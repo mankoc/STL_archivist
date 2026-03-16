@@ -18,12 +18,13 @@ def load_stylesheet(app: QApplication) -> None:
 
 
 def main() -> None:
-    # Initialise the database (creates tables if first run)
-    init_db("stl_database.db")
-
     app = QApplication(sys.argv)
     app.setApplicationName("STL Database")
     app.setOrganizationName("STLBrowser")
+
+    # Read configured database path (falls back to default if not set)
+    from app.ui.config_dialog import get_db_path
+    init_db(get_db_path())
 
     load_stylesheet(app)
 

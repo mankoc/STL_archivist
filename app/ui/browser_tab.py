@@ -5,6 +5,8 @@ Centre: sortable table with thumbnail, title, author, type, date, tags, path.
 Right panel: image thumbnail sidebar (populated on single-click).
 Right-click or double-click: Edit Model.
 """
+from pathlib import Path as FSPath
+
 from PyQt6.QtCore import Qt, QSortFilterProxyModel, QSize
 from PyQt6.QtGui import QStandardItemModel, QStandardItem, QPixmap, QIcon
 from PyQt6.QtWidgets import (
@@ -53,7 +55,6 @@ class BrowserTab(QWidget):
 
         self._filter_tree = QTreeWidget()
         self._filter_tree.setHeaderHidden(True)
-        self._filter_tree.setMaximumWidth(220)
         self._filter_tree.itemClicked.connect(self._on_filter_clicked)
         left_layout.addWidget(self._filter_tree)
 
@@ -162,12 +163,41 @@ class BrowserTab(QWidget):
                     child = QTreeWidgetItem([t])
                     child.setData(0, Qt.ItemDataRole.UserRole, ("type", t))
                     types_item.addChild(child)
+
+            paths_item = QTreeWidgetItem(["Path"])
+            self._filter_tree.addTopLevelItem(paths_item)
+            dirs: set[str] = set()
+            for (ap,) in session.query(STLModel.archive_path).all():
+                if ap:
+                    dirs.add(str(FSPath(ap).parent))
+            self._build_path_tree(paths_item, sorted(dirs))
         finally:
             session.close()
 
         self._filter_tree.expandAll()
 
-    def _load_table(self, author_filter=None, tag_filter=None, type_filter=None):
+    @staticmethod
+    def _build_path_tree(root_item: QTreeWidgetItem, dirs: list[str]) -> None:
+        """Build a nested tree of directory segments under *root_item*."""
+        # node_map: full path string → QTreeWidgetItem
+        node_map: dict[str, QTreeWidgetItem] = {}
+
+        for d in dirs:
+            parts = FSPath(d).parts
+            for depth in range(1, len(parts) + 1):
+                full = str(FSPath(*parts[:depth]))
+                if full in node_map:
+                    continue
+                label = parts[depth - 1]
+                parent = node_map.get(str(FSPath(*parts[:depth - 1]))) if depth > 1 else root_item
+                if parent is None:
+                    parent = root_item
+                item = QTreeWidgetItem([label])
+                item.setData(0, Qt.ItemDataRole.UserRole, ("path", full))
+                parent.addChild(item)
+                node_map[full] = item
+
+    def _load_table(self, author_filter=None, tag_filter=None, type_filter=None, path_filter=None):
         self._model.removeRows(0, self._model.rowCount())
         session = get_session()
         try:
@@ -178,6 +208,9 @@ class BrowserTab(QWidget):
                 q = q.filter(STLModel.type == type_filter)
             if tag_filter:
                 q = q.filter(STLModel.tags.any(Tag.name == tag_filter))
+            if path_filter:
+                prefix = path_filter.rstrip("/") + "/"
+                q = q.filter(STLModel.archive_path.like(prefix + "%"))
 
             for stl in q.order_by(STLModel.title).all():
                 thumb_item = QStandardItem()
@@ -221,6 +254,8 @@ class BrowserTab(QWidget):
             self._load_table(tag_filter=value)
         elif kind == "type":
             self._load_table(type_filter=value)
+        elif kind == "path":
+            self._load_table(path_filter=value)
 
     def _on_row_clicked(self, index):
         src_index = self._proxy.mapToSource(index)

@@ -69,6 +69,12 @@ class MainWindow(QMainWindow):
         file_menu = mb.addMenu("&File")
         file_menu.addAction(self._act_open_folder)
         file_menu.addSeparator()
+        act_config = QAction(
+            style.standardIcon(SP.SP_FileDialogDetailedView), "Configuration…", self)
+        act_config.setStatusTip("Open application configuration")
+        act_config.triggered.connect(self._open_config)
+        file_menu.addAction(act_config)
+        file_menu.addSeparator()
         file_menu.addAction(self._act_exit)
 
         view_menu = mb.addMenu("&View")
@@ -134,6 +140,10 @@ class MainWindow(QMainWindow):
             clear_db()
             self._browser_tab.refresh()
             QMessageBox.information(self, "Delete Database", "Database cleared.")
+
+    def _open_config(self):
+        from app.ui.config_dialog import ConfigDialog
+        ConfigDialog(parent=self).exec()
 
     def _show_about(self):
         QMessageBox.about(
