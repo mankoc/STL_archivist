@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c \"import sys; print\\(sys.executable\\)\")"
+    ],
+    "additionalDirectories": [
+      "/home/mankoc/Projects/stl_database"
+    ]
+  }
+}
