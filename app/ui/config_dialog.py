@@ -13,6 +13,8 @@ DB_PATH_KEY          = "config/db_path"
 DB_PATH_DEFAULT      = "stl_database.db"
 MAX_THUMBS_KEY       = "config/max_thumbnails"
 MAX_THUMBS_DEFAULT   = 5
+MAX_THUMB_SIZE_KEY     = "config/max_thumb_size"
+MAX_THUMB_SIZE_DEFAULT = 512
 
 
 def get_db_path() -> str:
@@ -21,6 +23,10 @@ def get_db_path() -> str:
 
 def get_max_thumbnails() -> int:
     return int(QSettings().value(MAX_THUMBS_KEY, MAX_THUMBS_DEFAULT))
+
+
+def get_max_thumb_size() -> int:
+    return int(QSettings().value(MAX_THUMB_SIZE_KEY, MAX_THUMB_SIZE_DEFAULT))
 
 
 class ConfigDialog(QDialog):
@@ -72,6 +78,16 @@ class ConfigDialog(QDialog):
             QLabel("<small>Maximum number of preview images extracted from each archive.</small>"),
         )
 
+        self._max_thumb_size_spin = QSpinBox()
+        self._max_thumb_size_spin.setRange(64, 4096)
+        self._max_thumb_size_spin.setSingleStep(64)
+        self._max_thumb_size_spin.setSuffix(" px")
+        crawler_layout.addRow("Max image size:", self._max_thumb_size_spin)
+        crawler_layout.addRow(
+            "",
+            QLabel("<small>Longest side in pixels when storing images (width & height capped at this value).</small>"),
+        )
+
         root.addWidget(crawler_group)
         root.addStretch()
 
@@ -98,12 +114,14 @@ class ConfigDialog(QDialog):
     def _load(self):
         self._db_path_edit.setText(get_db_path())
         self._max_thumbs_spin.setValue(get_max_thumbnails())
+        self._max_thumb_size_spin.setValue(get_max_thumb_size())
 
     def _save(self):
         path = self._db_path_edit.text().strip() or DB_PATH_DEFAULT
         old_path = get_db_path()
         QSettings().setValue(DB_PATH_KEY, path)
         QSettings().setValue(MAX_THUMBS_KEY, self._max_thumbs_spin.value())
+        QSettings().setValue(MAX_THUMB_SIZE_KEY, self._max_thumb_size_spin.value())
         if path != old_path:
             QMessageBox.information(
                 self,

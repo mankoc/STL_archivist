@@ -7,7 +7,7 @@ Right-click or double-click: Edit Model.
 """
 from pathlib import Path as FSPath
 
-from PyQt6.QtCore import Qt, QSortFilterProxyModel, QSize, QStringListModel, QEvent
+from PyQt6.QtCore import Qt, QSortFilterProxyModel, QSize, QStringListModel, QEvent, pyqtSignal
 from PyQt6.QtGui import QStandardItemModel, QStandardItem, QPixmap, QIcon
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QLineEdit, QLabel, QHeaderView, QAbstractItemView,
     QMenu, QScrollArea, QFrame, QInputDialog, QMessageBox,
     QStyledItemDelegate, QComboBox, QCompleter,
+    QDialog, QSizePolicy,
 )
 
 from app.database.db import get_session, session_scope
@@ -32,6 +33,43 @@ COL_PATH   = 6
 _HEADERS = ["", "Title", "Author", "Type", "Date", "Tags", "Path"]
 
 MODEL_ID_ROLE = Qt.ItemDataRole.UserRole + 1
+
+
+class ClickableLabel(QLabel):
+    clicked = pyqtSignal()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+
+class ImageViewerDialog(QDialog):
+    def __init__(self, pixmap: QPixmap, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Image")
+        self.setModal(True)
+        self._pixmap = pixmap
+
+        screen = self.screen().availableGeometry()
+        max_w = int(screen.width() * 0.9)
+        max_h = int(screen.height() * 0.9)
+
+        scaled = pixmap.scaled(max_w, max_h,
+                               Qt.AspectRatioMode.KeepAspectRatio,
+                               Qt.TransformationMode.SmoothTransformation)
+
+        label = QLabel()
+        label.setPixmap(scaled)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setCursor(Qt.CursorShape.PointingHandCursor)
+        label.mousePressEvent = lambda _: self.accept()
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(label)
+
+        self.resize(scaled.width(), scaled.height())
 
 
 class TypeDelegate(QStyledItemDelegate):
@@ -189,6 +227,7 @@ class BrowserTab(QWidget):
         self._table.setColumnHidden(COL_THUMB, True)
         self._table.verticalHeader().setVisible(False)
         self._table.setSortingEnabled(True)
+        self._table.setAlternatingRowColors(True)
         self._table.setItemDelegateForColumn(COL_TYPE, TypeDelegate(self._table))
         self._table.setItemDelegateForColumn(COL_TAGS, TagDelegate(self._table))
         self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -463,9 +502,11 @@ class BrowserTab(QWidget):
             for img in stl.images:
                 px = pixmap_from_bytes(img.thumbnail)
                 self._thumb_pixmaps.append(px)
-                lbl = QLabel()
+                lbl = ClickableLabel()
                 lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 lbl.setFrameShape(QFrame.Shape.StyledPanel)
+                lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+                lbl.clicked.connect(lambda _px=px: ImageViewerDialog(_px, self).exec())
                 self._thumb_vlayout.addWidget(lbl)
         finally:
             session.close()

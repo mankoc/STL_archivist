@@ -141,8 +141,9 @@ class CrawlerWorker(QThread):
                 session.flush()
 
             # Extract thumbnails up to the configured limit
-            from app.ui.config_dialog import get_max_thumbnails
+            from app.ui.config_dialog import get_max_thumbnails, get_max_thumb_size
             max_thumbs = get_max_thumbnails()
+            max_thumb_size = get_max_thumb_size()
             count = 0
             try:
                 all_names = list_contents(archive_path)
@@ -156,7 +157,7 @@ class CrawlerWorker(QThread):
                 for filename, raw_bytes in iter_images(archive_path):
                     if count >= max_thumbs:
                         break
-                    thumb = make_thumbnail(raw_bytes)
+                    thumb = make_thumbnail(raw_bytes, max_size=max_thumb_size)
                     if thumb:
                         session.add(Image(
                             model=model,

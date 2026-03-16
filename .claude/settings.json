@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python3 -c \"import sys; print\\(sys.executable\\)\")"
+      "Bash(python3 -c \"import sys; print\\(sys.executable\\)\")",
+      "Bash(grep -rn \"get_max_thumbnails\\\\|thumb_size\\\\|max_size\" /home/mankoc/Projects/stl_database/app/ --include=*.py)"
     ],
     "additionalDirectories": [
       "/home/mankoc/Projects/stl_database"
