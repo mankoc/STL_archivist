@@ -6,15 +6,21 @@ from PyQt6.QtCore import QSettings
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QHBoxLayout,
-    QDialogButtonBox, QFileDialog, QMessageBox,
+    QDialogButtonBox, QFileDialog, QMessageBox, QSpinBox,
 )
 
-DB_PATH_KEY     = "config/db_path"
-DB_PATH_DEFAULT = "stl_database.db"
+DB_PATH_KEY          = "config/db_path"
+DB_PATH_DEFAULT      = "stl_database.db"
+MAX_THUMBS_KEY       = "config/max_thumbnails"
+MAX_THUMBS_DEFAULT   = 5
 
 
 def get_db_path() -> str:
     return QSettings().value(DB_PATH_KEY, DB_PATH_DEFAULT)
+
+
+def get_max_thumbnails() -> int:
+    return int(QSettings().value(MAX_THUMBS_KEY, MAX_THUMBS_DEFAULT))
 
 
 class ConfigDialog(QDialog):
@@ -52,6 +58,21 @@ class ConfigDialog(QDialog):
         )
 
         root.addWidget(db_group)
+
+        # ---- Crawler group ----
+        crawler_group = QGroupBox("Crawler")
+        crawler_layout = QFormLayout(crawler_group)
+
+        self._max_thumbs_spin = QSpinBox()
+        self._max_thumbs_spin.setRange(0, 50)
+        self._max_thumbs_spin.setSuffix(" image(s)")
+        crawler_layout.addRow("Max thumbnails per model:", self._max_thumbs_spin)
+        crawler_layout.addRow(
+            "",
+            QLabel("<small>Maximum number of preview images extracted from each archive.</small>"),
+        )
+
+        root.addWidget(crawler_group)
         root.addStretch()
 
         # ---- Buttons ----
@@ -76,11 +97,13 @@ class ConfigDialog(QDialog):
     # ------------------------------------------------------------------
     def _load(self):
         self._db_path_edit.setText(get_db_path())
+        self._max_thumbs_spin.setValue(get_max_thumbnails())
 
     def _save(self):
         path = self._db_path_edit.text().strip() or DB_PATH_DEFAULT
         old_path = get_db_path()
         QSettings().setValue(DB_PATH_KEY, path)
+        QSettings().setValue(MAX_THUMBS_KEY, self._max_thumbs_spin.value())
         if path != old_path:
             QMessageBox.information(
                 self,

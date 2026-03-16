@@ -7,13 +7,14 @@ Right-click or double-click: Edit Model.
 """
 from pathlib import Path as FSPath
 
-from PyQt6.QtCore import Qt, QSortFilterProxyModel, QSize
+from PyQt6.QtCore import Qt, QSortFilterProxyModel, QSize, QStringListModel, QEvent
 from PyQt6.QtGui import QStandardItemModel, QStandardItem, QPixmap, QIcon
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
     QTreeWidget, QTreeWidgetItem, QTableView,
     QLineEdit, QLabel, QHeaderView, QAbstractItemView,
-    QMenu, QScrollArea, QFrame, QPushButton, QInputDialog, QMessageBox,
+    QMenu, QScrollArea, QFrame, QInputDialog, QMessageBox,
+    QStyledItemDelegate, QComboBox, QCompleter,
 )
 
 from app.database.db import get_session, session_scope
@@ -33,9 +34,105 @@ _HEADERS = ["", "Title", "Author", "Type", "Date", "Tags", "Path"]
 MODEL_ID_ROLE = Qt.ItemDataRole.UserRole + 1
 
 
+class TypeDelegate(QStyledItemDelegate):
+    """Editable QComboBox populated with all existing type values."""
+
+    def createEditor(self, parent, option, index):
+        session = get_session()
+        try:
+            types = sorted(filter(None, (
+                v for (v,) in session.query(STLModel.type).distinct().all()
+            )))
+        finally:
+            session.close()
+
+        combo = QComboBox(parent)
+        combo.setEditable(True)
+        combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        combo.addItems(types)
+        combo.setCurrentIndex(-1)
+        combo.completer().setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        combo.completer().setFilterMode(Qt.MatchFlag.MatchContains)
+        return combo
+
+    def setEditorData(self, editor, index):
+        editor.setCurrentText(index.data() or "")
+
+    def setModelData(self, editor, model, index):
+        model.setData(index, editor.currentText().strip())
+
+    def updateEditorGeometry(self, editor, option, index):
+        editor.setGeometry(option.rect)
+
+
+class TagDelegate(QStyledItemDelegate):
+    """QLineEdit that autocompletes each comma-separated token from the tag pool."""
+
+    def createEditor(self, parent, option, index):
+        session = get_session()
+        try:
+            all_tags = [t.name for t in session.query(Tag).order_by(Tag.name).all()]
+        finally:
+            session.close()
+
+        edit = _TagLineEdit(all_tags, parent)
+        return edit
+
+    def setEditorData(self, editor, index):
+        editor.setText(index.data() or "")
+        editor.setCursorPosition(len(editor.text()))
+
+    def setModelData(self, editor, model, index):
+        model.setData(index, editor.text().strip())
+
+    def updateEditorGeometry(self, editor, option, index):
+        editor.setGeometry(option.rect)
+
+
+class _TagLineEdit(QLineEdit):
+    """QLineEdit with per-token autocomplete for comma-separated tag lists."""
+
+    def __init__(self, all_tags: list[str], parent=None):
+        super().__init__(parent)
+        self._completer = QCompleter(self)
+        self._completer.setModel(QStringListModel(all_tags, self._completer))
+        self._completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self._completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        self._completer.setWidget(self)
+        self._completer.activated.connect(self._insert_completion)
+        self.textEdited.connect(self._on_text_edited)
+
+    def _current_token(self) -> str:
+        return self.text()[:self.cursorPosition()].rsplit(",", 1)[-1].lstrip()
+
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        self._show_completions()
+
+    def _on_text_edited(self, _text: str):
+        self._show_completions()
+
+    def _show_completions(self):
+        token = self._current_token()
+        self._completer.setCompletionPrefix(token)
+        self._completer.complete()
+
+    def _insert_completion(self, chosen: str):
+        text = self.text()
+        cursor = self.cursorPosition()
+        before = text[:cursor].rsplit(",", 1)
+        prefix = (before[0] + ", ") if len(before) == 2 else ""
+        after = text[cursor:]
+        new_text = prefix + chosen + (", " if after.lstrip(",").strip() else ", ")
+        self.setText(new_text)
+        self.setCursorPosition(len(new_text))
+
+
 class BrowserTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._loading = False
+        self._thumb_pixmaps: list[QPixmap] = []  # original (unscaled) pixmaps
         self._build_ui()
         self.refresh()
 
@@ -58,10 +155,6 @@ class BrowserTab(QWidget):
         self._filter_tree.itemClicked.connect(self._on_filter_clicked)
         left_layout.addWidget(self._filter_tree)
 
-        add_tag_btn = QPushButton("Add Tag…")
-        add_tag_btn.clicked.connect(self._add_tag)
-        left_layout.addWidget(add_tag_btn)
-
         splitter.addWidget(left)
 
         # ---- Centre: search bar + table ----
@@ -79,6 +172,7 @@ class BrowserTab(QWidget):
 
         self._model = QStandardItemModel()
         self._model.setHorizontalHeaderLabels(_HEADERS)
+        self._model.itemChanged.connect(self._on_item_changed)
 
         self._proxy = QSortFilterProxyModel()
         self._proxy.setSourceModel(self._model)
@@ -89,16 +183,18 @@ class BrowserTab(QWidget):
         self._table.setModel(self._proxy)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._table.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked)
         self._table.horizontalHeader().setSectionResizeMode(COL_TITLE, QHeaderView.ResizeMode.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(COL_PATH,  QHeaderView.ResizeMode.Stretch)
-        self._table.horizontalHeader().setSectionResizeMode(COL_THUMB, QHeaderView.ResizeMode.Fixed)
-        self._table.setColumnWidth(COL_THUMB, 68)
-        self._table.verticalHeader().setDefaultSectionSize(64)
+        self._table.setColumnHidden(COL_THUMB, True)
         self._table.verticalHeader().setVisible(False)
         self._table.setSortingEnabled(True)
+        self._table.setItemDelegateForColumn(COL_TYPE, TypeDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_TAGS, TagDelegate(self._table))
         self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._table.customContextMenuRequested.connect(self._context_menu)
+        self._table.horizontalHeader().setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._table.horizontalHeader().customContextMenuRequested.connect(self._header_context_menu)
         self._table.clicked.connect(self._on_row_clicked)
         self._table.doubleClicked.connect(self._on_double_click)
         centre_layout.addWidget(self._table)
@@ -121,6 +217,7 @@ class BrowserTab(QWidget):
         self._thumb_scroll.setWidget(self._thumb_content)
         self._thumb_scroll.setWidgetResizable(True)
         self._thumb_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._thumb_scroll.viewport().installEventFilter(self)
         right_layout.addWidget(self._thumb_scroll)
 
         splitter.addWidget(right)
@@ -198,6 +295,7 @@ class BrowserTab(QWidget):
                 node_map[full] = item
 
     def _load_table(self, author_filter=None, tag_filter=None, type_filter=None, path_filter=None):
+        self._loading = True
         self._model.removeRows(0, self._model.rowCount())
         session = get_session()
         try:
@@ -214,15 +312,12 @@ class BrowserTab(QWidget):
 
             for stl in q.order_by(STLModel.title).all():
                 thumb_item = QStandardItem()
-                if stl.images:
-                    px = pixmap_from_bytes(stl.images[0].thumbnail)
-                    px = px.scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio,
-                                   Qt.TransformationMode.SmoothTransformation)
-                    thumb_item.setData(px, Qt.ItemDataRole.DecorationRole)
                 thumb_item.setData(stl.id, MODEL_ID_ROLE)
                 thumb_item.setEditable(False)
 
                 tags_str = ", ".join(t.name for t in stl.tags)
+                path_item = QStandardItem(stl.archive_path or "")
+                path_item.setEditable(False)
                 row = [
                     thumb_item,
                     QStandardItem(stl.title or ""),
@@ -230,13 +325,45 @@ class BrowserTab(QWidget):
                     QStandardItem(stl.type or ""),
                     QStandardItem(stl.release_date or ""),
                     QStandardItem(tags_str),
-                    QStandardItem(stl.archive_path or ""),
+                    path_item,
                 ]
-                for item in row[1:]:
-                    item.setEditable(False)
                 self._model.appendRow(row)
         finally:
             session.close()
+            self._loading = False
+
+    # ------------------------------------------------------------------
+    def _on_item_changed(self, item: QStandardItem):
+        if self._loading:
+            return
+        col = item.column()
+        if col == COL_THUMB:
+            return
+        model_id = self._model.item(item.row(), COL_THUMB).data(MODEL_ID_ROLE)
+        if model_id is None:
+            return
+        value = item.text().strip() or None
+        with session_scope() as session:
+            stl: STLModel = session.get(STLModel, model_id)
+            if stl is None:
+                return
+            if col == COL_TITLE:
+                stl.title = value
+            elif col == COL_AUTHOR:
+                stl.author = value
+            elif col == COL_TYPE:
+                stl.type = value
+            elif col == COL_DATE:
+                stl.release_date = value
+            elif col == COL_TAGS:
+                stl.tags.clear()
+                for name in [t.strip().lower() for t in (value or "").split(",") if t.strip()]:
+                    tag = session.query(Tag).filter_by(name=name).first()
+                    if tag is None:
+                        tag = Tag(name=name)
+                        session.add(tag)
+                        session.flush()
+                    stl.tags.append(tag)
 
     # ------------------------------------------------------------------
     def _on_search(self, text: str):
@@ -264,6 +391,8 @@ class BrowserTab(QWidget):
             self._show_thumbnails(model_id)
 
     def _on_double_click(self, index):
+        if index.column() != COL_PATH:
+            return  # let the cell editor handle it
         src_index = self._proxy.mapToSource(index)
         model_id = self._model.item(src_index.row(), COL_THUMB).data(MODEL_ID_ROLE)
         if model_id is not None:
@@ -277,6 +406,20 @@ class BrowserTab(QWidget):
             for r in sorted(rows)
             if self._model.item(r, COL_THUMB) is not None
         ]
+
+    def _header_context_menu(self, pos):
+        menu = QMenu(self)
+        header = self._table.horizontalHeader()
+        for col in range(1, self._model.columnCount()):  # col 0 (thumb) is always hidden
+            label = _HEADERS[col]
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(not header.isSectionHidden(col))
+            action.setData(col)
+        chosen = menu.exec(header.mapToGlobal(pos))
+        if chosen is not None:
+            col = chosen.data()
+            header.setSectionHidden(col, not chosen.isChecked())
 
     def _context_menu(self, pos):
         index = self._table.indexAt(pos)
@@ -298,7 +441,13 @@ class BrowserTab(QWidget):
             self._open_mass_editor(selected_ids)
 
     # ------------------------------------------------------------------
+    def eventFilter(self, obj, event):
+        if obj is self._thumb_scroll.viewport() and event.type() == QEvent.Type.Resize:
+            self._rescale_thumbnails()
+        return super().eventFilter(obj, event)
+
     def _clear_thumbnails(self):
+        self._thumb_pixmaps.clear()
         while self._thumb_vlayout.count():
             item = self._thumb_vlayout.takeAt(0)
             if item.widget():
@@ -311,21 +460,28 @@ class BrowserTab(QWidget):
             stl: STLModel = session.get(STLModel, model_id)
             if stl is None:
                 return
-            sidebar_width = max(self._thumb_scroll.viewport().width() - 12, 140)
             for img in stl.images:
-                lbl = QLabel()
                 px = pixmap_from_bytes(img.thumbnail)
-                px = px.scaled(sidebar_width, sidebar_width,
-                               Qt.AspectRatioMode.KeepAspectRatio,
-                               Qt.TransformationMode.SmoothTransformation)
-                lbl.setPixmap(px)
+                self._thumb_pixmaps.append(px)
+                lbl = QLabel()
                 lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 lbl.setFrameShape(QFrame.Shape.StyledPanel)
                 self._thumb_vlayout.addWidget(lbl)
         finally:
             session.close()
+        self._rescale_thumbnails()
 
-    def _add_tag(self):
+    def _rescale_thumbnails(self):
+        w = max(self._thumb_scroll.viewport().width() - 12, 60)
+        for i, px in enumerate(self._thumb_pixmaps):
+            item = self._thumb_vlayout.itemAt(i)
+            if item and item.widget():
+                scaled = px.scaled(w, w,
+                                   Qt.AspectRatioMode.KeepAspectRatio,
+                                   Qt.TransformationMode.SmoothTransformation)
+                item.widget().setPixmap(scaled)
+
+    def add_tag(self):
         name, ok = QInputDialog.getText(self, "Add Tag", "Tag name:")
         if not ok or not name.strip():
             return

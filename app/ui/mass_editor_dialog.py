@@ -10,7 +10,7 @@ import re
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
-    QLabel, QLineEdit, QCheckBox, QDialogButtonBox, QPushButton,
+    QLabel, QLineEdit, QDialogButtonBox, QPushButton,
     QComboBox, QInputDialog, QMessageBox,
 )
 
@@ -199,28 +199,22 @@ class MassEditorDialog(QDialog):
 
         # ---- Manual override group ----
         manual_group = QGroupBox(
-            "Manual overrides — tick a field to apply the same value to all selected models"
+            "Manual overrides — fill a field to apply the same value to all selected models"
         )
         form = QFormLayout(manual_group)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
-        self._type_cb,   self._type_edit   = self._field_row("e.g. patreon")
-        self._author_cb, self._author_edit  = self._field_row("e.g. SomeAuthor")
-        self._date_cb,   self._date_edit    = self._field_row("e.g. 2024-01")
-        self._title_cb,  self._title_edit   = self._field_row()
-        self._tags_cb,   self._tags_edit    = self._field_row("tag1, tag2, … (replaces existing tags)")
+        self._type_edit  = QLineEdit(); self._type_edit.setPlaceholderText("e.g. patreon")
+        self._author_edit = QLineEdit(); self._author_edit.setPlaceholderText("e.g. SomeAuthor")
+        self._date_edit  = QLineEdit(); self._date_edit.setPlaceholderText("e.g. 2024-01")
+        self._title_edit = QLineEdit()
+        self._tags_edit  = QLineEdit(); self._tags_edit.setPlaceholderText("tag1, tag2, … (replaces existing tags)")
 
-        for label, cb, edit in (
-            ("Type:",   self._type_cb,   self._type_edit),
-            ("Author:", self._author_cb, self._author_edit),
-            ("Date:",   self._date_cb,   self._date_edit),
-            ("Title:",  self._title_cb,  self._title_edit),
-            ("Tags:",   self._tags_cb,   self._tags_edit),
-        ):
-            row = QHBoxLayout()
-            row.addWidget(cb)
-            row.addWidget(edit)
-            form.addRow(label, row)
+        form.addRow("Type:",   self._type_edit)
+        form.addRow("Author:", self._author_edit)
+        form.addRow("Date:",   self._date_edit)
+        form.addRow("Title:",  self._title_edit)
+        form.addRow("Tags:",   self._tags_edit)
 
         root.addWidget(manual_group)
 
@@ -233,15 +227,6 @@ class MassEditorDialog(QDialog):
         root.addWidget(buttons)
 
         self._refresh_saved_combo()
-
-    @staticmethod
-    def _field_row(placeholder: str = "") -> tuple[QCheckBox, QLineEdit]:
-        cb = QCheckBox()
-        edit = QLineEdit()
-        edit.setPlaceholderText(placeholder)
-        edit.setEnabled(False)
-        cb.toggled.connect(edit.setEnabled)
-        return cb, edit
 
     # ------------------------------------------------------------------
     # Settings helpers
@@ -369,21 +354,21 @@ class MassEditorDialog(QDialog):
         self._save_last_pattern()
 
         manual: dict[str, str | None] = {}
-        if self._type_cb.isChecked():
-            manual["type"] = self._type_edit.text().strip() or None
-        if self._author_cb.isChecked():
-            manual["author"] = self._author_edit.text().strip() or None
-        if self._date_cb.isChecked():
-            manual["release_date"] = self._date_edit.text().strip() or None
-        if self._title_cb.isChecked():
-            manual["title"] = self._title_edit.text().strip() or None
+        if self._type_edit.text().strip():
+            manual["type"] = self._type_edit.text().strip()
+        if self._author_edit.text().strip():
+            manual["author"] = self._author_edit.text().strip()
+        if self._date_edit.text().strip():
+            manual["release_date"] = self._date_edit.text().strip()
+        if self._title_edit.text().strip():
+            manual["title"] = self._title_edit.text().strip()
 
-        apply_tags = self._tags_cb.isChecked()
         tag_names = [
             t.strip().lower()
             for t in self._tags_edit.text().split(",")
             if t.strip()
         ]
+        apply_tags = bool(tag_names)
 
         with session_scope() as session:
             for mid in self._model_ids:

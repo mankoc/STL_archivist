@@ -1,10 +1,10 @@
 """
-Main application window — menu bar, toolbar, and tab widget.
+Main application window — menu bar, toolbar, browser.
 """
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
-    QMainWindow, QTabWidget, QStatusBar, QToolBar,
+    QMainWindow, QStatusBar, QToolBar,
     QApplication, QMessageBox,
 )
 
@@ -23,40 +23,37 @@ class MainWindow(QMainWindow):
         style = QApplication.style()
         SP    = style.StandardPixmap
 
-        # ---- Tabs ----
-        self._tabs = QTabWidget()
-        self.setCentralWidget(self._tabs)
+        self._browser = BrowserTab()
+        self.setCentralWidget(self._browser)
 
-        self._browser_tab = BrowserTab()
-
-        self._tabs.addTab(self._browser_tab, "Browser")
-        self._tabs.currentChanged.connect(self._on_tab_changed)
-
-        # ---- Shared actions ----
+        # ---- Actions ----
         self._act_refresh = QAction(
             style.standardIcon(SP.SP_BrowserReload), "Refresh", self)
         self._act_refresh.setShortcut(QKeySequence("F5"))
-        self._act_refresh.setStatusTip("Reload data in the current tab")
-        self._act_refresh.triggered.connect(self._refresh_current)
+        self._act_refresh.setStatusTip("Reload data from the database")
+        self._act_refresh.triggered.connect(self._browser.refresh)
 
-        self._act_open_folder = QAction(
+        self._act_open_crawler = QAction(
             style.standardIcon(SP.SP_DirOpenIcon), "Open Crawler…", self)
-        self._act_open_folder.setShortcut(QKeySequence.StandardKey.Open)
-        self._act_open_folder.setStatusTip("Open the Crawler window")
-        self._act_open_folder.triggered.connect(self._open_crawler)
+        self._act_open_crawler.setShortcut(QKeySequence.StandardKey.Open)
+        self._act_open_crawler.setStatusTip("Open the Crawler window")
+        self._act_open_crawler.triggered.connect(self._open_crawler)
+
+        self._act_add_tag = QAction(
+            style.standardIcon(SP.SP_FileDialogNewFolder), "Add Tag…", self)
+        self._act_add_tag.setStatusTip("Create a new tag")
+        self._act_add_tag.triggered.connect(self._browser.add_tag)
+
+        self._act_edit_tags = QAction(
+            style.standardIcon(SP.SP_FileDialogDetailedView), "Edit Tags…", self)
+        self._act_edit_tags.setStatusTip("Open the tag editor")
+        self._act_edit_tags.triggered.connect(self._open_tag_editor)
 
         self._act_exit = QAction(
             style.standardIcon(SP.SP_DialogCloseButton), "Exit", self)
         self._act_exit.setShortcut(QKeySequence.StandardKey.Quit)
         self._act_exit.setStatusTip("Quit STL Database")
         self._act_exit.triggered.connect(QApplication.quit)
-
-        self._act_go_browser = QAction(
-            style.standardIcon(SP.SP_FileDialogContentsView), "Browser", self)
-        self._act_go_browser.setShortcut(QKeySequence("Ctrl+1"))
-        self._act_go_browser.setStatusTip("Switch to Browser tab")
-        self._act_go_browser.triggered.connect(
-            lambda: self._tabs.setCurrentWidget(self._browser_tab))
 
         self._act_about = QAction(
             style.standardIcon(SP.SP_MessageBoxInformation), "About…", self)
@@ -67,7 +64,7 @@ class MainWindow(QMainWindow):
         mb = self.menuBar()
 
         file_menu = mb.addMenu("&File")
-        file_menu.addAction(self._act_open_folder)
+        file_menu.addAction(self._act_open_crawler)
         file_menu.addSeparator()
         act_config = QAction(
             style.standardIcon(SP.SP_FileDialogDetailedView), "Configuration…", self)
@@ -77,10 +74,12 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(self._act_exit)
 
+        tags_menu = mb.addMenu("&Tags")
+        tags_menu.addAction(self._act_add_tag)
+        tags_menu.addAction(self._act_edit_tags)
+
         view_menu = mb.addMenu("&View")
         view_menu.addAction(self._act_refresh)
-        view_menu.addSeparator()
-        view_menu.addAction(self._act_go_browser)
 
         debug_menu = mb.addMenu("&Debug")
         act_clear_db = QAction(
@@ -92,42 +91,37 @@ class MainWindow(QMainWindow):
         help_menu = mb.addMenu("&Help")
         help_menu.addAction(self._act_about)
 
-        # ---- Toolbar (reuses the same action objects) ----
+        # ---- Toolbar ----
         toolbar = QToolBar("Main Toolbar")
         toolbar.setMovable(False)
-        toolbar.setIconSize(QSize(22, 22))
-        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        toolbar.setIconSize(QSize(36, 36))
+        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
         self.addToolBar(toolbar)
 
-        toolbar.addAction(self._act_open_folder)
+        toolbar.addAction(self._act_open_crawler)
         toolbar.addAction(self._act_refresh)
         toolbar.addSeparator()
-        toolbar.addAction(self._act_go_browser)
+        toolbar.addAction(self._act_add_tag)
+        toolbar.addAction(self._act_edit_tags)
 
         self.setStatusBar(QStatusBar())
 
     # ------------------------------------------------------------------
-    def _refresh_current(self):
-        widget = self._tabs.currentWidget()
-        if hasattr(widget, "refresh"):
-            widget.refresh()
-
-    def _on_tab_changed(self, index: int):
-        widget = self._tabs.widget(index)
-        if hasattr(widget, "refresh"):
-            widget.refresh()
-
     def _open_crawler(self):
         from app.ui.crawler_dialog import CrawlerDialog
-        dlg = CrawlerDialog(parent=self)
-        dlg.exec()
-        # Refresh browser in case new models were crawled
-        self._browser_tab.refresh()
+        CrawlerDialog(parent=self).exec()
+        self._browser.refresh()
+
+    def _open_tag_editor(self):
+        from app.ui.tag_editor_dialog import TagEditorDialog
+        TagEditorDialog(parent=self).exec()
+        self._browser.refresh()
+
+    def _open_config(self):
+        from app.ui.config_dialog import ConfigDialog
+        ConfigDialog(parent=self).exec()
 
     def _clear_database(self):
-        from PyQt6.QtWidgets import QMessageBox
-        from app.database.db import clear_db
-
         reply = QMessageBox.warning(
             self,
             "Delete Database",
@@ -137,13 +131,10 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.Cancel,
         )
         if reply == QMessageBox.StandardButton.Yes:
+            from app.database.db import clear_db
             clear_db()
-            self._browser_tab.refresh()
+            self._browser.refresh()
             QMessageBox.information(self, "Delete Database", "Database cleared.")
-
-    def _open_config(self):
-        from app.ui.config_dialog import ConfigDialog
-        ConfigDialog(parent=self).exec()
 
     def _show_about(self):
         QMessageBox.about(

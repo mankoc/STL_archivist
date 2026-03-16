@@ -5,7 +5,7 @@ Opened from the browser via double-click or right-click → Edit Model.
 """
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QStringListModel
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QTextEdit, QDialogButtonBox,
@@ -20,15 +20,54 @@ from app.utils.thumbnailer import pixmap_from_bytes
 
 
 class TagEdit(QLineEdit):
-    """QLineEdit with autocomplete from existing tags."""
+    """QLineEdit that autocompletes the current comma-separated token."""
 
     def __init__(self, all_tags: list[str], parent=None):
         super().__init__(parent)
         self.setPlaceholderText("tag1, tag2, tag3…")
-        completer = QCompleter(all_tags, self)
-        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        self.setCompleter(completer)
+        self._all_tags = all_tags
 
+        self._completer = QCompleter(self)
+        self._completer.setModel(QStringListModel(all_tags, self._completer))
+        self._completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self._completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        self._completer.setWidget(self)
+        self._completer.activated.connect(self._insert_completion)
+
+        self.textEdited.connect(self._on_text_edited)
+
+    # ------------------------------------------------------------------
+    def _current_token(self) -> str:
+        """Return the tag fragment to the left of the cursor."""
+        text = self.text()
+        cursor = self.cursorPosition()
+        segment = text[:cursor].rsplit(",", 1)[-1]
+        return segment.lstrip()
+
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        self._show_completions()
+
+    def _on_text_edited(self, _text: str):
+        self._show_completions()
+
+    def _show_completions(self):
+        token = self._current_token()
+        self._completer.setCompletionPrefix(token)
+        self._completer.complete()
+
+    def _insert_completion(self, chosen: str):
+        text = self.text()
+        cursor = self.cursorPosition()
+        # Replace the current token with the chosen completion
+        before = text[:cursor].rsplit(",", 1)
+        prefix = (before[0] + ", ") if len(before) == 2 else ""
+        after = text[cursor:]
+        new_text = prefix + chosen + (", " if after.lstrip(",").strip() else ", ")
+        self.setText(new_text)
+        self.setCursorPosition(len(new_text))
+
+    # ------------------------------------------------------------------
     def get_tags(self) -> list[str]:
         return [t.strip() for t in self.text().split(",") if t.strip()]
 

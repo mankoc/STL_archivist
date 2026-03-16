@@ -140,7 +140,9 @@ class CrawlerWorker(QThread):
                     session.delete(img)
                 session.flush()
 
-            # Extract up to 5 image thumbnails
+            # Extract thumbnails up to the configured limit
+            from app.ui.config_dialog import get_max_thumbnails
+            max_thumbs = get_max_thumbnails()
             count = 0
             try:
                 all_names = list_contents(archive_path)
@@ -152,7 +154,7 @@ class CrawlerWorker(QThread):
                               f"{[Path(n).name for n in image_names[:8]]}")
 
                 for filename, raw_bytes in iter_images(archive_path):
-                    if count >= 5:
+                    if count >= max_thumbs:
                         break
                     thumb = make_thumbnail(raw_bytes)
                     if thumb:
