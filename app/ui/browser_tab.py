@@ -8,7 +8,7 @@ Right-click or double-click: Edit Model.
 from pathlib import Path as FSPath
 
 from PyQt6.QtCore import Qt, QSortFilterProxyModel, QSize, QStringListModel, QEvent, pyqtSignal
-from PyQt6.QtGui import QStandardItemModel, QStandardItem, QPixmap, QIcon
+from PyQt6.QtGui import QStandardItemModel, QStandardItem, QPixmap, QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
     QTreeWidget, QTreeWidgetItem, QTableView,
@@ -193,6 +193,17 @@ class BrowserTab(QWidget):
         self._filter_tree.itemClicked.connect(self._on_filter_clicked)
         left_layout.addWidget(self._filter_tree)
 
+        # ---- Info panel: author + tags of selected model ----
+        self._info_author_lbl = QLabel()
+        self._info_author_lbl.setWordWrap(True)
+        self._info_author_lbl.setVisible(False)
+        left_layout.addWidget(self._info_author_lbl)
+
+        self._info_tags_lbl = QLabel()
+        self._info_tags_lbl.setWordWrap(True)
+        self._info_tags_lbl.setVisible(False)
+        left_layout.addWidget(self._info_tags_lbl)
+
         splitter.addWidget(left)
 
         # ---- Centre: search bar + table ----
@@ -236,6 +247,8 @@ class BrowserTab(QWidget):
         self._table.horizontalHeader().customContextMenuRequested.connect(self._header_context_menu)
         self._table.clicked.connect(self._on_row_clicked)
         self._table.doubleClicked.connect(self._on_double_click)
+        QShortcut(QKeySequence.StandardKey.SelectAll, self._table, self._table.selectAll)
+        QShortcut(QKeySequence("E"), self._table, self._edit_selected)
         centre_layout.addWidget(self._table)
 
         splitter.addWidget(centre)
@@ -275,9 +288,19 @@ class BrowserTab(QWidget):
     # ------------------------------------------------------------------
     def _populate_filter_tree(self):
         self._filter_tree.clear()
+
+        from PyQt6.QtWidgets import QApplication as _App
+        _style = _App.style()
+        _SP = _style.StandardPixmap
+        _icon_author = _style.standardIcon(_SP.SP_FileDialogDetailedView)
+        _icon_tag    = _style.standardIcon(_SP.SP_FileDialogListView)
+        _icon_type   = _style.standardIcon(_SP.SP_DirHomeIcon)
+        _icon_path   = _style.standardIcon(_SP.SP_DirOpenIcon)
+
         session = get_session()
         try:
             authors_item = QTreeWidgetItem(["Authors"])
+            authors_item.setIcon(0, _icon_author)
             self._filter_tree.addTopLevelItem(authors_item)
             for (author,) in session.query(STLModel.author).distinct().order_by(STLModel.author).all():
                 if author:
@@ -286,6 +309,7 @@ class BrowserTab(QWidget):
                     authors_item.addChild(child)
 
             tags_item = QTreeWidgetItem(["Tags"])
+            tags_item.setIcon(0, _icon_tag)
             self._filter_tree.addTopLevelItem(tags_item)
             for tag in session.query(Tag).order_by(Tag.name).all():
                 child = QTreeWidgetItem([tag.name])
@@ -293,6 +317,7 @@ class BrowserTab(QWidget):
                 tags_item.addChild(child)
 
             types_item = QTreeWidgetItem(["Type"])
+            types_item.setIcon(0, _icon_type)
             self._filter_tree.addTopLevelItem(types_item)
             for (t,) in session.query(STLModel.type).distinct().order_by(STLModel.type).all():
                 if t:
@@ -301,6 +326,7 @@ class BrowserTab(QWidget):
                     types_item.addChild(child)
 
             paths_item = QTreeWidgetItem(["Path"])
+            paths_item.setIcon(0, _icon_path)
             self._filter_tree.addTopLevelItem(paths_item)
             dirs: set[str] = set()
             for (ap,) in session.query(STLModel.archive_path).all():
@@ -428,6 +454,26 @@ class BrowserTab(QWidget):
         model_id = self._model.item(src_index.row(), COL_THUMB).data(MODEL_ID_ROLE)
         if model_id is not None:
             self._show_thumbnails(model_id)
+            self._update_info_panel(model_id)
+
+    def _update_info_panel(self, model_id: int):
+        session = get_session()
+        try:
+            stl: STLModel = session.get(STLModel, model_id)
+            if stl is None:
+                return
+            if stl.author:
+                self._info_author_lbl.setText(f"<b>Author:</b> {stl.author}")
+                self._info_author_lbl.setVisible(True)
+            else:
+                self._info_author_lbl.setVisible(False)
+            if stl.tags:
+                self._info_tags_lbl.setText("<b>Tags:</b> " + ", ".join(t.name for t in stl.tags))
+                self._info_tags_lbl.setVisible(True)
+            else:
+                self._info_tags_lbl.setVisible(False)
+        finally:
+            session.close()
 
     def _on_double_click(self, index):
         if index.column() != COL_PATH:
@@ -436,6 +482,13 @@ class BrowserTab(QWidget):
         model_id = self._model.item(src_index.row(), COL_THUMB).data(MODEL_ID_ROLE)
         if model_id is not None:
             self._open_editor(model_id)
+
+    def _edit_selected(self):
+        ids = self._selected_model_ids()
+        if len(ids) == 1:
+            self._open_editor(ids[0])
+        elif len(ids) > 1:
+            self._open_mass_editor(ids)
 
     def _selected_model_ids(self) -> list[int]:
         rows = {self._proxy.mapToSource(idx).row()
@@ -471,8 +524,9 @@ class BrowserTab(QWidget):
 
         menu = QMenu(self)
         edit_act = menu.addAction("Edit Model…")
+        edit_act.setVisible(len(selected_ids) == 1)
         mass_act = menu.addAction(f"Mass Edit {len(selected_ids)} model(s)…")
-        mass_act.setEnabled(len(selected_ids) > 1)
+        mass_act.setVisible(len(selected_ids) > 1)
         action = menu.exec(self._table.viewport().mapToGlobal(pos))
         if action == edit_act:
             self._open_editor(model_id)
@@ -499,6 +553,7 @@ class BrowserTab(QWidget):
             stl: STLModel = session.get(STLModel, model_id)
             if stl is None:
                 return
+
             for img in stl.images:
                 px = pixmap_from_bytes(img.thumbnail)
                 self._thumb_pixmaps.append(px)

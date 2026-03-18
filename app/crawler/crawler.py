@@ -8,7 +8,7 @@ from typing import Optional
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from app.crawler.archive import is_archive, iter_images, list_contents, IMAGE_SUFFIXES
+from app.crawler.archive import is_archive, extract_archive_contents, IMAGE_SUFFIXES
 from app.crawler.metadata import extract_metadata
 from app.database.db import session_scope
 from app.database.models import STLModel, Tag, Image
@@ -110,7 +110,16 @@ class CrawlerWorker(QThread):
                 self.log.emit("  unchanged – skipped")
                 return
 
-            meta = extract_metadata(archive_path)
+            # Single-pass extraction: only images, info.json and .url files
+            contents = extract_archive_contents(archive_path)
+            image_names = [
+                n for n in contents
+                if Path(n.replace("\\", "/")).suffix.lower() in IMAGE_SUFFIXES
+            ]
+            self.log.emit(f"  {len(contents)} relevant file(s) extracted "
+                          f"({len(image_names)} image(s))")
+
+            meta = extract_metadata(archive_path, contents=contents)
 
             if existing:
                 model = existing
@@ -140,33 +149,18 @@ class CrawlerWorker(QThread):
                     session.delete(img)
                 session.flush()
 
-            # Extract thumbnails up to the configured limit
             from app.ui.config_dialog import get_max_thumbnails, get_max_thumb_size
             max_thumbs = get_max_thumbnails()
             max_thumb_size = get_max_thumb_size()
             count = 0
-            try:
-                all_names = list_contents(archive_path)
-                self.log.emit(f"  archive has {len(all_names)} file(s) total")
-                image_names = [n for n in all_names
-                               if Path(n.replace("\\", "/")).suffix.lower()
-                               in IMAGE_SUFFIXES]
-                self.log.emit(f"  {len(image_names)} image candidate(s): "
-                              f"{[Path(n).name for n in image_names[:8]]}")
-
-                for filename, raw_bytes in iter_images(archive_path):
-                    if count >= max_thumbs:
-                        break
-                    thumb = make_thumbnail(raw_bytes, max_size=max_thumb_size)
-                    if thumb:
-                        session.add(Image(
-                            model=model,
-                            filename=filename,
-                            thumbnail=thumb,
-                        ))
-                        count += 1
-                    else:
-                        self.log.emit(f"  WARNING: thumbnail conversion failed for {filename}")
-            except Exception as exc:
-                self.log.emit(f"  WARNING: image extraction failed — {exc}")
-            self.log.emit(f"  {count} image(s) extracted")
+            for filename in image_names:
+                if count >= max_thumbs:
+                    break
+                raw_bytes = contents[filename]
+                thumb = make_thumbnail(raw_bytes, max_size=max_thumb_size)
+                if thumb:
+                    session.add(Image(model=model, filename=filename, thumbnail=thumb))
+                    count += 1
+                else:
+                    self.log.emit(f"  WARNING: thumbnail conversion failed for {filename}")
+            self.log.emit(f"  {count} thumbnail(s) stored")

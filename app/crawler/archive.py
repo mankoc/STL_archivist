@@ -63,12 +63,15 @@ def read_file(archive_path: Path, member_name: str) -> Optional[bytes]:
             with _open_zip(archive_path) as zf:
                 return zf.read(member_name)
         elif suffix == ".7z":
-            with _open_7z(archive_path) as zf:
-                data = zf.read([member_name])
-                buf = data.get(member_name)
-                if buf is not None:
-                    return buf.read()
-                return None
+            _shm = "/dev/shm" if Path("/dev/shm").is_dir() else None
+            with tempfile.TemporaryDirectory(dir=_shm) as tmpdir:
+                tmp = Path(tmpdir)
+                with _open_7z(archive_path) as zf:
+                    zf.extract(path=tmpdir, targets=[member_name])
+                extracted = tmp / Path(member_name.replace("\\", "/"))
+                if extracted.exists():
+                    return extracted.read_bytes()
+            return None
         elif suffix == ".rar":
             with _open_rar(archive_path) as rf:
                 return rf.read(member_name)
@@ -134,6 +137,66 @@ def iter_images(archive_path: Path) -> Generator[tuple[str, bytes], None, None]:
         return
 
 
+def _is_wanted(name: str) -> bool:
+    """True for the only file types we ever extract from an archive."""
+    p = Path(name.replace("\\", "/"))
+    return (
+        p.suffix.lower() in IMAGE_SUFFIXES
+        or p.suffix.lower() == ".url"
+        or p.name.lower() == "info.json"
+    )
+
+
+def extract_archive_contents(archive_path: Path) -> dict[str, bytes]:
+    """
+    Open the archive exactly once and return a dict of {member_name: bytes}
+    for every image, info.json and .url file found inside.
+    All other members are ignored entirely.
+    """
+    suffix = archive_path.suffix.lower()
+    result: dict[str, bytes] = {}
+    try:
+        if suffix == ".zip":
+            with _open_zip(archive_path) as zf:
+                for name in zf.namelist():
+                    if _is_wanted(name):
+                        try:
+                            data = zf.read(name)
+                            if data:
+                                result[name] = data
+                        except Exception:
+                            continue
+
+        elif suffix == ".7z":
+            _shm = "/dev/shm" if Path("/dev/shm").is_dir() else None
+            with tempfile.TemporaryDirectory(dir=_shm) as tmpdir:
+                tmp = Path(tmpdir)
+                with _open_7z(archive_path) as zf:
+                    wanted = [n for n in zf.getnames() if _is_wanted(n)]
+                    if wanted:
+                        zf.extract(path=tmpdir, targets=wanted)
+                for name in wanted:
+                    filepath = tmp / Path(name.replace("\\", "/"))
+                    if filepath.exists():
+                        data = filepath.read_bytes()
+                        if data:
+                            result[name] = data
+
+        elif suffix == ".rar":
+            with _open_rar(archive_path) as rf:
+                for name in rf.namelist():
+                    if _is_wanted(name):
+                        try:
+                            data = rf.read(name)
+                            if data:
+                                result[name] = data
+                        except Exception:
+                            continue
+    except Exception:
+        pass
+    return result
+
+
 def read_info_json(archive_path: Path) -> Optional[bytes]:
     """Return raw bytes of info.json if present, else None."""
     names = list_contents(archive_path)
@@ -154,4 +217,61 @@ def read_url_file(archive_path: Path) -> Optional[str]:
                     line = line.strip()
                     if line.lower().startswith("url="):
                         return line[4:].strip()
+    return None
+
+
+def _parse_url_shortcut(path: Path) -> Optional[str]:
+    """Parse a Windows Internet Shortcut (.url) file and return the URL."""
+    try:
+        for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            line = line.strip()
+            if line.lower().startswith("url="):
+                return line[4:].strip()
+    except Exception:
+        pass
+    return None
+
+
+def find_url_file(archive_path: Path) -> Optional[str]:
+    """
+    Search for a .url file for the given archive in this priority order:
+      1. Inside the archive itself
+      2. Same directory as the archive
+      3. Subfolders of the archive's directory
+      4. One level above the archive
+      5. Subfolders of the directory one level above the archive
+    Returns the first URL found, or None.
+    """
+    # 1. Inside the archive
+    url = read_url_file(archive_path)
+    if url:
+        return url
+
+    parent = archive_path.parent
+    grandparent = parent.parent
+
+    # 2. Same directory as archive
+    for f in parent.glob("*.url"):
+        url = _parse_url_shortcut(f)
+        if url:
+            return url
+
+    # 3. Subfolders of archive's directory
+    for f in parent.glob("*/*.url"):
+        url = _parse_url_shortcut(f)
+        if url:
+            return url
+
+    # 4. One level above the archive
+    for f in grandparent.glob("*.url"):
+        url = _parse_url_shortcut(f)
+        if url:
+            return url
+
+    # 5. Subfolders of the directory one level above
+    for f in grandparent.glob("*/*.url"):
+        url = _parse_url_shortcut(f)
+        if url:
+            return url
+
     return None

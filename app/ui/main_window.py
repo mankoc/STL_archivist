@@ -60,6 +60,12 @@ class MainWindow(QMainWindow):
         self._act_about.setStatusTip("About STL Database")
         self._act_about.triggered.connect(self._show_about)
 
+        self._act_help = QAction(
+            style.standardIcon(SP.SP_DialogHelpButton), "Help…", self)
+        self._act_help.setShortcut(QKeySequence.StandardKey.HelpContents)
+        self._act_help.setStatusTip("Open the help page")
+        self._act_help.triggered.connect(self._show_help)
+
         # ---- Menu bar ----
         mb = self.menuBar()
 
@@ -89,6 +95,8 @@ class MainWindow(QMainWindow):
         debug_menu.addAction(act_clear_db)
 
         help_menu = mb.addMenu("&Help")
+        help_menu.addAction(self._act_help)
+        help_menu.addSeparator()
         help_menu.addAction(self._act_about)
 
         # ---- Toolbar ----
@@ -135,6 +143,10 @@ class MainWindow(QMainWindow):
             clear_db()
             self._browser.refresh()
             QMessageBox.information(self, "Delete Database", "Database cleared.")
+
+    def _show_help(self):
+        from app.ui.help_dialog import HelpDialog
+        HelpDialog(parent=self).exec()
 
     def _show_about(self):
         QMessageBox.about(

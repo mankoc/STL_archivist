@@ -9,16 +9,22 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox, QFileDialog, QMessageBox, QSpinBox,
 )
 
-DB_PATH_KEY          = "config/db_path"
-DB_PATH_DEFAULT      = "stl_database.db"
-MAX_THUMBS_KEY       = "config/max_thumbnails"
-MAX_THUMBS_DEFAULT   = 5
+from pathlib import Path
+
+DATA_DIR_KEY           = "config/data_dir"
+DATA_DIR_DEFAULT       = str(Path.home() / ".stl_database")
+MAX_THUMBS_KEY         = "config/max_thumbnails"
+MAX_THUMBS_DEFAULT     = 5
 MAX_THUMB_SIZE_KEY     = "config/max_thumb_size"
 MAX_THUMB_SIZE_DEFAULT = 512
 
 
+def get_data_dir() -> str:
+    return QSettings().value(DATA_DIR_KEY, DATA_DIR_DEFAULT)
+
+
 def get_db_path() -> str:
-    return QSettings().value(DB_PATH_KEY, DB_PATH_DEFAULT)
+    return str(Path(get_data_dir()) / "stl_database.db")
 
 
 def get_max_thumbnails() -> int:
@@ -46,20 +52,20 @@ class ConfigDialog(QDialog):
         db_layout = QFormLayout(db_group)
 
         path_row = QHBoxLayout()
-        self._db_path_edit = QLineEdit()
-        self._db_path_edit.setPlaceholderText(DB_PATH_DEFAULT)
-        path_row.addWidget(self._db_path_edit)
+        self._data_dir_edit = QLineEdit()
+        self._data_dir_edit.setPlaceholderText(DATA_DIR_DEFAULT)
+        path_row.addWidget(self._data_dir_edit)
 
         browse_btn = QPushButton("Browse…")
-        browse_btn.clicked.connect(self._browse_db_path)
+        browse_btn.clicked.connect(self._browse_data_dir)
         path_row.addWidget(browse_btn)
 
-        db_layout.addRow("Database file:", path_row)
+        db_layout.addRow("Data directory:", path_row)
         db_layout.addRow(
             "",
             QLabel(
-                "<small>Absolute path recommended. "
-                "A restart is required for path changes to take effect.</small>"
+                "<small>All database files are stored in this directory. "
+                "A restart is required for changes to take effect.</small>"
             ),
         )
 
@@ -100,32 +106,31 @@ class ConfigDialog(QDialog):
         root.addWidget(buttons)
 
     # ------------------------------------------------------------------
-    def _browse_db_path(self):
-        path, _ = QFileDialog.getSaveFileName(
+    def _browse_data_dir(self):
+        path = QFileDialog.getExistingDirectory(
             self,
-            "Choose database file location",
-            self._db_path_edit.text() or DB_PATH_DEFAULT,
-            "SQLite database (*.db);;All files (*)",
+            "Choose data directory",
+            self._data_dir_edit.text() or DATA_DIR_DEFAULT,
         )
         if path:
-            self._db_path_edit.setText(path)
+            self._data_dir_edit.setText(path)
 
     # ------------------------------------------------------------------
     def _load(self):
-        self._db_path_edit.setText(get_db_path())
+        self._data_dir_edit.setText(get_data_dir())
         self._max_thumbs_spin.setValue(get_max_thumbnails())
         self._max_thumb_size_spin.setValue(get_max_thumb_size())
 
     def _save(self):
-        path = self._db_path_edit.text().strip() or DB_PATH_DEFAULT
-        old_path = get_db_path()
-        QSettings().setValue(DB_PATH_KEY, path)
+        data_dir = self._data_dir_edit.text().strip() or DATA_DIR_DEFAULT
+        old_dir = get_data_dir()
+        QSettings().setValue(DATA_DIR_KEY, data_dir)
         QSettings().setValue(MAX_THUMBS_KEY, self._max_thumbs_spin.value())
         QSettings().setValue(MAX_THUMB_SIZE_KEY, self._max_thumb_size_spin.value())
-        if path != old_path:
+        if data_dir != old_dir:
             QMessageBox.information(
                 self,
                 "Configuration",
-                "Database path updated. Please restart the application for the change to take effect.",
+                "Data directory updated. Please restart the application for the change to take effect.",
             )
         self.accept()

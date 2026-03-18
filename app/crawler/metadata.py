@@ -10,13 +10,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from app.crawler.archive import read_info_json, read_url_file
+from app.crawler.archive import find_url_file
 
 
 # Known distributor/source keywords that appear in folder names
 _DISTRIBUTOR_PATTERNS = [
-    (re.compile(r"\bpatreon\b", re.I), "Patreon"),
-    (re.compile(r"\bkickstarter\b", re.I), "Kickstarter"),
+    (re.compile(r"\bpatreons?\b", re.I), "Patreon"),
+    (re.compile(r"\bkickstarters?\b", re.I), "Kickstarter"),
     (re.compile(r"\bmyminifactory\b", re.I), "MyMiniFactory"),
     (re.compile(r"\bartstation\b", re.I), "ArtStation"),
     (re.compile(r"\bgumroad\b", re.I), "Gumroad"),
@@ -54,29 +54,42 @@ def _parse_info_json(raw: bytes) -> dict:
 def _infer_from_path(archive_path: Path) -> ModelMetadata:
     """Guess fields by looking at parent directory names and the archive stem."""
     meta = ModelMetadata()
-    parts = list(archive_path.parts)  # all path components
+    parts = list(archive_path.parts)  # all path components including filename
 
     # Title: use the archive stem, clean up underscores/dashes
     stem = archive_path.stem
     meta.title = re.sub(r"[_\-]+", " ", stem).strip()
 
-    # Scan path parts from deepest (closest to the file) to shallowest so that
-    # the most-specific folder wins.  Example:
-    #   /patreon/AuthorA/Kickstarters/model.zip  →  Kickstarter  (not Patreon)
-    #   /patreon/AuthorA/model.zip               →  Patreon
-    parts_deep_first = list(reversed(parts))  # [filename, immediate parent, …, root]
-
-    # Distributor / Type — first hit walking up from the file wins
-    for part in parts_deep_first:
+    # Distributor / Type — scan left-to-right (shallowest first).
+    # The folder immediately after the distributor folder is the author.
+    distributor_idx = None
+    for i, part in enumerate(parts[:-1]):  # exclude the filename itself
         for pattern, name in _DISTRIBUTOR_PATTERNS:
             if pattern.search(part):
                 meta.distributor = name
+                distributor_idx = i
                 break
-        if meta.distributor:
+        if distributor_idx is not None:
             break
 
-    # Date — same depth-first strategy
-    for part in parts_deep_first:
+    # Author: folder immediately after the distributor folder (if present)
+    if distributor_idx is not None:
+        author_idx = distributor_idx + 1
+        if author_idx < len(parts) - 1:  # must not be the filename
+            meta.author = parts[author_idx]
+    else:
+        # Fallback: first folder that is not a date and not a known keyword
+        for part in parts[:-1]:
+            if re.match(r"^\d{4}", part):
+                continue
+            if any(p.search(part) for p, _ in _DISTRIBUTOR_PATTERNS):
+                continue
+            if len(part) > 2 and not part.startswith("."):
+                meta.author = part
+                break
+
+    # Date — scan all parts, deepest first for best specificity
+    for part in reversed(parts):
         for pattern in _DATE_PATTERNS:
             m = pattern.search(part)
             if m:
@@ -85,35 +98,42 @@ def _infer_from_path(archive_path: Path) -> ModelMetadata:
         if meta.release_date:
             break
 
-    # Author heuristic: the first folder below the root STL folder that is not
-    # a year/date and not a known keyword tends to be an author name.
-    # We look for a part that looks like a name (title-cased, not purely numeric).
-    for part in reversed(parts[:-1]):  # exclude filename itself
-        if re.match(r"^\d{4}", part):
-            continue
-        if any(p.search(part) for p, _ in _DISTRIBUTOR_PATTERNS):
-            continue
-        if len(part) > 2 and not part.startswith("."):
-            meta.author = part
-            break
-
     return meta
 
 
-def extract_metadata(archive_path: Path) -> ModelMetadata:
+def extract_metadata(archive_path: Path,
+                     contents: dict[str, bytes] | None = None) -> ModelMetadata:
     """
     Full metadata extraction pipeline for a single archive.
-    Returns a ModelMetadata dataclass with best-effort fields populated.
+    Pass *contents* (from extract_archive_contents) to avoid re-opening the archive.
     """
     meta = _infer_from_path(archive_path)
 
-    # Override with data from .url file
-    url_from_file = read_url_file(archive_path)
-    if url_from_file:
-        meta.url = url_from_file
+    # .url file — check archive contents first, then filesystem
+    url_from_archive: str | None = None
+    if contents:
+        for name, data in contents.items():
+            if Path(name.replace("\\", "/")).suffix.lower() == ".url":
+                for line in data.decode("utf-8", errors="ignore").splitlines():
+                    line = line.strip()
+                    if line.lower().startswith("url="):
+                        url_from_archive = line[4:].strip()
+                        break
+                if url_from_archive:
+                    break
 
-    # Override / enrich with info.json
-    raw_json = read_info_json(archive_path)
+    url = url_from_archive or find_url_file(archive_path)
+    if url:
+        meta.url = url
+
+    # info.json
+    raw_json: bytes | None = None
+    if contents:
+        for name, data in contents.items():
+            if Path(name.replace("\\", "/")).name.lower() == "info.json":
+                raw_json = data
+                break
+
     if raw_json:
         info = _parse_info_json(raw_json)
         if info.get("name"):

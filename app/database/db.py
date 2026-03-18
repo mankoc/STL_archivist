@@ -15,6 +15,9 @@ _SessionFactory = None
 
 def init_db(db_path: str = "stl_database.db") -> None:
     """Initialise the engine and create all tables if they don't exist."""
+    from pathlib import Path
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+
     global _engine, _SessionFactory
     url = f"sqlite:///{db_path}"
     _engine = create_engine(url, connect_args={"check_same_thread": False})
