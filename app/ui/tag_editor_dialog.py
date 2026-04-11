@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QTableWidget, QTableWidgetItem, QPushButton,
     QInputDialog, QMessageBox, QHeaderView, QAbstractItemView,
-    QDialogButtonBox, QSpinBox,
+    QDialogButtonBox, QSpinBox, QComboBox,
 )
 
 
@@ -26,6 +26,31 @@ def _levenshtein(a: str, b: str) -> int:
             curr.append(min(prev[j] + 1, curr[-1] + 1, prev[j - 1] + (ca != cb)))
         prev = curr
     return prev[-1]
+
+
+_SOUNDEX_CODE = str.maketrans(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    "01230120022455012623010202",
+)
+
+
+def _soundex(s: str) -> str:
+    """Return the American Soundex code for *s* (4-character string)."""
+    s = "".join(c for c in s.upper() if c.isalpha())
+    if not s:
+        return "0000"
+    first = s[0]
+    digits = s.translate(_SOUNDEX_CODE)
+    result = first
+    prev = digits[0]
+    for digit in digits[1:]:
+        if digit != "0" and digit != prev:
+            result += digit
+        if digit != "0":
+            prev = digit
+        if len(result) == 4:
+            break
+    return result.ljust(4, "0")
 
 
 class TagEditorDialog(QDialog):
@@ -192,7 +217,13 @@ class _MergeSimilarDialog(QDialog):
         root = QVBoxLayout(self)
 
         thresh_row = QHBoxLayout()
-        thresh_row.addWidget(QLabel("Max distance:"))
+        thresh_row.addWidget(QLabel("Method:"))
+        self._method_combo = QComboBox()
+        self._method_combo.addItems(["Levenshtein", "Soundex"])
+        self._method_combo.currentIndexChanged.connect(self._on_method_changed)
+        thresh_row.addWidget(self._method_combo)
+        self._thresh_label = QLabel("Max distance:")
+        thresh_row.addWidget(self._thresh_label)
         self._thresh_spin = QSpinBox()
         self._thresh_spin.setRange(1, 5)
         self._thresh_spin.setValue(2)
@@ -224,8 +255,13 @@ class _MergeSimilarDialog(QDialog):
         close_btn.rejected.connect(self.accept)
         root.addWidget(close_btn)
 
+    def _on_method_changed(self):
+        is_lev = self._method_combo.currentText() == "Levenshtein"
+        self._thresh_label.setVisible(is_lev)
+        self._thresh_spin.setVisible(is_lev)
+
     def _scan(self):
-        threshold = self._thresh_spin.value()
+        method = self._method_combo.currentText()
         session = get_session()
         try:
             tags = [
@@ -235,28 +271,44 @@ class _MergeSimilarDialog(QDialog):
         finally:
             session.close()
 
-        pairs = []
-        for i in range(len(tags)):
-            for j in range(i + 1, len(tags)):
-                d = _levenshtein(tags[i][1], tags[j][1])
-                if d <= threshold:
-                    pairs.append((tags[i], tags[j], d))
-        pairs.sort(key=lambda x: x[2])
+        pairs: list[tuple] = []
+        if method == "Levenshtein":
+            threshold = self._thresh_spin.value()
+            for i in range(len(tags)):
+                for j in range(i + 1, len(tags)):
+                    d = _levenshtein(tags[i][1], tags[j][1])
+                    if d <= threshold:
+                        pairs.append((tags[i], tags[j], str(d)))
+            pairs.sort(key=lambda x: int(x[2]))
+            col_header = "Distance"
+        else:  # Soundex
+            codes = {tid: _soundex(name) for tid, name, _ in tags}
+            groups: dict[str, list] = {}
+            for tid, name, count in tags:
+                code = codes[tid]
+                groups.setdefault(code, []).append((tid, name, count))
+            for code, members in groups.items():
+                for i in range(len(members)):
+                    for j in range(i + 1, len(members)):
+                        pairs.append((members[i], members[j], code))
+            pairs.sort(key=lambda x: x[2])
+            col_header = "Soundex"
 
+        self._table.setHorizontalHeaderItem(2, QTableWidgetItem(col_header))
         self._table.setSortingEnabled(False)
         self._table.setRowCount(0)
-        for (id_a, name_a, count_a), (id_b, name_b, count_b), dist in pairs:
+        for (id_a, name_a, count_a), (id_b, name_b, count_b), score in pairs:
             row = self._table.rowCount()
             self._table.insertRow(row)
             item_a = QTableWidgetItem(f"{name_a} ({count_a})")
             item_a.setData(Qt.ItemDataRole.UserRole, id_a)
             item_b = QTableWidgetItem(f"{name_b} ({count_b})")
             item_b.setData(Qt.ItemDataRole.UserRole, id_b)
-            dist_item = QTableWidgetItem(str(dist))
-            dist_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            score_item = QTableWidgetItem(score)
+            score_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self._table.setItem(row, 0, item_a)
             self._table.setItem(row, 1, item_b)
-            self._table.setItem(row, 2, dist_item)
+            self._table.setItem(row, 2, score_item)
         self._table.setSortingEnabled(True)
 
     def _merge_selected(self):

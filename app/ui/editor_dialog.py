@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QCursor
 
 from app.database.db import session_scope, get_session
-from app.database.models import STLModel, Tag, Release, Sculptor, ModelType, Subtype
+from app.database.models import STLModel, Tag, Release, Sculptor, Category, Subcategory
 from app.utils.thumbnailer import pixmap_from_path
 from app.utils.path_pattern import parse_path, ATTR_LABEL, PATTERN_HELP
 
@@ -113,8 +113,8 @@ class EditorDialog(QDialog):
             all_tags   = [t.name for t in session.query(Tag).order_by(Tag.name).all()]
             releases   = sorted(r.name for r in session.query(Release).order_by(Release.name).all())
             sculptors  = sorted(s.name for s in session.query(Sculptor).order_by(Sculptor.name).all())
-            model_types = sorted(t.name for t in session.query(ModelType).order_by(ModelType.name).all())
-            subtypes   = sorted(s.name for s in session.query(Subtype).order_by(Subtype.name).all())
+            categories   = sorted(c.name for c in session.query(Category).order_by(Category.name).all())
+            subcategories = sorted(s.name for s in session.query(Subcategory).order_by(Subcategory.name).all())
         finally:
             session.close()
 
@@ -129,10 +129,10 @@ class EditorDialog(QDialog):
         self._tags_edit   = TagEdit(all_tags)
         self._release_edit = self._make_combo(releases, blank_first=True)
 
-        self._sculptor_edit   = self._make_combo(sculptors, blank_first=True)
-        self._model_type_edit = self._make_combo(model_types, blank_first=True)
-        self._model_type_edit.currentTextChanged.connect(self._on_type_changed)
-        self._subtype_edit    = self._make_combo(subtypes, blank_first=True)
+        self._sculptor_edit      = self._make_combo(sculptors, blank_first=True)
+        self._category_edit      = self._make_combo(categories, blank_first=True)
+        self._category_edit.currentTextChanged.connect(self._on_category_changed)
+        self._subcategory_edit   = self._make_combo(subcategories, blank_first=True)
 
         self._sequence_spin = QSpinBox()
         self._sequence_spin.setRange(0, 9999)
@@ -146,8 +146,8 @@ class EditorDialog(QDialog):
         form.addRow("Date:",         self._date_edit)
         form.addRow("Release:",      self._release_edit)
         form.addRow("Sculptor:",     self._sculptor_edit)
-        form.addRow("Type:",         self._model_type_edit)
-        form.addRow("Subtype:",      self._subtype_edit)
+        form.addRow("Category:",     self._category_edit)
+        form.addRow("Subcategory:",  self._subcategory_edit)
         form.addRow("Sequence:",     self._with_clear_btn(
             self._sequence_spin, lambda: self._sequence_spin.setValue(0)
         ))
@@ -282,25 +282,25 @@ class EditorDialog(QDialog):
         lay.addWidget(btn, alignment=Qt.AlignmentFlag.AlignTop)
         return container
 
-    def _on_type_changed(self, type_name: str):
-        """Repopulate subtype combo when the model type changes."""
+    def _on_category_changed(self, category_name: str):
+        """Repopulate subcategory combo when the category changes."""
         session = get_session()
         try:
-            q = session.query(Subtype).order_by(Subtype.name)
-            if type_name.strip():
-                mt = session.query(ModelType).filter_by(name=type_name.strip()).first()
-                if mt:
-                    q = q.filter(Subtype.model_type_id == mt.id)
-            subtypes = [s.name for s in q.all()]
+            q = session.query(Subcategory).order_by(Subcategory.name)
+            if category_name.strip():
+                cat = session.query(Category).filter_by(name=category_name.strip()).first()
+                if cat:
+                    q = q.filter(Subcategory.category_id == cat.id)
+            subcategories = [s.name for s in q.all()]
         finally:
             session.close()
-        current = self._subtype_edit.currentText()
-        self._subtype_edit.blockSignals(True)
-        self._subtype_edit.clear()
-        self._subtype_edit.addItem("")
-        self._subtype_edit.addItems(subtypes)
-        self._subtype_edit.setCurrentText(current)
-        self._subtype_edit.blockSignals(False)
+        current = self._subcategory_edit.currentText()
+        self._subcategory_edit.blockSignals(True)
+        self._subcategory_edit.clear()
+        self._subcategory_edit.addItem("")
+        self._subcategory_edit.addItems(subcategories)
+        self._subcategory_edit.setCurrentText(current)
+        self._subcategory_edit.blockSignals(False)
 
     # ------------------------------------------------------------------
     def _load_model(self):
@@ -317,10 +317,10 @@ class EditorDialog(QDialog):
             self._date_edit.setText(model.release_date or "")
             self._release_edit.setCurrentText(model.release.name if model.release else "")
             self._sculptor_edit.setCurrentText(model.sculptor.name if model.sculptor else "")
-            type_name = model.type.name if model.type else ""
-            self._model_type_edit.setCurrentText(type_name)
-            self._on_type_changed(type_name)   # repopulate subtypes for this type
-            self._subtype_edit.setCurrentText(model.subtype.name if model.subtype else "")
+            category_name = model.category.name if model.category else ""
+            self._category_edit.setCurrentText(category_name)
+            self._on_category_changed(category_name)   # repopulate subcategories for this category
+            self._subcategory_edit.setCurrentText(model.subcategory.name if model.subcategory else "")
             self._sequence_spin.setValue(model.sequence if model.sequence is not None else 0)
             self._url_edit.setText(model.url or "")
             self._desc_edit.setPlainText(model.description or "")
@@ -432,8 +432,8 @@ class EditorDialog(QDialog):
             "release_date":    lambda v: self._date_edit.setText(v),
             "url":             lambda v: self._url_edit.setText(v),
             "sculptor_name":   lambda v: self._sculptor_edit.setCurrentText(v),
-            "model_type_name": lambda v: self._model_type_edit.setCurrentText(v),
-            "subtype_name":    lambda v: self._subtype_edit.setCurrentText(v),
+            "category_name":    lambda v: self._category_edit.setCurrentText(v),
+            "subcategory_name": lambda v: self._subcategory_edit.setCurrentText(v),
             "release_name":    lambda v: self._release_edit.setCurrentText(v),
             "sequence":        lambda v: self._sequence_spin.setValue(int(v)) if v.isdigit() else None,
         }
@@ -480,33 +480,33 @@ class EditorDialog(QDialog):
             else:
                 model.sculptor = None
 
-            type_name = self._model_type_edit.currentText().strip()
-            if type_name:
-                mt = session.query(ModelType).filter_by(name=type_name).first()
-                if mt is None:
-                    mt = ModelType(name=type_name)
-                    session.add(mt)
+            category_name = self._category_edit.currentText().strip()
+            if category_name:
+                cat = session.query(Category).filter_by(name=category_name).first()
+                if cat is None:
+                    cat = Category(name=category_name)
+                    session.add(cat)
                     session.flush()
-                model.type = mt
+                model.category = cat
             else:
-                model.type = None
-                model.subtype = None
+                model.category = None
+                model.subcategory = None
 
-            if model.type:
-                subtype_name = self._subtype_edit.currentText().strip()
-                if subtype_name:
-                    st = session.query(Subtype).filter_by(
-                        name=subtype_name, model_type_id=model.type.id
+            if model.category:
+                subcategory_name = self._subcategory_edit.currentText().strip()
+                if subcategory_name:
+                    sc = session.query(Subcategory).filter_by(
+                        name=subcategory_name, category_id=model.category.id
                     ).first()
-                    if st is None:
-                        st = Subtype(name=subtype_name, model_type_id=model.type.id)
-                        session.add(st)
+                    if sc is None:
+                        sc = Subcategory(name=subcategory_name, category_id=model.category.id)
+                        session.add(sc)
                         session.flush()
-                    model.subtype = st
+                    model.subcategory = sc
                 else:
-                    model.subtype = None
+                    model.subcategory = None
             else:
-                model.subtype = None
+                model.subcategory = None
 
             model.tags.clear()
             for name in self._tags_edit.get_tags():

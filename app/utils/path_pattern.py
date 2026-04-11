@@ -2,11 +2,11 @@
 Shared path-pattern utilities — used by the mass editor and the crawler.
 
 Pattern syntax:
-  {token}  → named capture  (token names: type, author, title/name, date/month,
-                              url, sculptor, model_type, subtype, sequence)
+  {token}  → named capture  (token names: source, author, title/name, date/month,
+                              url, sculptor, category, subcategory, sequence)
   *        → ignored segment
 
-FK-backed tokens (sculptor, model_type, subtype, sequence) are stored under
+FK-backed tokens (sculptor, category, subcategory, sequence) are stored under
 "virtual" keys in the extracted dict and require apply_extracted_to_model()
 to resolve them into the correct DB objects.
 """
@@ -17,18 +17,18 @@ import re
 # FK / special fields use a "virtual" key (e.g. "sculptor_name") that
 # apply_extracted_to_model() knows how to handle.
 TOKEN_MAP = {
-    "source":     "source",
-    "author":     "author",
-    "title":      "title",
-    "name":       "title",
-    "date":       "release_date",
-    "month":      "release_date",
-    "url":        "url",
-    "sculptor":   "sculptor_name",
-    "model_type": "model_type_name",
-    "subtype":    "subtype_name",
-    "sequence":   "sequence",
-    "release":    "release_name",
+    "source":      "source",
+    "author":      "author",
+    "title":       "title",
+    "name":        "title",
+    "date":        "release_date",
+    "month":       "release_date",
+    "url":         "url",
+    "sculptor":    "sculptor_name",
+    "category":    "category_name",
+    "subcategory": "subcategory_name",
+    "sequence":    "sequence",
+    "release":     "release_name",
 }
 
 # Simple string attributes that can be set with setattr directly
@@ -36,16 +36,16 @@ _SIMPLE_ATTRS = {"source", "author", "title", "release_date", "url"}
 
 # Human-readable label for each field key (for preview lines)
 ATTR_LABEL = {
-    "source":          "source",
-    "author":          "author",
-    "title":           "title",
-    "release_date":    "date",
-    "url":             "url",
-    "sculptor_name":   "sculptor",
-    "model_type_name": "type",
-    "subtype_name":    "subtype",
-    "sequence":        "sequence",
-    "release_name":    "release",
+    "source":           "source",
+    "author":           "author",
+    "title":            "title",
+    "release_date":     "date",
+    "url":              "url",
+    "sculptor_name":    "sculptor",
+    "category_name":    "category",
+    "subcategory_name": "subcategory",
+    "sequence":         "sequence",
+    "release_name":     "release",
 }
 
 PATTERN_HELP = (
@@ -57,8 +57,8 @@ PATTERN_HELP = (
     "<tr><td><code>{title}</code> / <code>{name}</code></td><td>&nbsp;–&nbsp;</td><td>model title</td></tr>"
     "<tr><td><code>{date}</code> / <code>{month}</code></td><td>&nbsp;–&nbsp;</td><td>release date</td></tr>"
     "<tr><td><code>{sculptor}</code></td><td>&nbsp;–&nbsp;</td><td>sculptor (looked up or created)</td></tr>"
-    "<tr><td><code>{model_type}</code></td><td>&nbsp;–&nbsp;</td><td>model type category</td></tr>"
-    "<tr><td><code>{subtype}</code></td><td>&nbsp;–&nbsp;</td><td>sub-category / variant</td></tr>"
+    "<tr><td><code>{category}</code></td><td>&nbsp;–&nbsp;</td><td>model category</td></tr>"
+    "<tr><td><code>{subcategory}</code></td><td>&nbsp;–&nbsp;</td><td>subcategory / variant</td></tr>"
     "<tr><td><code>{sequence}</code></td><td>&nbsp;–&nbsp;</td><td>numbering within a series</td></tr>"
     "<tr><td><code>{release}</code></td><td>&nbsp;–&nbsp;</td><td>release / bundle name</td></tr>"
     "<tr><td><code>{url}</code></td><td>&nbsp;–&nbsp;</td><td>source URL</td></tr>"
@@ -178,7 +178,7 @@ def apply_extracted_to_model(session, model, extracted: dict[str, str],
     When *overwrite* is False, only fields that are currently None / empty are
     filled in (used by the crawler to let archive metadata take precedence).
     """
-    from app.database.models import Sculptor, ModelType, Subtype, Release  # local to avoid circular imports
+    from app.database.models import Sculptor, Category, Subcategory, Release  # local to avoid circular imports
 
     def _should_set(current_value) -> bool:
         if overwrite:
@@ -202,28 +202,28 @@ def apply_extracted_to_model(session, model, extracted: dict[str, str],
                     session.flush()
                 model.sculptor = sc
 
-        elif attr == "model_type_name":
-            if _should_set(model.type_id):
-                mt = session.query(ModelType).filter_by(name=value).first()
-                if mt is None:
-                    mt = ModelType(name=value)
-                    session.add(mt)
+        elif attr == "category_name":
+            if _should_set(model.category_id):
+                cat = session.query(Category).filter_by(name=value).first()
+                if cat is None:
+                    cat = Category(name=value)
+                    session.add(cat)
                     session.flush()
-                model.type = mt
+                model.category = cat
 
-        elif attr == "subtype_name":
-            if _should_set(model.subtype_id):
-                # Prefer a subtype that matches the model's current type
-                q = session.query(Subtype).filter_by(name=value)
-                if model.type_id:
-                    q = q.filter_by(model_type_id=model.type_id)
-                st = q.first()
-                if st is None and model.type_id:
-                    st = Subtype(name=value, model_type_id=model.type_id)
-                    session.add(st)
+        elif attr == "subcategory_name":
+            if _should_set(model.subcategory_id):
+                # Prefer a subcategory that matches the model's current category
+                q = session.query(Subcategory).filter_by(name=value)
+                if model.category_id:
+                    q = q.filter_by(category_id=model.category_id)
+                sc = q.first()
+                if sc is None and model.category_id:
+                    sc = Subcategory(name=value, category_id=model.category_id)
+                    session.add(sc)
                     session.flush()
-                if st:
-                    model.subtype = st
+                if sc:
+                    model.subcategory = sc
 
         elif attr == "sequence":
             if _should_set(model.sequence):

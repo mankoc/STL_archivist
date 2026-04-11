@@ -36,33 +36,33 @@ class Sculptor(Base):
         return f"<Sculptor {self.name!r}>"
 
 
-class ModelType(Base):
-    __tablename__ = "model_types"
+class Category(Base):
+    __tablename__ = "categories"
 
     id   = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(128), unique=True, nullable=False)  # e.g. Movies, Comics, Games
 
-    subtypes = relationship("Subtype", back_populates="model_type", cascade="all, delete-orphan")
-    models   = relationship("STLModel", back_populates="type")
+    subcategories = relationship("Subcategory", back_populates="category", cascade="all, delete-orphan")
+    models        = relationship("STLModel", back_populates="category")
 
     def __repr__(self):
-        return f"<ModelType {self.name!r}>"
+        return f"<Category {self.name!r}>"
 
 
-class Subtype(Base):
-    __tablename__ = "subtypes"
+class Subcategory(Base):
+    __tablename__ = "subcategories"
 
-    id            = Column(Integer, primary_key=True, autoincrement=True)
-    model_type_id = Column(Integer, ForeignKey("model_types.id", ondelete="CASCADE"), nullable=False)
-    name          = Column(String(128), nullable=False)  # e.g. Marvel, DC, Star Wars
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    category_id = Column(Integer, ForeignKey("categories.id", ondelete="CASCADE"), nullable=False)
+    name        = Column(String(128), nullable=False)  # e.g. Marvel, DC, Star Wars
 
-    __table_args__ = (UniqueConstraint("model_type_id", "name", name="uq_subtype_per_type"),)
+    __table_args__ = (UniqueConstraint("category_id", "name", name="uq_subcategory_per_category"),)
 
-    model_type = relationship("ModelType", back_populates="subtypes")
-    models     = relationship("STLModel", back_populates="subtype")
+    category = relationship("Category", back_populates="subcategories")
+    models   = relationship("STLModel", back_populates="subcategory")
 
     def __repr__(self):
-        return f"<Subtype {self.name!r} (type_id={self.model_type_id})>"
+        return f"<Subcategory {self.name!r} (category_id={self.category_id})>"
 
 
 class Release(Base):
@@ -80,30 +80,30 @@ class Release(Base):
 class STLModel(Base):
     __tablename__ = "models"
 
-    id            = Column(Integer, primary_key=True, autoincrement=True)
-    title         = Column(String(512))
-    author        = Column(String(256))
-    source        = Column(String(128))          # patreon / kickstarter / myminifactory / unknown
-    release_date  = Column(String(32))           # ISO date string, e.g. "2024-01"
-    url           = Column(Text)
-    description   = Column(Text)
-    archive_path  = Column(Text, unique=True, nullable=False)
-    archive_hash  = Column(String(64), nullable=False)
-    sequence      = Column(Integer, nullable=True)               # position in a series, e.g. 3
-    created_at    = Column(DateTime, default=_utcnow)
-    updated_at    = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+    id               = Column(Integer, primary_key=True, autoincrement=True)
+    title            = Column(String(512))
+    author           = Column(String(256))
+    source           = Column(String(128))          # patreon / kickstarter / myminifactory / unknown
+    release_date     = Column(String(32))           # ISO date string, e.g. "2024-01"
+    url              = Column(Text)
+    description      = Column(Text)
+    archive_path     = Column(Text, unique=True, nullable=False)
+    archive_hash     = Column(String(64), nullable=False)
+    sequence         = Column(Integer, nullable=True)               # position in a series, e.g. 3
+    created_at       = Column(DateTime, default=_utcnow)
+    updated_at       = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
-    sculptor_id   = Column(Integer, ForeignKey("sculptors.id", ondelete="SET NULL"), nullable=True)
-    type_id       = Column(Integer, ForeignKey("model_types.id", ondelete="SET NULL"), nullable=True)
-    subtype_id    = Column(Integer, ForeignKey("subtypes.id", ondelete="SET NULL"), nullable=True)
-    release_id    = Column(Integer, ForeignKey("releases.id", ondelete="SET NULL"), nullable=True)
+    sculptor_id      = Column(Integer, ForeignKey("sculptors.id", ondelete="SET NULL"), nullable=True)
+    category_id      = Column(Integer, ForeignKey("categories.id", ondelete="SET NULL"), nullable=True)
+    subcategory_id   = Column(Integer, ForeignKey("subcategories.id", ondelete="SET NULL"), nullable=True)
+    release_id       = Column(Integer, ForeignKey("releases.id", ondelete="SET NULL"), nullable=True)
 
-    tags     = relationship("Tag",      secondary=model_tags, back_populates="models")
-    images   = relationship("Image",    back_populates="model", cascade="all, delete-orphan")
-    sculptor = relationship("Sculptor", back_populates="models")
-    type     = relationship("ModelType", back_populates="models")
-    subtype  = relationship("Subtype",  back_populates="models")
-    release  = relationship("Release",  back_populates="models")
+    tags        = relationship("Tag",         secondary=model_tags, back_populates="models")
+    images      = relationship("Image",       back_populates="model", cascade="all, delete-orphan")
+    sculptor    = relationship("Sculptor",    back_populates="models")
+    category    = relationship("Category",    back_populates="models")
+    subcategory = relationship("Subcategory", back_populates="models")
+    release     = relationship("Release",     back_populates="models")
 
     def __repr__(self):
         return f"<STLModel id={self.id} title={self.title!r}>"

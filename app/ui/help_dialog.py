@@ -29,8 +29,8 @@ _HELP_HTML = """
   <li>Archives that no longer exist on disk are <b>automatically removed</b> from the database.</li>
   <li>Metadata is inferred from path structure:
     <ul>
-      <li>A folder named <b>Patreon(s)</b> sets <em>type = Patreon</em>; the next folder becomes the <em>author</em>.</li>
-      <li>A folder named <b>Kickstarter(s)</b> sets <em>type = Kickstarter</em>; the next folder becomes the <em>author</em>.</li>
+      <li>A folder named <b>Patreon(s)</b> sets <em>source = Patreon</em>; the next folder becomes the <em>author</em>.</li>
+      <li>A folder named <b>Kickstarter(s)</b> sets <em>source = Kickstarter</em>; the next folder becomes the <em>author</em>.</li>
       <li>Dates in folder names (<code>2024-01</code>, <code>2024</code>) are used as <em>release date</em>.</li>
     </ul>
   </li>

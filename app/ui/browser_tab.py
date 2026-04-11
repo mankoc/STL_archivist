@@ -1,7 +1,7 @@
 """
 Tab 2 – Model browser.
 Left panel: filter tree (Author / Tags / Type).
-Centre: sortable table with thumbnail, title, author, type, date, tags, path.
+Centre: sortable table with thumbnail, title, author, category, date, tags, path.
 Right panel: image thumbnail sidebar (populated on single-click).
 Right-click or double-click: Edit Model.
 """
@@ -22,24 +22,24 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import QSettings
 
 from app.database.db import get_session, session_scope
-from app.database.models import STLModel, Tag, Sculptor, ModelType, Subtype, Release
+from app.database.models import STLModel, Tag, Sculptor, Category, Subcategory, Release
 from app.utils.thumbnailer import pixmap_from_path
 
 # Column indices
-COL_THUMB      = 0
-COL_TITLE      = 1
-COL_AUTHOR     = 2
-COL_SOURCE     = 3
-COL_DATE       = 4
-COL_TAGS       = 5
-COL_SCULPTOR   = 6
-COL_MODEL_TYPE = 7
-COL_SUBTYPE    = 8
-COL_SEQUENCE   = 9
-COL_RELEASE    = 10
-COL_PATH       = 11
+COL_THUMB       = 0
+COL_TITLE       = 1
+COL_AUTHOR      = 2
+COL_SOURCE      = 3
+COL_DATE        = 4
+COL_TAGS        = 5
+COL_SCULPTOR    = 6
+COL_CATEGORY    = 7
+COL_SUBCATEGORY = 8
+COL_SEQUENCE    = 9
+COL_RELEASE     = 10
+COL_PATH        = 11
 _HEADERS = ["", "Title", "Author", "Source", "Date", "Tags",
-            "Sculptor", "Type", "Subtype", "Seq", "Release", "Path"]
+            "Sculptor", "Category", "Subcategory", "Seq", "Release", "Path"]
 
 MODEL_ID_ROLE = Qt.ItemDataRole.UserRole + 1
 
@@ -131,25 +131,25 @@ class SculptorDelegate(_ComboDelegate):
             session.close()
 
 
-class ModelTypeDelegate(_ComboDelegate):
-    """QComboBox of all ModelType names."""
+class CategoryDelegate(_ComboDelegate):
+    """QComboBox of all Category names."""
 
     def _get_items(self) -> list[str]:
         session = get_session()
         try:
-            return sorted(t.name for t in session.query(ModelType).order_by(ModelType.name).all())
+            return sorted(c.name for c in session.query(Category).order_by(Category.name).all())
         finally:
             session.close()
 
 
-class SubtypeDelegate(_ComboDelegate):
-    """QComboBox of all Subtype names."""
+class SubcategoryDelegate(_ComboDelegate):
+    """QComboBox of all Subcategory names."""
 
     def _get_items(self) -> list[str]:
         session = get_session()
         try:
             return sorted(
-                s.name for s in session.query(Subtype).order_by(Subtype.name).all()
+                s.name for s in session.query(Subcategory).order_by(Subcategory.name).all()
             )
         finally:
             session.close()
@@ -298,18 +298,18 @@ class BrowserTab(QWidget):
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked)
-        self._table.horizontalHeader().setSectionResizeMode(COL_TITLE, QHeaderView.ResizeMode.Stretch)
-        self._table.horizontalHeader().setSectionResizeMode(COL_PATH,  QHeaderView.ResizeMode.Stretch)
+        self._table.horizontalHeader().setSectionResizeMode(COL_TITLE, QHeaderView.ResizeMode.Interactive)
+        self._table.horizontalHeader().setSectionResizeMode(COL_PATH,  QHeaderView.ResizeMode.Interactive)
         self._table.setColumnHidden(COL_THUMB, True)
         self._table.verticalHeader().setVisible(False)
         self._table.setSortingEnabled(True)
         self._table.setAlternatingRowColors(True)
-        self._table.setItemDelegateForColumn(COL_SOURCE,     SourceDelegate(self._table))
-        self._table.setItemDelegateForColumn(COL_TAGS,       TagDelegate(self._table))
-        self._table.setItemDelegateForColumn(COL_SCULPTOR,   SculptorDelegate(self._table))
-        self._table.setItemDelegateForColumn(COL_MODEL_TYPE, ModelTypeDelegate(self._table))
-        self._table.setItemDelegateForColumn(COL_SUBTYPE,    SubtypeDelegate(self._table))
-        self._table.setItemDelegateForColumn(COL_RELEASE,    ReleaseDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_SOURCE,      SourceDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_TAGS,        TagDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_SCULPTOR,    SculptorDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_CATEGORY,    CategoryDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_SUBCATEGORY, SubcategoryDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_RELEASE,     ReleaseDelegate(self._table))
         self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._table.customContextMenuRequested.connect(self._context_menu)
         header = self._table.horizontalHeader()
@@ -317,6 +317,7 @@ class BrowserTab(QWidget):
         header.customContextMenuRequested.connect(self._header_context_menu)
         header.setSectionsMovable(True)
         header.sectionMoved.connect(self._save_header_state)
+        header.sectionResized.connect(lambda *_: self._save_header_state())
         self._restore_header_state()
         self._table.clicked.connect(self._on_row_clicked)
         self._table.doubleClicked.connect(self._on_double_click)
@@ -481,8 +482,8 @@ class BrowserTab(QWidget):
                     QStandardItem(stl.release_date or ""),
                     QStandardItem(tags_str),
                     QStandardItem(stl.sculptor.name if stl.sculptor else ""),
-                    QStandardItem(stl.type.name if stl.type else ""),
-                    QStandardItem(stl.subtype.name if stl.subtype else ""),
+                    QStandardItem(stl.category.name if stl.category else ""),
+                    QStandardItem(stl.subcategory.name if stl.subcategory else ""),
                     QStandardItem(seq_str),
                     QStandardItem(stl.release.name if stl.release else ""),
                     path_item,
@@ -535,31 +536,31 @@ class BrowserTab(QWidget):
                     stl.sculptor = sc
                 else:
                     stl.sculptor = None
-            elif col == COL_MODEL_TYPE:
+            elif col == COL_CATEGORY:
                 if value:
-                    mt = session.query(ModelType).filter_by(name=value).first()
-                    if mt is None:
-                        mt = ModelType(name=value)
-                        session.add(mt)
+                    cat = session.query(Category).filter_by(name=value).first()
+                    if cat is None:
+                        cat = Category(name=value)
+                        session.add(cat)
                         session.flush()
-                    stl.type = mt
+                    stl.category = cat
                 else:
-                    stl.type = None
-                    stl.subtype = None  # subtype depends on type
-            elif col == COL_SUBTYPE:
+                    stl.category = None
+                    stl.subcategory = None  # subcategory depends on category
+            elif col == COL_SUBCATEGORY:
                 if value:
-                    q = session.query(Subtype).filter_by(name=value)
-                    if stl.type_id:
-                        q = q.filter_by(model_type_id=stl.type_id)
-                    st = q.first()
-                    if st is None and stl.type_id:
-                        st = Subtype(name=value, model_type_id=stl.type_id)
-                        session.add(st)
+                    q = session.query(Subcategory).filter_by(name=value)
+                    if stl.category_id:
+                        q = q.filter_by(category_id=stl.category_id)
+                    sc = q.first()
+                    if sc is None and stl.category_id:
+                        sc = Subcategory(name=value, category_id=stl.category_id)
+                        session.add(sc)
                         session.flush()
-                    if st:
-                        stl.subtype = st
+                    if sc:
+                        stl.subcategory = sc
                 else:
-                    stl.subtype = None
+                    stl.subcategory = None
             elif col == COL_SEQUENCE:
                 try:
                     stl.sequence = int(value) if value else None
@@ -656,6 +657,15 @@ class BrowserTab(QWidget):
             self._table.horizontalHeader().restoreState(state)
             # Always keep COL_THUMB hidden after restoring
             self._table.setColumnHidden(COL_THUMB, True)
+            # restoreState() preserves saved resize modes — re-assert Interactive so
+            # columns that were previously Stretch remain manually resizable.
+            header = self._table.horizontalHeader()
+            header.setSectionResizeMode(COL_TITLE, QHeaderView.ResizeMode.Interactive)
+            header.setSectionResizeMode(COL_PATH,  QHeaderView.ResizeMode.Interactive)
+        else:
+            # Set reasonable defaults when no saved state exists
+            self._table.setColumnWidth(COL_TITLE, 260)
+            self._table.setColumnWidth(COL_PATH,  320)
 
     def _header_context_menu(self, pos):
         menu = QMenu(self)
@@ -692,6 +702,23 @@ class BrowserTab(QWidget):
         mass_act.setVisible(len(selected_ids) > 1)
         menu.addSeparator()
         delete_act = menu.addAction(style.standardIcon(SP.SP_TrashIcon), f"Delete {len(selected_ids)} model(s)…")
+
+        add_tag_act = None
+        edit_tags_act = None
+        edit_categories_act = None
+        edit_subcategories_act = None
+        src_col = self._proxy.mapToSource(index).column()
+        if src_col == COL_TAGS:
+            menu.addSeparator()
+            add_tag_act = menu.addAction(style.standardIcon(SP.SP_FileDialogNewFolder), "Add Tag…")
+            edit_tags_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), "Edit Tags…")
+        elif src_col == COL_CATEGORY:
+            menu.addSeparator()
+            edit_categories_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), "Edit Categories…")
+        elif src_col == COL_SUBCATEGORY:
+            menu.addSeparator()
+            edit_subcategories_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), "Edit Subcategories…")
+
         action = menu.exec(self._table.viewport().mapToGlobal(pos))
         if action == edit_act:
             self._open_editor(model_id)
@@ -699,6 +726,14 @@ class BrowserTab(QWidget):
             self._open_mass_editor(selected_ids)
         elif action == delete_act:
             self._delete_models(selected_ids)
+        elif add_tag_act and action == add_tag_act:
+            self.add_tag()
+        elif edit_tags_act and action == edit_tags_act:
+            self._open_tag_editor()
+        elif edit_categories_act and action == edit_categories_act:
+            self._open_category_editor()
+        elif edit_subcategories_act and action == edit_subcategories_act:
+            self._open_subcategory_editor()
 
     def _delete_models(self, model_ids: list[int]):
         count = len(model_ids)
@@ -779,6 +814,21 @@ class BrowserTab(QWidget):
                 return
             session.add(Tag(name=name))
         self._populate_filter_tree()
+
+    def _open_tag_editor(self):
+        from app.ui.tag_editor_dialog import TagEditorDialog
+        TagEditorDialog(parent=self).exec()
+        self.refresh()
+
+    def _open_category_editor(self):
+        from app.ui.category_editor_dialog import CategoryEditorDialog
+        CategoryEditorDialog(parent=self).exec()
+        self.refresh()
+
+    def _open_subcategory_editor(self):
+        from app.ui.subcategory_editor_dialog import SubcategoryEditorDialog
+        SubcategoryEditorDialog(parent=self).exec()
+        self.refresh()
 
     def _open_editor(self, model_id: int):
         from app.ui.editor_dialog import EditorDialog

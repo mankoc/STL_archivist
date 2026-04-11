@@ -43,10 +43,39 @@ def _migrate(engine) -> None:
     """Apply incremental schema changes for existing databases."""
     from sqlalchemy import inspect, text
     inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
 
-    # -- models table --
+    # -- Rename model_types → categories and subtypes → subcategories --
+    if "model_types" in tables:
+        with engine.begin() as conn:
+            conn.execute(text("PRAGMA foreign_keys=OFF"))
+            # Rename the category table
+            conn.execute(text("ALTER TABLE model_types RENAME TO categories"))
+            # Recreate subtypes as subcategories with an updated FK reference to categories
+            conn.execute(text("""
+                CREATE TABLE subcategories (
+                    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                    category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+                    name VARCHAR(128) NOT NULL,
+                    CONSTRAINT uq_subcategory_per_category UNIQUE (category_id, name)
+                )
+            """))
+            conn.execute(text(
+                "INSERT INTO subcategories (id, category_id, name) "
+                "SELECT id, model_type_id, name FROM subtypes"
+            ))
+            conn.execute(text("DROP TABLE subtypes"))
+            conn.execute(text("PRAGMA foreign_keys=ON"))
+        # Re-inspect after table renames
+        inspector = inspect(engine)
+
+    # -- models table column renames and additions --
     existing_models = {c["name"] for c in inspector.get_columns("models")}
     with engine.begin() as conn:
+        if "type_id" in existing_models:
+            conn.execute(text("ALTER TABLE models RENAME COLUMN type_id TO category_id"))
+        if "subtype_id" in existing_models:
+            conn.execute(text("ALTER TABLE models RENAME COLUMN subtype_id TO subcategory_id"))
         if "release_id" not in existing_models:
             conn.execute(text(
                 "ALTER TABLE models ADD COLUMN release_id INTEGER "

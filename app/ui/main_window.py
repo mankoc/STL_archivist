@@ -40,16 +40,6 @@ class MainWindow(QMainWindow):
         self._act_open_crawler.setStatusTip("Open the Crawler window")
         self._act_open_crawler.triggered.connect(self._open_crawler)
 
-        self._act_add_tag = QAction(
-            style.standardIcon(SP.SP_FileDialogNewFolder), "Add Tag…", self)
-        self._act_add_tag.setStatusTip("Create a new tag")
-        self._act_add_tag.triggered.connect(self._browser.add_tag)
-
-        self._act_edit_tags = QAction(
-            style.standardIcon(SP.SP_FileDialogDetailedView), "Edit Tags…", self)
-        self._act_edit_tags.setStatusTip("Open the tag editor")
-        self._act_edit_tags.triggered.connect(self._open_tag_editor)
-
         self._act_exit = QAction(
             style.standardIcon(SP.SP_DialogCloseButton), "Exit", self)
         self._act_exit.setShortcut(QKeySequence.StandardKey.Quit)
@@ -81,10 +71,6 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(self._act_exit)
 
-        tags_menu = mb.addMenu("&Tags")
-        tags_menu.addAction(self._act_add_tag)
-        tags_menu.addAction(self._act_edit_tags)
-
         view_menu = mb.addMenu("&View")
         view_menu.addAction(self._act_refresh)
 
@@ -109,9 +95,6 @@ class MainWindow(QMainWindow):
 
         toolbar.addAction(self._act_open_crawler)
         toolbar.addAction(self._act_refresh)
-        toolbar.addSeparator()
-        toolbar.addAction(self._act_add_tag)
-        toolbar.addAction(self._act_edit_tags)
 
         sb = QStatusBar()
         self.setStatusBar(sb)
@@ -123,11 +106,6 @@ class MainWindow(QMainWindow):
     def _open_crawler(self):
         from app.ui.crawler_dialog import CrawlerDialog
         CrawlerDialog(parent=self).exec()
-        self._browser.refresh()
-
-    def _open_tag_editor(self):
-        from app.ui.tag_editor_dialog import TagEditorDialog
-        TagEditorDialog(parent=self).exec()
         self._browser.refresh()
 
     def _open_config(self):
