@@ -108,11 +108,20 @@ class CrawlerWorker(QThread):
                 session.query(STLModel).filter_by(archive_path=archive_str).first()
             )
 
+            # Existing + unchanged: only re-apply the path pattern, skip everything else
             if existing and existing.archive_hash == current_hash:
-                self.log.emit("  unchanged – skipped")
+                if self._pattern:
+                    extracted = parse_path(self._pattern, archive_str)
+                    if extracted:
+                        apply_extracted_to_model(session, model=existing, extracted=extracted, overwrite=True)
+                        self.log.emit("  unchanged – pattern updated: " + ", ".join(f"{k}={v!r}" for k, v in extracted.items()))
+                    else:
+                        self.log.emit("  unchanged – pattern: no match")
+                else:
+                    self.log.emit("  unchanged – skipped")
                 return
 
-            # Single-pass extraction: only images, info.json and .url files
+            # Extract archive contents for metadata + (new files only) thumbnails
             contents = extract_archive_contents(archive_path)
             image_names = [
                 n for n in contents
@@ -121,7 +130,8 @@ class CrawlerWorker(QThread):
             self.log.emit(f"  {len(contents)} relevant file(s) extracted "
                           f"({len(image_names)} image(s))")
 
-            meta = extract_metadata(archive_path, contents=contents)
+            meta = extract_metadata(archive_path, contents=contents,
+                                    source_dir=self.source_dir)
 
             meta_parts = []
             if meta.title:        meta_parts.append(f"title={meta.title!r}")
@@ -131,7 +141,7 @@ class CrawlerWorker(QThread):
             if meta.url:          meta_parts.append(f"url={meta.url!r}")
             if meta.description:  meta_parts.append(f"description={meta.description!r}")
             if meta.tags:         meta_parts.append(f"tags={meta.tags}")
-            if meta.release:       meta_parts.append(f"release={meta.release!r}")
+            if meta.release:      meta_parts.append(f"release={meta.release!r}")
             if meta_parts:
                 self.log.emit("  metadata: " + ", ".join(meta_parts))
             else:
@@ -176,30 +186,24 @@ class CrawlerWorker(QThread):
                 if tag_name.strip():
                     model.tags.append(_get_or_create_tag(session, tag_name))
 
-            # Thumbnails – replace existing images for updated archives
-            if existing:
-                for img in list(model.images):
-                    if img.thumbnail_path:
-                        delete_thumbnail(img.thumbnail_path)
-                    session.delete(img)
-                session.flush()
-
-            from app.ui.config_dialog import get_max_thumbnails, get_max_thumb_size
-            max_thumbs = get_max_thumbnails()
-            max_thumb_size = get_max_thumb_size()
-            count = 0
-            for filename in image_names:
-                if count >= max_thumbs:
-                    break
-                raw_bytes = contents[filename]
-                img = Image(model=model, filename=filename)
-                session.add(img)
-                session.flush()  # get img.id before writing the file
-                rel_path = save_thumbnail(raw_bytes, img.id, max_size=max_thumb_size)
-                if rel_path:
-                    img.thumbnail_path = rel_path
-                    count += 1
-                else:
-                    session.delete(img)
-                    self.log.emit(f"  WARNING: thumbnail conversion failed for {filename}")
-            self.log.emit(f"  {count} thumbnail(s) stored")
+            # Thumbnails – only for new archives
+            if not existing:
+                from app.ui.config_dialog import get_max_thumbnails, get_max_thumb_size
+                max_thumbs = get_max_thumbnails()
+                max_thumb_size = get_max_thumb_size()
+                count = 0
+                for filename in image_names:
+                    if count >= max_thumbs:
+                        break
+                    raw_bytes = contents[filename]
+                    img = Image(model=model, filename=filename)
+                    session.add(img)
+                    session.flush()  # get img.id before writing the file
+                    rel_path = save_thumbnail(raw_bytes, img.id, max_size=max_thumb_size)
+                    if rel_path:
+                        img.thumbnail_path = rel_path
+                        count += 1
+                    else:
+                        session.delete(img)
+                        self.log.emit(f"  WARNING: thumbnail conversion failed for {filename}")
+                self.log.emit(f"  {count} thumbnail(s) stored")

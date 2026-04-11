@@ -25,6 +25,7 @@ class MainWindow(QMainWindow):
 
         self._browser = BrowserTab()
         self.setCentralWidget(self._browser)
+        self._browser.model_count_changed.connect(self._update_status_bar)
 
         # ---- Actions ----
         self._act_refresh = QAction(
@@ -112,9 +113,13 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self._act_add_tag)
         toolbar.addAction(self._act_edit_tags)
 
-        self.setStatusBar(QStatusBar())
+        sb = QStatusBar()
+        self.setStatusBar(sb)
 
     # ------------------------------------------------------------------
+    def _update_status_bar(self, count: int):
+        self.statusBar().showMessage(f"{count} model{'s' if count != 1 else ''}")
+
     def _open_crawler(self):
         from app.ui.crawler_dialog import CrawlerDialog
         CrawlerDialog(parent=self).exec()

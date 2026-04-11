@@ -52,10 +52,23 @@ def _parse_info_json(raw: bytes) -> dict:
         return {}
 
 
-def _infer_from_path(archive_path: Path) -> ModelMetadata:
-    """Guess fields by looking at parent directory names and the archive stem."""
+def _infer_from_path(archive_path: Path,
+                     source_dir: Path | None = None) -> ModelMetadata:
+    """Guess fields by looking at parent directory names and the archive stem.
+
+    When *source_dir* is provided only path components relative to it are
+    considered, preventing OS-level folders (e.g. ``home``, ``Users``) from
+    being mistakenly identified as the author.
+    """
     meta = ModelMetadata()
-    parts = list(archive_path.parts)  # all path components including filename
+    if source_dir is not None:
+        try:
+            rel = archive_path.relative_to(source_dir)
+            parts = list(rel.parts)  # relative components including filename
+        except ValueError:
+            parts = list(archive_path.parts)
+    else:
+        parts = list(archive_path.parts)  # all path components including filename
 
     # Title: use the archive stem, clean up underscores/dashes, then strip any
     # leading date prefix (e.g. "2024-09 " or "2024 09 ") so it doesn't bleed
@@ -78,21 +91,13 @@ def _infer_from_path(archive_path: Path) -> ModelMetadata:
         if distributor_idx is not None:
             break
 
-    # Author: folder immediately after the distributor folder (if present)
+    # Author: folder immediately after the distributor folder (if present).
+    # Without a distributor signal there is no reliable heuristic, so we leave
+    # author empty rather than guessing from an arbitrary folder name.
     if distributor_idx is not None:
         author_idx = distributor_idx + 1
         if author_idx < len(parts) - 1:  # must not be the filename
             meta.author = parts[author_idx]
-    else:
-        # Fallback: first folder that is not a date and not a known keyword
-        for part in parts[:-1]:
-            if re.match(r"^\d{4}", part):
-                continue
-            if any(p.search(part) for p, _ in _DISTRIBUTOR_PATTERNS):
-                continue
-            if len(part) > 2 and not part.startswith("."):
-                meta.author = part
-                break
 
     # Date — scan all parts, deepest first for best specificity
     for part in reversed(parts):
@@ -108,12 +113,14 @@ def _infer_from_path(archive_path: Path) -> ModelMetadata:
 
 
 def extract_metadata(archive_path: Path,
-                     contents: dict[str, bytes] | None = None) -> ModelMetadata:
+                     contents: dict[str, bytes] | None = None,
+                     source_dir: Path | None = None) -> ModelMetadata:
     """
     Full metadata extraction pipeline for a single archive.
     Pass *contents* (from extract_archive_contents) to avoid re-opening the archive.
+    Pass *source_dir* so that path inference uses only relative components.
     """
-    meta = _infer_from_path(archive_path)
+    meta = _infer_from_path(archive_path, source_dir=source_dir)
 
     # .url file — check archive contents first, then filesystem
     url_from_archive: str | None = None

@@ -7,7 +7,7 @@ Right-click or double-click: Edit Model.
 """
 from pathlib import Path as FSPath
 
-from PyQt6.QtCore import Qt, QSortFilterProxyModel, QSize, QStringListModel, QEvent, pyqtSignal
+from PyQt6.QtCore import Qt, QSortFilterProxyModel, QSize, QStringListModel, QEvent, pyqtSignal, QItemSelection
 from PyQt6.QtGui import QStandardItemModel, QStandardItem, QPixmap, QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
@@ -15,8 +15,9 @@ from PyQt6.QtWidgets import (
     QLineEdit, QLabel, QHeaderView, QAbstractItemView,
     QMenu, QScrollArea, QFrame, QInputDialog, QMessageBox,
     QStyledItemDelegate, QComboBox, QCompleter,
-    QDialog, QSizePolicy,
+    QDialog, QSizePolicy, QApplication,
 )
+from PyQt6.QtCore import QSettings
 
 from app.database.db import get_session, session_scope
 from app.database.models import STLModel, Tag, Sculptor, ModelType, Subtype, Release
@@ -227,6 +228,8 @@ class _TagLineEdit(QLineEdit):
 
 
 class BrowserTab(QWidget):
+    model_count_changed = pyqtSignal(int)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._loading = False
@@ -307,8 +310,12 @@ class BrowserTab(QWidget):
         self._table.setItemDelegateForColumn(COL_RELEASE,    ReleaseDelegate(self._table))
         self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._table.customContextMenuRequested.connect(self._context_menu)
-        self._table.horizontalHeader().setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self._table.horizontalHeader().customContextMenuRequested.connect(self._header_context_menu)
+        header = self._table.horizontalHeader()
+        header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        header.customContextMenuRequested.connect(self._header_context_menu)
+        header.setSectionsMovable(True)
+        header.sectionMoved.connect(self._save_header_state)
+        self._restore_header_state()
         self._table.clicked.connect(self._on_row_clicked)
         self._table.doubleClicked.connect(self._on_double_click)
         QShortcut(QKeySequence.StandardKey.SelectAll, self._table, self._table.selectAll)
@@ -466,6 +473,7 @@ class BrowserTab(QWidget):
         finally:
             session.close()
             self._loading = False
+        self.model_count_changed.emit(self._model.rowCount())
 
     # ------------------------------------------------------------------
     def _on_item_changed(self, item: QStandardItem):
@@ -619,6 +627,18 @@ class BrowserTab(QWidget):
             if self._model.item(r, COL_THUMB) is not None
         ]
 
+    def _save_header_state(self):
+        settings = QSettings()
+        settings.setValue("browser/header_state", self._table.horizontalHeader().saveState())
+
+    def _restore_header_state(self):
+        settings = QSettings()
+        state = settings.value("browser/header_state")
+        if state:
+            self._table.horizontalHeader().restoreState(state)
+            # Always keep COL_THUMB hidden after restoring
+            self._table.setColumnHidden(COL_THUMB, True)
+
     def _header_context_menu(self, pos):
         menu = QMenu(self)
         header = self._table.horizontalHeader()
@@ -632,6 +652,7 @@ class BrowserTab(QWidget):
         if chosen is not None:
             col = chosen.data()
             header.setSectionHidden(col, not chosen.isChecked())
+            self._save_header_state()
 
     def _context_menu(self, pos):
         index = self._table.indexAt(pos)
@@ -642,16 +663,48 @@ class BrowserTab(QWidget):
 
         selected_ids = self._selected_model_ids()
 
+        style = QApplication.style()
+        SP = style.StandardPixmap
         menu = QMenu(self)
-        edit_act = menu.addAction("Edit Model…")
+        edit_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), "Edit Model…")
         edit_act.setVisible(len(selected_ids) == 1)
-        mass_act = menu.addAction(f"Mass Edit {len(selected_ids)} model(s)…")
+        mass_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), f"Mass Edit {len(selected_ids)} model(s)…")
         mass_act.setVisible(len(selected_ids) > 1)
+        menu.addSeparator()
+        delete_act = menu.addAction(style.standardIcon(SP.SP_TrashIcon), f"Delete {len(selected_ids)} model(s)…")
         action = menu.exec(self._table.viewport().mapToGlobal(pos))
         if action == edit_act:
             self._open_editor(model_id)
         elif action == mass_act:
             self._open_mass_editor(selected_ids)
+        elif action == delete_act:
+            self._delete_models(selected_ids)
+
+    def _delete_models(self, model_ids: list[int]):
+        count = len(model_ids)
+        reply = QMessageBox.warning(
+            self,
+            "Delete Model",
+            f"Permanently delete <b>{count} model{'s' if count != 1 else ''}</b> "
+            f"and their thumbnail files from the database?<br><br>This cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        from app.utils.thumbnailer import delete_thumbnail
+        with session_scope() as session:
+            for model_id in model_ids:
+                stl: STLModel = session.get(STLModel, model_id)
+                if stl is None:
+                    continue
+                for img in list(stl.images):
+                    if img.thumbnail_path:
+                        delete_thumbnail(img.thumbnail_path)
+                session.delete(stl)
+
+        self.refresh()
 
     # ------------------------------------------------------------------
     def eventFilter(self, obj, event):

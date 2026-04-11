@@ -77,7 +77,20 @@ class CrawlerTab(QWidget):
         pattern_row.addWidget(self._pattern_edit)
         pattern_layout.addLayout(pattern_row)
 
-        # Live preview using folder path as example
+        # Random file for pattern preview
+        file_pick_row = QHBoxLayout()
+        file_pick_row.addWidget(QLabel("Test file:"))
+        self._example_file_edit = QLineEdit()
+        self._example_file_edit.setReadOnly(True)
+        self._example_file_edit.setPlaceholderText("click 'Random' to test against a file…")
+        self._example_file_edit.textChanged.connect(self._update_preview)
+        file_pick_row.addWidget(self._example_file_edit, stretch=1)
+        random_file_btn = QPushButton("Random")
+        random_file_btn.clicked.connect(self._pick_random_file)
+        file_pick_row.addWidget(random_file_btn)
+        pattern_layout.addLayout(file_pick_row)
+
+        # Live preview
         self._preview_label = QLabel("")
         self._preview_label.setTextFormat(Qt.TextFormat.RichText)
         self._preview_label.setWordWrap(True)
@@ -85,6 +98,19 @@ class CrawlerTab(QWidget):
         pattern_layout.addWidget(self._preview_label)
 
         root.addWidget(pattern_group)
+
+        # --- Progress bar ---
+        self._progress = QProgressBar()
+        self._progress.setValue(0)
+        self._progress.setTextVisible(True)
+        root.addWidget(self._progress)
+
+        # --- Log output ---
+        root.addWidget(QLabel("Log:"))
+        self._log = QPlainTextEdit()
+        self._log.setReadOnly(True)
+        self._log.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        root.addWidget(self._log)
 
         # --- Control buttons ---
         btn_row = QHBoxLayout()
@@ -99,19 +125,6 @@ class CrawlerTab(QWidget):
 
         btn_row.addStretch()
         root.addLayout(btn_row)
-
-        # --- Progress bar ---
-        self._progress = QProgressBar()
-        self._progress.setValue(0)
-        self._progress.setTextVisible(True)
-        root.addWidget(self._progress)
-
-        # --- Log output ---
-        root.addWidget(QLabel("Log:"))
-        self._log = QPlainTextEdit()
-        self._log.setReadOnly(True)
-        self._log.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        root.addWidget(self._log)
 
         self._refresh_saved_combo()
 
@@ -182,31 +195,41 @@ class CrawlerTab(QWidget):
             self._refresh_saved_combo()
 
     # ------------------------------------------------------------------
-    # Live preview — uses the folder path as a stand-in example
+    # Live preview
     # ------------------------------------------------------------------
+    def _pick_random_file(self) -> None:
+        import random
+        folder = self._folder_edit.text().strip()
+        if not folder:
+            return
+        from pathlib import Path
+        from app.crawler.archive import is_archive
+        files = [str(p) for p in Path(folder).rglob("*") if is_archive(p)]
+        if files:
+            self._example_file_edit.setText(random.choice(files))
+
     def _update_preview(self) -> None:
         pattern = self._pattern_edit.text().strip()
-        example = self._folder_edit.text().strip()
+        example = self._example_file_edit.text().strip() or self._folder_edit.text().strip()
         if not pattern or not example:
             self._preview_label.clear()
             return
 
         extracted = parse_path(pattern, example)
         if not extracted:
-            self._preview_label.setText("<i>no match against folder path</i>")
+            self._preview_label.setText("<i>no match</i>")
             return
 
         parts = [
             f"<b>{ATTR_LABEL.get(attr, attr)}:</b>&nbsp;{val}"
             for attr, val in extracted.items()
         ]
-        self._preview_label.setText(
-            "<b>Folder match:</b>&nbsp;" + "&nbsp;&nbsp;→&nbsp;&nbsp;".join(parts)
-        )
+        self._preview_label.setText("&nbsp;&nbsp;→&nbsp;&nbsp;".join(parts))
 
     # ------------------------------------------------------------------
     def _browse_folder(self):
-        path = QFileDialog.getExistingDirectory(self, "Select STL folder")
+        start = self._folder_edit.text().strip() or "/"
+        path = QFileDialog.getExistingDirectory(self, "Select STL folder", start)
         if path:
             self._folder_edit.setText(path)
 
