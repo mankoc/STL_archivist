@@ -3,20 +3,19 @@ Model editor dialog — all editable fields for a single STLModel.
 Layout: form fields on the left, thumbnail sidebar on the right.
 Opened from the browser via double-click or right-click → Edit Model.
 """
-from pathlib import Path
-
-from PyQt6.QtCore import Qt, QStringListModel
+from PyQt6.QtCore import Qt, QSettings, QStringListModel
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QTextEdit, QDialogButtonBox,
     QPushButton, QScrollArea, QWidget, QCompleter, QComboBox,
-    QFrame, QSplitter,
+    QFrame, QGroupBox, QInputDialog, QMessageBox, QSplitter, QSpinBox, QToolButton, QToolTip,
 )
+from PyQt6.QtGui import QCursor
 
-from app.crawler.metadata import extract_metadata
 from app.database.db import session_scope, get_session
-from app.database.models import STLModel, Tag, Release
+from app.database.models import STLModel, Tag, Release, Sculptor, ModelType, Subtype
 from app.utils.thumbnailer import pixmap_from_path
+from app.utils.path_pattern import parse_path, ATTR_LABEL, PATTERN_HELP
 
 
 class TagEdit(QLineEdit):
@@ -25,6 +24,7 @@ class TagEdit(QLineEdit):
     def __init__(self, all_tags: list[str], parent=None):
         super().__init__(parent)
         self.setPlaceholderText("tag1, tag2, tag3…")
+        self.setClearButtonEnabled(True)
         self._all_tags = all_tags
 
         self._completer = QCompleter(self)
@@ -106,53 +106,105 @@ class EditorDialog(QDialog):
             _uniq = lambda col: sorted(
                 filter(None, (v for (v,) in session.query(col).distinct().all()))
             )
-            titles    = _uniq(STLModel.title)
-            authors   = _uniq(STLModel.author)
-            types     = _uniq(STLModel.source)
-            dates     = _uniq(STLModel.release_date)
-            all_tags  = [t.name for t in session.query(Tag).order_by(Tag.name).all()]
-            releases  = sorted(r.name for r in session.query(Release).order_by(Release.name).all())
+            titles     = _uniq(STLModel.title)
+            authors    = _uniq(STLModel.author)
+            sources    = _uniq(STLModel.source)
+            dates      = _uniq(STLModel.release_date)
+            all_tags   = [t.name for t in session.query(Tag).order_by(Tag.name).all()]
+            releases   = sorted(r.name for r in session.query(Release).order_by(Release.name).all())
+            sculptors  = sorted(s.name for s in session.query(Sculptor).order_by(Sculptor.name).all())
+            model_types = sorted(t.name for t in session.query(ModelType).order_by(ModelType.name).all())
+            subtypes   = sorted(s.name for s in session.query(Subtype).order_by(Subtype.name).all())
         finally:
             session.close()
 
         self._title_edit  = self._autocomplete_edit(titles)
         self._author_edit = self._autocomplete_edit(authors)
-        self._type_edit   = QComboBox()
-        self._type_edit.setEditable(True)
-        self._type_edit.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self._type_edit.addItems(types)
-        self._type_edit.setCurrentIndex(-1)
-        self._type_edit.completer().setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        self._type_edit.completer().setFilterMode(Qt.MatchFlag.MatchContains)
-        self._date_edit    = self._autocomplete_edit(dates)
-        self._url_edit     = QLineEdit()
-        self._desc_edit    = QTextEdit()
+        self._source_edit = self._make_combo(sources)
+        self._date_edit   = self._autocomplete_edit(dates)
+        self._url_edit    = QLineEdit()
+        self._url_edit.setClearButtonEnabled(True)
+        self._desc_edit   = QTextEdit()
         self._desc_edit.setMaximumHeight(90)
-        self._tags_edit    = TagEdit(all_tags)
-        self._release_edit = QComboBox()
-        self._release_edit.setEditable(True)
-        self._release_edit.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self._release_edit.addItem("")
-        self._release_edit.addItems(releases)
-        self._release_edit.setCurrentIndex(0)
-        self._release_edit.completer().setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        self._release_edit.completer().setFilterMode(Qt.MatchFlag.MatchContains)
+        self._tags_edit   = TagEdit(all_tags)
+        self._release_edit = self._make_combo(releases, blank_first=True)
+
+        self._sculptor_edit   = self._make_combo(sculptors, blank_first=True)
+        self._model_type_edit = self._make_combo(model_types, blank_first=True)
+        self._model_type_edit.currentTextChanged.connect(self._on_type_changed)
+        self._subtype_edit    = self._make_combo(subtypes, blank_first=True)
+
+        self._sequence_spin = QSpinBox()
+        self._sequence_spin.setRange(0, 9999)
+        self._sequence_spin.setSpecialValueText("")   # 0 shown as blank
+        self._sequence_spin.setValue(0)
 
         form.addRow("Archive Path:", self._path_edit)
         form.addRow("Title:",        self._title_edit)
         form.addRow("Author:",       self._author_edit)
-        form.addRow("Type:",         self._type_edit)
+        form.addRow("Source:",       self._source_edit)
         form.addRow("Date:",         self._date_edit)
         form.addRow("Release:",      self._release_edit)
+        form.addRow("Sculptor:",     self._sculptor_edit)
+        form.addRow("Type:",         self._model_type_edit)
+        form.addRow("Subtype:",      self._subtype_edit)
+        form.addRow("Sequence:",     self._with_clear_btn(
+            self._sequence_spin, lambda: self._sequence_spin.setValue(0)
+        ))
         form.addRow("URL:",          self._url_edit)
-        form.addRow("Description:",  self._desc_edit)
+        form.addRow("Description:",  self._with_clear_btn(
+            self._desc_edit, self._desc_edit.clear
+        ))
         form.addRow("Tags:",         self._tags_edit)
         left_layout.addLayout(form)
 
-        reinfer_btn = QPushButton("Re-infer from archive…")
-        reinfer_btn.clicked.connect(self._reinfer)
-        left_layout.addWidget(reinfer_btn)
+        # ---- Pattern inference group ----
+        pat_group = QGroupBox("Infer from path pattern")
+        pat_layout = QVBoxLayout(pat_group)
+
+        saved_row = QHBoxLayout()
+        saved_row.addWidget(QLabel("Saved:"))
+        self._pat_saved_combo = QComboBox()
+        self._pat_saved_combo.setPlaceholderText("— load a saved pattern —")
+        self._pat_saved_combo.activated.connect(self._pat_load_saved)
+        saved_row.addWidget(self._pat_saved_combo, stretch=1)
+        pat_save_btn = QPushButton("Save…")
+        pat_save_btn.clicked.connect(self._pat_save)
+        saved_row.addWidget(pat_save_btn)
+        pat_del_btn = QPushButton("Delete")
+        pat_del_btn.clicked.connect(self._pat_delete)
+        saved_row.addWidget(pat_del_btn)
+        help_btn = QToolButton()
+        help_btn.setText("?")
+        help_btn.setToolTip(PATTERN_HELP)
+        help_btn.setStyleSheet(
+            "QToolButton { font-weight: bold; border: 1px solid gray;"
+            " border-radius: 9px; min-width: 18px; min-height: 18px; }"
+        )
+        help_btn.enterEvent = lambda e: QToolTip.showText(QCursor.pos(), PATTERN_HELP, help_btn)
+        saved_row.addWidget(help_btn)
+        pat_layout.addLayout(saved_row)
+
+        pat_input_row = QHBoxLayout()
+        self._pattern_edit = QLineEdit()
+        self._pattern_edit.setPlaceholderText("/mnt/f/{source}/{author}/*/{name}")
+        self._pattern_edit.textChanged.connect(self._pat_update_preview)
+        pat_input_row.addWidget(self._pattern_edit)
+        apply_btn = QPushButton("Apply")
+        apply_btn.clicked.connect(self._pat_apply)
+        pat_input_row.addWidget(apply_btn)
+        pat_layout.addLayout(pat_input_row)
+
+        self._pat_preview = QLabel("")
+        self._pat_preview.setTextFormat(Qt.TextFormat.RichText)
+        self._pat_preview.setWordWrap(True)
+        self._pat_preview.setStyleSheet("color: #555; font-style: italic;")
+        pat_layout.addWidget(self._pat_preview)
+
+        left_layout.addWidget(pat_group)
         left_layout.addStretch()
+
+        self._pat_refresh_saved_combo()
 
         splitter.addWidget(left)
 
@@ -194,7 +246,61 @@ class EditorDialog(QDialog):
         completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         completer.setFilterMode(Qt.MatchFlag.MatchContains)
         edit.setCompleter(completer)
+        edit.setClearButtonEnabled(True)
         return edit
+
+    @staticmethod
+    def _make_combo(values: list[str], *, blank_first: bool = False) -> QComboBox:
+        combo = QComboBox()
+        combo.setEditable(True)
+        combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        if blank_first:
+            combo.addItem("")
+        combo.addItems(values)
+        combo.setCurrentIndex(0 if blank_first else -1)
+        combo.completer().setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        combo.completer().setFilterMode(Qt.MatchFlag.MatchContains)
+        combo.lineEdit().setClearButtonEnabled(True)
+        return combo
+
+    @staticmethod
+    def _with_clear_btn(widget: QWidget, clear_fn) -> QWidget:
+        """Wrap *widget* in a container with a small × button on the right."""
+        container = QWidget()
+        lay = QHBoxLayout(container)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(2)
+        lay.addWidget(widget, stretch=1)
+        btn = QToolButton()
+        btn.setText("×")
+        btn.setFixedWidth(20)
+        btn.setStyleSheet(
+            "QToolButton { color: gray; border: none; font-size: 14px; padding: 0; }"
+            "QToolButton:hover { color: #cc3333; }"
+        )
+        btn.clicked.connect(clear_fn)
+        lay.addWidget(btn, alignment=Qt.AlignmentFlag.AlignTop)
+        return container
+
+    def _on_type_changed(self, type_name: str):
+        """Repopulate subtype combo when the model type changes."""
+        session = get_session()
+        try:
+            q = session.query(Subtype).order_by(Subtype.name)
+            if type_name.strip():
+                mt = session.query(ModelType).filter_by(name=type_name.strip()).first()
+                if mt:
+                    q = q.filter(Subtype.model_type_id == mt.id)
+            subtypes = [s.name for s in q.all()]
+        finally:
+            session.close()
+        current = self._subtype_edit.currentText()
+        self._subtype_edit.blockSignals(True)
+        self._subtype_edit.clear()
+        self._subtype_edit.addItem("")
+        self._subtype_edit.addItems(subtypes)
+        self._subtype_edit.setCurrentText(current)
+        self._subtype_edit.blockSignals(False)
 
     # ------------------------------------------------------------------
     def _load_model(self):
@@ -207,9 +313,15 @@ class EditorDialog(QDialog):
             self._path_edit.setText(model.archive_path or "")
             self._title_edit.setText(model.title or "")
             self._author_edit.setText(model.author or "")
-            self._type_edit.setCurrentText(model.source or "")
+            self._source_edit.setCurrentText(model.source or "")
             self._date_edit.setText(model.release_date or "")
             self._release_edit.setCurrentText(model.release.name if model.release else "")
+            self._sculptor_edit.setCurrentText(model.sculptor.name if model.sculptor else "")
+            type_name = model.type.name if model.type else ""
+            self._model_type_edit.setCurrentText(type_name)
+            self._on_type_changed(type_name)   # repopulate subtypes for this type
+            self._subtype_edit.setCurrentText(model.subtype.name if model.subtype else "")
+            self._sequence_spin.setValue(model.sequence if model.sequence is not None else 0)
             self._url_edit.setText(model.url or "")
             self._desc_edit.setPlainText(model.description or "")
             self._tags_edit.setText(", ".join(t.name for t in model.tags))
@@ -236,17 +348,98 @@ class EditorDialog(QDialog):
             self._thumb_vlayout.addWidget(lbl)
 
     # ------------------------------------------------------------------
-    def _reinfer(self):
-        if not hasattr(self, "_archive_path"):
+    # Pattern inference helpers (shared saved-patterns store with mass editor)
+    # ------------------------------------------------------------------
+    _SAVED_PATTERNS_KEY = "mass_editor/saved_patterns"
+    _SEP = ":::"
+
+    def _pat_saved_patterns(self) -> list[tuple[str, str]]:
+        raw = QSettings().value(self._SAVED_PATTERNS_KEY, [])
+        if isinstance(raw, str):
+            raw = [raw]
+        result = []
+        for entry in raw:
+            if self._SEP in entry:
+                name, _, pattern = entry.partition(self._SEP)
+                result.append((name.strip(), pattern.strip()))
+        return result
+
+    def _pat_write_saved(self, patterns: list[tuple[str, str]]) -> None:
+        entries = [f"{name}{self._SEP}{pat}" for name, pat in patterns]
+        QSettings().setValue(self._SAVED_PATTERNS_KEY, entries)
+
+    def _pat_refresh_saved_combo(self) -> None:
+        self._pat_saved_combo.clear()
+        for name, _ in self._pat_saved_patterns():
+            self._pat_saved_combo.addItem(name)
+
+    def _pat_load_saved(self, index: int) -> None:
+        patterns = self._pat_saved_patterns()
+        if 0 <= index < len(patterns):
+            self._pattern_edit.setText(patterns[index][1])
+
+    def _pat_save(self) -> None:
+        pattern = self._pattern_edit.text().strip()
+        if not pattern:
+            QMessageBox.information(self, "Save Pattern", "Enter a pattern first.")
             return
-        meta = extract_metadata(Path(self._archive_path))
-        if meta.title:        self._title_edit.setText(meta.title)
-        if meta.author:       self._author_edit.setText(meta.author)
-        if meta.distributor:  self._type_edit.setCurrentText(meta.distributor)
-        if meta.release_date: self._date_edit.setText(meta.release_date)
-        if meta.url:          self._url_edit.setText(meta.url)
-        if meta.description:  self._desc_edit.setPlainText(meta.description)
-        if meta.tags:         self._tags_edit.setText(", ".join(meta.tags))
+        name, ok = QInputDialog.getText(self, "Save Pattern", "Pattern name:")
+        if not ok or not name.strip():
+            return
+        name = name.strip()
+        patterns = [(n, p) for n, p in self._pat_saved_patterns() if n != name]
+        patterns.append((name, pattern))
+        self._pat_write_saved(patterns)
+        self._pat_refresh_saved_combo()
+
+    def _pat_delete(self) -> None:
+        idx = self._pat_saved_combo.currentIndex()
+        if idx < 0:
+            return
+        patterns = self._pat_saved_patterns()
+        if 0 <= idx < len(patterns):
+            patterns.pop(idx)
+            self._pat_write_saved(patterns)
+            self._pat_refresh_saved_combo()
+
+    def _pat_update_preview(self, pattern: str) -> None:
+        archive_path = getattr(self, "_archive_path", "") or ""
+        if not archive_path or not pattern.strip():
+            self._pat_preview.clear()
+            return
+        extracted = parse_path(pattern.strip(), archive_path)
+        if not extracted:
+            self._pat_preview.setText("<i>no match</i>")
+            return
+        parts = [
+            f"<b>{ATTR_LABEL.get(attr, attr)}:</b>&nbsp;{val}"
+            for attr, val in extracted.items()
+        ]
+        self._pat_preview.setText("&nbsp;&nbsp;→&nbsp;&nbsp;".join(parts))
+
+    def _pat_apply(self) -> None:
+        archive_path = getattr(self, "_archive_path", "") or ""
+        pattern = self._pattern_edit.text().strip()
+        if not archive_path or not pattern:
+            return
+        extracted = parse_path(pattern, archive_path)
+        if not extracted:
+            return
+        _field_map = {
+            "title":           lambda v: self._title_edit.setText(v),
+            "author":          lambda v: self._author_edit.setText(v),
+            "source":          lambda v: self._source_edit.setCurrentText(v),
+            "release_date":    lambda v: self._date_edit.setText(v),
+            "url":             lambda v: self._url_edit.setText(v),
+            "sculptor_name":   lambda v: self._sculptor_edit.setCurrentText(v),
+            "model_type_name": lambda v: self._model_type_edit.setCurrentText(v),
+            "subtype_name":    lambda v: self._subtype_edit.setCurrentText(v),
+            "release_name":    lambda v: self._release_edit.setCurrentText(v),
+            "sequence":        lambda v: self._sequence_spin.setValue(int(v)) if v.isdigit() else None,
+        }
+        for attr, value in extracted.items():
+            if value and attr in _field_map:
+                _field_map[attr](value)
 
     # ------------------------------------------------------------------
     def _save(self):
@@ -258,10 +451,12 @@ class EditorDialog(QDialog):
 
             model.title        = self._title_edit.text().strip() or None
             model.author       = self._author_edit.text().strip() or None
-            model.source       = self._type_edit.currentText().strip() or None
+            model.source       = self._source_edit.currentText().strip() or None
             model.release_date = self._date_edit.text().strip() or None
             model.url          = self._url_edit.text().strip() or None
             model.description  = self._desc_edit.toPlainText().strip() or None
+            seq = self._sequence_spin.value()
+            model.sequence     = seq if seq > 0 else None
 
             release_name = self._release_edit.currentText().strip()
             if release_name:
@@ -273,6 +468,45 @@ class EditorDialog(QDialog):
                 model.release = rel
             else:
                 model.release = None
+
+            sculptor_name = self._sculptor_edit.currentText().strip()
+            if sculptor_name:
+                sc = session.query(Sculptor).filter_by(name=sculptor_name).first()
+                if sc is None:
+                    sc = Sculptor(name=sculptor_name)
+                    session.add(sc)
+                    session.flush()
+                model.sculptor = sc
+            else:
+                model.sculptor = None
+
+            type_name = self._model_type_edit.currentText().strip()
+            if type_name:
+                mt = session.query(ModelType).filter_by(name=type_name).first()
+                if mt is None:
+                    mt = ModelType(name=type_name)
+                    session.add(mt)
+                    session.flush()
+                model.type = mt
+            else:
+                model.type = None
+                model.subtype = None
+
+            if model.type:
+                subtype_name = self._subtype_edit.currentText().strip()
+                if subtype_name:
+                    st = session.query(Subtype).filter_by(
+                        name=subtype_name, model_type_id=model.type.id
+                    ).first()
+                    if st is None:
+                        st = Subtype(name=subtype_name, model_type_id=model.type.id)
+                        session.add(st)
+                        session.flush()
+                    model.subtype = st
+                else:
+                    model.subtype = None
+            else:
+                model.subtype = None
 
             model.tags.clear()
             for name in self._tags_edit.get_tags():

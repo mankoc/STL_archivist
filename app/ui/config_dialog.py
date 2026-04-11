@@ -5,14 +5,15 @@ All other settings are stored in a JSON file inside the data directory so
 that each library has its own independent configuration.
 """
 import json
+from pathlib import Path
+
 from PyQt6.QtCore import QSettings
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QHBoxLayout,
     QDialogButtonBox, QFileDialog, QMessageBox, QSpinBox,
+    QComboBox, QApplication,
 )
-
-from pathlib import Path
 
 DATA_DIR_KEY           = "config/data_dir"
 DATA_DIR_DEFAULT       = str(Path.home() / ".stl_database")
@@ -20,8 +21,18 @@ DATA_DIR_DEFAULT       = str(Path.home() / ".stl_database")
 # Defaults for per-library settings
 MAX_THUMBS_DEFAULT     = 5
 MAX_THUMB_SIZE_DEFAULT = 512
+COLOR_SCHEME_DEFAULT   = "Windows 11 Dark"
 
 _LIBRARY_SETTINGS_FILE = "settings.json"
+
+# Map display name -> path relative to the package root (or "" for system default)
+_THEMES_DIR = Path(__file__).parent.parent.parent / "resources" / "themes"
+THEMES: dict[str, str] = {
+    "System Default":  "",
+    "VS Code Dark+":   str(_THEMES_DIR / "vscode_dark.qss"),
+    "Windows 11 Dark": str(_THEMES_DIR / "win11_dark.qss"),
+    "Windows 11 Light": str(_THEMES_DIR / "win11_light.qss"),
+}
 
 
 def get_data_dir() -> str:
@@ -60,11 +71,34 @@ def get_max_thumb_size() -> int:
     return int(_load_library_settings().get("max_thumb_size", MAX_THUMB_SIZE_DEFAULT))
 
 
+def get_color_scheme() -> str:
+    return _load_library_settings().get("color_scheme", COLOR_SCHEME_DEFAULT)
+
+
+_ICONS_DIR = Path(__file__).parent.parent.parent / "resources" / "icons"
+
+
+def apply_color_scheme(scheme_name: str) -> None:
+    """Apply a color scheme to the running QApplication."""
+    app = QApplication.instance()
+    if app is None:
+        return
+    qss_path = THEMES.get(scheme_name, "")
+    if qss_path and Path(qss_path).exists():
+        icons = str(_ICONS_DIR).replace("\\", "/")
+        qss = Path(qss_path).read_text(encoding="utf-8")
+        qss = qss.replace("%(ICONS_DIR)s", icons)
+        app.setStyleSheet(qss)
+    else:
+        app.setStyleSheet("")
+
+
 class ConfigDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Configuration")
         self.setMinimumWidth(480)
+        self._original_scheme: str = get_color_scheme()
         self._build_ui()
         self._load()
 
@@ -120,6 +154,22 @@ class ConfigDialog(QDialog):
         )
 
         root.addWidget(crawler_group)
+
+        # ---- Appearance group ----
+        appearance_group = QGroupBox("Appearance")
+        appearance_layout = QFormLayout(appearance_group)
+
+        self._theme_combo = QComboBox()
+        for name in THEMES:
+            self._theme_combo.addItem(name)
+        self._theme_combo.currentTextChanged.connect(self._preview_theme)
+        appearance_layout.addRow("Color scheme:", self._theme_combo)
+        appearance_layout.addRow(
+            "",
+            QLabel("<small>Preview is applied immediately. Cancel reverts to the previous scheme.</small>"),
+        )
+
+        root.addWidget(appearance_group)
         root.addStretch()
 
         # ---- Buttons ----
@@ -127,7 +177,7 @@ class ConfigDialog(QDialog):
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
         buttons.accepted.connect(self._save)
-        buttons.rejected.connect(self.reject)
+        buttons.rejected.connect(self._cancel)
         root.addWidget(buttons)
 
     # ------------------------------------------------------------------
@@ -141,10 +191,21 @@ class ConfigDialog(QDialog):
             self._data_dir_edit.setText(path)
 
     # ------------------------------------------------------------------
+    def _preview_theme(self, scheme_name: str) -> None:
+        apply_color_scheme(scheme_name)
+
+    # ------------------------------------------------------------------
     def _load(self):
         self._data_dir_edit.setText(get_data_dir())
         self._max_thumbs_spin.setValue(get_max_thumbnails())
         self._max_thumb_size_spin.setValue(get_max_thumb_size())
+
+        scheme = get_color_scheme()
+        idx = self._theme_combo.findText(scheme)
+        if idx >= 0:
+            self._theme_combo.setCurrentIndex(idx)
+        else:
+            self._theme_combo.setCurrentIndex(0)
 
     def _save(self):
         data_dir = self._data_dir_edit.text().strip() or DATA_DIR_DEFAULT
@@ -153,14 +214,19 @@ class ConfigDialog(QDialog):
         # Save the data-directory pointer globally
         QSettings().setValue(DATA_DIR_KEY, data_dir)
 
+        selected_scheme = self._theme_combo.currentText()
+
         # Save all other settings into the library's own settings file
         _save_library_settings(
             {
                 "max_thumbnails": self._max_thumbs_spin.value(),
                 "max_thumb_size": self._max_thumb_size_spin.value(),
+                "color_scheme": selected_scheme,
             },
             data_dir=data_dir,
         )
+
+        self._original_scheme = selected_scheme
 
         if data_dir != old_dir:
             QMessageBox.information(
@@ -169,3 +235,7 @@ class ConfigDialog(QDialog):
                 "Data directory updated. Please restart the application for the change to take effect.",
             )
         self.accept()
+
+    def _cancel(self):
+        apply_color_scheme(self._original_scheme)
+        self.reject()

@@ -34,7 +34,7 @@ _HELP_HTML = """
       <li>Dates in folder names (<code>2024-01</code>, <code>2024</code>) are used as <em>release date</em>.</li>
     </ul>
   </li>
-  <li>You can define a <b>parse pattern</b> (e.g. <code>/mnt/f/{type}/{author}/*/{name}</code>) to extract
+  <li>You can define a <b>parse pattern</b> (e.g. <code>/mnt/f/{source}/{author}/*/{name}</code>) to extract
       fields from paths more precisely. Patterns can be saved and reused.</li>
   <li>Configure the maximum number of thumbnails and their size in <b>File → Configuration…</b></li>
 </ul>

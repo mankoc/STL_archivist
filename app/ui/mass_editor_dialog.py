@@ -9,8 +9,9 @@ from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
     QLabel, QLineEdit, QDialogButtonBox, QPushButton,
-    QComboBox, QInputDialog, QMessageBox,
+    QComboBox, QInputDialog, QMessageBox, QToolButton, QToolTip,
 )
+from PyQt6.QtGui import QCursor
 
 from app.database.db import session_scope, get_session
 from app.database.models import STLModel, Tag, Release
@@ -22,7 +23,7 @@ from app.utils.path_pattern import (
 _SAVED_PATTERNS_KEY = "mass_editor/saved_patterns"
 _LAST_PATTERN_KEY   = "mass_editor/last_pattern"
 
-# Separator used inside QSettings list entries: "My pattern:::/mnt/f/{type}/…"
+# Separator used inside QSettings list entries: "My pattern:::/mnt/f/{source}/…"
 _SEP = ":::"
 
 
@@ -62,11 +63,6 @@ class MassEditorDialog(QDialog):
         path_group = QGroupBox("Parse fields from archive path (optional)")
         path_layout = QVBoxLayout(path_group)
 
-        help_label = QLabel(_PATTERN_HELP)
-        help_label.setTextFormat(Qt.TextFormat.RichText)
-        help_label.setWordWrap(True)
-        path_layout.addWidget(help_label)
-
         # Example path
         if self._example_path:
             ex_label = QLabel(f"<b>Example path:</b>&nbsp;<code>{self._example_path}</code>")
@@ -87,12 +83,21 @@ class MassEditorDialog(QDialog):
         delete_btn = QPushButton("Delete")
         delete_btn.clicked.connect(self._delete_pattern)
         saved_row.addWidget(delete_btn)
+        help_btn = QToolButton()
+        help_btn.setText("?")
+        help_btn.setToolTip(_PATTERN_HELP)
+        help_btn.setStyleSheet(
+            "QToolButton { font-weight: bold; border: 1px solid gray;"
+            " border-radius: 9px; min-width: 18px; min-height: 18px; }"
+        )
+        help_btn.enterEvent = lambda e: QToolTip.showText(QCursor.pos(), _PATTERN_HELP, help_btn)
+        saved_row.addWidget(help_btn)
         path_layout.addLayout(saved_row)
 
         # Pattern input + Parse button
         pattern_row = QHBoxLayout()
         self._pattern_edit = QLineEdit()
-        self._pattern_edit.setPlaceholderText("/mnt/f/{type}/{author}/{month}/{name}")
+        self._pattern_edit.setPlaceholderText("/mnt/f/{source}/{author}/{month}/{name}")
         self._pattern_edit.textChanged.connect(self._update_preview)
         pattern_row.addWidget(self._pattern_edit)
         parse_btn = QPushButton("Parse all paths")

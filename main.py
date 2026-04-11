@@ -2,7 +2,6 @@
 STL Database — application entry point.
 """
 import sys
-from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
@@ -11,22 +10,17 @@ from app.database.db import init_db
 from app.ui.main_window import MainWindow
 
 
-def load_stylesheet(app: QApplication) -> None:
-    qss_path = Path(__file__).parent / "resources" / "style.qss"
-    if qss_path.exists():
-        app.setStyleSheet(qss_path.read_text(encoding="utf-8"))
-
-
 def main() -> None:
     app = QApplication(sys.argv)
+    app.setStyle("Fusion")  # flat base style — QSS overrides work fully on all platforms
     app.setApplicationName("STL Database")
     app.setOrganizationName("STLBrowser")
 
     # Read configured database path (falls back to default if not set)
-    from app.ui.config_dialog import get_db_path
+    from app.ui.config_dialog import get_db_path, get_color_scheme, apply_color_scheme
     init_db(get_db_path())
 
-    load_stylesheet(app)
+    apply_color_scheme(get_color_scheme())
 
     window = MainWindow()
     window.show()

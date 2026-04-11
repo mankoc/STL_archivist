@@ -7,6 +7,8 @@ Right-click or double-click: Edit Model.
 """
 from pathlib import Path as FSPath
 
+_ICONS_DIR = FSPath(__file__).parent.parent.parent / "resources" / "icons"
+
 from PyQt6.QtCore import Qt, QSortFilterProxyModel, QSize, QStringListModel, QEvent, pyqtSignal, QItemSelection
 from PyQt6.QtGui import QStandardItemModel, QStandardItem, QPixmap, QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
@@ -348,6 +350,8 @@ class BrowserTab(QWidget):
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 4)
         splitter.setStretchFactor(2, 1)
+        splitter.setHandleWidth(6)
+        self._thumb_splitter = splitter
 
     # ------------------------------------------------------------------
     def refresh(self):
@@ -360,50 +364,64 @@ class BrowserTab(QWidget):
     def _populate_filter_tree(self):
         self._filter_tree.clear()
 
-        from PyQt6.QtWidgets import QApplication as _App
-        _style = _App.style()
-        _SP = _style.StandardPixmap
-        _icon_author = _style.standardIcon(_SP.SP_FileDialogDetailedView)
-        _icon_tag    = _style.standardIcon(_SP.SP_FileDialogListView)
-        _icon_type   = _style.standardIcon(_SP.SP_DirHomeIcon)
-        _icon_path   = _style.standardIcon(_SP.SP_DirOpenIcon)
+        from app.ui.config_dialog import get_color_scheme as _get_cs
+        _v = "light" if "light" in _get_cs().lower() else "dark"
+
+        def _icon(name: str):
+            p = _ICONS_DIR / f"{name}_{_v}.svg"
+            return QIcon(str(p)) if p.exists() else QIcon()
+
+        _icon_author = _icon("icon_author")
+        _icon_tag    = _icon("icon_tag")
+        _icon_type   = _icon("icon_type")
+        _icon_path   = _icon("icon_path")
+
+        header = self._table.horizontalHeader()
+        show_author = not header.isSectionHidden(COL_AUTHOR)
+        show_tags   = not header.isSectionHidden(COL_TAGS)
+        show_source = not header.isSectionHidden(COL_SOURCE)
+        show_path   = not header.isSectionHidden(COL_PATH)
 
         session = get_session()
         try:
-            authors_item = QTreeWidgetItem(["Authors"])
-            authors_item.setIcon(0, _icon_author)
-            self._filter_tree.addTopLevelItem(authors_item)
-            for (author,) in session.query(STLModel.author).distinct().order_by(STLModel.author).all():
-                if author:
-                    child = QTreeWidgetItem([author])
-                    child.setData(0, Qt.ItemDataRole.UserRole, ("author", author))
-                    authors_item.addChild(child)
+            if show_author:
+                authors_item = QTreeWidgetItem(["Authors"])
+                authors_item.setIcon(0, _icon_author)
+                self._filter_tree.addTopLevelItem(authors_item)
+                for (author,) in session.query(STLModel.author).distinct().order_by(STLModel.author).all():
+                    if author:
+                        child = QTreeWidgetItem([author])
+                        child.setData(0, Qt.ItemDataRole.UserRole, ("author", author))
+                        authors_item.addChild(child)
 
-            tags_item = QTreeWidgetItem(["Tags"])
-            tags_item.setIcon(0, _icon_tag)
-            self._filter_tree.addTopLevelItem(tags_item)
-            for tag in session.query(Tag).order_by(Tag.name).all():
-                child = QTreeWidgetItem([tag.name])
-                child.setData(0, Qt.ItemDataRole.UserRole, ("tag", tag.name))
-                tags_item.addChild(child)
+            if show_tags:
+                tags_item = QTreeWidgetItem(["Tags"])
+                tags_item.setIcon(0, _icon_tag)
+                self._filter_tree.addTopLevelItem(tags_item)
+                for tag in session.query(Tag).order_by(Tag.name).all():
+                    child = QTreeWidgetItem([tag.name])
+                    child.setData(0, Qt.ItemDataRole.UserRole, ("tag", tag.name))
+                    tags_item.addChild(child)
 
-            types_item = QTreeWidgetItem(["Type"])
-            types_item.setIcon(0, _icon_type)
-            self._filter_tree.addTopLevelItem(types_item)
-            for (t,) in session.query(STLModel.source).distinct().order_by(STLModel.source).all():
-                if t:
-                    child = QTreeWidgetItem([t])
-                    child.setData(0, Qt.ItemDataRole.UserRole, ("source", t))
-                    types_item.addChild(child)
+            if show_source:
+                types_item = QTreeWidgetItem(["Type"])
+                types_item.setIcon(0, _icon_type)
+                self._filter_tree.addTopLevelItem(types_item)
+                for (t,) in session.query(STLModel.source).distinct().order_by(STLModel.source).all():
+                    if t:
+                        child = QTreeWidgetItem([t])
+                        child.setData(0, Qt.ItemDataRole.UserRole, ("source", t))
+                        types_item.addChild(child)
 
-            paths_item = QTreeWidgetItem(["Path"])
-            paths_item.setIcon(0, _icon_path)
-            self._filter_tree.addTopLevelItem(paths_item)
-            dirs: set[str] = set()
-            for (ap,) in session.query(STLModel.archive_path).all():
-                if ap:
-                    dirs.add(str(FSPath(ap).parent))
-            self._build_path_tree(paths_item, sorted(dirs))
+            if show_path:
+                paths_item = QTreeWidgetItem(["Path"])
+                paths_item.setIcon(0, _icon_path)
+                self._filter_tree.addTopLevelItem(paths_item)
+                dirs: set[str] = set()
+                for (ap,) in session.query(STLModel.archive_path).all():
+                    if ap:
+                        dirs.add(str(FSPath(ap).parent))
+                self._build_path_tree(paths_item, sorted(dirs))
         finally:
             session.close()
 
@@ -653,6 +671,8 @@ class BrowserTab(QWidget):
             col = chosen.data()
             header.setSectionHidden(col, not chosen.isChecked())
             self._save_header_state()
+            if col in (COL_AUTHOR, COL_TAGS, COL_SOURCE, COL_PATH):
+                self._populate_filter_tree()
 
     def _context_menu(self, pos):
         index = self._table.indexAt(pos)
@@ -745,9 +765,7 @@ class BrowserTab(QWidget):
         for i, px in enumerate(self._thumb_pixmaps):
             item = self._thumb_vlayout.itemAt(i)
             if item and item.widget():
-                scaled = px.scaled(w, w,
-                                   Qt.AspectRatioMode.KeepAspectRatio,
-                                   Qt.TransformationMode.SmoothTransformation)
+                scaled = px.scaledToWidth(w, Qt.TransformationMode.SmoothTransformation)
                 item.widget().setPixmap(scaled)
 
     def add_tag(self):

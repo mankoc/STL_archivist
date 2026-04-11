@@ -87,13 +87,17 @@ class CrawlerWorker(QThread):
 
     # ------------------------------------------------------------------
     def _remove_missing(self):
-        """Delete DB records whose archive file no longer exists on disk."""
+        """Delete DB records whose archive file no longer exists on disk,
+        including any thumbnail files stored on disk."""
         with session_scope() as session:
             all_models = session.query(STLModel).all()
             removed = 0
             for model in all_models:
                 if not Path(model.archive_path).exists():
                     self.log.emit(f"Removing missing: {model.archive_path}")
+                    for image in model.images:
+                        if image.thumbnail_path:
+                            delete_thumbnail(image.thumbnail_path)
                     session.delete(model)
                     removed += 1
         if removed:

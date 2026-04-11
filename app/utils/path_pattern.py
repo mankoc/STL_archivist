@@ -17,7 +17,7 @@ import re
 # FK / special fields use a "virtual" key (e.g. "sculptor_name") that
 # apply_extracted_to_model() knows how to handle.
 TOKEN_MAP = {
-    "type":       "source",
+    "source":     "source",
     "author":     "author",
     "title":      "title",
     "name":       "title",
@@ -49,16 +49,22 @@ ATTR_LABEL = {
 }
 
 PATTERN_HELP = (
-    "<b>Pattern syntax:</b> use <code>{token}</code> for captured segments, "
-    "<code>*</code> for ignored segments.<br>"
-    "Supported tokens:&nbsp; "
-    "<code>{type}</code>, <code>{author}</code>, "
-    "<code>{title}</code>&nbsp;/&nbsp;<code>{name}</code>, "
-    "<code>{date}</code>&nbsp;/&nbsp;<code>{month}</code>, "
-    "<code>{url}</code>, <code>{sculptor}</code>, "
-    "<code>{model_type}</code>, <code>{subtype}</code>, "
-    "<code>{sequence}</code>, <code>{release}</code><br>"
-    "<b>Example:</b>&nbsp; <code>/mnt/f/{type}/{author}/*/{name}</code>"
+    "<b>Pattern syntax</b><br>"
+    "Use <code>{token}</code> to capture a path segment, <code>*</code> to skip one.<br><br>"
+    "<table cellspacing='0' cellpadding='2'>"
+    "<tr><td><code>{source}</code></td><td>&nbsp;–&nbsp;</td><td>distribution / shop name</td></tr>"
+    "<tr><td><code>{author}</code></td><td>&nbsp;–&nbsp;</td><td>creator / designer name</td></tr>"
+    "<tr><td><code>{title}</code> / <code>{name}</code></td><td>&nbsp;–&nbsp;</td><td>model title</td></tr>"
+    "<tr><td><code>{date}</code> / <code>{month}</code></td><td>&nbsp;–&nbsp;</td><td>release date</td></tr>"
+    "<tr><td><code>{sculptor}</code></td><td>&nbsp;–&nbsp;</td><td>sculptor (looked up or created)</td></tr>"
+    "<tr><td><code>{model_type}</code></td><td>&nbsp;–&nbsp;</td><td>model type category</td></tr>"
+    "<tr><td><code>{subtype}</code></td><td>&nbsp;–&nbsp;</td><td>sub-category / variant</td></tr>"
+    "<tr><td><code>{sequence}</code></td><td>&nbsp;–&nbsp;</td><td>numbering within a series</td></tr>"
+    "<tr><td><code>{release}</code></td><td>&nbsp;–&nbsp;</td><td>release / bundle name</td></tr>"
+    "<tr><td><code>{url}</code></td><td>&nbsp;–&nbsp;</td><td>source URL</td></tr>"
+    "<tr><td><code>*</code></td><td>&nbsp;–&nbsp;</td><td>ignored segment (any value)</td></tr>"
+    "</table><br>"
+    "<b>Example:</b> <code>/mnt/f/{source}/{author}/*/{name}</code>"
 )
 
 
@@ -79,7 +85,7 @@ def pattern_to_regex(pattern: str) -> re.Pattern | None:
     regex_parts: list[str] = []
     for part in parts:
         if part == "*":
-            regex_parts.append("[^/]+")
+            regex_parts.append(".*")
         elif part.startswith("{") and part.endswith("}"):
             token = part[1:-1]
             count = seen.get(token, 0)

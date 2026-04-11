@@ -1,13 +1,14 @@
 """
 Tab 1 – Crawler controls: folder picker, start/stop, progress bar, log.
 """
-from PyQt6.QtCore import Qt, QSettings
+from PyQt6.QtCore import Qt, QSettings, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QFileDialog,
     QProgressBar, QPlainTextEdit, QSizePolicy,
-    QComboBox, QInputDialog, QMessageBox,
+    QComboBox, QInputDialog, QMessageBox, QApplication, QToolButton, QToolTip,
 )
+from PyQt6.QtGui import QIcon, QCursor
 
 from app.crawler.crawler import CrawlerWorker
 from app.utils.path_pattern import parse_path, PATTERN_HELP, ATTR_LABEL
@@ -19,6 +20,8 @@ _SEP = ":::"
 
 
 class CrawlerTab(QWidget):
+    close_requested = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._worker: CrawlerWorker | None = None
@@ -49,11 +52,6 @@ class CrawlerTab(QWidget):
         pattern_group = QGroupBox("Parse metadata from path (optional)")
         pattern_layout = QVBoxLayout(pattern_group)
 
-        help_label = QLabel(PATTERN_HELP)
-        help_label.setTextFormat(Qt.TextFormat.RichText)
-        help_label.setWordWrap(True)
-        pattern_layout.addWidget(help_label)
-
         # Saved-patterns row
         saved_row = QHBoxLayout()
         saved_row.addWidget(QLabel("Saved:"))
@@ -67,12 +65,21 @@ class CrawlerTab(QWidget):
         delete_btn = QPushButton("Delete")
         delete_btn.clicked.connect(self._delete_pattern)
         saved_row.addWidget(delete_btn)
+        help_btn = QToolButton()
+        help_btn.setText("?")
+        help_btn.setToolTip(PATTERN_HELP)
+        help_btn.setStyleSheet(
+            "QToolButton { font-weight: bold; border: 1px solid gray;"
+            " border-radius: 9px; min-width: 18px; min-height: 18px; }"
+        )
+        help_btn.enterEvent = lambda e: QToolTip.showText(QCursor.pos(), PATTERN_HELP, help_btn)
+        saved_row.addWidget(help_btn)
         pattern_layout.addLayout(saved_row)
 
         # Pattern input
         pattern_row = QHBoxLayout()
         self._pattern_edit = QLineEdit()
-        self._pattern_edit.setPlaceholderText("/mnt/f/{type}/{author}/{month}/{name}")
+        self._pattern_edit.setPlaceholderText("/mnt/f/{source}/{author}/{month}/{name}")
         self._pattern_edit.textChanged.connect(self._update_preview)
         pattern_row.addWidget(self._pattern_edit)
         pattern_layout.addLayout(pattern_row)
@@ -113,17 +120,29 @@ class CrawlerTab(QWidget):
         root.addWidget(self._log)
 
         # --- Control buttons ---
+        style = QApplication.style()
         btn_row = QHBoxLayout()
-        self._start_btn = QPushButton("Start Crawl")
+        self._start_btn = QPushButton(
+            style.standardIcon(style.StandardPixmap.SP_MediaPlay), "Start Crawl"
+        )
         self._start_btn.clicked.connect(self._start_crawl)
         btn_row.addWidget(self._start_btn)
 
-        self._stop_btn = QPushButton("Stop")
+        self._stop_btn = QPushButton(
+            style.standardIcon(style.StandardPixmap.SP_MediaStop), "Stop"
+        )
         self._stop_btn.setEnabled(False)
         self._stop_btn.clicked.connect(self._stop_crawl)
         btn_row.addWidget(self._stop_btn)
 
         btn_row.addStretch()
+
+        self._close_btn = QPushButton(
+            style.standardIcon(style.StandardPixmap.SP_DialogCloseButton), "Close"
+        )
+        self._close_btn.clicked.connect(self.close_requested)
+        btn_row.addWidget(self._close_btn)
+
         root.addLayout(btn_row)
 
         self._refresh_saved_combo()
