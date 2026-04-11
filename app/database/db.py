@@ -29,7 +29,59 @@ def init_db(db_path: str = "stl_database.db") -> None:
         conn.execute("PRAGMA foreign_keys=ON")
 
     Base.metadata.create_all(_engine)
+
+    # Initialise thumbnail file store alongside the database
+    from app.utils.thumbnailer import init_thumbnail_store
+    thumb_dir = Path(db_path).parent / "thumbnails"
+    init_thumbnail_store(thumb_dir)
+
+    _migrate(_engine)
     _SessionFactory = sessionmaker(bind=_engine, expire_on_commit=False)
+
+
+def _migrate(engine) -> None:
+    """Apply incremental schema changes for existing databases."""
+    from sqlalchemy import inspect, text
+    inspector = inspect(engine)
+
+    # -- models table --
+    existing_models = {c["name"] for c in inspector.get_columns("models")}
+    with engine.begin() as conn:
+        if "release_id" not in existing_models:
+            conn.execute(text(
+                "ALTER TABLE models ADD COLUMN release_id INTEGER "
+                "REFERENCES releases(id) ON DELETE SET NULL"
+            ))
+
+    # -- images table --
+    existing_images = {c["name"] for c in inspector.get_columns("images")}
+    with engine.begin() as conn:
+        if "thumbnail_path" not in existing_images:
+            conn.execute(text("ALTER TABLE images ADD COLUMN thumbnail_path VARCHAR(512)"))
+
+    # Migrate any existing blobs to files
+    _migrate_blobs_to_files(engine)
+
+
+def _migrate_blobs_to_files(engine) -> None:
+    """Write legacy JPEG blobs to disk, set thumbnail_path, then clear the blob."""
+    from sqlalchemy import text
+    from app.utils.thumbnailer import write_raw_thumbnail
+
+    with engine.begin() as conn:
+        rows = conn.execute(
+            text("SELECT id, thumbnail FROM images "
+                 "WHERE thumbnail IS NOT NULL AND thumbnail_path IS NULL")
+        ).fetchall()
+
+        for image_id, blob in rows:
+            rel = write_raw_thumbnail(image_id, bytes(blob))
+            if rel:
+                conn.execute(
+                    text("UPDATE images SET thumbnail_path = :path, thumbnail = NULL "
+                         "WHERE id = :id"),
+                    {"path": rel, "id": image_id},
+                )
 
 
 def get_session() -> Session:

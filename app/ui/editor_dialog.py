@@ -15,8 +15,8 @@ from PyQt6.QtWidgets import (
 
 from app.crawler.metadata import extract_metadata
 from app.database.db import session_scope, get_session
-from app.database.models import STLModel, Tag
-from app.utils.thumbnailer import pixmap_from_bytes
+from app.database.models import STLModel, Tag, Release
+from app.utils.thumbnailer import pixmap_from_path
 
 
 class TagEdit(QLineEdit):
@@ -106,11 +106,12 @@ class EditorDialog(QDialog):
             _uniq = lambda col: sorted(
                 filter(None, (v for (v,) in session.query(col).distinct().all()))
             )
-            titles  = _uniq(STLModel.title)
-            authors = _uniq(STLModel.author)
-            types   = _uniq(STLModel.type)
-            dates   = _uniq(STLModel.release_date)
-            all_tags = [t.name for t in session.query(Tag).order_by(Tag.name).all()]
+            titles    = _uniq(STLModel.title)
+            authors   = _uniq(STLModel.author)
+            types     = _uniq(STLModel.source)
+            dates     = _uniq(STLModel.release_date)
+            all_tags  = [t.name for t in session.query(Tag).order_by(Tag.name).all()]
+            releases  = sorted(r.name for r in session.query(Release).order_by(Release.name).all())
         finally:
             session.close()
 
@@ -123,17 +124,26 @@ class EditorDialog(QDialog):
         self._type_edit.setCurrentIndex(-1)
         self._type_edit.completer().setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self._type_edit.completer().setFilterMode(Qt.MatchFlag.MatchContains)
-        self._date_edit   = self._autocomplete_edit(dates)
-        self._url_edit    = QLineEdit()
-        self._desc_edit   = QTextEdit()
+        self._date_edit    = self._autocomplete_edit(dates)
+        self._url_edit     = QLineEdit()
+        self._desc_edit    = QTextEdit()
         self._desc_edit.setMaximumHeight(90)
-        self._tags_edit   = TagEdit(all_tags)
+        self._tags_edit    = TagEdit(all_tags)
+        self._release_edit = QComboBox()
+        self._release_edit.setEditable(True)
+        self._release_edit.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self._release_edit.addItem("")
+        self._release_edit.addItems(releases)
+        self._release_edit.setCurrentIndex(0)
+        self._release_edit.completer().setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self._release_edit.completer().setFilterMode(Qt.MatchFlag.MatchContains)
 
         form.addRow("Archive Path:", self._path_edit)
         form.addRow("Title:",        self._title_edit)
         form.addRow("Author:",       self._author_edit)
         form.addRow("Type:",         self._type_edit)
         form.addRow("Date:",         self._date_edit)
+        form.addRow("Release:",      self._release_edit)
         form.addRow("URL:",          self._url_edit)
         form.addRow("Description:",  self._desc_edit)
         form.addRow("Tags:",         self._tags_edit)
@@ -197,8 +207,9 @@ class EditorDialog(QDialog):
             self._path_edit.setText(model.archive_path or "")
             self._title_edit.setText(model.title or "")
             self._author_edit.setText(model.author or "")
-            self._type_edit.setCurrentText(model.type or "")
+            self._type_edit.setCurrentText(model.source or "")
             self._date_edit.setText(model.release_date or "")
+            self._release_edit.setCurrentText(model.release.name if model.release else "")
             self._url_edit.setText(model.url or "")
             self._desc_edit.setPlainText(model.description or "")
             self._tags_edit.setText(", ".join(t.name for t in model.tags))
@@ -215,7 +226,7 @@ class EditorDialog(QDialog):
         sidebar_width = 200
         for img in model.images:
             lbl = QLabel()
-            px = pixmap_from_bytes(img.thumbnail)
+            px = pixmap_from_path(img.thumbnail_path)
             px = px.scaled(sidebar_width, sidebar_width,
                            Qt.AspectRatioMode.KeepAspectRatio,
                            Qt.TransformationMode.SmoothTransformation)
@@ -247,10 +258,21 @@ class EditorDialog(QDialog):
 
             model.title        = self._title_edit.text().strip() or None
             model.author       = self._author_edit.text().strip() or None
-            model.type         = self._type_edit.currentText().strip() or None
+            model.source       = self._type_edit.currentText().strip() or None
             model.release_date = self._date_edit.text().strip() or None
             model.url          = self._url_edit.text().strip() or None
             model.description  = self._desc_edit.toPlainText().strip() or None
+
+            release_name = self._release_edit.currentText().strip()
+            if release_name:
+                rel = session.query(Release).filter_by(name=release_name).first()
+                if rel is None:
+                    rel = Release(name=release_name)
+                    session.add(rel)
+                    session.flush()
+                model.release = rel
+            else:
+                model.release = None
 
             model.tags.clear()
             for name in self._tags_edit.get_tags():

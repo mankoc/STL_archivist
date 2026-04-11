@@ -42,6 +42,7 @@ class ModelMetadata:
     url: Optional[str] = None
     description: Optional[str] = None
     tags: list[str] = field(default_factory=list)
+    release: Optional[str] = None
 
 
 def _parse_info_json(raw: bytes) -> dict:
@@ -56,9 +57,14 @@ def _infer_from_path(archive_path: Path) -> ModelMetadata:
     meta = ModelMetadata()
     parts = list(archive_path.parts)  # all path components including filename
 
-    # Title: use the archive stem, clean up underscores/dashes
+    # Title: use the archive stem, clean up underscores/dashes, then strip any
+    # leading date prefix (e.g. "2024-09 " or "2024 09 ") so it doesn't bleed
+    # into the title when the filename starts with a date.
     stem = archive_path.stem
-    meta.title = re.sub(r"[_\-]+", " ", stem).strip()
+    title = re.sub(r"[_\-]+", " ", stem).strip()
+    title = re.sub(r"^\d{4}[\s\-_]\d{2}\s*", "", title).strip()  # "2024-09 …"
+    title = re.sub(r"^\d{4}\s+", "", title).strip()               # "2024 …"
+    meta.title = title if title else re.sub(r"[_\-]+", " ", stem).strip()
 
     # Distributor / Type — scan left-to-right (shallowest first).
     # The folder immediately after the distributor folder is the author.
@@ -148,5 +154,7 @@ def extract_metadata(archive_path: Path,
             meta.description = info["description"]
         if info.get("tags") and isinstance(info["tags"], list):
             meta.tags = [str(t) for t in info["tags"]]
+        if info.get("release"):
+            meta.release = str(info["release"])
 
     return meta

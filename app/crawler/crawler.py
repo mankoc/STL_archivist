@@ -11,8 +11,9 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from app.crawler.archive import is_archive, extract_archive_contents, IMAGE_SUFFIXES
 from app.crawler.metadata import extract_metadata
 from app.database.db import session_scope
-from app.database.models import STLModel, Tag, Image
-from app.utils.thumbnailer import make_thumbnail
+from app.database.models import STLModel, Tag, Image, Release
+from app.utils.thumbnailer import save_thumbnail, delete_thumbnail
+from app.utils.path_pattern import parse_path, apply_extracted_to_model
 
 
 def _hash_file(path: Path, chunk: int = 1 << 20) -> str:
@@ -50,9 +51,10 @@ class CrawlerWorker(QThread):
     log      = pyqtSignal(str)
     finished = pyqtSignal()
 
-    def __init__(self, source_dir: str, parent=None):
+    def __init__(self, source_dir: str, pattern: str = "", parent=None):
         super().__init__(parent)
         self.source_dir = Path(source_dir)
+        self._pattern = pattern.strip()
         self._stop_requested = False
 
     def stop(self):
@@ -121,6 +123,20 @@ class CrawlerWorker(QThread):
 
             meta = extract_metadata(archive_path, contents=contents)
 
+            meta_parts = []
+            if meta.title:        meta_parts.append(f"title={meta.title!r}")
+            if meta.author:       meta_parts.append(f"author={meta.author!r}")
+            if meta.distributor:  meta_parts.append(f"source={meta.distributor!r}")
+            if meta.release_date: meta_parts.append(f"date={meta.release_date!r}")
+            if meta.url:          meta_parts.append(f"url={meta.url!r}")
+            if meta.description:  meta_parts.append(f"description={meta.description!r}")
+            if meta.tags:         meta_parts.append(f"tags={meta.tags}")
+            if meta.release:       meta_parts.append(f"release={meta.release!r}")
+            if meta_parts:
+                self.log.emit("  metadata: " + ", ".join(meta_parts))
+            else:
+                self.log.emit("  metadata: (none found)")
+
             if existing:
                 model = existing
                 self.log.emit("  updated")
@@ -132,10 +148,27 @@ class CrawlerWorker(QThread):
             model.archive_hash = current_hash
             model.title        = meta.title
             model.author       = meta.author
-            model.type         = meta.distributor
+            model.source       = meta.distributor
             model.release_date = meta.release_date
             model.url          = meta.url
             model.description  = meta.description
+
+            if meta.release:
+                rel = session.query(Release).filter_by(name=meta.release).first()
+                if rel is None:
+                    rel = Release(name=meta.release)
+                    session.add(rel)
+                    session.flush()
+                model.release = rel
+
+            # Apply path pattern — fills in fields left empty by metadata
+            if self._pattern:
+                extracted = parse_path(self._pattern, archive_str)
+                if extracted:
+                    apply_extracted_to_model(session, model, extracted, overwrite=False)
+                    self.log.emit("  pattern: " + ", ".join(f"{k}={v!r}" for k, v in extracted.items()))
+                else:
+                    self.log.emit("  pattern: no match")
 
             # Tags
             model.tags.clear()
@@ -146,6 +179,8 @@ class CrawlerWorker(QThread):
             # Thumbnails – replace existing images for updated archives
             if existing:
                 for img in list(model.images):
+                    if img.thumbnail_path:
+                        delete_thumbnail(img.thumbnail_path)
                     session.delete(img)
                 session.flush()
 
@@ -157,10 +192,14 @@ class CrawlerWorker(QThread):
                 if count >= max_thumbs:
                     break
                 raw_bytes = contents[filename]
-                thumb = make_thumbnail(raw_bytes, max_size=max_thumb_size)
-                if thumb:
-                    session.add(Image(model=model, filename=filename, thumbnail=thumb))
+                img = Image(model=model, filename=filename)
+                session.add(img)
+                session.flush()  # get img.id before writing the file
+                rel_path = save_thumbnail(raw_bytes, img.id, max_size=max_thumb_size)
+                if rel_path:
+                    img.thumbnail_path = rel_path
                     count += 1
                 else:
+                    session.delete(img)
                     self.log.emit(f"  WARNING: thumbnail conversion failed for {filename}")
             self.log.emit(f"  {count} thumbnail(s) stored")

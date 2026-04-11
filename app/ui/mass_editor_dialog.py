@@ -5,8 +5,6 @@ Two modes can be combined:
   • Path pattern  — extract field values from each model's archive_path
   • Manual fields — apply the same value to all selected models
 """
-import re
-
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
@@ -15,37 +13,10 @@ from PyQt6.QtWidgets import (
 )
 
 from app.database.db import session_scope, get_session
-from app.database.models import STLModel, Tag
-
-# Maps lowercase token name → STLModel attribute
-_TOKEN_MAP = {
-    "type":    "type",
-    "author":  "author",
-    "title":   "title",
-    "name":    "title",
-    "date":    "release_date",
-    "month":   "release_date",
-    "url":     "url",
-}
-
-# Human-readable label for each attribute (for the preview line)
-_ATTR_LABEL = {
-    "type":         "type",
-    "author":       "author",
-    "title":        "title",
-    "release_date": "date",
-    "url":          "url",
-}
-
-_PATTERN_HELP = (
-    "<b>Pattern syntax:</b> use <code>{token}</code> for captured segments, "
-    "<code>*</code> for ignored segments.<br>"
-    "Supported tokens:&nbsp; "
-    "<code>{type}</code>, <code>{author}</code>, "
-    "<code>{title}</code>&nbsp;/&nbsp;<code>{name}</code>, "
-    "<code>{date}</code>&nbsp;/&nbsp;<code>{month}</code>, "
-    "<code>{url}</code><br>"
-    "<b>Example:</b>&nbsp; <code>/mnt/f/{type}/{author}/*/{name}</code>"
+from app.database.models import STLModel, Tag, Release
+from app.utils.path_pattern import (
+    parse_path, apply_extracted_to_model,
+    ATTR_LABEL as _ATTR_LABEL, PATTERN_HELP as _PATTERN_HELP,
 )
 
 _SAVED_PATTERNS_KEY = "mass_editor/saved_patterns"
@@ -55,62 +26,8 @@ _LAST_PATTERN_KEY   = "mass_editor/last_pattern"
 _SEP = ":::"
 
 
-def _pattern_to_regex(pattern: str) -> re.Pattern | None:
-    """Compile *pattern* to a regex.
-
-    ``{token}`` → named capture group ``(?P<token>[^/]+)``
-    ``*``        → anonymous match  ``[^/]+``
-    Duplicate token names get a numeric suffix so the regex stays valid.
-    Returns None when the pattern contains no tokens or wildcards.
-    """
-    has_placeholder = bool(re.search(r"\{(\w+)\}|\*", pattern))
-    if not has_placeholder:
-        return None
-
-    seen: dict[str, int] = {}
-    # Escape the literal parts, then restore placeholder markers
-    # Work token-by-token to preserve order
-    parts = re.split(r"(\{\w+\}|\*)", pattern)
-    regex_parts: list[str] = []
-    for part in parts:
-        if part == "*":
-            regex_parts.append("[^/]+")
-        elif part.startswith("{") and part.endswith("}"):
-            token = part[1:-1]
-            count = seen.get(token, 0)
-            seen[token] = count + 1
-            group = token if count == 0 else f"{token}_{count}"
-            regex_parts.append(f"(?P<{group}>[^/]+)")
-        else:
-            regex_parts.append(re.escape(part))
-
-    try:
-        return re.compile("".join(regex_parts))
-    except re.error:
-        return None
-
-
 def _parse_path(pattern: str, path: str) -> dict[str, str]:
-    """Extract field values from *path* using *pattern*.
-
-    Returns a dict mapping STLModel attribute names → extracted strings.
-    Returns an empty dict if the pattern does not match.
-    """
-    rx = _pattern_to_regex(pattern)
-    if rx is None:
-        return {}
-
-    m = rx.search(path)
-    if not m:
-        return {}
-
-    result: dict[str, str] = {}
-    for group, value in m.groupdict().items():
-        base_token = re.sub(r"_\d+$", "", group)   # strip numeric suffix
-        attr = _TOKEN_MAP.get(base_token.lower())
-        if attr and value:
-            result[attr] = value
-    return result
+    return parse_path(pattern, path)
 
 
 class MassEditorDialog(QDialog):
@@ -204,17 +121,19 @@ class MassEditorDialog(QDialog):
         form = QFormLayout(manual_group)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
-        self._type_edit  = QLineEdit(); self._type_edit.setPlaceholderText("e.g. patreon")
-        self._author_edit = QLineEdit(); self._author_edit.setPlaceholderText("e.g. SomeAuthor")
-        self._date_edit  = QLineEdit(); self._date_edit.setPlaceholderText("e.g. 2024-01")
-        self._title_edit = QLineEdit()
-        self._tags_edit  = QLineEdit(); self._tags_edit.setPlaceholderText("tag1, tag2, … (replaces existing tags)")
+        self._type_edit    = QLineEdit(); self._type_edit.setPlaceholderText("e.g. patreon")
+        self._author_edit  = QLineEdit(); self._author_edit.setPlaceholderText("e.g. SomeAuthor")
+        self._date_edit    = QLineEdit(); self._date_edit.setPlaceholderText("e.g. 2024-01")
+        self._title_edit   = QLineEdit()
+        self._release_edit = QLineEdit(); self._release_edit.setPlaceholderText("Release name (groups models)")
+        self._tags_edit    = QLineEdit(); self._tags_edit.setPlaceholderText("tag1, tag2, … (replaces existing tags)")
 
-        form.addRow("Type:",   self._type_edit)
-        form.addRow("Author:", self._author_edit)
-        form.addRow("Date:",   self._date_edit)
-        form.addRow("Title:",  self._title_edit)
-        form.addRow("Tags:",   self._tags_edit)
+        form.addRow("Type:",    self._type_edit)
+        form.addRow("Author:",  self._author_edit)
+        form.addRow("Date:",    self._date_edit)
+        form.addRow("Title:",   self._title_edit)
+        form.addRow("Release:", self._release_edit)
+        form.addRow("Tags:",    self._tags_edit)
 
         root.addWidget(manual_group)
 
@@ -355,13 +274,15 @@ class MassEditorDialog(QDialog):
 
         manual: dict[str, str | None] = {}
         if self._type_edit.text().strip():
-            manual["type"] = self._type_edit.text().strip()
+            manual["source"] = self._type_edit.text().strip()
         if self._author_edit.text().strip():
             manual["author"] = self._author_edit.text().strip()
         if self._date_edit.text().strip():
             manual["release_date"] = self._date_edit.text().strip()
         if self._title_edit.text().strip():
             manual["title"] = self._title_edit.text().strip()
+
+        release_name = self._release_edit.text().strip()
 
         tag_names = [
             t.strip().lower()
@@ -371,16 +292,26 @@ class MassEditorDialog(QDialog):
         apply_tags = bool(tag_names)
 
         with session_scope() as session:
+            release_obj = None
+            if release_name:
+                release_obj = session.query(Release).filter_by(name=release_name).first()
+                if release_obj is None:
+                    release_obj = Release(name=release_name)
+                    session.add(release_obj)
+                    session.flush()
+
             for mid in self._model_ids:
                 model: STLModel = session.get(STLModel, mid)
                 if model is None:
                     continue
 
-                for attr, value in self._path_results.get(mid, {}).items():
-                    setattr(model, attr, value)
+                apply_extracted_to_model(session, model, self._path_results.get(mid, {}))
 
                 for attr, value in manual.items():
                     setattr(model, attr, value)
+
+                if release_obj is not None:
+                    model.release = release_obj
 
                 if apply_tags:
                     model.tags.clear()

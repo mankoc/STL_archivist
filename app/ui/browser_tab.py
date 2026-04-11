@@ -19,18 +19,24 @@ from PyQt6.QtWidgets import (
 )
 
 from app.database.db import get_session, session_scope
-from app.database.models import STLModel, Tag
-from app.utils.thumbnailer import pixmap_from_bytes
+from app.database.models import STLModel, Tag, Sculptor, ModelType, Subtype, Release
+from app.utils.thumbnailer import pixmap_from_path
 
 # Column indices
-COL_THUMB  = 0
-COL_TITLE  = 1
-COL_AUTHOR = 2
-COL_TYPE   = 3
-COL_DATE   = 4
-COL_TAGS   = 5
-COL_PATH   = 6
-_HEADERS = ["", "Title", "Author", "Type", "Date", "Tags", "Path"]
+COL_THUMB      = 0
+COL_TITLE      = 1
+COL_AUTHOR     = 2
+COL_SOURCE     = 3
+COL_DATE       = 4
+COL_TAGS       = 5
+COL_SCULPTOR   = 6
+COL_MODEL_TYPE = 7
+COL_SUBTYPE    = 8
+COL_SEQUENCE   = 9
+COL_RELEASE    = 10
+COL_PATH       = 11
+_HEADERS = ["", "Title", "Author", "Source", "Date", "Tags",
+            "Sculptor", "Type", "Subtype", "Seq", "Release", "Path"]
 
 MODEL_ID_ROLE = Qt.ItemDataRole.UserRole + 1
 
@@ -72,22 +78,17 @@ class ImageViewerDialog(QDialog):
         self.resize(scaled.width(), scaled.height())
 
 
-class TypeDelegate(QStyledItemDelegate):
-    """Editable QComboBox populated with all existing type values."""
+class _ComboDelegate(QStyledItemDelegate):
+    """Base delegate that shows an editable QComboBox populated by a query callable."""
+
+    def _get_items(self) -> list[str]:
+        raise NotImplementedError
 
     def createEditor(self, parent, option, index):
-        session = get_session()
-        try:
-            types = sorted(filter(None, (
-                v for (v,) in session.query(STLModel.type).distinct().all()
-            )))
-        finally:
-            session.close()
-
         combo = QComboBox(parent)
         combo.setEditable(True)
         combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        combo.addItems(types)
+        combo.addItems(self._get_items())
         combo.setCurrentIndex(-1)
         combo.completer().setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         combo.completer().setFilterMode(Qt.MatchFlag.MatchContains)
@@ -101,6 +102,65 @@ class TypeDelegate(QStyledItemDelegate):
 
     def updateEditorGeometry(self, editor, option, index):
         editor.setGeometry(option.rect)
+
+
+class SourceDelegate(_ComboDelegate):
+    """QComboBox of distinct source/distributor strings."""
+
+    def _get_items(self) -> list[str]:
+        session = get_session()
+        try:
+            return sorted(filter(None, (
+                v for (v,) in session.query(STLModel.source).distinct().all()
+            )))
+        finally:
+            session.close()
+
+
+class SculptorDelegate(_ComboDelegate):
+    """QComboBox of all sculptor names."""
+
+    def _get_items(self) -> list[str]:
+        session = get_session()
+        try:
+            return sorted(s.name for s in session.query(Sculptor).order_by(Sculptor.name).all())
+        finally:
+            session.close()
+
+
+class ModelTypeDelegate(_ComboDelegate):
+    """QComboBox of all ModelType names."""
+
+    def _get_items(self) -> list[str]:
+        session = get_session()
+        try:
+            return sorted(t.name for t in session.query(ModelType).order_by(ModelType.name).all())
+        finally:
+            session.close()
+
+
+class SubtypeDelegate(_ComboDelegate):
+    """QComboBox of all Subtype names."""
+
+    def _get_items(self) -> list[str]:
+        session = get_session()
+        try:
+            return sorted(
+                s.name for s in session.query(Subtype).order_by(Subtype.name).all()
+            )
+        finally:
+            session.close()
+
+
+class ReleaseDelegate(_ComboDelegate):
+    """QComboBox of all Release names."""
+
+    def _get_items(self) -> list[str]:
+        session = get_session()
+        try:
+            return sorted(r.name for r in session.query(Release).order_by(Release.name).all())
+        finally:
+            session.close()
 
 
 class TagDelegate(QStyledItemDelegate):
@@ -239,8 +299,12 @@ class BrowserTab(QWidget):
         self._table.verticalHeader().setVisible(False)
         self._table.setSortingEnabled(True)
         self._table.setAlternatingRowColors(True)
-        self._table.setItemDelegateForColumn(COL_TYPE, TypeDelegate(self._table))
-        self._table.setItemDelegateForColumn(COL_TAGS, TagDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_SOURCE,     SourceDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_TAGS,       TagDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_SCULPTOR,   SculptorDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_MODEL_TYPE, ModelTypeDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_SUBTYPE,    SubtypeDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_RELEASE,    ReleaseDelegate(self._table))
         self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._table.customContextMenuRequested.connect(self._context_menu)
         self._table.horizontalHeader().setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -319,10 +383,10 @@ class BrowserTab(QWidget):
             types_item = QTreeWidgetItem(["Type"])
             types_item.setIcon(0, _icon_type)
             self._filter_tree.addTopLevelItem(types_item)
-            for (t,) in session.query(STLModel.type).distinct().order_by(STLModel.type).all():
+            for (t,) in session.query(STLModel.source).distinct().order_by(STLModel.source).all():
                 if t:
                     child = QTreeWidgetItem([t])
-                    child.setData(0, Qt.ItemDataRole.UserRole, ("type", t))
+                    child.setData(0, Qt.ItemDataRole.UserRole, ("source", t))
                     types_item.addChild(child)
 
             paths_item = QTreeWidgetItem(["Path"])
@@ -368,7 +432,7 @@ class BrowserTab(QWidget):
             if author_filter:
                 q = q.filter(STLModel.author == author_filter)
             if type_filter:
-                q = q.filter(STLModel.type == type_filter)
+                q = q.filter(STLModel.source == type_filter)
             if tag_filter:
                 q = q.filter(STLModel.tags.any(Tag.name == tag_filter))
             if path_filter:
@@ -383,13 +447,19 @@ class BrowserTab(QWidget):
                 tags_str = ", ".join(t.name for t in stl.tags)
                 path_item = QStandardItem(stl.archive_path or "")
                 path_item.setEditable(False)
+                seq_str = str(stl.sequence) if stl.sequence is not None else ""
                 row = [
                     thumb_item,
                     QStandardItem(stl.title or ""),
                     QStandardItem(stl.author or ""),
-                    QStandardItem(stl.type or ""),
+                    QStandardItem(stl.source or ""),
                     QStandardItem(stl.release_date or ""),
                     QStandardItem(tags_str),
+                    QStandardItem(stl.sculptor.name if stl.sculptor else ""),
+                    QStandardItem(stl.type.name if stl.type else ""),
+                    QStandardItem(stl.subtype.name if stl.subtype else ""),
+                    QStandardItem(seq_str),
+                    QStandardItem(stl.release.name if stl.release else ""),
                     path_item,
                 ]
                 self._model.appendRow(row)
@@ -416,8 +486,8 @@ class BrowserTab(QWidget):
                 stl.title = value
             elif col == COL_AUTHOR:
                 stl.author = value
-            elif col == COL_TYPE:
-                stl.type = value
+            elif col == COL_SOURCE:
+                stl.source = value
             elif col == COL_DATE:
                 stl.release_date = value
             elif col == COL_TAGS:
@@ -429,6 +499,56 @@ class BrowserTab(QWidget):
                         session.add(tag)
                         session.flush()
                     stl.tags.append(tag)
+            elif col == COL_SCULPTOR:
+                if value:
+                    sc = session.query(Sculptor).filter_by(name=value).first()
+                    if sc is None:
+                        sc = Sculptor(name=value)
+                        session.add(sc)
+                        session.flush()
+                    stl.sculptor = sc
+                else:
+                    stl.sculptor = None
+            elif col == COL_MODEL_TYPE:
+                if value:
+                    mt = session.query(ModelType).filter_by(name=value).first()
+                    if mt is None:
+                        mt = ModelType(name=value)
+                        session.add(mt)
+                        session.flush()
+                    stl.type = mt
+                else:
+                    stl.type = None
+                    stl.subtype = None  # subtype depends on type
+            elif col == COL_SUBTYPE:
+                if value:
+                    q = session.query(Subtype).filter_by(name=value)
+                    if stl.type_id:
+                        q = q.filter_by(model_type_id=stl.type_id)
+                    st = q.first()
+                    if st is None and stl.type_id:
+                        st = Subtype(name=value, model_type_id=stl.type_id)
+                        session.add(st)
+                        session.flush()
+                    if st:
+                        stl.subtype = st
+                else:
+                    stl.subtype = None
+            elif col == COL_SEQUENCE:
+                try:
+                    stl.sequence = int(value) if value else None
+                except ValueError:
+                    pass
+            elif col == COL_RELEASE:
+                if value:
+                    rel = session.query(Release).filter_by(name=value).first()
+                    if rel is None:
+                        rel = Release(name=value)
+                        session.add(rel)
+                        session.flush()
+                    stl.release = rel
+                else:
+                    stl.release = None
 
     # ------------------------------------------------------------------
     def _on_search(self, text: str):
@@ -444,7 +564,7 @@ class BrowserTab(QWidget):
             self._load_table(author_filter=value)
         elif kind == "tag":
             self._load_table(tag_filter=value)
-        elif kind == "type":
+        elif kind == "source":
             self._load_table(type_filter=value)
         elif kind == "path":
             self._load_table(path_filter=value)
@@ -555,7 +675,7 @@ class BrowserTab(QWidget):
                 return
 
             for img in stl.images:
-                px = pixmap_from_bytes(img.thumbnail)
+                px = pixmap_from_path(img.thumbnail_path)
                 self._thumb_pixmaps.append(px)
                 lbl = ClickableLabel()
                 lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
