@@ -77,6 +77,18 @@ class Release(Base):
         return f"<Release {self.name!r}>"
 
 
+class Scale(Base):
+    __tablename__ = "scales"
+
+    id   = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(64), unique=True, nullable=False)  # e.g. "28mm", "32mm", "75mm"
+
+    models = relationship("STLModel", back_populates="scale")
+
+    def __repr__(self):
+        return f"<Scale {self.name!r}>"
+
+
 class STLModel(Base):
     __tablename__ = "models"
 
@@ -91,20 +103,23 @@ class STLModel(Base):
     archive_path     = Column(Text, unique=True, nullable=False)
     archive_hash     = Column(String(64), nullable=False)
     sequence         = Column(Integer, nullable=True)               # position in a series, e.g. 3
+    presupports      = Column(String(32), nullable=True)            # No / Lychee / Chitubox / Presupported
     created_at       = Column(DateTime, default=_utcnow)
     updated_at       = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
-    sculptor_id      = Column(Integer, ForeignKey("sculptors.id", ondelete="SET NULL"), nullable=True, index=True)
-    category_id      = Column(Integer, ForeignKey("categories.id", ondelete="SET NULL"), nullable=True, index=True)
-    subcategory_id   = Column(Integer, ForeignKey("subcategories.id", ondelete="SET NULL"), nullable=True, index=True)
-    release_id       = Column(Integer, ForeignKey("releases.id", ondelete="SET NULL"), nullable=True, index=True)
+    sculptor_id      = Column(Integer, ForeignKey("sculptors.id",    ondelete="SET NULL"), nullable=True, index=True)
+    category_id      = Column(Integer, ForeignKey("categories.id",   ondelete="SET NULL"), nullable=True, index=True)
+    subcategory_id   = Column(Integer, ForeignKey("subcategories.id",ondelete="SET NULL"), nullable=True, index=True)
+    release_id       = Column(Integer, ForeignKey("releases.id",     ondelete="SET NULL"), nullable=True, index=True)
+    scale_id         = Column(Integer, ForeignKey("scales.id",       ondelete="SET NULL"), nullable=True, index=True)
 
     tags        = relationship("Tag",         secondary=model_tags, back_populates="models")
     images      = relationship("Image",       back_populates="model", cascade="all, delete-orphan")
     sculptor    = relationship("Sculptor",    back_populates="models")
-    category    = relationship("Category",    back_populates="models")
-    subcategory = relationship("Subcategory", back_populates="models")
-    release     = relationship("Release",     back_populates="models")
+    category    = relationship("Category",   back_populates="models")
+    subcategory = relationship("Subcategory",back_populates="models")
+    release     = relationship("Release",    back_populates="models")
+    scale       = relationship("Scale",      back_populates="models")
 
     def __repr__(self):
         return f"<STLModel id={self.id} title={self.title!r}>"

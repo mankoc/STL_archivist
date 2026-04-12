@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QCursor
 
 from app.database.db import session_scope, get_session
-from app.database.models import STLModel, Tag, Release, Category, Subcategory
+from app.database.models import STLModel, Tag, Release, Category, Subcategory, Scale
 from app.utils.path_pattern import (
     parse_path, apply_extracted_to_model,
     ATTR_LABEL as _ATTR_LABEL, PATTERN_HELP as _PATTERN_HELP,
@@ -131,6 +131,9 @@ class MassEditorDialog(QDialog):
         self._author_edit  = QLineEdit(); self._author_edit.setPlaceholderText("e.g. SomeAuthor")
         self._date_edit    = QLineEdit(); self._date_edit.setPlaceholderText("e.g. 2024-01")
         self._title_edit   = QLineEdit()
+        self._scale_combo  = self._make_combo(scales, placeholder="— no change —")
+        self._presupports_combo = QComboBox()
+        self._presupports_combo.addItems(["— no change —", "No", "Lychee", "Chitubox", "Presupported"])
         self._release_edit = QLineEdit(); self._release_edit.setPlaceholderText("Release name (groups models)")
         self._tags_edit    = QLineEdit(); self._tags_edit.setPlaceholderText("tag1, tag2, … (replaces existing tags)")
 
@@ -138,6 +141,7 @@ class MassEditorDialog(QDialog):
         try:
             categories    = sorted(c.name for c in session.query(Category).order_by(Category.name).all())
             subcategories = sorted(s.name for s in session.query(Subcategory).order_by(Subcategory.name).all())
+            scales        = sorted(s.name for s in session.query(Scale).order_by(Scale.name).all())
         finally:
             session.close()
 
@@ -145,14 +149,16 @@ class MassEditorDialog(QDialog):
         self._category_edit.currentTextChanged.connect(self._on_category_changed)
         self._subcategory_edit = self._make_combo(subcategories)
 
-        form.addRow("Type:",        self._type_edit)
-        form.addRow("Author:",      self._author_edit)
-        form.addRow("Date:",        self._date_edit)
-        form.addRow("Title:",       self._title_edit)
-        form.addRow("Release:",     self._release_edit)
-        form.addRow("Category:",    self._category_edit)
-        form.addRow("Subcategory:", self._subcategory_edit)
-        form.addRow("Tags:",        self._tags_edit)
+        form.addRow("Type:",          self._type_edit)
+        form.addRow("Author:",        self._author_edit)
+        form.addRow("Date:",          self._date_edit)
+        form.addRow("Title:",         self._title_edit)
+        form.addRow("Scale:",        self._scale_combo)
+        form.addRow("Presupports:",  self._presupports_combo)
+        form.addRow("Release:",       self._release_edit)
+        form.addRow("Category:",      self._category_edit)
+        form.addRow("Subcategory:",   self._subcategory_edit)
+        form.addRow("Tags:",          self._tags_edit)
 
         root.addWidget(manual_group)
 
@@ -170,11 +176,11 @@ class MassEditorDialog(QDialog):
     # Combo helper
     # ------------------------------------------------------------------
     @staticmethod
-    def _make_combo(values: list[str]) -> QComboBox:
+    def _make_combo(values: list[str], *, placeholder: str = "") -> QComboBox:
         combo = QComboBox()
         combo.setEditable(True)
         combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        combo.addItem("")
+        combo.addItem(placeholder)
         combo.addItems(values)
         combo.setCurrentIndex(0)
         combo.completer().setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
@@ -336,6 +342,12 @@ class MassEditorDialog(QDialog):
             manual["release_date"] = self._date_edit.text().strip()
         if self._title_edit.text().strip():
             manual["title"] = self._title_edit.text().strip()
+        scale_name   = self._scale_combo.currentText().strip()
+        apply_scale  = bool(scale_name) and scale_name != "— no change —"
+
+        presup_choice     = self._presupports_combo.currentText()
+        apply_presupports = presup_choice != "— no change —"
+        presupports_value = presup_choice if apply_presupports else None
 
         release_name    = self._release_edit.text().strip()
         category_name    = self._category_edit.currentText().strip()
@@ -392,6 +404,17 @@ class MassEditorDialog(QDialog):
                             session.add(sub)
                             session.flush()
                         model.subcategory = sub
+
+                if apply_scale:
+                    sc = session.query(Scale).filter_by(name=scale_name).first()
+                    if sc is None:
+                        sc = Scale(name=scale_name)
+                        session.add(sc)
+                        session.flush()
+                    model.scale = sc
+
+                if apply_presupports:
+                    model.presupports = presupports_value or None
 
                 if apply_tags:
                     model.tags.clear()

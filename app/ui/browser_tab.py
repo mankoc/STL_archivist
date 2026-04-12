@@ -25,25 +25,29 @@ from sqlalchemy import or_, and_
 from sqlalchemy.orm import selectinload
 
 from app.database.db import get_session, session_scope
-from app.database.models import STLModel, Tag, Sculptor, Category, Subcategory, Release
+from app.database.models import STLModel, Tag, Sculptor, Category, Subcategory, Release, Scale
 from app.utils.thumbnailer import pixmap_from_path
 from app.utils.path_pattern import parse_release_date, format_release_date
 
 # Column indices
-COL_THUMB       = 0
-COL_TITLE       = 1
-COL_AUTHOR      = 2
-COL_SOURCE      = 3
-COL_DATE        = 4
-COL_TAGS        = 5
-COL_SCULPTOR    = 6
-COL_CATEGORY    = 7
-COL_SUBCATEGORY = 8
-COL_SEQUENCE    = 9
-COL_RELEASE     = 10
-COL_PATH        = 11
+COL_THUMB        = 0
+COL_TITLE        = 1
+COL_AUTHOR       = 2
+COL_SOURCE       = 3
+COL_DATE         = 4
+COL_TAGS         = 5
+COL_SCULPTOR     = 6
+COL_CATEGORY     = 7
+COL_SUBCATEGORY  = 8
+COL_SEQUENCE     = 9
+COL_RELEASE      = 10
+COL_PATH         = 11
+COL_SCALE        = 12
+COL_PRESUPPORTED = 13
+COL_ADDED        = 14
 _HEADERS = ["", "Title", "Author", "Source", "Date", "Tags",
-            "Sculptor", "Category", "Subcategory", "Seq", "Release", "Path"]
+            "Sculptor", "Category", "Subcategory", "Seq", "Release", "Path",
+            "Scale", "Presupports", "Added"]
 
 MODEL_ID_ROLE = Qt.ItemDataRole.UserRole + 1
 
@@ -168,6 +172,40 @@ class ReleaseDelegate(_ComboDelegate):
             return sorted(r.name for r in session.query(Release).order_by(Release.name).all())
         finally:
             session.close()
+
+
+class ScaleDelegate(_ComboDelegate):
+    """QComboBox of all Scale names."""
+
+    def _get_items(self) -> list[str]:
+        session = get_session()
+        try:
+            return sorted(s.name for s in session.query(Scale).order_by(Scale.name).all())
+        finally:
+            session.close()
+
+
+
+    def updateEditorGeometry(self, editor, option, index):
+        editor.setGeometry(option.rect)
+
+
+_PRESUPPORTS_OPTIONS = ["", "No", "Lychee", "Chitubox", "Presupported"]
+
+
+class PresupportsDelegate(QStyledItemDelegate):
+    """Fixed-option combo for the presupports column."""
+
+    def createEditor(self, parent, option, index):
+        combo = QComboBox(parent)
+        combo.addItems(_PRESUPPORTS_OPTIONS)
+        return combo
+
+    def setEditorData(self, editor, index):
+        editor.setCurrentText(index.data() or "")
+
+    def setModelData(self, editor, model, index):
+        model.setData(index, editor.currentText())
 
 
 class TagDelegate(QStyledItemDelegate):
@@ -332,12 +370,14 @@ class BrowserTab(QWidget):
         self._table.verticalHeader().setVisible(False)
         self._table.setSortingEnabled(True)
         self._table.setAlternatingRowColors(True)
-        self._table.setItemDelegateForColumn(COL_SOURCE,      SourceDelegate(self._table))
-        self._table.setItemDelegateForColumn(COL_TAGS,        TagDelegate(self._table))
-        self._table.setItemDelegateForColumn(COL_SCULPTOR,    SculptorDelegate(self._table))
-        self._table.setItemDelegateForColumn(COL_CATEGORY,    CategoryDelegate(self._table))
-        self._table.setItemDelegateForColumn(COL_SUBCATEGORY, SubcategoryDelegate(self._table))
-        self._table.setItemDelegateForColumn(COL_RELEASE,     ReleaseDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_SOURCE,       SourceDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_TAGS,         TagDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_SCULPTOR,     SculptorDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_CATEGORY,     CategoryDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_SUBCATEGORY,  SubcategoryDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_RELEASE,      ReleaseDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_SCALE,        ScaleDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_PRESUPPORTED, PresupportsDelegate(self._table))
         self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._table.customContextMenuRequested.connect(self._context_menu)
         header = self._table.horizontalHeader()
@@ -567,6 +607,7 @@ class BrowserTab(QWidget):
                 selectinload(STLModel.category),
                 selectinload(STLModel.subcategory),
                 selectinload(STLModel.release),
+                selectinload(STLModel.scale),
             )
             if author_filters:
                 q = q.filter(STLModel.author.in_(author_filters))
@@ -600,6 +641,9 @@ class BrowserTab(QWidget):
                 path_item = QStandardItem(stl.archive_path or "")
                 path_item.setEditable(False)
                 seq_str = str(stl.sequence) if stl.sequence is not None else ""
+                added_str = stl.created_at.strftime("%Y-%m-%d") if stl.created_at else ""
+                added_item = QStandardItem(added_str)
+                added_item.setEditable(False)
                 row = [
                     thumb_item,
                     QStandardItem(stl.title or ""),
@@ -613,6 +657,9 @@ class BrowserTab(QWidget):
                     QStandardItem(seq_str),
                     QStandardItem(stl.release.name if stl.release else ""),
                     path_item,
+                    QStandardItem(stl.scale.name if stl.scale else ""),
+                    QStandardItem(stl.presupports or ""),
+                    added_item,
                 ]
                 self._model.appendRow(row)
         finally:
@@ -717,6 +764,18 @@ class BrowserTab(QWidget):
                     stl.release = rel
                 else:
                     stl.release = None
+            elif col == COL_SCALE:
+                if value:
+                    sc = session.query(Scale).filter_by(name=value).first()
+                    if sc is None:
+                        sc = Scale(name=value)
+                        session.add(sc)
+                        session.flush()
+                    stl.scale = sc
+                else:
+                    stl.scale = None
+            elif col == COL_PRESUPPORTED:
+                stl.presupports = value.strip() or None
 
     # ------------------------------------------------------------------
     def _on_search(self, text: str):
@@ -833,11 +892,15 @@ class BrowserTab(QWidget):
     def _save_header_state(self):
         settings = QSettings()
         settings.setValue("browser/header_state", self._table.horizontalHeader().saveState())
+        settings.setValue("browser/header_column_count", self._model.columnCount())
 
     def _restore_header_state(self):
         settings = QSettings()
-        state = settings.value("browser/header_state")
-        if state:
+        state        = settings.value("browser/header_state")
+        saved_count  = settings.value("browser/header_column_count", type=int)
+        current_count = self._model.columnCount()
+
+        if state and saved_count == current_count:
             self._table.horizontalHeader().restoreState(state)
             # Always keep COL_THUMB hidden after restoring
             self._table.setColumnHidden(COL_THUMB, True)
@@ -847,7 +910,9 @@ class BrowserTab(QWidget):
             header.setSectionResizeMode(COL_TITLE, QHeaderView.ResizeMode.Interactive)
             header.setSectionResizeMode(COL_PATH,  QHeaderView.ResizeMode.Interactive)
         else:
-            # Set reasonable defaults when no saved state exists
+            # Column layout changed — discard stale state and use defaults
+            settings.remove("browser/header_state")
+            settings.remove("browser/header_column_count")
             self._table.setColumnWidth(COL_TITLE, 260)
             self._table.setColumnWidth(COL_PATH,  320)
 
@@ -891,6 +956,7 @@ class BrowserTab(QWidget):
         edit_tags_act = None
         edit_categories_act = None
         edit_subcategories_act = None
+        edit_scales_act = None
         src_col = self._proxy.mapToSource(index).column()
         if src_col == COL_TAGS:
             menu.addSeparator()
@@ -902,6 +968,9 @@ class BrowserTab(QWidget):
         elif src_col == COL_SUBCATEGORY:
             menu.addSeparator()
             edit_subcategories_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), "Edit Subcategories…")
+        elif src_col == COL_SCALE:
+            menu.addSeparator()
+            edit_scales_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), "Edit Scales…")
 
         from app.ui.config_dialog import get_file_sorting_enabled
         sort_act = None
@@ -929,6 +998,8 @@ class BrowserTab(QWidget):
             self._open_category_editor()
         elif edit_subcategories_act and action == edit_subcategories_act:
             self._open_subcategory_editor()
+        elif edit_scales_act and action == edit_scales_act:
+            self._open_scale_editor()
 
     def _delete_models(self, model_ids: list[int]):
         count = len(model_ids)
@@ -1023,6 +1094,11 @@ class BrowserTab(QWidget):
     def _open_subcategory_editor(self):
         from app.ui.subcategory_editor_dialog import SubcategoryEditorDialog
         SubcategoryEditorDialog(parent=self).exec()
+        self.refresh()
+
+    def _open_scale_editor(self):
+        from app.ui.scale_editor_dialog import ScaleEditorDialog
+        ScaleEditorDialog(parent=self).exec()
         self.refresh()
 
     def _open_editor(self, model_id: int):

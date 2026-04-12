@@ -10,8 +10,9 @@ from typing import Optional
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from app.config import CrawlerConfig
-from app.crawler.archive import iter_archives, extract_archive_contents, archive_hash, IMAGE_SUFFIXES
+from app.crawler.archive import iter_archives, extract_archive_contents, archive_hash, list_contents, IMAGE_SUFFIXES
 from app.crawler.metadata import extract_metadata
+from app.crawler.rules import detect_presupport
 from app.database.db import session_scope
 from app.database.models import STLModel, Tag, Image, Release
 from app.utils.thumbnailer import save_thumbnail, delete_thumbnail
@@ -225,8 +226,10 @@ class CrawlerWorker(QThread):
             session.add(model)
             self.log.emit("  new")
 
-        model.archive_hash = current_hash
-        model.title        = meta.title
+        model.archive_hash  = current_hash
+        all_names           = list_contents(archive_path, self._config.unrar_path)
+        model.presupports   = detect_presupport(all_names)
+        model.title         = meta.title
         model.author       = meta.author
         model.source       = meta.distributor
         _year, _month = parse_release_date(meta.release_date or "")
