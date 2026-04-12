@@ -2,7 +2,6 @@
 Crawler — walks a source directory, processes each archive, and upserts records
 into the database. Runs inside a QThread to keep the UI responsive.
 """
-import hashlib
 from pathlib import Path
 from typing import Optional
 
@@ -17,14 +16,12 @@ from app.utils.path_pattern import parse_path, apply_extracted_to_model
 
 
 def _hash_file(path: Path, chunk: int = 1 << 20) -> str:
-    """SHA-256 hash of a file, reading in chunks to stay memory-efficient."""
-    h = hashlib.sha256()
+    """xxHash-64 hash of a file, reading in chunks to stay memory-efficient."""
+    import xxhash
+    h = xxhash.xxh64()
     with open(path, "rb") as fh:
-        while True:
-            block = fh.read(chunk)
-            if not block:
-                break
-            h.update(block)
+        for chunk_data in iter(lambda: fh.read(chunk), b""):
+            h.update(chunk_data)
     return h.hexdigest()
 
 
