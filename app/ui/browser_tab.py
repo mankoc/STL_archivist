@@ -239,6 +239,8 @@ class BrowserTab(QWidget):
         super().__init__(parent)
         self._loading = False
         self._thumb_pixmaps: list[QPixmap] = []  # original (unscaled) pixmaps
+        self._cached_path_dirs: frozenset[str] = frozenset()
+        self._cached_sorted_dirs: list[str] = []
         self._build_ui()
         self.refresh()
 
@@ -422,10 +424,14 @@ class BrowserTab(QWidget):
                 paths_item.setIcon(0, _icon_path)
                 self._filter_tree.addTopLevelItem(paths_item)
                 dirs: set[str] = set()
-                for (ap,) in session.query(STLModel.archive_path).all():
+                for (ap,) in session.query(STLModel.archive_path).distinct().all():
                     if ap:
                         dirs.add(str(FSPath(ap).parent))
-                self._build_path_tree(paths_item, sorted(dirs))
+                new_dirs = frozenset(dirs)
+                if new_dirs != self._cached_path_dirs:
+                    self._cached_path_dirs = new_dirs
+                    self._cached_sorted_dirs = sorted(dirs)
+                self._build_path_tree(paths_item, self._cached_sorted_dirs)
         finally:
             session.close()
 
