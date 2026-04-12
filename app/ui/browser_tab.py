@@ -9,7 +9,7 @@ from pathlib import Path as FSPath
 
 _ICONS_DIR = FSPath(__file__).parent.parent.parent / "resources" / "icons"
 
-from PyQt6.QtCore import Qt, QSortFilterProxyModel, QSize, QStringListModel, QEvent, pyqtSignal, QItemSelection
+from PyQt6.QtCore import Qt, QSortFilterProxyModel, QSize, QStringListModel, QEvent, pyqtSignal, QItemSelection, QTimer
 from PyQt6.QtGui import QStandardItemModel, QStandardItem, QPixmap, QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
@@ -241,6 +241,12 @@ class BrowserTab(QWidget):
         self._thumb_pixmaps: list[QPixmap] = []  # original (unscaled) pixmaps
         self._cached_path_dirs: frozenset[str] = frozenset()
         self._cached_sorted_dirs: list[str] = []
+        # Debounce rapid cell edits: keyed by (row, col) → QStandardItem
+        self._pending_edits: dict[tuple[int, int], "QStandardItem"] = {}
+        self._edit_timer = QTimer(self)
+        self._edit_timer.setSingleShot(True)
+        self._edit_timer.setInterval(400)  # ms
+        self._edit_timer.timeout.connect(self._flush_pending_edits)
         self._build_ui()
         self.refresh()
 
@@ -516,6 +522,19 @@ class BrowserTab(QWidget):
         col = item.column()
         if col == COL_THUMB:
             return
+        # Debounce: store the latest item for this cell and (re)start the timer.
+        self._pending_edits[(item.row(), col)] = item
+        self._edit_timer.start()
+
+    def _flush_pending_edits(self):
+        """Write all debounced cell edits to the DB in a single pass."""
+        items = list(self._pending_edits.values())
+        self._pending_edits.clear()
+        for item in items:
+            self._write_item(item)
+
+    def _write_item(self, item: QStandardItem):
+        col = item.column()
         model_id = self._model.item(item.row(), COL_THUMB).data(MODEL_ID_ROLE)
         if model_id is None:
             return
