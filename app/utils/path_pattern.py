@@ -168,6 +168,53 @@ def parse_path(pattern: str, path: str) -> dict[str, str]:
     return {}
 
 
+def render_path_pattern(pattern: str, model) -> str:
+    """Expand *pattern* using *model* attributes.
+
+    Replaces ``{token}`` placeholders with the corresponding value from the
+    STLModel instance.  Unknown or empty tokens are replaced with ``_unknown``.
+    The result is NOT joined with a base directory — callers do that.
+
+    Only the *filename* part (last segment) keeps the original archive
+    extension so the resulting path remains a valid archive path.
+    """
+    import os
+    import re
+
+    # Build a lookup dict from model attributes
+    def _safe(v) -> str:
+        if v is None:
+            return "_unknown"
+        s = str(v).strip()
+        return s if s else "_unknown"
+
+    values: dict[str, str] = {
+        "source":      _safe(model.source),
+        "author":      _safe(model.author),
+        "title":       _safe(model.title),
+        "name":        _safe(model.title),
+        "date":        _safe(model.release_date),
+        "month":       _safe(model.release_date),
+        "url":         _safe(model.url),
+        "sculptor":    _safe(model.sculptor.name if model.sculptor else None),
+        "category":    _safe(model.category.name if model.category else None),
+        "subcategory": _safe(model.subcategory.name if model.subcategory else None),
+        "sequence":    _safe(model.sequence),
+        "release":     _safe(model.release.name if model.release else None),
+    }
+
+    # Replace each {token} with its value, sanitising directory-separator chars
+    def _sub(m: re.Match) -> str:
+        token = m.group(1).lower()
+        raw = values.get(token, "_unknown")
+        # Strip characters unsafe in path components
+        safe = re.sub(r'[\\/:*?"<>|]', "_", raw)
+        return safe
+
+    rendered = re.sub(r"\{(\w+)\}", _sub, pattern)
+    return rendered
+
+
 def apply_extracted_to_model(session, model, extracted: dict[str, str],
                              overwrite: bool = True) -> None:
     """Write *extracted* field values onto *model* inside *session*.
