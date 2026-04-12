@@ -104,6 +104,7 @@ class STLModel(Base):
     archive_hash     = Column(String(64), nullable=False)
     sequence         = Column(Integer, nullable=True)               # position in a series, e.g. 3
     presupports      = Column(String(32), nullable=True)            # No / Lychee / Chitubox / Presupported
+    warning          = Column(Text, nullable=True)                  # newline-separated warning strings, NULL if none
     created_at       = Column(DateTime, default=_utcnow)
     updated_at       = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 

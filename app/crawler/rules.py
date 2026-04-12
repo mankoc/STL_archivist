@@ -33,10 +33,30 @@ from pathlib import Path
 #
 # Returns a de-duplicated list in order of first appearance.
 # ──────────────────────────────────────────────────────────────────────────────
+# Warning detection
+#
+# Two optional checks, each controlled by a config flag:
+#
+#   • "presupported stl"      — archive contains an STL whose filename matches
+#                               "[ |_]presupported.stl" (e.g. "body_presupported.stl")
+#                               or "sup*.stl" (e.g. "supported.stl", "sup_dragon.stl")
+#
+#   • "Archive without images" — archive contains no image file (.jpg, .jpeg,
+#                               .png, .webp, .bmp)
+#
+# Returns a newline-separated string of active warnings, or "" if none.
+# ──────────────────────────────────────────────────────────────────────────────
 
-_PRESUPPORTED_RE = re.compile(r"[_ -]supported", re.IGNORECASE)
-_SCALE_MM_RE     = re.compile(r"\b(\d+)[_ ]?mm\b", re.IGNORECASE)
-_SCALE_RATIO_RE  = re.compile(r"\b1[/\-](\d+)\b")
+_PRESUPPORTED_RE     = re.compile(r"[_ -]supported", re.IGNORECASE)
+_SCALE_MM_RE         = re.compile(r"\b(\d+)[_ ]?mm\b", re.IGNORECASE)
+_SCALE_RATIO_RE      = re.compile(r"\b1[/\-](\d+)\b")
+
+# Warning: presupported STL detection
+# Matches filenames like "body_presupported.stl", "torso presupported.stl",
+# "supported.stl", "sup_dragon.stl" (the sup*.stl glob)
+_WARN_PRESUP_STL_RE    = re.compile(r"(?:[ |_]presupported\.stl$|^sup.*\.stl$)", re.IGNORECASE)
+_WARN_IMAGE_SUFFIXES   = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+_WARN_ARCHIVE_SUFFIXES = {".zip", ".rar", ".7z"}
 
 
 def detect_presupport(names: list[str]) -> str:
@@ -60,6 +80,56 @@ def detect_presupport(names: list[str]) -> str:
     if has_presupported:
         return "Presupported"
     return "No"                               # rule 4 – fallback
+
+
+def detect_warnings(
+    names: list[str],
+    check_presupported: bool = True,
+    check_no_images: bool = True,
+    check_nested_archive: bool = True,
+) -> str:
+    """
+    Return a newline-separated string of warnings for an archive, or ``""``
+    if no warnings apply.
+
+    *names* should contain the archive member names (as returned by
+    ``list_contents``).
+
+    Parameters
+    ----------
+    check_presupported:
+        Warn when the archive contains an STL matching ``[ |_]presupported.stl``
+        or ``sup*.stl`` (config option "Archive have presupported stls").
+    check_no_images:
+        Warn when the archive contains no image file (.jpg/.jpeg/.png/.webp/.bmp)
+        (config option "Archive contains images").
+    check_nested_archive:
+        Warn when the archive contains another compressed archive (.zip/.rar/.7z)
+        (config option "Archive inside archive").
+    """
+    warnings: list[str] = []
+    has_image            = False
+    has_presup_stl       = False
+    has_nested_archive   = False
+
+    for name in names:
+        fname = Path(name.replace("\\", "/")).name
+        suffix = Path(fname).suffix.lower()
+        if check_no_images and suffix in _WARN_IMAGE_SUFFIXES:
+            has_image = True
+        if check_presupported and _WARN_PRESUP_STL_RE.search(fname):
+            has_presup_stl = True
+        if check_nested_archive and suffix in _WARN_ARCHIVE_SUFFIXES:
+            has_nested_archive = True
+
+    if check_presupported and has_presup_stl:
+        warnings.append("presupported stl")
+    if check_no_images and not has_image:
+        warnings.append("Archive without images")
+    if check_nested_archive and has_nested_archive:
+        warnings.append("Archive inside archive")
+
+    return "\n".join(warnings)
 
 
 def detect_scale(names: list[str]) -> list[str]:
