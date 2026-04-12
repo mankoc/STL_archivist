@@ -24,6 +24,7 @@ from PyQt6.QtCore import QSettings
 from app.database.db import get_session, session_scope
 from app.database.models import STLModel, Tag, Sculptor, Category, Subcategory, Release
 from app.utils.thumbnailer import pixmap_from_path
+from app.utils.path_pattern import parse_release_date, format_release_date
 
 # Column indices
 COL_THUMB       = 0
@@ -479,7 +480,7 @@ class BrowserTab(QWidget):
                     QStandardItem(stl.title or ""),
                     QStandardItem(stl.author or ""),
                     QStandardItem(stl.source or ""),
-                    QStandardItem(stl.release_date or ""),
+                    QStandardItem(format_release_date(stl.release_year, stl.release_month)),
                     QStandardItem(tags_str),
                     QStandardItem(stl.sculptor.name if stl.sculptor else ""),
                     QStandardItem(stl.category.name if stl.category else ""),
@@ -516,7 +517,9 @@ class BrowserTab(QWidget):
             elif col == COL_SOURCE:
                 stl.source = value
             elif col == COL_DATE:
-                stl.release_date = value
+                _year, _month = parse_release_date(value or "")
+                stl.release_year  = _year
+                stl.release_month = _month
             elif col == COL_TAGS:
                 stl.tags.clear()
                 for name in [t.strip().lower() for t in (value or "").split(",") if t.strip()]:

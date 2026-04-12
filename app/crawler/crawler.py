@@ -12,7 +12,7 @@ from app.crawler.metadata import extract_metadata
 from app.database.db import session_scope
 from app.database.models import STLModel, Tag, Image, Release
 from app.utils.thumbnailer import save_thumbnail, delete_thumbnail
-from app.utils.path_pattern import parse_path, apply_extracted_to_model
+from app.utils.path_pattern import parse_path, apply_extracted_to_model, parse_release_date
 
 
 def _hash_file(path: Path, chunk: int = 1 << 20) -> str:
@@ -175,7 +175,9 @@ class CrawlerWorker(QThread):
         model.title        = meta.title
         model.author       = meta.author
         model.source       = meta.distributor
-        model.release_date = meta.release_date
+        _year, _month = parse_release_date(meta.release_date or "")
+        model.release_year  = _year
+        model.release_month = _month
         model.url          = meta.url
         model.description  = meta.description
 

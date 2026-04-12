@@ -15,7 +15,7 @@ from PyQt6.QtGui import QCursor
 from app.database.db import session_scope, get_session
 from app.database.models import STLModel, Tag, Release, Sculptor, Category, Subcategory
 from app.utils.thumbnailer import pixmap_from_path
-from app.utils.path_pattern import parse_path, ATTR_LABEL, PATTERN_HELP
+from app.utils.path_pattern import parse_path, ATTR_LABEL, PATTERN_HELP, parse_release_date, format_release_date
 
 
 class TagEdit(QLineEdit):
@@ -109,7 +109,13 @@ class EditorDialog(QDialog):
             titles     = _uniq(STLModel.title)
             authors    = _uniq(STLModel.author)
             sources    = _uniq(STLModel.source)
-            dates      = _uniq(STLModel.release_date)
+            dates      = sorted({
+                format_release_date(y, mo)
+                for (y, mo) in session.query(STLModel.release_year, STLModel.release_month)
+                                      .filter(STLModel.release_year.isnot(None))
+                                      .distinct()
+                                      .all()
+            })
             all_tags   = [t.name for t in session.query(Tag).order_by(Tag.name).all()]
             releases   = sorted(r.name for r in session.query(Release).order_by(Release.name).all())
             sculptors  = sorted(s.name for s in session.query(Sculptor).order_by(Sculptor.name).all())
@@ -314,7 +320,7 @@ class EditorDialog(QDialog):
             self._title_edit.setText(model.title or "")
             self._author_edit.setText(model.author or "")
             self._source_edit.setCurrentText(model.source or "")
-            self._date_edit.setText(model.release_date or "")
+            self._date_edit.setText(format_release_date(model.release_year, model.release_month))
             self._release_edit.setCurrentText(model.release.name if model.release else "")
             self._sculptor_edit.setCurrentText(model.sculptor.name if model.sculptor else "")
             category_name = model.category.name if model.category else ""
@@ -452,7 +458,9 @@ class EditorDialog(QDialog):
             model.title        = self._title_edit.text().strip() or None
             model.author       = self._author_edit.text().strip() or None
             model.source       = self._source_edit.currentText().strip() or None
-            model.release_date = self._date_edit.text().strip() or None
+            _year, _month = parse_release_date(self._date_edit.text().strip())
+            model.release_year  = _year
+            model.release_month = _month
             model.url          = self._url_edit.text().strip() or None
             model.description  = self._desc_edit.toPlainText().strip() or None
             seq = self._sequence_spin.value()

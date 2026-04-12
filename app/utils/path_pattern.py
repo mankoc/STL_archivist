@@ -12,6 +12,34 @@ to resolve them into the correct DB objects.
 """
 import re
 
+
+def parse_release_date(s: str) -> tuple[int | None, int | None]:
+    """Parse a date string like 'YYYY-MM', 'YYYY_MM', or 'YYYY' into (year, month).
+
+    Returns (None, None) for unrecognised input.
+    """
+    if not s:
+        return None, None
+    m = re.match(r'^(\d{4})[-_](\d{1,2})$', s.strip())
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    m = re.match(r'^(\d{4})$', s.strip())
+    if m:
+        return int(m.group(1)), None
+    return None, None
+
+
+def format_release_date(year: int | None, month: int | None) -> str:
+    """Format release_year / release_month integers into a display string.
+
+    Returns '' when year is None.
+    """
+    if year is None:
+        return ""
+    if month is not None:
+        return f"{year}-{month:02d}"
+    return str(year)
+
 # Maps lowercase token name → field key used in extracted dicts.
 # Plain string fields map directly to STLModel attributes.
 # FK / special fields use a "virtual" key (e.g. "sculptor_name") that
@@ -32,7 +60,7 @@ TOKEN_MAP = {
 }
 
 # Simple string attributes that can be set with setattr directly
-_SIMPLE_ATTRS = {"source", "author", "title", "release_date", "url"}
+_SIMPLE_ATTRS = {"source", "author", "title", "url"}
 
 # Human-readable label for each field key (for preview lines)
 ATTR_LABEL = {
@@ -193,8 +221,8 @@ def render_path_pattern(pattern: str, model) -> str:
         "author":      _safe(model.author),
         "title":       _safe(model.title),
         "name":        _safe(model.title),
-        "date":        _safe(model.release_date),
-        "month":       _safe(model.release_date),
+        "date":        _safe(format_release_date(model.release_year, model.release_month)),
+        "month":       _safe(format_release_date(model.release_year, model.release_month)),
         "url":         _safe(model.url),
         "sculptor":    _safe(model.sculptor.name if model.sculptor else None),
         "category":    _safe(model.category.name if model.category else None),
@@ -239,6 +267,13 @@ def apply_extracted_to_model(session, model, extracted: dict[str, str],
         if attr in _SIMPLE_ATTRS:
             if _should_set(getattr(model, attr, None)):
                 setattr(model, attr, value)
+
+        elif attr == "release_date":
+            if _should_set(model.release_year):
+                year, month = parse_release_date(value)
+                if year is not None:
+                    model.release_year = year
+                    model.release_month = month
 
         elif attr == "sculptor_name":
             if _should_set(model.sculptor_id):
