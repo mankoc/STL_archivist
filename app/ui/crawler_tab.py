@@ -10,7 +10,9 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QIcon, QCursor
 
+from app.config import CrawlerConfig
 from app.crawler.crawler import CrawlerWorker
+from app.ui.config_dialog import get_max_thumbnails, get_max_thumb_size, get_unrar_path
 from app.utils.path_pattern import parse_path, PATTERN_HELP, ATTR_LABEL
 
 _SAVED_PATTERNS_KEY = "crawler/saved_patterns"
@@ -265,7 +267,12 @@ class CrawlerTab(QWidget):
         self._stop_btn.setEnabled(True)
 
         pattern = self._pattern_edit.text().strip()
-        self._worker = CrawlerWorker(source, pattern=pattern)
+        config = CrawlerConfig(
+            max_thumbnails=get_max_thumbnails(),
+            max_thumb_size=get_max_thumb_size(),
+            unrar_path=get_unrar_path(),
+        )
+        self._worker = CrawlerWorker(source, pattern=pattern, config=config)
         self._worker.log.connect(self._on_log)
         self._worker.progress.connect(self._on_progress)
         self._worker.finished.connect(self._on_finished)

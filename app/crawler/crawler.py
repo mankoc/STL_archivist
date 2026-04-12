@@ -7,6 +7,7 @@ from typing import Optional
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from app.config import CrawlerConfig
 from app.crawler.archive import is_archive, extract_archive_contents, IMAGE_SUFFIXES
 from app.crawler.metadata import extract_metadata
 from app.database.db import session_scope
@@ -48,10 +49,11 @@ class CrawlerWorker(QThread):
     log      = pyqtSignal(str)
     finished = pyqtSignal()
 
-    def __init__(self, source_dir: str, pattern: str = "", parent=None):
+    def __init__(self, source_dir: str, pattern: str = "", config: CrawlerConfig | None = None, parent=None):
         super().__init__(parent)
         self.source_dir = Path(source_dir)
         self._pattern = pattern.strip()
+        self._config = config or CrawlerConfig()
         self._stop_requested = False
 
     def stop(self):
@@ -69,9 +71,8 @@ class CrawlerWorker(QThread):
         total = len(archives)
         self.log.emit(f"Found {total} archives in {self.source_dir}")
 
-        from app.ui.config_dialog import get_max_thumbnails, get_max_thumb_size
-        max_thumbs = get_max_thumbnails()
-        max_thumb_size = get_max_thumb_size()
+        max_thumbs = self._config.max_thumbnails
+        max_thumb_size = self._config.max_thumb_size
 
         for batch_start in range(0, total, self.BATCH_SIZE):
             batch = archives[batch_start:batch_start + self.BATCH_SIZE]
@@ -138,7 +139,7 @@ class CrawlerWorker(QThread):
             return
 
         # Extract archive contents for metadata + (new files only) thumbnails
-        contents = extract_archive_contents(archive_path)
+        contents = extract_archive_contents(archive_path, unrar_path=self._config.unrar_path)
         image_names = [
             n for n in contents
             if Path(n.replace("\\", "/")).suffix.lower() in IMAGE_SUFFIXES
