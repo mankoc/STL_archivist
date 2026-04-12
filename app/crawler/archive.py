@@ -38,6 +38,18 @@ def is_archive(path: Path) -> bool:
     return path.suffix.lower() in ARCHIVE_SUFFIXES
 
 
+def iter_archives(root: Path):
+    """Yield every archive file under *root*, filtering on the fly.
+
+    Using a generator avoids materialising non-archive paths into memory and
+    lets callers begin processing the first archive before the full tree scan
+    completes.
+    """
+    for p in root.rglob("*"):
+        if p.suffix.lower() in ARCHIVE_SUFFIXES:
+            yield p
+
+
 def _open_zip(path: Path):
     return zipfile.ZipFile(str(path), "r")
 
