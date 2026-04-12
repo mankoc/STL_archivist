@@ -108,15 +108,3 @@ def pixmap_from_path(rel_path: Optional[str]):
     px = QPixmap()
     px.load(str(full))
     return px
-
-
-def pixmap_from_bytes(thumbnail_bytes: bytes):
-    """Load a QPixmap from raw JPEG bytes (kept for compatibility)."""
-    from PyQt6.QtGui import QPixmap
-    from PyQt6.QtCore import QByteArray
-    if not thumbnail_bytes:
-        return QPixmap()
-    ba = QByteArray(thumbnail_bytes)
-    px = QPixmap()
-    px.loadFromData(ba, "JPEG")
-    return px
