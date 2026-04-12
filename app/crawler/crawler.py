@@ -10,22 +10,13 @@ from typing import Optional
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from app.config import CrawlerConfig
-from app.crawler.archive import iter_archives, extract_archive_contents, IMAGE_SUFFIXES
+from app.crawler.archive import iter_archives, extract_archive_contents, archive_hash, IMAGE_SUFFIXES
 from app.crawler.metadata import extract_metadata
 from app.database.db import session_scope
 from app.database.models import STLModel, Tag, Image, Release
 from app.utils.thumbnailer import save_thumbnail, delete_thumbnail
 from app.utils.path_pattern import parse_path, apply_extracted_to_model, parse_release_date
 
-
-def _hash_file(path: Path, chunk: int = 1 << 20) -> str:
-    """xxHash-64 hash of a file, reading in chunks to stay memory-efficient."""
-    import xxhash
-    h = xxhash.xxh64()
-    with open(path, "rb") as fh:
-        for chunk_data in iter(lambda: fh.read(chunk), b""):
-            h.update(chunk_data)
-    return h.hexdigest()
 
 
 def _get_or_create_tag(session, name: str) -> Tag:
@@ -80,9 +71,10 @@ class CrawlerWorker(QThread):
                 break
             batch = archives[batch_start:batch_start + self.BATCH_SIZE]
 
-            # Phase 1: hash all archives in the batch in parallel (IO-bound)
+            # Phase 1: read per-member CRCs from each archive's catalog (no decompression)
+            hash_fn = partial(archive_hash, unrar_path=self._config.unrar_path)
             with ThreadPoolExecutor(max_workers=workers) as pool:
-                hashes: dict[Path, str] = dict(zip(batch, pool.map(_hash_file, batch)))
+                hashes: dict[Path, str] = dict(zip(batch, pool.map(hash_fn, batch)))
 
             with session_scope() as session:
                 # Phase 2: batch-query existing records — one round-trip for the whole batch

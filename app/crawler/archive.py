@@ -38,6 +38,51 @@ def is_archive(path: Path) -> bool:
     return path.suffix.lower() in ARCHIVE_SUFFIXES
 
 
+def archive_hash(path: Path, unrar_path: str = "") -> str:
+    """
+    Derive a stable fingerprint from the CRC values already stored in the
+    archive's internal catalog — no member data is read or decompressed.
+
+    Members are sorted by name before hashing so the result is independent
+    of insertion order.  Falls back to a size+mtime fingerprint when the
+    archive cannot be opened (e.g. truncated file).
+    """
+    import xxhash
+    suffix = path.suffix.lower()
+    members: list[tuple[str, int]] = []
+    try:
+        if suffix == ".zip":
+            with zipfile.ZipFile(str(path), "r") as zf:
+                members = sorted(
+                    (info.filename, info.CRC & 0xFFFFFFFF)
+                    for info in zf.infolist()
+                )
+        elif suffix == ".7z":
+            with py7zr.SevenZipFile(str(path), mode="r") as zf:
+                members = sorted(
+                    (f.filename, f.digest or 0)
+                    for f in zf.list()
+                )
+        elif suffix == ".rar":
+            if unrar_path:
+                rarfile.UNRAR_TOOL = unrar_path
+            with rarfile.RarFile(str(path), "r") as rf:
+                members = sorted(
+                    (info.filename, getattr(info, "CRC", 0) or 0)
+                    for info in rf.infolist()
+                    if not info.is_dir()
+                )
+    except Exception:
+        stat = path.stat()
+        return f"fallback:{stat.st_size}:{stat.st_mtime_ns}"
+
+    h = xxhash.xxh64()
+    for name, crc in members:
+        h.update(name.encode("utf-8", errors="replace"))
+        h.update(crc.to_bytes(4, "little"))
+    return h.hexdigest()
+
+
 def iter_archives(root: Path):
     """Yield every archive file under *root*, filtering on the fly.
 
