@@ -69,6 +69,10 @@ class CrawlerWorker(QThread):
         total = len(archives)
         self.log.emit(f"Found {total} archives in {self.source_dir}")
 
+        from app.ui.config_dialog import get_max_thumbnails, get_max_thumb_size
+        max_thumbs = get_max_thumbnails()
+        max_thumb_size = get_max_thumb_size()
+
         for batch_start in range(0, total, self.BATCH_SIZE):
             batch = archives[batch_start:batch_start + self.BATCH_SIZE]
             with session_scope() as session:
@@ -80,7 +84,7 @@ class CrawlerWorker(QThread):
                     self.log.emit(f"[{idx}/{total}] {archive_path.name}")
                     sp = session.begin_nested()
                     try:
-                        self._process_archive(archive_path, session)
+                        self._process_archive(archive_path, session, max_thumbs, max_thumb_size)
                         sp.commit()
                     except Exception as exc:
                         sp.rollback()
@@ -111,7 +115,7 @@ class CrawlerWorker(QThread):
         if removed:
             self.log.emit(f"Removed {removed} missing record(s) from database.")
 
-    def _process_archive(self, archive_path: Path, session):
+    def _process_archive(self, archive_path: Path, session, max_thumbs: int, max_thumb_size: int):
         archive_str = str(archive_path)
         current_hash = _hash_file(archive_path)
 
@@ -199,9 +203,6 @@ class CrawlerWorker(QThread):
 
         # Thumbnails – only for new archives
         if not existing:
-            from app.ui.config_dialog import get_max_thumbnails, get_max_thumb_size
-            max_thumbs = get_max_thumbnails()
-            max_thumb_size = get_max_thumb_size()
             count = 0
             for filename in image_names:
                 if count >= max_thumbs:
