@@ -21,6 +21,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import QSettings
 
+from sqlalchemy.orm import selectinload
+
 from app.database.db import get_session, session_scope
 from app.database.models import STLModel, Tag, Sculptor, Category, Subcategory, Release
 from app.utils.thumbnailer import pixmap_from_path
@@ -455,7 +457,13 @@ class BrowserTab(QWidget):
         self._model.removeRows(0, self._model.rowCount())
         session = get_session()
         try:
-            q = session.query(STLModel)
+            q = session.query(STLModel).options(
+                selectinload(STLModel.tags),
+                selectinload(STLModel.sculptor),
+                selectinload(STLModel.category),
+                selectinload(STLModel.subcategory),
+                selectinload(STLModel.release),
+            )
             if author_filter:
                 q = q.filter(STLModel.author == author_filter)
             if type_filter:
