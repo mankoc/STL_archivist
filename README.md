@@ -4,13 +4,19 @@ A desktop application for cataloguing and browsing your local collection of 3D p
 
 ## Features
 
-- **Crawler** — scans a folder of archives (`.zip`, `.7z`, `.rar`) and automatically imports model metadata into a local SQLite database
+- **Crawler** — scans a folder of archives (`.zip`, `.7z`, `.rar`) and automatically imports model metadata into a local SQLite database; runs with parallel workers for fast processing
 - **Path pattern parsing** — extract sculptor, release name, model title, and more directly from your folder/file naming conventions
-- **Thumbnail generation** — extracts preview images from archives and stores them locally
+- **Thumbnail generation** — extracts preview images from archives and stores them locally; configurable count and resolution
+- **Scale detection** — automatically detects miniature scale (e.g. `28mm`, `32mm`, `1/35`) from archive and file names
+- **Presupport detection** — identifies whether an archive contains Lychee, Chitubox, or presupported STL files
+- **Crawler warnings** — flags archives that contain presupported STLs, no images, or nested archives
 - **Tagging** — add and manage tags per model for easy filtering
-- **Browser** — search, filter, and browse your collection with inline editing support
-- **Editor** — edit model metadata (title, author, sculptor, type, subtype, release, tags, source, URL, date)
-- **Mass editor** — apply bulk changes across multiple models at once
+- **Browser** — search, filter, and browse your collection with inline editing, multi-value filters, and a clear-filters button
+- **Image grid** — display a grid of thumbnails for the currently filtered set of models
+- **Editor** — edit model metadata (title, author, sculptor, category, subcategory, release, scale, presupports, source, URL, date, sequence, tags)
+- **Mass editor** — apply bulk changes across multiple models at once, including category and subcategory
+- **File sorting** — optionally move and rename archive files into a structured directory layout using a path pattern (enable in Configuration)
+- **Themes** — built-in color schemes: System Default, VS Code Dark+, Windows 11 Dark, Windows 11 Light
 
 ## Requirements
 
@@ -21,7 +27,6 @@ A desktop application for cataloguing and browsing your local collection of 3D p
   - Pillow
   - py7zr
   - rarfile
-  - qt-material
   - xxhash
 
 ## Installation
@@ -46,25 +51,33 @@ python main.py
 > **Note for RAR support:** `rarfile` requires the `unrar` binary to be installed on your system.
 > - Linux: `sudo apt install unrar`
 > - Windows: install [WinRAR](https://www.rarlab.com/) or the standalone `UnRAR` tool and make sure it is on your `PATH`.
+> You can also set a custom path to the executable in **Configuration → Crawler → RAR tool**.
 
 ## Usage
 
-### 1. Configure the database path
+### 1. Configure the application
 
-On first launch, go to **Settings → Configure Database Path** and choose where the SQLite database file should be stored.
+On first launch, go to **File → Configuration…** and set up:
+
+- **Database** — choose where the SQLite database and thumbnails are stored (restart required after changing)
+- **Crawler** — max thumbnails per model, max image size in pixels, path to `unrar` executable, and which crawler warnings to enable
+- **Browser** — enable the *Sort files into directory* option (adds a right-click menu entry)
+- **Appearance** — select a color scheme (preview is applied immediately; Cancel reverts)
 
 ### 2. Crawl your archive folder
 
 1. Click **Open Crawler** (toolbar icon or `Ctrl+O`).
 2. Select the root folder that contains your STL archives.
 3. Optionally set a **path pattern** to auto-populate metadata fields from your folder/file naming convention (see [Path Patterns](#path-patterns) below).
-4. Click **Start**. The crawler will walk the directory recursively, hash each archive, extract preview images, and upsert records into the database.
+4. Click **Start**. The crawler will walk the directory recursively, hash each archive, detect scale and presupport information, extract preview images, and upsert records into the database.
 
 ### 3. Browse and edit
 
-- Use the search bar and filter dropdowns to narrow down the collection.
+- Use the search bar and filter tree (Sculptor / Tags / Category) to narrow down the collection.
+- Use the multi-value filter dropdowns and the **Clear filters** button to reset filters quickly.
 - Double-click a row (or press `Enter`) to open the **Editor** and update model details.
-- Right-click for context-menu options including opening the archive folder, previewing a random file, and deleting a record.
+- Click **Image Grid** in the toolbar to view thumbnails for all currently displayed models.
+- Right-click for context-menu options including opening the archive folder, previewing a random file, deleting a record, and (if enabled) sorting files into a directory.
 - Use **Mass Edit** to apply changes to multiple selected rows at once.
 
 ### 4. Tags
@@ -72,6 +85,14 @@ On first launch, go to **Settings → Configure Database Path** and choose where
 - **Add Tag** — creates a new global tag (toolbar button).
 - **Edit Tags** — opens the tag manager to rename or delete existing tags.
 - Tags can be assigned per model through the editor or the inline tag autocomplete in the browser table.
+
+### 5. Categories, Subcategories, and Sculptors
+
+Managed through dedicated editor dialogs accessible from the browser's right-click menu or the editor. Each category can have multiple subcategories (e.g. Category: *Comics*, Subcategory: *Marvel*). Deleting a category cascades to its subcategories.
+
+### 6. Scales
+
+Scale values (e.g. `28mm`, `32mm`, `1/35`) are detected automatically during crawl and can also be set manually per model through the editor or the **Scale** inline cell in the browser.
 
 ## Path Patterns
 
@@ -106,28 +127,39 @@ stl_database/
 ├── main.py                  # Entry point
 ├── requirements.txt
 ├── resources/
-│   └── style.qss            # Application stylesheet
+│   ├── style.qss            # Application stylesheet
+│   ├── icons/               # SVG icons (light/dark variants)
+│   └── themes/              # QSS color schemes (VS Code, Win11)
 ├── app/
+│   ├── config.py            # CrawlerConfig dataclass
 │   ├── crawler/
-│   │   ├── crawler.py       # QThread-based directory crawler
+│   │   ├── crawler.py       # QThread-based directory crawler (parallel workers)
 │   │   ├── archive.py       # Archive extraction helpers
-│   │   └── metadata.py      # Metadata extraction logic
+│   │   ├── metadata.py      # Metadata extraction logic
+│   │   └── rules.py         # Scale / presupport / warning detection rules
 │   ├── database/
 │   │   ├── db.py            # SQLAlchemy engine / session helpers
-│   │   └── models.py        # ORM models (STLModel, Tag, Image, …)
+│   │   └── models.py        # ORM models (STLModel, Tag, Image, Sculptor, Category, Subcategory, Release, Scale)
 │   ├── ui/
 │   │   ├── main_window.py   # Main application window
-│   │   ├── browser_tab.py   # Collection browser
+│   │   ├── browser_tab.py   # Collection browser with inline editing and multi-value filters
 │   │   ├── crawler_dialog.py
+│   │   ├── crawler_tab.py
 │   │   ├── editor_dialog.py
 │   │   ├── mass_editor_dialog.py
-│   │   ├── tag_editor_tab.py
+│   │   ├── image_grid_dialog.py
+│   │   ├── scale_editor_dialog.py
+│   │   ├── category_editor_dialog.py
+│   │   ├── subcategory_editor_dialog.py
 │   │   ├── tag_editor_dialog.py
+│   │   ├── sort_dialog.py
 │   │   ├── config_dialog.py
+│   │   ├── about_dialog.py
 │   │   └── help_dialog.py
 │   └── utils/
 │       ├── thumbnailer.py   # Thumbnail save/delete helpers
-│       └── path_pattern.py  # Path pattern parser
+│       ├── path_pattern.py  # Path pattern parser
+│       └── string_utils.py  # Levenshtein distance, Soundex
 └── tests/
 ```
 
