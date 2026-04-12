@@ -8,7 +8,7 @@ from typing import Optional
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from app.config import CrawlerConfig
-from app.crawler.archive import is_archive, extract_archive_contents, IMAGE_SUFFIXES
+from app.crawler.archive import iter_archives, extract_archive_contents, IMAGE_SUFFIXES
 from app.crawler.metadata import extract_metadata
 from app.database.db import session_scope
 from app.database.models import STLModel, Tag, Image, Release
@@ -65,9 +65,7 @@ class CrawlerWorker(QThread):
         self._stop_requested = False
         self._remove_missing()
 
-        archives = sorted(
-            p for p in self.source_dir.rglob("*") if is_archive(p)
-        )
+        archives = sorted(iter_archives(self.source_dir))
         total = len(archives)
         self.log.emit(f"Found {total} archives in {self.source_dir}")
 
