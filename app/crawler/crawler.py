@@ -57,6 +57,8 @@ class CrawlerWorker(QThread):
     def stop(self):
         self._stop_requested = True
 
+    BATCH_SIZE = 50
+
     def run(self):
         self._stop_requested = False
         self._remove_missing()
@@ -67,17 +69,26 @@ class CrawlerWorker(QThread):
         total = len(archives)
         self.log.emit(f"Found {total} archives in {self.source_dir}")
 
-        for idx, archive_path in enumerate(archives, start=1):
-            if self._stop_requested:
-                self.log.emit("Crawl stopped by user.")
-                break
+        for batch_start in range(0, total, self.BATCH_SIZE):
+            batch = archives[batch_start:batch_start + self.BATCH_SIZE]
+            with session_scope() as session:
+                for idx, archive_path in enumerate(batch, start=batch_start + 1):
+                    if self._stop_requested:
+                        self.log.emit("Crawl stopped by user.")
+                        break
 
-            self.log.emit(f"[{idx}/{total}] {archive_path.name}")
-            try:
-                self._process_archive(archive_path)
-            except Exception as exc:
-                self.log.emit(f"  ERROR: {exc}")
-            self.progress.emit(idx, total)
+                    self.log.emit(f"[{idx}/{total}] {archive_path.name}")
+                    sp = session.begin_nested()
+                    try:
+                        self._process_archive(archive_path, session)
+                        sp.commit()
+                    except Exception as exc:
+                        sp.rollback()
+                        self.log.emit(f"  ERROR: {exc}")
+                    self.progress.emit(idx, total)
+
+            if self._stop_requested:
+                break
 
         self.log.emit("Crawl complete.")
         self.finished.emit()
@@ -100,111 +111,110 @@ class CrawlerWorker(QThread):
         if removed:
             self.log.emit(f"Removed {removed} missing record(s) from database.")
 
-    def _process_archive(self, archive_path: Path):
+    def _process_archive(self, archive_path: Path, session):
         archive_str = str(archive_path)
         current_hash = _hash_file(archive_path)
 
-        with session_scope() as session:
-            existing: Optional[STLModel] = (
-                session.query(STLModel).filter_by(archive_path=archive_str).first()
-            )
+        existing: Optional[STLModel] = (
+            session.query(STLModel).filter_by(archive_path=archive_str).first()
+        )
 
-            # Existing + unchanged: only re-apply the path pattern, skip everything else
-            if existing and existing.archive_hash == current_hash:
-                if self._pattern:
-                    extracted = parse_path(self._pattern, archive_str)
-                    if extracted:
-                        apply_extracted_to_model(session, model=existing, extracted=extracted, overwrite=True)
-                        self.log.emit("  unchanged – pattern updated: " + ", ".join(f"{k}={v!r}" for k, v in extracted.items()))
-                    else:
-                        self.log.emit("  unchanged – pattern: no match")
-                else:
-                    self.log.emit("  unchanged – skipped")
-                return
-
-            # Extract archive contents for metadata + (new files only) thumbnails
-            contents = extract_archive_contents(archive_path)
-            image_names = [
-                n for n in contents
-                if Path(n.replace("\\", "/")).suffix.lower() in IMAGE_SUFFIXES
-            ]
-            self.log.emit(f"  {len(contents)} relevant file(s) extracted "
-                          f"({len(image_names)} image(s))")
-
-            meta = extract_metadata(archive_path, contents=contents,
-                                    source_dir=self.source_dir)
-
-            meta_parts = []
-            if meta.title:        meta_parts.append(f"title={meta.title!r}")
-            if meta.author:       meta_parts.append(f"author={meta.author!r}")
-            if meta.distributor:  meta_parts.append(f"source={meta.distributor!r}")
-            if meta.release_date: meta_parts.append(f"date={meta.release_date!r}")
-            if meta.url:          meta_parts.append(f"url={meta.url!r}")
-            if meta.description:  meta_parts.append(f"description={meta.description!r}")
-            if meta.tags:         meta_parts.append(f"tags={meta.tags}")
-            if meta.release:      meta_parts.append(f"release={meta.release!r}")
-            if meta_parts:
-                self.log.emit("  metadata: " + ", ".join(meta_parts))
-            else:
-                self.log.emit("  metadata: (none found)")
-
-            if existing:
-                model = existing
-                self.log.emit("  updated")
-            else:
-                model = STLModel(archive_path=archive_str)
-                session.add(model)
-                self.log.emit("  new")
-
-            model.archive_hash = current_hash
-            model.title        = meta.title
-            model.author       = meta.author
-            model.source       = meta.distributor
-            model.release_date = meta.release_date
-            model.url          = meta.url
-            model.description  = meta.description
-
-            if meta.release:
-                rel = session.query(Release).filter_by(name=meta.release).first()
-                if rel is None:
-                    rel = Release(name=meta.release)
-                    session.add(rel)
-                    session.flush()
-                model.release = rel
-
-            # Apply path pattern — fills in fields left empty by metadata
+        # Existing + unchanged: only re-apply the path pattern, skip everything else
+        if existing and existing.archive_hash == current_hash:
             if self._pattern:
                 extracted = parse_path(self._pattern, archive_str)
                 if extracted:
-                    apply_extracted_to_model(session, model, extracted, overwrite=False)
-                    self.log.emit("  pattern: " + ", ".join(f"{k}={v!r}" for k, v in extracted.items()))
+                    apply_extracted_to_model(session, model=existing, extracted=extracted, overwrite=True)
+                    self.log.emit("  unchanged – pattern updated: " + ", ".join(f"{k}={v!r}" for k, v in extracted.items()))
                 else:
-                    self.log.emit("  pattern: no match")
+                    self.log.emit("  unchanged – pattern: no match")
+            else:
+                self.log.emit("  unchanged – skipped")
+            return
 
-            # Tags
-            model.tags.clear()
-            for tag_name in meta.tags:
-                if tag_name.strip():
-                    model.tags.append(_get_or_create_tag(session, tag_name))
+        # Extract archive contents for metadata + (new files only) thumbnails
+        contents = extract_archive_contents(archive_path)
+        image_names = [
+            n for n in contents
+            if Path(n.replace("\\", "/")).suffix.lower() in IMAGE_SUFFIXES
+        ]
+        self.log.emit(f"  {len(contents)} relevant file(s) extracted "
+                      f"({len(image_names)} image(s))")
 
-            # Thumbnails – only for new archives
-            if not existing:
-                from app.ui.config_dialog import get_max_thumbnails, get_max_thumb_size
-                max_thumbs = get_max_thumbnails()
-                max_thumb_size = get_max_thumb_size()
-                count = 0
-                for filename in image_names:
-                    if count >= max_thumbs:
-                        break
-                    raw_bytes = contents[filename]
-                    img = Image(model=model, filename=filename)
-                    session.add(img)
-                    session.flush()  # get img.id before writing the file
-                    rel_path = save_thumbnail(raw_bytes, img.id, max_size=max_thumb_size)
-                    if rel_path:
-                        img.thumbnail_path = rel_path
-                        count += 1
-                    else:
-                        session.delete(img)
-                        self.log.emit(f"  WARNING: thumbnail conversion failed for {filename}")
-                self.log.emit(f"  {count} thumbnail(s) stored")
+        meta = extract_metadata(archive_path, contents=contents,
+                                source_dir=self.source_dir)
+
+        meta_parts = []
+        if meta.title:        meta_parts.append(f"title={meta.title!r}")
+        if meta.author:       meta_parts.append(f"author={meta.author!r}")
+        if meta.distributor:  meta_parts.append(f"source={meta.distributor!r}")
+        if meta.release_date: meta_parts.append(f"date={meta.release_date!r}")
+        if meta.url:          meta_parts.append(f"url={meta.url!r}")
+        if meta.description:  meta_parts.append(f"description={meta.description!r}")
+        if meta.tags:         meta_parts.append(f"tags={meta.tags}")
+        if meta.release:      meta_parts.append(f"release={meta.release!r}")
+        if meta_parts:
+            self.log.emit("  metadata: " + ", ".join(meta_parts))
+        else:
+            self.log.emit("  metadata: (none found)")
+
+        if existing:
+            model = existing
+            self.log.emit("  updated")
+        else:
+            model = STLModel(archive_path=archive_str)
+            session.add(model)
+            self.log.emit("  new")
+
+        model.archive_hash = current_hash
+        model.title        = meta.title
+        model.author       = meta.author
+        model.source       = meta.distributor
+        model.release_date = meta.release_date
+        model.url          = meta.url
+        model.description  = meta.description
+
+        if meta.release:
+            rel = session.query(Release).filter_by(name=meta.release).first()
+            if rel is None:
+                rel = Release(name=meta.release)
+                session.add(rel)
+                session.flush()
+            model.release = rel
+
+        # Apply path pattern — fills in fields left empty by metadata
+        if self._pattern:
+            extracted = parse_path(self._pattern, archive_str)
+            if extracted:
+                apply_extracted_to_model(session, model, extracted, overwrite=False)
+                self.log.emit("  pattern: " + ", ".join(f"{k}={v!r}" for k, v in extracted.items()))
+            else:
+                self.log.emit("  pattern: no match")
+
+        # Tags
+        model.tags.clear()
+        for tag_name in meta.tags:
+            if tag_name.strip():
+                model.tags.append(_get_or_create_tag(session, tag_name))
+
+        # Thumbnails – only for new archives
+        if not existing:
+            from app.ui.config_dialog import get_max_thumbnails, get_max_thumb_size
+            max_thumbs = get_max_thumbnails()
+            max_thumb_size = get_max_thumb_size()
+            count = 0
+            for filename in image_names:
+                if count >= max_thumbs:
+                    break
+                raw_bytes = contents[filename]
+                img = Image(model=model, filename=filename)
+                session.add(img)
+                session.flush()  # get img.id before writing the file
+                rel_path = save_thumbnail(raw_bytes, img.id, max_size=max_thumb_size)
+                if rel_path:
+                    img.thumbnail_path = rel_path
+                    count += 1
+                else:
+                    session.delete(img)
+                    self.log.emit(f"  WARNING: thumbnail conversion failed for {filename}")
+            self.log.emit(f"  {count} thumbnail(s) stored")

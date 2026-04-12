@@ -404,63 +404,98 @@ class SortFilesDialog(QDialog):
 
     # ------------------------------------------------------------------
     def _do_move(self):
-        """Perform the file moves and update the database."""
+        """Perform the file moves and update the database.
+
+        The operation is atomic with respect to the database:
+          • All file moves are attempted first.
+          • If any move fails, every already-moved file is rolled back and the
+            DB is left completely unchanged.
+          • Only after every move succeeds is the DB updated in a single
+            transaction, so archive_path values are always consistent with the
+            filesystem.
+        """
         if not self._preview_data:
             return
 
-        moved: list[tuple[str, str, int]] = []
-        errors: list[str] = []
+        # Phase 1: resolve unique destination paths up-front so the whole plan
+        # is known before any files are touched.
+        plan: list[tuple[Path, Path, int]] = []
+        for src_str, dst_str, mid in self._preview_data:
+            src = Path(src_str)
+            if not src.exists():
+                QMessageBox.warning(
+                    self,
+                    "Sort — aborted",
+                    f"Source file no longer exists:\n{src}\n\n"
+                    "No files were moved.",
+                )
+                return
+            plan.append((src, _unique_target(Path(dst_str)), mid))
+
+        # Phase 2: move every file, stopping at the first failure.
+        moved_so_far: list[tuple[Path, Path]] = []
+        move_error: str | None = None
 
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            for src_str, dst_str, mid in self._preview_data:
-                src = Path(src_str)
-                dst = Path(dst_str)
-
-                if not src.exists():
-                    errors.append(f"Source gone: {src}")
-                    continue
-
-                dst = _unique_target(dst)
-
+            for src, dst, _mid in plan:
                 try:
                     dst.parent.mkdir(parents=True, exist_ok=True)
                 except OSError as exc:
-                    errors.append(f"Cannot create directory {dst.parent}: {exc}")
-                    continue
+                    move_error = f"Cannot create directory {dst.parent}: {exc}"
+                    break
 
                 try:
                     shutil.move(str(src), str(dst))
+                    moved_so_far.append((src, dst))
                 except (OSError, shutil.Error) as exc:
-                    errors.append(f"Move failed {src} → {dst}: {exc}")
-                    continue
-
-                moved.append((src_str, str(dst), mid))
+                    move_error = f"Move failed {src} → {dst}: {exc}"
+                    break
         finally:
             QApplication.restoreOverrideCursor()
 
-        if moved:
-            with session_scope() as session:
-                for _src, final_dst, mid in moved:
-                    model: STLModel = session.get(STLModel, mid)
-                    if model is not None:
-                        model.archive_path = final_dst
+        if move_error:
+            # Roll back every file that was successfully moved so the
+            # filesystem is restored to its original state.
+            rollback_errors: list[str] = []
+            for orig_src, moved_dst in reversed(moved_so_far):
+                try:
+                    shutil.move(str(moved_dst), str(orig_src))
+                except (OSError, shutil.Error) as exc:
+                    rollback_errors.append(f"{moved_dst} → {orig_src}: {exc}")
 
-        if moved:
-            _save_last_directory(self._dir_edit.text().strip())
+            if rollback_errors:
+                QMessageBox.critical(
+                    self,
+                    "Sort — failed (partial rollback)",
+                    f"An error occurred:\n{move_error}\n\n"
+                    "Some files could not be rolled back:\n"
+                    + "\n".join(rollback_errors)
+                    + "\n\nThe database has NOT been updated. "
+                    "Please reconcile the affected paths manually.",
+                )
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Sort — aborted",
+                    f"Move failed:\n{move_error}\n\n"
+                    "All moves have been rolled back. "
+                    "No files were moved and the database was not changed.",
+                )
+            return
 
-        if errors:
-            QMessageBox.warning(
-                self,
-                "Sort — partial success",
-                f"Moved {len(moved)} of {len(self._preview_data)} file(s).\n\n"
-                "Errors:\n" + "\n".join(errors),
-            )
-        else:
-            QMessageBox.information(
-                self,
-                "Sort complete",
-                f"Successfully moved {len(moved)} file(s).",
-            )
+        # Phase 3: every move succeeded — write all DB updates in one
+        # transaction so archive_path values are never partially updated.
+        with session_scope() as session:
+            for _src, dst, mid in plan:
+                model: STLModel = session.get(STLModel, mid)
+                if model is not None:
+                    model.archive_path = str(dst)
 
+        _save_last_directory(self._dir_edit.text().strip())
+        QMessageBox.information(
+            self,
+            "Sort complete",
+            f"Successfully moved {len(plan)} file(s).",
+        )
         self.accept()
