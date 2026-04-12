@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QCursor
 
 from app.database.db import session_scope, get_session
-from app.database.models import STLModel, Tag, Release, Sculptor, Category, Subcategory
+from app.database.models import STLModel, Tag, Release, Sculptor, Category, Subcategory, Scale
 from app.utils.thumbnailer import pixmap_from_path
 from app.utils.path_pattern import parse_path, ATTR_LABEL, PATTERN_HELP, parse_release_date, format_release_date
 
@@ -121,6 +121,7 @@ class EditorDialog(QDialog):
             sculptors  = sorted(s.name for s in session.query(Sculptor).order_by(Sculptor.name).all())
             categories   = sorted(c.name for c in session.query(Category).order_by(Category.name).all())
             subcategories = sorted(s.name for s in session.query(Subcategory).order_by(Subcategory.name).all())
+            scales     = sorted(s.name for s in session.query(Scale).order_by(Scale.name).all())
         finally:
             session.close()
 
@@ -145,6 +146,9 @@ class EditorDialog(QDialog):
         self._sequence_spin.setSpecialValueText("")   # 0 shown as blank
         self._sequence_spin.setValue(0)
 
+        self._scale_edit = self._make_combo(scales, blank_first=True)
+        self._presupports_edit = self._make_combo(["No", "Lychee", "Chitubox", "Presupported"], blank_first=True)
+
         form.addRow("Archive Path:", self._path_edit)
         form.addRow("Title:",        self._title_edit)
         form.addRow("Author:",       self._author_edit)
@@ -157,6 +161,8 @@ class EditorDialog(QDialog):
         form.addRow("Sequence:",     self._with_clear_btn(
             self._sequence_spin, lambda: self._sequence_spin.setValue(0)
         ))
+        form.addRow("Scale:",        self._scale_edit)
+        form.addRow("Presupports:",  self._presupports_edit)
         form.addRow("URL:",          self._url_edit)
         form.addRow("Description:",  self._with_clear_btn(
             self._desc_edit, self._desc_edit.clear
@@ -328,6 +334,8 @@ class EditorDialog(QDialog):
             self._on_category_changed(category_name)   # repopulate subcategories for this category
             self._subcategory_edit.setCurrentText(model.subcategory.name if model.subcategory else "")
             self._sequence_spin.setValue(model.sequence if model.sequence is not None else 0)
+            self._scale_edit.setCurrentText(model.scale.name if model.scale else "")
+            self._presupports_edit.setCurrentText(model.presupports or "")
             self._url_edit.setText(model.url or "")
             self._desc_edit.setPlainText(model.description or "")
             self._tags_edit.setText(", ".join(t.name for t in model.tags))
@@ -461,6 +469,17 @@ class EditorDialog(QDialog):
             _year, _month = parse_release_date(self._date_edit.text().strip())
             model.release_year  = _year
             model.release_month = _month
+            scale_name = self._scale_edit.currentText().strip()
+            if scale_name:
+                sc = session.query(Scale).filter_by(name=scale_name).first()
+                if sc is None:
+                    sc = Scale(name=scale_name)
+                    session.add(sc)
+                    session.flush()
+                model.scale = sc
+            else:
+                model.scale = None
+            model.presupports  = self._presupports_edit.currentText().strip() or None
             model.url          = self._url_edit.text().strip() or None
             model.description  = self._desc_edit.toPlainText().strip() or None
             seq = self._sequence_spin.value()
