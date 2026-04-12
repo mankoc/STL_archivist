@@ -81,10 +81,11 @@ class STLModel(Base):
     __tablename__ = "models"
 
     id               = Column(Integer, primary_key=True, autoincrement=True)
-    title            = Column(String(512))
-    author           = Column(String(256))
-    source           = Column(String(128))          # patreon / kickstarter / myminifactory / unknown
-    release_date     = Column(String(32))           # ISO date string, e.g. "2024-01"
+    title            = Column(String(512), index=True)
+    author           = Column(String(256), index=True)
+    source           = Column(String(128), index=True)  # patreon / kickstarter / myminifactory / unknown
+    release_year     = Column(Integer, nullable=True, index=True)
+    release_month    = Column(Integer, nullable=True)   # 1-12, NULL when only year is known
     url              = Column(Text)
     description      = Column(Text)
     archive_path     = Column(Text, unique=True, nullable=False)

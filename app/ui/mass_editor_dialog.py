@@ -18,6 +18,7 @@ from app.database.models import STLModel, Tag, Release
 from app.utils.path_pattern import (
     parse_path, apply_extracted_to_model,
     ATTR_LABEL as _ATTR_LABEL, PATTERN_HELP as _PATTERN_HELP,
+    parse_release_date,
 )
 
 _SAVED_PATTERNS_KEY = "mass_editor/saved_patterns"
@@ -313,7 +314,12 @@ class MassEditorDialog(QDialog):
                 apply_extracted_to_model(session, model, self._path_results.get(mid, {}))
 
                 for attr, value in manual.items():
-                    setattr(model, attr, value)
+                    if attr == "release_date":
+                        _year, _month = parse_release_date(value or "")
+                        model.release_year  = _year
+                        model.release_month = _month
+                    else:
+                        setattr(model, attr, value)
 
                 if release_obj is not None:
                     model.release = release_obj

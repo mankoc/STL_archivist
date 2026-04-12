@@ -81,6 +81,14 @@ def _migrate(engine) -> None:
                 "ALTER TABLE models ADD COLUMN release_id INTEGER "
                 "REFERENCES releases(id) ON DELETE SET NULL"
             ))
+        if "release_year" not in existing_models:
+            conn.execute(text("ALTER TABLE models ADD COLUMN release_year INTEGER"))
+        if "release_month" not in existing_models:
+            conn.execute(text("ALTER TABLE models ADD COLUMN release_month INTEGER"))
+
+    # Migrate release_date string → release_year + release_month integers
+    if "release_date" in existing_models:
+        _migrate_release_date(engine)
 
     # -- images table --
     existing_images = {c["name"] for c in inspector.get_columns("images")}
@@ -90,6 +98,34 @@ def _migrate(engine) -> None:
 
     # Migrate any existing blobs to files
     _migrate_blobs_to_files(engine)
+
+
+def _migrate_release_date(engine) -> None:
+    """Parse the legacy release_date string column into release_year + release_month."""
+    import re
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        rows = conn.execute(
+            text("SELECT id, release_date FROM models "
+                 "WHERE release_date IS NOT NULL AND release_year IS NULL")
+        ).fetchall()
+        for row_id, rd in rows:
+            if not rd:
+                continue
+            m = re.match(r'^(\d{4})[-_](\d{1,2})$', rd.strip())
+            if m:
+                conn.execute(
+                    text("UPDATE models SET release_year = :y, release_month = :mo WHERE id = :id"),
+                    {"y": int(m.group(1)), "mo": int(m.group(2)), "id": row_id},
+                )
+                continue
+            m = re.match(r'^(\d{4})$', rd.strip())
+            if m:
+                conn.execute(
+                    text("UPDATE models SET release_year = :y WHERE id = :id"),
+                    {"y": int(m.group(1)), "id": row_id},
+                )
 
 
 def _migrate_blobs_to_files(engine) -> None:
