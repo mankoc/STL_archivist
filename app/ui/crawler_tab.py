@@ -81,7 +81,7 @@ class CrawlerTab(QWidget):
         # Pattern input
         pattern_row = QHBoxLayout()
         self._pattern_edit = QLineEdit()
-        self._pattern_edit.setPlaceholderText("/mnt/f/{source}/{author}/{month}/{name}")
+        self._pattern_edit.setPlaceholderText("/{source}/{author}/{month}/{name}")
         self._pattern_edit.textChanged.connect(self._update_preview)
         pattern_row.addWidget(self._pattern_edit)
         pattern_layout.addLayout(pattern_row)
@@ -231,12 +231,22 @@ class CrawlerTab(QWidget):
 
     def _update_preview(self) -> None:
         pattern = self._pattern_edit.text().strip()
-        example = self._example_file_edit.text().strip() or self._folder_edit.text().strip()
+        source = self._folder_edit.text().strip()
+        example = self._example_file_edit.text().strip() or source
         if not pattern or not example:
             self._preview_label.clear()
             return
 
-        extracted = parse_path(pattern, example)
+        # Match pattern against path relative to the source folder
+        if source and example.startswith(source):
+            rel = example[len(source):]
+            if not rel.startswith("/"):
+                rel = "/" + rel
+            match_path = rel
+        else:
+            match_path = example
+
+        extracted = parse_path(pattern, match_path)
         if not extracted:
             self._preview_label.setText("<i>no match</i>")
             return
