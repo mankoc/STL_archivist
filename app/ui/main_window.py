@@ -132,11 +132,5 @@ class MainWindow(QMainWindow):
         HelpDialog(parent=self).exec()
 
     def _show_about(self):
-        QMessageBox.about(
-            self,
-            "About STL Database",
-            "<b>STL Database</b><br>"
-            "A desktop application for cataloguing and browsing<br>"
-            "3D-print model archives.<br><br>"
-            "Built with Python + PyQt6 + SQLAlchemy.",
-        )
+        from app.ui.about_dialog import AboutDialog
+        AboutDialog(parent=self).exec()

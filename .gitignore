@@ -8,7 +8,6 @@ __pycache__/
 thumbnails/
 dist/
 build/
-*.spec
 .venv/
 venv/
 .env
