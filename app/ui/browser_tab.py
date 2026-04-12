@@ -719,6 +719,15 @@ class BrowserTab(QWidget):
             menu.addSeparator()
             edit_subcategories_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), "Edit Subcategories…")
 
+        from app.ui.config_dialog import get_file_sorting_enabled
+        sort_act = None
+        if get_file_sorting_enabled():
+            menu.addSeparator()
+            sort_act = menu.addAction(
+                style.standardIcon(SP.SP_DirOpenIcon),
+                f"Sort {len(selected_ids)} file(s) into directory…",
+            )
+
         action = menu.exec(self._table.viewport().mapToGlobal(pos))
         if action == edit_act:
             self._open_editor(model_id)
@@ -726,6 +735,8 @@ class BrowserTab(QWidget):
             self._open_mass_editor(selected_ids)
         elif action == delete_act:
             self._delete_models(selected_ids)
+        elif sort_act and action == sort_act:
+            self._sort_files(selected_ids)
         elif add_tag_act and action == add_tag_act:
             self.add_tag()
         elif edit_tags_act and action == edit_tags_act:
@@ -839,5 +850,11 @@ class BrowserTab(QWidget):
     def _open_mass_editor(self, model_ids: list[int]):
         from app.ui.mass_editor_dialog import MassEditorDialog
         dlg = MassEditorDialog(model_ids, parent=self)
+        if dlg.exec():
+            self.refresh()
+
+    def _sort_files(self, model_ids: list[int]):
+        from app.ui.sort_dialog import SortFilesDialog
+        dlg = SortFilesDialog(model_ids, parent=self)
         if dlg.exec():
             self.refresh()
