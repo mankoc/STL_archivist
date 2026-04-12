@@ -1,6 +1,6 @@
 """
 Tests for crawler utilities: file hashing, archive extraction, path-pattern
-behaviour, apply_extracted_to_model, and CrawlerWorker._process_archive logic.
+behaviour, apply_extracted_to_model, and CrawlerWorker._upsert_archive logic.
 """
 import io
 import tempfile
@@ -31,7 +31,7 @@ def _make_worker(source_dir: str = "/tmp", pattern: str = ""):
 
     CrawlerWorker inherits from QThread; creating a real instance requires Qt
     internals.  Instead we build a SimpleNamespace with the attributes that
-    _process_archive reads from `self`, then call the method as an unbound
+    _upsert_archive reads from `self`, then call the method as an unbound
     function so no Qt initialisation is needed.
     """
     from app.crawler.crawler import CrawlerWorker
@@ -43,7 +43,7 @@ def _make_worker(source_dir: str = "/tmp", pattern: str = ""):
         _stop_requested=False,
         log=MagicMock(),
         # Bind the real method to our namespace so it runs with our attributes
-        _process_archive=lambda *a, **kw: CrawlerWorker._process_archive(ns, *a, **kw),
+        _upsert_archive=lambda *a, **kw: CrawlerWorker._upsert_archive(ns, *a, **kw),
     )
     return ns
 
@@ -170,7 +170,11 @@ def test_apply_extracted_overwrite_false():
 # ---------------------------------------------------------------------------
 
 def test_crawler_skips_unchanged_hash():
-    """When archive hash matches the DB record, extract_metadata is never called."""
+    """When archive hash matches the DB record, extract_metadata is never called.
+
+    In the new design the caller pre-computes the hash and passes contents=None
+    to signal that the archive is unchanged.
+    """
     KNOWN_HASH = "deadbeefdeadbeef"
 
     with session_scope() as session:
@@ -182,13 +186,17 @@ def test_crawler_skips_unchanged_hash():
 
     worker = _make_worker()
 
-    with (
-        patch("app.crawler.crawler._hash_file", return_value=KNOWN_HASH),
-        patch("app.crawler.crawler.extract_metadata") as mock_meta,
-        patch("app.crawler.crawler.extract_archive_contents", return_value={}),
-    ):
+    with patch("app.crawler.crawler.extract_metadata") as mock_meta:
         with session_scope() as session:
-            worker._process_archive(Path("/tmp/unchanged.zip"), session, 5, 512)
+            existing = session.query(STLModel).filter_by(
+                archive_path="/tmp/unchanged.zip"
+            ).first()
+            worker._upsert_archive(
+                Path("/tmp/unchanged.zip"), session, 5, 512,
+                current_hash=KNOWN_HASH,
+                existing=existing,
+                contents=None,   # None → hash unchanged, skip extraction
+            )
 
         mock_meta.assert_not_called()
 
@@ -235,16 +243,21 @@ def test_thumbnail_refresh_on_hash_change():
     img_bytes = _minimal_png()
 
     with (
-        patch("app.crawler.crawler._hash_file", return_value=NEW_HASH),
         patch("app.crawler.crawler.extract_metadata",
               return_value=ModelMetadata(title="NewModel")),
-        patch("app.crawler.crawler.extract_archive_contents",
-              return_value={"thumb.jpg": img_bytes}),
         patch("app.crawler.crawler.delete_thumbnail") as mock_delete,
         patch("app.crawler.crawler.save_thumbnail", return_value="thumbs/2.jpg"),
     ):
         with session_scope() as session:
-            worker._process_archive(Path("/tmp/changed.zip"), session, 5, 512)
+            existing = session.query(STLModel).filter_by(
+                archive_path="/tmp/changed.zip"
+            ).first()
+            worker._upsert_archive(
+                Path("/tmp/changed.zip"), session, 5, 512,
+                current_hash=NEW_HASH,
+                existing=existing,
+                contents={"thumb.jpg": img_bytes},  # pre-extracted by caller
+            )
 
         # Old thumbnail must have been deleted
         mock_delete.assert_called_once_with("thumbs/1.jpg")

@@ -12,3 +12,4 @@ class CrawlerConfig:
     max_thumbnails: int = 5
     max_thumb_size: int = 512
     unrar_path: str = ""
+    max_workers: int = 4

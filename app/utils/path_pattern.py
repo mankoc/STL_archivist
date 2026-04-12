@@ -93,7 +93,7 @@ PATTERN_HELP = (
     "<tr><td><code>{url}</code></td><td>&nbsp;–&nbsp;</td><td>source URL</td></tr>"
     "<tr><td><code>*</code></td><td>&nbsp;–&nbsp;</td><td>ignored segment (any value)</td></tr>"
     "</table><br>"
-    "<b>Example:</b> <code>/mnt/f/{source}/{author}/*/{name}</code>"
+    "<b>Example:</b> <code>/{source}/{author}/*/{name}</code>"
 )
 
 

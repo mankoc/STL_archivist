@@ -2,6 +2,8 @@
 Crawler — walks a source directory, processes each archive, and upserts records
 into the database. Runs inside a QThread to keep the UI responsive.
 """
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import partial
 from pathlib import Path
 from typing import Optional
 
@@ -71,10 +73,51 @@ class CrawlerWorker(QThread):
 
         max_thumbs = self._config.max_thumbnails
         max_thumb_size = self._config.max_thumb_size
+        workers = self._config.max_workers
 
         for batch_start in range(0, total, self.BATCH_SIZE):
+            if self._stop_requested:
+                break
             batch = archives[batch_start:batch_start + self.BATCH_SIZE]
+
+            # Phase 1: hash all archives in the batch in parallel (IO-bound)
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                hashes: dict[Path, str] = dict(zip(batch, pool.map(_hash_file, batch)))
+
             with session_scope() as session:
+                # Phase 2: batch-query existing records — one round-trip for the whole batch
+                batch_strs = [str(p) for p in batch]
+                existing_map: dict[str, STLModel] = {
+                    m.archive_path: m
+                    for m in session.query(STLModel)
+                        .filter(STLModel.archive_path.in_(batch_strs))
+                        .all()
+                }
+
+                # Decide which archives need extraction (new or hash-changed)
+                to_extract: list[Path] = []
+                for p in batch:
+                    ex = existing_map.get(str(p))
+                    if ex is None or ex.archive_hash != hashes[p]:
+                        to_extract.append(p)
+
+                # Phase 3: extract archive contents in parallel (IO/CPU-bound)
+                contents_map: dict[Path, dict[str, bytes]] = {}
+                if to_extract:
+                    extract_fn = partial(
+                        extract_archive_contents, unrar_path=self._config.unrar_path
+                    )
+                    with ThreadPoolExecutor(max_workers=workers) as pool:
+                        futures = {pool.submit(extract_fn, p): p for p in to_extract}
+                        for future in as_completed(futures):
+                            p = futures[future]
+                            try:
+                                contents_map[p] = future.result()
+                            except Exception as exc:
+                                self.log.emit(f"  ERROR extracting {p.name}: {exc}")
+                                contents_map[p] = {}
+
+                # Phase 4: serial DB upserts with all expensive work already done
                 for idx, archive_path in enumerate(batch, start=batch_start + 1):
                     if self._stop_requested:
                         self.log.emit("Crawl stopped by user.")
@@ -83,7 +126,16 @@ class CrawlerWorker(QThread):
                     self.log.emit(f"[{idx}/{total}] {archive_path.name}")
                     sp = session.begin_nested()
                     try:
-                        self._process_archive(archive_path, session, max_thumbs, max_thumb_size)
+                        self._upsert_archive(
+                            archive_path,
+                            session,
+                            max_thumbs,
+                            max_thumb_size,
+                            current_hash=hashes[archive_path],
+                            existing=existing_map.get(str(archive_path)),
+                            # None signals "hash unchanged — skip extraction"
+                            contents=contents_map.get(archive_path),
+                        )
                         sp.commit()
                     except Exception as exc:
                         sp.rollback()
@@ -114,19 +166,32 @@ class CrawlerWorker(QThread):
         if removed:
             self.log.emit(f"Removed {removed} missing record(s) from database.")
 
-    def _process_archive(self, archive_path: Path, session, max_thumbs: int, max_thumb_size: int):
+    def _upsert_archive(
+        self,
+        archive_path: Path,
+        session,
+        max_thumbs: int,
+        max_thumb_size: int,
+        current_hash: str,
+        existing: Optional[STLModel],
+        contents: Optional[dict[str, bytes]],
+    ):
+        """
+        Write one archive to the database using pre-computed *current_hash* and
+        *contents*.  When *contents* is None the hash is unchanged and only the
+        path pattern is re-applied.
+        """
         archive_str = str(archive_path)
-        current_hash = _hash_file(archive_path)
-
-        existing: Optional[STLModel] = (
-            session.query(STLModel).filter_by(archive_path=archive_str).first()
-        )
         hash_changed = existing is not None and existing.archive_hash != current_hash
 
-        # Existing + unchanged: only re-apply the path pattern, skip everything else
-        if existing and existing.archive_hash == current_hash:
+        # Unchanged: only re-apply the path pattern, skip everything else
+        if contents is None:
             if self._pattern:
-                extracted = parse_path(self._pattern, archive_str)
+                try:
+                    rel_path = "/" + str(archive_path.relative_to(self.source_dir)).replace("\\", "/")
+                except ValueError:
+                    rel_path = archive_str
+                extracted = parse_path(self._pattern, rel_path)
                 if extracted:
                     apply_extracted_to_model(session, model=existing, extracted=extracted, overwrite=False)
                     self.log.emit("  unchanged – pattern applied: " + ", ".join(f"{k}={v!r}" for k, v in extracted.items()))
@@ -136,8 +201,6 @@ class CrawlerWorker(QThread):
                 self.log.emit("  unchanged – skipped")
             return
 
-        # Extract archive contents for metadata + (new files only) thumbnails
-        contents = extract_archive_contents(archive_path, unrar_path=self._config.unrar_path)
         image_names = [
             n for n in contents
             if Path(n.replace("\\", "/")).suffix.lower() in IMAGE_SUFFIXES
@@ -190,7 +253,11 @@ class CrawlerWorker(QThread):
 
         # Apply path pattern — fills in fields left empty by metadata
         if self._pattern:
-            extracted = parse_path(self._pattern, archive_str)
+            try:
+                rel_path = "/" + str(archive_path.relative_to(self.source_dir)).replace("\\", "/")
+            except ValueError:
+                rel_path = archive_str
+            extracted = parse_path(self._pattern, rel_path)
             if extracted:
                 apply_extracted_to_model(session, model, extracted, overwrite=False)
                 self.log.emit("  pattern: " + ", ".join(f"{k}={v!r}" for k, v in extracted.items()))
