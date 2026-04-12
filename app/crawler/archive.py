@@ -46,15 +46,13 @@ def _open_7z(path: Path):
     return py7zr.SevenZipFile(str(path), mode="r")
 
 
-def _open_rar(path: Path):
-    from app.ui.config_dialog import get_unrar_path
-    tool = get_unrar_path()
-    if tool:
-        rarfile.UNRAR_TOOL = tool
+def _open_rar(path: Path, unrar_path: str = ""):
+    if unrar_path:
+        rarfile.UNRAR_TOOL = unrar_path
     return rarfile.RarFile(str(path), "r")
 
 
-def list_contents(archive_path: Path) -> list[str]:
+def list_contents(archive_path: Path, unrar_path: str = "") -> list[str]:
     """Return a list of all file names inside the archive."""
     suffix = archive_path.suffix.lower()
     try:
@@ -65,14 +63,14 @@ def list_contents(archive_path: Path) -> list[str]:
             with _open_7z(archive_path) as zf:
                 return zf.getnames()
         elif suffix == ".rar":
-            with _open_rar(archive_path) as rf:
+            with _open_rar(archive_path, unrar_path) as rf:
                 return rf.namelist()
     except Exception:
         return []
     return []
 
 
-def read_file(archive_path: Path, member_name: str) -> Optional[bytes]:
+def read_file(archive_path: Path, member_name: str, unrar_path: str = "") -> Optional[bytes]:
     """Read a single member from the archive and return its bytes."""
     suffix = archive_path.suffix.lower()
     try:
@@ -90,7 +88,7 @@ def read_file(archive_path: Path, member_name: str) -> Optional[bytes]:
                     return extracted.read_bytes()
             return None
         elif suffix == ".rar":
-            with _open_rar(archive_path) as rf:
+            with _open_rar(archive_path, unrar_path) as rf:
                 return rf.read(member_name)
     except Exception:
         return None
@@ -112,7 +110,7 @@ def _is_wanted(name: str) -> bool:
     )
 
 
-def extract_archive_contents(archive_path: Path) -> dict[str, bytes]:
+def extract_archive_contents(archive_path: Path, unrar_path: str = "") -> dict[str, bytes]:
     """
     Open the archive exactly once and return a dict of {member_name: bytes}
     for every image, info.json and .url file found inside.
@@ -164,7 +162,7 @@ def extract_archive_contents(archive_path: Path) -> dict[str, bytes]:
                             result[name] = data
 
         elif suffix == ".rar":
-            with _open_rar(archive_path) as rf:
+            with _open_rar(archive_path, unrar_path) as rf:
                 for name in rf.namelist():
                     if _is_wanted(name):
                         limit = _member_size_limit(name)
