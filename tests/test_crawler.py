@@ -59,7 +59,7 @@ def test_hash_file_stable():
     content = b"Hello, STL database!\n" * 1000
     with tempfile.NamedTemporaryFile(delete=False) as f:
         f.write(content)
-        tmp_path = Path(f.name)
+    tmp_path = Path(f.name)
 
     try:
         h1 = _hash_file(tmp_path)

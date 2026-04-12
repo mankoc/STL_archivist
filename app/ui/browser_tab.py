@@ -247,6 +247,13 @@ class BrowserTab(QWidget):
         self._edit_timer.setSingleShot(True)
         self._edit_timer.setInterval(400)  # ms
         self._edit_timer.timeout.connect(self._flush_pending_edits)
+        # Debounce search-box keystrokes to avoid scanning on every character
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(250)  # ms
+        self._search_timer.timeout.connect(
+            lambda: self._on_search(self._search_edit.text())
+        )
         self._build_ui()
         self.refresh()
 
@@ -291,7 +298,7 @@ class BrowserTab(QWidget):
         search_row.addWidget(QLabel("Search:"))
         self._search_edit = QLineEdit()
         self._search_edit.setPlaceholderText("Title, author or tag…")
-        self._search_edit.textChanged.connect(self._on_search)
+        self._search_edit.textChanged.connect(lambda _: self._search_timer.start())
         search_row.addWidget(self._search_edit)
         centre_layout.addLayout(search_row)
 
@@ -328,7 +335,7 @@ class BrowserTab(QWidget):
         header.customContextMenuRequested.connect(self._header_context_menu)
         header.setSectionsMovable(True)
         header.sectionMoved.connect(self._save_header_state)
-        header.sectionResized.connect(lambda *_: self._save_header_state())
+        header.sectionResized.connect(self._save_header_state)
         self._restore_header_state()
         self._table.clicked.connect(self._on_row_clicked)
         self._table.doubleClicked.connect(self._on_double_click)

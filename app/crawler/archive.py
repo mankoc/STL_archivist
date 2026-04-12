@@ -79,7 +79,6 @@ def list_contents(archive_path: Path, unrar_path: str = "") -> list[str]:
                 return rf.namelist()
     except Exception:
         return []
-    return []
 
 
 def read_file(archive_path: Path, member_name: str, unrar_path: str = "") -> Optional[bytes]:
@@ -192,7 +191,7 @@ def extract_archive_contents(archive_path: Path, unrar_path: str = "") -> dict[s
                         except Exception:
                             continue
     except Exception:
-        pass
+        logging.warning("Failed to open archive %s", archive_path, exc_info=True)
     return result
 
 

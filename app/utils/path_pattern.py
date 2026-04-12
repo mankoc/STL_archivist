@@ -11,6 +11,7 @@ FK-backed tokens (sculptor, category, subcategory, sequence) are stored under
 to resolve them into the correct DB objects.
 """
 import re
+from functools import lru_cache
 
 
 def parse_release_date(s: str) -> tuple[int | None, int | None]:
@@ -96,6 +97,7 @@ PATTERN_HELP = (
 )
 
 
+@lru_cache(maxsize=64)
 def pattern_to_regex(pattern: str) -> re.Pattern | None:
     """Compile *pattern* to a regex.
 
