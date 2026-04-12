@@ -87,6 +87,21 @@ def get_file_sorting_enabled() -> bool:
     return bool(_load_library_settings().get("file_sorting_enabled", False))
 
 
+def get_warn_presupported_stl() -> bool:
+    """Whether to warn when an archive contains presupported STL files."""
+    return bool(_load_library_settings().get("warn_presupported_stl", True))
+
+
+def get_warn_no_images() -> bool:
+    """Whether to warn when an archive contains no image files."""
+    return bool(_load_library_settings().get("warn_no_images", True))
+
+
+def get_warn_nested_archive() -> bool:
+    """Whether to warn when an archive contains another compressed archive."""
+    return bool(_load_library_settings().get("warn_nested_archive", True))
+
+
 _ICONS_DIR = Path(__file__).parent.parent.parent / "resources" / "icons"
 
 
@@ -244,6 +259,41 @@ class ConfigDialog(QDialog):
         )
 
         layout.addWidget(group)
+
+        warn_group = QGroupBox("Crawler Warnings")
+        warn_form  = QFormLayout(warn_group)
+
+        self._warn_presupported_check = QCheckBox("Archive have presupported stls")
+        warn_form.addRow("", self._warn_presupported_check)
+        warn_form.addRow(
+            "",
+            QLabel(
+                "<small>Warn when an archive contains STL files matching "
+                "<b>[ |_]presupported.stl</b> or <b>sup*.stl</b>.</small>"
+            ),
+        )
+
+        self._warn_no_images_check = QCheckBox("Archive contains images")
+        warn_form.addRow("", self._warn_no_images_check)
+        warn_form.addRow(
+            "",
+            QLabel(
+                "<small>Warn when an archive contains no image files "
+                "(.jpg, .png, .webp, …).</small>"
+            ),
+        )
+
+        self._warn_nested_archive_check = QCheckBox("Archive inside archive")
+        warn_form.addRow("", self._warn_nested_archive_check)
+        warn_form.addRow(
+            "",
+            QLabel(
+                "<small>Warn when an archive contains another compressed archive "
+                "(.zip, .rar, .7z).</small>"
+            ),
+        )
+
+        layout.addWidget(warn_group)
         layout.addStretch()
         return page
 
@@ -320,6 +370,9 @@ class ConfigDialog(QDialog):
 
         self._file_sorting_check.setChecked(get_file_sorting_enabled())
         self._unrar_edit.setText(get_unrar_path())
+        self._warn_presupported_check.setChecked(get_warn_presupported_stl())
+        self._warn_no_images_check.setChecked(get_warn_no_images())
+        self._warn_nested_archive_check.setChecked(get_warn_nested_archive())
 
         scheme = get_color_scheme()
         idx = self._theme_combo.findText(scheme)
@@ -345,6 +398,9 @@ class ConfigDialog(QDialog):
                 "max_thumb_size": self._max_thumb_size_spin.value(),
                 "color_scheme": selected_scheme,
                 "file_sorting_enabled": self._file_sorting_check.isChecked(),
+                "warn_presupported_stl": self._warn_presupported_check.isChecked(),
+                "warn_no_images": self._warn_no_images_check.isChecked(),
+                "warn_nested_archive": self._warn_nested_archive_check.isChecked(),
             },
             data_dir=data_dir,
         )

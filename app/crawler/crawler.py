@@ -12,7 +12,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from app.config import CrawlerConfig
 from app.crawler.archive import iter_archives, extract_archive_contents, archive_hash, list_contents, IMAGE_SUFFIXES
 from app.crawler.metadata import extract_metadata
-from app.crawler.rules import detect_presupport, detect_scale
+from app.crawler.rules import detect_presupport, detect_scale, detect_warnings
 from app.database.db import session_scope
 from app.database.models import STLModel, Tag, Image, Release, Scale
 from app.utils.thumbnailer import save_thumbnail, delete_thumbnail
@@ -229,6 +229,15 @@ class CrawlerWorker(QThread):
         model.archive_hash  = current_hash
         all_names           = list_contents(archive_path, self._config.unrar_path)
         model.presupports   = detect_presupport(all_names)
+
+        from app.ui.config_dialog import get_warn_presupported_stl, get_warn_no_images, get_warn_nested_archive
+        warnings = detect_warnings(
+            all_names,
+            check_presupported=get_warn_presupported_stl(),
+            check_no_images=get_warn_no_images(),
+            check_nested_archive=get_warn_nested_archive(),
+        )
+        model.warning = warnings or None
 
         scales = detect_scale([archive_path.name] + all_names)
         if scales:

@@ -10,7 +10,7 @@ from pathlib import Path as FSPath
 _ICONS_DIR = FSPath(__file__).parent.parent.parent / "resources" / "icons"
 
 from PyQt6.QtCore import Qt, QSortFilterProxyModel, QSize, QStringListModel, QEvent, pyqtSignal, QItemSelection, QTimer
-from PyQt6.QtGui import QStandardItemModel, QStandardItem, QPixmap, QIcon, QKeySequence, QShortcut
+from PyQt6.QtGui import QStandardItemModel, QStandardItem, QPixmap, QIcon, QKeySequence, QShortcut, QColor, QFont
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
     QTreeWidget, QTreeWidgetItem, QTableView,
@@ -45,9 +45,10 @@ COL_PATH         = 11
 COL_SCALE        = 12
 COL_PRESUPPORTED = 13
 COL_ADDED        = 14
+COL_WARNING      = 15
 _HEADERS = ["", "Title", "Author", "Source", "Date", "Tags",
             "Sculptor", "Category", "Subcategory", "Seq", "Release", "Path",
-            "Scale", "Presupports", "Added"]
+            "Scale", "Presupports", "Added", "Warnings"]
 
 MODEL_ID_ROLE = Qt.ItemDataRole.UserRole + 1
 
@@ -644,6 +645,17 @@ class BrowserTab(QWidget):
                 added_str = stl.created_at.strftime("%Y-%m-%d") if stl.created_at else ""
                 added_item = QStandardItem(added_str)
                 added_item.setEditable(False)
+                warning_item = QStandardItem("⚠" if stl.warning else "")
+                warning_item.setEditable(False)
+                warning_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                if stl.warning:
+                    warning_item.setData(stl.warning, Qt.ItemDataRole.ToolTipRole)
+                    warning_item.setBackground(QColor("#4a4a4a"))
+                    warning_item.setForeground(QColor("#FFD700"))
+                    _warn_font = QFont()
+                    _warn_font.setPointSize(16)
+                    _warn_font.setBold(True)
+                    warning_item.setFont(_warn_font)
                 row = [
                     thumb_item,
                     QStandardItem(stl.title or ""),
@@ -660,6 +672,7 @@ class BrowserTab(QWidget):
                     QStandardItem(stl.scale.name if stl.scale else ""),
                     QStandardItem(stl.presupports or ""),
                     added_item,
+                    warning_item,
                 ]
                 self._model.appendRow(row)
         finally:
@@ -672,7 +685,7 @@ class BrowserTab(QWidget):
         if self._loading:
             return
         col = item.column()
-        if col == COL_THUMB:
+        if col in (COL_THUMB, COL_ADDED, COL_WARNING):
             return
         # Debounce: store the latest item for this cell and (re)start the timer.
         self._pending_edits[(item.row(), col)] = item
@@ -845,6 +858,10 @@ class BrowserTab(QWidget):
         if model_id is not None:
             self._show_thumbnails(model_id)
             self._update_info_panel(model_id)
+        if index.column() == COL_WARNING:
+            warning_item = self._model.item(src_index.row(), COL_WARNING)
+            if warning_item and warning_item.toolTip():
+                QMessageBox.warning(self, "Warnings", warning_item.toolTip())
 
     def _update_info_panel(self, model_id: int):
         session = get_session()
