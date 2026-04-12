@@ -122,6 +122,7 @@ class CrawlerWorker(QThread):
         existing: Optional[STLModel] = (
             session.query(STLModel).filter_by(archive_path=archive_str).first()
         )
+        hash_changed = existing is not None and existing.archive_hash != current_hash
 
         # Existing + unchanged: only re-apply the path pattern, skip everything else
         if existing and existing.archive_hash == current_hash:
@@ -201,8 +202,13 @@ class CrawlerWorker(QThread):
             if tag_name.strip():
                 model.tags.append(_get_or_create_tag(session, tag_name))
 
-        # Thumbnails – only for new archives
-        if not existing:
+        # Thumbnails – for new archives and archives whose file content changed
+        if hash_changed:
+            for old_img in list(existing.images):
+                if old_img.thumbnail_path:
+                    delete_thumbnail(old_img.thumbnail_path)
+                session.delete(old_img)
+        if not existing or hash_changed:
             count = 0
             for filename in image_names:
                 if count >= max_thumbs:
