@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QCursor
 
 from app.database.db import session_scope, get_session
-from app.database.models import STLModel, Tag, Release
+from app.database.models import STLModel, Tag, Release, Category, Subcategory
 from app.utils.path_pattern import (
     parse_path, apply_extracted_to_model,
     ATTR_LABEL as _ATTR_LABEL, PATTERN_HELP as _PATTERN_HELP,
@@ -134,12 +134,25 @@ class MassEditorDialog(QDialog):
         self._release_edit = QLineEdit(); self._release_edit.setPlaceholderText("Release name (groups models)")
         self._tags_edit    = QLineEdit(); self._tags_edit.setPlaceholderText("tag1, tag2, … (replaces existing tags)")
 
-        form.addRow("Type:",    self._type_edit)
-        form.addRow("Author:",  self._author_edit)
-        form.addRow("Date:",    self._date_edit)
-        form.addRow("Title:",   self._title_edit)
-        form.addRow("Release:", self._release_edit)
-        form.addRow("Tags:",    self._tags_edit)
+        session = get_session()
+        try:
+            categories    = sorted(c.name for c in session.query(Category).order_by(Category.name).all())
+            subcategories = sorted(s.name for s in session.query(Subcategory).order_by(Subcategory.name).all())
+        finally:
+            session.close()
+
+        self._category_edit    = self._make_combo(categories)
+        self._category_edit.currentTextChanged.connect(self._on_category_changed)
+        self._subcategory_edit = self._make_combo(subcategories)
+
+        form.addRow("Type:",        self._type_edit)
+        form.addRow("Author:",      self._author_edit)
+        form.addRow("Date:",        self._date_edit)
+        form.addRow("Title:",       self._title_edit)
+        form.addRow("Release:",     self._release_edit)
+        form.addRow("Category:",    self._category_edit)
+        form.addRow("Subcategory:", self._subcategory_edit)
+        form.addRow("Tags:",        self._tags_edit)
 
         root.addWidget(manual_group)
 
@@ -152,6 +165,42 @@ class MassEditorDialog(QDialog):
         root.addWidget(buttons)
 
         self._refresh_saved_combo()
+
+    # ------------------------------------------------------------------
+    # Combo helper
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _make_combo(values: list[str]) -> QComboBox:
+        combo = QComboBox()
+        combo.setEditable(True)
+        combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        combo.addItem("")
+        combo.addItems(values)
+        combo.setCurrentIndex(0)
+        combo.completer().setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        combo.completer().setFilterMode(Qt.MatchFlag.MatchContains)
+        combo.lineEdit().setClearButtonEnabled(True)
+        return combo
+
+    def _on_category_changed(self, category_name: str) -> None:
+        """Repopulate subcategory combo when the category selection changes."""
+        session = get_session()
+        try:
+            q = session.query(Subcategory).order_by(Subcategory.name)
+            if category_name.strip():
+                cat = session.query(Category).filter_by(name=category_name.strip()).first()
+                if cat:
+                    q = q.filter(Subcategory.category_id == cat.id)
+            subcategories = [s.name for s in q.all()]
+        finally:
+            session.close()
+        current = self._subcategory_edit.currentText()
+        self._subcategory_edit.blockSignals(True)
+        self._subcategory_edit.clear()
+        self._subcategory_edit.addItem("")
+        self._subcategory_edit.addItems(subcategories)
+        self._subcategory_edit.setCurrentText(current)
+        self._subcategory_edit.blockSignals(False)
 
     # ------------------------------------------------------------------
     # Settings helpers
@@ -288,7 +337,9 @@ class MassEditorDialog(QDialog):
         if self._title_edit.text().strip():
             manual["title"] = self._title_edit.text().strip()
 
-        release_name = self._release_edit.text().strip()
+        release_name    = self._release_edit.text().strip()
+        category_name    = self._category_edit.currentText().strip()
+        subcategory_name = self._subcategory_edit.currentText().strip()
 
         tag_names = [
             t.strip().lower()
@@ -323,6 +374,24 @@ class MassEditorDialog(QDialog):
 
                 if release_obj is not None:
                     model.release = release_obj
+
+                if category_name:
+                    cat = session.query(Category).filter_by(name=category_name).first()
+                    if cat is None:
+                        cat = Category(name=category_name)
+                        session.add(cat)
+                        session.flush()
+                    model.category = cat
+
+                    if subcategory_name:
+                        sub = session.query(Subcategory).filter_by(
+                            name=subcategory_name, category_id=cat.id
+                        ).first()
+                        if sub is None:
+                            sub = Subcategory(name=subcategory_name, category_id=cat.id)
+                            session.add(sub)
+                            session.flush()
+                        model.subcategory = sub
 
                 if apply_tags:
                     model.tags.clear()
