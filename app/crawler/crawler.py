@@ -129,8 +129,8 @@ class CrawlerWorker(QThread):
             if self._pattern:
                 extracted = parse_path(self._pattern, archive_str)
                 if extracted:
-                    apply_extracted_to_model(session, model=existing, extracted=extracted, overwrite=True)
-                    self.log.emit("  unchanged – pattern updated: " + ", ".join(f"{k}={v!r}" for k, v in extracted.items()))
+                    apply_extracted_to_model(session, model=existing, extracted=extracted, overwrite=False)
+                    self.log.emit("  unchanged – pattern applied: " + ", ".join(f"{k}={v!r}" for k, v in extracted.items()))
                 else:
                     self.log.emit("  unchanged – pattern: no match")
             else:
