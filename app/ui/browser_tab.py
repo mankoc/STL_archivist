@@ -17,10 +17,11 @@ from PyQt6.QtWidgets import (
     QLineEdit, QLabel, QHeaderView, QAbstractItemView,
     QMenu, QScrollArea, QFrame, QInputDialog, QMessageBox,
     QStyledItemDelegate, QComboBox, QCompleter,
-    QDialog, QSizePolicy, QApplication,
+    QDialog, QSizePolicy, QApplication, QPushButton,
 )
 from PyQt6.QtCore import QSettings
 
+from sqlalchemy import or_, and_
 from sqlalchemy.orm import selectinload
 
 from app.database.db import get_session, session_scope
@@ -269,11 +270,20 @@ class BrowserTab(QWidget):
         left = QWidget()
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.addWidget(QLabel("Filter"))
+
+        filter_header = QHBoxLayout()
+        filter_header.addWidget(QLabel("Filter"))
+        filter_header.addStretch()
+        self._clear_filters_btn = QPushButton("Clear")
+        self._clear_filters_btn.setFlat(True)
+        self._clear_filters_btn.setToolTip("Clear all active filters")
+        self._clear_filters_btn.clicked.connect(self._clear_filters)
+        filter_header.addWidget(self._clear_filters_btn)
+        left_layout.addLayout(filter_header)
 
         self._filter_tree = QTreeWidget()
         self._filter_tree.setHeaderHidden(True)
-        self._filter_tree.itemClicked.connect(self._on_filter_clicked)
+        self._filter_tree.itemChanged.connect(self._on_filter_item_changed)
         left_layout.addWidget(self._filter_tree)
 
         # ---- Info panel: author + tags of selected model ----
@@ -381,6 +391,26 @@ class BrowserTab(QWidget):
 
     # ------------------------------------------------------------------
     def _populate_filter_tree(self):
+        # Save checked items and expanded top-level sections so they survive the rebuild.
+        # expanded_sections is None on the very first call (tree is empty) → default collapsed.
+        checked_data: set = set()
+        expanded_sections: set[str] | None = None
+
+        root_item = self._filter_tree.invisibleRootItem()
+        if root_item.childCount() > 0:
+            expanded_sections = set()
+            def _collect_state(item: QTreeWidgetItem):
+                d = item.data(0, Qt.ItemDataRole.UserRole)
+                if d and item.checkState(0) == Qt.CheckState.Checked:
+                    checked_data.add(d)
+                if item.childCount() and item.isExpanded():
+                    expanded_sections.add(item.text(0))
+                for i in range(item.childCount()):
+                    _collect_state(item.child(i))
+            for i in range(root_item.childCount()):
+                _collect_state(root_item.child(i))
+
+        self._filter_tree.blockSignals(True)
         self._filter_tree.clear()
 
         from app.ui.config_dialog import get_color_scheme as _get_cs
@@ -398,6 +428,16 @@ class BrowserTab(QWidget):
                         else QApplication.style().standardIcon(
                             QApplication.style().StandardPixmap.SP_FileDialogContentsView))
 
+        _CHECKABLE = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable
+
+        def _make_leaf(label: str, data) -> QTreeWidgetItem:
+            item = QTreeWidgetItem([label])
+            item.setData(0, Qt.ItemDataRole.UserRole, data)
+            item.setFlags(_CHECKABLE)
+            state = Qt.CheckState.Checked if data in checked_data else Qt.CheckState.Unchecked
+            item.setCheckState(0, state)
+            return item
+
         header = self._table.horizontalHeader()
         show_author = not header.isSectionHidden(COL_AUTHOR)
         show_tags   = not header.isSectionHidden(COL_TAGS)
@@ -413,18 +453,14 @@ class BrowserTab(QWidget):
                 self._filter_tree.addTopLevelItem(authors_item)
                 for (author,) in session.query(STLModel.author).distinct().order_by(STLModel.author).all():
                     if author:
-                        child = QTreeWidgetItem([author])
-                        child.setData(0, Qt.ItemDataRole.UserRole, ("author", author))
-                        authors_item.addChild(child)
+                        authors_item.addChild(_make_leaf(author, ("author", author)))
 
             if show_tags:
                 tags_item = QTreeWidgetItem(["Tags"])
                 tags_item.setIcon(0, _icon_tag)
                 self._filter_tree.addTopLevelItem(tags_item)
                 for tag in session.query(Tag).order_by(Tag.name).all():
-                    child = QTreeWidgetItem([tag.name])
-                    child.setData(0, Qt.ItemDataRole.UserRole, ("tag", tag.name))
-                    tags_item.addChild(child)
+                    tags_item.addChild(_make_leaf(tag.name, ("tag", tag.name)))
 
             if show_source:
                 types_item = QTreeWidgetItem(["Type"])
@@ -432,9 +468,7 @@ class BrowserTab(QWidget):
                 self._filter_tree.addTopLevelItem(types_item)
                 for (t,) in session.query(STLModel.source).distinct().order_by(STLModel.source).all():
                     if t:
-                        child = QTreeWidgetItem([t])
-                        child.setData(0, Qt.ItemDataRole.UserRole, ("source", t))
-                        types_item.addChild(child)
+                        types_item.addChild(_make_leaf(t, ("source", t)))
 
             if show_date:
                 _MONTH_NAMES = [
@@ -454,15 +488,14 @@ class BrowserTab(QWidget):
                 year_items: dict[int, QTreeWidgetItem] = {}
                 for year, month in rows:
                     if year not in year_items:
-                        yi = QTreeWidgetItem([str(year)])
-                        yi.setData(0, Qt.ItemDataRole.UserRole, ("date_year", year))
+                        yi = _make_leaf(str(year), ("date_year", year))
                         dates_item.addChild(yi)
                         year_items[year] = yi
                     if month is not None:
                         label = _MONTH_NAMES[month] if 1 <= month <= 12 else str(month)
-                        mi = QTreeWidgetItem([label])
-                        mi.setData(0, Qt.ItemDataRole.UserRole, ("date_month", (year, month)))
-                        year_items[year].addChild(mi)
+                        year_items[year].addChild(
+                            _make_leaf(label, ("date_month", (year, month)))
+                        )
 
             if show_path:
                 paths_item = QTreeWidgetItem(["Path"])
@@ -476,16 +509,24 @@ class BrowserTab(QWidget):
                 if new_dirs != self._cached_path_dirs:
                     self._cached_path_dirs = new_dirs
                     self._cached_sorted_dirs = sorted(dirs)
-                self._build_path_tree(paths_item, self._cached_sorted_dirs)
+                self._build_path_tree(paths_item, self._cached_sorted_dirs, checked_data)
         finally:
             session.close()
 
-        self._filter_tree.expandAll()
+        self._filter_tree.blockSignals(False)
+
+        # Restore expansion: first run → all collapsed; subsequent runs → restore state.
+        if expanded_sections is not None:
+            root_item = self._filter_tree.invisibleRootItem()
+            for i in range(root_item.childCount()):
+                section = root_item.child(i)
+                section.setExpanded(section.text(0) in expanded_sections)
 
     @staticmethod
-    def _build_path_tree(root_item: QTreeWidgetItem, dirs: list[str]) -> None:
+    def _build_path_tree(root_item: QTreeWidgetItem, dirs: list[str],
+                         checked_data: set | None = None) -> None:
         """Build a nested tree of directory segments under *root_item*."""
-        # node_map: full path string → QTreeWidgetItem
+        _CHECKABLE = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable
         node_map: dict[str, QTreeWidgetItem] = {}
 
         for d in dirs:
@@ -498,13 +539,24 @@ class BrowserTab(QWidget):
                 parent = node_map.get(str(FSPath(*parts[:depth - 1]))) if depth > 1 else root_item
                 if parent is None:
                     parent = root_item
+                data = ("path", full)
                 item = QTreeWidgetItem([label])
-                item.setData(0, Qt.ItemDataRole.UserRole, ("path", full))
+                item.setData(0, Qt.ItemDataRole.UserRole, data)
+                item.setFlags(_CHECKABLE)
+                state = (Qt.CheckState.Checked
+                         if checked_data and data in checked_data
+                         else Qt.CheckState.Unchecked)
+                item.setCheckState(0, state)
                 parent.addChild(item)
                 node_map[full] = item
 
-    def _load_table(self, author_filter=None, tag_filter=None, type_filter=None, path_filter=None,
-                    date_year_filter=None, date_month_filter=None):
+    def _load_table(self, author_filters=None, tag_filters=None, type_filters=None,
+                    path_filters=None, date_filters=None):
+        """Reload the table, optionally with multi-value filter lists.
+
+        Within each category the values are OR-ed; across categories they are AND-ed.
+        *date_filters* is a list of (year, month_or_None) tuples.
+        """
         self._loading = True
         self._model.removeRows(0, self._model.rowCount())
         session = get_session()
@@ -516,19 +568,28 @@ class BrowserTab(QWidget):
                 selectinload(STLModel.subcategory),
                 selectinload(STLModel.release),
             )
-            if author_filter:
-                q = q.filter(STLModel.author == author_filter)
-            if type_filter:
-                q = q.filter(STLModel.source == type_filter)
-            if tag_filter:
-                q = q.filter(STLModel.tags.any(Tag.name == tag_filter))
-            if path_filter:
-                prefix = path_filter.rstrip("/") + "/"
-                q = q.filter(STLModel.archive_path.like(prefix + "%"))
-            if date_year_filter is not None:
-                q = q.filter(STLModel.release_year == date_year_filter)
-            if date_month_filter is not None:
-                q = q.filter(STLModel.release_month == date_month_filter)
+            if author_filters:
+                q = q.filter(STLModel.author.in_(author_filters))
+            if type_filters:
+                q = q.filter(STLModel.source.in_(type_filters))
+            if tag_filters:
+                q = q.filter(STLModel.tags.any(Tag.name.in_(tag_filters)))
+            if path_filters:
+                q = q.filter(or_(*(
+                    STLModel.archive_path.like(p.rstrip("/") + "/%")
+                    for p in path_filters
+                )))
+            if date_filters:
+                date_conditions = []
+                for year, month in date_filters:
+                    if month is None:
+                        date_conditions.append(STLModel.release_year == year)
+                    else:
+                        date_conditions.append(
+                            and_(STLModel.release_year == year,
+                                 STLModel.release_month == month)
+                        )
+                q = q.filter(or_(*date_conditions))
 
             for stl in q.order_by(STLModel.title).all():
                 thumb_item = QStandardItem()
@@ -661,25 +722,63 @@ class BrowserTab(QWidget):
     def _on_search(self, text: str):
         self._proxy.setFilterFixedString(text)
 
-    def _on_filter_clicked(self, item: QTreeWidgetItem, _col: int):
-        data = item.data(0, Qt.ItemDataRole.UserRole)
-        if data is None:
-            self._load_table()
-            return
-        kind, value = data
-        if kind == "author":
-            self._load_table(author_filter=value)
-        elif kind == "tag":
-            self._load_table(tag_filter=value)
-        elif kind == "source":
-            self._load_table(type_filter=value)
-        elif kind == "path":
-            self._load_table(path_filter=value)
-        elif kind == "date_year":
-            self._load_table(date_year_filter=value)
-        elif kind == "date_month":
-            year, month = value
-            self._load_table(date_year_filter=year, date_month_filter=month)
+    def _on_filter_item_changed(self, item: QTreeWidgetItem, _col: int):
+        """Called when a checkbox in the filter tree is toggled."""
+        if item.data(0, Qt.ItemDataRole.UserRole) is not None:
+            self._apply_checked_filters()
+
+    def _apply_checked_filters(self):
+        """Collect all checked filter items and reload the table."""
+        author_filters: list[str] = []
+        tag_filters:    list[str] = []
+        type_filters:   list[str] = []
+        path_filters:   list[str] = []
+        date_filters:   list[tuple] = []
+
+        def _collect(item: QTreeWidgetItem):
+            data = item.data(0, Qt.ItemDataRole.UserRole)
+            if data and item.checkState(0) == Qt.CheckState.Checked:
+                kind, value = data
+                if kind == "author":
+                    author_filters.append(value)
+                elif kind == "tag":
+                    tag_filters.append(value)
+                elif kind == "source":
+                    type_filters.append(value)
+                elif kind == "path":
+                    path_filters.append(value)
+                elif kind == "date_year":
+                    date_filters.append((value, None))
+                elif kind == "date_month":
+                    date_filters.append(value)  # (year, month)
+            for i in range(item.childCount()):
+                _collect(item.child(i))
+
+        root = self._filter_tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            _collect(root.child(i))
+
+        self._load_table(
+            author_filters=author_filters or None,
+            tag_filters=tag_filters or None,
+            type_filters=type_filters or None,
+            path_filters=path_filters or None,
+            date_filters=date_filters or None,
+        )
+
+    def _clear_filters(self):
+        """Uncheck all filter items and reload the full table."""
+        self._filter_tree.blockSignals(True)
+        def _uncheck(item: QTreeWidgetItem):
+            if item.data(0, Qt.ItemDataRole.UserRole) is not None:
+                item.setCheckState(0, Qt.CheckState.Unchecked)
+            for i in range(item.childCount()):
+                _uncheck(item.child(i))
+        root = self._filter_tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            _uncheck(root.child(i))
+        self._filter_tree.blockSignals(False)
+        self._load_table()
 
     def _on_row_clicked(self, index):
         src_index = self._proxy.mapToSource(index)
