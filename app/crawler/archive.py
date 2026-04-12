@@ -34,6 +34,10 @@ def _open_7z(path: Path):
 
 
 def _open_rar(path: Path):
+    from app.ui.config_dialog import get_unrar_path
+    tool = get_unrar_path()
+    if tool:
+        rarfile.UNRAR_TOOL = tool
     return rarfile.RarFile(str(path), "r")
 
 
