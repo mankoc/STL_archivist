@@ -45,8 +45,9 @@ class AboutDialog(QDialog):
     def _build_ui(self):
         root = QVBoxLayout(self)
 
+        from app import __version__
         header = QLabel(
-            "<b>STL Database</b><br>"
+            f"<b>STL Database</b> v{__version__}<br>"
             "A desktop application for cataloguing and browsing<br>"
             "3D-print model archives.<br><br>"
             "Built with Python + PyQt6 + SQLAlchemy."
