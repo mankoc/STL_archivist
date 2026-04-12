@@ -94,10 +94,10 @@ class STLModel(Base):
     created_at       = Column(DateTime, default=_utcnow)
     updated_at       = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
-    sculptor_id      = Column(Integer, ForeignKey("sculptors.id", ondelete="SET NULL"), nullable=True)
-    category_id      = Column(Integer, ForeignKey("categories.id", ondelete="SET NULL"), nullable=True)
-    subcategory_id   = Column(Integer, ForeignKey("subcategories.id", ondelete="SET NULL"), nullable=True)
-    release_id       = Column(Integer, ForeignKey("releases.id", ondelete="SET NULL"), nullable=True)
+    sculptor_id      = Column(Integer, ForeignKey("sculptors.id", ondelete="SET NULL"), nullable=True, index=True)
+    category_id      = Column(Integer, ForeignKey("categories.id", ondelete="SET NULL"), nullable=True, index=True)
+    subcategory_id   = Column(Integer, ForeignKey("subcategories.id", ondelete="SET NULL"), nullable=True, index=True)
+    release_id       = Column(Integer, ForeignKey("releases.id", ondelete="SET NULL"), nullable=True, index=True)
 
     tags        = relationship("Tag",         secondary=model_tags, back_populates="models")
     images      = relationship("Image",       back_populates="model", cascade="all, delete-orphan")

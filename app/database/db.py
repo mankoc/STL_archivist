@@ -2,9 +2,10 @@
 Database session factory.
 Swap the DB URL in get_engine() to migrate away from SQLite in the future.
 """
+import re
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker, Session
 
 from app.database.models import Base
@@ -41,7 +42,7 @@ def init_db(db_path: str = "stl_database.db") -> None:
 
 def _migrate(engine) -> None:
     """Apply incremental schema changes for existing databases."""
-    from sqlalchemy import inspect, text
+    from sqlalchemy import inspect
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
 
@@ -49,23 +50,25 @@ def _migrate(engine) -> None:
     if "model_types" in tables:
         with engine.begin() as conn:
             conn.execute(text("PRAGMA foreign_keys=OFF"))
-            # Rename the category table
-            conn.execute(text("ALTER TABLE model_types RENAME TO categories"))
-            # Recreate subtypes as subcategories with an updated FK reference to categories
-            conn.execute(text("""
-                CREATE TABLE subcategories (
-                    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                    category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
-                    name VARCHAR(128) NOT NULL,
-                    CONSTRAINT uq_subcategory_per_category UNIQUE (category_id, name)
-                )
-            """))
-            conn.execute(text(
-                "INSERT INTO subcategories (id, category_id, name) "
-                "SELECT id, model_type_id, name FROM subtypes"
-            ))
-            conn.execute(text("DROP TABLE subtypes"))
-            conn.execute(text("PRAGMA foreign_keys=ON"))
+            try:
+                # Rename the category table
+                conn.execute(text("ALTER TABLE model_types RENAME TO categories"))
+                # Recreate subtypes as subcategories with an updated FK reference to categories
+                conn.execute(text("""
+                    CREATE TABLE subcategories (
+                        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                        category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+                        name VARCHAR(128) NOT NULL,
+                        CONSTRAINT uq_subcategory_per_category UNIQUE (category_id, name)
+                    )
+                """))
+                conn.execute(text(
+                    "INSERT INTO subcategories (id, category_id, name) "
+                    "SELECT id, model_type_id, name FROM subtypes"
+                ))
+                conn.execute(text("DROP TABLE subtypes"))
+            finally:
+                conn.execute(text("PRAGMA foreign_keys=ON"))
         # Re-inspect after table renames
         inspector = inspect(engine)
 
@@ -102,9 +105,6 @@ def _migrate(engine) -> None:
 
 def _migrate_release_date(engine) -> None:
     """Parse the legacy release_date string column into release_year + release_month."""
-    import re
-    from sqlalchemy import text
-
     with engine.begin() as conn:
         rows = conn.execute(
             text("SELECT id, release_date FROM models "
@@ -130,7 +130,6 @@ def _migrate_release_date(engine) -> None:
 
 def _migrate_blobs_to_files(engine) -> None:
     """Write legacy JPEG blobs to disk, set thumbnail_path, then clear the blob."""
-    from sqlalchemy import text
     from app.utils.thumbnailer import write_raw_thumbnail
 
     with engine.begin() as conn:

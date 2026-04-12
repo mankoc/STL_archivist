@@ -1,6 +1,7 @@
 """
 String similarity utilities used across the application.
 """
+import unicodedata
 
 _SOUNDEX_CODE = str.maketrans(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
@@ -23,8 +24,13 @@ def levenshtein(a: str, b: str) -> int:
 
 
 def soundex(s: str) -> str:
-    """Return the American Soundex code for *s* (4-character string)."""
-    s = "".join(c for c in s.upper() if c.isalpha())
+    """Return the American Soundex code for *s* (4-character string).
+
+    Accented / non-ASCII letters are decomposed to their ASCII base before
+    encoding, so names like "Müller" and "Muller" produce the same code.
+    """
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(c for c in s.upper() if c.isascii() and c.isalpha())
     if not s:
         return "0000"
     first = s[0]
