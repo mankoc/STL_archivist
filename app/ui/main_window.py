@@ -46,6 +46,11 @@ class MainWindow(QMainWindow):
         self._act_exit.setStatusTip("Quit STL Database")
         self._act_exit.triggered.connect(QApplication.quit)
 
+        self._act_image_grid = QAction(
+            style.standardIcon(SP.SP_FileDialogListView), "Image Grid", self)
+        self._act_image_grid.setStatusTip("Show a grid of images for the current table")
+        self._act_image_grid.triggered.connect(self._browser.show_image_grid)
+
         self._act_about = QAction(
             style.standardIcon(SP.SP_MessageBoxInformation), "About…", self)
         self._act_about.setStatusTip("About STL Database")
@@ -95,6 +100,7 @@ class MainWindow(QMainWindow):
 
         toolbar.addAction(self._act_open_crawler)
         toolbar.addAction(self._act_refresh)
+        toolbar.addAction(self._act_image_grid)
 
         sb = QStatusBar()
         self.setStatusBar(sb)

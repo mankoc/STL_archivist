@@ -394,12 +394,16 @@ class BrowserTab(QWidget):
         _icon_tag    = _icon("icon_tag")
         _icon_type   = _icon("icon_type")
         _icon_path   = _icon("icon_path")
+        _icon_date   = (_icon("icon_date") if (_ICONS_DIR / f"icon_date_{_v}.svg").exists()
+                        else QApplication.style().standardIcon(
+                            QApplication.style().StandardPixmap.SP_FileDialogContentsView))
 
         header = self._table.horizontalHeader()
         show_author = not header.isSectionHidden(COL_AUTHOR)
         show_tags   = not header.isSectionHidden(COL_TAGS)
         show_source = not header.isSectionHidden(COL_SOURCE)
         show_path   = not header.isSectionHidden(COL_PATH)
+        show_date   = not header.isSectionHidden(COL_DATE)
 
         session = get_session()
         try:
@@ -431,6 +435,34 @@ class BrowserTab(QWidget):
                         child = QTreeWidgetItem([t])
                         child.setData(0, Qt.ItemDataRole.UserRole, ("source", t))
                         types_item.addChild(child)
+
+            if show_date:
+                _MONTH_NAMES = [
+                    "", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+                ]
+                dates_item = QTreeWidgetItem(["Date"])
+                dates_item.setIcon(0, _icon_date)
+                self._filter_tree.addTopLevelItem(dates_item)
+                rows = (
+                    session.query(STLModel.release_year, STLModel.release_month)
+                    .filter(STLModel.release_year.isnot(None))
+                    .distinct()
+                    .order_by(STLModel.release_year.desc(), STLModel.release_month)
+                    .all()
+                )
+                year_items: dict[int, QTreeWidgetItem] = {}
+                for year, month in rows:
+                    if year not in year_items:
+                        yi = QTreeWidgetItem([str(year)])
+                        yi.setData(0, Qt.ItemDataRole.UserRole, ("date_year", year))
+                        dates_item.addChild(yi)
+                        year_items[year] = yi
+                    if month is not None:
+                        label = _MONTH_NAMES[month] if 1 <= month <= 12 else str(month)
+                        mi = QTreeWidgetItem([label])
+                        mi.setData(0, Qt.ItemDataRole.UserRole, ("date_month", (year, month)))
+                        year_items[year].addChild(mi)
 
             if show_path:
                 paths_item = QTreeWidgetItem(["Path"])
@@ -471,7 +503,8 @@ class BrowserTab(QWidget):
                 parent.addChild(item)
                 node_map[full] = item
 
-    def _load_table(self, author_filter=None, tag_filter=None, type_filter=None, path_filter=None):
+    def _load_table(self, author_filter=None, tag_filter=None, type_filter=None, path_filter=None,
+                    date_year_filter=None, date_month_filter=None):
         self._loading = True
         self._model.removeRows(0, self._model.rowCount())
         session = get_session()
@@ -492,6 +525,10 @@ class BrowserTab(QWidget):
             if path_filter:
                 prefix = path_filter.rstrip("/") + "/"
                 q = q.filter(STLModel.archive_path.like(prefix + "%"))
+            if date_year_filter is not None:
+                q = q.filter(STLModel.release_year == date_year_filter)
+            if date_month_filter is not None:
+                q = q.filter(STLModel.release_month == date_month_filter)
 
             for stl in q.order_by(STLModel.title).all():
                 thumb_item = QStandardItem()
@@ -638,6 +675,11 @@ class BrowserTab(QWidget):
             self._load_table(type_filter=value)
         elif kind == "path":
             self._load_table(path_filter=value)
+        elif kind == "date_year":
+            self._load_table(date_year_filter=value)
+        elif kind == "date_month":
+            year, month = value
+            self._load_table(date_year_filter=year, date_month_filter=month)
 
     def _on_row_clicked(self, index):
         src_index = self._proxy.mapToSource(index)
@@ -724,7 +766,7 @@ class BrowserTab(QWidget):
             col = chosen.data()
             header.setSectionHidden(col, not chosen.isChecked())
             self._save_header_state()
-            if col in (COL_AUTHOR, COL_TAGS, COL_SOURCE, COL_PATH):
+            if col in (COL_AUTHOR, COL_TAGS, COL_SOURCE, COL_PATH, COL_DATE):
                 self._populate_filter_tree()
 
     def _context_menu(self, pos):
@@ -901,3 +943,16 @@ class BrowserTab(QWidget):
         dlg = SortFilesDialog(model_ids, parent=self)
         if dlg.exec():
             self.refresh()
+
+    def show_image_grid(self):
+        """Open an image grid for all models currently visible in the table."""
+        model_ids = []
+        for proxy_row in range(self._proxy.rowCount()):
+            src_row = self._proxy.mapToSource(self._proxy.index(proxy_row, 0)).row()
+            item = self._model.item(src_row, COL_THUMB)
+            if item is not None:
+                mid = item.data(MODEL_ID_ROLE)
+                if mid is not None:
+                    model_ids.append(mid)
+        from app.ui.image_grid_dialog import ImageGridDialog
+        ImageGridDialog(model_ids, parent=self).exec()
