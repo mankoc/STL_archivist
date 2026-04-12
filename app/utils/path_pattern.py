@@ -113,7 +113,7 @@ def pattern_to_regex(pattern: str) -> re.Pattern | None:
     regex_parts: list[str] = []
     for part in parts:
         if part == "*":
-            regex_parts.append(".*")
+            regex_parts.append("[^/]+")
         elif part.startswith("{") and part.endswith("}"):
             token = part[1:-1]
             count = seen.get(token, 0)
