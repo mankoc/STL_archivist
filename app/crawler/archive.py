@@ -3,6 +3,7 @@ Helpers for opening 7z / zip / rar archives and streaming file contents
 without full extraction to disk (memory-efficient).
 """
 import io
+import logging
 import tempfile
 import zipfile
 from pathlib import Path
@@ -10,6 +11,18 @@ from typing import Callable, Generator, Optional
 
 import py7zr
 import rarfile
+
+# Per-file size caps applied when loading archive members into memory.
+# Oversized entries are skipped with a warning instead of being read.
+_SIZE_LIMIT_IMAGE = 50 * 1024 * 1024   # 50 MB – images / thumbnails
+_SIZE_LIMIT_META  =  1 * 1024 * 1024   #  1 MB – info.json / .url files
+
+
+def _member_size_limit(name: str) -> int:
+    """Return the maximum number of bytes allowed for *name* in memory."""
+    if Path(name.replace("\\", "/")).suffix.lower() in IMAGE_SUFFIXES:
+        return _SIZE_LIMIT_IMAGE
+    return _SIZE_LIMIT_META
 
 
 ARCHIVE_SUFFIXES = {".7z", ".zip", ".rar"}
@@ -164,6 +177,14 @@ def extract_archive_contents(archive_path: Path) -> dict[str, bytes]:
             with _open_zip(archive_path) as zf:
                 for name in zf.namelist():
                     if _is_wanted(name):
+                        limit = _member_size_limit(name)
+                        file_size = zf.getinfo(name).file_size
+                        if file_size > limit:
+                            logging.warning(
+                                "Skipping oversized member %r (%d B > %d B limit) in %s",
+                                name, file_size, limit, archive_path,
+                            )
+                            continue
                         try:
                             data = zf.read(name)
                             if data:
@@ -182,6 +203,14 @@ def extract_archive_contents(archive_path: Path) -> dict[str, bytes]:
                 for name in wanted:
                     filepath = tmp / Path(name.replace("\\", "/"))
                     if filepath.exists():
+                        limit = _member_size_limit(name)
+                        file_size = filepath.stat().st_size
+                        if file_size > limit:
+                            logging.warning(
+                                "Skipping oversized member %r (%d B > %d B limit) in %s",
+                                name, file_size, limit, archive_path,
+                            )
+                            continue
                         data = filepath.read_bytes()
                         if data:
                             result[name] = data
@@ -190,6 +219,14 @@ def extract_archive_contents(archive_path: Path) -> dict[str, bytes]:
             with _open_rar(archive_path) as rf:
                 for name in rf.namelist():
                     if _is_wanted(name):
+                        limit = _member_size_limit(name)
+                        file_size = rf.getinfo(name).file_size
+                        if file_size > limit:
+                            logging.warning(
+                                "Skipping oversized member %r (%d B > %d B limit) in %s",
+                                name, file_size, limit, archive_path,
+                            )
+                            continue
                         try:
                             data = rf.read(name)
                             if data:
