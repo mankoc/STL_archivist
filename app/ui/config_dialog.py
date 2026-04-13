@@ -5,6 +5,8 @@ All other settings are stored in a JSON file inside the data directory so
 that each library has its own independent configuration.
 """
 import json
+import os
+import sys
 from pathlib import Path
 
 from PyQt6.QtCore import QSettings, QSize, Qt
@@ -17,14 +19,58 @@ from PyQt6.QtWidgets import (
 )
 
 DATA_DIR_KEY           = "config/data_dir"
-DATA_DIR_DEFAULT       = str(Path.home() / ".stl_database")
-
 UNRAR_TOOL_KEY         = "config/unrar_tool"
 
-# Defaults for per-library settings
+# Defaults for per-library settings (non-platform-specific)
 MAX_THUMBS_DEFAULT     = 5
 MAX_THUMB_SIZE_DEFAULT = 512
-COLOR_SCHEME_DEFAULT   = "Windows 11 Dark"
+
+
+def _platform_defaults() -> dict:
+    """Return a dict of default values that differ by operating system.
+
+    Keys
+    ----
+    data_dir        : str   — default location for the database and thumbnails
+    color_scheme    : str   — initial color theme name (must be a key in THEMES)
+    unrar_hint      : str   — placeholder text shown in the unrar path field
+    max_workers     : int   — default number of parallel crawler threads
+    """
+    cpu = os.cpu_count() or 2
+    # Use half the logical CPU count, clamped to [2, 8]
+    workers = max(2, min(cpu // 2, 8))
+
+    if sys.platform == "win32":
+        local_app_data = os.environ.get("LOCALAPPDATA", str(Path.home()))
+        data_dir       = str(Path(local_app_data) / "STL Database")
+        color_scheme   = "Windows 11 Dark"
+        unrar_hint     = (
+            r"C:\Program Files\WinRAR\UnRAR.exe  "
+            r"(or C:\Program Files (x86)\WinRAR\UnRAR.exe)"
+        )
+    elif sys.platform == "darwin":
+        data_dir     = str(Path.home() / "Library" / "Application Support" / "STL Database")
+        color_scheme = "System Default"
+        unrar_hint   = "/opt/homebrew/bin/unrar  (or /usr/local/bin/unrar)"
+    else:
+        # Linux / BSD — follow XDG Base Directory spec
+        xdg_data = os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))
+        data_dir     = str(Path(xdg_data) / "stl_database")
+        color_scheme = "System Default"
+        unrar_hint   = "/usr/bin/unrar"
+
+    return {
+        "data_dir":     data_dir,
+        "color_scheme": color_scheme,
+        "unrar_hint":   unrar_hint,
+        "max_workers":  workers,
+    }
+
+
+_PLATFORM = _platform_defaults()
+
+DATA_DIR_DEFAULT     = _PLATFORM["data_dir"]
+COLOR_SCHEME_DEFAULT = _PLATFORM["color_scheme"]
 
 _LIBRARY_SETTINGS_FILE = "settings.json"
 
@@ -87,6 +133,10 @@ def get_file_sorting_enabled() -> bool:
     return bool(_load_library_settings().get("file_sorting_enabled", False))
 
 
+def get_max_workers() -> int:
+    return int(_load_library_settings().get("max_workers", _PLATFORM["max_workers"]))
+
+
 def get_warn_presupported_stl() -> bool:
     """Whether to warn when an archive contains presupported STL files."""
     return bool(_load_library_settings().get("warn_presupported_stl", True))
@@ -100,6 +150,11 @@ def get_warn_no_images() -> bool:
 def get_warn_nested_archive() -> bool:
     """Whether to warn when an archive contains another compressed archive."""
     return bool(_load_library_settings().get("warn_nested_archive", True))
+
+
+def get_debug_menu_enabled() -> bool:
+    """Whether the Debug menu is visible in the main window."""
+    return bool(_load_library_settings().get("debug_menu_enabled", False))
 
 
 _ICONS_DIR = Path(__file__).parent.parent.parent / "resources" / "icons"
@@ -240,9 +295,22 @@ class ConfigDialog(QDialog):
             QLabel("<small>Longest side in pixels when storing images (width & height capped at this value).</small>"),
         )
 
+        self._max_workers_spin = QSpinBox()
+        self._max_workers_spin.setRange(1, 32)
+        self._max_workers_spin.setSuffix(" thread(s)")
+        form.addRow("Parallel workers:", self._max_workers_spin)
+        form.addRow(
+            "",
+            QLabel(
+                f"<small>Number of threads used to hash and extract archives in parallel. "
+                f"Default for this machine: <b>{_PLATFORM['max_workers']}</b> "
+                f"({os.cpu_count() or '?'} logical CPU(s) detected).</small>"
+            ),
+        )
+
         unrar_row = QHBoxLayout()
         self._unrar_edit = QLineEdit()
-        self._unrar_edit.setPlaceholderText("unrar  (found on PATH)")
+        self._unrar_edit.setPlaceholderText(_PLATFORM["unrar_hint"])
         unrar_row.addWidget(self._unrar_edit)
 
         unrar_browse_btn = QPushButton("Browse…")
@@ -335,6 +403,22 @@ class ConfigDialog(QDialog):
         )
 
         layout.addWidget(group)
+
+        adv_group = QGroupBox("Advanced")
+        adv_form  = QFormLayout(adv_group)
+
+        self._debug_menu_check = QCheckBox("Show Debug menu")
+        adv_form.addRow("", self._debug_menu_check)
+        adv_form.addRow(
+            "",
+            QLabel(
+                "<small>Shows the <b>Debug</b> menu in the menu bar, which gives "
+                "access to destructive operations such as deleting the database "
+                "and log files.</small>"
+            ),
+        )
+
+        layout.addWidget(adv_group)
         layout.addStretch()
         return page
 
@@ -368,6 +452,7 @@ class ConfigDialog(QDialog):
         self._max_thumbs_spin.setValue(get_max_thumbnails())
         self._max_thumb_size_spin.setValue(get_max_thumb_size())
 
+        self._max_workers_spin.setValue(get_max_workers())
         self._file_sorting_check.setChecked(get_file_sorting_enabled())
         self._unrar_edit.setText(get_unrar_path())
         self._warn_presupported_check.setChecked(get_warn_presupported_stl())
@@ -380,6 +465,8 @@ class ConfigDialog(QDialog):
             self._theme_combo.setCurrentIndex(idx)
         else:
             self._theme_combo.setCurrentIndex(0)
+
+        self._debug_menu_check.setChecked(get_debug_menu_enabled())
 
     def _save(self):
         data_dir = self._data_dir_edit.text().strip() or DATA_DIR_DEFAULT
@@ -396,11 +483,13 @@ class ConfigDialog(QDialog):
             {
                 "max_thumbnails": self._max_thumbs_spin.value(),
                 "max_thumb_size": self._max_thumb_size_spin.value(),
+                "max_workers":    self._max_workers_spin.value(),
                 "color_scheme": selected_scheme,
                 "file_sorting_enabled": self._file_sorting_check.isChecked(),
                 "warn_presupported_stl": self._warn_presupported_check.isChecked(),
                 "warn_no_images": self._warn_no_images_check.isChecked(),
                 "warn_nested_archive": self._warn_nested_archive_check.isChecked(),
+                "debug_menu_enabled": self._debug_menu_check.isChecked(),
             },
             data_dir=data_dir,
         )

@@ -79,18 +79,18 @@ class MainWindow(QMainWindow):
         view_menu = mb.addMenu("&View")
         view_menu.addAction(self._act_refresh)
 
-        debug_menu = mb.addMenu("&Debug")
+        self._debug_menu = mb.addMenu("&Debug")
         act_clear_db = QAction(
             style.standardIcon(SP.SP_TrashIcon), "Delete Database…", self)
         act_clear_db.setStatusTip("Permanently delete all records from the database")
         act_clear_db.triggered.connect(self._clear_database)
-        debug_menu.addAction(act_clear_db)
+        self._debug_menu.addAction(act_clear_db)
 
         act_delete_logs = QAction(
             style.standardIcon(SP.SP_TrashIcon), "Delete Logs…", self)
         act_delete_logs.setStatusTip("Delete all log files from the data directory")
         act_delete_logs.triggered.connect(self._delete_logs)
-        debug_menu.addAction(act_delete_logs)
+        self._debug_menu.addAction(act_delete_logs)
 
         help_menu = mb.addMenu("&Help")
         help_menu.addAction(self._act_help)
@@ -111,6 +111,8 @@ class MainWindow(QMainWindow):
         sb = QStatusBar()
         self.setStatusBar(sb)
 
+        self._apply_debug_menu_visibility()
+
     # ------------------------------------------------------------------
     def _update_status_bar(self, count: int):
         self.statusBar().showMessage(f"{count} model{'s' if count != 1 else ''}")
@@ -123,6 +125,11 @@ class MainWindow(QMainWindow):
     def _open_config(self):
         from app.ui.config_dialog import ConfigDialog
         ConfigDialog(parent=self).exec()
+        self._apply_debug_menu_visibility()
+
+    def _apply_debug_menu_visibility(self):
+        from app.ui.config_dialog import get_debug_menu_enabled
+        self._debug_menu.menuAction().setVisible(get_debug_menu_enabled())
 
     def _clear_database(self):
         reply = QMessageBox.warning(
