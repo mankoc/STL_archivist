@@ -1,0 +1,219 @@
+"""
+Dialog for generating or updating METADATA.7z sidecar files across all folders
+that have records in the database.
+"""
+import logging
+from pathlib import Path
+
+from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout,
+    QLabel, QPushButton, QProgressBar, QPlainTextEdit,
+    QSizePolicy, QApplication,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class MetadataSidecarWorker(QThread):
+    """
+    Background thread that exports METADATA.7z for every folder that has at
+    least one STLModel record in the database.
+
+    Signals
+    -------
+    progress(current, total)  – folder index and total folder count
+    log(message)              – human-readable status line
+    finished()                – emitted when all folders are processed (or stopped)
+    """
+    progress = pyqtSignal(int, int)
+    log      = pyqtSignal(str)
+    finished = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._stop_requested = False
+
+    def stop(self):
+        self._stop_requested = True
+
+    def run(self):
+        from app.database.db import session_scope
+        from app.database.models import STLModel
+        from app.crawler.folder_metadata import export_folder_metadata
+        from app.utils.thumbnailer import get_thumbnail_base_dir
+        from app.ui.config_dialog import (
+            get_metadata_sidecar_enabled,
+            get_metadata_thumbnails_enabled,
+        )
+
+        self._stop_requested = False
+
+        if not get_metadata_sidecar_enabled():
+            self.log.emit(
+                "Metadata sidecar is disabled in Configuration. "
+                "Enable it first, then retry."
+            )
+            self.finished.emit()
+            return
+
+        thumb_base = get_thumbnail_base_dir()
+        if thumb_base is None:
+            self.log.emit("Thumbnail directory is not configured — cannot run.")
+            self.finished.emit()
+            return
+
+        include_thumbs = get_metadata_thumbnails_enabled()
+
+        # Collect all distinct parent folders from the database
+        with session_scope() as session:
+            rows = session.query(STLModel.archive_path).all()
+
+        folders = sorted({Path(row.archive_path).parent for row in rows if row.archive_path})
+        total = len(folders)
+
+        if total == 0:
+            self.log.emit("No folders with database records found.")
+            self.finished.emit()
+            return
+
+        self.log.emit(
+            f"Found {total} folder(s). Writing METADATA.7z "
+            f"(thumbnails={'yes' if include_thumbs else 'no'})…"
+        )
+        logger.info(
+            "MetadataSidecarWorker: processing %d folder(s), thumbnails=%s",
+            total, include_thumbs,
+        )
+
+        written = 0
+        for idx, folder in enumerate(folders, 1):
+            if self._stop_requested:
+                self.log.emit("Stopped by user.")
+                break
+
+            self.progress.emit(idx, total)
+            try:
+                with session_scope() as session:
+                    ok = export_folder_metadata(
+                        folder, session, thumb_base,
+                        include_thumbnails=include_thumbs,
+                    )
+                if ok:
+                    self.log.emit(f"[{idx}/{total}] Updated: {folder}")
+                    written += 1
+                    logger.debug("  wrote METADATA.7z in %s", folder)
+                else:
+                    self.log.emit(f"[{idx}/{total}] Skipped (no records): {folder}")
+            except Exception as exc:
+                self.log.emit(f"[{idx}/{total}] ERROR in {folder}: {exc}")
+                logger.error("Failed to write METADATA.7z in %s: %s", folder, exc, exc_info=True)
+
+        self.log.emit(f"Done — updated {written} of {total} folder(s).")
+        logger.info("MetadataSidecarWorker finished: %d/%d written", written, total)
+        self.finished.emit()
+
+
+class MetadataSidecarDialog(QDialog):
+    """Modal dialog that runs MetadataSidecarWorker and shows its progress."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Generate / Update Metadata Sidecars")
+        self.resize(640, 420)
+        self.setModal(True)
+        self._worker: MetadataSidecarWorker | None = None
+        self._build_ui()
+
+    # ------------------------------------------------------------------
+    def _build_ui(self):
+        root = QVBoxLayout(self)
+        root.setSpacing(8)
+
+        info = QLabel(
+            "Writes or refreshes a <b>METADATA.7z</b> sidecar file in every "
+            "folder that contains archived models in the database.<br>"
+            "This allows the library to be restored on a new machine without "
+            "re-crawling every archive."
+        )
+        info.setWordWrap(True)
+        root.addWidget(info)
+
+        self._progress = QProgressBar()
+        self._progress.setValue(0)
+        self._progress.setTextVisible(True)
+        root.addWidget(self._progress)
+
+        root.addWidget(QLabel("Log:"))
+        self._log = QPlainTextEdit()
+        self._log.setReadOnly(True)
+        self._log.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        root.addWidget(self._log)
+
+        style = QApplication.style()
+        btn_row = QHBoxLayout()
+
+        self._start_btn = QPushButton(
+            style.standardIcon(style.StandardPixmap.SP_MediaPlay), "Start"
+        )
+        self._start_btn.clicked.connect(self._start)
+        btn_row.addWidget(self._start_btn)
+
+        self._stop_btn = QPushButton(
+            style.standardIcon(style.StandardPixmap.SP_MediaStop), "Stop"
+        )
+        self._stop_btn.setEnabled(False)
+        self._stop_btn.clicked.connect(self._stop)
+        btn_row.addWidget(self._stop_btn)
+
+        btn_row.addStretch()
+
+        self._close_btn = QPushButton(
+            style.standardIcon(style.StandardPixmap.SP_DialogCloseButton), "Close"
+        )
+        self._close_btn.clicked.connect(self.reject)
+        btn_row.addWidget(self._close_btn)
+
+        root.addLayout(btn_row)
+
+    # ------------------------------------------------------------------
+    def _start(self):
+        self._log.clear()
+        self._progress.setValue(0)
+        self._start_btn.setEnabled(False)
+        self._stop_btn.setEnabled(True)
+        self._close_btn.setEnabled(False)
+
+        self._worker = MetadataSidecarWorker()
+        self._worker.log.connect(self._on_log)
+        self._worker.progress.connect(self._on_progress)
+        self._worker.finished.connect(self._on_finished)
+        self._worker.start()
+
+    def _stop(self):
+        if self._worker:
+            self._worker.stop()
+        self._stop_btn.setEnabled(False)
+
+    # ------------------------------------------------------------------
+    def _on_log(self, msg: str):
+        self._log.appendPlainText(msg)
+
+    def _on_progress(self, current: int, total: int):
+        self._progress.setMaximum(total)
+        self._progress.setValue(current)
+        self._progress.setFormat(f"{current} / {total}")
+
+    def _on_finished(self):
+        self._start_btn.setEnabled(True)
+        self._stop_btn.setEnabled(False)
+        self._close_btn.setEnabled(True)
+        self._worker = None
+
+    # ------------------------------------------------------------------
+    def closeEvent(self, event):
+        """Stop the worker if the dialog is closed while running."""
+        if self._worker and self._worker.isRunning():
+            self._worker.stop()
+            self._worker.wait(3000)
+        super().closeEvent(event)

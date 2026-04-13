@@ -549,11 +549,15 @@ class EditorDialog(QDialog):
                 from pathlib import Path as _Path
                 from app.crawler.folder_metadata import export_folder_metadata
                 from app.utils.thumbnailer import get_thumbnail_base_dir
+                from app.ui.config_dialog import get_metadata_thumbnails_enabled, get_metadata_sidecar_enabled
                 thumb_base = get_thumbnail_base_dir()
-                if thumb_base is not None:
+                if thumb_base is not None and get_metadata_sidecar_enabled():
                     try:
-                        export_folder_metadata(_Path(model.archive_path).parent,
-                                               session, thumb_base)
+                        export_folder_metadata(
+                            _Path(model.archive_path).parent,
+                            session, thumb_base,
+                            include_thumbnails=get_metadata_thumbnails_enabled(),
+                        )
                     except Exception:
                         pass  # metadata export is best-effort; never block saving
 

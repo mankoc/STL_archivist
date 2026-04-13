@@ -66,10 +66,23 @@ def folder_has_db_records(folder: Path, session) -> bool:
     ) is not None
 
 
-def export_folder_metadata(folder: Path, session, thumb_base_dir: Path) -> bool:
+def export_folder_metadata(
+    folder: Path,
+    session,
+    thumb_base_dir: Path,
+    include_thumbnails: bool = True,
+) -> bool:
     """
     Create or replace METADATA.7z in *folder* with a snapshot of all
     direct-child archive records currently in the DB.
+
+    Parameters
+    ----------
+    include_thumbnails:
+        When True (default), thumbnail JPEG files are embedded in the archive
+        and referenced from the JSON.  When False the ``images`` list in the
+        JSON is cleared and no image files are written — useful to save disk
+        space when thumbnails are not needed for restore.
 
     Returns True when the file was written, False when there was nothing to do
     (no matching DB records or a write error).
@@ -91,14 +104,20 @@ def export_folder_metadata(folder: Path, session, thumb_base_dir: Path) -> bool:
         logger.debug("export_folder_metadata: no records for %s — skipping", folder)
         return False
 
-    logger.debug("export_folder_metadata: exporting %d record(s) from %s", len(models), folder)
+    logger.debug(
+        "export_folder_metadata: exporting %d record(s) from %s (thumbnails=%s)",
+        len(models), folder, include_thumbnails,
+    )
 
-    data = _serialize_models(models, thumb_base_dir)
+    data = _serialize_models(models, thumb_base_dir, include_thumbnails=include_thumbnails)
 
     metadata_path = folder / METADATA_FILENAME
     try:
-        _write_metadata_7z(metadata_path, data, models, thumb_base_dir)
-        logger.info("Wrote %s (%d model(s))", metadata_path, len(models))
+        _write_metadata_7z(
+            metadata_path, data, models, thumb_base_dir,
+            include_thumbnails=include_thumbnails,
+        )
+        logger.info("Wrote %s (%d model(s), thumbnails=%s)", metadata_path, len(models), include_thumbnails)
         return True
     except Exception as exc:
         logger.error("Failed to write %s: %s", metadata_path, exc, exc_info=True)
@@ -213,17 +232,18 @@ def import_folder_metadata(folder: Path, session, thumb_base_dir: Path) -> list[
 # Internal serialisation helpers
 # ---------------------------------------------------------------------------
 
-def _serialize_models(models, thumb_base_dir: Path) -> dict:
+def _serialize_models(models, thumb_base_dir: Path, include_thumbnails: bool = True) -> dict:
     """Build the metadata.json payload from a list of STLModel instances."""
     entries = []
     for m_idx, model in enumerate(models):
         images_list = []
-        for i_idx, img in enumerate(model.images):
-            if img.thumbnail_path:
-                images_list.append({
-                    "filename":  img.filename or "",
-                    "thumbnail": f"{_THUMBS_DIR}/{m_idx}_{i_idx}.jpg",
-                })
+        if include_thumbnails:
+            for i_idx, img in enumerate(model.images):
+                if img.thumbnail_path:
+                    images_list.append({
+                        "filename":  img.filename or "",
+                        "thumbnail": f"{_THUMBS_DIR}/{m_idx}_{i_idx}.jpg",
+                    })
 
         entries.append({
             "archive_name":  Path(model.archive_path).name,
@@ -254,10 +274,17 @@ def _serialize_models(models, thumb_base_dir: Path) -> dict:
     }
 
 
-def _write_metadata_7z(dest: Path, data: dict, models, thumb_base_dir: Path) -> None:
+def _write_metadata_7z(
+    dest: Path,
+    data: dict,
+    models,
+    thumb_base_dir: Path,
+    include_thumbnails: bool = True,
+) -> None:
     """
-    Write *data* as metadata.json plus thumbnails into a 7z archive at *dest*.
-    Uses a temp file + atomic rename to avoid leaving a corrupt archive on failure.
+    Write *data* as metadata.json plus (optionally) thumbnails into a 7z archive
+    at *dest*.  Uses a temp file + atomic rename to avoid leaving a corrupt
+    archive on failure.
     """
     tmp_path = dest.with_suffix(".7z.tmp")
 
@@ -267,17 +294,18 @@ def _write_metadata_7z(dest: Path, data: dict, models, thumb_base_dir: Path) -> 
             json_bytes = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
             zf.writef(io.BytesIO(json_bytes), _JSON_MEMBER)
 
-            # Add thumbnails referenced in the JSON
-            for m_idx, model in enumerate(models):
-                for i_idx, img in enumerate(model.images):
-                    if not img.thumbnail_path:
-                        continue
-                    thumb_file = thumb_base_dir / img.thumbnail_path
-                    if not thumb_file.exists():
-                        logger.debug("  thumbnail missing, skipping: %s", thumb_file)
-                        continue
-                    arc_name = f"{_THUMBS_DIR}/{m_idx}_{i_idx}.jpg"
-                    zf.write(str(thumb_file), arc_name)
+            # Add thumbnails only when the option is enabled
+            if include_thumbnails:
+                for m_idx, model in enumerate(models):
+                    for i_idx, img in enumerate(model.images):
+                        if not img.thumbnail_path:
+                            continue
+                        thumb_file = thumb_base_dir / img.thumbnail_path
+                        if not thumb_file.exists():
+                            logger.debug("  thumbnail missing, skipping: %s", thumb_file)
+                            continue
+                        arc_name = f"{_THUMBS_DIR}/{m_idx}_{i_idx}.jpg"
+                        zf.write(str(thumb_file), arc_name)
 
         # Atomic replace
         tmp_path.replace(dest)
@@ -300,6 +328,11 @@ def _read_metadata_7z(metadata_path: Path) -> tuple[dict, dict[str, bytes]]:
         tmp = Path(tmpdir)
         with py7zr.SevenZipFile(str(metadata_path), mode="r") as zf:
             zf.extractall(path=tmpdir)
+
+        # py7zr may preserve restrictive archive permissions — ensure files are readable
+        for _f in tmp.rglob("*"):
+            if _f.is_file():
+                _f.chmod(_f.stat().st_mode | 0o644)
 
         # Read JSON
         json_file = tmp / _JSON_MEMBER

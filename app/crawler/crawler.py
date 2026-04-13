@@ -17,7 +17,6 @@ from app.crawler.archive import iter_archives, extract_archive_contents, archive
 from app.crawler.folder_metadata import (
     export_folder_metadata,
     import_folder_metadata,
-    folder_has_db_records,
 )
 from app.crawler.metadata import extract_metadata
 from app.crawler.rules import detect_presupport, detect_scale, detect_warnings
@@ -78,9 +77,10 @@ class CrawlerWorker(QThread):
         self.log.emit(msg)
         logger.info(msg)
 
-        # --- Pre-crawl: restore from METADATA.7z for folders with no DB records ---
+        # --- Pre-crawl: restore from METADATA.7z for any archive not yet in DB ---
+        from app.ui.config_dialog import get_metadata_sidecar_enabled
         thumb_base = get_thumbnail_base_dir()
-        if thumb_base is not None:
+        if thumb_base is not None and get_metadata_sidecar_enabled():
             folder_archives: dict[Path, list[Path]] = defaultdict(list)
             for p in archives:
                 folder_archives[p.parent].append(p)
@@ -89,16 +89,15 @@ class CrawlerWorker(QThread):
                 for folder in folder_archives:
                     if self._stop_requested:
                         break
-                    if not folder_has_db_records(folder, session):
-                        metadata_path = folder / "METADATA.7z"
-                        if metadata_path.exists():
-                            logger.info("Pre-crawl import from %s", metadata_path)
-                            imported = import_folder_metadata(folder, session, thumb_base)
-                            if imported:
-                                msg = (f"Imported {len(imported)} record(s) "
-                                       f"from METADATA.7z in {folder.name}")
-                                self.log.emit(msg)
-                                logger.info(msg)
+                    metadata_path = folder / "METADATA.7z"
+                    if metadata_path.exists():
+                        logger.info("Pre-crawl import from %s", metadata_path)
+                        imported = import_folder_metadata(folder, session, thumb_base)
+                        if imported:
+                            msg = (f"Imported {len(imported)} record(s) "
+                                   f"from METADATA.7z in {folder.name}")
+                            self.log.emit(msg)
+                            logger.info(msg)
 
         max_thumbs     = self._config.max_thumbnails
         max_thumb_size = self._config.max_thumb_size
@@ -217,15 +216,19 @@ class CrawlerWorker(QThread):
                 break
 
         # --- Post-crawl: update METADATA.7z for every folder that was modified ---
-        if modified_folders and thumb_base is not None:
+        if modified_folders and thumb_base is not None and get_metadata_sidecar_enabled():
+            from app.ui.config_dialog import get_metadata_thumbnails_enabled
+            include_thumbs = get_metadata_thumbnails_enabled()
             self.log.emit(f"Updating METADATA.7z in {len(modified_folders)} folder(s)…")
-            logger.info("Post-crawl: updating METADATA.7z in %d folder(s)", len(modified_folders))
+            logger.info("Post-crawl: updating METADATA.7z in %d folder(s) (thumbnails=%s)",
+                        len(modified_folders), include_thumbs)
             with session_scope() as session:
                 for folder in sorted(modified_folders):
                     if self._stop_requested:
                         break
                     try:
-                        export_folder_metadata(folder, session, thumb_base)
+                        export_folder_metadata(folder, session, thumb_base,
+                                               include_thumbnails=include_thumbs)
                         self.log.emit(f"  Updated METADATA.7z in {folder.name}")
                     except Exception as exc:
                         logger.error("Failed to update METADATA.7z in %s: %s",

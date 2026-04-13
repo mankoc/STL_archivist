@@ -157,6 +157,16 @@ def get_debug_menu_enabled() -> bool:
     return bool(_load_library_settings().get("debug_menu_enabled", False))
 
 
+def get_metadata_sidecar_enabled() -> bool:
+    """Whether per-folder METADATA.7z sidecar files are created at all."""
+    return bool(_load_library_settings().get("metadata_sidecar_enabled", True))
+
+
+def get_metadata_thumbnails_enabled() -> bool:
+    """Whether thumbnails are included in per-folder METADATA.7z sidecar files."""
+    return bool(_load_library_settings().get("metadata_thumbnails", True))
+
+
 _ICONS_DIR = Path(__file__).parent.parent.parent / "resources" / "icons"
 
 
@@ -362,6 +372,37 @@ class ConfigDialog(QDialog):
         )
 
         layout.addWidget(warn_group)
+
+        meta_group = QGroupBox("Metadata Sidecar (METADATA.7z)")
+        meta_form  = QFormLayout(meta_group)
+
+        self._metadata_sidecar_check = QCheckBox("Enable metadata sidecar")
+        meta_form.addRow("", self._metadata_sidecar_check)
+        meta_form.addRow(
+            "",
+            QLabel(
+                "<small>When enabled, a <b>METADATA.7z</b> sidecar file is created "
+                "in each folder after crawling. This allows the library to be "
+                "restored on a new machine without re-crawling every archive. "
+                "Disable to prevent any METADATA.7z files from being written.</small>"
+            ),
+        )
+
+        self._metadata_thumbnails_check = QCheckBox("Include thumbnails")
+        meta_form.addRow("", self._metadata_thumbnails_check)
+        meta_form.addRow(
+            "",
+            QLabel(
+                "<small>When enabled, each folder's <b>METADATA.7z</b> sidecar will "
+                "contain thumbnail images alongside the metadata JSON. "
+                "Disable to save disk space; thumbnails will be omitted from the "
+                "sidecar and not restored when importing on a new machine.</small>"
+            ),
+        )
+
+        self._metadata_sidecar_check.toggled.connect(self._metadata_thumbnails_check.setEnabled)
+
+        layout.addWidget(meta_group)
         layout.addStretch()
         return page
 
@@ -458,6 +499,10 @@ class ConfigDialog(QDialog):
         self._warn_presupported_check.setChecked(get_warn_presupported_stl())
         self._warn_no_images_check.setChecked(get_warn_no_images())
         self._warn_nested_archive_check.setChecked(get_warn_nested_archive())
+        sidecar_enabled = get_metadata_sidecar_enabled()
+        self._metadata_sidecar_check.setChecked(sidecar_enabled)
+        self._metadata_thumbnails_check.setEnabled(sidecar_enabled)
+        self._metadata_thumbnails_check.setChecked(get_metadata_thumbnails_enabled())
 
         scheme = get_color_scheme()
         idx = self._theme_combo.findText(scheme)
@@ -489,6 +534,8 @@ class ConfigDialog(QDialog):
                 "warn_presupported_stl": self._warn_presupported_check.isChecked(),
                 "warn_no_images": self._warn_no_images_check.isChecked(),
                 "warn_nested_archive": self._warn_nested_archive_check.isChecked(),
+                "metadata_sidecar_enabled": self._metadata_sidecar_check.isChecked(),
+                "metadata_thumbnails": self._metadata_thumbnails_check.isChecked(),
                 "debug_menu_enabled": self._debug_menu_check.isChecked(),
             },
             data_dir=data_dir,
