@@ -79,6 +79,29 @@ class MainWindow(QMainWindow):
         view_menu = mb.addMenu("&View")
         view_menu.addAction(self._act_refresh)
 
+        tools_menu = mb.addMenu("&Tools")
+        self._act_gen_metadata = QAction(
+            style.standardIcon(SP.SP_FileDialogDetailedView),
+            "Generate / Update Metadata Sidecars…",
+            self,
+        )
+        self._act_gen_metadata.setStatusTip(
+            "Write or refresh METADATA.7z sidecar files for all folders in the database"
+        )
+        self._act_gen_metadata.triggered.connect(self._open_metadata_sidecar_dialog)
+        tools_menu.addAction(self._act_gen_metadata)
+
+        act_gen_thumbs = QAction(
+            style.standardIcon(SP.SP_BrowserReload),
+            "Generate Thumbnails for Selected…",
+            self,
+        )
+        act_gen_thumbs.setStatusTip(
+            "Generate thumbnails for the models currently selected in the table"
+        )
+        act_gen_thumbs.triggered.connect(self._browser.generate_thumbnails_for_selected)
+        tools_menu.addAction(act_gen_thumbs)
+
         self._debug_menu = mb.addMenu("&Debug")
         act_clear_db = QAction(
             style.standardIcon(SP.SP_TrashIcon), "Delete Database…", self)
@@ -127,9 +150,14 @@ class MainWindow(QMainWindow):
         ConfigDialog(parent=self).exec()
         self._apply_debug_menu_visibility()
 
+    def _open_metadata_sidecar_dialog(self):
+        from app.ui.metadata_sidecar_dialog import MetadataSidecarDialog
+        MetadataSidecarDialog(parent=self).exec()
+
     def _apply_debug_menu_visibility(self):
-        from app.ui.config_dialog import get_debug_menu_enabled
+        from app.ui.config_dialog import get_debug_menu_enabled, get_metadata_sidecar_enabled
         self._debug_menu.menuAction().setVisible(get_debug_menu_enabled())
+        self._act_gen_metadata.setEnabled(get_metadata_sidecar_enabled())
 
     def _clear_database(self):
         reply = QMessageBox.warning(

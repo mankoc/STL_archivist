@@ -9,7 +9,7 @@ from pathlib import Path as FSPath
 
 _ICONS_DIR = FSPath(__file__).parent.parent.parent / "resources" / "icons"
 
-from PyQt6.QtCore import Qt, QSortFilterProxyModel, QSize, QStringListModel, QEvent, pyqtSignal, QItemSelection, QTimer
+from PyQt6.QtCore import Qt, QSortFilterProxyModel, QSize, QStringListModel, QEvent, pyqtSignal, QItemSelection, QTimer, QThread
 from PyQt6.QtGui import QStandardItemModel, QStandardItem, QPixmap, QIcon, QKeySequence, QShortcut, QColor, QFont
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
     QMenu, QScrollArea, QFrame, QInputDialog, QMessageBox,
     QStyledItemDelegate, QComboBox, QCompleter,
     QDialog, QSizePolicy, QApplication, QPushButton,
+    QProgressDialog,
 )
 from PyQt6.QtCore import QSettings
 
@@ -270,6 +271,96 @@ class _TagLineEdit(QLineEdit):
         new_text = prefix + chosen + (", " if after.lstrip(",").strip() else ", ")
         self.setText(new_text)
         self.setCursorPosition(len(new_text))
+
+
+class ThumbnailGeneratorWorker(QThread):
+    """Background worker that (re-)generates thumbnails for a list of model IDs."""
+
+    progress = pyqtSignal(int, int)   # (current, total)
+    log      = pyqtSignal(str)
+    finished = pyqtSignal()
+
+    def __init__(self, model_ids: list[int], max_thumbnails: int, parent=None):
+        super().__init__(parent)
+        self._model_ids = model_ids
+        self._max_thumbnails = max_thumbnails
+
+    def run(self):
+        from pathlib import Path
+        from app.database.db import session_scope
+        from app.database.models import STLModel, Image as DBImage
+        from app.crawler.archive import extract_archive_contents, IMAGE_SUFFIXES
+        from app.utils.thumbnailer import save_thumbnail, delete_thumbnail, get_thumbnail_base_dir
+        from app.ui.config_dialog import get_max_thumb_size, get_unrar_path
+
+        max_size  = get_max_thumb_size()
+        unrar     = get_unrar_path()
+        total     = len(self._model_ids)
+        modified_folders: set[Path] = set()
+
+        for idx, model_id in enumerate(self._model_ids, start=1):
+            self.progress.emit(idx, total)
+
+            with session_scope() as session:
+                stl: STLModel = session.get(STLModel, model_id)
+                if stl is None:
+                    continue
+
+                archive_path = Path(stl.archive_path)
+                self.log.emit(f"[{idx}/{total}] {archive_path.name}")
+
+                if not archive_path.exists():
+                    self.log.emit(f"  WARNING: archive not found, skipping")
+                    continue
+
+                # Delete existing thumbnails
+                for old_img in list(stl.images):
+                    if old_img.thumbnail_path:
+                        delete_thumbnail(old_img.thumbnail_path)
+                    session.delete(old_img)
+                session.flush()
+
+                # Extract and generate new thumbnails
+                contents = extract_archive_contents(archive_path, unrar_path=unrar)
+                image_names = sorted(
+                    name for name in contents
+                    if Path(name.replace("\\", "/")).suffix.lower() in IMAGE_SUFFIXES
+                )
+
+                count = 0
+                for filename in image_names:
+                    if count >= self._max_thumbnails:
+                        break
+                    raw_bytes = contents[filename]
+                    img = DBImage(model=stl, filename=filename)
+                    session.add(img)
+                    session.flush()
+                    rel_path = save_thumbnail(raw_bytes, img.id, max_size=max_size)
+                    if rel_path:
+                        img.thumbnail_path = rel_path
+                        count += 1
+                    else:
+                        session.delete(img)
+                        self.log.emit(f"  WARNING: thumbnail conversion failed for {filename}")
+
+                self.log.emit(f"  {count} thumbnail(s) stored")
+                modified_folders.add(archive_path.parent)
+
+        # Update METADATA.7z for all affected folders (if option is enabled)
+        thumb_base = get_thumbnail_base_dir()
+        if modified_folders and thumb_base is not None:
+            from app.ui.config_dialog import get_metadata_thumbnails_enabled, get_metadata_sidecar_enabled
+            from app.crawler.folder_metadata import export_folder_metadata
+            include_thumbs = get_metadata_thumbnails_enabled()
+            if get_metadata_sidecar_enabled():
+                self.log.emit(f"Updating METADATA.7z in {len(modified_folders)} folder(s)…")
+                with session_scope() as session:
+                    for folder in sorted(modified_folders):
+                        export_folder_metadata(folder, session, thumb_base,
+                                               include_thumbnails=True)
+                        self.log.emit(f"  Updated METADATA.7z in {folder.name}")
+
+        self.finished.emit()
 
 
 class BrowserTab(QWidget):
@@ -790,6 +881,23 @@ class BrowserTab(QWidget):
             elif col == COL_PRESUPPORTED:
                 stl.presupports = value.strip() or None
 
+            # Update per-folder METADATA.7z sidecar with the saved change
+            if stl.archive_path:
+                from pathlib import Path as _Path
+                from app.crawler.folder_metadata import export_folder_metadata
+                from app.utils.thumbnailer import get_thumbnail_base_dir
+                from app.ui.config_dialog import get_metadata_thumbnails_enabled, get_metadata_sidecar_enabled
+                thumb_base = get_thumbnail_base_dir()
+                if thumb_base is not None and get_metadata_sidecar_enabled():
+                    try:
+                        export_folder_metadata(
+                            _Path(stl.archive_path).parent,
+                            session, thumb_base,
+                            include_thumbnails=get_metadata_thumbnails_enabled(),
+                        )
+                    except Exception:
+                        pass  # best-effort; never block the edit
+
     # ------------------------------------------------------------------
     def _on_search(self, text: str):
         self._proxy.setFilterFixedString(text)
@@ -998,6 +1106,12 @@ class BrowserTab(QWidget):
                 f"Sort {len(selected_ids)} file(s) into directory…",
             )
 
+        menu.addSeparator()
+        thumb_act = menu.addAction(
+            style.standardIcon(SP.SP_BrowserReload),
+            f"Generate Thumbnails for {len(selected_ids)} model(s)…",
+        )
+
         action = menu.exec(self._table.viewport().mapToGlobal(pos))
         if action == edit_act:
             self._open_editor(model_id)
@@ -1007,6 +1121,8 @@ class BrowserTab(QWidget):
             self._delete_models(selected_ids)
         elif sort_act and action == sort_act:
             self._sort_files(selected_ids)
+        elif action == thumb_act:
+            self._generate_thumbnails(selected_ids)
         elif add_tag_act and action == add_tag_act:
             self.add_tag()
         elif edit_tags_act and action == edit_tags_act:
@@ -1135,6 +1251,61 @@ class BrowserTab(QWidget):
         dlg = SortFilesDialog(model_ids, parent=self)
         if dlg.exec():
             self.refresh()
+
+    def _generate_thumbnails(self, model_ids: list[int]):
+        from app.ui.config_dialog import get_max_thumbnails
+
+        count, ok = QInputDialog.getInt(
+            self,
+            "Generate Thumbnails",
+            "Number of thumbnails to generate per model:",
+            get_max_thumbnails(),
+            1,
+            100,
+            1,
+        )
+        if not ok:
+            return
+
+        progress = QProgressDialog(
+            "Generating thumbnails…", "Cancel", 0, len(model_ids), self
+        )
+        progress.setWindowTitle("Generate Thumbnails")
+        progress.setMinimumDuration(0)
+        progress.setModal(True)
+        progress.setValue(0)
+
+        self._thumb_worker = ThumbnailGeneratorWorker(model_ids, count, parent=self)
+
+        def _on_progress(current, total):
+            progress.setValue(current)
+            progress.setLabelText(f"Processing model {current} of {total}…")
+
+        def _on_finished():
+            progress.setValue(len(model_ids))
+            self.refresh()
+            self._thumb_worker = None
+
+        self._thumb_worker.progress.connect(_on_progress)
+        self._thumb_worker.finished.connect(_on_finished)
+        progress.canceled.connect(lambda: None)  # worker runs to completion; cancel just closes dialog
+        self._thumb_worker.start()
+
+    def generate_thumbnails_for_selected(self):
+        """Generate thumbnails for the rows currently selected in the table.
+
+        Called from the main-window Tools menu; mirrors the right-click action.
+        """
+        ids = self._selected_model_ids()
+        if not ids:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self,
+                "Generate Thumbnails",
+                "Select one or more models in the table first.",
+            )
+            return
+        self._generate_thumbnails(ids)
 
     def show_image_grid(self):
         """Open an image grid for all models currently visible in the table."""

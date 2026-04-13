@@ -127,6 +127,14 @@ class MassEditorDialog(QDialog):
         form = QFormLayout(manual_group)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
+        session = get_session()
+        try:
+            categories    = sorted(c.name for c in session.query(Category).order_by(Category.name).all())
+            subcategories = sorted(s.name for s in session.query(Subcategory).order_by(Subcategory.name).all())
+            scales        = sorted(s.name for s in session.query(Scale).order_by(Scale.name).all())
+        finally:
+            session.close()
+
         self._type_edit    = QLineEdit(); self._type_edit.setPlaceholderText("e.g. patreon")
         self._author_edit  = QLineEdit(); self._author_edit.setPlaceholderText("e.g. SomeAuthor")
         self._date_edit    = QLineEdit(); self._date_edit.setPlaceholderText("e.g. 2024-01")
@@ -136,14 +144,6 @@ class MassEditorDialog(QDialog):
         self._presupports_combo.addItems(["— no change —", "No", "Lychee", "Chitubox", "Presupported"])
         self._release_edit = QLineEdit(); self._release_edit.setPlaceholderText("Release name (groups models)")
         self._tags_edit    = QLineEdit(); self._tags_edit.setPlaceholderText("tag1, tag2, … (replaces existing tags)")
-
-        session = get_session()
-        try:
-            categories    = sorted(c.name for c in session.query(Category).order_by(Category.name).all())
-            subcategories = sorted(s.name for s in session.query(Subcategory).order_by(Subcategory.name).all())
-            scales        = sorted(s.name for s in session.query(Scale).order_by(Scale.name).all())
-        finally:
-            session.close()
 
         self._category_edit    = self._make_combo(categories)
         self._category_edit.currentTextChanged.connect(self._on_category_changed)

@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QFileDialog,
     QProgressBar, QPlainTextEdit, QSizePolicy,
     QComboBox, QInputDialog, QMessageBox, QApplication, QToolButton, QToolTip,
+    QCheckBox,
 )
 from PyQt6.QtGui import QIcon, QCursor
 
@@ -15,9 +16,10 @@ from app.crawler.crawler import CrawlerWorker
 from app.ui.config_dialog import get_max_thumbnails, get_max_thumb_size, get_unrar_path, get_max_workers
 from app.utils.path_pattern import parse_path, PATTERN_HELP, ATTR_LABEL
 
-_SAVED_PATTERNS_KEY = "crawler/saved_patterns"
-_LAST_PATTERN_KEY   = "crawler/last_pattern"
-_LAST_FOLDER_KEY    = "crawler/last_folder"
+_SAVED_PATTERNS_KEY      = "crawler/saved_patterns"
+_LAST_PATTERN_KEY        = "crawler/last_pattern"
+_LAST_FOLDER_KEY         = "crawler/last_folder"
+_GENERATE_THUMBNAILS_KEY = "crawler/generate_thumbnails"
 _SEP = ":::"
 
 
@@ -121,6 +123,11 @@ class CrawlerTab(QWidget):
         self._log.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         root.addWidget(self._log)
 
+        # --- Crawl options ---
+        self._generate_thumbs_check = QCheckBox("Generate thumbnails")
+        self._generate_thumbs_check.setChecked(True)
+        root.addWidget(self._generate_thumbs_check)
+
         # --- Control buttons ---
         style = QApplication.style()
         btn_row = QHBoxLayout()
@@ -156,11 +163,15 @@ class CrawlerTab(QWidget):
         s = QSettings()
         self._folder_edit.setText(s.value(_LAST_FOLDER_KEY, ""))
         self._pattern_edit.setText(s.value(_LAST_PATTERN_KEY, ""))
+        self._generate_thumbs_check.setChecked(
+            s.value(_GENERATE_THUMBNAILS_KEY, True, type=bool)
+        )
 
     def _save_settings(self):
         s = QSettings()
         s.setValue(_LAST_FOLDER_KEY, self._folder_edit.text().strip())
         s.setValue(_LAST_PATTERN_KEY, self._pattern_edit.text().strip())
+        s.setValue(_GENERATE_THUMBNAILS_KEY, self._generate_thumbs_check.isChecked())
 
     # ------------------------------------------------------------------
     # Saved-pattern helpers
@@ -277,8 +288,9 @@ class CrawlerTab(QWidget):
         self._stop_btn.setEnabled(True)
 
         pattern = self._pattern_edit.text().strip()
+        max_thumbs = get_max_thumbnails() if self._generate_thumbs_check.isChecked() else 0
         config = CrawlerConfig(
-            max_thumbnails=get_max_thumbnails(),
+            max_thumbnails=max_thumbs,
             max_thumb_size=get_max_thumb_size(),
             unrar_path=get_unrar_path(),
             max_workers=get_max_workers(),

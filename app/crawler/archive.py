@@ -66,7 +66,7 @@ def archive_hash(path: Path, unrar_path: str = "") -> str:
         elif suffix == ".7z":
             with py7zr.SevenZipFile(str(path), mode="r") as zf:
                 members = sorted(
-                    (f.filename, f.digest or 0)
+                    (f.filename, f.crc32 or 0)
                     for f in zf.list()
                 )
         elif suffix == ".rar":
@@ -78,11 +78,13 @@ def archive_hash(path: Path, unrar_path: str = "") -> str:
                     for info in rf.infolist()
                     if not info.is_dir()
                 )
-    except Exception:
+    except Exception as exc:
         stat = path.stat()
         fingerprint = f"fallback:{stat.st_size}:{stat.st_mtime_ns}"
-        logger.warning("Could not open %s for hashing — using fallback fingerprint (%s)",
-                       path.name, fingerprint)
+        logger.warning(
+            "Could not open %s for hashing — using fallback fingerprint (%s): %s",
+            path.name, fingerprint, exc,
+        )
         return fingerprint
 
     h = xxhash.xxh64()
