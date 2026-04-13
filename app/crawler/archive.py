@@ -29,6 +29,9 @@ def _member_size_limit(name: str) -> int:
 
 ARCHIVE_SUFFIXES = {".7z", ".zip", ".rar"}
 
+# Name of the per-folder metadata sidecar — never treated as an STL archive
+METADATA_FILENAME = "METADATA.7z"
+
 # Image extensions we consider as potential thumbnails
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
@@ -97,9 +100,12 @@ def iter_archives(root: Path):
     Using a generator avoids materialising non-archive paths into memory and
     lets callers begin processing the first archive before the full tree scan
     completes.
+
+    METADATA.7z sidecar files are intentionally excluded so they are never
+    treated as STL archives to be crawled.
     """
     for p in root.rglob("*"):
-        if p.suffix.lower() in ARCHIVE_SUFFIXES:
+        if p.suffix.lower() in ARCHIVE_SUFFIXES and p.name != METADATA_FILENAME:
             yield p
 
 

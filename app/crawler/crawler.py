@@ -14,11 +14,16 @@ logger = logging.getLogger(__name__)
 
 from app.config import CrawlerConfig
 from app.crawler.archive import iter_archives, extract_archive_contents, archive_hash, list_contents, IMAGE_SUFFIXES
+from app.crawler.folder_metadata import (
+    export_folder_metadata,
+    import_folder_metadata,
+    folder_has_db_records,
+)
 from app.crawler.metadata import extract_metadata
 from app.crawler.rules import detect_presupport, detect_scale, detect_warnings
 from app.database.db import session_scope
 from app.database.models import STLModel, Tag, Image, Release, Scale
-from app.utils.thumbnailer import save_thumbnail, delete_thumbnail
+from app.utils.thumbnailer import save_thumbnail, delete_thumbnail, get_thumbnail_base_dir
 from app.utils.path_pattern import parse_path, apply_extracted_to_model, parse_release_date
 
 
@@ -59,6 +64,8 @@ class CrawlerWorker(QThread):
     BATCH_SIZE = 50
 
     def run(self):
+        from collections import defaultdict
+
         self._stop_requested = False
         logger.info("Crawl started — source: %s, pattern: %r, workers: %d",
                     self.source_dir, self._pattern, self._config.max_workers)
@@ -71,12 +78,36 @@ class CrawlerWorker(QThread):
         self.log.emit(msg)
         logger.info(msg)
 
+        # --- Pre-crawl: restore from METADATA.7z for folders with no DB records ---
+        thumb_base = get_thumbnail_base_dir()
+        if thumb_base is not None:
+            folder_archives: dict[Path, list[Path]] = defaultdict(list)
+            for p in archives:
+                folder_archives[p.parent].append(p)
+
+            with session_scope() as session:
+                for folder in folder_archives:
+                    if self._stop_requested:
+                        break
+                    if not folder_has_db_records(folder, session):
+                        metadata_path = folder / "METADATA.7z"
+                        if metadata_path.exists():
+                            logger.info("Pre-crawl import from %s", metadata_path)
+                            imported = import_folder_metadata(folder, session, thumb_base)
+                            if imported:
+                                msg = (f"Imported {len(imported)} record(s) "
+                                       f"from METADATA.7z in {folder.name}")
+                                self.log.emit(msg)
+                                logger.info(msg)
+
         max_thumbs     = self._config.max_thumbnails
         max_thumb_size = self._config.max_thumb_size
         workers        = self._config.max_workers
         num_batches    = (total + self.BATCH_SIZE - 1) // self.BATCH_SIZE
         logger.debug("Processing %d archive(s) in %d batch(es) of up to %d",
                      total, num_batches, self.BATCH_SIZE)
+
+        modified_folders: set[Path] = set()
 
         for batch_start in range(0, total, self.BATCH_SIZE):
             if self._stop_requested:
@@ -172,6 +203,7 @@ class CrawlerWorker(QThread):
                             contents=contents_map.get(archive_path),
                         )
                         sp.commit()
+                        modified_folders.add(archive_path.parent)
                         logger.debug("  Upsert committed: %s", archive_path.name)
                     except Exception as exc:
                         sp.rollback()
@@ -183,6 +215,21 @@ class CrawlerWorker(QThread):
 
             if self._stop_requested:
                 break
+
+        # --- Post-crawl: update METADATA.7z for every folder that was modified ---
+        if modified_folders and thumb_base is not None:
+            self.log.emit(f"Updating METADATA.7z in {len(modified_folders)} folder(s)…")
+            logger.info("Post-crawl: updating METADATA.7z in %d folder(s)", len(modified_folders))
+            with session_scope() as session:
+                for folder in sorted(modified_folders):
+                    if self._stop_requested:
+                        break
+                    try:
+                        export_folder_metadata(folder, session, thumb_base)
+                        self.log.emit(f"  Updated METADATA.7z in {folder.name}")
+                    except Exception as exc:
+                        logger.error("Failed to update METADATA.7z in %s: %s",
+                                     folder, exc, exc_info=True)
 
         msg = "Crawl complete."
         self.log.emit(msg)

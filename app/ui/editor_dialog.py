@@ -544,4 +544,17 @@ class EditorDialog(QDialog):
                     session.flush()
                 model.tags.append(tag)
 
+            # Update per-folder METADATA.7z sidecar with the saved changes
+            if model.archive_path:
+                from pathlib import Path as _Path
+                from app.crawler.folder_metadata import export_folder_metadata
+                from app.utils.thumbnailer import get_thumbnail_base_dir
+                thumb_base = get_thumbnail_base_dir()
+                if thumb_base is not None:
+                    try:
+                        export_folder_metadata(_Path(model.archive_path).parent,
+                                               session, thumb_base)
+                    except Exception:
+                        pass  # metadata export is best-effort; never block saving
+
         self.accept()
