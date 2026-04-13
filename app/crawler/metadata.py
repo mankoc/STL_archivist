@@ -5,12 +5,15 @@ Infer model metadata from:
   3. Archive file path / parent folder names
 """
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 from app.crawler.archive import find_url_file
+
+logger = logging.getLogger(__name__)
 
 
 # Known distributor/source keywords that appear in folder names
@@ -70,6 +73,8 @@ def _infer_from_path(archive_path: Path,
     else:
         parts = list(archive_path.parts)  # all path components including filename
 
+    logger.debug("Path inference for: %s (parts: %s)", archive_path.name, parts)
+
     # Title: use the archive stem, clean up underscores/dashes, then strip any
     # leading date prefix (e.g. "2024-09 " or "2024 09 ") so it doesn't bleed
     # into the title when the filename starts with a date.
@@ -78,6 +83,7 @@ def _infer_from_path(archive_path: Path,
     title = re.sub(r"^\d{4}[\s\-_]\d{2}\s*", "", title).strip()  # "2024-09 …"
     title = re.sub(r"^\d{4}\s+", "", title).strip()               # "2024 …"
     meta.title = title if title else re.sub(r"[_\-]+", " ", stem).strip()
+    logger.debug("  Inferred title: %r", meta.title)
 
     # Distributor / Type — scan left-to-right (shallowest first).
     # The folder immediately after the distributor folder is the author.
@@ -87,9 +93,14 @@ def _infer_from_path(archive_path: Path,
             if pattern.search(part):
                 meta.distributor = name
                 distributor_idx = i
+                logger.debug("  Distributor matched %r in part %r (index %d)",
+                             name, part, i)
                 break
         if distributor_idx is not None:
             break
+
+    if distributor_idx is None:
+        logger.debug("  No distributor pattern matched in path")
 
     # Author: folder immediately after the distributor folder (if present).
     # Without a distributor signal there is no reliable heuristic, so we leave
@@ -98,6 +109,8 @@ def _infer_from_path(archive_path: Path,
         author_idx = distributor_idx + 1
         if author_idx < len(parts) - 1:  # must not be the filename
             meta.author = parts[author_idx]
+            logger.debug("  Inferred author: %r (from path part at index %d)",
+                         meta.author, author_idx)
 
     # Date — scan all parts, deepest first for best specificity
     for part in reversed(parts):
@@ -105,9 +118,13 @@ def _infer_from_path(archive_path: Path,
             m = pattern.search(part)
             if m:
                 meta.release_date = m.group(1)
+                logger.debug("  Inferred date: %r (from part %r)", meta.release_date, part)
                 break
         if meta.release_date:
             break
+
+    if not meta.release_date:
+        logger.debug("  No date pattern matched in path")
 
     return meta
 
@@ -120,6 +137,7 @@ def extract_metadata(archive_path: Path,
     Pass *contents* (from extract_archive_contents) to avoid re-opening the archive.
     Pass *source_dir* so that path inference uses only relative components.
     """
+    logger.debug("Extracting metadata for: %s", archive_path.name)
     meta = _infer_from_path(archive_path, source_dir=source_dir)
 
     # .url file — check archive contents first, then filesystem
@@ -127,17 +145,24 @@ def extract_metadata(archive_path: Path,
     if contents:
         for name, data in contents.items():
             if Path(name.replace("\\", "/")).suffix.lower() == ".url":
+                logger.debug("  Found .url file in archive contents: %r", name)
                 for line in data.decode("utf-8", errors="ignore").splitlines():
                     line = line.strip()
                     if line.lower().startswith("url="):
                         url_from_archive = line[4:].strip()
+                        logger.debug("  URL from archive .url file: %r", url_from_archive)
                         break
                 if url_from_archive:
                     break
 
+    if not url_from_archive:
+        logger.debug("  No .url in archive contents — searching filesystem")
     url = url_from_archive or find_url_file(archive_path)
     if url:
         meta.url = url
+        logger.debug("  URL resolved: %r", url)
+    else:
+        logger.debug("  No URL found for %s", archive_path.name)
 
     # info.json
     raw_json: bytes | None = None
@@ -145,23 +170,44 @@ def extract_metadata(archive_path: Path,
         for name, data in contents.items():
             if Path(name.replace("\\", "/")).name.lower() == "info.json":
                 raw_json = data
+                logger.debug("  Found info.json in archive contents (%d B): %r", len(data), name)
                 break
 
     if raw_json:
         info = _parse_info_json(raw_json)
+        logger.debug("  Parsed info.json keys: %s", list(info.keys()))
+        overrides = []
         if info.get("name"):
             meta.title = info["name"]
+            overrides.append(f"title={meta.title!r}")
         if info.get("author"):
             meta.author = info["author"]
+            overrides.append(f"author={meta.author!r}")
         if info.get("distributor"):
             meta.distributor = info["distributor"]
+            overrides.append(f"distributor={meta.distributor!r}")
         if info.get("url"):
             meta.url = info["url"]
+            overrides.append(f"url={meta.url!r}")
         if info.get("description"):
             meta.description = info["description"]
+            overrides.append("description=<set>")
         if info.get("tags") and isinstance(info["tags"], list):
             meta.tags = [str(t) for t in info["tags"]]
+            overrides.append(f"tags={meta.tags}")
         if info.get("release"):
             meta.release = str(info["release"])
+            overrides.append(f"release={meta.release!r}")
+        if overrides:
+            logger.debug("  info.json overrides: %s", ", ".join(overrides))
+        else:
+            logger.debug("  info.json contained no recognised fields")
+    else:
+        logger.debug("  No info.json found for %s", archive_path.name)
 
+    logger.debug(
+        "  Final metadata — title=%r author=%r source=%r date=%r tags=%s url=%r",
+        meta.title, meta.author, meta.distributor, meta.release_date,
+        meta.tags, meta.url,
+    )
     return meta

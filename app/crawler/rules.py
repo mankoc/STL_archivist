@@ -1,8 +1,11 @@
 """
 Scraping rules applied to archive member names during crawl.
 """
+import logging
 import re
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -69,16 +72,22 @@ def detect_presupport(names: list[str]) -> str:
         suffix = p.suffix.lower()
 
         if suffix in (".lys", ".lyt"):        # rule 1 – Lychee (highest priority)
+            logger.debug("  Presupport=Lychee (matched %r)", name)
             return "Lychee"
         if suffix == ".chitu":                # rule 2 – Chitubox
+            logger.debug("  Presupport candidate Chitubox (matched %r)", name)
             has_chitu = True
         if suffix == ".stl" and _PRESUPPORTED_RE.search(p.stem):  # rule 3
+            logger.debug("  Presupport candidate Presupported (matched stem %r)", p.stem)
             has_presupported = True
 
     if has_chitu:
+        logger.debug("  Presupport=Chitubox")
         return "Chitubox"
     if has_presupported:
+        logger.debug("  Presupport=Presupported")
         return "Presupported"
+    logger.debug("  Presupport=No")
     return "No"                               # rule 4 – fallback
 
 
@@ -124,10 +133,16 @@ def detect_warnings(
 
     if check_presupported and has_presup_stl:
         warnings.append("presupported stl")
+        logger.debug("  Warning: presupported stl")
     if check_no_images and not has_image:
         warnings.append("Archive without images")
+        logger.debug("  Warning: archive without images")
     if check_nested_archive and has_nested_archive:
         warnings.append("Archive inside archive")
+        logger.debug("  Warning: archive inside archive")
+
+    if not warnings:
+        logger.debug("  No warnings")
 
     return "\n".join(warnings)
 
@@ -155,11 +170,15 @@ def detect_scale(names: list[str]) -> list[str]:
             if scale not in seen:
                 seen.add(scale)
                 found.append(scale)
+                logger.debug("  Scale detected: %r (from %r)", scale, stem)
 
         for m in _SCALE_RATIO_RE.finditer(stem):
             scale = f"1/{m.group(1)}"
             if scale not in seen:
                 seen.add(scale)
                 found.append(scale)
+                logger.debug("  Scale detected: %r (from %r)", scale, stem)
 
+    if not found:
+        logger.debug("  No scale detected")
     return found
