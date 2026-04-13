@@ -27,6 +27,11 @@ def init_thumbnail_store(base_dir) -> None:
     _base_dir.mkdir(parents=True, exist_ok=True)
 
 
+def get_thumbnail_base_dir() -> Optional[Path]:
+    """Return the thumbnail root directory set by init_thumbnail_store(), or None."""
+    return _base_dir
+
+
 def thumbnail_rel_path(image_id: int) -> str:
     """Relative path stored in the DB, e.g. '0000/42.jpg'."""
     subfolder = image_id // FILES_PER_DIR
