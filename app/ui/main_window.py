@@ -86,6 +86,12 @@ class MainWindow(QMainWindow):
         act_clear_db.triggered.connect(self._clear_database)
         debug_menu.addAction(act_clear_db)
 
+        act_delete_logs = QAction(
+            style.standardIcon(SP.SP_TrashIcon), "Delete Logs…", self)
+        act_delete_logs.setStatusTip("Delete all log files from the data directory")
+        act_delete_logs.triggered.connect(self._delete_logs)
+        debug_menu.addAction(act_delete_logs)
+
         help_menu = mb.addMenu("&Help")
         help_menu.addAction(self._act_help)
         help_menu.addSeparator()
@@ -132,6 +138,23 @@ class MainWindow(QMainWindow):
             clear_db()
             self._browser.refresh()
             QMessageBox.information(self, "Delete Database", "Database cleared.")
+
+    def _delete_logs(self):
+        reply = QMessageBox.warning(
+            self,
+            "Delete Logs",
+            "This will permanently delete <b>all log files</b> "
+            "(active log and compressed backups).<br><br>Are you sure?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            from app.utils.logger import delete_logs
+            count = delete_logs()
+            QMessageBox.information(
+                self, "Delete Logs",
+                f"Deleted {count} log file{'s' if count != 1 else ''}."
+            )
 
     def _show_help(self):
         from app.ui.help_dialog import HelpDialog

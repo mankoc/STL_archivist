@@ -12,6 +12,8 @@ from typing import Callable, Optional
 import py7zr
 import rarfile
 
+logger = logging.getLogger(__name__)
+
 # Per-file size caps applied when loading archive members into memory.
 # Oversized entries are skipped with a warning instead of being read.
 _SIZE_LIMIT_IMAGE = 50 * 1024 * 1024   # 50 MB – images / thumbnails
@@ -50,6 +52,7 @@ def archive_hash(path: Path, unrar_path: str = "") -> str:
     import xxhash
     suffix = path.suffix.lower()
     members: list[tuple[str, int]] = []
+    logger.debug("Computing hash for: %s", path.name)
     try:
         if suffix == ".zip":
             with zipfile.ZipFile(str(path), "r") as zf:
@@ -74,13 +77,18 @@ def archive_hash(path: Path, unrar_path: str = "") -> str:
                 )
     except Exception:
         stat = path.stat()
-        return f"fallback:{stat.st_size}:{stat.st_mtime_ns}"
+        fingerprint = f"fallback:{stat.st_size}:{stat.st_mtime_ns}"
+        logger.warning("Could not open %s for hashing — using fallback fingerprint (%s)",
+                       path.name, fingerprint)
+        return fingerprint
 
     h = xxhash.xxh64()
     for name, crc in members:
         h.update(name.encode("utf-8", errors="replace"))
         h.update(crc.to_bytes(4, "little"))
-    return h.hexdigest()
+    digest = h.hexdigest()
+    logger.debug("Hash for %s: %s… (%d member(s))", path.name, digest[:12], len(members))
+    return digest
 
 
 def iter_archives(root: Path):
@@ -112,17 +120,23 @@ def _open_rar(path: Path, unrar_path: str = ""):
 def list_contents(archive_path: Path, unrar_path: str = "") -> list[str]:
     """Return a list of all file names inside the archive."""
     suffix = archive_path.suffix.lower()
+    logger.debug("Listing contents of: %s", archive_path.name)
     try:
         if suffix == ".zip":
             with _open_zip(archive_path) as zf:
-                return zf.namelist()
+                names = zf.namelist()
         elif suffix == ".7z":
             with _open_7z(archive_path) as zf:
-                return zf.getnames()
+                names = zf.getnames()
         elif suffix == ".rar":
             with _open_rar(archive_path, unrar_path) as rf:
-                return rf.namelist()
-    except Exception:
+                names = rf.namelist()
+        else:
+            return []
+        logger.debug("  %d member(s) in %s", len(names), archive_path.name)
+        return names
+    except Exception as exc:
+        logger.error("Failed to list contents of %s: %s", archive_path.name, exc, exc_info=True)
         return []
 
 
@@ -174,32 +188,40 @@ def extract_archive_contents(archive_path: Path, unrar_path: str = "") -> dict[s
     """
     suffix = archive_path.suffix.lower()
     result: dict[str, bytes] = {}
+    logger.debug("Extracting wanted files from: %s (type: %s)", archive_path.name, suffix)
     try:
         if suffix == ".zip":
             with _open_zip(archive_path) as zf:
-                for name in zf.namelist():
-                    if _is_wanted(name):
-                        limit = _member_size_limit(name)
-                        file_size = zf.getinfo(name).file_size
-                        if file_size > limit:
-                            logging.warning(
-                                "Skipping oversized member %r (%d B > %d B limit) in %s",
-                                name, file_size, limit, archive_path,
-                            )
-                            continue
-                        try:
-                            data = zf.read(name)
-                            if data:
-                                result[name] = data
-                        except Exception:
-                            continue
+                all_names = zf.namelist()
+                wanted = [n for n in all_names if _is_wanted(n)]
+                logger.debug("  ZIP: %d total members, %d wanted", len(all_names), len(wanted))
+                for name in wanted:
+                    limit = _member_size_limit(name)
+                    file_size = zf.getinfo(name).file_size
+                    if file_size > limit:
+                        logger.warning(
+                            "Skipping oversized member %r (%d B > %d B limit) in %s",
+                            name, file_size, limit, archive_path,
+                        )
+                        continue
+                    try:
+                        data = zf.read(name)
+                        if data:
+                            result[name] = data
+                            logger.debug("  Read %r (%d B)", name, len(data))
+                    except Exception as exc:
+                        logger.warning("Failed to read member %r in %s: %s",
+                                       name, archive_path.name, exc)
+                        continue
 
         elif suffix == ".7z":
             _shm = "/dev/shm" if Path("/dev/shm").is_dir() else None
             with tempfile.TemporaryDirectory(dir=_shm) as tmpdir:
                 tmp = Path(tmpdir)
                 with _open_7z(archive_path) as zf:
-                    wanted = [n for n in zf.getnames() if _is_wanted(n)]
+                    all_names = zf.getnames()
+                    wanted = [n for n in all_names if _is_wanted(n)]
+                    logger.debug("  7Z: %d total members, %d wanted", len(all_names), len(wanted))
                     if wanted:
                         zf.extract(path=tmpdir, targets=wanted)
                 for name in wanted:
@@ -208,7 +230,7 @@ def extract_archive_contents(archive_path: Path, unrar_path: str = "") -> dict[s
                         limit = _member_size_limit(name)
                         file_size = filepath.stat().st_size
                         if file_size > limit:
-                            logging.warning(
+                            logger.warning(
                                 "Skipping oversized member %r (%d B > %d B limit) in %s",
                                 name, file_size, limit, archive_path,
                             )
@@ -216,27 +238,38 @@ def extract_archive_contents(archive_path: Path, unrar_path: str = "") -> dict[s
                         data = filepath.read_bytes()
                         if data:
                             result[name] = data
+                            logger.debug("  Read %r (%d B)", name, len(data))
+                    else:
+                        logger.debug("  Expected extracted file not found: %r", name)
 
         elif suffix == ".rar":
             with _open_rar(archive_path, unrar_path) as rf:
-                for name in rf.namelist():
-                    if _is_wanted(name):
-                        limit = _member_size_limit(name)
-                        file_size = rf.getinfo(name).file_size
-                        if file_size > limit:
-                            logging.warning(
-                                "Skipping oversized member %r (%d B > %d B limit) in %s",
-                                name, file_size, limit, archive_path,
-                            )
-                            continue
-                        try:
-                            data = rf.read(name)
-                            if data:
-                                result[name] = data
-                        except Exception:
-                            continue
-    except Exception:
-        logging.warning("Failed to open archive %s", archive_path, exc_info=True)
+                all_names = rf.namelist()
+                wanted = [n for n in all_names if _is_wanted(n)]
+                logger.debug("  RAR: %d total members, %d wanted", len(all_names), len(wanted))
+                for name in wanted:
+                    limit = _member_size_limit(name)
+                    file_size = rf.getinfo(name).file_size
+                    if file_size > limit:
+                        logger.warning(
+                            "Skipping oversized member %r (%d B > %d B limit) in %s",
+                            name, file_size, limit, archive_path,
+                        )
+                        continue
+                    try:
+                        data = rf.read(name)
+                        if data:
+                            result[name] = data
+                            logger.debug("  Read %r (%d B)", name, len(data))
+                    except Exception as exc:
+                        logger.warning("Failed to read member %r in %s: %s",
+                                       name, archive_path.name, exc)
+                        continue
+
+    except Exception as exc:
+        logger.error("Failed to open archive %s: %s", archive_path, exc, exc_info=True)
+
+    logger.debug("Extraction complete for %s — %d file(s) loaded", archive_path.name, len(result))
     return result
 
 
