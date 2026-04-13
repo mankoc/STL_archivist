@@ -20,10 +20,12 @@ import shutil
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QEvent, QPoint, QSettings, QTimer
+from PyQt6.QtGui import QBrush, QColor
 from PyQt6.QtWidgets import (
     QApplication, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
-    QFormLayout, QFrame, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
-    QMessageBox, QPushButton, QTextEdit, QToolButton, QVBoxLayout,
+    QFormLayout, QFrame, QGroupBox, QHBoxLayout, QHeaderView, QLabel,
+    QLineEdit, QMessageBox, QPushButton, QTableWidget, QTableWidgetItem,
+    QToolButton, QVBoxLayout,
 )
 
 from app.database.db import session_scope, get_session
@@ -244,11 +246,22 @@ class SortFilesDialog(QDialog):
         # ---- Preview ----
         preview_box = QGroupBox("Preview")
         preview_layout = QVBoxLayout(preview_box)
-        self._preview_edit = QTextEdit()
-        self._preview_edit.setReadOnly(True)
-        self._preview_edit.setFontFamily("monospace")
-        self._preview_edit.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
-        preview_layout.addWidget(self._preview_edit)
+
+        self._preview_status = QLabel("")
+        self._preview_status.setVisible(False)
+        preview_layout.addWidget(self._preview_status)
+
+        self._preview_table = QTableWidget(0, 3)
+        self._preview_table.setHorizontalHeaderLabels(["Status", "From", "To"])
+        hdr = self._preview_table.horizontalHeader()
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self._preview_table.verticalHeader().setVisible(False)
+        self._preview_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._preview_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._preview_table.setWordWrap(True)
+        preview_layout.addWidget(self._preview_table)
         layout.addWidget(preview_box)
 
         # ---- Buttons ----
@@ -336,62 +349,72 @@ class SortFilesDialog(QDialog):
 
     # ------------------------------------------------------------------
     def _refresh_preview(self):
-        """Re-compute target paths and update the preview text."""
+        """Re-compute target paths and update the preview table."""
         self._preview_data.clear()
         self._move_btn.setEnabled(False)
+        self._preview_table.setRowCount(0)
 
         base_text = self._dir_edit.text().strip()
         pattern = self._pat_edit.text().strip()
 
         if not base_text:
-            self._preview_edit.setPlainText("← Set a target directory to see preview.")
+            self._preview_status.setText("← Set a target directory to see preview.")
+            self._preview_status.setVisible(True)
             return
         if not pattern:
-            self._preview_edit.setPlainText("← Set a path pattern to see preview.")
+            self._preview_status.setText("← Set a path pattern to see preview.")
+            self._preview_status.setVisible(True)
             return
 
+        self._preview_status.setVisible(False)
         base_dir = Path(base_text)
-
-        lines: list[str] = []
         has_errors = False
+
+        _RED    = QColor(255, 180, 180)
+        _YELLOW = QColor(255, 220, 150)
+
+        def _add_row(status: str, from_text: str, to_text: str, color: QColor | None = None):
+            row = self._preview_table.rowCount()
+            self._preview_table.insertRow(row)
+            for col, text in enumerate([status, from_text, to_text]):
+                item = QTableWidgetItem(text)
+                if color is not None:
+                    item.setBackground(QBrush(color))
+                self._preview_table.setItem(row, col, item)
 
         session = get_session()
         try:
             for mid in self._model_ids:
                 model: STLModel = session.get(STLModel, mid)
                 if model is None:
-                    lines.append(f"[ERROR] model id={mid} not found in database")
+                    _add_row("ERROR", f"model id={mid}", "not found in database", _RED)
                     has_errors = True
                     continue
 
                 src = model.archive_path
                 if not src:
-                    lines.append(f"[SKIP ] {model.title or mid!r} — no archive_path set")
+                    _add_row("SKIP", model.title or str(mid), "no archive_path set", _YELLOW)
                     has_errors = True
                     continue
 
                 src_path = Path(src)
                 if not src_path.exists():
-                    lines.append(
-                        f"[MISS ] {src}\n"
-                        f"        ↳ source file not found on disk"
-                    )
+                    _add_row("MISS", src, "source file not found on disk", _RED)
                     has_errors = True
                     continue
 
                 target = _compute_target(base_dir, pattern, model)
                 collision = target.exists() and target != src_path
-                collision_note = "  [COLLISION — will be renamed]" if collision else ""
-
-                lines.append(
-                    f"FROM  {src}\n"
-                    f"  TO  {target}{collision_note}\n"
-                )
+                if collision:
+                    _add_row("COLLISION", src, str(target), _YELLOW)
+                else:
+                    _add_row("OK", src, str(target))
                 self._preview_data.append((str(src_path), str(target), mid))
         finally:
             session.close()
 
-        self._preview_edit.setPlainText("\n".join(lines))
+        self._preview_table.resizeRowsToContents()
+
         if self._preview_data and not has_errors:
             self._move_btn.setEnabled(True)
         elif self._preview_data:
