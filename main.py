@@ -2,9 +2,21 @@
 STL Database — application entry point.
 """
 import sys
+from pathlib import Path
 
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
+
+
+def _resource(relative: str) -> Path:
+    """Return the path to a bundled resource.
+
+    Works both in development (relative to this file) and when packaged by
+    PyInstaller (resources land in sys._MEIPASS at runtime).
+    """
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
+    return base / relative
 
 from app import __version__
 from app.database.db import init_db
@@ -17,6 +29,10 @@ def main() -> None:
     app.setApplicationName("STL Database")
     app.setApplicationVersion(__version__)
     app.setOrganizationName("MrIxolite")
+
+    icon_path = _resource("resources/icon.ico")
+    if icon_path.exists():
+        app.setWindowIcon(QIcon(str(icon_path)))
 
     # Read configured database path (falls back to default if not set)
     from app.ui.config_dialog import get_db_path, get_color_scheme, apply_color_scheme
