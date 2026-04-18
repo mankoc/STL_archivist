@@ -63,5 +63,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    # icon='resources/icon.ico',  # uncomment and add an .ico file to use a custom icon
+    icon='resources/icon.ico',
 )

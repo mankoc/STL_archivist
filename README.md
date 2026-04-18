@@ -66,10 +66,45 @@ On first launch, go to **File → Configuration…** and set up:
 
 ### 2. Crawl your archive folder
 
+#### GUI
+
 1. Click **Open Crawler** (toolbar icon or `Ctrl+O`).
 2. Select the root folder that contains your STL archives.
 3. Optionally set a **path pattern** to auto-populate metadata fields from your folder/file naming convention (see [Path Patterns](#path-patterns) below).
 4. Click **Start**. The crawler will walk the directory recursively, hash each archive, detect scale and presupport information, extract preview images, and upsert records into the database.
+
+#### Command line
+
+`crawl.py` runs the same crawler without opening the GUI — useful for scripting or scheduled imports.
+
+```bash
+python crawl.py /path/to/stl/folder
+```
+
+By default it uses the same database configured in the GUI. Override any setting with options:
+
+| Option | Default | Description |
+|---|---|---|
+| `--db PATH` | GUI-configured path | SQLite database file to write to |
+| `--pattern PATTERN` | *(none)* | Path pattern for metadata extraction (see [Path Patterns](#path-patterns)) |
+| `--workers N` | CPUs / 2, clamped to 2–8 | Parallel worker threads |
+| `--max-thumbnails N` | 5 | Max preview images stored per archive |
+| `--max-thumb-size PX` | 512 | Max thumbnail dimension in pixels |
+| `--unrar PATH` | GUI-configured path | Path to `unrar` executable for RAR archives |
+
+**Examples:**
+
+```bash
+# Use a custom database and extract metadata from the path structure
+python crawl.py ~/stl_collection \
+  --db ~/stl_collection/library.db \
+  --pattern "{sculptor}/{release}/{title}"
+
+# Faster crawl with more workers, no thumbnails
+python crawl.py ~/stl_collection --workers 8 --max-thumbnails 0
+```
+
+Progress and log output are written to stdout.
 
 ### 3. Browse and edit
 
@@ -124,7 +159,8 @@ use the pattern:
 
 ```
 stl_database/
-├── main.py                  # Entry point
+├── main.py                  # GUI entry point
+├── crawl.py                 # Command-line crawler
 ├── requirements.txt
 ├── resources/
 │   ├── style.qss            # Application stylesheet
