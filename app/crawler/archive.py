@@ -143,6 +143,9 @@ def list_contents(archive_path: Path, unrar_path: str = "") -> list[str]:
             return []
         logger.debug("  %d member(s) in %s", len(names), archive_path.name)
         return names
+    except PermissionError as exc:
+        logger.warning("Permission denied reading archive %s: %s", archive_path.name, exc)
+        return []
     except Exception as exc:
         logger.error("Failed to list contents of %s: %s", archive_path.name, exc, exc_info=True)
         return []
@@ -274,6 +277,8 @@ def extract_archive_contents(archive_path: Path, unrar_path: str = "") -> dict[s
                                        name, archive_path.name, exc)
                         continue
 
+    except PermissionError as exc:
+        logger.warning("Permission denied reading archive %s: %s", archive_path, exc)
     except Exception as exc:
         logger.error("Failed to open archive %s: %s", archive_path, exc, exc_info=True)
 

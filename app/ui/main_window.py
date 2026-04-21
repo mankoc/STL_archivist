@@ -51,6 +51,13 @@ class MainWindow(QMainWindow):
         self._act_image_grid.setStatusTip("Show a grid of images for the current table")
         self._act_image_grid.triggered.connect(self._browser.show_image_grid)
 
+        self._act_toggle_images = QAction(
+            style.standardIcon(SP.SP_FileDialogContentsView), "Images", self)
+        self._act_toggle_images.setCheckable(True)
+        self._act_toggle_images.setChecked(True)
+        self._act_toggle_images.setStatusTip("Show or hide the image preview pane")
+        self._act_toggle_images.triggered.connect(self._toggle_image_pane)
+
         self._act_about = QAction(
             style.standardIcon(SP.SP_MessageBoxInformation), "About…", self)
         self._act_about.setStatusTip("About STL Database")
@@ -78,6 +85,7 @@ class MainWindow(QMainWindow):
 
         view_menu = mb.addMenu("&View")
         view_menu.addAction(self._act_refresh)
+        view_menu.addAction(self._act_toggle_images)
 
         tools_menu = mb.addMenu("&Tools")
         self._act_gen_metadata = QAction(
@@ -130,6 +138,7 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self._act_open_crawler)
         toolbar.addAction(self._act_refresh)
         toolbar.addAction(self._act_image_grid)
+        toolbar.addAction(self._act_toggle_images)
 
         sb = QStatusBar()
         self.setStatusBar(sb)
@@ -190,6 +199,10 @@ class MainWindow(QMainWindow):
                 self, "Delete Logs",
                 f"Deleted {count} log file{'s' if count != 1 else ''}."
             )
+
+    def _toggle_image_pane(self):
+        visible = self._browser.toggle_image_pane()
+        self._act_toggle_images.setChecked(visible)
 
     def _show_help(self):
         from app.ui.help_dialog import HelpDialog

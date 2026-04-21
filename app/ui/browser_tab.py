@@ -489,6 +489,7 @@ class BrowserTab(QWidget):
 
         # ---- Right: thumbnail sidebar ----
         right = QWidget()
+        self._right_pane = right
         right.setMinimumWidth(160)
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(4, 0, 0, 0)
@@ -520,6 +521,24 @@ class BrowserTab(QWidget):
         self._populate_filter_tree()
         self._load_table()
         self._clear_thumbnails()
+
+    def image_pane_visible(self) -> bool:
+        return self._right_pane.isVisible()
+
+    def toggle_image_pane(self) -> bool:
+        """Show or hide the right thumbnail pane. Returns the new visibility state."""
+        visible = not self._right_pane.isVisible()
+        if visible:
+            sizes = self._thumb_splitter.sizes()
+            saved = getattr(self, "_saved_right_width", 220)
+            total = sum(sizes)
+            self._thumb_splitter.setSizes([sizes[0], total - sizes[0] - saved, saved])
+        else:
+            sizes = self._thumb_splitter.sizes()
+            self._saved_right_width = sizes[2] or 220
+            self._thumb_splitter.setSizes([sizes[0], sizes[1] + sizes[2], 0])
+        self._right_pane.setVisible(visible)
+        return visible
 
     # ------------------------------------------------------------------
     def _populate_filter_tree(self):
@@ -574,7 +593,6 @@ class BrowserTab(QWidget):
         show_author = not header.isSectionHidden(COL_AUTHOR)
         show_tags   = not header.isSectionHidden(COL_TAGS)
         show_source = not header.isSectionHidden(COL_SOURCE)
-        show_path   = not header.isSectionHidden(COL_PATH)
         show_date   = not header.isSectionHidden(COL_DATE)
 
         session = get_session()
@@ -629,19 +647,18 @@ class BrowserTab(QWidget):
                             _make_leaf(label, ("date_month", (year, month)))
                         )
 
-            if show_path:
-                paths_item = QTreeWidgetItem(["Path"])
-                paths_item.setIcon(0, _icon_path)
-                self._filter_tree.addTopLevelItem(paths_item)
-                dirs: set[str] = set()
-                for (ap,) in session.query(STLModel.archive_path).distinct().all():
-                    if ap:
-                        dirs.add(str(FSPath(ap).parent))
-                new_dirs = frozenset(dirs)
-                if new_dirs != self._cached_path_dirs:
-                    self._cached_path_dirs = new_dirs
-                    self._cached_sorted_dirs = sorted(dirs)
-                self._build_path_tree(paths_item, self._cached_sorted_dirs, checked_data)
+            paths_item = QTreeWidgetItem(["Path"])
+            paths_item.setIcon(0, _icon_path)
+            self._filter_tree.addTopLevelItem(paths_item)
+            dirs: set[str] = set()
+            for (ap,) in session.query(STLModel.archive_path).distinct().all():
+                if ap:
+                    dirs.add(str(FSPath(ap).parent))
+            new_dirs = frozenset(dirs)
+            if new_dirs != self._cached_path_dirs:
+                self._cached_path_dirs = new_dirs
+                self._cached_sorted_dirs = sorted(dirs)
+            self._build_path_tree(paths_item, self._cached_sorted_dirs, checked_data)
         finally:
             session.close()
 
@@ -733,7 +750,7 @@ class BrowserTab(QWidget):
                 path_item = QStandardItem(stl.archive_path or "")
                 path_item.setEditable(False)
                 seq_str = str(stl.sequence) if stl.sequence is not None else ""
-                added_str = stl.created_at.strftime("%Y-%m-%d") if stl.created_at else ""
+                added_str = stl.created_at.strftime("%Y-%m-%d %H:%M") if stl.created_at else ""
                 added_item = QStandardItem(added_str)
                 added_item.setEditable(False)
                 warning_item = QStandardItem("⚠" if stl.warning else "")
@@ -966,10 +983,6 @@ class BrowserTab(QWidget):
         if model_id is not None:
             self._show_thumbnails(model_id)
             self._update_info_panel(model_id)
-        if index.column() == COL_WARNING:
-            warning_item = self._model.item(src_index.row(), COL_WARNING)
-            if warning_item and warning_item.toolTip():
-                QMessageBox.warning(self, "Warnings", warning_item.toolTip())
 
     def _update_info_panel(self, model_id: int):
         session = get_session()
