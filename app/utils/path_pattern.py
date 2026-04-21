@@ -112,8 +112,16 @@ def pattern_to_regex(pattern: str) -> re.Pattern | None:
 
     seen: dict[str, int] = {}
     parts = re.split(r"(\{\w+\}|\*)", pattern)
+    # Identify the last token placeholder so only it gets greedy matching;
+    # earlier tokens use non-greedy to enforce left-to-right consumption.
+    placeholder_indices = [
+        i for i, p in enumerate(parts)
+        if p == "*" or (p.startswith("{") and p.endswith("}"))
+    ]
+    last_ph = placeholder_indices[-1] if placeholder_indices else -1
+
     regex_parts: list[str] = []
-    for part in parts:
+    for i, part in enumerate(parts):
         if part == "*":
             regex_parts.append("[^/]+")
         elif part.startswith("{") and part.endswith("}"):
@@ -121,7 +129,8 @@ def pattern_to_regex(pattern: str) -> re.Pattern | None:
             count = seen.get(token, 0)
             seen[token] = count + 1
             group = token if count == 0 else f"{token}_{count}"
-            regex_parts.append(f"(?P<{group}>[^/]+)")
+            quantifier = "[^/]+" if i == last_ph else "[^/]+?"
+            regex_parts.append(f"(?P<{group}>{quantifier})")
         else:
             regex_parts.append(re.escape(part))
 
@@ -174,11 +183,21 @@ def parse_path(pattern: str, path: str) -> dict[str, str]:
     parent = norm.rsplit("/", 1)[0] if "/" in norm else norm
     archive_stem, _ = os.path.splitext(norm.rsplit("/", 1)[-1])
 
+    archive_filename = norm.rsplit("/", 1)[-1] if "/" in norm else norm
+
     # Pass 1: full path — accept only if the match reaches the string end
     # (meaning {name} captured the actual archive filename, not a directory)
     m = rx.search(norm)
     if m and m.end() == len(norm):
         return _result_from_match(m)
+
+    # Pass 1b: filename only — for patterns without path separators, match
+    # against just the last segment so a directory with the same separator
+    # string (e.g. "Vengeance - 3dbyJT") doesn't shadow the real filename.
+    if "/" not in pattern:
+        m_fn = rx.search(archive_filename)
+        if m_fn and m_fn.end() == len(archive_filename):
+            return _result_from_match(m_fn)
 
     # Pass 2: parent directory path
     if parent and parent != norm:

@@ -148,6 +148,51 @@ class _HelpPopup(QFrame):
 
 
 # ---------------------------------------------------------------------------
+# Confirmation dialog
+# ---------------------------------------------------------------------------
+
+class _ConfirmMoveDialog(QDialog):
+    """Shows the planned moves and asks the user to confirm before proceeding."""
+
+    def __init__(self, preview_data: list[tuple[str, str, int]], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Confirm file move")
+        self.setMinimumSize(720, 400)
+
+        layout = QVBoxLayout(self)
+
+        lbl = QLabel(f"The following {len(preview_data)} file(s) will be moved:")
+        layout.addWidget(lbl)
+
+        table = QTableWidget(0, 2)
+        table.setHorizontalHeaderLabels(["From", "To"])
+        hdr = table.horizontalHeader()
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        table.verticalHeader().setVisible(False)
+        table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        table.setWordWrap(True)
+
+        for src, dst, _mid in preview_data:
+            row = table.rowCount()
+            table.insertRow(row)
+            table.setItem(row, 0, QTableWidgetItem(src))
+            table.setItem(row, 1, QTableWidgetItem(dst))
+
+        table.resizeRowsToContents()
+        layout.addWidget(table)
+
+        btn_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btn_box.button(QDialogButtonBox.StandardButton.Ok).setText("Move Files")
+        btn_box.accepted.connect(self.accept)
+        btn_box.rejected.connect(self.reject)
+        layout.addWidget(btn_box)
+
+
+# ---------------------------------------------------------------------------
 # Dialog
 # ---------------------------------------------------------------------------
 
@@ -266,6 +311,11 @@ class SortFilesDialog(QDialog):
 
         # ---- Buttons ----
         self._btn_box = QDialogButtonBox()
+        self._dry_run_btn = self._btn_box.addButton(
+            "Dry Run", QDialogButtonBox.ButtonRole.ActionRole
+        )
+        self._dry_run_btn.setToolTip("Preview where files would be moved without moving them")
+        self._dry_run_btn.clicked.connect(self._refresh_preview)
         self._move_btn = self._btn_box.addButton(
             "Move Files", QDialogButtonBox.ButtonRole.AcceptRole
         )
@@ -415,21 +465,14 @@ class SortFilesDialog(QDialog):
 
         self._preview_table.resizeRowsToContents()
 
-        if self._preview_data and not has_errors:
-            self._move_btn.setEnabled(True)
-        elif self._preview_data:
-            self._move_btn.setEnabled(True)
-            self._move_btn.setText(
-                f"Move {len(self._preview_data)} of {len(self._model_ids)} Files"
-            )
-        else:
-            self._move_btn.setEnabled(False)
+        self._move_btn.setEnabled(bool(self._preview_data))
 
     # ------------------------------------------------------------------
     def _do_move(self):
         """Perform the file moves and update the database.
 
-        The operation is atomic with respect to the database:
+        Shows a confirmation dialog with the full move plan before touching
+        any files.  The operation is atomic with respect to the database:
           • All file moves are attempted first.
           • If any move fails, every already-moved file is rolled back and the
             DB is left completely unchanged.
@@ -437,7 +480,12 @@ class SortFilesDialog(QDialog):
             transaction, so archive_path values are always consistent with the
             filesystem.
         """
+        self._refresh_preview()
         if not self._preview_data:
+            return
+
+        confirmed = _ConfirmMoveDialog(self._preview_data, self).exec()
+        if confirmed != QDialog.DialogCode.Accepted:
             return
 
         # Phase 1: resolve unique destination paths up-front so the whole plan
@@ -506,6 +554,15 @@ class SortFilesDialog(QDialog):
                     "No files were moved and the database was not changed.",
                 )
             return
+
+        # Phase 2b: remove any source directories that are now empty.
+        source_dirs: set[Path] = {src.parent for src, _dst, _mid in plan}
+        for directory in sorted(source_dirs, key=lambda p: len(p.parts), reverse=True):
+            try:
+                if directory.is_dir() and not any(directory.iterdir()):
+                    directory.rmdir()
+            except OSError:
+                pass
 
         # Phase 3: every move succeeded — write all DB updates in one
         # transaction so archive_path values are never partially updated.
