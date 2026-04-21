@@ -296,16 +296,17 @@ def _write_metadata_7z(
 
             # Add thumbnails only when the option is enabled
             if include_thumbnails:
+                from app.utils.thumbnailer import get_thumbnail_bytes
                 for m_idx, model in enumerate(models):
                     for i_idx, img in enumerate(model.images):
                         if not img.thumbnail_path:
                             continue
-                        thumb_file = thumb_base_dir / img.thumbnail_path
-                        if not thumb_file.exists():
-                            logger.debug("  thumbnail missing, skipping: %s", thumb_file)
+                        thumb_bytes = get_thumbnail_bytes(img.id)
+                        if not thumb_bytes:
+                            logger.debug("  thumbnail missing in LMDB: image_id=%s", img.id)
                             continue
                         arc_name = f"{_THUMBS_DIR}/{m_idx}_{i_idx}.jpg"
-                        zf.write(str(thumb_file), arc_name)
+                        zf.writef(io.BytesIO(thumb_bytes), arc_name)
 
         # Atomic replace
         tmp_path.replace(dest)

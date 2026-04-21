@@ -31,9 +31,9 @@ def init_db(db_path: str = "stl_database.db") -> None:
     Base.metadata.create_all(_engine)
     _ensure_columns(_engine)
 
-    # Initialise thumbnail file store alongside the database
+    # Initialise LMDB thumbnail store alongside the database
     from app.utils.thumbnailer import init_thumbnail_store
-    thumb_dir = Path(db_path).parent / "thumbnails"
+    thumb_dir = Path(db_path).parent / "thumbnails.lmdb"
     init_thumbnail_store(thumb_dir)
 
     _SessionFactory = sessionmaker(bind=_engine, expire_on_commit=False)

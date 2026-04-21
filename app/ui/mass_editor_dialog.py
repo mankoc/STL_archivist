@@ -15,10 +15,12 @@ from PyQt6.QtGui import QCursor
 
 from app.database.db import session_scope, get_session
 from app.database.models import STLModel, Tag, Release, Category, Subcategory, Scale
+import re
+
 from app.utils.path_pattern import (
     parse_path, apply_extracted_to_model,
     ATTR_LABEL as _ATTR_LABEL, PATTERN_HELP as _PATTERN_HELP,
-    parse_release_date,
+    parse_release_date, format_release_date,
 )
 
 _SAVED_PATTERNS_KEY = "mass_editor/saved_patterns"
@@ -26,6 +28,18 @@ _LAST_PATTERN_KEY   = "mass_editor/last_pattern"
 
 # Separator used inside QSettings list entries: "My pattern:::/mnt/f/{source}/…"
 _SEP = ":::"
+
+_TOKEN_HELP = (
+    "You can use tokens in any text field to copy values from each model:\n"
+    "  {author}   — the model's current author\n"
+    "  {source}   — the model's current source/type\n"
+    "  {title}    — the model's current title\n"
+    "  {date}     — the model's current release date (YYYY-MM)\n"
+    "  {path}     — full archive path\n"
+    "  {folder}   — parent folder name\n"
+    "  {filename} — archive file name (without extension)\n\n"
+    "Tokens from a parsed path pattern are also available."
+)
 
 
 def _parse_path(pattern: str, path: str) -> dict[str, str]:
@@ -124,7 +138,25 @@ class MassEditorDialog(QDialog):
         manual_group = QGroupBox(
             "Manual overrides — fill a field to apply the same value to all selected models"
         )
-        form = QFormLayout(manual_group)
+        manual_vbox = QVBoxLayout(manual_group)
+
+        token_row = QHBoxLayout()
+        token_row.addStretch()
+        token_help_btn = QToolButton()
+        token_help_btn.setText("?")
+        token_help_btn.setToolTip(_TOKEN_HELP)
+        token_help_btn.setStyleSheet(
+            "QToolButton { font-weight: bold; border: 1px solid gray;"
+            " border-radius: 9px; min-width: 18px; min-height: 18px; }"
+        )
+        token_help_btn.enterEvent = lambda e: QToolTip.showText(
+            QCursor.pos(), _TOKEN_HELP, token_help_btn
+        )
+        token_row.addWidget(token_help_btn)
+        manual_vbox.addLayout(token_row)
+
+        form = QFormLayout()
+        manual_vbox.addLayout(form)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
         session = get_session()
@@ -135,15 +167,15 @@ class MassEditorDialog(QDialog):
         finally:
             session.close()
 
-        self._type_edit    = QLineEdit(); self._type_edit.setPlaceholderText("e.g. patreon")
-        self._author_edit  = QLineEdit(); self._author_edit.setPlaceholderText("e.g. SomeAuthor")
-        self._date_edit    = QLineEdit(); self._date_edit.setPlaceholderText("e.g. 2024-01")
-        self._title_edit   = QLineEdit()
+        self._type_edit    = QLineEdit(); self._type_edit.setPlaceholderText("e.g. patreon  or  {source}")
+        self._author_edit  = QLineEdit(); self._author_edit.setPlaceholderText("e.g. SomeAuthor  or  {author}")
+        self._date_edit    = QLineEdit(); self._date_edit.setPlaceholderText("e.g. 2024-01  or  {date}")
+        self._title_edit   = QLineEdit(); self._title_edit.setPlaceholderText("e.g. {filename}  or  {author} — {title}")
         self._scale_combo  = self._make_combo(scales, placeholder="— no change —")
         self._presupports_combo = QComboBox()
         self._presupports_combo.addItems(["— no change —", "No", "Lychee", "Chitubox", "Presupported"])
-        self._release_edit = QLineEdit(); self._release_edit.setPlaceholderText("Release name (groups models)")
-        self._tags_edit    = QLineEdit(); self._tags_edit.setPlaceholderText("tag1, tag2, … (replaces existing tags)")
+        self._release_edit = QLineEdit(); self._release_edit.setPlaceholderText("Release name  or  {folder}")
+        self._tags_edit    = QLineEdit(); self._tags_edit.setPlaceholderText("tag1, tag2, …  (replaces existing tags)")
 
         self._category_edit    = self._make_combo(categories)
         self._category_edit.currentTextChanged.connect(self._on_category_changed)
@@ -187,6 +219,31 @@ class MassEditorDialog(QDialog):
         combo.completer().setFilterMode(Qt.MatchFlag.MatchContains)
         combo.lineEdit().setClearButtonEnabled(True)
         return combo
+
+    # ------------------------------------------------------------------
+    # Token resolution
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _token_context(model: "STLModel", path_extracted: dict[str, str]) -> dict[str, str]:
+        from pathlib import Path as _P
+        ap = model.archive_path or ""
+        ctx: dict[str, str] = {
+            "author":   model.author   or "",
+            "source":   model.source   or "",
+            "title":    model.title    or "",
+            "date":     format_release_date(model.release_year, model.release_month),
+            "path":     ap,
+            "folder":   _P(ap).parent.name if ap else "",
+            "filename": _P(ap).stem       if ap else "",
+        }
+        ctx.update(path_extracted)
+        return ctx
+
+    @staticmethod
+    def _resolve_tokens(value: str, context: dict[str, str]) -> str:
+        def _sub(m: re.Match) -> str:
+            return context.get(m.group(1), m.group(0))
+        return re.sub(r"\{(\w+)\}", _sub, value)
 
     def _on_category_changed(self, category_name: str) -> None:
         """Repopulate subcategory combo when the category selection changes."""
@@ -349,43 +406,41 @@ class MassEditorDialog(QDialog):
         apply_presupports = presup_choice != "— no change —"
         presupports_value = presup_choice if apply_presupports else None
 
-        release_name    = self._release_edit.text().strip()
+        release_tmpl     = self._release_edit.text().strip()
         category_name    = self._category_edit.currentText().strip()
         subcategory_name = self._subcategory_edit.currentText().strip()
 
-        tag_names = [
-            t.strip().lower()
-            for t in self._tags_edit.text().split(",")
-            if t.strip()
-        ]
-        apply_tags = bool(tag_names)
+        tags_tmpl  = self._tags_edit.text()
+        apply_tags = bool(tags_tmpl.strip())
 
         with session_scope() as session:
-            release_obj = None
-            if release_name:
-                release_obj = session.query(Release).filter_by(name=release_name).first()
-                if release_obj is None:
-                    release_obj = Release(name=release_name)
-                    session.add(release_obj)
-                    session.flush()
-
             for mid in self._model_ids:
                 model: STLModel = session.get(STLModel, mid)
                 if model is None:
                     continue
 
-                apply_extracted_to_model(session, model, self._path_results.get(mid, {}))
+                path_extracted = self._path_results.get(mid, {})
+                apply_extracted_to_model(session, model, path_extracted)
 
+                ctx = self._token_context(model, path_extracted)
                 for attr, value in manual.items():
+                    resolved = self._resolve_tokens(value, ctx)
                     if attr == "release_date":
-                        _year, _month = parse_release_date(value or "")
+                        _year, _month = parse_release_date(resolved or "")
                         model.release_year  = _year
                         model.release_month = _month
                     else:
-                        setattr(model, attr, value)
+                        setattr(model, attr, resolved or None)
 
-                if release_obj is not None:
-                    model.release = release_obj
+                if release_tmpl:
+                    release_name = self._resolve_tokens(release_tmpl, ctx)
+                    if release_name:
+                        release_obj = session.query(Release).filter_by(name=release_name).first()
+                        if release_obj is None:
+                            release_obj = Release(name=release_name)
+                            session.add(release_obj)
+                            session.flush()
+                        model.release = release_obj
 
                 if category_name:
                     cat = session.query(Category).filter_by(name=category_name).first()
@@ -417,6 +472,8 @@ class MassEditorDialog(QDialog):
                     model.presupports = presupports_value or None
 
                 if apply_tags:
+                    resolved_tags = self._resolve_tokens(tags_tmpl, ctx)
+                    tag_names = [t.strip().lower() for t in resolved_tags.split(",") if t.strip()]
                     model.tags.clear()
                     for name in tag_names:
                         tag = session.query(Tag).filter_by(name=name).first()
