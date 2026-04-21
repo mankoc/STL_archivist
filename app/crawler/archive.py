@@ -235,23 +235,26 @@ def extract_archive_contents(archive_path: Path, unrar_path: str = "") -> dict[s
                     logger.debug("  7Z: %d total members, %d wanted", len(all_names), len(wanted))
                     if wanted:
                         zf.extract(path=tmpdir, targets=wanted)
-                for name in wanted:
-                    filepath = tmp / Path(name.replace("\\", "/"))
-                    if filepath.exists():
-                        limit = _member_size_limit(name)
-                        file_size = filepath.stat().st_size
-                        if file_size > limit:
-                            logger.warning(
-                                "Skipping oversized member %r (%d B > %d B limit) in %s",
-                                name, file_size, limit, archive_path,
-                            )
-                            continue
-                        data = filepath.read_bytes()
-                        if data:
-                            result[name] = data
-                            logger.debug("  Read %r (%d B)", name, len(data))
-                    else:
-                        logger.debug("  Expected extracted file not found: %r", name)
+                # Walk the extracted tree so files at any subfolder depth are found,
+                # regardless of how the archive member names were encoded.
+                for filepath in sorted(tmp.rglob("*")):
+                    if not filepath.is_file():
+                        continue
+                    name = filepath.relative_to(tmp).as_posix()
+                    if not _is_wanted(name):
+                        continue
+                    limit = _member_size_limit(name)
+                    file_size = filepath.stat().st_size
+                    if file_size > limit:
+                        logger.warning(
+                            "Skipping oversized member %r (%d B > %d B limit) in %s",
+                            name, file_size, limit, archive_path,
+                        )
+                        continue
+                    data = filepath.read_bytes()
+                    if data:
+                        result[name] = data
+                        logger.debug("  Read %r (%d B)", name, len(data))
 
         elif suffix == ".rar":
             with _open_rar(archive_path, unrar_path) as rf:

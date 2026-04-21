@@ -321,6 +321,11 @@ class ThumbnailGeneratorWorker(QThread):
                 session.flush()
 
                 # Extract and generate new thumbnails
+                from app.crawler.archive import list_contents
+                from app.crawler.rules import detect_warnings
+                from app.ui.config_dialog import get_warn_presupported_stl, get_warn_no_images, get_warn_nested_archive
+
+                all_names = list_contents(archive_path, unrar_path=unrar)
                 contents = extract_archive_contents(archive_path, unrar_path=unrar)
                 image_names = sorted(
                     name for name in contents
@@ -344,6 +349,17 @@ class ThumbnailGeneratorWorker(QThread):
                         self.log.emit(f"  WARNING: thumbnail conversion failed for {filename}")
 
                 self.log.emit(f"  {count} thumbnail(s) stored")
+
+                warnings = detect_warnings(
+                    all_names,
+                    check_presupported=get_warn_presupported_stl(),
+                    check_no_images=get_warn_no_images(),
+                    check_nested_archive=get_warn_nested_archive(),
+                )
+                stl.warning = warnings or None
+                if warnings:
+                    self.log.emit(f"  WARNING: {warnings.replace(chr(10), '; ')}")
+
                 modified_folders.add(archive_path.parent)
 
         # Update METADATA.7z for all affected folders (if option is enabled)
@@ -519,7 +535,7 @@ class BrowserTab(QWidget):
     def refresh(self):
         """Reload all data from the database."""
         self._populate_filter_tree()
-        self._load_table()
+        self._apply_checked_filters()
         self._clear_thumbnails()
 
     def image_pane_visible(self) -> bool:
@@ -659,6 +675,7 @@ class BrowserTab(QWidget):
                 self._cached_path_dirs = new_dirs
                 self._cached_sorted_dirs = sorted(dirs)
             self._build_path_tree(paths_item, self._cached_sorted_dirs, checked_data)
+            self._init_path_parent_states(paths_item)
         finally:
             session.close()
 
@@ -919,9 +936,55 @@ class BrowserTab(QWidget):
     def _on_search(self, text: str):
         self._proxy.setFilterFixedString(text)
 
+    def _init_path_parent_states(self, item: QTreeWidgetItem) -> Qt.CheckState:
+        """Recursively compute and set PartiallyChecked on path ancestor items.
+        Called after building the path tree to initialise tristate visuals."""
+        if item.childCount() == 0:
+            return item.checkState(0)
+        child_states = [self._init_path_parent_states(item.child(i))
+                        for i in range(item.childCount())]
+        if item.data(0, Qt.ItemDataRole.UserRole) is None:
+            return Qt.CheckState.Unchecked
+        checked = child_states.count(Qt.CheckState.Checked)
+        partial = child_states.count(Qt.CheckState.PartiallyChecked)
+        n = len(child_states)
+        if checked == n:
+            new_state = Qt.CheckState.Checked
+        elif checked > 0 or partial > 0:
+            new_state = Qt.CheckState.PartiallyChecked
+        else:
+            new_state = Qt.CheckState.Unchecked
+        item.setCheckState(0, new_state)
+        return new_state
+
+    def _update_path_parent_states(self, item: QTreeWidgetItem) -> None:
+        """Walk up the path tree from *item* and set Partial/Checked/Unchecked
+        on each ancestor based on its children's states."""
+        self._filter_tree.blockSignals(True)
+        try:
+            parent = item.parent()
+            while parent is not None and parent.data(0, Qt.ItemDataRole.UserRole) is not None:
+                n = parent.childCount()
+                checked = sum(1 for i in range(n)
+                              if parent.child(i).checkState(0) == Qt.CheckState.Checked)
+                partial = sum(1 for i in range(n)
+                              if parent.child(i).checkState(0) == Qt.CheckState.PartiallyChecked)
+                if checked == n:
+                    parent.setCheckState(0, Qt.CheckState.Checked)
+                elif checked > 0 or partial > 0:
+                    parent.setCheckState(0, Qt.CheckState.PartiallyChecked)
+                else:
+                    parent.setCheckState(0, Qt.CheckState.Unchecked)
+                parent = parent.parent()
+        finally:
+            self._filter_tree.blockSignals(False)
+
     def _on_filter_item_changed(self, item: QTreeWidgetItem, _col: int):
         """Called when a checkbox in the filter tree is toggled."""
-        if item.data(0, Qt.ItemDataRole.UserRole) is not None:
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if data is not None:
+            if isinstance(data, tuple) and data[0] == "path":
+                self._update_path_parent_states(item)
             self._apply_checked_filters()
 
     def _apply_checked_filters(self):

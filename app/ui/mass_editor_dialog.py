@@ -167,7 +167,7 @@ class MassEditorDialog(QDialog):
         finally:
             session.close()
 
-        self._type_edit    = QLineEdit(); self._type_edit.setPlaceholderText("e.g. patreon  or  {source}")
+        self._type_edit    = QLineEdit(); self._type_edit.setPlaceholderText("e.g. patreon  or  {source} or {folder}")
         self._author_edit  = QLineEdit(); self._author_edit.setPlaceholderText("e.g. SomeAuthor  or  {author}")
         self._date_edit    = QLineEdit(); self._date_edit.setPlaceholderText("e.g. 2024-01  or  {date}")
         self._title_edit   = QLineEdit(); self._title_edit.setPlaceholderText("e.g. {filename}  or  {author} — {title}")
@@ -181,7 +181,7 @@ class MassEditorDialog(QDialog):
         self._category_edit.currentTextChanged.connect(self._on_category_changed)
         self._subcategory_edit = self._make_combo(subcategories)
 
-        form.addRow("Type:",          self._type_edit)
+        form.addRow("Source:",         self._type_edit)
         form.addRow("Author:",        self._author_edit)
         form.addRow("Date:",          self._date_edit)
         form.addRow("Title:",         self._title_edit)
