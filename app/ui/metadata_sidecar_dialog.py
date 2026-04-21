@@ -20,6 +20,8 @@ class MetadataSidecarWorker(QThread):
     Background thread that exports METADATA.7z for every folder that has at
     least one STLModel record in the database.
 
+    If *folders* is provided, only those specific folders are processed.
+
     Signals
     -------
     progress(current, total)  – folder index and total folder count
@@ -30,9 +32,10 @@ class MetadataSidecarWorker(QThread):
     log      = pyqtSignal(str)
     finished = pyqtSignal()
 
-    def __init__(self, parent=None):
+    def __init__(self, folders=None, parent=None):
         super().__init__(parent)
         self._stop_requested = False
+        self._folders = folders  # None → process all DB folders
 
     def stop(self):
         self._stop_requested = True
@@ -65,11 +68,14 @@ class MetadataSidecarWorker(QThread):
 
         include_thumbs = get_metadata_thumbnails_enabled()
 
-        # Collect all distinct parent folders from the database
-        with session_scope() as session:
-            rows = session.query(STLModel.archive_path).all()
+        # Collect target folders
+        if self._folders is not None:
+            folders = sorted(self._folders)
+        else:
+            with session_scope() as session:
+                rows = session.query(STLModel.archive_path).all()
+            folders = sorted({Path(row.archive_path).parent for row in rows if row.archive_path})
 
-        folders = sorted({Path(row.archive_path).parent for row in rows if row.archive_path})
         total = len(folders)
 
         if total == 0:
@@ -78,7 +84,7 @@ class MetadataSidecarWorker(QThread):
             return
 
         self.log.emit(
-            f"Found {total} folder(s). Writing METADATA.7z "
+            f"Processing {total} folder(s). Writing METADATA.7z "
             f"(thumbnails={'yes' if include_thumbs else 'no'})…"
         )
         logger.info(
@@ -115,11 +121,21 @@ class MetadataSidecarWorker(QThread):
 
 
 class MetadataSidecarDialog(QDialog):
-    """Modal dialog that runs MetadataSidecarWorker and shows its progress."""
+    """Modal dialog that runs MetadataSidecarWorker and shows its progress.
 
-    def __init__(self, parent=None):
+    If *folders* is provided the dialog targets only those folders and starts
+    automatically when shown.
+    """
+
+    def __init__(self, folders=None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Generate / Update Metadata Sidecars")
+        self._folders = folders
+        title = (
+            f"Create / Update Sidecar for {len(folders)} folder(s)"
+            if folders is not None
+            else "Generate / Update Metadata Sidecars"
+        )
+        self.setWindowTitle(title)
         self.resize(640, 420)
         self.setModal(True)
         self._worker: MetadataSidecarWorker | None = None
@@ -130,12 +146,21 @@ class MetadataSidecarDialog(QDialog):
         root = QVBoxLayout(self)
         root.setSpacing(8)
 
-        info = QLabel(
-            "Writes or refreshes a <b>METADATA.7z</b> sidecar file in every "
-            "folder that contains archived models in the database.<br>"
-            "This allows the library to be restored on a new machine without "
-            "re-crawling every archive."
-        )
+        if self._folders is not None:
+            folder_list = "<br>".join(f"&nbsp;• {f}" for f in sorted(self._folders))
+            desc = (
+                f"Writes or refreshes <b>METADATA.7z</b> for the "
+                f"{len(self._folders)} folder(s) containing the selected models:<br>"
+                f"{folder_list}"
+            )
+        else:
+            desc = (
+                "Writes or refreshes a <b>METADATA.7z</b> sidecar file in every "
+                "folder that contains archived models in the database.<br>"
+                "This allows the library to be restored on a new machine without "
+                "re-crawling every archive."
+            )
+        info = QLabel(desc)
         info.setWordWrap(True)
         root.addWidget(info)
 
@@ -177,6 +202,11 @@ class MetadataSidecarDialog(QDialog):
         root.addLayout(btn_row)
 
     # ------------------------------------------------------------------
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self._folders is not None and self._start_btn.isEnabled():
+            self._start()
+
     def _start(self):
         self._log.clear()
         self._progress.setValue(0)
@@ -184,7 +214,7 @@ class MetadataSidecarDialog(QDialog):
         self._stop_btn.setEnabled(True)
         self._close_btn.setEnabled(False)
 
-        self._worker = MetadataSidecarWorker()
+        self._worker = MetadataSidecarWorker(folders=self._folders)
         self._worker.log.connect(self._on_log)
         self._worker.progress.connect(self._on_progress)
         self._worker.finished.connect(self._on_finished)
