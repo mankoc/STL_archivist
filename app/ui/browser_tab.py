@@ -1188,6 +1188,14 @@ class BrowserTab(QWidget):
             f"Generate Thumbnails for {len(selected_ids)} model(s)…",
         )
 
+        from app.ui.config_dialog import get_metadata_sidecar_enabled
+        sidecar_act = None
+        if get_metadata_sidecar_enabled():
+            sidecar_act = menu.addAction(
+                style.standardIcon(SP.SP_DriveHDIcon),
+                f"Create / Update Sidecar for {len(selected_ids)} model(s)…",
+            )
+
         action = menu.exec(self._table.viewport().mapToGlobal(pos))
         if action == edit_act:
             self._open_editor(model_id)
@@ -1199,6 +1207,8 @@ class BrowserTab(QWidget):
             self._sort_files(selected_ids)
         elif action == thumb_act:
             self._generate_thumbnails(selected_ids)
+        elif sidecar_act and action == sidecar_act:
+            self._create_sidecar_for_selection(selected_ids)
         elif add_tag_act and action == add_tag_act:
             self.add_tag()
         elif edit_tags_act and action == edit_tags_act:
@@ -1382,6 +1392,26 @@ class BrowserTab(QWidget):
             )
             return
         self._generate_thumbnails(ids)
+
+    def _create_sidecar_for_selection(self, model_ids: list[int]):
+        """Open a sidecar dialog scoped to the folders of the selected models."""
+        from pathlib import Path
+        from app.ui.metadata_sidecar_dialog import MetadataSidecarDialog
+
+        with session_scope() as session:
+            rows = (
+                session.query(STLModel.archive_path)
+                .filter(STLModel.id.in_(model_ids))
+                .all()
+            )
+
+        folders = {Path(r.archive_path).parent for r in rows if r.archive_path}
+        if not folders:
+            QMessageBox.warning(self, "Create Sidecar", "No valid file paths found for the selected models.")
+            return
+
+        dlg = MetadataSidecarDialog(folders=folders, parent=self)
+        dlg.exec()
 
     def show_image_grid(self):
         """Open an image grid for all models currently visible in the table."""
