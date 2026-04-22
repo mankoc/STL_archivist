@@ -52,18 +52,23 @@ def _make_worker(source_dir: str = "/tmp", pattern: str = ""):
 # test_hash_file
 # ---------------------------------------------------------------------------
 
-def test_hash_file_stable():
-    """_hash_file must return the same value for identical content."""
-    from app.crawler.crawler import _hash_file
+def test_archive_hash_stable():
+    """archive_hash must return the same value for identical archive content."""
+    from app.crawler.archive import archive_hash
 
-    content = b"Hello, STL database!\n" * 1000
-    with tempfile.NamedTemporaryFile(delete=False) as f:
-        f.write(content)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("a.txt", b"alpha")
+        zf.writestr("b.txt", b"beta")
+    buf.seek(0)
+
+    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as f:
+        f.write(buf.read())
     tmp_path = Path(f.name)
 
     try:
-        h1 = _hash_file(tmp_path)
-        h2 = _hash_file(tmp_path)
+        h1 = archive_hash(tmp_path)
+        h2 = archive_hash(tmp_path)
         assert h1 == h2
         assert isinstance(h1, str)
         assert len(h1) > 0

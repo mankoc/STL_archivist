@@ -57,7 +57,7 @@ _SCALE_RATIO_RE      = re.compile(r"\b1[/\-](\d+)\b")
 # Warning: presupported STL detection
 # Matches filenames like "body_presupported.stl", "torso presupported.stl",
 # "supported.stl", "sup_dragon.stl" (the sup*.stl glob)
-_WARN_PRESUP_STL_RE    = re.compile(r"(?:[ |_]presupported\.stl$|^sup.*\.stl$)", re.IGNORECASE)
+_WARN_PRESUP_STL_RE    = re.compile(r"(?:[ _]presupported\.stl$|^sup.*\.stl$)", re.IGNORECASE)
 _WARN_IMAGE_SUFFIXES   = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 _WARN_ARCHIVE_SUFFIXES = {".zip", ".rar", ".7z"}
 

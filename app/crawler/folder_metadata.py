@@ -132,7 +132,7 @@ def import_folder_metadata(folder: Path, session, thumb_base_dir: Path) -> list[
     Returns a list of archive_path strings that were newly inserted.
     """
     from app.database.models import STLModel, Image, Sculptor, Category, Subcategory, Release, Scale, Tag
-    from app.utils.thumbnailer import save_thumbnail
+    from app.utils.thumbnailer import write_raw_thumbnail
 
     folder = Path(folder)
     metadata_path = folder / METADATA_FILENAME
@@ -216,7 +216,9 @@ def import_folder_metadata(folder: Path, session, thumb_base_dir: Path) -> list[
             img = Image(model=model, filename=img_data.get("filename", ""))
             session.add(img)
             session.flush()  # get img.id
-            rel_path = save_thumbnail(raw_bytes, img.id)
+            # Thumbnails in METADATA.7z are already sized + JPEG-encoded; store
+            # the bytes as-is rather than re-decoding through Pillow.
+            rel_path = write_raw_thumbnail(img.id, raw_bytes)
             if rel_path:
                 img.thumbnail_path = rel_path
             else:

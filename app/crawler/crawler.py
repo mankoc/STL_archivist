@@ -152,28 +152,41 @@ class CrawlerWorker(QThread):
                 logger.debug("Extraction needed: %d new/changed, %d unchanged",
                              len(to_extract), len(unchanged))
 
-                # Phase 3: extract archive contents in parallel (IO/CPU-bound)
-                contents_map: dict[Path, dict[str, bytes]] = {}
+                # Phase 3: extract archive contents in parallel (IO/CPU-bound).
+                # We also capture the full member name list from each archive's
+                # catalog so Phase 4 can run rule/warning detection without
+                # reopening the archive.
+                contents_map:  dict[Path, dict[str, bytes]] = {}
+                all_names_map: dict[Path, list[str]]       = {}
+
+                def _extract_and_list(p: Path) -> tuple[dict[str, bytes], list[str]]:
+                    names: list[str] = []
+                    data = extract_archive_contents(
+                        p,
+                        unrar_path=self._config.unrar_path,
+                        all_names_out=names,
+                    )
+                    return data, names
+
                 if to_extract:
                     logger.debug("Phase 3: extracting %d archive(s) in parallel", len(to_extract))
-                    extract_fn = partial(
-                        extract_archive_contents, unrar_path=self._config.unrar_path
-                    )
                     with ThreadPoolExecutor(max_workers=workers) as pool:
-                        futures = {pool.submit(extract_fn, p): p for p in to_extract}
+                        futures = {pool.submit(_extract_and_list, p): p for p in to_extract}
                         for future in as_completed(futures):
                             p = futures[future]
                             try:
-                                result = future.result()
-                                contents_map[p] = result
-                                logger.debug("  extracted %s → %d file(s)",
-                                             p.name, len(result))
+                                data, names = future.result()
+                                contents_map[p]  = data
+                                all_names_map[p] = names
+                                logger.debug("  extracted %s → %d file(s), %d member(s)",
+                                             p.name, len(data), len(names))
                             except Exception as exc:
                                 msg = f"  ERROR extracting {p.name}: {exc}"
                                 self.log.emit(msg)
                                 logger.error("Extraction failed for %s: %s",
                                              p.name, exc, exc_info=True)
-                                contents_map[p] = {}
+                                contents_map[p]  = {}
+                                all_names_map[p] = []
                     logger.debug("Phase 3 complete — %d archive(s) extracted", len(contents_map))
                 else:
                     logger.debug("Phase 3 skipped — no archives need extraction")
@@ -200,6 +213,7 @@ class CrawlerWorker(QThread):
                             existing=existing_map.get(str(archive_path)),
                             # None signals "hash unchanged — skip extraction"
                             contents=contents_map.get(archive_path),
+                            all_names=all_names_map.get(archive_path),
                         )
                         sp.commit()
                         modified_folders.add(archive_path.parent)
@@ -275,11 +289,16 @@ class CrawlerWorker(QThread):
         current_hash: str,
         existing: Optional[STLModel],
         contents: Optional[dict[str, bytes]],
+        all_names: Optional[list[str]] = None,
     ):
         """
         Write one archive to the database using pre-computed *current_hash* and
         *contents*.  When *contents* is None the hash is unchanged and only the
         path pattern is re-applied.
+
+        *all_names* is the full member list returned from
+        ``extract_archive_contents(all_names_out=…)``.  If not provided it will
+        be fetched via ``list_contents`` (one extra archive open).
         """
         archive_str  = str(archive_path)
         hash_changed = existing is not None and existing.archive_hash != current_hash
@@ -345,8 +364,9 @@ class CrawlerWorker(QThread):
             logger.debug("  %s — inserting new record", archive_path.name)
 
         model.archive_hash  = current_hash
-        logger.debug("  Listing archive contents for rule detection: %s", archive_path.name)
-        all_names           = list_contents(archive_path, self._config.unrar_path)
+        if all_names is None:
+            logger.debug("  Listing archive contents for rule detection: %s", archive_path.name)
+            all_names = list_contents(archive_path, self._config.unrar_path)
         logger.debug("  %d member(s) in archive", len(all_names))
 
         presupport = detect_presupport(all_names)
