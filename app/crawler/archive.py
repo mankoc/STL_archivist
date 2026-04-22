@@ -191,11 +191,20 @@ def _is_wanted(name: str) -> bool:
     )
 
 
-def extract_archive_contents(archive_path: Path, unrar_path: str = "") -> dict[str, bytes]:
+def extract_archive_contents(
+    archive_path: Path,
+    unrar_path: str = "",
+    all_names_out: Optional[list] = None,
+) -> dict[str, bytes]:
     """
     Open the archive exactly once and return a dict of {member_name: bytes}
     for every image, info.json and .url file found inside.
     All other members are ignored entirely.
+
+    When *all_names_out* is a list, it will be populated with every member
+    name read from the archive's catalog.  Callers that also need the full
+    member list (e.g. for rule/warning detection) can pass a list here to
+    avoid opening the archive a second time.
     """
     suffix = archive_path.suffix.lower()
     result: dict[str, bytes] = {}
@@ -204,6 +213,8 @@ def extract_archive_contents(archive_path: Path, unrar_path: str = "") -> dict[s
         if suffix == ".zip":
             with _open_zip(archive_path) as zf:
                 all_names = zf.namelist()
+                if all_names_out is not None:
+                    all_names_out.extend(all_names)
                 wanted = [n for n in all_names if _is_wanted(n)]
                 logger.debug("  ZIP: %d total members, %d wanted", len(all_names), len(wanted))
                 for name in wanted:
@@ -231,6 +242,8 @@ def extract_archive_contents(archive_path: Path, unrar_path: str = "") -> dict[s
                 tmp = Path(tmpdir)
                 with _open_7z(archive_path) as zf:
                     all_names = zf.getnames()
+                    if all_names_out is not None:
+                        all_names_out.extend(all_names)
                     wanted = [n for n in all_names if _is_wanted(n)]
                     logger.debug("  7Z: %d total members, %d wanted", len(all_names), len(wanted))
                     if wanted:
@@ -259,6 +272,8 @@ def extract_archive_contents(archive_path: Path, unrar_path: str = "") -> dict[s
         elif suffix == ".rar":
             with _open_rar(archive_path, unrar_path) as rf:
                 all_names = rf.namelist()
+                if all_names_out is not None:
+                    all_names_out.extend(all_names)
                 wanted = [n for n in all_names if _is_wanted(n)]
                 logger.debug("  RAR: %d total members, %d wanted", len(all_names), len(wanted))
                 for name in wanted:

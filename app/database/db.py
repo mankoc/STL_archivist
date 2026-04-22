@@ -22,11 +22,17 @@ def init_db(db_path: str = "stl_database.db") -> None:
     url = f"sqlite:///{db_path}"
     _engine = create_engine(url, connect_args={"check_same_thread": False})
 
-    # Enable WAL mode and foreign keys for SQLite
+    # Enable WAL mode and foreign keys for SQLite.
+    # The connect event passes the raw DBAPI connection, so we need an explicit
+    # cursor — conn.execute() on a sqlite3.Connection silently no-ops for pragmas.
     @event.listens_for(_engine, "connect")
     def _set_pragmas(conn, _record):
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA foreign_keys=ON")
+        cursor = conn.cursor()
+        try:
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA foreign_keys=ON")
+        finally:
+            cursor.close()
 
     Base.metadata.create_all(_engine)
     _ensure_columns(_engine)

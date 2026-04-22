@@ -13,10 +13,19 @@ def test_infer_title_from_stem():
     assert meta.title == "cyborg hulk"
 
 
-def test_infer_author_from_parent():
+def test_infer_author_after_distributor():
+    """Author is inferred only from the folder directly after a distributor folder."""
+    p = Path("/mnt/f/STL/Patreon/CalebNefzen/Cyborg-Hulk.7z")
+    meta = _infer_from_path(p)
+    assert meta.distributor == "Patreon"
+    assert meta.author == "CalebNefzen"
+
+
+def test_author_not_inferred_without_distributor():
+    """Without a distributor signal the author should remain unset."""
     p = Path("/mnt/f/STL/CalebNefzen/Cyborg-Hulk.7z")
     meta = _infer_from_path(p)
-    assert meta.author == "CalebNefzen"
+    assert meta.author is None
 
 
 def test_infer_patreon_type():

@@ -187,11 +187,6 @@ class ScaleDelegate(_ComboDelegate):
             session.close()
 
 
-
-    def updateEditorGeometry(self, editor, option, index):
-        editor.setGeometry(option.rect)
-
-
 _PRESUPPORTS_OPTIONS = ["", "No", "Lychee", "Chitubox", "Presupported"]
 
 
@@ -321,12 +316,13 @@ class ThumbnailGeneratorWorker(QThread):
                 session.flush()
 
                 # Extract and generate new thumbnails
-                from app.crawler.archive import list_contents
                 from app.crawler.rules import detect_warnings
                 from app.ui.config_dialog import get_warn_presupported_stl, get_warn_no_images, get_warn_nested_archive
 
-                all_names = list_contents(archive_path, unrar_path=unrar)
-                contents = extract_archive_contents(archive_path, unrar_path=unrar)
+                all_names: list[str] = []
+                contents = extract_archive_contents(
+                    archive_path, unrar_path=unrar, all_names_out=all_names,
+                )
                 image_names = sorted(
                     name for name in contents
                     if Path(name.replace("\\", "/")).suffix.lower() in IMAGE_SUFFIXES
