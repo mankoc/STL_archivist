@@ -205,3 +205,102 @@ def test_apply_extracted_overwrite_false_preserves_existing():
         )
         assert model.title == "Original"
         assert model.sculptor.name == "Existing"
+
+
+# ---------------------------------------------------------------------------
+# apply_extracted_to_model — sequence and release_name
+# ---------------------------------------------------------------------------
+
+def test_apply_extracted_sets_sequence():
+    with session_scope() as session:
+        model = STLModel(archive_path="/seq.7z", archive_hash="h")
+        session.add(model)
+        session.flush()
+
+        apply_extracted_to_model(session, model, {"sequence": "3"}, overwrite=True)
+        assert model.sequence == 3
+
+
+def test_apply_extracted_sequence_non_numeric_skipped():
+    with session_scope() as session:
+        model = STLModel(archive_path="/seq2.7z", archive_hash="h")
+        session.add(model)
+        session.flush()
+
+        apply_extracted_to_model(session, model, {"sequence": "not-a-number"}, overwrite=True)
+        assert model.sequence is None
+
+
+def test_apply_extracted_creates_release():
+    from app.database.models import Release
+    with session_scope() as session:
+        model = STLModel(archive_path="/rel.7z", archive_hash="h")
+        session.add(model)
+        session.flush()
+
+        apply_extracted_to_model(
+            session, model, {"release_name": "March Bundle"}, overwrite=True
+        )
+        assert model.release is not None
+        assert model.release.name == "March Bundle"
+
+    with session_scope() as session:
+        assert session.query(Release).filter_by(name="March Bundle").count() == 1
+
+
+def test_apply_extracted_reuses_existing_release():
+    from app.database.models import Release
+    with session_scope() as session:
+        existing = Release(name="Shared Bundle")
+        session.add(existing)
+        session.flush()
+
+        m1 = STLModel(archive_path="/r1.7z", archive_hash="h1")
+        m2 = STLModel(archive_path="/r2.7z", archive_hash="h2")
+        session.add_all([m1, m2])
+        session.flush()
+
+        apply_extracted_to_model(session, m1, {"release_name": "Shared Bundle"}, overwrite=True)
+        apply_extracted_to_model(session, m2, {"release_name": "Shared Bundle"}, overwrite=True)
+
+    with session_scope() as session:
+        assert session.query(Release).filter_by(name="Shared Bundle").count() == 1
+
+
+# ---------------------------------------------------------------------------
+# apply_extracted_to_model — subcategory without a category is skipped
+# ---------------------------------------------------------------------------
+
+def test_apply_extracted_subcategory_without_category_not_created():
+    """If no category is set, a subcategory cannot be created."""
+    with session_scope() as session:
+        model = STLModel(archive_path="/nocat.7z", archive_hash="h")
+        session.add(model)
+        session.flush()
+
+        apply_extracted_to_model(
+            session, model, {"subcategory_name": "Orphan Sub"}, overwrite=True
+        )
+        assert model.subcategory is None
+
+
+# ---------------------------------------------------------------------------
+# render_path_pattern — date token
+# ---------------------------------------------------------------------------
+
+def test_render_path_pattern_date_token():
+    m = _StubModel(release_year=2024, release_month=3)
+    out = render_path_pattern("/{date}/{title}", m)
+    assert "2024-03" in out
+
+
+def test_render_path_pattern_year_only():
+    m = _StubModel(release_year=2024, release_month=None)
+    out = render_path_pattern("/{date}", m)
+    assert "2024" in out
+
+
+def test_render_path_pattern_unknown_date():
+    m = _StubModel(release_year=None, release_month=None, title="T")
+    out = render_path_pattern("/{date}/{title}", m)
+    assert "_unknown" in out

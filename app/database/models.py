@@ -1,7 +1,8 @@
 from datetime import datetime, timezone
 
 
-def _utcnow():
+def _utcnow() -> datetime:
+    """Return the current UTC time as a timezone-aware datetime."""
     return datetime.now(timezone.utc)
 
 from sqlalchemy import (
@@ -25,6 +26,8 @@ model_tags = Table(
 
 
 class Sculptor(Base):
+    """An artist or creator associated with one or more STL models."""
+
     __tablename__ = "sculptors"
 
     id   = Column(Integer, primary_key=True, autoincrement=True)
@@ -32,40 +35,52 @@ class Sculptor(Base):
 
     models = relationship("STLModel", back_populates="sculptor")
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Sculptor {self.name!r}>"
 
 
 class Category(Base):
+    """A top-level content category (e.g. Movies, Comics, Games).
+
+    Deleting a category cascades to all its subcategories.
+    """
+
     __tablename__ = "categories"
 
     id   = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(128), unique=True, nullable=False)  # e.g. Movies, Comics, Games
+    name = Column(String(128), unique=True, nullable=False)
 
     subcategories = relationship("Subcategory", back_populates="category", cascade="all, delete-orphan")
     models        = relationship("STLModel", back_populates="category")
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Category {self.name!r}>"
 
 
 class Subcategory(Base):
+    """A sub-division of a Category (e.g. Marvel, DC under Comics).
+
+    Names are unique per parent category (``uq_subcategory_per_category``).
+    """
+
     __tablename__ = "subcategories"
 
     id          = Column(Integer, primary_key=True, autoincrement=True)
     category_id = Column(Integer, ForeignKey("categories.id", ondelete="CASCADE"), nullable=False)
-    name        = Column(String(128), nullable=False)  # e.g. Marvel, DC, Star Wars
+    name        = Column(String(128), nullable=False)
 
     __table_args__ = (UniqueConstraint("category_id", "name", name="uq_subcategory_per_category"),)
 
     category = relationship("Category", back_populates="subcategories")
     models   = relationship("STLModel", back_populates="subcategory")
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Subcategory {self.name!r} (category_id={self.category_id})>"
 
 
 class Release(Base):
+    """A named release bundle that groups one or more STL models (e.g. a monthly Patreon drop)."""
+
     __tablename__ = "releases"
 
     id   = Column(Integer, primary_key=True, autoincrement=True)
@@ -73,23 +88,35 @@ class Release(Base):
 
     models = relationship("STLModel", back_populates="release")
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Release {self.name!r}>"
 
 
 class Scale(Base):
+    """A miniature scale designation (e.g. ``28mm``, ``32mm``, ``1/35``)."""
+
     __tablename__ = "scales"
 
     id   = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(64), unique=True, nullable=False)  # e.g. "28mm", "32mm", "75mm"
+    name = Column(String(64), unique=True, nullable=False)
 
     models = relationship("STLModel", back_populates="scale")
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Scale {self.name!r}>"
 
 
 class STLModel(Base):
+    """Central record for a single STL archive entry in the catalogue.
+
+    Each row corresponds to exactly one archive file on disk (``archive_path``
+    is unique).  The ``archive_hash`` fingerprint is recomputed on every crawl
+    run; a changed hash triggers re-extraction of metadata and thumbnails.
+
+    Nullable FK columns use ``SET NULL`` on delete so removing a sculptor,
+    category, etc. does not cascade-delete the model records.
+    """
+
     __tablename__ = "models"
 
     id               = Column(Integer, primary_key=True, autoincrement=True)
@@ -122,11 +149,13 @@ class STLModel(Base):
     release     = relationship("Release",    back_populates="models")
     scale       = relationship("Scale",      back_populates="models")
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<STLModel id={self.id} title={self.title!r}>"
 
 
 class Tag(Base):
+    """A user-defined label that can be applied to many models (many-to-many)."""
+
     __tablename__ = "tags"
 
     id   = Column(Integer, primary_key=True, autoincrement=True)
@@ -134,17 +163,24 @@ class Tag(Base):
 
     models = relationship("STLModel", secondary=model_tags, back_populates="tags")
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Tag {self.name!r}>"
 
 
 class Image(Base):
+    """A preview image extracted from an archive and stored as a thumbnail.
+
+    ``thumbnail_path`` holds the LMDB key (the image ID as a string).
+    The ``thumbnail`` column is a legacy binary blob retained for backwards
+    compatibility with pre-LMDB databases — it is NULL for all new records.
+    """
+
     __tablename__ = "images"
 
     id             = Column(Integer, primary_key=True, autoincrement=True)
     model_id       = Column(Integer, ForeignKey("models.id", ondelete="CASCADE"), nullable=False)
     filename       = Column(String(512))
-    thumbnail_path = Column(String(512), nullable=True)   # relative path within thumbnails dir
-    thumbnail      = Column(LargeBinary, nullable=True)   # legacy blob – NULL after migration
+    thumbnail_path = Column(String(512), nullable=True)
+    thumbnail      = Column(LargeBinary, nullable=True)   # legacy blob – NULL after migration to LMDB
 
     model = relationship("STLModel", back_populates="images")

@@ -67,13 +67,15 @@ _HELP_HTML = """
 
 
 class HelpDialog(QDialog):
-    def __init__(self, parent=None):
+    """Quick-reference help dialog with keyboard shortcuts and feature descriptions."""
+
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("STL Database — Help")
         self.resize(720, 560)
         self._build_ui()
 
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         root = QVBoxLayout(self)
 
         browser = QTextBrowser()

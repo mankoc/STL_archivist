@@ -19,9 +19,14 @@ from app.utils.path_pattern import parse_path, ATTR_LABEL, PATTERN_HELP, parse_r
 
 
 class TagEdit(QLineEdit):
-    """QLineEdit that autocompletes the current comma-separated token."""
+    """QLineEdit with per-token autocomplete for comma-separated tag lists.
 
-    def __init__(self, all_tags: list[str], parent=None):
+    As the user types, the substring to the left of the cursor (up to the
+    last comma) is used as the completion prefix.  Selecting a completion
+    replaces only that token, leaving the rest of the field unchanged.
+    """
+
+    def __init__(self, all_tags: list[str], parent=None) -> None:
         super().__init__(parent)
         self.setPlaceholderText("tag1, tag2, tag3…")
         self.setClearButtonEnabled(True)
@@ -44,19 +49,21 @@ class TagEdit(QLineEdit):
         segment = text[:cursor].rsplit(",", 1)[-1]
         return segment.lstrip()
 
-    def focusInEvent(self, event):
+    def focusInEvent(self, event) -> None:
         super().focusInEvent(event)
         self._show_completions()
 
-    def _on_text_edited(self, _text: str):
+    def _on_text_edited(self, _text: str) -> None:
         self._show_completions()
 
-    def _show_completions(self):
+    def _show_completions(self) -> None:
+        """Update the completer prefix to the current token and show the popup."""
         token = self._current_token()
         self._completer.setCompletionPrefix(token)
         self._completer.complete()
 
-    def _insert_completion(self, chosen: str):
+    def _insert_completion(self, chosen: str) -> None:
+        """Replace the current incomplete token with the chosen completion."""
         text = self.text()
         cursor = self.cursorPosition()
         # Replace the current token with the chosen completion
@@ -69,11 +76,21 @@ class TagEdit(QLineEdit):
 
     # ------------------------------------------------------------------
     def get_tags(self) -> list[str]:
+        """Return the current tag list as stripped, non-empty strings."""
         return [t.strip() for t in self.text().split(",") if t.strip()]
 
 
 class EditorDialog(QDialog):
-    def __init__(self, model_id: int, parent=None):
+    """Full metadata editor for a single STL model.
+
+    Displays all editable fields (title, author, sculptor, category,
+    subcategory, release, scale, presupports, source, URL, date, sequence,
+    tags, description) in a form layout with a thumbnail sidebar.
+
+    On accept the changes are written to the database using a session scope.
+    """
+
+    def __init__(self, model_id: int, parent=None) -> None:
         super().__init__(parent)
         self.model_id = model_id
         self.setWindowTitle("Edit Model")

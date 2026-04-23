@@ -12,14 +12,16 @@ from app.ui.browser_tab import BrowserTab
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    """Main application window hosting the browser tab, menu bar, and toolbar."""
+
+    def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("STL Database")
         self.resize(1280, 860)
         self._build_ui()
 
     # ------------------------------------------------------------------
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         style = QApplication.style()
         SP    = style.StandardPixmap
 
@@ -146,29 +148,34 @@ class MainWindow(QMainWindow):
         self._apply_debug_menu_visibility()
 
     # ------------------------------------------------------------------
-    def _update_status_bar(self, count: int):
+    def _update_status_bar(self, count: int) -> None:
+        """Update the status bar with the current visible model count."""
         self.statusBar().showMessage(f"{count} model{'s' if count != 1 else ''}")
 
-    def _open_crawler(self):
+    def _open_crawler(self) -> None:
+        """Open the crawler dialog and refresh the browser when it closes."""
         from app.ui.crawler_dialog import CrawlerDialog
         CrawlerDialog(parent=self).exec()
         self._browser.refresh()
 
-    def _open_config(self):
+    def _open_config(self) -> None:
+        """Open the configuration dialog and re-apply debug menu visibility."""
         from app.ui.config_dialog import ConfigDialog
         ConfigDialog(parent=self).exec()
         self._apply_debug_menu_visibility()
 
-    def _open_metadata_sidecar_dialog(self):
+    def _open_metadata_sidecar_dialog(self) -> None:
+        """Open the metadata sidecar generation dialog."""
         from app.ui.metadata_sidecar_dialog import MetadataSidecarDialog
         MetadataSidecarDialog(parent=self).exec()
 
-    def _apply_debug_menu_visibility(self):
+    def _apply_debug_menu_visibility(self) -> None:
+        """Show or hide the Debug menu and sidecar action based on current settings."""
         from app.ui.config_dialog import get_debug_menu_enabled, get_metadata_sidecar_enabled
         self._debug_menu.menuAction().setVisible(get_debug_menu_enabled())
         self._act_gen_metadata.setEnabled(get_metadata_sidecar_enabled())
 
-    def _clear_database(self):
+    def _clear_database(self) -> None:
         reply = QMessageBox.warning(
             self,
             "Delete Database",
@@ -183,7 +190,7 @@ class MainWindow(QMainWindow):
             self._browser.refresh()
             QMessageBox.information(self, "Delete Database", "Database cleared.")
 
-    def _delete_logs(self):
+    def _delete_logs(self) -> None:
         reply = QMessageBox.warning(
             self,
             "Delete Logs",
@@ -200,14 +207,17 @@ class MainWindow(QMainWindow):
                 f"Deleted {count} log file{'s' if count != 1 else ''}."
             )
 
-    def _toggle_image_pane(self):
+    def _toggle_image_pane(self) -> None:
+        """Toggle the image preview pane and sync the toolbar button state."""
         visible = self._browser.toggle_image_pane()
         self._act_toggle_images.setChecked(visible)
 
-    def _show_help(self):
+    def _show_help(self) -> None:
+        """Open the help dialog."""
         from app.ui.help_dialog import HelpDialog
         HelpDialog(parent=self).exec()
 
-    def _show_about(self):
+    def _show_about(self) -> None:
+        """Open the About dialog."""
         from app.ui.about_dialog import AboutDialog
         AboutDialog(parent=self).exec()

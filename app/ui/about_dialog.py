@@ -36,13 +36,15 @@ _LICENSE_HTML = """
 
 
 class AboutDialog(QDialog):
-    def __init__(self, parent=None):
+    """About dialog showing the application version, description, and license."""
+
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("About STL Database")
         self.resize(540, 420)
         self._build_ui()
 
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         root = QVBoxLayout(self)
 
         from app import __version__

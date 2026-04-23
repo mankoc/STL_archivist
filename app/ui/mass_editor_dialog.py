@@ -47,7 +47,16 @@ def _parse_path(pattern: str, path: str) -> dict[str, str]:
 
 
 class MassEditorDialog(QDialog):
-    def __init__(self, model_ids: list[int], parent=None):
+    """Bulk editor that applies changes to multiple STLModel records simultaneously.
+
+    Two modes can be combined:
+    - **Path pattern** — extract field values from each model's ``archive_path``
+      and preview the results before applying.
+    - **Manual fields** — fill in any field to overwrite it on all selected
+      models; leave a field empty to leave it unchanged.
+    """
+
+    def __init__(self, model_ids: list[int], parent=None) -> None:
         super().__init__(parent)
         self._model_ids = model_ids
         self._path_results: dict[int, dict[str, str]] = {}

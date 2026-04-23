@@ -10,6 +10,19 @@ _SOUNDEX_CODE = str.maketrans(
 
 
 def levenshtein(a: str, b: str) -> int:
+    """Return the Levenshtein (edit) distance between strings *a* and *b*.
+
+    Computes the minimum number of single-character insertions, deletions, or
+    substitutions required to transform *a* into *b*.  Uses an O(min(|a|,|b|))
+    space iterative algorithm.
+
+    Args:
+        a: First string.
+        b: Second string.
+
+    Returns:
+        Non-negative integer distance.  Zero means the strings are identical.
+    """
     if a == b:
         return 0
     if len(a) < len(b):
@@ -28,6 +41,13 @@ def soundex(s: str) -> str:
 
     Accented / non-ASCII letters are decomposed to their ASCII base before
     encoding, so names like "Müller" and "Muller" produce the same code.
+
+    Args:
+        s: Input string (any language).
+
+    Returns:
+        A 4-character Soundex code such as ``"M460"``.  Returns ``"0000"``
+        for strings that contain no ASCII alphabetic characters.
     """
     s = unicodedata.normalize("NFKD", s)
     s = "".join(c for c in s.upper() if c.isascii() and c.isalpha())

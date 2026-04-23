@@ -114,3 +114,65 @@ def test_scale_deduplicates():
 def test_scale_none_found():
     names = ["body.stl", "arm.stl"]
     assert detect_scale(names) == []
+
+
+def test_scale_dash_prefix_mm():
+    # Dash creates a word boundary before the digit; underscore does NOT.
+    names = ["body-75mm.stl"]
+    assert detect_scale(names) == ["75 mm"]
+
+
+def test_scale_ratio_dash_in_stem():
+    # 1-35 in the stem (after a dash that creates a word boundary)
+    names = ["figure-1-35.stl"]
+    assert detect_scale(names) == ["1/35"]
+
+
+def test_scale_multiple_different_scales():
+    names = ["28mm.stl", "figure-1-35.stl"]
+    scales = detect_scale(names)
+    assert "28 mm" in scales
+    assert "1/35" in scales
+
+
+# ---------------------------------------------------------------------------
+# detect_presupport — .lyt extension (alternative Lychee format)
+# ---------------------------------------------------------------------------
+
+def test_presupport_lyt_is_lychee():
+    names = ["body.stl", "scene.lyt"]
+    assert detect_presupport(names) == "Lychee"
+
+
+def test_presupport_lyt_takes_priority_over_chitu():
+    names = ["body.stl", "slice.chitu", "scene.lyt"]
+    assert detect_presupport(names) == "Lychee"
+
+
+# ---------------------------------------------------------------------------
+# detect_warnings — image format edge cases
+# ---------------------------------------------------------------------------
+
+def test_warn_bmp_image_suppresses_no_images_warning():
+    names = ["body.stl", "render.bmp"]
+    out = detect_warnings(names, check_presupported=False, check_nested_archive=False)
+    assert "Archive without images" not in out
+
+
+def test_warn_webp_image_suppresses_no_images_warning():
+    names = ["body.stl", "render.webp"]
+    out = detect_warnings(names, check_presupported=False, check_nested_archive=False)
+    assert "Archive without images" not in out
+
+
+def test_warn_rar_nested_archive():
+    names = ["model.stl", "extras.rar"]
+    out = detect_warnings(names, check_presupported=False, check_no_images=False)
+    assert "Archive inside archive" in out
+
+
+def test_warn_multiple_warnings_joined_by_newline():
+    names = ["body_presupported.stl", "extra.zip"]
+    out = detect_warnings(names, check_no_images=False)
+    lines = out.splitlines()
+    assert len(lines) >= 2

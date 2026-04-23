@@ -16,7 +16,9 @@ from app.utils.string_utils import levenshtein as _levenshtein, soundex as _soun
 
 
 class TagEditorDialog(QDialog):
-    def __init__(self, parent=None):
+    """Dialog for managing global Tag values: list, add, rename, delete, and merge similar."""
+
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Tag Editor")
         self.resize(420, 520)
@@ -24,7 +26,7 @@ class TagEditorDialog(QDialog):
         self._load()
 
     # ------------------------------------------------------------------
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         root = QVBoxLayout(self)
 
         self._table = QTableWidget(0, 2)
@@ -63,7 +65,7 @@ class TagEditorDialog(QDialog):
         root.addWidget(close_btn)
 
     # ------------------------------------------------------------------
-    def _load(self):
+    def _load(self) -> None:
         self._table.setSortingEnabled(False)
         self._table.setRowCount(0)
         session = get_session()
@@ -92,7 +94,8 @@ class TagEditorDialog(QDialog):
         return self._table.item(list(rows)[0], 0).data(Qt.ItemDataRole.UserRole)
 
     # ------------------------------------------------------------------
-    def _add_tag(self):
+    def _add_tag(self) -> None:
+        """Prompt for a new tag name (lower-cased) and insert it into the DB."""
         name, ok = QInputDialog.getText(self, "Add Tag", "Tag name:")
         if not ok or not name.strip():
             return
@@ -104,7 +107,8 @@ class TagEditorDialog(QDialog):
             session.add(Tag(name=name))
         self._load()
 
-    def _rename_tag(self):
+    def _rename_tag(self) -> None:
+        """Rename the selected tag, rejecting duplicates."""
         tag_id = self._selected_tag_id()
         if tag_id is None:
             QMessageBox.information(self, "Rename", "Select exactly one tag to rename.")
@@ -131,7 +135,8 @@ class TagEditorDialog(QDialog):
             session.get(Tag, tag_id).name = new_name
         self._load()
 
-    def _delete_tag(self):
+    def _delete_tag(self) -> None:
+        """Delete the selected tag after user confirmation."""
         tag_id = self._selected_tag_id()
         if tag_id is None:
             QMessageBox.information(self, "Delete", "Select exactly one tag to delete.")
@@ -161,21 +166,28 @@ class TagEditorDialog(QDialog):
             session.delete(tag)
         self._load()
 
-    def _merge_similar(self):
+    def _merge_similar(self) -> None:
+        """Open the merge-similar-tags sub-dialog and reload the table on close."""
         dlg = _MergeSimilarDialog(parent=self)
         dlg.exec()
         self._load()
 
 
 class _MergeSimilarDialog(QDialog):
-    def __init__(self, parent=None):
+    """Sub-dialog for finding and merging similar-sounding tags.
+
+    Uses either Levenshtein distance (threshold configurable) or Soundex
+    grouping to identify candidates, then lets the user merge a selected pair.
+    """
+
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Merge Similar Tags")
         self.resize(520, 420)
         self._build_ui()
         self._scan()
 
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         root = QVBoxLayout(self)
 
         thresh_row = QHBoxLayout()
@@ -217,12 +229,14 @@ class _MergeSimilarDialog(QDialog):
         close_btn.rejected.connect(self.accept)
         root.addWidget(close_btn)
 
-    def _on_method_changed(self):
+    def _on_method_changed(self) -> None:
+        """Show or hide the threshold spinner depending on the selected method."""
         is_lev = self._method_combo.currentText() == "Levenshtein"
         self._thresh_label.setVisible(is_lev)
         self._thresh_spin.setVisible(is_lev)
 
-    def _scan(self):
+    def _scan(self) -> None:
+        """Scan all tags and populate the table with similar pairs."""
         method = self._method_combo.currentText()
         session = get_session()
         try:
@@ -273,7 +287,8 @@ class _MergeSimilarDialog(QDialog):
             self._table.setItem(row, 2, score_item)
         self._table.setSortingEnabled(True)
 
-    def _merge_selected(self):
+    def _merge_selected(self) -> None:
+        """Merge the two tags in the selected row, re-assigning models to the kept tag."""
         rows = {idx.row() for idx in self._table.selectedIndexes()}
         if len(rows) != 1:
             QMessageBox.information(self, "Merge", "Select exactly one pair to merge.")

@@ -21,7 +21,13 @@ _SIZE_LIMIT_META  =  1 * 1024 * 1024   #  1 MB – info.json / .url files
 
 
 def _member_size_limit(name: str) -> int:
-    """Return the maximum number of bytes allowed for *name* in memory."""
+    """Return the maximum number of bytes we will load for *name* into memory.
+
+    Caps are applied as a safety guard against accidentally extracting very large
+    STL binary files that happen to share an image extension, or malformed/malicious
+    archives with inflated member sizes.  Images get a generous 50 MB budget;
+    metadata files (``info.json``, ``.url``) get 1 MB.
+    """
     if Path(name.replace("\\", "/")).suffix.lower() in IMAGE_SUFFIXES:
         return _SIZE_LIMIT_IMAGE
     return _SIZE_LIMIT_META
@@ -40,6 +46,7 @@ SLICER_SUFFIXES = {".lys", ".chitu", ".ctb", ".photon"}
 
 
 def is_archive(path: Path) -> bool:
+    """Return ``True`` if *path* has a recognised archive extension."""
     return path.suffix.lower() in ARCHIVE_SUFFIXES
 
 

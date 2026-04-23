@@ -7,7 +7,9 @@ from app.ui.crawler_tab import CrawlerTab
 
 
 class CrawlerDialog(QDialog):
-    def __init__(self, parent=None):
+    """Modal dialog that wraps ``CrawlerTab`` for use from the main menu/toolbar."""
+
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Crawler")
         self.resize(700, 480)

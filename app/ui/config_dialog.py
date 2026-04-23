@@ -186,7 +186,17 @@ def apply_color_scheme(scheme_name: str) -> None:
 
 
 class ConfigDialog(QDialog):
-    def __init__(self, parent=None):
+    """Multi-page settings dialog with sections for Database, Crawler, Browser, and Appearance.
+
+    Settings are persisted in two places:
+    - ``DATA_DIR_KEY`` and ``UNRAR_TOOL_KEY`` in ``QSettings`` (global, cross-library).
+    - All other settings in a ``settings.json`` file inside the data directory
+      (per-library, so each collection can have independent configuration).
+
+    Cancelling the dialog reverts any colour-scheme preview applied during the session.
+    """
+
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Configuration")
         self.setMinimumWidth(580)
@@ -196,7 +206,7 @@ class ConfigDialog(QDialog):
         self._load()
 
     # ------------------------------------------------------------------
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
         root.setSpacing(8)
@@ -464,7 +474,8 @@ class ConfigDialog(QDialog):
         return page
 
     # ------------------------------------------------------------------
-    def _browse_data_dir(self):
+    def _browse_data_dir(self) -> None:
+        """Open a directory picker and set the data-directory field."""
         path = QFileDialog.getExistingDirectory(
             self,
             "Choose data directory",
@@ -473,7 +484,8 @@ class ConfigDialog(QDialog):
         if path:
             self._data_dir_edit.setText(path)
 
-    def _browse_unrar(self):
+    def _browse_unrar(self) -> None:
+        """Open a file picker to locate the unrar/rar executable."""
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Select unrar or rar executable",
@@ -488,7 +500,8 @@ class ConfigDialog(QDialog):
         apply_color_scheme(scheme_name)
 
     # ------------------------------------------------------------------
-    def _load(self):
+    def _load(self) -> None:
+        """Populate all form fields from current QSettings / library settings."""
         self._data_dir_edit.setText(get_data_dir())
         self._max_thumbs_spin.setValue(get_max_thumbnails())
         self._max_thumb_size_spin.setValue(get_max_thumb_size())
@@ -513,7 +526,8 @@ class ConfigDialog(QDialog):
 
         self._debug_menu_check.setChecked(get_debug_menu_enabled())
 
-    def _save(self):
+    def _save(self) -> None:
+        """Persist all form values to QSettings and the library settings JSON."""
         data_dir = self._data_dir_edit.text().strip() or DATA_DIR_DEFAULT
         old_dir = get_data_dir()
 

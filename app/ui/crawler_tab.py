@@ -24,16 +24,23 @@ _SEP = ":::"
 
 
 class CrawlerTab(QWidget):
+    """Crawler control panel: folder picker, path-pattern editor, progress, and log.
+
+    Signals:
+        close_requested: Emitted when the user clicks the Close button, so the
+            parent dialog (if any) can dismiss itself.
+    """
+
     close_requested = pyqtSignal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._worker: CrawlerWorker | None = None
         self._build_ui()
         self._load_settings()
 
     # ------------------------------------------------------------------
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         root = QVBoxLayout(self)
         root.setSpacing(10)
 
@@ -159,7 +166,8 @@ class CrawlerTab(QWidget):
     # ------------------------------------------------------------------
     # Settings
     # ------------------------------------------------------------------
-    def _load_settings(self):
+    def _load_settings(self) -> None:
+        """Restore last-used folder, pattern, and thumbnail flag from QSettings."""
         s = QSettings()
         self._folder_edit.setText(s.value(_LAST_FOLDER_KEY, ""))
         self._pattern_edit.setText(s.value(_LAST_PATTERN_KEY, ""))
@@ -167,7 +175,8 @@ class CrawlerTab(QWidget):
             s.value(_GENERATE_THUMBNAILS_KEY, True, type=bool)
         )
 
-    def _save_settings(self):
+    def _save_settings(self) -> None:
+        """Persist the current folder, pattern, and thumbnail flag to QSettings."""
         s = QSettings()
         s.setValue(_LAST_FOLDER_KEY, self._folder_edit.text().strip())
         s.setValue(_LAST_PATTERN_KEY, self._pattern_edit.text().strip())
@@ -177,6 +186,7 @@ class CrawlerTab(QWidget):
     # Saved-pattern helpers
     # ------------------------------------------------------------------
     def _saved_patterns(self) -> list[tuple[str, str]]:
+        """Return all saved patterns as ``(name, pattern)`` pairs from QSettings."""
         raw = QSettings().value(_SAVED_PATTERNS_KEY, [])
         if isinstance(raw, str):
             raw = [raw]
@@ -269,13 +279,14 @@ class CrawlerTab(QWidget):
         self._preview_label.setText("&nbsp;&nbsp;→&nbsp;&nbsp;".join(parts))
 
     # ------------------------------------------------------------------
-    def _browse_folder(self):
+    def _browse_folder(self) -> None:
+        """Open a directory picker and populate the source folder field."""
         start = self._folder_edit.text().strip() or "/"
         path = QFileDialog.getExistingDirectory(self, "Select STL folder", start)
         if path:
             self._folder_edit.setText(path)
 
-    def _start_crawl(self):
+    def _start_crawl(self) -> None:
         source = self._folder_edit.text().strip()
         if not source:
             self._log.appendPlainText("Please select a source folder first.")
@@ -301,21 +312,25 @@ class CrawlerTab(QWidget):
         self._worker.finished.connect(self._on_finished)
         self._worker.start()
 
-    def _stop_crawl(self):
+    def _stop_crawl(self) -> None:
+        """Request the running crawler to stop after the current archive."""
         if self._worker:
             self._worker.stop()
         self._stop_btn.setEnabled(False)
 
     # ------------------------------------------------------------------
-    def _on_log(self, msg: str):
+    def _on_log(self, msg: str) -> None:
+        """Append a crawler log message to the log panel."""
         self._log.appendPlainText(msg)
 
-    def _on_progress(self, current: int, total: int):
+    def _on_progress(self, current: int, total: int) -> None:
+        """Update the progress bar with the current archive index and total."""
         self._progress.setMaximum(total)
         self._progress.setValue(current)
         self._progress.setFormat(f"{current} / {total}")
 
-    def _on_finished(self):
+    def _on_finished(self) -> None:
+        """Re-enable the Start button and clear the worker reference when done."""
         self._start_btn.setEnabled(True)
         self._stop_btn.setEnabled(False)
         self._worker = None

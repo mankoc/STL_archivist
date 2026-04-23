@@ -197,17 +197,14 @@ class _ConfirmMoveDialog(QDialog):
 # ---------------------------------------------------------------------------
 
 class SortFilesDialog(QDialog):
-    """
-    Dialog for sorting selected STL archive files into a structured directory.
+    """Dialog for sorting selected STL archive files into a structured directory.
 
-    Parameters
-    ----------
-    model_ids : list[int]
-        Primary-key IDs of the STLModel rows whose archive files to move.
-    parent : QWidget, optional
+    Args:
+        model_ids: Primary-key IDs of the STLModel rows whose archive files to move.
+        parent: Optional parent widget.
     """
 
-    def __init__(self, model_ids: list[int], parent=None):
+    def __init__(self, model_ids: list[int], parent=None) -> None:
         super().__init__(parent)
         self._model_ids = model_ids
         self._preview_data: list[tuple[str, str, int]] = []
@@ -225,7 +222,7 @@ class SortFilesDialog(QDialog):
         self._build_ui()
 
     # ------------------------------------------------------------------
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
 
         # ---- Options form ----
@@ -340,15 +337,15 @@ class SortFilesDialog(QDialog):
                 self._help_popup.hide()
         return super().eventFilter(obj, event)
 
-    def _show_help_popup(self):
+    def _show_help_popup(self) -> None:
         if self._help_btn_ref is not None:
             self._help_popup.show_near(self._help_btn_ref)
 
-    def hideEvent(self, event):
+    def hideEvent(self, event) -> None:
         self._help_popup.hide()
         super().hideEvent(event)
 
-    def closeEvent(self, event):
+    def closeEvent(self, event) -> None:
         self._help_popup.hide()
         super().closeEvent(event)
 
@@ -356,16 +353,16 @@ class SortFilesDialog(QDialog):
     # Saved patterns
     # ------------------------------------------------------------------
 
-    def _populate_saved_combo(self):
+    def _populate_saved_combo(self) -> None:
         self._saved_combo.clear()
         for pat in _load_saved_patterns():
             self._saved_combo.addItem(pat)
 
-    def _load_selected_pattern(self, index: int):
+    def _load_selected_pattern(self, index: int) -> None:
         if 0 <= index < self._saved_combo.count():
             self._pat_edit.setText(self._saved_combo.itemText(index))
 
-    def _save_current_pattern(self):
+    def _save_current_pattern(self) -> None:
         pattern = self._pat_edit.text().strip()
         if not pattern:
             QMessageBox.warning(self, "Save pattern", "Enter a pattern before saving.")
@@ -378,7 +375,7 @@ class SortFilesDialog(QDialog):
         _save_patterns(patterns)
         self._populate_saved_combo()
 
-    def _delete_selected_pattern(self):
+    def _delete_selected_pattern(self) -> None:
         index = self._saved_combo.currentIndex()
         if index < 0:
             return
@@ -390,7 +387,7 @@ class SortFilesDialog(QDialog):
         self._populate_saved_combo()
 
     # ------------------------------------------------------------------
-    def _browse_dir(self):
+    def _browse_dir(self) -> None:
         d = QFileDialog.getExistingDirectory(
             self, "Select target directory", self._dir_edit.text() or ""
         )
@@ -398,7 +395,7 @@ class SortFilesDialog(QDialog):
             self._dir_edit.setText(d)
 
     # ------------------------------------------------------------------
-    def _refresh_preview(self):
+    def _refresh_preview(self) -> None:
         """Re-compute target paths and update the preview table."""
         self._preview_data.clear()
         self._move_btn.setEnabled(False)
@@ -468,7 +465,7 @@ class SortFilesDialog(QDialog):
         self._move_btn.setEnabled(bool(self._preview_data))
 
     # ------------------------------------------------------------------
-    def _do_move(self):
+    def _do_move(self) -> None:
         """Perform the file moves and update the database.
 
         Shows a confirmation dialog with the full move plan before touching
