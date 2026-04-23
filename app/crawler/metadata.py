@@ -38,6 +38,24 @@ _DATE_PATTERNS = [
 
 @dataclass
 class ModelMetadata:
+    """Metadata extracted from a single STL archive.
+
+    Fields are populated in priority order: ``info.json`` values override
+    ``.url`` file values, which override path-inferred values.  Fields remain
+    ``None`` when no source provided a value.
+
+    Attributes:
+        title: Model title / display name.
+        author: Creator or sculptor name.
+        distributor: Publishing platform (e.g. ``"Patreon"``, ``"MyMiniFactory"``).
+        release_date: Release date string as found in the archive path (e.g.
+            ``"2024-01"``).  Not normalised.
+        url: Source URL from a ``.url`` shortcut or ``info.json``.
+        description: Free-text description from ``info.json``.
+        tags: List of tag strings from ``info.json``.
+        release: Release bundle name from ``info.json``.
+    """
+
     title: Optional[str] = None
     author: Optional[str] = None
     distributor: Optional[str] = None
@@ -49,6 +67,14 @@ class ModelMetadata:
 
 
 def _parse_info_json(raw: bytes) -> dict:
+    """Parse raw JSON bytes into a dict, returning ``{}`` on any error.
+
+    Args:
+        raw: Raw bytes read from an ``info.json`` archive member.
+
+    Returns:
+        Parsed dict, or an empty dict if decoding or parsing fails.
+    """
     try:
         return json.loads(raw.decode("utf-8", errors="replace"))
     except Exception:
@@ -129,13 +155,30 @@ def _infer_from_path(archive_path: Path,
     return meta
 
 
-def extract_metadata(archive_path: Path,
-                     contents: dict[str, bytes] | None = None,
-                     source_dir: Path | None = None) -> ModelMetadata:
-    """
-    Full metadata extraction pipeline for a single archive.
-    Pass *contents* (from extract_archive_contents) to avoid re-opening the archive.
-    Pass *source_dir* so that path inference uses only relative components.
+def extract_metadata(
+    archive_path: Path,
+    contents: Optional[dict[str, bytes]] = None,
+    source_dir: Optional[Path] = None,
+) -> ModelMetadata:
+    """Run the full metadata extraction pipeline for a single archive.
+
+    Sources are consulted in priority order (each overrides the previous):
+    1. Path inference — title, date, and optionally distributor/author from
+       the folder structure.
+    2. ``.url`` files — URL from inside the archive, then from the filesystem.
+    3. ``info.json`` — all fields; highest priority.
+
+    Args:
+        archive_path: Absolute path to the archive file.
+        contents: Pre-extracted file contents from ``extract_archive_contents()``.
+            Pass this to avoid reopening the archive.  When ``None``, the
+            filesystem is still searched for ``.url`` files.
+        source_dir: Root of the crawl; only path components relative to this
+            are used for inference, preventing OS-level folders from being
+            mistaken for metadata.
+
+    Returns:
+        Populated ``ModelMetadata`` instance.
     """
     logger.debug("Extracting metadata for: %s", archive_path.name)
     meta = _infer_from_path(archive_path, source_dir=source_dir)

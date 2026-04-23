@@ -16,31 +16,32 @@ logger = logging.getLogger(__name__)
 
 
 class MetadataSidecarWorker(QThread):
-    """
-    Background thread that exports METADATA.7z for every folder that has at
-    least one STLModel record in the database.
+    """Background thread that exports METADATA.7z for every folder with DB records.
 
-    If *folders* is provided, only those specific folders are processed.
+    When *folders* is provided only those specific folders are processed;
+    otherwise all distinct parent directories of archive records are used.
 
-    Signals
-    -------
-    progress(current, total)  – folder index and total folder count
-    log(message)              – human-readable status line
-    finished()                – emitted when all folders are processed (or stopped)
+    Signals:
+        progress(current, total): Folder index and total folder count.
+        log(message): Human-readable status line for the UI log panel.
+        finished(): Emitted when all folders are processed or the worker is stopped.
     """
+
     progress = pyqtSignal(int, int)
     log      = pyqtSignal(str)
     finished = pyqtSignal()
 
-    def __init__(self, folders=None, parent=None):
+    def __init__(self, folders=None, parent=None) -> None:
         super().__init__(parent)
         self._stop_requested = False
         self._folders = folders  # None → process all DB folders
 
-    def stop(self):
+    def stop(self) -> None:
+        """Request the worker to stop after the current folder finishes."""
         self._stop_requested = True
 
-    def run(self):
+    def run(self) -> None:
+        """Main thread entry point — iterates folders and writes METADATA.7z files."""
         from app.database.db import session_scope
         from app.database.models import STLModel
         from app.crawler.folder_metadata import export_folder_metadata
@@ -127,7 +128,7 @@ class MetadataSidecarDialog(QDialog):
     automatically when shown.
     """
 
-    def __init__(self, folders=None, parent=None):
+    def __init__(self, folders=None, parent=None) -> None:
         super().__init__(parent)
         self._folders = folders
         title = (
@@ -142,7 +143,7 @@ class MetadataSidecarDialog(QDialog):
         self._build_ui()
 
     # ------------------------------------------------------------------
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         root = QVBoxLayout(self)
         root.setSpacing(8)
 
@@ -202,12 +203,13 @@ class MetadataSidecarDialog(QDialog):
         root.addLayout(btn_row)
 
     # ------------------------------------------------------------------
-    def showEvent(self, event):
+    def showEvent(self, event) -> None:
+        """Auto-start the worker when the dialog opens with a pre-set folder list."""
         super().showEvent(event)
         if self._folders is not None and self._start_btn.isEnabled():
             self._start()
 
-    def _start(self):
+    def _start(self) -> None:
         self._log.clear()
         self._progress.setValue(0)
         self._start_btn.setEnabled(False)
@@ -220,21 +222,25 @@ class MetadataSidecarDialog(QDialog):
         self._worker.finished.connect(self._on_finished)
         self._worker.start()
 
-    def _stop(self):
+    def _stop(self) -> None:
+        """Request the worker to stop after the current folder."""
         if self._worker:
             self._worker.stop()
         self._stop_btn.setEnabled(False)
 
     # ------------------------------------------------------------------
-    def _on_log(self, msg: str):
+    def _on_log(self, msg: str) -> None:
+        """Append a worker log message to the log panel."""
         self._log.appendPlainText(msg)
 
-    def _on_progress(self, current: int, total: int):
+    def _on_progress(self, current: int, total: int) -> None:
+        """Update the progress bar with the current folder index and total."""
         self._progress.setMaximum(total)
         self._progress.setValue(current)
         self._progress.setFormat(f"{current} / {total}")
 
-    def _on_finished(self):
+    def _on_finished(self) -> None:
+        """Re-enable buttons and clear the worker reference when done."""
         self._start_btn.setEnabled(True)
         self._stop_btn.setEnabled(False)
         self._close_btn.setEnabled(True)

@@ -14,14 +14,16 @@ from app.database.models import Scale
 
 
 class ScaleEditorDialog(QDialog):
-    def __init__(self, parent=None):
+    """Dialog for managing Scale lookup values (e.g. 28mm, 32mm, 1/35)."""
+
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Scale Editor")
         self.resize(320, 400)
         self._build_ui()
         self._load()
 
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         root = QVBoxLayout(self)
 
         self._table = QTableWidget(0, 2)
@@ -54,7 +56,7 @@ class ScaleEditorDialog(QDialog):
         close_btn.rejected.connect(self.accept)
         root.addWidget(close_btn)
 
-    def _load(self):
+    def _load(self) -> None:
         self._table.setSortingEnabled(False)
         self._table.setRowCount(0)
         session = get_session()
@@ -78,7 +80,8 @@ class ScaleEditorDialog(QDialog):
             return None
         return self._table.item(list(rows)[0], 0).data(Qt.ItemDataRole.UserRole)
 
-    def _add(self):
+    def _add(self) -> None:
+        """Prompt for a new scale name and add it to the database."""
         name, ok = QInputDialog.getText(self, "Add Scale", "Scale name (e.g. 28mm):")
         if not ok or not name.strip():
             return
@@ -90,7 +93,8 @@ class ScaleEditorDialog(QDialog):
             session.add(Scale(name=name))
         self._load()
 
-    def _rename(self, *_):
+    def _rename(self, *_) -> None:
+        """Rename the selected scale, checking for duplicates first."""
         sc_id = self._selected_id()
         if sc_id is None:
             QMessageBox.information(self, "Rename", "Select exactly one scale to rename.")
@@ -111,7 +115,8 @@ class ScaleEditorDialog(QDialog):
             session.get(Scale, sc_id).name = new_name
         self._load()
 
-    def _delete(self):
+    def _delete(self) -> None:
+        """Delete the selected scale after user confirmation."""
         sc_id = self._selected_id()
         if sc_id is None:
             QMessageBox.information(self, "Delete", "Select exactly one scale to delete.")

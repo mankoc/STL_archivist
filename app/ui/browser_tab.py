@@ -55,16 +55,20 @@ MODEL_ID_ROLE = Qt.ItemDataRole.UserRole + 1
 
 
 class ClickableLabel(QLabel):
+    """QLabel that emits a *clicked* signal on left mouse button press."""
+
     clicked = pyqtSignal()
 
-    def mousePressEvent(self, event):
+    def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit()
         super().mousePressEvent(event)
 
 
 class ImageViewerDialog(QDialog):
-    def __init__(self, pixmap: QPixmap, parent=None):
+    """Full-screen image viewer — click anywhere to close."""
+
+    def __init__(self, pixmap: QPixmap, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Image")
         self.setModal(True)
@@ -97,7 +101,7 @@ class _ComboDelegate(QStyledItemDelegate):
     def _get_items(self) -> list[str]:
         raise NotImplementedError
 
-    def createEditor(self, parent, option, index):
+    def createEditor(self, parent, option, index) -> QComboBox:
         combo = QComboBox(parent)
         combo.setEditable(True)
         combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
@@ -107,13 +111,13 @@ class _ComboDelegate(QStyledItemDelegate):
         combo.completer().setFilterMode(Qt.MatchFlag.MatchContains)
         return combo
 
-    def setEditorData(self, editor, index):
+    def setEditorData(self, editor, index) -> None:
         editor.setCurrentText(index.data() or "")
 
-    def setModelData(self, editor, model, index):
+    def setModelData(self, editor, model, index) -> None:
         model.setData(index, editor.currentText().strip())
 
-    def updateEditorGeometry(self, editor, option, index):
+    def updateEditorGeometry(self, editor, option, index) -> None:
         editor.setGeometry(option.rect)
 
 
@@ -193,22 +197,22 @@ _PRESUPPORTS_OPTIONS = ["", "No", "Lychee", "Chitubox", "Presupported"]
 class PresupportsDelegate(QStyledItemDelegate):
     """Fixed-option combo for the presupports column."""
 
-    def createEditor(self, parent, option, index):
+    def createEditor(self, parent, option, index) -> QComboBox:
         combo = QComboBox(parent)
         combo.addItems(_PRESUPPORTS_OPTIONS)
         return combo
 
-    def setEditorData(self, editor, index):
+    def setEditorData(self, editor, index) -> None:
         editor.setCurrentText(index.data() or "")
 
-    def setModelData(self, editor, model, index):
+    def setModelData(self, editor, model, index) -> None:
         model.setData(index, editor.currentText())
 
 
 class TagDelegate(QStyledItemDelegate):
     """QLineEdit that autocompletes each comma-separated token from the tag pool."""
 
-    def createEditor(self, parent, option, index):
+    def createEditor(self, parent, option, index) -> "_TagLineEdit":
         session = get_session()
         try:
             all_tags = [t.name for t in session.query(Tag).order_by(Tag.name).all()]
@@ -218,21 +222,21 @@ class TagDelegate(QStyledItemDelegate):
         edit = _TagLineEdit(all_tags, parent)
         return edit
 
-    def setEditorData(self, editor, index):
+    def setEditorData(self, editor, index) -> None:
         editor.setText(index.data() or "")
         editor.setCursorPosition(len(editor.text()))
 
-    def setModelData(self, editor, model, index):
+    def setModelData(self, editor, model, index) -> None:
         model.setData(index, editor.text().strip())
 
-    def updateEditorGeometry(self, editor, option, index):
+    def updateEditorGeometry(self, editor, option, index) -> None:
         editor.setGeometry(option.rect)
 
 
 class _TagLineEdit(QLineEdit):
     """QLineEdit with per-token autocomplete for comma-separated tag lists."""
 
-    def __init__(self, all_tags: list[str], parent=None):
+    def __init__(self, all_tags: list[str], parent=None) -> None:
         super().__init__(parent)
         self._completer = QCompleter(self)
         self._completer.setModel(QStringListModel(all_tags, self._completer))
@@ -245,19 +249,19 @@ class _TagLineEdit(QLineEdit):
     def _current_token(self) -> str:
         return self.text()[:self.cursorPosition()].rsplit(",", 1)[-1].lstrip()
 
-    def focusInEvent(self, event):
+    def focusInEvent(self, event) -> None:
         super().focusInEvent(event)
         self._show_completions()
 
-    def _on_text_edited(self, _text: str):
+    def _on_text_edited(self, _text: str) -> None:
         self._show_completions()
 
-    def _show_completions(self):
+    def _show_completions(self) -> None:
         token = self._current_token()
         self._completer.setCompletionPrefix(token)
         self._completer.complete()
 
-    def _insert_completion(self, chosen: str):
+    def _insert_completion(self, chosen: str) -> None:
         text = self.text()
         cursor = self.cursorPosition()
         before = text[:cursor].rsplit(",", 1)
@@ -275,12 +279,13 @@ class ThumbnailGeneratorWorker(QThread):
     log      = pyqtSignal(str)
     finished = pyqtSignal()
 
-    def __init__(self, model_ids: list[int], max_thumbnails: int, parent=None):
+    def __init__(self, model_ids: list[int], max_thumbnails: int, parent=None) -> None:
         super().__init__(parent)
         self._model_ids = model_ids
         self._max_thumbnails = max_thumbnails
 
-    def run(self):
+    def run(self) -> None:
+        """Re-extract and save thumbnails for every model in *model_ids*, then update sidecars."""
         from pathlib import Path
         from app.database.db import session_scope
         from app.database.models import STLModel, Image as DBImage
@@ -376,9 +381,20 @@ class ThumbnailGeneratorWorker(QThread):
 
 
 class BrowserTab(QWidget):
+    """Main model-browser widget.
+
+    Composed of three panels in a horizontal splitter:
+    - Left: collapsible filter tree (Author / Tags / Type / Date / Path).
+    - Centre: search bar + sortable, editable QTableView of all models.
+    - Right: thumbnail sidebar populated on single-click.
+
+    Signals:
+        model_count_changed(int): Emitted after each table reload with the new row count.
+    """
+
     model_count_changed = pyqtSignal(int)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._loading = False
         self._thumb_pixmaps: list[QPixmap] = []  # original (unscaled) pixmaps
@@ -401,7 +417,7 @@ class BrowserTab(QWidget):
         self.refresh()
 
     # ------------------------------------------------------------------
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         root = QHBoxLayout(self)
         root.setContentsMargins(4, 4, 4, 4)
 
@@ -528,7 +544,7 @@ class BrowserTab(QWidget):
         self._thumb_splitter = splitter
 
     # ------------------------------------------------------------------
-    def refresh(self):
+    def refresh(self) -> None:
         """Reload all data from the database."""
         self._populate_filter_tree()
         self._apply_checked_filters()
@@ -553,7 +569,8 @@ class BrowserTab(QWidget):
         return visible
 
     # ------------------------------------------------------------------
-    def _populate_filter_tree(self):
+    def _populate_filter_tree(self) -> None:
+        """Rebuild the left-panel filter tree from the current DB contents."""
         # Save checked items and expanded top-level sections so they survive the rebuild.
         # expanded_sections is None on the very first call (tree is empty) → default collapsed.
         checked_data: set = set()
@@ -713,7 +730,7 @@ class BrowserTab(QWidget):
                 node_map[full] = item
 
     def _load_table(self, author_filters=None, tag_filters=None, type_filters=None,
-                    path_filters=None, date_filters=None):
+                    path_filters=None, date_filters=None) -> None:
         """Reload the table, optionally with multi-value filter lists.
 
         Within each category the values are OR-ed; across categories they are AND-ed.
@@ -802,7 +819,8 @@ class BrowserTab(QWidget):
         self.model_count_changed.emit(self._model.rowCount())
 
     # ------------------------------------------------------------------
-    def _on_item_changed(self, item: QStandardItem):
+    def _on_item_changed(self, item: QStandardItem) -> None:
+        """Debounce cell edits; actual DB write is deferred to *_flush_pending_edits*."""
         if self._loading:
             return
         col = item.column()
@@ -812,14 +830,15 @@ class BrowserTab(QWidget):
         self._pending_edits[(item.row(), col)] = item
         self._edit_timer.start()
 
-    def _flush_pending_edits(self):
+    def _flush_pending_edits(self) -> None:
         """Write all debounced cell edits to the DB in a single pass."""
         items = list(self._pending_edits.values())
         self._pending_edits.clear()
         for item in items:
             self._write_item(item)
 
-    def _write_item(self, item: QStandardItem):
+    def _write_item(self, item: QStandardItem) -> None:
+        """Persist a single edited table cell to the database."""
         col = item.column()
         model_id = self._model.item(item.row(), COL_THUMB).data(MODEL_ID_ROLE)
         if model_id is None:
@@ -929,7 +948,7 @@ class BrowserTab(QWidget):
                         pass  # best-effort; never block the edit
 
     # ------------------------------------------------------------------
-    def _on_search(self, text: str):
+    def _on_search(self, text: str) -> None:
         self._proxy.setFilterFixedString(text)
 
     def _init_path_parent_states(self, item: QTreeWidgetItem) -> Qt.CheckState:
@@ -975,7 +994,7 @@ class BrowserTab(QWidget):
         finally:
             self._filter_tree.blockSignals(False)
 
-    def _on_filter_item_changed(self, item: QTreeWidgetItem, _col: int):
+    def _on_filter_item_changed(self, item: QTreeWidgetItem, _col: int) -> None:
         """Called when a checkbox in the filter tree is toggled."""
         data = item.data(0, Qt.ItemDataRole.UserRole)
         if data is not None:
@@ -983,7 +1002,7 @@ class BrowserTab(QWidget):
                 self._update_path_parent_states(item)
             self._apply_checked_filters()
 
-    def _apply_checked_filters(self):
+    def _apply_checked_filters(self) -> None:
         """Collect all checked filter items and reload the table."""
         author_filters: list[str] = []
         tag_filters:    list[str] = []
@@ -1022,7 +1041,7 @@ class BrowserTab(QWidget):
             date_filters=date_filters or None,
         )
 
-    def _clear_filters(self):
+    def _clear_filters(self) -> None:
         """Uncheck all filter items and reload the full table."""
         self._filter_tree.blockSignals(True)
         def _uncheck(item: QTreeWidgetItem):
@@ -1036,14 +1055,15 @@ class BrowserTab(QWidget):
         self._filter_tree.blockSignals(False)
         self._load_table()
 
-    def _on_row_clicked(self, index):
+    def _on_row_clicked(self, index) -> None:
         src_index = self._proxy.mapToSource(index)
         model_id = self._model.item(src_index.row(), COL_THUMB).data(MODEL_ID_ROLE)
         if model_id is not None:
             self._show_thumbnails(model_id)
             self._update_info_panel(model_id)
 
-    def _update_info_panel(self, model_id: int):
+    def _update_info_panel(self, model_id: int) -> None:
+        """Refresh the author/tag info labels below the filter tree."""
         session = get_session()
         try:
             stl: STLModel = session.get(STLModel, model_id)
@@ -1062,7 +1082,7 @@ class BrowserTab(QWidget):
         finally:
             session.close()
 
-    def _on_double_click(self, index):
+    def _on_double_click(self, index) -> None:
         if index.column() != COL_PATH:
             return  # let the cell editor handle it
         src_index = self._proxy.mapToSource(index)
@@ -1070,7 +1090,8 @@ class BrowserTab(QWidget):
         if model_id is not None:
             self._open_editor(model_id)
 
-    def _edit_selected(self):
+    def _edit_selected(self) -> None:
+        """Open the single-model editor or mass editor depending on selection count."""
         ids = self._selected_model_ids()
         if len(ids) == 1:
             self._open_editor(ids[0])
@@ -1086,12 +1107,14 @@ class BrowserTab(QWidget):
             if self._model.item(r, COL_THUMB) is not None
         ]
 
-    def _save_header_state(self):
+    def _save_header_state(self) -> None:
+        """Persist column widths, order, and visibility to QSettings."""
         settings = QSettings()
         settings.setValue("browser/header_state", self._table.horizontalHeader().saveState())
         settings.setValue("browser/header_column_count", self._model.columnCount())
 
-    def _restore_header_state(self):
+    def _restore_header_state(self) -> None:
+        """Restore previously saved column widths, order, and visibility."""
         settings = QSettings()
         state        = settings.value("browser/header_state")
         saved_count  = settings.value("browser/header_column_count", type=int)
@@ -1113,7 +1136,8 @@ class BrowserTab(QWidget):
             self._table.setColumnWidth(COL_TITLE, 260)
             self._table.setColumnWidth(COL_PATH,  320)
 
-    def _header_context_menu(self, pos):
+    def _header_context_menu(self, pos) -> None:
+        """Show a column-visibility toggle menu when the table header is right-clicked."""
         menu = QMenu(self)
         header = self._table.horizontalHeader()
         for col in range(1, self._model.columnCount()):  # col 0 (thumb) is always hidden
@@ -1130,7 +1154,8 @@ class BrowserTab(QWidget):
             if col in (COL_AUTHOR, COL_TAGS, COL_SOURCE, COL_PATH, COL_DATE):
                 self._populate_filter_tree()
 
-    def _context_menu(self, pos):
+    def _context_menu(self, pos) -> None:
+        """Show the row-level context menu (edit, delete, thumbnails, sidecar, etc.)."""
         index = self._table.indexAt(pos)
         if not index.isValid():
             return
@@ -1216,7 +1241,8 @@ class BrowserTab(QWidget):
         elif edit_scales_act and action == edit_scales_act:
             self._open_scale_editor()
 
-    def _delete_models(self, model_ids: list[int]):
+    def _delete_models(self, model_ids: list[int]) -> None:
+        """Confirm then delete models and their LMDB thumbnails from the database."""
         count = len(model_ids)
         reply = QMessageBox.warning(
             self,
@@ -1243,19 +1269,21 @@ class BrowserTab(QWidget):
         self.refresh()
 
     # ------------------------------------------------------------------
-    def eventFilter(self, obj, event):
+    def eventFilter(self, obj, event) -> bool:
         if obj is self._thumb_scroll.viewport() and event.type() == QEvent.Type.Resize:
             self._rescale_thumbnails()
         return super().eventFilter(obj, event)
 
-    def _clear_thumbnails(self):
+    def _clear_thumbnails(self) -> None:
+        """Remove all thumbnail widgets from the sidebar and drop the pixmap cache."""
         self._thumb_pixmaps.clear()
         while self._thumb_vlayout.count():
             item = self._thumb_vlayout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
-    def _show_thumbnails(self, model_id: int):
+    def _show_thumbnails(self, model_id: int) -> None:
+        """Load and display thumbnails for the model with *model_id* in the sidebar."""
         self._clear_thumbnails()
         session = get_session()
         try:
@@ -1276,7 +1304,8 @@ class BrowserTab(QWidget):
             session.close()
         self._rescale_thumbnails()
 
-    def _rescale_thumbnails(self):
+    def _rescale_thumbnails(self) -> None:
+        """Scale all sidebar thumbnails to fit the current scroll-area width."""
         w = max(self._thumb_scroll.viewport().width() - 12, 60)
         for i, px in enumerate(self._thumb_pixmaps):
             item = self._thumb_vlayout.itemAt(i)
@@ -1284,7 +1313,8 @@ class BrowserTab(QWidget):
                 scaled = px.scaledToWidth(w, Qt.TransformationMode.SmoothTransformation)
                 item.widget().setPixmap(scaled)
 
-    def add_tag(self):
+    def add_tag(self) -> None:
+        """Prompt for a new tag name, create it in the DB, and rebuild the filter tree."""
         name, ok = QInputDialog.getText(self, "Add Tag", "Tag name:")
         if not ok or not name.strip():
             return
@@ -1296,45 +1326,46 @@ class BrowserTab(QWidget):
             session.add(Tag(name=name))
         self._populate_filter_tree()
 
-    def _open_tag_editor(self):
+    def _open_tag_editor(self) -> None:
         from app.ui.tag_editor_dialog import TagEditorDialog
         TagEditorDialog(parent=self).exec()
         self.refresh()
 
-    def _open_category_editor(self):
+    def _open_category_editor(self) -> None:
         from app.ui.category_editor_dialog import CategoryEditorDialog
         CategoryEditorDialog(parent=self).exec()
         self.refresh()
 
-    def _open_subcategory_editor(self):
+    def _open_subcategory_editor(self) -> None:
         from app.ui.subcategory_editor_dialog import SubcategoryEditorDialog
         SubcategoryEditorDialog(parent=self).exec()
         self.refresh()
 
-    def _open_scale_editor(self):
+    def _open_scale_editor(self) -> None:
         from app.ui.scale_editor_dialog import ScaleEditorDialog
         ScaleEditorDialog(parent=self).exec()
         self.refresh()
 
-    def _open_editor(self, model_id: int):
+    def _open_editor(self, model_id: int) -> None:
         from app.ui.editor_dialog import EditorDialog
         dlg = EditorDialog(model_id, parent=self)
         if dlg.exec():
             self.refresh()
 
-    def _open_mass_editor(self, model_ids: list[int]):
+    def _open_mass_editor(self, model_ids: list[int]) -> None:
         from app.ui.mass_editor_dialog import MassEditorDialog
         dlg = MassEditorDialog(model_ids, parent=self)
         if dlg.exec():
             self.refresh()
 
-    def _sort_files(self, model_ids: list[int]):
+    def _sort_files(self, model_ids: list[int]) -> None:
         from app.ui.sort_dialog import SortFilesDialog
         dlg = SortFilesDialog(model_ids, parent=self)
         if dlg.exec():
             self.refresh()
 
-    def _generate_thumbnails(self, model_ids: list[int]):
+    def _generate_thumbnails(self, model_ids: list[int]) -> None:
+        """Prompt for a thumbnail count then run ThumbnailGeneratorWorker on *model_ids*."""
         from app.ui.config_dialog import get_max_thumbnails
 
         count, ok = QInputDialog.getInt(
@@ -1373,7 +1404,7 @@ class BrowserTab(QWidget):
         progress.canceled.connect(lambda: None)  # worker runs to completion; cancel just closes dialog
         self._thumb_worker.start()
 
-    def generate_thumbnails_for_selected(self):
+    def generate_thumbnails_for_selected(self) -> None:
         """Generate thumbnails for the rows currently selected in the table.
 
         Called from the main-window Tools menu; mirrors the right-click action.
@@ -1389,7 +1420,7 @@ class BrowserTab(QWidget):
             return
         self._generate_thumbnails(ids)
 
-    def _create_sidecar_for_selection(self, model_ids: list[int]):
+    def _create_sidecar_for_selection(self, model_ids: list[int]) -> None:
         """Open a sidecar dialog scoped to the folders of the selected models."""
         from pathlib import Path
         from app.ui.metadata_sidecar_dialog import MetadataSidecarDialog
@@ -1409,7 +1440,7 @@ class BrowserTab(QWidget):
         dlg = MetadataSidecarDialog(folders=folders, parent=self)
         dlg.exec()
 
-    def show_image_grid(self):
+    def show_image_grid(self) -> None:
         """Open an image grid for all models currently visible in the table."""
         model_ids = []
         for proxy_row in range(self._proxy.rowCount()):

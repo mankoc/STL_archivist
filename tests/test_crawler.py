@@ -42,9 +42,14 @@ def _make_worker(source_dir: str = "/tmp", pattern: str = ""):
         _config=CrawlerConfig(),
         _stop_requested=False,
         log=MagicMock(),
-        # Bind the real method to our namespace so it runs with our attributes
-        _upsert_archive=lambda *a, **kw: CrawlerWorker._upsert_archive(ns, *a, **kw),
     )
+    # Bind all real CrawlerWorker methods that _upsert_archive delegates to.
+    ns._upsert_archive             = lambda *a, **kw: CrawlerWorker._upsert_archive(ns, *a, **kw)
+    ns._apply_pattern_to_unchanged = lambda *a, **kw: CrawlerWorker._apply_pattern_to_unchanged(ns, *a, **kw)
+    ns._log_metadata               = lambda *a, **kw: CrawlerWorker._log_metadata(ns, *a, **kw)
+    ns._detect_rules               = lambda *a, **kw: CrawlerWorker._detect_rules(ns, *a, **kw)
+    ns._assign_metadata            = lambda *a, **kw: CrawlerWorker._assign_metadata(ns, *a, **kw)
+    ns._update_thumbnails          = lambda *a, **kw: CrawlerWorker._update_thumbnails(ns, *a, **kw)
     return ns
 
 

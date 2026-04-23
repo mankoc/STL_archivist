@@ -15,7 +15,9 @@ from app.utils.string_utils import levenshtein as _levenshtein, soundex as _soun
 
 
 class CategoryEditorDialog(QDialog):
-    def __init__(self, parent=None):
+    """Dialog for managing Category lookup values: list, add, rename, delete, and merge."""
+
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Category Editor")
         self.resize(420, 520)
@@ -23,7 +25,7 @@ class CategoryEditorDialog(QDialog):
         self._load()
 
     # ------------------------------------------------------------------
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         root = QVBoxLayout(self)
 
         self._table = QTableWidget(0, 2)
@@ -62,7 +64,7 @@ class CategoryEditorDialog(QDialog):
         root.addWidget(close_btn)
 
     # ------------------------------------------------------------------
-    def _load(self):
+    def _load(self) -> None:
         self._table.setSortingEnabled(False)
         self._table.setRowCount(0)
         session = get_session()
@@ -91,7 +93,8 @@ class CategoryEditorDialog(QDialog):
         return self._table.item(list(rows)[0], 0).data(Qt.ItemDataRole.UserRole)
 
     # ------------------------------------------------------------------
-    def _add(self):
+    def _add(self) -> None:
+        """Prompt for a new category name and insert it into the DB."""
         name, ok = QInputDialog.getText(self, "Add Category", "Category name:")
         if not ok or not name.strip():
             return
@@ -103,7 +106,8 @@ class CategoryEditorDialog(QDialog):
             session.add(Category(name=name))
         self._load()
 
-    def _rename(self, *_):
+    def _rename(self, *_) -> None:
+        """Rename the selected category, rejecting duplicates."""
         cat_id = self._selected_id()
         if cat_id is None:
             QMessageBox.information(self, "Rename", "Select exactly one category to rename.")
@@ -129,7 +133,8 @@ class CategoryEditorDialog(QDialog):
             session.get(Category, cat_id).name = new_name
         self._load()
 
-    def _delete(self):
+    def _delete(self) -> None:
+        """Delete the selected category (and its subcategories) after user confirmation."""
         cat_id = self._selected_id()
         if cat_id is None:
             QMessageBox.information(self, "Delete", "Select exactly one category to delete.")
@@ -161,14 +166,21 @@ class CategoryEditorDialog(QDialog):
             session.delete(session.get(Category, cat_id))
         self._load()
 
-    def _merge_duplicates(self):
+    def _merge_duplicates(self) -> None:
+        """Open the merge-duplicate-categories sub-dialog and reload on close."""
         dlg = _MergeCategoriesDialog(parent=self)
         dlg.exec()
         self._load()
 
 
 class _MergeCategoriesDialog(QDialog):
-    def __init__(self, parent=None):
+    """Sub-dialog for finding and merging similar-sounding categories.
+
+    When merging, models from the deleted category are reassigned to the kept
+    category and their subcategory is cleared (since it belonged to the deleted one).
+    """
+
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Merge Duplicate Categories")
         self.resize(520, 420)

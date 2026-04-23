@@ -17,9 +17,12 @@ COLS = 5
 
 
 class _GridImageViewer(QDialog):
-    """Full-size viewer that navigates through all images currently in the grid."""
+    """Full-size image viewer with previous/next navigation for the grid thumbnails.
 
-    def __init__(self, entries: list[tuple[QPixmap, str]], start_index: int, parent=None):
+    Keyboard shortcuts: Left/Right arrows navigate, Escape closes.
+    """
+
+    def __init__(self, entries: list[tuple[QPixmap, str]], start_index: int, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Image Viewer")
         self.setModal(True)
@@ -60,7 +63,8 @@ class _GridImageViewer(QDialog):
 
         self._show_current()
 
-    def _show_current(self):
+    def _show_current(self) -> None:
+        """Display the image at the current index and update navigation state."""
         px, title = self._entries[self._index]
         scaled = px.scaled(self._max_w, self._max_h,
                            Qt.AspectRatioMode.KeepAspectRatio,
@@ -73,26 +77,30 @@ class _GridImageViewer(QDialog):
         self._prev_btn.setEnabled(self._index > 0)
         self._next_btn.setEnabled(self._index < total - 1)
 
-    def _go_prev(self):
+    def _go_prev(self) -> None:
+        """Move to the previous image if one exists."""
         if self._index > 0:
             self._index -= 1
             self._show_current()
 
-    def _go_next(self):
+    def _go_next(self) -> None:
+        """Move to the next image if one exists."""
         if self._index < len(self._entries) - 1:
             self._index += 1
             self._show_current()
 
 
 class ImageGridDialog(QDialog):
-    def __init__(self, model_ids: list[int], parent=None):
+    """Scrollable thumbnail grid for all models currently visible in the browser."""
+
+    def __init__(self, model_ids: list[int], parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"Image Grid — {len(model_ids)} model{'s' if len(model_ids) != 1 else ''}")
         self.resize(920, 700)
         self._entries: list[tuple[QPixmap, str]] = []
         self._build_ui(model_ids)
 
-    def _build_ui(self, model_ids: list[int]):
+    def _build_ui(self, model_ids: list[int]) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
 
@@ -144,6 +152,7 @@ class ImageGridDialog(QDialog):
         layout.addWidget(buttons)
 
     def _make_cell(self, px: QPixmap, title: str, entry_index: int) -> QWidget:
+        """Build a single thumbnail cell widget with a title label below it."""
         cell = QWidget()
         cell_layout = QVBoxLayout(cell)
         cell_layout.setContentsMargins(4, 4, 4, 4)
@@ -176,7 +185,8 @@ class ImageGridDialog(QDialog):
 
         return cell
 
-    def _view_image(self, index: int):
+    def _view_image(self, index: int) -> None:
+        """Open the full-size viewer starting at the given grid *index*."""
         viewable = [(px, t) for px, t in self._entries if not px.isNull()]
         if not viewable:
             return

@@ -15,6 +15,8 @@ A desktop application for cataloguing and browsing your local collection of 3D p
 - **Image grid** — display a grid of thumbnails for the currently filtered set of models
 - **Editor** — edit model metadata (title, author, sculptor, category, subcategory, release, scale, presupports, source, URL, date, sequence, tags)
 - **Mass editor** — apply bulk changes across multiple models at once, including category and subcategory
+- **Metadata sidecars** — export a `METADATA.7z` snapshot into every archive folder so the library can be restored on a new machine without re-crawling; optionally includes thumbnails
+- **Image pane toggle** — show or hide the right-hand thumbnail sidebar via a toolbar button or the View menu
 - **File sorting** — optionally move and rename archive files into a structured directory layout using a path pattern (enable in Configuration)
 - **Themes** — built-in color schemes: System Default, VS Code Dark+, Windows 11 Dark, Windows 11 Light
 
@@ -28,6 +30,8 @@ A desktop application for cataloguing and browsing your local collection of 3D p
   - py7zr
   - rarfile
   - xxhash
+  - lmdb
+  - qt-material
 
 ## Installation
 
@@ -62,6 +66,7 @@ On first launch, go to **File → Configuration…** and set up:
 - **Database** — choose where the SQLite database and thumbnails are stored (restart required after changing)
 - **Crawler** — max thumbnails per model, max image size in pixels, path to `unrar` executable, and which crawler warnings to enable
 - **Browser** — enable the *Sort files into directory* option (adds a right-click menu entry)
+- **Metadata** — enable *Metadata sidecar* to write `METADATA.7z` per folder during crawl; optionally include thumbnails
 - **Appearance** — select a color scheme (preview is applied immediately; Cancel reverts)
 
 ### 2. Crawl your archive folder
@@ -108,11 +113,12 @@ Progress and log output are written to stdout.
 
 ### 3. Browse and edit
 
-- Use the search bar and filter tree (Sculptor / Tags / Category) to narrow down the collection.
-- Use the multi-value filter dropdowns and the **Clear filters** button to reset filters quickly.
-- Double-click a row (or press `Enter`) to open the **Editor** and update model details.
+- Use the search bar and filter tree (Author / Tags / Type / Date / Path) to narrow down the collection.
+- Use the multi-value filter checkboxes and the **Clear** button to reset filters quickly.
+- Double-click a row (or press `E`) to open the **Editor** and update model details.
 - Click **Image Grid** in the toolbar to view thumbnails for all currently displayed models.
-- Right-click for context-menu options including opening the archive folder, previewing a random file, deleting a record, and (if enabled) sorting files into a directory.
+- Click the **image pane** toolbar button (or use the View menu) to toggle the thumbnail sidebar.
+- Right-click for context-menu options: edit, mass-edit, delete, generate thumbnails, create/update sidecar, and (if enabled) sort files into a directory.
 - Use **Mass Edit** to apply changes to multiple selected rows at once.
 
 ### 4. Tags
@@ -160,7 +166,7 @@ use the pattern:
 ```
 stl_database/
 ├── main.py                  # GUI entry point
-├── crawl.py                 # Command-line crawler
+├── crawl.py                 # Command-line crawler (headless)
 ├── requirements.txt
 ├── resources/
 │   ├── style.qss            # Application stylesheet
@@ -170,9 +176,10 @@ stl_database/
 │   ├── config.py            # CrawlerConfig dataclass
 │   ├── crawler/
 │   │   ├── crawler.py       # QThread-based directory crawler (parallel workers)
-│   │   ├── archive.py       # Archive extraction helpers
-│   │   ├── metadata.py      # Metadata extraction logic
-│   │   └── rules.py         # Scale / presupport / warning detection rules
+│   │   ├── archive.py       # Archive extraction helpers (.zip/.7z/.rar)
+│   │   ├── metadata.py      # Metadata extraction logic (info.json, .url, path)
+│   │   ├── rules.py         # Scale / presupport / warning detection rules
+│   │   └── folder_metadata.py  # METADATA.7z sidecar read/write
 │   ├── database/
 │   │   ├── db.py            # SQLAlchemy engine / session helpers
 │   │   └── models.py        # ORM models (STLModel, Tag, Image, Sculptor, Category, Subcategory, Release, Scale)
@@ -184,6 +191,7 @@ stl_database/
 │   │   ├── editor_dialog.py
 │   │   ├── mass_editor_dialog.py
 │   │   ├── image_grid_dialog.py
+│   │   ├── metadata_sidecar_dialog.py  # Sidecar generation dialog and worker
 │   │   ├── scale_editor_dialog.py
 │   │   ├── category_editor_dialog.py
 │   │   ├── subcategory_editor_dialog.py
@@ -193,9 +201,10 @@ stl_database/
 │   │   ├── about_dialog.py
 │   │   └── help_dialog.py
 │   └── utils/
-│       ├── thumbnailer.py   # Thumbnail save/delete helpers
-│       ├── path_pattern.py  # Path pattern parser
-│       └── string_utils.py  # Levenshtein distance, Soundex
+│       ├── thumbnailer.py   # LMDB thumbnail store (save/load/delete)
+│       ├── path_pattern.py  # Path pattern parser and renderer
+│       ├── string_utils.py  # Levenshtein distance, Soundex
+│       └── logger.py        # Rotating gzip-compressed file logger
 └── tests/
 ```
 

@@ -15,7 +15,9 @@ from app.utils.string_utils import levenshtein as _levenshtein, soundex as _soun
 
 
 class SubcategoryEditorDialog(QDialog):
-    def __init__(self, parent=None):
+    """Dialog for managing Subcategory lookup values grouped by their parent Category."""
+
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Subcategory Editor")
         self.resize(520, 520)
@@ -23,7 +25,7 @@ class SubcategoryEditorDialog(QDialog):
         self._load()
 
     # ------------------------------------------------------------------
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         root = QVBoxLayout(self)
 
         self._table = QTableWidget(0, 3)
@@ -63,7 +65,7 @@ class SubcategoryEditorDialog(QDialog):
         root.addWidget(close_btn)
 
     # ------------------------------------------------------------------
-    def _load(self):
+    def _load(self) -> None:
         self._table.setSortingEnabled(False)
         self._table.setRowCount(0)
         session = get_session()
@@ -107,7 +109,8 @@ class SubcategoryEditorDialog(QDialog):
             session.close()
 
     # ------------------------------------------------------------------
-    def _add(self):
+    def _add(self) -> None:
+        """Prompt for a parent category and new subcategory name, then insert into DB."""
         category_names = self._category_names()
         if not category_names:
             QMessageBox.warning(self, "Add Subcategory",
@@ -147,7 +150,8 @@ class SubcategoryEditorDialog(QDialog):
             session.add(Subcategory(name=name, category_id=cat.id))
         self._load()
 
-    def _rename(self, *_):
+    def _rename(self, *_) -> None:
+        """Rename the selected subcategory, checking for duplicates within its parent."""
         sc_id = self._selected_id()
         if sc_id is None:
             QMessageBox.information(self, "Rename",
@@ -180,7 +184,8 @@ class SubcategoryEditorDialog(QDialog):
             session.get(Subcategory, sc_id).name = new_name
         self._load()
 
-    def _delete(self):
+    def _delete(self) -> None:
+        """Delete the selected subcategory after user confirmation."""
         sc_id = self._selected_id()
         if sc_id is None:
             QMessageBox.information(self, "Delete",
@@ -210,21 +215,24 @@ class SubcategoryEditorDialog(QDialog):
             session.delete(session.get(Subcategory, sc_id))
         self._load()
 
-    def _merge_duplicates(self):
+    def _merge_duplicates(self) -> None:
+        """Open the merge-duplicate-subcategories sub-dialog and reload on close."""
         dlg = _MergeSubcategoriesDialog(parent=self)
         dlg.exec()
         self._load()
 
 
 class _MergeSubcategoriesDialog(QDialog):
-    def __init__(self, parent=None):
+    """Sub-dialog for merging similar-sounding subcategories within the same parent category."""
+
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Merge Duplicate Subcategories")
         self.resize(580, 420)
         self._build_ui()
         self._scan()
 
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         root = QVBoxLayout(self)
 
         thresh_row = QHBoxLayout()

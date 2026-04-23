@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Optional
 
 import py7zr
+from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ _SCHEMA_VERSION   = 1
 # Public helpers
 # ---------------------------------------------------------------------------
 
-def folder_has_db_records(folder: Path, session) -> bool:
+def folder_has_db_records(folder: Path, session: Session) -> bool:
     """Return True when at least one direct-child archive of *folder* is in DB."""
     from app.crawler.archive import ARCHIVE_SUFFIXES, METADATA_FILENAME as _MF
     from app.database.models import STLModel
@@ -68,7 +69,7 @@ def folder_has_db_records(folder: Path, session) -> bool:
 
 def export_folder_metadata(
     folder: Path,
-    session,
+    session: Session,
     thumb_base_dir: Path,
     include_thumbnails: bool = True,
 ) -> bool:
@@ -124,7 +125,7 @@ def export_folder_metadata(
         return False
 
 
-def import_folder_metadata(folder: Path, session, thumb_base_dir: Path) -> list[str]:
+def import_folder_metadata(folder: Path, session: Session, thumb_base_dir: Path) -> list[str]:
     """
     Read METADATA.7z from *folder* and populate the DB with any records whose
     archive file exists on disk but is not yet in the DB.
@@ -234,8 +235,20 @@ def import_folder_metadata(folder: Path, session, thumb_base_dir: Path) -> list[
 # Internal serialisation helpers
 # ---------------------------------------------------------------------------
 
-def _serialize_models(models, thumb_base_dir: Path, include_thumbnails: bool = True) -> dict:
-    """Build the metadata.json payload from a list of STLModel instances."""
+def _serialize_models(models: list, thumb_base_dir: Path, include_thumbnails: bool = True) -> dict:
+    """Build the ``metadata.json`` payload dict from a list of ``STLModel`` instances.
+
+    Args:
+        models: List of ``STLModel`` ORM objects to serialise.
+        thumb_base_dir: Base directory of the LMDB thumbnail store (currently
+            unused in the payload itself; thumbnails are fetched from LMDB).
+        include_thumbnails: When ``True``, each image entry includes a
+            ``thumbnail`` key referencing its position in the sidecar archive.
+
+    Returns:
+        Dict ready for JSON serialisation, containing ``version``,
+        ``generated_at``, and a ``models`` list.
+    """
     entries = []
     for m_idx, model in enumerate(models):
         images_list = []
@@ -279,14 +292,22 @@ def _serialize_models(models, thumb_base_dir: Path, include_thumbnails: bool = T
 def _write_metadata_7z(
     dest: Path,
     data: dict,
-    models,
+    models: list,
     thumb_base_dir: Path,
     include_thumbnails: bool = True,
 ) -> None:
-    """
-    Write *data* as metadata.json plus (optionally) thumbnails into a 7z archive
-    at *dest*.  Uses a temp file + atomic rename to avoid leaving a corrupt
-    archive on failure.
+    """Write *data* as ``metadata.json`` plus thumbnails into a 7z archive at *dest*.
+
+    Uses a temp file + atomic rename so that a failure never leaves a corrupt
+    or truncated sidecar archive at *dest*.
+
+    Args:
+        dest: Target path for the ``.7z`` sidecar file.
+        data: Serialised metadata payload from ``_serialize_models()``.
+        models: ``STLModel`` list (used to iterate ``Image`` records for thumbnails).
+        thumb_base_dir: Unused — thumbnails are fetched from LMDB by image ID.
+        include_thumbnails: When ``False``, the archive contains only
+            ``metadata.json`` and no image files.
     """
     tmp_path = dest.with_suffix(".7z.tmp")
 
@@ -318,13 +339,23 @@ def _write_metadata_7z(
 
 
 def _read_metadata_7z(metadata_path: Path) -> tuple[dict, dict[str, bytes]]:
-    """
-    Extract metadata.json and all thumbnails from *metadata_path*.
+    """Extract ``metadata.json`` and all thumbnails from a METADATA.7z sidecar.
+
+    Extracts to a temporary directory (on ``/dev/shm`` when available for
+    in-memory speed), then reads the JSON and all thumbnail files.
+
+    Args:
+        metadata_path: Path to the ``METADATA.7z`` sidecar file.
 
     Returns:
-        data           – parsed JSON dict
-        thumb_bytes    – mapping of in-archive path → JPEG bytes
-                         (e.g. ``{"thumbnails/0_0.jpg": b"..."}``
+        A 2-tuple of:
+        - ``data``: Parsed JSON dict from ``metadata.json``.
+        - ``thumb_bytes``: Mapping of in-archive path to raw JPEG bytes,
+          e.g. ``{"thumbnails/0_0.jpg": b"..."}``.
+
+    Raises:
+        ValueError: If ``metadata.json`` is not found inside the archive.
+        Exception: Propagates any ``py7zr`` or I/O error to the caller.
     """
     _shm = "/dev/shm" if Path("/dev/shm").is_dir() else None
     with tempfile.TemporaryDirectory(dir=_shm) as tmpdir:
@@ -355,8 +386,19 @@ def _read_metadata_7z(metadata_path: Path) -> tuple[dict, dict[str, bytes]]:
     return data, thumb_bytes
 
 
-def _restore_fk(session, model, model_data: dict) -> None:
-    """Resolve or create FK-backed entities and attach them to *model*."""
+def _restore_fk(session: Session, model, model_data: dict) -> None:
+    """Resolve or create FK-backed lookup entities and attach them to *model*.
+
+    For each named FK field (sculptor, category, subcategory, release, scale)
+    the function looks up an existing record by name, creates one if it does not
+    exist yet, and assigns the relationship on *model*.  Subcategory lookup is
+    scoped to the already-resolved category.
+
+    Args:
+        session: Active SQLAlchemy session.
+        model: The ``STLModel`` being populated.
+        model_data: Deserialised dict for this archive from ``metadata.json``.
+    """
     from app.database.models import Sculptor, Category, Subcategory, Release, Scale
 
     sculptor_name = model_data.get("sculptor")

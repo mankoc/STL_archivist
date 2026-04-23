@@ -80,13 +80,22 @@ def _ensure_columns(engine) -> None:
 
 
 def get_session() -> Session:
+    """Return a new session from the factory.
+
+    Raises:
+        RuntimeError: If ``init_db()`` has not been called yet.
+    """
     if _SessionFactory is None:
         raise RuntimeError("Database not initialised. Call init_db() first.")
     return _SessionFactory()
 
 
 def clear_db() -> None:
-    """Delete all rows from every table (keeps the schema intact)."""
+    """Delete all rows from every table (keeps the schema intact).
+
+    Raises:
+        RuntimeError: If ``init_db()`` has not been called yet.
+    """
     if _engine is None:
         raise RuntimeError("Database not initialised. Call init_db() first.")
     with _engine.begin() as conn:
@@ -96,7 +105,17 @@ def clear_db() -> None:
 
 @contextmanager
 def session_scope():
-    """Provide a transactional scope around a series of operations."""
+    """Provide a transactional scope around a series of database operations.
+
+    Commits on success, rolls back on any exception, and always closes the
+    session.  Intended to be used as a ``with`` statement::
+
+        with session_scope() as session:
+            session.add(model)
+
+    Yields:
+        An open ``Session`` instance.
+    """
     session = get_session()
     try:
         yield session
