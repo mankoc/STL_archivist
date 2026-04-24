@@ -1,7 +1,12 @@
 """
 Unit tests for presupport / warning / scale detection rules.
 """
-from app.crawler.rules import detect_presupport, detect_warnings, detect_scale
+from app.crawler.rules import (
+    DEFAULT_SUPPORTS_PATTERNS,
+    detect_presupport,
+    detect_scale,
+    detect_warnings,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -176,3 +181,100 @@ def test_warn_multiple_warnings_joined_by_newline():
     out = detect_warnings(names, check_no_images=False)
     lines = out.splitlines()
     assert len(lines) >= 2
+
+
+# ---------------------------------------------------------------------------
+# detect_warnings — archive with supports
+# ---------------------------------------------------------------------------
+
+def test_warn_supports_default_patterns_supported_stl():
+    names = ["body_supported.stl", "arm.stl"]
+    out = detect_warnings(
+        names, check_presupported=False, check_no_images=False,
+        check_nested_archive=False, check_supports=True,
+    )
+    assert "Archive with supports" in out
+
+
+def test_warn_supports_default_patterns_sup_prefix():
+    names = ["sup_dragon.stl", "base.stl"]
+    out = detect_warnings(
+        names, check_presupported=False, check_no_images=False,
+        check_nested_archive=False, check_supports=True,
+    )
+    assert "Archive with supports" in out
+
+
+def test_warn_supports_unsupported_not_flagged():
+    """Files with 'unsupported' in the name should NOT trigger the warning."""
+    names = ["body_unsupported.stl", "arm.stl"]
+    out = detect_warnings(
+        names, check_presupported=False, check_no_images=False,
+        check_nested_archive=False, check_supports=True,
+    )
+    assert "Archive with supports" not in out
+
+
+def test_warn_supports_disabled_by_default():
+    """check_supports defaults to False — no warning without opting in."""
+    names = ["body_supported.stl"]
+    out = detect_warnings(names, check_no_images=False, check_nested_archive=False)
+    assert "Archive with supports" not in out
+
+
+def test_warn_supports_custom_pattern():
+    names = ["presup_arm.stl", "body.stl"]
+    out = detect_warnings(
+        names, check_presupported=False, check_no_images=False,
+        check_nested_archive=False, check_supports=True,
+        supports_patterns=[r"^presup.*\.stl$"],
+    )
+    assert "Archive with supports" in out
+
+
+def test_warn_supports_invalid_regex_skipped():
+    """An invalid regex should not crash; it is silently skipped."""
+    names = ["body_supported.stl"]
+    out = detect_warnings(
+        names, check_presupported=False, check_no_images=False,
+        check_nested_archive=False, check_supports=True,
+        supports_patterns=["[invalid(regex", r"(?<!un)supported\.stl$"],
+    )
+    assert "Archive with supports" in out
+
+
+def test_warn_supports_empty_pattern_list_no_warning():
+    names = ["body_supported.stl"]
+    out = detect_warnings(
+        names, check_presupported=False, check_no_images=False,
+        check_nested_archive=False, check_supports=True,
+        supports_patterns=[],
+    )
+    assert "Archive with supports" not in out
+
+
+def test_warn_supports_no_match_no_warning():
+    names = ["body.stl", "arm.stl"]
+    out = detect_warnings(
+        names, check_presupported=False, check_no_images=False,
+        check_nested_archive=False, check_supports=True,
+    )
+    assert "Archive with supports" not in out
+
+
+# ---------------------------------------------------------------------------
+# DEFAULT_SUPPORTS_PATTERNS
+# ---------------------------------------------------------------------------
+
+def test_default_supports_patterns_is_nonempty():
+    assert len(DEFAULT_SUPPORTS_PATTERNS) > 0
+
+
+def test_default_supports_patterns_match_supported_stl():
+    import re
+    for p in DEFAULT_SUPPORTS_PATTERNS:
+        rx = re.compile(p, re.IGNORECASE)
+        # At least one default pattern must match a "supported.stl" filename
+        if rx.search("body_supported.stl"):
+            return
+    raise AssertionError("No default pattern matched 'body_supported.stl'")
