@@ -18,6 +18,15 @@ _WARN_PRESUP_STL_RE    = re.compile(r"(?:[ _]presupported\.stl$|^sup.*\.stl$)", 
 _WARN_IMAGE_SUFFIXES   = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 _WARN_ARCHIVE_SUFFIXES = {".zip", ".rar", ".7z"}
 
+# Default regex patterns used by the "archive with supports" warning.
+# Each pattern is applied (re.IGNORECASE) to the bare filename of every archive member.
+#   Pattern 1 — "supported.stl" NOT preceded by "un" (so "unsupported" is excluded).
+#   Pattern 2 — Any file whose name starts with "sup" (e.g. "sup_arm.stl").
+DEFAULT_SUPPORTS_PATTERNS: list[str] = [
+    r"(?<!un)supported\.stl$",
+    r"^sup.*\.stl$",
+]
+
 
 def detect_presupport(names: list[str]) -> str:
     """Return the presupport classification for an archive given its member *names*.
@@ -70,6 +79,8 @@ def detect_warnings(
     check_presupported: bool = True,
     check_no_images: bool = True,
     check_nested_archive: bool = True,
+    check_supports: bool = False,
+    supports_patterns: list[str] | None = None,
 ) -> str:
     """Return a newline-separated string of warnings for an archive.
 
@@ -84,6 +95,12 @@ def detect_warnings(
             file (``.jpg``, ``.jpeg``, ``.png``, ``.webp``, ``.bmp``).
         check_nested_archive: Warn when the archive contains another compressed
             archive (``.zip``, ``.rar``, ``.7z``).
+        check_supports: Warn when the archive contains files matching any of
+            the patterns in *supports_patterns*.
+        supports_patterns: List of regex strings (case-insensitive) applied to
+            the bare filename of each archive member. Invalid patterns are
+            silently skipped. Defaults to ``DEFAULT_SUPPORTS_PATTERNS`` when
+            *check_supports* is ``True`` and this argument is ``None``.
 
     Returns:
         Newline-separated warning strings, or ``""`` if no warnings apply.
@@ -92,6 +109,17 @@ def detect_warnings(
     has_image            = False
     has_presup_stl       = False
     has_nested_archive   = False
+    has_supports         = False
+
+    # Pre-compile support patterns once so they are not recompiled per filename.
+    compiled_support: list[re.Pattern] = []
+    if check_supports:
+        patterns = supports_patterns if supports_patterns is not None else DEFAULT_SUPPORTS_PATTERNS
+        for p in patterns:
+            try:
+                compiled_support.append(re.compile(p, re.IGNORECASE))
+            except re.error:
+                logger.warning("Invalid supports pattern %r — skipped", p)
 
     for name in names:
         fname = Path(name.replace("\\", "/")).name
@@ -102,6 +130,11 @@ def detect_warnings(
             has_presup_stl = True
         if check_nested_archive and suffix in _WARN_ARCHIVE_SUFFIXES:
             has_nested_archive = True
+        if compiled_support and not has_supports:
+            for rx in compiled_support:
+                if rx.search(fname):
+                    has_supports = True
+                    break
 
     if check_presupported and has_presup_stl:
         warnings.append("presupported stl")
@@ -112,6 +145,9 @@ def detect_warnings(
     if check_nested_archive and has_nested_archive:
         warnings.append("Archive inside archive")
         logger.debug("  Warning: archive inside archive")
+    if has_supports:
+        warnings.append("Archive with supports")
+        logger.debug("  Warning: archive with supports")
 
     if not warnings:
         logger.debug("  No warnings")

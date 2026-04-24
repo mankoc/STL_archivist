@@ -152,6 +152,17 @@ def get_warn_nested_archive() -> bool:
     return bool(_load_library_settings().get("warn_nested_archive", True))
 
 
+def get_warn_supports() -> bool:
+    """Whether to warn when an archive contains files matching the supports patterns."""
+    return bool(_load_library_settings().get("warn_supports", False))
+
+
+def get_supports_patterns() -> list[str]:
+    """Return the list of regex patterns used by the 'archive with supports' warning."""
+    from app.crawler.rules import DEFAULT_SUPPORTS_PATTERNS
+    return list(_load_library_settings().get("supports_patterns", DEFAULT_SUPPORTS_PATTERNS))
+
+
 def get_debug_menu_enabled() -> bool:
     """Whether the Debug menu is visible in the main window."""
     return bool(_load_library_settings().get("debug_menu_enabled", False))
@@ -381,6 +392,40 @@ class ConfigDialog(QDialog):
             ),
         )
 
+        self._warn_supports_check = QCheckBox("Archive with supports")
+        warn_form.addRow("", self._warn_supports_check)
+        warn_form.addRow(
+            "",
+            QLabel(
+                "<small>Warn when an archive contains files matching any of the "
+                "patterns below. Each pattern is a Python regex applied "
+                "(case-insensitively) to every archive member filename.</small>"
+            ),
+        )
+
+        # Container widget so the list + buttons can be enabled/disabled together.
+        self._supports_patterns_widget = QWidget()
+        sup_layout = QVBoxLayout(self._supports_patterns_widget)
+        sup_layout.setContentsMargins(0, 2, 0, 0)
+        sup_layout.setSpacing(4)
+
+        self._supports_patterns_list = QListWidget()
+        self._supports_patterns_list.setFixedHeight(90)
+        sup_layout.addWidget(self._supports_patterns_list)
+
+        sup_btn_row = QHBoxLayout()
+        sup_add_btn = QPushButton("Add pattern")
+        sup_add_btn.clicked.connect(self._add_supports_pattern)
+        sup_rm_btn = QPushButton("Remove selected")
+        sup_rm_btn.clicked.connect(self._remove_supports_pattern)
+        sup_btn_row.addWidget(sup_add_btn)
+        sup_btn_row.addWidget(sup_rm_btn)
+        sup_btn_row.addStretch()
+        sup_layout.addLayout(sup_btn_row)
+
+        warn_form.addRow("", self._supports_patterns_widget)
+        self._warn_supports_check.toggled.connect(self._supports_patterns_widget.setEnabled)
+
         layout.addWidget(warn_group)
 
         meta_group = QGroupBox("Metadata Sidecar (METADATA.7z)")
@@ -474,6 +519,19 @@ class ConfigDialog(QDialog):
         return page
 
     # ------------------------------------------------------------------
+    def _add_supports_pattern(self) -> None:
+        """Append a new editable pattern row and immediately open it for editing."""
+        item = QListWidgetItem("new pattern")
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+        self._supports_patterns_list.addItem(item)
+        self._supports_patterns_list.editItem(item)
+
+    def _remove_supports_pattern(self) -> None:
+        """Remove all currently selected rows from the pattern list."""
+        for item in self._supports_patterns_list.selectedItems():
+            self._supports_patterns_list.takeItem(self._supports_patterns_list.row(item))
+
+    # ------------------------------------------------------------------
     def _browse_data_dir(self) -> None:
         """Open a directory picker and set the data-directory field."""
         path = QFileDialog.getExistingDirectory(
@@ -512,6 +570,14 @@ class ConfigDialog(QDialog):
         self._warn_presupported_check.setChecked(get_warn_presupported_stl())
         self._warn_no_images_check.setChecked(get_warn_no_images())
         self._warn_nested_archive_check.setChecked(get_warn_nested_archive())
+        supports_enabled = get_warn_supports()
+        self._warn_supports_check.setChecked(supports_enabled)
+        self._supports_patterns_widget.setEnabled(supports_enabled)
+        self._supports_patterns_list.clear()
+        for pattern in get_supports_patterns():
+            item = QListWidgetItem(pattern)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+            self._supports_patterns_list.addItem(item)
         sidecar_enabled = get_metadata_sidecar_enabled()
         self._metadata_sidecar_check.setChecked(sidecar_enabled)
         self._metadata_thumbnails_check.setEnabled(sidecar_enabled)
@@ -548,6 +614,12 @@ class ConfigDialog(QDialog):
                 "warn_presupported_stl": self._warn_presupported_check.isChecked(),
                 "warn_no_images": self._warn_no_images_check.isChecked(),
                 "warn_nested_archive": self._warn_nested_archive_check.isChecked(),
+                "warn_supports": self._warn_supports_check.isChecked(),
+                "supports_patterns": [
+                    self._supports_patterns_list.item(i).text().strip()
+                    for i in range(self._supports_patterns_list.count())
+                    if self._supports_patterns_list.item(i).text().strip()
+                ],
                 "metadata_sidecar_enabled": self._metadata_sidecar_check.isChecked(),
                 "metadata_thumbnails": self._metadata_thumbnails_check.isChecked(),
                 "debug_menu_enabled": self._debug_menu_check.isChecked(),

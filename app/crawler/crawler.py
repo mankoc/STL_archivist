@@ -462,12 +462,17 @@ class CrawlerWorker(QThread):
         logger.debug("  Presupport detected: %s", presupport)
 
         # Deferred import avoids circular dependency (crawler → ui → crawler).
-        from app.ui.config_dialog import get_warn_presupported_stl, get_warn_no_images, get_warn_nested_archive
+        from app.ui.config_dialog import (
+            get_warn_presupported_stl, get_warn_no_images, get_warn_nested_archive,
+            get_warn_supports, get_supports_patterns,
+        )
         warnings = detect_warnings(
             all_names,
             check_presupported=get_warn_presupported_stl(),
             check_no_images=get_warn_no_images(),
             check_nested_archive=get_warn_nested_archive(),
+            check_supports=get_warn_supports(),
+            supports_patterns=get_supports_patterns(),
         )
         model.warning = warnings or None
         if warnings:
