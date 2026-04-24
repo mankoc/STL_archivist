@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox, QFileDialog, QMessageBox, QSpinBox,
     QComboBox, QCheckBox, QApplication,
     QListWidget, QListWidgetItem, QStackedWidget, QSplitter, QWidget, QStyle,
+    QTreeWidget, QTreeWidgetItem,
 )
 
 DATA_DIR_KEY           = "config/data_dir"
@@ -197,7 +198,10 @@ def apply_color_scheme(scheme_name: str) -> None:
 
 
 class ConfigDialog(QDialog):
-    """Multi-page settings dialog with sections for Database, Crawler, Browser, and Appearance.
+    """Multi-page settings dialog.
+
+    Sidebar sections:
+      Database | Crawler > Warnings | Browser | Appearance | Sidecar
 
     Settings are persisted in two places:
     - ``DATA_DIR_KEY`` and ``UNRAR_TOOL_KEY`` in ``QSettings`` (global, cross-library).
@@ -226,39 +230,53 @@ class ConfigDialog(QDialog):
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
 
-        # Left: section list
-        self._section_list = QListWidget()
-        self._section_list.setFixedWidth(140)
-        self._section_list.setIconSize(QSize(20, 20))
-        sp = QStyle.StandardPixmap
-        style = QApplication.style()
-        _sections = [
-            ("Database",   sp.SP_DriveHDIcon),
-            ("Crawler",    sp.SP_FileDialogDetailedView),
-            ("Browser",    sp.SP_DesktopIcon),
-            ("Appearance", sp.SP_TitleBarNormalButton),
-        ]
-        for name, pixmap in _sections:
-            item = QListWidgetItem(style.standardIcon(pixmap), name)
-            self._section_list.addItem(item)
-        self._section_list.currentRowChanged.connect(self._on_section_changed)
+        # Left: section tree
+        # Page indices must match the order pages are added to self._stack below.
+        # 0=Database  1=Crawler  2=Warnings(child)  3=Browser  4=Appearance  5=Sidecar
+        self._section_tree = QTreeWidget()
+        self._section_tree.setFixedWidth(155)
+        self._section_tree.setHeaderHidden(True)
+        self._section_tree.setIconSize(QSize(20, 20))
+        self._section_tree.setRootIsDecorated(True)
 
-        # Right: stacked pages
+        sp    = QStyle.StandardPixmap
+        style = QApplication.style()
+
+        def _item(parent, label: str, pixmap, page_idx: int) -> QTreeWidgetItem:
+            item = QTreeWidgetItem(parent, [label])
+            item.setIcon(0, style.standardIcon(pixmap))
+            item.setData(0, Qt.ItemDataRole.UserRole, page_idx)
+            return item
+
+        _item(self._section_tree, "Database",   sp.SP_DriveHDIcon,            0)
+        crawler_item = _item(self._section_tree, "Crawler", sp.SP_FileDialogDetailedView, 1)
+        _item(crawler_item,          "Warnings", sp.SP_MessageBoxWarning,      2)
+        _item(self._section_tree, "Browser",    sp.SP_DesktopIcon,             3)
+        _item(self._section_tree, "Appearance", sp.SP_TitleBarNormalButton,    4)
+        _item(self._section_tree, "Sidecar",    sp.SP_DialogSaveButton,        5)
+
+        crawler_item.setExpanded(True)
+        self._section_tree.currentItemChanged.connect(self._on_section_changed)
+
+        # Right: stacked pages (indices must match the numbers assigned above)
         self._stack = QStackedWidget()
 
-        splitter.addWidget(self._section_list)
+        splitter.addWidget(self._section_tree)
         splitter.addWidget(self._stack)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         root.addWidget(splitter)
 
-        # Build pages
-        self._stack.addWidget(self._build_database_page())
-        self._stack.addWidget(self._build_crawler_page())
-        self._stack.addWidget(self._build_browser_page())
-        self._stack.addWidget(self._build_appearance_page())
+        self._stack.addWidget(self._build_database_page())    # 0
+        self._stack.addWidget(self._build_crawler_page())     # 1
+        self._stack.addWidget(self._build_warnings_page())    # 2
+        self._stack.addWidget(self._build_browser_page())     # 3
+        self._stack.addWidget(self._build_appearance_page())  # 4
+        self._stack.addWidget(self._build_sidecar_page())     # 5
 
-        self._section_list.setCurrentRow(0)
+        self._section_tree.setCurrentItem(
+            self._section_tree.topLevelItem(0)
+        )
 
         # ---- Buttons ----
         buttons = QDialogButtonBox(
@@ -268,8 +286,12 @@ class ConfigDialog(QDialog):
         buttons.rejected.connect(self._cancel)
         root.addWidget(buttons)
 
-    def _on_section_changed(self, row: int) -> None:
-        self._stack.setCurrentIndex(row)
+    def _on_section_changed(self, current: QTreeWidgetItem, _previous) -> None:
+        if current is None:
+            return
+        page_idx = current.data(0, Qt.ItemDataRole.UserRole)
+        if page_idx is not None:
+            self._stack.setCurrentIndex(page_idx)
 
     # ---- Page builders ------------------------------------------------
 
@@ -358,13 +380,18 @@ class ConfigDialog(QDialog):
         )
 
         layout.addWidget(group)
+        layout.addStretch()
+        return page
 
-        warn_group = QGroupBox("Crawler Warnings")
-        warn_form  = QFormLayout(warn_group)
+    def _build_warnings_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        group = QGroupBox("Crawler Warnings")
+        form  = QFormLayout(group)
 
         self._warn_presupported_check = QCheckBox("Archive have presupported stls")
-        warn_form.addRow("", self._warn_presupported_check)
-        warn_form.addRow(
+        form.addRow("", self._warn_presupported_check)
+        form.addRow(
             "",
             QLabel(
                 "<small>Warn when an archive contains STL files matching "
@@ -373,8 +400,8 @@ class ConfigDialog(QDialog):
         )
 
         self._warn_no_images_check = QCheckBox("Archive contains images")
-        warn_form.addRow("", self._warn_no_images_check)
-        warn_form.addRow(
+        form.addRow("", self._warn_no_images_check)
+        form.addRow(
             "",
             QLabel(
                 "<small>Warn when an archive contains no image files "
@@ -383,8 +410,8 @@ class ConfigDialog(QDialog):
         )
 
         self._warn_nested_archive_check = QCheckBox("Archive inside archive")
-        warn_form.addRow("", self._warn_nested_archive_check)
-        warn_form.addRow(
+        form.addRow("", self._warn_nested_archive_check)
+        form.addRow(
             "",
             QLabel(
                 "<small>Warn when an archive contains another compressed archive "
@@ -393,8 +420,8 @@ class ConfigDialog(QDialog):
         )
 
         self._warn_supports_check = QCheckBox("Archive with supports")
-        warn_form.addRow("", self._warn_supports_check)
-        warn_form.addRow(
+        form.addRow("", self._warn_supports_check)
+        form.addRow(
             "",
             QLabel(
                 "<small>Warn when an archive contains files matching any of the "
@@ -423,17 +450,22 @@ class ConfigDialog(QDialog):
         sup_btn_row.addStretch()
         sup_layout.addLayout(sup_btn_row)
 
-        warn_form.addRow("", self._supports_patterns_widget)
+        form.addRow("", self._supports_patterns_widget)
         self._warn_supports_check.toggled.connect(self._supports_patterns_widget.setEnabled)
 
-        layout.addWidget(warn_group)
+        layout.addWidget(group)
+        layout.addStretch()
+        return page
 
-        meta_group = QGroupBox("Metadata Sidecar (METADATA.7z)")
-        meta_form  = QFormLayout(meta_group)
+    def _build_sidecar_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        group = QGroupBox("Metadata Sidecar (METADATA.7z)")
+        form  = QFormLayout(group)
 
         self._metadata_sidecar_check = QCheckBox("Enable metadata sidecar")
-        meta_form.addRow("", self._metadata_sidecar_check)
-        meta_form.addRow(
+        form.addRow("", self._metadata_sidecar_check)
+        form.addRow(
             "",
             QLabel(
                 "<small>When enabled, a <b>METADATA.7z</b> sidecar file is created "
@@ -444,8 +476,8 @@ class ConfigDialog(QDialog):
         )
 
         self._metadata_thumbnails_check = QCheckBox("Include thumbnails")
-        meta_form.addRow("", self._metadata_thumbnails_check)
-        meta_form.addRow(
+        form.addRow("", self._metadata_thumbnails_check)
+        form.addRow(
             "",
             QLabel(
                 "<small>When enabled, each folder's <b>METADATA.7z</b> sidecar will "
@@ -457,7 +489,7 @@ class ConfigDialog(QDialog):
 
         self._metadata_sidecar_check.toggled.connect(self._metadata_thumbnails_check.setEnabled)
 
-        layout.addWidget(meta_group)
+        layout.addWidget(group)
         layout.addStretch()
         return page
 
