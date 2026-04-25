@@ -6,12 +6,28 @@ keyed by a page-ID string.  Hyperlinks use the custom scheme  help:<page_id>
 and are intercepted by _on_anchor_clicked so QTextBrowser never tries to open
 them externally.
 """
+from pathlib import Path
+
 from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QDialogButtonBox,
     QTextBrowser, QListWidget, QListWidgetItem, QSplitter,
     QPushButton, QWidget,
 )
+
+_SCREENSHOTS_DIR = Path(__file__).parent.parent.parent / "resources" / "screenshots"
+
+
+def _screenshot(name: str) -> str:
+    """Return an <img> tag for a screenshot, or empty string if the file is missing."""
+    path = _SCREENSHOTS_DIR / name
+    if not path.exists():
+        return ""
+    return (
+        f'<p><img src="file://{path}" '
+        f'style="max-width:100%;border:1px solid #888;border-radius:4px;" '
+        f'alt="{path.stem}"></p>'
+    )
 
 # ── Page IDs ──────────────────────────────────────────────────────────────────
 PAGE_OVERVIEW    = "overview"
@@ -66,7 +82,35 @@ def _prev_next(current: str) -> str:
     )
 
 
+def _is_dark() -> bool:
+    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtGui import QPalette
+    return QApplication.palette().color(QPalette.ColorRole.Window).lightness() < 128
+
+
 def _css() -> str:
+    if _is_dark():
+        return """<style>
+body  { font-family: system-ui, sans-serif; font-size: 13px; margin: 8px 14px; }
+h1    { font-size: 17px; margin: 0 0 4px 0; }
+h2    { font-size: 14px; border-bottom: 1px solid #555; padding-bottom: 2px; margin-top: 16px; }
+h3    { font-size: 13px; margin-top: 10px; }
+table { border-collapse: collapse; width: 100%; margin: 6px 0; }
+td, th{ padding: 3px 8px; border: 1px solid #555; vertical-align: top; }
+th    { background: #3a3a3a; font-weight: bold; }
+code  { background: #3a3a3a; color: #e0e0e0; padding: 1px 4px; border-radius: 2px; font-size: 12px; }
+pre   { background: #2a2a2a; border: 1px solid #555; border-radius: 4px; color: #e0e0e0;
+        padding: 8px 10px; font-size: 11px; white-space: pre; overflow-x: auto; }
+.note { background: #3d3400; border-left: 3px solid #f9a825; padding: 5px 9px; margin: 6px 0; color: #ffe082; }
+.tip  { background: #1a3a1e; border-left: 3px solid #43a047; padding: 5px 9px; margin: 6px 0; color: #a5d6a7; }
+.warn { background: #3d1518; border-left: 3px solid #e53935; padding: 5px 9px; margin: 6px 0; color: #ef9a9a; }
+.kb   { display: inline-block; padding: 1px 5px; border: 1px solid #666;
+        border-radius: 3px; background: #3a3a3a; color: #e0e0e0; font-family: monospace; font-size: 11px; }
+a     { color: #64b5f6; text-decoration: none; }
+a:hover { text-decoration: underline; }
+ul, ol { margin: 4px 0; padding-left: 20px; }
+li    { margin: 2px 0; }
+</style>"""
     return """<style>
 body  { font-family: system-ui, sans-serif; font-size: 13px; margin: 8px 14px; }
 h1    { font-size: 17px; margin: 0 0 4px 0; }
@@ -75,14 +119,14 @@ h3    { font-size: 13px; margin-top: 10px; }
 table { border-collapse: collapse; width: 100%; margin: 6px 0; }
 td, th{ padding: 3px 8px; border: 1px solid #ccc; vertical-align: top; }
 th    { background: #e8e8e8; font-weight: bold; }
-code  { background: #f0f0f0; padding: 1px 4px; border-radius: 2px; font-size: 12px; }
-pre   { background: #f5f5f5; border: 1px solid #ddd; border-radius: 4px;
+code  { background: #f0f0f0; color: #222; padding: 1px 4px; border-radius: 2px; font-size: 12px; }
+pre   { background: #f5f5f5; border: 1px solid #ddd; border-radius: 4px; color: #222;
         padding: 8px 10px; font-size: 11px; white-space: pre; overflow-x: auto; }
-.note { background: #fff8e1; border-left: 3px solid #f9a825; padding: 5px 9px; margin: 6px 0; }
-.tip  { background: #e8f5e9; border-left: 3px solid #43a047; padding: 5px 9px; margin: 6px 0; }
-.warn { background: #fce4ec; border-left: 3px solid #e53935; padding: 5px 9px; margin: 6px 0; }
+.note { background: #fff8e1; border-left: 3px solid #f9a825; padding: 5px 9px; margin: 6px 0; color: #5d4037; }
+.tip  { background: #e8f5e9; border-left: 3px solid #43a047; padding: 5px 9px; margin: 6px 0; color: #1b5e20; }
+.warn { background: #fce4ec; border-left: 3px solid #e53935; padding: 5px 9px; margin: 6px 0; color: #b71c1c; }
 .kb   { display: inline-block; padding: 1px 5px; border: 1px solid #aaa;
-        border-radius: 3px; background: #f0f0f0; font-family: monospace; font-size: 11px; }
+        border-radius: 3px; background: #f0f0f0; color: #222; font-family: monospace; font-size: 11px; }
 a     { color: #1565c0; text-decoration: none; }
 a:hover { text-decoration: underline; }
 ul, ol { margin: 4px 0; padding-left: 20px; }
@@ -159,20 +203,7 @@ def _page_browser() -> str:
 with a filter panel on the left and an image preview pane on the right.</p>
 
 <h2>Layout</h2>
-<pre>
-&#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
-&#9474;  [Open Crawler]  [Refresh]  [Image Grid]  [Images]    &#8592; toolbar  &#9474;
-&#9500;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9516;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9516;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9508;
-&#9474; Filter Panel  &#9474;       Model Table          &#9474; Image Preview&#9474;
-&#9474;               &#9474;  Thumb Title  Author  ...  &#9474;              &#9474;
-&#9474;  Authors &#9658;    &#9474;  &#9608;    Model A  Jane   ...  &#9474;  [thumbnail] &#9474;
-&#9474;  Tags &#9658;       &#9474;  &#9608;    Model B  John   ...  &#9474;  [thumbnail] &#9474;
-&#9474;  Category &#9658;   &#9474;  &#9608;    Model C  Jane   ...  &#9474;              &#9474;
-&#9474;  ...           &#9474;                             &#9474;              &#9474;
-&#9474; [Clear]       &#9474;                             &#9474;              &#9474;
-&#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9524;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9524;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;
-  18 models                                          &#8592; status bar</pre>
-
+{_screenshot("main_window.jpg")}
 <h2>Table Columns</h2>
 <table>
   <tr><th>Column</th><th>Description</th></tr>
@@ -308,16 +339,7 @@ for a specific model by appearance rather than name.</p>
 The grid reflects the current filter state: only models shown in the table appear in the grid.</p>
 
 <h2>Layout</h2>
-<pre>
-&#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
-&#9474;  Size: [&#9608;&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;&#9617;]  60&#9472;300 px  (slider)    &#9474;
-&#9500;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9508;
-&#9474;  &#9608;&#9608;&#9608;&#9608;&#9608;  &#9608;&#9608;&#9608;&#9608;&#9608;  &#9608;&#9608;&#9608;&#9608;&#9608;  &#9608;&#9608;&#9608;&#9608;&#9608;  &#9608;&#9608;&#9608;&#9608;&#9608; &#9474;
-&#9474;  Title  Title  Title  Title  Title &#9474;
-&#9474;                                              &#9474;
-&#9474;  &#9608;&#9608;&#9608;&#9608;&#9608;  &#9608;&#9608;&#9608;&#9608;&#9608;  &#9608;&#9608;&#9608;&#9608;&#9608;  ...               &#9474;
-&#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;</pre>
-
+{_screenshot("image_grid.jpg")}
 <h2>Size Slider</h2>
 <p>Drag the <b>Size</b> slider at the top of the grid to resize all thumbnails between
 <b>60 px</b> and <b>300 px</b> on the longest side. The grid reflows automatically.</p>
@@ -355,20 +377,7 @@ are skipped on subsequent runs, making incremental updates fast.</p>
 (<span class="kb">Ctrl+O</span>).  The crawler runs in a docked tab inside the main window.</p>
 
 <h2>Crawler Tab Layout</h2>
-<pre>
-&#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
-&#9474; Root folder: [/mnt/f/STL  _______________] [&#9552;] &#9474;
-&#9474; Pattern:     [{source}/{author}/*/{name}] [?] &#9474;
-&#9474; Saved:  [My Pattern &#9660;]  [Save]  [Delete]      &#9474;
-&#9474; Preview: source=Patreon  author=Jane  ...         &#9474;
-&#9500;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9508;
-&#9474; [Start Crawl]  [Stop]    Progress: 42/180       &#9474;
-&#9474; Log:                                             &#9474;
-&#9474;   Hashing...  OK  model_a.zip                   &#9474;
-&#9474;   Skipped (unchanged):  model_b.zip             &#9474;
-&#9474;   Added:  model_c.zip                           &#9474;
-&#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;</pre>
-
+{_screenshot("crawler.jpg")}
 <h2>Steps</h2>
 <ol>
   <li>Click <b>&#9556;</b> (Browse) next to <em>Root folder</em> and select the top-level directory
@@ -512,26 +521,7 @@ def _page_editor() -> str:
 </ul>
 
 <h2>Layout</h2>
-<pre>
-&#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
-&#9474;  &#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;  &#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;  &#9608;&#9608;&#9608;&#9608;&#9608;&#9608;&#9608;     &#9474;  &#8592; thumbnails
-&#9500;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9508;
-&#9474;  Title         [dragon_warrior        ] &#9474;
-&#9474;  Author        [Jane Doe              ] &#9474;
-&#9474;  Source        [Patreon               ] &#9474;
-&#9474;  Date          [2024-01               ] &#9474;
-&#9474;  Sculptor      [                      ] &#9474;
-&#9474;  Category      [Fantasy         &#9660;    ] &#9474;
-&#9474;  Subcategory   [Warriors        &#9660;    ] &#9474;
-&#9474;  Release       [January Drop    &#9660;    ] &#9474;
-&#9474;  Scale         [32mm            &#9660;    ] &#9474;
-&#9474;  Presupports   [Lychee          &#9660;    ] &#9474;
-&#9474;  Tags          [fantasy, warrior      ] &#9474;
-&#9474;  Notes         [                      ] &#9474;
-&#9500;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9508;
-&#9474;           [Save]          [Cancel]         &#9474;
-&#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;</pre>
-
+{_screenshot("model_editor.jpg")}
 <h2>Fields</h2>
 <table>
   <tr><th>Field</th><th>Notes</th></tr>
@@ -566,25 +556,7 @@ models</b> in a single operation.  Leave a field empty to leave it unchanged.</p
 </ul>
 
 <h2>Layout</h2>
-<pre>
-&#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
-&#9474;  Parse fields from archive path (optional)          &#9474;
-&#9474;  Example: /mnt/f/Patreons/Jane/2024/dragon.zip      &#9474;
-&#9474;  Saved: [My Pattern &#9660;]  [Save]  [Delete]  [?]     &#9474;
-&#9474;  Pattern: [/mnt/f/{source}/{author}/*/{name}____]   &#9474;
-&#9474;  [Parse &#9654;]  source=Patreons  author=Jane  ...     &#9474;
-&#9500;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9508;
-&#9474;  Set fields manually (leave blank = no change)      &#9474;
-&#9474;  Author        [                            ]        &#9474;
-&#9474;  Source        [                            ]        &#9474;
-&#9474;  Category      [                       &#9660;    ]        &#9474;
-&#9474;  Tags (add)    [                            ]        &#9474;
-&#9474;  Presupports   [&mdash; no change &mdash;          &#9660;    ]        &#9474;
-&#9474;  ...                                                &#9474;
-&#9500;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9508;
-&#9474;             [Apply to N models]  [Cancel]           &#9474;
-&#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;</pre>
-
+{_screenshot("mass_editor.jpg")}
 <h2>Manual Field Overwrite</h2>
 <p>Fill in any field in the lower section to overwrite that field on all selected models.
 Leaving a field empty means &ldquo;do not change&rdquo;. The Title field is deliberately absent
@@ -738,18 +710,7 @@ collection to a new machine, so the sidecar snapshots are up-to-date.</p>
 <p>Open via <b>Tools &rarr; Database Maintenance&hellip;</b></p>
 <p>The maintenance dialog helps you keep the database consistent with the files on disk:</p>
 
-<pre>
-&#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
-&#9474;  [Verify]  [Stop]  [Search folder]               &#9474;
-&#9474;  [Remove selected]  [Remove all failed]  [Close]  &#9474;
-&#9474;  Progress: [===========         ]                 &#9474;
-&#9474;  &#9632; Show only failed                               &#9474;
-&#9474;  ID   Title          Path              Status     &#9474;
-&#9474;  12   dragon_warrior /mnt/f/...        &#10003; OK      &#9474;
-&#9474;  47   orc_berseker   /mnt/old/...      &#10007; Missing &#9474;
-&#9474;  ...                                              &#9474;
-&#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;</pre>
-
+{_screenshot("db_mant.jpg")}
 <table>
   <tr><th>Button</th><th>Action</th></tr>
   <tr><td><b>Verify</b></td>
@@ -852,6 +813,10 @@ class HelpDialog(QDialog):
 
         self._browser = QTextBrowser()
         self._browser.setOpenLinks(False)
+        self._browser.setStyleSheet(
+            "QTextBrowser { selection-background-color: palette(highlight);"
+            "                selection-color: palette(highlighted-text); }"
+        )
         self._browser.anchorClicked.connect(self._on_anchor_clicked)
         right_layout.addWidget(self._browser)
 
