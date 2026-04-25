@@ -35,6 +35,7 @@ PAGE_BROWSER     = "browser"
 PAGE_FILTER      = "filter"
 PAGE_IMAGEGRID   = "imagegrid"
 PAGE_CRAWLER     = "crawler"
+PAGE_SIDECARS    = "sidecars"
 PAGE_TAGS        = "tags"
 PAGE_EDITOR      = "editor"
 PAGE_MASS_EDITOR = "mass_editor"
@@ -47,6 +48,7 @@ _NAV_ITEMS = [
     (PAGE_FILTER,      "Filter Panel"),
     (PAGE_IMAGEGRID,   "Image Grid"),
     (PAGE_CRAWLER,     "Crawler"),
+    (PAGE_SIDECARS,    "Metadata Sidecars"),
     (PAGE_TAGS,        "Tags"),
     (PAGE_EDITOR,      "Model Editor"),
     (PAGE_MASS_EDITOR, "Mass Editor"),
@@ -736,12 +738,86 @@ review the list carefully before clicking <b>Remove all failed</b>.</div>
 
 # ── Page registry ─────────────────────────────────────────────────────────────
 
+def _page_sidecars() -> str:
+    return _css() + _nav_bar(PAGE_SIDECARS) + f"""
+<h1>Metadata Sidecars</h1>
+<p>A <b>metadata sidecar</b> is a file named <code>METADATA.7z</code> that the crawler
+writes into each archive folder after processing it.  It stores a snapshot of every
+model&rsquo;s database record for that folder, and optionally its JPEG thumbnails.
+The main purpose is a <b>fast restore</b>: when you move your collection to a new
+machine you can rebuild the entire database by importing the sidecars rather than
+re-crawling and re-extracting every archive from scratch.</p>
+
+<h2>What Is Inside METADATA.7z</h2>
+<table>
+  <tr><th>Member</th><th>Contents</th></tr>
+  <tr><td><code>metadata.json</code></td>
+      <td>A JSON snapshot of all DB fields for every direct-child archive in the folder
+          (title, author, tags, category, presupports, date, &hellip;) plus a schema
+          version number and a write timestamp.</td></tr>
+  <tr><td><code>thumbnails/</code></td>
+      <td>JPEG thumbnails for the models, included only when
+          <em>Include thumbnails in sidecar</em> is enabled in
+          {_link(PAGE_CONFIG, "Configuration")}.</td></tr>
+</table>
+
+<h2>Enabling Sidecars</h2>
+<p>Sidecars are <b>opt-in</b>.  Enable them in
+<b>File &rarr; Configuration&hellip; &rarr; Metadata Sidecar</b>:</p>
+<ul>
+  <li><b>Enable metadata sidecars</b> &mdash; must be on for any sidecar activity to occur.</li>
+  <li><b>Include thumbnails</b> &mdash; embeds JPEG thumbnails inside the sidecar.
+      Makes the file larger but lets a restore work without any internet access or
+      re-extraction of original archives.</li>
+</ul>
+<div class="note">When sidecars are disabled the crawler never writes or reads
+<code>METADATA.7z</code> and the <b>Tools &rarr; Generate / Update Metadata Sidecars</b>
+menu item is greyed out.</div>
+
+<h2>How Sidecars Are Written</h2>
+<p>There are two ways a sidecar gets created or updated:</p>
+<ol>
+  <li><b>Automatically after each crawl</b> &mdash; once the crawler finishes processing
+      a folder it writes (or refreshes) the <code>METADATA.7z</code> for that folder.
+      Only folders that had at least one archive added or updated are touched.</li>
+  <li><b>Manually via Tools</b> &mdash; open
+      <b>Tools &rarr; Generate / Update Metadata Sidecars&hellip;</b> to refresh the
+      sidecar for <em>every</em> folder in the database in one operation.
+      Use this after a bulk edit or before moving the collection.</li>
+</ol>
+
+<h2>Restore Workflow (New Machine)</h2>
+<ol>
+  <li>Copy or mount your archive collection on the new machine.</li>
+  <li>Install the application and set the <em>Data Directory</em> in Configuration.</li>
+  <li>Enable <em>Metadata sidecars</em> in Configuration.</li>
+  <li>Open the Crawler, point it at the root folder, and start a crawl.
+      The crawler detects the <code>METADATA.7z</code> sidecars and imports their
+      contents into the database before extracting any archive &mdash; only archives
+      whose CRC has changed since the snapshot was written are fully re-extracted.</li>
+</ol>
+<div class="tip">Tip: if you also enabled <em>Include thumbnails</em> before the move,
+the restore will populate all thumbnails from the sidecar without touching the
+original archive files at all.</div>
+
+<h2>Sidecar vs. Full Crawl</h2>
+<table>
+  <tr><th></th><th>Full crawl (no sidecar)</th><th>Crawl with sidecar import</th></tr>
+  <tr><td>Reads metadata from</td><td>Inside each archive</td><td>METADATA.7z first, then archive for changed files</td></tr>
+  <tr><td>Reads thumbnails from</td><td>Decompresses each archive</td><td>METADATA.7z (if thumbnails included)</td></tr>
+  <tr><td>Speed on unchanged collection</td><td>Fast (CRC skip)</td><td>Faster (no archive I/O at all)</td></tr>
+  <tr><td>Requires original archives</td><td>Yes</td><td>Only for files changed since last snapshot</td></tr>
+</table>
+{_prev_next(PAGE_SIDECARS)}"""
+
+
 _PAGES: dict[str, object] = {
     PAGE_OVERVIEW:    _page_overview,
     PAGE_BROWSER:     _page_browser,
     PAGE_FILTER:      _page_filter,
     PAGE_IMAGEGRID:   _page_imagegrid,
     PAGE_CRAWLER:     _page_crawler,
+    PAGE_SIDECARS:    _page_sidecars,
     PAGE_TAGS:        _page_tags,
     PAGE_EDITOR:      _page_editor,
     PAGE_MASS_EDITOR: _page_mass_editor,
