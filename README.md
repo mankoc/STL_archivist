@@ -11,8 +11,9 @@ A desktop application for cataloguing and browsing your local collection of 3D p
 - **Presupport detection** — identifies whether an archive contains Lychee, Chitubox, or presupported STL files
 - **Crawler warnings** — flags archives that contain presupported STLs, no images, or nested archives
 - **Tagging** — add and manage tags per model for easy filtering
-- **Browser** — search, filter, and browse your collection with inline editing, multi-value filters, and a clear-filters button
-- **Image grid** — display a grid of thumbnails for the currently filtered set of models
+- **Browser** — search, filter, and browse your collection with inline editing, tri-state filters (include / exclude / no filter), and a clear-filters button
+- **Filter panel** — each filter group header shows an icon and acts as a "has value / no value" toggle; individual values cycle through include (green **+**), exclude (red **−**), and off states
+- **Image grid** — display a scrollable grid of thumbnails for the currently filtered set of models; resize thumbnails live with a slider (60–300 px)
 - **Editor** — edit model metadata (title, author, sculptor, category, subcategory, release, scale, presupports, source, URL, date, sequence, tags)
 - **Mass editor** — apply bulk changes across multiple models at once, including category and subcategory
 - **Metadata sidecars** — export a `METADATA.7z` snapshot into every archive folder so the library can be restored on a new machine without re-crawling; optionally includes thumbnails
@@ -113,10 +114,18 @@ Progress and log output are written to stdout.
 
 ### 3. Browse and edit
 
-- Use the search bar and filter tree (Author / Tags / Type / Date / Path) to narrow down the collection.
-- Use the multi-value filter checkboxes and the **Clear** button to reset filters quickly.
+- Use the search bar and filter tree (Authors / Tags / Type / Date / Sculptor / Category / Subcategory / Release / Scale / Presupports / Warnings / Path) to narrow down the collection.
+- **Filter indicators** use colored circles:
+  - Gray circle — no filter active for this value
+  - Green **+** — include rows matching this value
+  - Red **−** — exclude rows matching this value
+- **Click a leaf value** to cycle through include → exclude → off.
+- **Click the checkbox icon on a group header** (e.g. Authors, Tags) to filter by whether models have *any* value for that field:
+  - Green **+** — show only models that have a value for this field
+  - Red **−** — show only models that have *no* value for this field
+- Use the **Clear** button to reset all active filters.
 - Double-click a row (or press `E`) to open the **Editor** and update model details.
-- Click **Image Grid** in the toolbar to view thumbnails for all currently displayed models.
+- Click **Image Grid** in the toolbar to view thumbnails for all currently displayed models. Use the **Size** slider at the top of the grid to resize thumbnails from 60 to 300 px.
 - Click the **image pane** toolbar button (or use the View menu) to toggle the thumbnail sidebar.
 - Right-click for context-menu options: edit, mass-edit, delete, generate thumbnails, create/update sidecar, and (if enabled) sort files into a directory.
 - Use **Mass Edit** to apply changes to multiple selected rows at once.
