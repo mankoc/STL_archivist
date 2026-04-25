@@ -112,6 +112,40 @@ class MainWindow(QMainWindow):
         act_gen_thumbs.triggered.connect(self._browser.generate_thumbnails_for_selected)
         tools_menu.addAction(act_gen_thumbs)
 
+        tools_menu.addSeparator()
+
+        act_db_maintenance = QAction(
+            style.standardIcon(SP.SP_FileDialogDetailedView),
+            "Database Maintenance…",
+            self,
+        )
+        act_db_maintenance.setStatusTip(
+            "Verify archive files exist, relocate moved archives, or remove stale records"
+        )
+        act_db_maintenance.triggered.connect(self._open_db_maintenance_dialog)
+        tools_menu.addAction(act_db_maintenance)
+
+        stats_menu = mb.addMenu("&Statistics")
+        act_statistics = QAction(
+            style.standardIcon(SP.SP_FileDialogInfoView),
+            "Show Statistics…",
+            self,
+        )
+        act_statistics.setStatusTip("Show aggregated statistics about the database")
+        act_statistics.triggered.connect(self._open_statistics_dialog)
+        stats_menu.addAction(act_statistics)
+
+        act_col_stats = QAction(
+            style.standardIcon(SP.SP_FileDialogListView),
+            "Column Distribution…",
+            self,
+        )
+        act_col_stats.setStatusTip(
+            "Show a bar chart of how models are distributed across any column"
+        )
+        act_col_stats.triggered.connect(self._open_column_stats_dialog)
+        stats_menu.addAction(act_col_stats)
+
         self._debug_menu = mb.addMenu("&Debug")
         act_clear_db = QAction(
             style.standardIcon(SP.SP_TrashIcon), "Delete Database…", self)
@@ -168,6 +202,23 @@ class MainWindow(QMainWindow):
         """Open the metadata sidecar generation dialog."""
         from app.ui.metadata_sidecar_dialog import MetadataSidecarDialog
         MetadataSidecarDialog(parent=self).exec()
+
+    def _open_db_maintenance_dialog(self) -> None:
+        """Open the database maintenance dialog."""
+        from app.ui.db_maintenance_dialog import DbMaintenanceDialog
+        dialog = DbMaintenanceDialog(parent=self)
+        dialog.exec()
+        self._browser.refresh()
+
+    def _open_statistics_dialog(self) -> None:
+        """Open the database statistics dialog."""
+        from app.ui.statistics_dialog import StatisticsDialog
+        StatisticsDialog(parent=self).exec()
+
+    def _open_column_stats_dialog(self) -> None:
+        """Open the column distribution dialog."""
+        from app.ui.column_stats_dialog import ColumnStatsDialog
+        ColumnStatsDialog(parent=self).exec()
 
     def _apply_debug_menu_visibility(self) -> None:
         """Show or hide the Debug menu and sidecar action based on current settings."""
