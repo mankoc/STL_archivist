@@ -9,8 +9,8 @@ from pathlib import Path as FSPath
 
 _ICONS_DIR = FSPath(__file__).parent.parent.parent / "resources" / "icons"
 
-from PyQt6.QtCore import Qt, QSortFilterProxyModel, QSize, QStringListModel, QEvent, pyqtSignal, QItemSelection, QTimer, QThread
-from PyQt6.QtGui import QStandardItemModel, QStandardItem, QPixmap, QIcon, QKeySequence, QShortcut, QColor, QFont
+from PyQt6.QtCore import Qt, QSortFilterProxyModel, QSize, QStringListModel, QEvent, pyqtSignal, QItemSelection, QTimer, QThread, QRect, QPointF, QRectF
+from PyQt6.QtGui import QStandardItemModel, QStandardItem, QPixmap, QIcon, QKeySequence, QShortcut, QColor, QFont, QPainter, QPen
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
     QTreeWidget, QTreeWidgetItem, QTableView,
@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QMenu, QScrollArea, QFrame, QInputDialog, QMessageBox,
     QStyledItemDelegate, QComboBox, QCompleter,
     QDialog, QSizePolicy, QApplication, QPushButton,
-    QProgressDialog,
+    QProgressDialog, QStyle, QStyleOptionViewItem,
 )
 from PyQt6.QtCore import QSettings
 
@@ -380,6 +380,163 @@ class ThumbnailGeneratorWorker(QThread):
         self.finished.emit()
 
 
+class FilterItemDelegate(QStyledItemDelegate):
+    """Replaces Qt's default tristate checkbox with colored circle indicators:
+        Unchecked        — gray outline circle  (not selected)
+        Checked          — green filled circle with white +  (include)
+        PartiallyChecked — red filled circle with white −  (exclude)
+    """
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
+        is_checkable = bool(index.flags() & Qt.ItemFlag.ItemIsUserCheckable)
+        check_state  = index.data(Qt.ItemDataRole.CheckStateRole)
+
+        if not is_checkable or check_state is None:
+            super().paint(painter, option, index)
+            return
+
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+
+        widget = option.widget
+        style  = widget.style() if widget else QApplication.style()
+
+        check_rect = style.subElementRect(
+            QStyle.SubElement.SE_ItemViewItemCheckIndicator, opt, widget
+        )
+
+        # Let the style draw the full item (icon + text + selection background).
+        # Then overdraw the default checkbox indicator with our custom circle.
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, widget)
+
+        if check_rect.isValid():
+            self._draw_indicator(painter, check_rect, Qt.CheckState(check_state))
+
+    @staticmethod
+    def _draw_indicator(painter: QPainter, rect: QRect, state: Qt.CheckState) -> None:
+        size = (min(rect.width(), rect.height()) - 4) * 1.5
+        if size < 4:
+            return
+        cx   = rect.center().x()
+        cy   = rect.center().y()
+        half = size / 2.0
+        rf   = QRectF(cx - half, cy - half, size, size)
+        pw   = max(1.5, size * 0.14)
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        if state == Qt.CheckState.Unchecked:
+            # Neutral gray circle — "parent / not selected"
+            painter.setPen(QPen(QColor("#888888"), 1.5))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(rf)
+
+        elif state == Qt.CheckState.Checked:
+            # Green filled circle with white "+"
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor("#4CAF50"))
+            painter.drawEllipse(rf)
+            pen = QPen(QColor("white"), pw, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            pad = 0.25
+            painter.drawLine(QPointF(cx, cy - half * (1 - pad * 2)),
+                             QPointF(cx, cy + half * (1 - pad * 2)))
+            painter.drawLine(QPointF(cx - half * (1 - pad * 2), cy),
+                             QPointF(cx + half * (1 - pad * 2), cy))
+
+        elif state == Qt.CheckState.PartiallyChecked:
+            # Red filled circle with white "−"
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor("#F44336"))
+            painter.drawEllipse(rf)
+            pen = QPen(QColor("white"), pw, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            pad = 0.25
+            painter.drawLine(QPointF(cx - half * (1 - pad * 2), cy),
+                             QPointF(cx + half * (1 - pad * 2), cy))
+
+        painter.restore()
+
+
+class FilterTreeWidget(QTreeWidget):
+    """QTreeWidget whose checkable items cycle through three states on every click
+    (Unchecked → Checked → PartiallyChecked → Unchecked), whether the click lands
+    on the checkbox indicator or the item text.
+
+    State semantics:
+        Unchecked       — no filter applied for this value
+        Checked         — include items that match this value
+        PartiallyChecked — exclude items that match this value
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.setItemDelegate(FilterItemDelegate(self))
+        # Maps id(item) → state before the last checkbox click so _on_filter_item_changed
+        # can decide which state comes next in the cycle.
+        self._pre_click_states: dict[int, Qt.CheckState] = {}
+
+    # ------------------------------------------------------------------
+    def mousePressEvent(self, event) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
+            super().mousePressEvent(event)
+            return
+
+        item = self.itemAt(event.pos())
+        if item is None or not (item.flags() & Qt.ItemFlag.ItemIsUserCheckable):
+            super().mousePressEvent(event)
+            return
+
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if data is None:
+            super().mousePressEvent(event)
+            return
+
+        # Determine whether the click landed on the checkbox widget.
+        vis_rect = self.visualItemRect(item)
+        indicator_w = self.style().pixelMetric(
+            QStyle.PixelMetric.PM_IndicatorWidth, None, self
+        )
+        is_checkbox_click = event.pos().x() <= vis_rect.left() + indicator_w + 4
+
+        if is_checkbox_click:
+            # Store pre-click state; let Qt perform its normal Unchecked↔Checked toggle,
+            # then _on_filter_item_changed will complete the 3-step cycle.
+            self._pre_click_states[id(item)] = item.checkState(0)
+            super().mousePressEvent(event)
+        else:
+            data_tuple = item.data(0, Qt.ItemDataRole.UserRole)
+            if isinstance(data_tuple, tuple) and data_tuple[0] == "group":
+                # Group header text click → expand/collapse only; state changes via checkbox.
+                super().mousePressEvent(event)
+            else:
+                # Leaf / path item text click → advance through the full 3-state cycle.
+                new_state = self._next_check_state(item.checkState(0))
+                self.blockSignals(True)
+                item.setCheckState(0, new_state)
+                self.blockSignals(False)
+                self.itemChanged.emit(item, 0)
+                event.accept()
+
+    @staticmethod
+    def _next_check_state(state: Qt.CheckState) -> Qt.CheckState:
+        if state == Qt.CheckState.Unchecked:
+            return Qt.CheckState.Checked
+        if state == Qt.CheckState.Checked:
+            return Qt.CheckState.PartiallyChecked
+        return Qt.CheckState.Unchecked
+
+    def _clear_all(self, root: QTreeWidgetItem) -> None:
+        d = root.data(0, Qt.ItemDataRole.UserRole)
+        if d is not None and (root.flags() & Qt.ItemFlag.ItemIsUserCheckable):
+            root.setCheckState(0, Qt.CheckState.Unchecked)
+        for i in range(root.childCount()):
+            self._clear_all(root.child(i))
+
+
 class BrowserTab(QWidget):
     """Main model-browser widget.
 
@@ -439,7 +596,7 @@ class BrowserTab(QWidget):
         filter_header.addWidget(self._clear_filters_btn)
         left_layout.addLayout(filter_header)
 
-        self._filter_tree = QTreeWidget()
+        self._filter_tree = FilterTreeWidget()
         self._filter_tree.setHeaderHidden(True)
         self._filter_tree.itemChanged.connect(self._on_filter_item_changed)
         left_layout.addWidget(self._filter_tree)
@@ -573,7 +730,8 @@ class BrowserTab(QWidget):
         """Rebuild the left-panel filter tree from the current DB contents."""
         # Save checked items and expanded top-level sections so they survive the rebuild.
         # expanded_sections is None on the very first call (tree is empty) → default collapsed.
-        checked_data: set = set()
+        checked_data:  set = set()
+        excluded_data: set = set()
         expanded_sections: set[str] | None = None
 
         root_item = self._filter_tree.invisibleRootItem()
@@ -581,8 +739,12 @@ class BrowserTab(QWidget):
             expanded_sections = set()
             def _collect_state(item: QTreeWidgetItem):
                 d = item.data(0, Qt.ItemDataRole.UserRole)
-                if d and item.checkState(0) == Qt.CheckState.Checked:
-                    checked_data.add(d)
+                if d:
+                    state = item.checkState(0)
+                    if state == Qt.CheckState.Checked:
+                        checked_data.add(d)
+                    elif state == Qt.CheckState.PartiallyChecked:
+                        excluded_data.add(d)
                 if item.childCount() and item.isExpanded():
                     expanded_sections.add(item.text(0))
                 for i in range(item.childCount()):
@@ -600,13 +762,18 @@ class BrowserTab(QWidget):
             p = _ICONS_DIR / f"{name}_{_v}.svg"
             return QIcon(str(p)) if p.exists() else QIcon()
 
-        _icon_author = _icon("icon_author")
-        _icon_tag    = _icon("icon_tag")
-        _icon_type   = _icon("icon_type")
-        _icon_path   = _icon("icon_path")
-        _icon_date   = (_icon("icon_date") if (_ICONS_DIR / f"icon_date_{_v}.svg").exists()
-                        else QApplication.style().standardIcon(
-                            QApplication.style().StandardPixmap.SP_FileDialogContentsView))
+        _icon_author      = _icon("icon_author")
+        _icon_tag         = _icon("icon_tag")
+        _icon_type        = _icon("icon_type")
+        _icon_path        = _icon("icon_path")
+        _icon_date        = _icon("icon_date")
+        _icon_sculptor    = _icon("icon_sculptor")
+        _icon_category    = _icon("icon_category")
+        _icon_subcategory = _icon("icon_subcategory")
+        _icon_release     = _icon("icon_release")
+        _icon_scale       = _icon("icon_scale")
+        _icon_presupports = _icon("icon_presupports")
+        _icon_warnings    = _icon("icon_warnings")
 
         _CHECKABLE = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable
 
@@ -614,20 +781,32 @@ class BrowserTab(QWidget):
             item = QTreeWidgetItem([label])
             item.setData(0, Qt.ItemDataRole.UserRole, data)
             item.setFlags(_CHECKABLE)
-            state = Qt.CheckState.Checked if data in checked_data else Qt.CheckState.Unchecked
+            if data in checked_data:
+                state = Qt.CheckState.Checked
+            elif data in excluded_data:
+                state = Qt.CheckState.PartiallyChecked
+            else:
+                state = Qt.CheckState.Unchecked
             item.setCheckState(0, state)
             return item
 
         header = self._table.horizontalHeader()
-        show_author = not header.isSectionHidden(COL_AUTHOR)
-        show_tags   = not header.isSectionHidden(COL_TAGS)
-        show_source = not header.isSectionHidden(COL_SOURCE)
-        show_date   = not header.isSectionHidden(COL_DATE)
+        show_author      = not header.isSectionHidden(COL_AUTHOR)
+        show_tags        = not header.isSectionHidden(COL_TAGS)
+        show_source      = not header.isSectionHidden(COL_SOURCE)
+        show_date        = not header.isSectionHidden(COL_DATE)
+        show_sculptor    = not header.isSectionHidden(COL_SCULPTOR)
+        show_category    = not header.isSectionHidden(COL_CATEGORY)
+        show_subcategory = not header.isSectionHidden(COL_SUBCATEGORY)
+        show_release     = not header.isSectionHidden(COL_RELEASE)
+        show_scale       = not header.isSectionHidden(COL_SCALE)
+        show_presupports = not header.isSectionHidden(COL_PRESUPPORTED)
+        show_warnings    = not header.isSectionHidden(COL_WARNING)
 
         session = get_session()
         try:
             if show_author:
-                authors_item = QTreeWidgetItem(["Authors"])
+                authors_item = _make_leaf("Authors", ("group", "author"))
                 authors_item.setIcon(0, _icon_author)
                 self._filter_tree.addTopLevelItem(authors_item)
                 for (author,) in session.query(STLModel.author).distinct().order_by(STLModel.author).all():
@@ -635,14 +814,14 @@ class BrowserTab(QWidget):
                         authors_item.addChild(_make_leaf(author, ("author", author)))
 
             if show_tags:
-                tags_item = QTreeWidgetItem(["Tags"])
+                tags_item = _make_leaf("Tags", ("group", "tag"))
                 tags_item.setIcon(0, _icon_tag)
                 self._filter_tree.addTopLevelItem(tags_item)
                 for tag in session.query(Tag).order_by(Tag.name).all():
                     tags_item.addChild(_make_leaf(tag.name, ("tag", tag.name)))
 
             if show_source:
-                types_item = QTreeWidgetItem(["Type"])
+                types_item = _make_leaf("Type", ("group", "source"))
                 types_item.setIcon(0, _icon_type)
                 self._filter_tree.addTopLevelItem(types_item)
                 for (t,) in session.query(STLModel.source).distinct().order_by(STLModel.source).all():
@@ -654,7 +833,7 @@ class BrowserTab(QWidget):
                     "", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
                     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
                 ]
-                dates_item = QTreeWidgetItem(["Date"])
+                dates_item = _make_leaf("Date", ("group", "date"))
                 dates_item.setIcon(0, _icon_date)
                 self._filter_tree.addTopLevelItem(dates_item)
                 rows = (
@@ -676,7 +855,74 @@ class BrowserTab(QWidget):
                             _make_leaf(label, ("date_month", (year, month)))
                         )
 
-            paths_item = QTreeWidgetItem(["Path"])
+            if show_sculptor:
+                sculptor_item = _make_leaf("Sculptor", ("group", "sculptor"))
+                sculptor_item.setIcon(0, _icon_sculptor)
+                self._filter_tree.addTopLevelItem(sculptor_item)
+                for sc in session.query(Sculptor).order_by(Sculptor.name).all():
+                    sculptor_item.addChild(_make_leaf(sc.name, ("sculptor_id", sc.id)))
+
+            if show_category:
+                category_item = _make_leaf("Category", ("group", "category"))
+                category_item.setIcon(0, _icon_category)
+                self._filter_tree.addTopLevelItem(category_item)
+                for cat in session.query(Category).order_by(Category.name).all():
+                    category_item.addChild(_make_leaf(cat.name, ("category_id", cat.id)))
+
+            if show_subcategory:
+                subcat_section = _make_leaf("Subcategory", ("group", "subcategory"))
+                subcat_section.setIcon(0, _icon_subcategory)
+                self._filter_tree.addTopLevelItem(subcat_section)
+                for cat in session.query(Category).order_by(Category.name).all():
+                    subs = (session.query(Subcategory)
+                            .filter_by(category_id=cat.id)
+                            .order_by(Subcategory.name).all())
+                    if not subs:
+                        continue
+                    cat_node = QTreeWidgetItem([cat.name])
+                    cat_node.setFlags(Qt.ItemFlag.ItemIsEnabled)
+                    subcat_section.addChild(cat_node)
+                    for sub in subs:
+                        cat_node.addChild(_make_leaf(sub.name, ("subcategory_id", sub.id)))
+
+            if show_release:
+                release_item = _make_leaf("Release", ("group", "release"))
+                release_item.setIcon(0, _icon_release)
+                self._filter_tree.addTopLevelItem(release_item)
+                for rel in session.query(Release).order_by(Release.name).all():
+                    release_item.addChild(_make_leaf(rel.name, ("release_id", rel.id)))
+
+            if show_scale:
+                scale_item = _make_leaf("Scale", ("group", "scale"))
+                scale_item.setIcon(0, _icon_scale)
+                self._filter_tree.addTopLevelItem(scale_item)
+                for sc in session.query(Scale).order_by(Scale.name).all():
+                    scale_item.addChild(_make_leaf(sc.name, ("scale_id", sc.id)))
+
+            if show_presupports:
+                presup_item = _make_leaf("Presupports", ("group", "presupports"))
+                presup_item.setIcon(0, _icon_presupports)
+                self._filter_tree.addTopLevelItem(presup_item)
+                for (val,) in (session.query(STLModel.presupports)
+                               .filter(STLModel.presupports.isnot(None))
+                               .distinct().order_by(STLModel.presupports).all()):
+                    if val:
+                        presup_item.addChild(_make_leaf(val, ("presupports", val)))
+
+            if show_warnings:
+                _WARNING_TYPES = [
+                    "presupported stl",
+                    "Archive without images",
+                    "Archive inside archive",
+                    "Archive with supports",
+                ]
+                warn_item = _make_leaf("Warnings", ("group", "warning"))
+                warn_item.setIcon(0, _icon_warnings)
+                self._filter_tree.addTopLevelItem(warn_item)
+                for wtype in _WARNING_TYPES:
+                    warn_item.addChild(_make_leaf(wtype, ("warning", wtype)))
+
+            paths_item = _make_leaf("Path", ("group", "path"))
             paths_item.setIcon(0, _icon_path)
             self._filter_tree.addTopLevelItem(paths_item)
             dirs: set[str] = set()
@@ -687,8 +933,7 @@ class BrowserTab(QWidget):
             if new_dirs != self._cached_path_dirs:
                 self._cached_path_dirs = new_dirs
                 self._cached_sorted_dirs = sorted(dirs)
-            self._build_path_tree(paths_item, self._cached_sorted_dirs, checked_data)
-            self._init_path_parent_states(paths_item)
+            self._build_path_tree(paths_item, self._cached_sorted_dirs, checked_data, excluded_data)
         finally:
             session.close()
 
@@ -703,7 +948,8 @@ class BrowserTab(QWidget):
 
     @staticmethod
     def _build_path_tree(root_item: QTreeWidgetItem, dirs: list[str],
-                         checked_data: set | None = None) -> None:
+                         checked_data: set | None = None,
+                         excluded_data: set | None = None) -> None:
         """Build a nested tree of directory segments under *root_item*."""
         _CHECKABLE = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable
         node_map: dict[str, QTreeWidgetItem] = {}
@@ -722,23 +968,50 @@ class BrowserTab(QWidget):
                 item = QTreeWidgetItem([label])
                 item.setData(0, Qt.ItemDataRole.UserRole, data)
                 item.setFlags(_CHECKABLE)
-                state = (Qt.CheckState.Checked
-                         if checked_data and data in checked_data
-                         else Qt.CheckState.Unchecked)
+                if checked_data and data in checked_data:
+                    state = Qt.CheckState.Checked
+                elif excluded_data and data in excluded_data:
+                    state = Qt.CheckState.PartiallyChecked
+                else:
+                    state = Qt.CheckState.Unchecked
                 item.setCheckState(0, state)
                 parent.addChild(item)
                 node_map[full] = item
 
-    def _load_table(self, author_filters=None, tag_filters=None, type_filters=None,
-                    path_filters=None, date_filters=None) -> None:
-        """Reload the table, optionally with multi-value filter lists.
+    def _load_table(self,
+                    author_filters=None,      author_exc_filters=None,
+                    tag_filters=None,         tag_exc_filters=None,
+                    type_filters=None,        type_exc_filters=None,
+                    path_filters=None,        path_exc_filters=None,
+                    date_filters=None,        date_exc_filters=None,
+                    sculptor_filters=None,    sculptor_exc_filters=None,
+                    category_filters=None,    category_exc_filters=None,
+                    subcategory_filters=None, subcategory_exc_filters=None,
+                    release_filters=None,     release_exc_filters=None,
+                    scale_filters=None,       scale_exc_filters=None,
+                    presupports_filters=None, presupports_exc_filters=None,
+                    warning_filters=None,     warning_exc_filters=None,
+                    has_value_groups=None,    no_value_groups=None) -> None:
+        """Reload the table with optional include/exclude filter lists.
 
         Within each category the values are OR-ed; across categories they are AND-ed.
-        *date_filters* is a list of (year, month_or_None) tuples.
+        *_exc_filters* variants exclude rows that match those values.
+        *date_filters* / *date_exc_filters* are lists of (year, month_or_None) tuples.
         """
         self._loading = True
         self._model.removeRows(0, self._model.rowCount())
         session = get_session()
+
+        def _date_clauses(pairs):
+            conds = []
+            for year, month in pairs:
+                if month is None:
+                    conds.append(STLModel.release_year == year)
+                else:
+                    conds.append(and_(STLModel.release_year == year,
+                                      STLModel.release_month == month))
+            return conds
+
         try:
             q = session.query(STLModel).options(
                 selectinload(STLModel.tags),
@@ -748,6 +1021,7 @@ class BrowserTab(QWidget):
                 selectinload(STLModel.release),
                 selectinload(STLModel.scale),
             )
+            # --- include filters (OR within category, AND across) ---
             if author_filters:
                 q = q.filter(STLModel.author.in_(author_filters))
             if type_filters:
@@ -760,16 +1034,73 @@ class BrowserTab(QWidget):
                     for p in path_filters
                 )))
             if date_filters:
-                date_conditions = []
-                for year, month in date_filters:
-                    if month is None:
-                        date_conditions.append(STLModel.release_year == year)
-                    else:
-                        date_conditions.append(
-                            and_(STLModel.release_year == year,
-                                 STLModel.release_month == month)
-                        )
-                q = q.filter(or_(*date_conditions))
+                q = q.filter(or_(*_date_clauses(date_filters)))
+            if sculptor_filters:
+                q = q.filter(STLModel.sculptor_id.in_(sculptor_filters))
+            if category_filters:
+                q = q.filter(STLModel.category_id.in_(category_filters))
+            if subcategory_filters:
+                q = q.filter(STLModel.subcategory_id.in_(subcategory_filters))
+            if release_filters:
+                q = q.filter(STLModel.release_id.in_(release_filters))
+            if scale_filters:
+                q = q.filter(STLModel.scale_id.in_(scale_filters))
+            if presupports_filters:
+                q = q.filter(STLModel.presupports.in_(presupports_filters))
+            if warning_filters:
+                q = q.filter(or_(*(STLModel.warning.contains(w) for w in warning_filters)))
+            # --- exclude filters (NOT, AND across) ---
+            if author_exc_filters:
+                q = q.filter(~STLModel.author.in_(author_exc_filters))
+            if type_exc_filters:
+                q = q.filter(~STLModel.source.in_(type_exc_filters))
+            if tag_exc_filters:
+                q = q.filter(~STLModel.tags.any(Tag.name.in_(tag_exc_filters)))
+            if path_exc_filters:
+                for p in path_exc_filters:
+                    q = q.filter(~STLModel.archive_path.like(p.rstrip("/") + "/%"))
+            if date_exc_filters:
+                q = q.filter(~or_(*_date_clauses(date_exc_filters)))
+            if sculptor_exc_filters:
+                q = q.filter(~STLModel.sculptor_id.in_(sculptor_exc_filters))
+            if category_exc_filters:
+                q = q.filter(~STLModel.category_id.in_(category_exc_filters))
+            if subcategory_exc_filters:
+                q = q.filter(~STLModel.subcategory_id.in_(subcategory_exc_filters))
+            if release_exc_filters:
+                q = q.filter(~STLModel.release_id.in_(release_exc_filters))
+            if scale_exc_filters:
+                q = q.filter(~STLModel.scale_id.in_(scale_exc_filters))
+            if presupports_exc_filters:
+                q = q.filter(~STLModel.presupports.in_(presupports_exc_filters))
+            if warning_exc_filters:
+                q = q.filter(and_(*(~STLModel.warning.contains(w) for w in warning_exc_filters)))
+
+            # Group-level "has/no value" filters — applied when the group header is checked.
+            _group_has_value = {
+                "author":      lambda: and_(STLModel.author.isnot(None),      STLModel.author != ""),
+                "tag":         lambda: STLModel.tags.any(),
+                "source":      lambda: and_(STLModel.source.isnot(None),      STLModel.source != ""),
+                "date":        lambda: STLModel.release_year.isnot(None),
+                "sculptor":    lambda: STLModel.sculptor_id.isnot(None),
+                "category":    lambda: STLModel.category_id.isnot(None),
+                "subcategory": lambda: STLModel.subcategory_id.isnot(None),
+                "release":     lambda: STLModel.release_id.isnot(None),
+                "scale":       lambda: STLModel.scale_id.isnot(None),
+                "presupports": lambda: and_(STLModel.presupports.isnot(None), STLModel.presupports != ""),
+                "warning":     lambda: and_(STLModel.warning.isnot(None),     STLModel.warning != ""),
+                "path":        lambda: and_(STLModel.archive_path.isnot(None), STLModel.archive_path != ""),
+            }
+            if has_value_groups:
+                for _key in has_value_groups:
+                    _cond = _group_has_value.get(_key)
+                    if _cond:
+                        q = q.filter(_cond())
+            if no_value_groups:
+                for _key in no_value_groups:
+                    _cond = _group_has_value.get(_key)
+                    if _cond:
+                        q = q.filter(~_cond())
 
             for stl in q.order_by(STLModel.title).all():
                 thumb_item = QStandardItem()
@@ -951,81 +1282,91 @@ class BrowserTab(QWidget):
     def _on_search(self, text: str) -> None:
         self._proxy.setFilterFixedString(text)
 
-    def _init_path_parent_states(self, item: QTreeWidgetItem) -> Qt.CheckState:
-        """Recursively compute and set PartiallyChecked on path ancestor items.
-        Called after building the path tree to initialise tristate visuals."""
-        if item.childCount() == 0:
-            return item.checkState(0)
-        child_states = [self._init_path_parent_states(item.child(i))
-                        for i in range(item.childCount())]
-        if item.data(0, Qt.ItemDataRole.UserRole) is None:
-            return Qt.CheckState.Unchecked
-        checked = child_states.count(Qt.CheckState.Checked)
-        partial = child_states.count(Qt.CheckState.PartiallyChecked)
-        n = len(child_states)
-        if checked == n:
-            new_state = Qt.CheckState.Checked
-        elif checked > 0 or partial > 0:
-            new_state = Qt.CheckState.PartiallyChecked
-        else:
-            new_state = Qt.CheckState.Unchecked
-        item.setCheckState(0, new_state)
-        return new_state
+    def _on_filter_item_changed(self, item: QTreeWidgetItem, _col: int) -> None:
+        """Called when a checkbox in the filter tree changes state."""
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if data is None:
+            return
 
-    def _update_path_parent_states(self, item: QTreeWidgetItem) -> None:
-        """Walk up the path tree from *item* and set Partial/Checked/Unchecked
-        on each ancestor based on its children's states."""
-        self._filter_tree.blockSignals(True)
-        try:
-            parent = item.parent()
-            while parent is not None and parent.data(0, Qt.ItemDataRole.UserRole) is not None:
-                n = parent.childCount()
-                checked = sum(1 for i in range(n)
-                              if parent.child(i).checkState(0) == Qt.CheckState.Checked)
-                partial = sum(1 for i in range(n)
-                              if parent.child(i).checkState(0) == Qt.CheckState.PartiallyChecked)
-                if checked == n:
-                    parent.setCheckState(0, Qt.CheckState.Checked)
-                elif checked > 0 or partial > 0:
-                    parent.setCheckState(0, Qt.CheckState.PartiallyChecked)
-                else:
-                    parent.setCheckState(0, Qt.CheckState.Unchecked)
-                parent = parent.parent()
-        finally:
+        # Complete the tristate cycle for checkbox-click events.
+        # mousePressEvent stores the pre-click state; here we map it to the next state.
+        prev = self._filter_tree._pre_click_states.pop(id(item), None)
+        if prev is not None:
+            current = item.checkState(0)
+            if prev == Qt.CheckState.Unchecked:
+                next_state = Qt.CheckState.Checked
+            elif prev == Qt.CheckState.Checked:
+                next_state = Qt.CheckState.PartiallyChecked
+            else:  # PartiallyChecked → reset
+                next_state = Qt.CheckState.Unchecked
+            if next_state != current:
+                self._filter_tree.blockSignals(True)
+                item.setCheckState(0, next_state)
+                self._filter_tree.blockSignals(False)
+
+        # Propagate the final state down to all children (path, date, etc.).
+        # Group headers are excluded because their children have different semantics.
+        kind = data[0] if isinstance(data, tuple) else None
+        if kind != "group" and item.childCount() > 0:
+            self._filter_tree.blockSignals(True)
+            self._propagate_state_to_children(item, item.checkState(0))
             self._filter_tree.blockSignals(False)
 
-    def _on_filter_item_changed(self, item: QTreeWidgetItem, _col: int) -> None:
-        """Called when a checkbox in the filter tree is toggled."""
-        data = item.data(0, Qt.ItemDataRole.UserRole)
-        if data is not None:
-            if isinstance(data, tuple) and data[0] == "path":
-                self._update_path_parent_states(item)
-            self._apply_checked_filters()
+        self._apply_checked_filters()
+
+    @staticmethod
+    def _propagate_state_to_children(item: QTreeWidgetItem, state: Qt.CheckState) -> None:
+        """Recursively set all checkable descendants of *item* to *state*."""
+        for i in range(item.childCount()):
+            child = item.child(i)
+            if child.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+                child.setCheckState(0, state)
+            BrowserTab._propagate_state_to_children(child, state)
 
     def _apply_checked_filters(self) -> None:
-        """Collect all checked filter items and reload the table."""
-        author_filters: list[str] = []
-        tag_filters:    list[str] = []
-        type_filters:   list[str] = []
-        path_filters:   list[str] = []
-        date_filters:   list[tuple] = []
+        """Collect include (Checked) and exclude (PartiallyChecked) filter items and reload."""
+        author_inc:       list[str]   = []; author_exc:       list[str]   = []
+        tag_inc:          list[str]   = []; tag_exc:          list[str]   = []
+        type_inc:         list[str]   = []; type_exc:         list[str]   = []
+        path_inc:         list[str]   = []; path_exc:         list[str]   = []
+        date_inc:         list[tuple] = []; date_exc:         list[tuple] = []
+        sculptor_inc:     list[int]   = []; sculptor_exc:     list[int]   = []
+        category_inc:     list[int]   = []; category_exc:     list[int]   = []
+        subcategory_inc:  list[int]   = []; subcategory_exc:  list[int]   = []
+        release_inc:      list[int]   = []; release_exc:      list[int]   = []
+        scale_inc:        list[int]   = []; scale_exc:        list[int]   = []
+        presupports_inc:  list[str]   = []; presupports_exc:  list[str]   = []
+        warning_inc:      list[str]   = []; warning_exc:      list[str]   = []
+        has_value_groups: set[str]    = set()
+        no_value_groups:  set[str]    = set()
+
+        _buckets = {
+            "author":         (author_inc,      author_exc),
+            "tag":            (tag_inc,         tag_exc),
+            "source":         (type_inc,        type_exc),
+            "path":           (path_inc,        path_exc),
+            "sculptor_id":    (sculptor_inc,    sculptor_exc),
+            "category_id":    (category_inc,    category_exc),
+            "subcategory_id": (subcategory_inc, subcategory_exc),
+            "release_id":     (release_inc,     release_exc),
+            "scale_id":       (scale_inc,       scale_exc),
+            "presupports":    (presupports_inc, presupports_exc),
+            "warning":        (warning_inc,     warning_exc),
+        }
 
         def _collect(item: QTreeWidgetItem):
-            data = item.data(0, Qt.ItemDataRole.UserRole)
-            if data and item.checkState(0) == Qt.CheckState.Checked:
+            data  = item.data(0, Qt.ItemDataRole.UserRole)
+            state = item.checkState(0)
+            if data and state in (Qt.CheckState.Checked, Qt.CheckState.PartiallyChecked):
+                is_inc = state == Qt.CheckState.Checked
                 kind, value = data
-                if kind == "author":
-                    author_filters.append(value)
-                elif kind == "tag":
-                    tag_filters.append(value)
-                elif kind == "source":
-                    type_filters.append(value)
-                elif kind == "path":
-                    path_filters.append(value)
-                elif kind == "date_year":
-                    date_filters.append((value, None))
-                elif kind == "date_month":
-                    date_filters.append(value)  # (year, month)
+                if kind == "group":
+                    (has_value_groups if is_inc else no_value_groups).add(value)
+                elif kind in ("date_year", "date_month"):
+                    target = (date_inc if is_inc else date_exc)
+                    target.append((value, None) if kind == "date_year" else value)
+                elif kind in _buckets:
+                    _buckets[kind][0 if is_inc else 1].append(value)
             for i in range(item.childCount()):
                 _collect(item.child(i))
 
@@ -1034,11 +1375,20 @@ class BrowserTab(QWidget):
             _collect(root.child(i))
 
         self._load_table(
-            author_filters=author_filters or None,
-            tag_filters=tag_filters or None,
-            type_filters=type_filters or None,
-            path_filters=path_filters or None,
-            date_filters=date_filters or None,
+            author_filters=author_inc or None,         author_exc_filters=author_exc or None,
+            tag_filters=tag_inc or None,               tag_exc_filters=tag_exc or None,
+            type_filters=type_inc or None,             type_exc_filters=type_exc or None,
+            path_filters=path_inc or None,             path_exc_filters=path_exc or None,
+            date_filters=date_inc or None,             date_exc_filters=date_exc or None,
+            sculptor_filters=sculptor_inc or None,     sculptor_exc_filters=sculptor_exc or None,
+            category_filters=category_inc or None,     category_exc_filters=category_exc or None,
+            subcategory_filters=subcategory_inc or None, subcategory_exc_filters=subcategory_exc or None,
+            release_filters=release_inc or None,       release_exc_filters=release_exc or None,
+            scale_filters=scale_inc or None,           scale_exc_filters=scale_exc or None,
+            presupports_filters=presupports_inc or None, presupports_exc_filters=presupports_exc or None,
+            warning_filters=warning_inc or None,       warning_exc_filters=warning_exc or None,
+            has_value_groups=has_value_groups or None,
+            no_value_groups=no_value_groups or None,
         )
 
     def _clear_filters(self) -> None:

@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
 _HELP_HTML = """
 <h2>STL Database — Quick Reference</h2>
 
-<h3>Browser</h3>
+<h3>Browser keyboard shortcuts</h3>
 <table>
   <tr><td><b>Double-click row</b></td><td>Edit model (path column opens editor; other columns allow inline editing)</td></tr>
   <tr><td><b>E</b></td><td>Edit selected model(s) — single selection opens the model editor, multiple opens the mass editor</td></tr>
@@ -19,6 +19,35 @@ _HELP_HTML = """
   <tr><td><b>Click thumbnail</b></td><td>Open full-size image viewer; click image to close</td></tr>
   <tr><td><b>F5</b></td><td>Refresh the table from the database</td></tr>
 </table>
+
+<h3>Filter panel</h3>
+<p>The left panel contains filter groups for Authors, Tags, Type, Date, Sculptor, Category,
+Subcategory, Release, Scale, Presupports, Warnings, and Path.
+Each item displays a colored circle indicator:</p>
+<table>
+  <tr><td>&#9711; Gray circle</td><td>No filter — this value is ignored</td></tr>
+  <tr><td><span style="color:#4CAF50"><b>&#8853;</b></span> Green +</td><td><b>Include</b> — show only models matching this value</td></tr>
+  <tr><td><span style="color:#F44336"><b>&#8854;</b></span> Red −</td><td><b>Exclude</b> — hide models matching this value</td></tr>
+</table>
+<p><b>Clicking a leaf value</b> (e.g. a specific author name) cycles through include → exclude → off.</p>
+<p><b>Clicking the circle indicator on a group header</b> (e.g. the circle next to "Authors") applies
+a <em>has-value / no-value</em> filter for that entire column:</p>
+<ul>
+  <li>Green + on a group header → show only models that <b>have</b> a value for that field</li>
+  <li>Red − on a group header → show only models that have <b>no</b> value for that field</li>
+</ul>
+<p>Clicking the group header <em>text</em> expands or collapses its children without changing the filter state.
+Click <b>Clear</b> at the top of the filter panel to reset all active filters at once.</p>
+
+<h3>Image Grid</h3>
+<p>Click <b>Image Grid</b> in the toolbar to open a scrollable thumbnail grid for all models currently
+visible in the table.</p>
+<ul>
+  <li>Drag the <b>Size</b> slider at the top to resize thumbnails between 60 and 300 px.</li>
+  <li>Click any thumbnail to open the full-size image viewer.</li>
+  <li>Use the <b>← Prev</b> / <b>Next →</b> buttons or the Left / Right arrow keys to navigate
+      between images in the viewer. Press <b>Escape</b> or click the image to close.</li>
+</ul>
 
 <h3>Crawler</h3>
 <p>Open via <b>File → Open Crawler…</b> or the toolbar button.</p>
@@ -72,7 +101,7 @@ class HelpDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("STL Database — Help")
-        self.resize(720, 560)
+        self.resize(720, 680)
         self._build_ui()
 
     def _build_ui(self) -> None:

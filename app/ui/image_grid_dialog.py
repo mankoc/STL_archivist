@@ -5,14 +5,16 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QScrollArea, QWidget, QGridLayout,
-    QLabel, QFrame, QDialogButtonBox, QPushButton,
+    QLabel, QFrame, QDialogButtonBox, QPushButton, QSlider,
 )
 
 from app.database.db import get_session
 from app.database.models import STLModel
 from app.utils.thumbnailer import pixmap_from_path
 
-THUMB_SIZE = 150
+THUMB_SIZE_DEFAULT = 150
+THUMB_SIZE_MIN = 60
+THUMB_SIZE_MAX = 300
 COLS = 5
 
 
@@ -98,21 +100,41 @@ class ImageGridDialog(QDialog):
         self.setWindowTitle(f"Image Grid — {len(model_ids)} model{'s' if len(model_ids) != 1 else ''}")
         self.resize(920, 700)
         self._entries: list[tuple[QPixmap, str]] = []
+        # (thumb_label, original_pixmap, title_label) for each cell
+        self._cells: list[tuple[QLabel, QPixmap, QLabel]] = []
+        self._thumb_size = THUMB_SIZE_DEFAULT
         self._build_ui(model_ids)
 
     def _build_ui(self, model_ids: list[int]) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(6)
+
+        # Slider toolbar
+        toolbar = QHBoxLayout()
+        toolbar.addWidget(QLabel("Size:"))
+        self._slider = QSlider(Qt.Orientation.Horizontal)
+        self._slider.setRange(THUMB_SIZE_MIN, THUMB_SIZE_MAX)
+        self._slider.setValue(THUMB_SIZE_DEFAULT)
+        self._slider.setFixedWidth(200)
+        self._slider.setTickPosition(QSlider.TickPosition.NoTicks)
+        self._slider.valueChanged.connect(self._on_slider_changed)
+        toolbar.addWidget(self._slider)
+        self._size_lbl = QLabel(f"{THUMB_SIZE_DEFAULT} px")
+        self._size_lbl.setFixedWidth(50)
+        toolbar.addWidget(self._size_lbl)
+        toolbar.addStretch()
+        layout.addLayout(toolbar)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         layout.addWidget(scroll)
 
         container = QWidget()
-        grid = QGridLayout(container)
-        grid.setSpacing(10)
-        grid.setContentsMargins(8, 8, 8, 8)
-        grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self._grid = QGridLayout(container)
+        self._grid.setSpacing(10)
+        self._grid.setContentsMargins(8, 8, 8, 8)
+        self._grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
 
         session = get_session()
         try:
@@ -123,7 +145,6 @@ class ImageGridDialog(QDialog):
                 if stl is None:
                     continue
 
-                # Use first available thumbnail
                 px = QPixmap()
                 for img in stl.images:
                     candidate = pixmap_from_path(img.thumbnail_path)
@@ -135,8 +156,9 @@ class ImageGridDialog(QDialog):
                 entry_index = len(self._entries)
                 self._entries.append((px, title))
 
-                cell = self._make_cell(px, title, entry_index)
-                grid.addWidget(cell, grid_row, grid_col)
+                cell, thumb_lbl, title_lbl = self._make_cell(px, title, entry_index)
+                self._cells.append((thumb_lbl, px, title_lbl))
+                self._grid.addWidget(cell, grid_row, grid_col)
 
                 grid_col += 1
                 if grid_col >= COLS:
@@ -151,8 +173,9 @@ class ImageGridDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-    def _make_cell(self, px: QPixmap, title: str, entry_index: int) -> QWidget:
-        """Build a single thumbnail cell widget with a title label below it."""
+    def _make_cell(self, px: QPixmap, title: str, entry_index: int) -> tuple[QWidget, QLabel, QLabel]:
+        """Build a single thumbnail cell; returns (cell_widget, thumb_label, title_label)."""
+        size = self._thumb_size
         cell = QWidget()
         cell_layout = QVBoxLayout(cell)
         cell_layout.setContentsMargins(4, 4, 4, 4)
@@ -160,12 +183,12 @@ class ImageGridDialog(QDialog):
 
         thumb = QLabel()
         thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        thumb.setFixedSize(THUMB_SIZE, THUMB_SIZE)
+        thumb.setFixedSize(size, size)
         thumb.setFrameShape(QFrame.Shape.StyledPanel)
 
         if not px.isNull():
             scaled = px.scaled(
-                THUMB_SIZE, THUMB_SIZE,
+                size, size,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
@@ -178,12 +201,27 @@ class ImageGridDialog(QDialog):
         title_lbl = QLabel(title)
         title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title_lbl.setWordWrap(True)
-        title_lbl.setMaximumWidth(THUMB_SIZE + 8)
+        title_lbl.setMaximumWidth(size + 8)
 
         cell_layout.addWidget(thumb)
         cell_layout.addWidget(title_lbl)
 
-        return cell
+        return cell, thumb, title_lbl
+
+    def _on_slider_changed(self, value: int) -> None:
+        """Rescale all thumbnails to the new size."""
+        self._thumb_size = value
+        self._size_lbl.setText(f"{value} px")
+        for thumb_lbl, orig_px, title_lbl in self._cells:
+            thumb_lbl.setFixedSize(value, value)
+            title_lbl.setMaximumWidth(value + 8)
+            if not orig_px.isNull():
+                scaled = orig_px.scaled(
+                    value, value,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                thumb_lbl.setPixmap(scaled)
 
     def _view_image(self, index: int) -> None:
         """Open the full-size viewer starting at the given grid *index*."""
