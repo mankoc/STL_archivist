@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.1.1 — 2026-04-29
+
+### UI — Browser
+
+- Added **File Size** column to the browser table showing each archive's size on disk
+  (formatted as B / KB / MB / GB); sorts numerically
+
+### UI — Tools
+
+- Added **Find Metadata Duplicates** dialog (Tools menu) for locating models with identical
+  or phonetically similar field values across any combination of columns
+  - Column selection: Title, Author, Source, Sculptor, Category, Subcategory, Release, Scale
+  - Three match methods: **Exact match**, **Levenshtein** (configurable max edit distance),
+    and **Soundex** (phonetic)
+  - Results table with Group, Column, ID, Title, Value, and Match columns; sortable
+  - **Show Group in Main Table** — filters the browser to the selected duplicate group
+  - **Show All Groups in Main Table** — filters the browser to every model in any duplicate group
+  - Non-modal dialog; browser table updates live while the dialog stays open
+  - Background worker with Stop button to cancel long-running similarity searches
+
+---
+
 ## v0.1-alpha — 2026-04-26
 
 Initial alpha release of STL Database, a desktop application for cataloguing local collections of
@@ -62,6 +84,7 @@ Initial alpha release of STL Database, a desktop application for cataloguing loc
   `metadata_sidecar_enabled`, `metadata_thumbnails`, custom warning patterns
 - Platform-specific defaults (Windows / Linux)
 - Windows 11 Dark and Light themes
+- Nine Material Design themes via qt-material (dark/light variants of Blue, Teal, Purple, Amber, Red, Orange)
 
 ### Build & CI
 
