@@ -19,7 +19,10 @@ A desktop application for cataloguing and browsing your local collection of 3D p
 - **Metadata sidecars** — export a `METADATA.7z` snapshot into every archive folder so the library can be restored on a new machine without re-crawling; optionally includes thumbnails
 - **Image pane toggle** — show or hide the right-hand thumbnail sidebar via a toolbar button or the View menu
 - **File sorting** — optionally move and rename archive files into a structured directory layout using a path pattern (enable in Configuration)
-- **Themes** — built-in color schemes: System Default, VS Code Dark+, Windows 11 Dark, Windows 11 Light
+- **File Size column** — browser table shows each archive's size on disk (B / KB / MB / GB), sortable numerically
+- **Find Metadata Duplicates** — Tools menu dialog that finds models with identical or phonetically similar field values; supports exact match, Levenshtein (configurable distance), and Soundex; results can be sent directly to the browser table
+- **Statistics** — column statistics and aggregated statistics dialogs for a quick numeric overview of any field; database maintenance dialog (vacuum, integrity check)
+- **Themes** — built-in color schemes: System Default, VS Code Dark+, Windows 11 Dark, Windows 11 Light, and nine Material Design themes (dark/light variants of Blue, Teal, Purple, Amber, Red, Orange) via qt-material
 
 ## Requirements
 
@@ -35,6 +38,19 @@ A desktop application for cataloguing and browsing your local collection of 3D p
   - qt-material
 
 ## Installation
+
+### Pre-built Windows executables
+
+Grab the latest release from the [Releases](../../releases) page:
+
+| Executable | Description |
+|---|---|
+| `STLDatabase-<version>.exe` | Full GUI application |
+| `crawl-<version>.exe` | Headless command-line crawler |
+
+No Python installation required — both are self-contained single-file executables.
+
+### From source
 
 ```bash
 # 1. Clone the repository
@@ -180,7 +196,7 @@ stl_database/
 ├── resources/
 │   ├── style.qss            # Application stylesheet
 │   ├── icons/               # SVG icons (light/dark variants)
-│   └── themes/              # QSS color schemes (VS Code, Win11)
+│   └── themes/              # QSS color schemes (VS Code, Win11); Material themes loaded via qt-material
 ├── app/
 │   ├── config.py            # CrawlerConfig dataclass
 │   ├── crawler/
@@ -207,6 +223,7 @@ stl_database/
 │   │   ├── tag_editor_dialog.py
 │   │   ├── sort_dialog.py
 │   │   ├── config_dialog.py
+│   │   ├── find_duplicates_dialog.py
 │   │   ├── about_dialog.py
 │   │   └── help_dialog.py
 │   └── utils/

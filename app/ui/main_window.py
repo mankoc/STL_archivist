@@ -114,6 +114,19 @@ class MainWindow(QMainWindow):
 
         tools_menu.addSeparator()
 
+        act_find_dupes = QAction(
+            style.standardIcon(SP.SP_FileDialogContentsView),
+            "Find Metadata Duplicates…",
+            self,
+        )
+        act_find_dupes.setStatusTip(
+            "Find models with identical or phonetically similar field values"
+        )
+        act_find_dupes.triggered.connect(self._open_find_duplicates_dialog)
+        tools_menu.addAction(act_find_dupes)
+
+        tools_menu.addSeparator()
+
         act_db_maintenance = QAction(
             style.standardIcon(SP.SP_FileDialogDetailedView),
             "Database Maintenance…",
@@ -202,6 +215,18 @@ class MainWindow(QMainWindow):
         """Open the metadata sidecar generation dialog."""
         from app.ui.metadata_sidecar_dialog import MetadataSidecarDialog
         MetadataSidecarDialog(parent=self).exec()
+
+    def _open_find_duplicates_dialog(self) -> None:
+        """Open the find metadata duplicates dialog (non-modal so main table stays interactive)."""
+        from app.ui.find_duplicates_dialog import FindDuplicatesDialog
+        dlg = getattr(self, "_find_dupes_dlg", None)
+        if dlg is None or not dlg.isVisible():
+            dlg = FindDuplicatesDialog(parent=self)
+            dlg.show_models_requested.connect(self._browser.show_model_ids)
+            self._find_dupes_dlg = dlg
+        dlg.raise_()
+        dlg.activateWindow()
+        dlg.show()
 
     def _open_db_maintenance_dialog(self) -> None:
         """Open the database maintenance dialog."""

@@ -227,6 +227,7 @@ with a filter panel on the left and an image preview pane on the right.</p>
   <tr><td>Presupports</td><td>Support status: No / Lychee / Chitubox / Presupported</td></tr>
   <tr><td>Added</td><td>Date the record was added to the database</td></tr>
   <tr><td>Warnings</td><td>Flags raised during crawl (nested archive, no images, &hellip;)</td></tr>
+  <tr><td>File Size</td><td>Archive size on disk (B / KB / MB / GB); read from the file system at load time; sorts numerically</td></tr>
 </table>
 
 <h2>Keyboard Shortcuts</h2>
@@ -707,6 +708,50 @@ thumbnails from their archives. Handy when the original crawl ran with a lower
 currently represented in the database. Progress is shown in a dialog with a live log.</p>
 <p>Use this after a crawl has finished importing metadata but before moving the archive
 collection to a new machine, so the sidecar snapshots are up-to-date.</p>
+
+<h2>Tools &mdash; Find Metadata Duplicates&hellip;</h2>
+<p>Open via <b>Tools &rarr; Find Metadata Duplicates&hellip;</b></p>
+<p>Searches the database for models that share identical or phonetically similar values
+in one or more metadata fields. The dialog is <em>non-modal</em> — results are visible
+alongside the browser table and clicking a button filters the browser directly.</p>
+
+<h3>Columns to check</h3>
+<p>Check any combination of: Title, Author, Source, Sculptor, Category, Subcategory, Release, Scale.</p>
+
+<h3>Match methods</h3>
+<table>
+  <tr><th>Method</th><th>How it works</th></tr>
+  <tr><td><b>Exact match</b></td>
+      <td>Groups all models whose field value is character-for-character identical
+          (case-sensitive, whitespace-trimmed).</td></tr>
+  <tr><td><b>Levenshtein</b></td>
+      <td>Reports pairs of models whose field values are within a configurable
+          <em>max edit distance</em> (1&ndash;20, default 3). Useful for catching typos
+          and minor spelling variations. A length pre-filter skips obviously
+          different strings for performance.</td></tr>
+  <tr><td><b>Soundex (phonetic)</b></td>
+      <td>Groups models whose field value encodes to the same 4-character Soundex
+          code, catching names that sound the same but are spelled differently
+          (e.g. &ldquo;Smith&rdquo; / &ldquo;Smyth&rdquo; / &ldquo;Smythe&rdquo;).
+          Groups where every entry is identical are excluded (use Exact match instead).</td></tr>
+</table>
+
+<h3>Results table</h3>
+<p>Each row shows: <b>Group</b> number, <b>Column</b> checked, model <b>ID</b>,
+<b>Title</b>, the matched <b>Value</b>, and the <b>Match</b> score or method.
+The table is sortable by any column.</p>
+
+<h3>Sending results to the browser</h3>
+<ul>
+  <li><b>Show Group in Main Table</b> &mdash; select any row, then click to filter the browser
+      to all models in that duplicate group.</li>
+  <li><b>Show All Groups in Main Table</b> &mdash; filter the browser to every model that
+      appears in any duplicate group found by the last search.</li>
+</ul>
+
+<div class="tip">Tip: Levenshtein search on very large collections (thousands of models)
+is O(n&sup2;) — use the Stop button to cancel if it takes too long, or reduce the
+max distance to 1 or 2 to narrow the scope.</div>
 
 <h2>Tools &mdash; Database Maintenance&hellip;</h2>
 <p>Open via <b>Tools &rarr; Database Maintenance&hellip;</b></p>

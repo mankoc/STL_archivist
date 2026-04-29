@@ -47,9 +47,27 @@ COL_SCALE        = 12
 COL_PRESUPPORTED = 13
 COL_ADDED        = 14
 COL_WARNING      = 15
+COL_FILESIZE     = 16
 _HEADERS = ["", "Title", "Author", "Source", "Date", "Tags",
             "Sculptor", "Category", "Subcategory", "Seq", "Release", "Path",
-            "Scale", "Presupports", "Added", "Warnings"]
+            "Scale", "Presupports", "Added", "Warnings", "File Size"]
+
+
+def _fmt_size(nbytes: int) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if nbytes < 1024:
+            return f"{nbytes} {unit}" if unit == "B" else f"{nbytes:.1f} {unit}"
+        nbytes /= 1024
+    return f"{nbytes:.1f} TB"
+
+
+class _BrowserProxyModel(QSortFilterProxyModel):
+    """Proxy model that sorts the File Size column numerically via UserRole data."""
+
+    def lessThan(self, left, right):
+        if left.column() == COL_FILESIZE:
+            return (left.data(Qt.ItemDataRole.UserRole) or -1) < (right.data(Qt.ItemDataRole.UserRole) or -1)
+        return super().lessThan(left, right)
 
 MODEL_ID_ROLE = Qt.ItemDataRole.UserRole + 1
 
@@ -631,7 +649,7 @@ class BrowserTab(QWidget):
         self._model.setHorizontalHeaderLabels(_HEADERS)
         self._model.itemChanged.connect(self._on_item_changed)
 
-        self._proxy = QSortFilterProxyModel()
+        self._proxy = _BrowserProxyModel()
         self._proxy.setSourceModel(self._model)
         self._proxy.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self._proxy.setFilterKeyColumn(-1)  # search all columns
@@ -978,6 +996,10 @@ class BrowserTab(QWidget):
                 parent.addChild(item)
                 node_map[full] = item
 
+    def show_model_ids(self, ids: list[int]) -> None:
+        """Show only the models with the given IDs, ignoring all sidebar filters."""
+        self._load_table(id_filters=ids)
+
     def _load_table(self,
                     author_filters=None,      author_exc_filters=None,
                     tag_filters=None,         tag_exc_filters=None,
@@ -991,7 +1013,8 @@ class BrowserTab(QWidget):
                     scale_filters=None,       scale_exc_filters=None,
                     presupports_filters=None, presupports_exc_filters=None,
                     warning_filters=None,     warning_exc_filters=None,
-                    has_value_groups=None,    no_value_groups=None) -> None:
+                    has_value_groups=None,    no_value_groups=None,
+                    id_filters=None) -> None:
         """Reload the table with optional include/exclude filter lists.
 
         Within each category the values are OR-ed; across categories they are AND-ed.
@@ -1021,6 +1044,9 @@ class BrowserTab(QWidget):
                 selectinload(STLModel.release),
                 selectinload(STLModel.scale),
             )
+            # --- explicit ID set (from duplicate finder etc.) ---
+            if id_filters:
+                q = q.filter(STLModel.id.in_(id_filters))
             # --- include filters (OR within category, AND across) ---
             if author_filters:
                 q = q.filter(STLModel.author.in_(author_filters))
@@ -1125,6 +1151,16 @@ class BrowserTab(QWidget):
                     _warn_font.setPointSize(16)
                     _warn_font.setBold(True)
                     warning_item.setFont(_warn_font)
+                try:
+                    raw_size = FSPath(stl.archive_path).stat().st_size
+                    size_display = _fmt_size(raw_size)
+                except OSError:
+                    raw_size = -1
+                    size_display = ""
+                size_item = QStandardItem(size_display)
+                size_item.setData(raw_size, Qt.ItemDataRole.UserRole)
+                size_item.setEditable(False)
+
                 row = [
                     thumb_item,
                     QStandardItem(stl.title or ""),
@@ -1142,6 +1178,7 @@ class BrowserTab(QWidget):
                     QStandardItem(stl.presupports or ""),
                     added_item,
                     warning_item,
+                    size_item,
                 ]
                 self._model.appendRow(row)
         finally:
@@ -1155,7 +1192,7 @@ class BrowserTab(QWidget):
         if self._loading:
             return
         col = item.column()
-        if col in (COL_THUMB, COL_ADDED, COL_WARNING):
+        if col in (COL_THUMB, COL_ADDED, COL_WARNING, COL_FILESIZE):
             return
         # Debounce: store the latest item for this cell and (re)start the timer.
         self._pending_edits[(item.row(), col)] = item

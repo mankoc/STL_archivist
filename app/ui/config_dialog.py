@@ -75,13 +75,24 @@ COLOR_SCHEME_DEFAULT = _PLATFORM["color_scheme"]
 
 _LIBRARY_SETTINGS_FILE = "settings.json"
 
-# Map display name -> path relative to the package root (or "" for system default)
+# Map display name -> path relative to the package root (or "" for system default).
+# Values prefixed with "material:" are routed to qt_material instead of a .qss file.
 _THEMES_DIR = Path(__file__).parent.parent.parent / "resources" / "themes"
 THEMES: dict[str, str] = {
-    "System Default":  "",
-    "VS Code Dark+":   str(_THEMES_DIR / "vscode_dark.qss"),
-    "Windows 11 Dark": str(_THEMES_DIR / "win11_dark.qss"),
-    "Windows 11 Light": str(_THEMES_DIR / "win11_light.qss"),
+    "System Default":       "",
+    "VS Code Dark+":        str(_THEMES_DIR / "vscode_dark.qss"),
+    "Windows 11 Dark":      str(_THEMES_DIR / "win11_dark.qss"),
+    "Windows 11 Light":     str(_THEMES_DIR / "win11_light.qss"),
+    # ── Material Design (qt_material) ────────────────────────────────────────
+    "Material Dark Blue":   "material:dark_blue.xml",
+    "Material Dark Teal":   "material:dark_teal.xml",
+    "Material Dark Purple": "material:dark_purple.xml",
+    "Material Dark Amber":  "material:dark_amber.xml",
+    "Material Dark Red":    "material:dark_red.xml",
+    "Material Light Blue":  "material:light_blue_500.xml",
+    "Material Light Teal":  "material:light_teal.xml",
+    "Material Light Purple":"material:light_purple.xml",
+    "Material Light Orange":"material:light_orange.xml",
 }
 
 
@@ -187,10 +198,13 @@ def apply_color_scheme(scheme_name: str) -> None:
     app = QApplication.instance()
     if app is None:
         return
-    qss_path = THEMES.get(scheme_name, "")
-    if qss_path and Path(qss_path).exists():
+    value = THEMES.get(scheme_name, "")
+    if value.startswith("material:"):
+        from qt_material import apply_stylesheet
+        apply_stylesheet(app, theme=value[len("material:"):])
+    elif value and Path(value).exists():
         icons = str(_ICONS_DIR).replace("\\", "/")
-        qss = Path(qss_path).read_text(encoding="utf-8")
+        qss = Path(value).read_text(encoding="utf-8")
         qss = qss.replace("%(ICONS_DIR)s", icons)
         app.setStyleSheet(qss)
     else:
