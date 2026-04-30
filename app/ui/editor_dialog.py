@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QCursor
 
 from app.database.db import session_scope, get_session
-from app.database.models import STLModel, Tag, Release, Sculptor, Category, Subcategory, Scale
+from app.database.models import STLModel, Tag, Release, Sculptor, Collection, Subcollection, Category, Scale
 from app.utils.thumbnailer import pixmap_from_path
 from app.utils.path_pattern import parse_path, ATTR_LABEL, PATTERN_HELP, parse_release_date, format_release_date
 
@@ -83,9 +83,9 @@ class TagEdit(QLineEdit):
 class EditorDialog(QDialog):
     """Full metadata editor for a single STL model.
 
-    Displays all editable fields (title, author, sculptor, category,
-    subcategory, release, scale, presupports, source, URL, date, sequence,
-    tags, description) in a form layout with a thumbnail sidebar.
+    Displays all editable fields (title, creator, sculptor, collection,
+    subcollection, category, release, scale, presupports, source, URL, date,
+    sequence, tags, description) in a form layout with a thumbnail sidebar.
 
     On accept the changes are written to the database using a session scope.
     """
@@ -123,27 +123,28 @@ class EditorDialog(QDialog):
             _uniq = lambda col: sorted(
                 filter(None, (v for (v,) in session.query(col).distinct().all()))
             )
-            titles     = _uniq(STLModel.title)
-            authors    = _uniq(STLModel.author)
-            sources    = _uniq(STLModel.source)
-            dates      = sorted({
+            titles        = _uniq(STLModel.title)
+            creators      = _uniq(STLModel.creator)
+            sources       = _uniq(STLModel.source)
+            dates         = sorted({
                 format_release_date(y, mo)
                 for (y, mo) in session.query(STLModel.release_year, STLModel.release_month)
                                       .filter(STLModel.release_year.isnot(None))
                                       .distinct()
                                       .all()
             })
-            all_tags   = [t.name for t in session.query(Tag).order_by(Tag.name).all()]
-            releases   = sorted(r.name for r in session.query(Release).order_by(Release.name).all())
-            sculptors  = sorted(s.name for s in session.query(Sculptor).order_by(Sculptor.name).all())
-            categories   = sorted(c.name for c in session.query(Category).order_by(Category.name).all())
-            subcategories = sorted(s.name for s in session.query(Subcategory).order_by(Subcategory.name).all())
-            scales     = sorted(s.name for s in session.query(Scale).order_by(Scale.name).all())
+            all_tags      = [t.name for t in session.query(Tag).order_by(Tag.name).all()]
+            releases      = sorted(r.name for r in session.query(Release).order_by(Release.name).all())
+            sculptors     = sorted(s.name for s in session.query(Sculptor).order_by(Sculptor.name).all())
+            collections   = sorted(c.name for c in session.query(Collection).order_by(Collection.name).all())
+            subcollections = sorted(s.name for s in session.query(Subcollection).order_by(Subcollection.name).all())
+            categories    = sorted(c.name for c in session.query(Category).order_by(Category.name).all())
+            scales        = sorted(s.name for s in session.query(Scale).order_by(Scale.name).all())
         finally:
             session.close()
 
         self._title_edit  = self._autocomplete_edit(titles)
-        self._author_edit = self._autocomplete_edit(authors)
+        self._creator_edit = self._autocomplete_edit(creators)
         self._source_edit = self._make_combo(sources)
         self._date_edit   = self._autocomplete_edit(dates)
         self._url_edit    = QLineEdit()
@@ -153,10 +154,11 @@ class EditorDialog(QDialog):
         self._tags_edit   = TagEdit(all_tags)
         self._release_edit = self._make_combo(releases, blank_first=True)
 
-        self._sculptor_edit      = self._make_combo(sculptors, blank_first=True)
-        self._category_edit      = self._make_combo(categories, blank_first=True)
-        self._category_edit.currentTextChanged.connect(self._on_category_changed)
-        self._subcategory_edit   = self._make_combo(subcategories, blank_first=True)
+        self._sculptor_edit       = self._make_combo(sculptors, blank_first=True)
+        self._collection_edit     = self._make_combo(collections, blank_first=True)
+        self._collection_edit.currentTextChanged.connect(self._on_collection_changed)
+        self._subcollection_edit  = self._make_combo(subcollections, blank_first=True)
+        self._category_edit       = self._make_combo(categories, blank_first=True)
 
         self._sequence_spin = QSpinBox()
         self._sequence_spin.setRange(0, 9999)
@@ -166,15 +168,16 @@ class EditorDialog(QDialog):
         self._scale_edit = self._make_combo(scales, blank_first=True)
         self._presupports_edit = self._make_combo(["No", "Lychee", "Chitubox", "Presupported"], blank_first=True)
 
-        form.addRow("Archive Path:", self._path_edit)
-        form.addRow("Title:",        self._title_edit)
-        form.addRow("Author:",       self._author_edit)
-        form.addRow("Source:",       self._source_edit)
-        form.addRow("Date:",         self._date_edit)
-        form.addRow("Release:",      self._release_edit)
-        form.addRow("Sculptor:",     self._sculptor_edit)
-        form.addRow("Category:",     self._category_edit)
-        form.addRow("Subcategory:",  self._subcategory_edit)
+        form.addRow("Archive Path:",  self._path_edit)
+        form.addRow("Title:",         self._title_edit)
+        form.addRow("Creator:",       self._creator_edit)
+        form.addRow("Source:",        self._source_edit)
+        form.addRow("Date:",          self._date_edit)
+        form.addRow("Release:",       self._release_edit)
+        form.addRow("Sculptor:",      self._sculptor_edit)
+        form.addRow("Collection:",    self._collection_edit)
+        form.addRow("Subcollection:", self._subcollection_edit)
+        form.addRow("Category:",      self._category_edit)
         form.addRow("Sequence:",     self._with_clear_btn(
             self._sequence_spin, lambda: self._sequence_spin.setValue(0)
         ))
@@ -216,7 +219,7 @@ class EditorDialog(QDialog):
 
         pat_input_row = QHBoxLayout()
         self._pattern_edit = QLineEdit()
-        self._pattern_edit.setPlaceholderText("/mnt/f/{source}/{author}/*/{name}")
+        self._pattern_edit.setPlaceholderText("/mnt/f/{source}/{creator}/*/{name}")
         self._pattern_edit.textChanged.connect(self._pat_update_preview)
         pat_input_row.addWidget(self._pattern_edit)
         apply_btn = QPushButton("Apply")
@@ -311,25 +314,25 @@ class EditorDialog(QDialog):
         lay.addWidget(btn, alignment=Qt.AlignmentFlag.AlignTop)
         return container
 
-    def _on_category_changed(self, category_name: str):
-        """Repopulate subcategory combo when the category changes."""
+    def _on_collection_changed(self, collection_name: str):
+        """Repopulate subcollection combo when the collection changes."""
         session = get_session()
         try:
-            q = session.query(Subcategory).order_by(Subcategory.name)
-            if category_name.strip():
-                cat = session.query(Category).filter_by(name=category_name.strip()).first()
-                if cat:
-                    q = q.filter(Subcategory.category_id == cat.id)
-            subcategories = [s.name for s in q.all()]
+            q = session.query(Subcollection).order_by(Subcollection.name)
+            if collection_name.strip():
+                col = session.query(Collection).filter_by(name=collection_name.strip()).first()
+                if col:
+                    q = q.filter(Subcollection.collection_id == col.id)
+            subcollections = [s.name for s in q.all()]
         finally:
             session.close()
-        current = self._subcategory_edit.currentText()
-        self._subcategory_edit.blockSignals(True)
-        self._subcategory_edit.clear()
-        self._subcategory_edit.addItem("")
-        self._subcategory_edit.addItems(subcategories)
-        self._subcategory_edit.setCurrentText(current)
-        self._subcategory_edit.blockSignals(False)
+        current = self._subcollection_edit.currentText()
+        self._subcollection_edit.blockSignals(True)
+        self._subcollection_edit.clear()
+        self._subcollection_edit.addItem("")
+        self._subcollection_edit.addItems(subcollections)
+        self._subcollection_edit.setCurrentText(current)
+        self._subcollection_edit.blockSignals(False)
 
     # ------------------------------------------------------------------
     def _load_model(self):
@@ -341,15 +344,16 @@ class EditorDialog(QDialog):
             self._archive_path = model.archive_path
             self._path_edit.setText(model.archive_path or "")
             self._title_edit.setText(model.title or "")
-            self._author_edit.setText(model.author or "")
+            self._creator_edit.setText(model.creator or "")
             self._source_edit.setCurrentText(model.source or "")
             self._date_edit.setText(format_release_date(model.release_year, model.release_month))
             self._release_edit.setCurrentText(model.release.name if model.release else "")
             self._sculptor_edit.setCurrentText(model.sculptor.name if model.sculptor else "")
-            category_name = model.category.name if model.category else ""
-            self._category_edit.setCurrentText(category_name)
-            self._on_category_changed(category_name)   # repopulate subcategories for this category
-            self._subcategory_edit.setCurrentText(model.subcategory.name if model.subcategory else "")
+            collection_name = model.collection.name if model.collection else ""
+            self._collection_edit.setCurrentText(collection_name)
+            self._on_collection_changed(collection_name)
+            self._subcollection_edit.setCurrentText(model.subcollection.name if model.subcollection else "")
+            self._category_edit.setCurrentText(model.category.name if model.category else "")
             self._sequence_spin.setValue(model.sequence if model.sequence is not None else 0)
             self._scale_edit.setCurrentText(model.scale.name if model.scale else "")
             self._presupports_edit.setCurrentText(model.presupports or "")
@@ -457,16 +461,16 @@ class EditorDialog(QDialog):
         if not extracted:
             return
         _field_map = {
-            "title":           lambda v: self._title_edit.setText(v),
-            "author":          lambda v: self._author_edit.setText(v),
-            "source":          lambda v: self._source_edit.setCurrentText(v),
-            "release_date":    lambda v: self._date_edit.setText(v),
-            "url":             lambda v: self._url_edit.setText(v),
-            "sculptor_name":   lambda v: self._sculptor_edit.setCurrentText(v),
-            "category_name":    lambda v: self._category_edit.setCurrentText(v),
-            "subcategory_name": lambda v: self._subcategory_edit.setCurrentText(v),
-            "release_name":    lambda v: self._release_edit.setCurrentText(v),
-            "sequence":        lambda v: self._sequence_spin.setValue(int(v)) if v.isdigit() else None,
+            "title":              lambda v: self._title_edit.setText(v),
+            "creator":            lambda v: self._creator_edit.setText(v),
+            "source":             lambda v: self._source_edit.setCurrentText(v),
+            "release_date":       lambda v: self._date_edit.setText(v),
+            "url":                lambda v: self._url_edit.setText(v),
+            "sculptor_name":      lambda v: self._sculptor_edit.setCurrentText(v),
+            "collection_name":    lambda v: self._collection_edit.setCurrentText(v),
+            "subcollection_name": lambda v: self._subcollection_edit.setCurrentText(v),
+            "release_name":       lambda v: self._release_edit.setCurrentText(v),
+            "sequence":           lambda v: self._sequence_spin.setValue(int(v)) if v.isdigit() else None,
         }
         for attr, value in extracted.items():
             if value and attr in _field_map:
@@ -481,7 +485,7 @@ class EditorDialog(QDialog):
                 return
 
             model.title        = self._title_edit.text().strip() or None
-            model.author       = self._author_edit.text().strip() or None
+            model.creator      = self._creator_edit.text().strip() or None
             model.source       = self._source_edit.currentText().strip() or None
             _year, _month = parse_release_date(self._date_edit.text().strip())
             model.release_year  = _year
@@ -524,6 +528,34 @@ class EditorDialog(QDialog):
             else:
                 model.sculptor = None
 
+            collection_name = self._collection_edit.currentText().strip()
+            if collection_name:
+                col = session.query(Collection).filter_by(name=collection_name).first()
+                if col is None:
+                    col = Collection(name=collection_name)
+                    session.add(col)
+                    session.flush()
+                model.collection = col
+            else:
+                model.collection = None
+                model.subcollection = None
+
+            if model.collection:
+                subcollection_name = self._subcollection_edit.currentText().strip()
+                if subcollection_name:
+                    sc = session.query(Subcollection).filter_by(
+                        name=subcollection_name, collection_id=model.collection.id
+                    ).first()
+                    if sc is None:
+                        sc = Subcollection(name=subcollection_name, collection_id=model.collection.id)
+                        session.add(sc)
+                        session.flush()
+                    model.subcollection = sc
+                else:
+                    model.subcollection = None
+            else:
+                model.subcollection = None
+
             category_name = self._category_edit.currentText().strip()
             if category_name:
                 cat = session.query(Category).filter_by(name=category_name).first()
@@ -534,23 +566,6 @@ class EditorDialog(QDialog):
                 model.category = cat
             else:
                 model.category = None
-                model.subcategory = None
-
-            if model.category:
-                subcategory_name = self._subcategory_edit.currentText().strip()
-                if subcategory_name:
-                    sc = session.query(Subcategory).filter_by(
-                        name=subcategory_name, category_id=model.category.id
-                    ).first()
-                    if sc is None:
-                        sc = Subcategory(name=subcategory_name, category_id=model.category.id)
-                        session.add(sc)
-                        session.flush()
-                    model.subcategory = sc
-                else:
-                    model.subcategory = None
-            else:
-                model.subcategory = None
 
             model.tags.clear()
             for name in self._tags_edit.get_tags():

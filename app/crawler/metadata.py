@@ -46,7 +46,7 @@ class ModelMetadata:
 
     Attributes:
         title: Model title / display name.
-        author: Creator or sculptor name.
+        creator: Creator or sculptor name.
         distributor: Publishing platform (e.g. ``"Patreon"``, ``"MyMiniFactory"``).
         release_date: Release date string as found in the archive path (e.g.
             ``"2024-01"``).  Not normalised.
@@ -57,7 +57,7 @@ class ModelMetadata:
     """
 
     title: Optional[str] = None
-    author: Optional[str] = None
+    creator: Optional[str] = None
     distributor: Optional[str] = None
     release_date: Optional[str] = None
     url: Optional[str] = None
@@ -134,9 +134,9 @@ def _infer_from_path(archive_path: Path,
     if distributor_idx is not None:
         author_idx = distributor_idx + 1
         if author_idx < len(parts) - 1:  # must not be the filename
-            meta.author = parts[author_idx]
+            meta.creator = parts[author_idx]
             logger.debug("  Inferred author: %r (from path part at index %d)",
-                         meta.author, author_idx)
+                         meta.creator, author_idx)
 
     # Date — scan all parts, deepest first for best specificity
     for part in reversed(parts):
@@ -223,9 +223,9 @@ def extract_metadata(
         if info.get("name"):
             meta.title = info["name"]
             overrides.append(f"title={meta.title!r}")
-        if info.get("author"):
-            meta.author = info["author"]
-            overrides.append(f"author={meta.author!r}")
+        if info.get("creator") or info.get("author"):
+            meta.creator = info.get("creator") or info.get("author")
+            overrides.append(f"creator={meta.creator!r}")
         if info.get("distributor"):
             meta.distributor = info["distributor"]
             overrides.append(f"distributor={meta.distributor!r}")
@@ -250,7 +250,7 @@ def extract_metadata(
 
     logger.debug(
         "  Final metadata — title=%r author=%r source=%r date=%r tags=%s url=%r",
-        meta.title, meta.author, meta.distributor, meta.release_date,
+        meta.title, meta.creator, meta.distributor, meta.release_date,
         meta.tags, meta.url,
     )
     return meta

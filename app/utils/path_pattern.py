@@ -2,11 +2,12 @@
 Shared path-pattern utilities — used by the mass editor and the crawler.
 
 Pattern syntax:
-  {token}  → named capture  (token names: source, author, title/name, date/month,
-                              url, sculptor, category, subcategory, sequence)
+  {token}  → named capture  (token names: source, creator/author, title/name,
+                              date/month, url, sculptor, collection/category,
+                              subcollection/subcategory, sequence)
   *        → ignored segment
 
-FK-backed tokens (sculptor, category, subcategory, sequence) are stored under
+FK-backed tokens (sculptor, collection, subcollection, sequence) are stored under
 "virtual" keys in the extracted dict and require apply_extracted_to_model()
 to resolve them into the correct DB objects.
 """
@@ -46,35 +47,38 @@ def format_release_date(year: int | None, month: int | None) -> str:
 # FK / special fields use a "virtual" key (e.g. "sculptor_name") that
 # apply_extracted_to_model() knows how to handle.
 TOKEN_MAP = {
-    "source":      "source",
-    "author":      "author",
-    "title":       "title",
-    "name":        "title",
-    "date":        "release_date",
-    "month":       "release_date",
-    "url":         "url",
-    "sculptor":    "sculptor_name",
-    "category":    "category_name",
-    "subcategory": "subcategory_name",
-    "sequence":    "sequence",
-    "release":     "release_name",
+    "source":         "source",
+    "creator":        "creator",
+    "author":         "creator",        # backward-compat alias
+    "title":          "title",
+    "name":           "title",
+    "date":           "release_date",
+    "month":          "release_date",
+    "url":            "url",
+    "sculptor":       "sculptor_name",
+    "collection":     "collection_name",
+    "category":       "collection_name",  # backward-compat alias
+    "subcollection":  "subcollection_name",
+    "subcategory":    "subcollection_name",  # backward-compat alias
+    "sequence":       "sequence",
+    "release":        "release_name",
 }
 
 # Simple string attributes that can be set with setattr directly
-_SIMPLE_ATTRS = {"source", "author", "title", "url"}
+_SIMPLE_ATTRS = {"source", "creator", "title", "url"}
 
 # Human-readable label for each field key (for preview lines)
 ATTR_LABEL = {
-    "source":           "source",
-    "author":           "author",
-    "title":            "title",
-    "release_date":     "date",
-    "url":              "url",
-    "sculptor_name":    "sculptor",
-    "category_name":    "category",
-    "subcategory_name": "subcategory",
-    "sequence":         "sequence",
-    "release_name":     "release",
+    "source":              "source",
+    "creator":             "creator",
+    "title":               "title",
+    "release_date":        "date",
+    "url":                 "url",
+    "sculptor_name":       "sculptor",
+    "collection_name":     "collection",
+    "subcollection_name":  "subcollection",
+    "sequence":            "sequence",
+    "release_name":        "release",
 }
 
 PATTERN_HELP = (
@@ -82,18 +86,18 @@ PATTERN_HELP = (
     "Use <code>{token}</code> to capture a path segment, <code>*</code> to skip one.<br><br>"
     "<table cellspacing='0' cellpadding='2'>"
     "<tr><td><code>{source}</code></td><td>&nbsp;–&nbsp;</td><td>distribution / shop name</td></tr>"
-    "<tr><td><code>{author}</code></td><td>&nbsp;–&nbsp;</td><td>creator / designer name</td></tr>"
+    "<tr><td><code>{creator}</code> / <code>{author}</code></td><td>&nbsp;–&nbsp;</td><td>creator / designer name</td></tr>"
     "<tr><td><code>{title}</code> / <code>{name}</code></td><td>&nbsp;–&nbsp;</td><td>model title</td></tr>"
     "<tr><td><code>{date}</code> / <code>{month}</code></td><td>&nbsp;–&nbsp;</td><td>release date</td></tr>"
     "<tr><td><code>{sculptor}</code></td><td>&nbsp;–&nbsp;</td><td>sculptor (looked up or created)</td></tr>"
-    "<tr><td><code>{category}</code></td><td>&nbsp;–&nbsp;</td><td>model category</td></tr>"
-    "<tr><td><code>{subcategory}</code></td><td>&nbsp;–&nbsp;</td><td>subcategory / variant</td></tr>"
+    "<tr><td><code>{collection}</code> / <code>{category}</code></td><td>&nbsp;–&nbsp;</td><td>collection (looked up or created)</td></tr>"
+    "<tr><td><code>{subcollection}</code> / <code>{subcategory}</code></td><td>&nbsp;–&nbsp;</td><td>subcollection / variant</td></tr>"
     "<tr><td><code>{sequence}</code></td><td>&nbsp;–&nbsp;</td><td>numbering within a series</td></tr>"
     "<tr><td><code>{release}</code></td><td>&nbsp;–&nbsp;</td><td>release / bundle name</td></tr>"
     "<tr><td><code>{url}</code></td><td>&nbsp;–&nbsp;</td><td>source URL</td></tr>"
     "<tr><td><code>*</code></td><td>&nbsp;–&nbsp;</td><td>ignored segment (any value)</td></tr>"
     "</table><br>"
-    "<b>Example:</b> <code>/{source}/{author}/*/{name}</code>"
+    "<b>Example:</b> <code>/{source}/{creator}/*/{name}</code>"
 )
 
 
@@ -238,18 +242,21 @@ def render_path_pattern(pattern: str, model) -> str:
         return s if s else "_unknown"
 
     values: dict[str, str] = {
-        "source":      _safe(model.source),
-        "author":      _safe(model.author),
-        "title":       _safe(model.title),
-        "name":        _safe(model.title),
-        "date":        _safe(format_release_date(model.release_year, model.release_month)),
-        "month":       _safe(format_release_date(model.release_year, model.release_month)),
-        "url":         _safe(model.url),
-        "sculptor":    _safe(model.sculptor.name if model.sculptor else None),
-        "category":    _safe(model.category.name if model.category else None),
-        "subcategory": _safe(model.subcategory.name if model.subcategory else None),
-        "sequence":    _safe(model.sequence),
-        "release":     _safe(model.release.name if model.release else None),
+        "source":        _safe(model.source),
+        "creator":       _safe(model.creator),
+        "author":        _safe(model.creator),   # backward-compat alias
+        "title":         _safe(model.title),
+        "name":          _safe(model.title),
+        "date":          _safe(format_release_date(model.release_year, model.release_month)),
+        "month":         _safe(format_release_date(model.release_year, model.release_month)),
+        "url":           _safe(model.url),
+        "sculptor":      _safe(model.sculptor.name    if model.sculptor    else None),
+        "collection":    _safe(model.collection.name  if model.collection  else None),
+        "category":      _safe(model.collection.name  if model.collection  else None),  # backward-compat
+        "subcollection": _safe(model.subcollection.name if model.subcollection else None),
+        "subcategory":   _safe(model.subcollection.name if model.subcollection else None),  # backward-compat
+        "sequence":      _safe(model.sequence),
+        "release":       _safe(model.release.name    if model.release     else None),
     }
 
     # Replace each {token} with its value, sanitising directory-separator chars
@@ -274,7 +281,7 @@ def apply_extracted_to_model(session, model, extracted: dict[str, str],
     When *overwrite* is False, only fields that are currently None / empty are
     filled in (used by the crawler to let archive metadata take precedence).
     """
-    from app.database.models import Sculptor, Category, Subcategory, Release  # local to avoid circular imports
+    from app.database.models import Sculptor, Collection, Subcollection, Release  # local to avoid circular imports
 
     def _should_set(current_value) -> bool:
         if overwrite:
@@ -305,28 +312,28 @@ def apply_extracted_to_model(session, model, extracted: dict[str, str],
                     session.flush()
                 model.sculptor = sc
 
-        elif attr == "category_name":
-            if _should_set(model.category_id):
-                cat = session.query(Category).filter_by(name=value).first()
-                if cat is None:
-                    cat = Category(name=value)
-                    session.add(cat)
+        elif attr == "collection_name":
+            if _should_set(model.collection_id):
+                col = session.query(Collection).filter_by(name=value).first()
+                if col is None:
+                    col = Collection(name=value)
+                    session.add(col)
                     session.flush()
-                model.category = cat
+                model.collection = col
 
-        elif attr == "subcategory_name":
-            if _should_set(model.subcategory_id):
-                # Prefer a subcategory that matches the model's current category
-                q = session.query(Subcategory).filter_by(name=value)
-                if model.category_id:
-                    q = q.filter_by(category_id=model.category_id)
+        elif attr == "subcollection_name":
+            if _should_set(model.subcollection_id):
+                # Prefer a subcollection that matches the model's current collection
+                q = session.query(Subcollection).filter_by(name=value)
+                if model.collection_id:
+                    q = q.filter_by(collection_id=model.collection_id)
                 sc = q.first()
-                if sc is None and model.category_id:
-                    sc = Subcategory(name=value, category_id=model.category_id)
+                if sc is None and model.collection_id:
+                    sc = Subcollection(name=value, collection_id=model.collection_id)
                     session.add(sc)
                     session.flush()
                 if sc:
-                    model.subcategory = sc
+                    model.subcollection = sc
 
         elif attr == "sequence":
             if _should_set(model.sequence):

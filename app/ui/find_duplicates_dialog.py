@@ -29,14 +29,15 @@ logger = logging.getLogger(__name__)
 
 # (display_name, dotted_attr_path) — one level of relationship supported
 _COLUMNS = [
-    ("Title",       "title"),
-    ("Author",      "author"),
-    ("Source",      "source"),
-    ("Sculptor",    "sculptor.name"),
-    ("Category",    "category.name"),
-    ("Subcategory", "subcategory.name"),
-    ("Release",     "release.name"),
-    ("Scale",       "scale.name"),
+    ("Title",          "title"),
+    ("Creator",        "creator"),
+    ("Source",         "source"),
+    ("Sculptor",       "sculptor.name"),
+    ("Collection",     "collection.name"),
+    ("Subcollection",  "subcollection.name"),
+    ("Category",       "category.name"),
+    ("Release",        "release.name"),
+    ("Scale",          "scale.name"),
 ]
 
 _COL_GROUP  = 0
@@ -86,8 +87,9 @@ class _SearchWorker(QThread):
                 session.query(STLModel)
                 .options(
                     joinedload(STLModel.sculptor),
+                    joinedload(STLModel.collection),
+                    joinedload(STLModel.subcollection),
                     joinedload(STLModel.category),
-                    joinedload(STLModel.subcategory),
                     joinedload(STLModel.release),
                     joinedload(STLModel.scale),
                 )

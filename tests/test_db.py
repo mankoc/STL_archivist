@@ -93,25 +93,25 @@ def test_get_session_before_init_raises(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Cascade delete: Category → Subcategory
+# Cascade delete: Collection → Subcollection
 # ---------------------------------------------------------------------------
 
-def test_cascade_delete_category_removes_subcategories():
-    from app.database.models import Category, Subcategory
+def test_cascade_delete_collection_removes_subcollections():
+    from app.database.models import Collection, Subcollection
 
     with session_scope() as session:
-        cat = Category(name="Comics")
-        sub = Subcategory(name="Marvel", category=cat)
-        session.add(cat)
+        col = Collection(name="Comics")
+        sub = Subcollection(name="Marvel", collection=col)
+        session.add(col)
         session.flush()
         session.add(sub)
 
     with session_scope() as session:
-        cat = session.query(Category).filter_by(name="Comics").one()
-        session.delete(cat)
+        col = session.query(Collection).filter_by(name="Comics").one()
+        session.delete(col)
 
     with session_scope() as session:
-        assert session.query(Subcategory).filter_by(name="Marvel").first() is None
+        assert session.query(Subcollection).filter_by(name="Marvel").first() is None
 
 
 # ---------------------------------------------------------------------------

@@ -20,19 +20,19 @@ def test_infer_title_from_stem():
     assert meta.title == "cyborg hulk"
 
 
-def test_infer_author_after_distributor():
-    """Author is inferred only from the folder directly after a distributor folder."""
+def test_infer_creator_after_distributor():
+    """Creator is inferred only from the folder directly after a distributor folder."""
     p = Path("/mnt/f/STL/Patreon/CalebNefzen/Cyborg-Hulk.7z")
     meta = _infer_from_path(p)
     assert meta.distributor == "Patreon"
-    assert meta.author == "CalebNefzen"
+    assert meta.creator == "CalebNefzen"
 
 
-def test_author_not_inferred_without_distributor():
-    """Without a distributor signal the author should remain unset."""
+def test_creator_not_inferred_without_distributor():
+    """Without a distributor signal the creator should remain unset."""
     p = Path("/mnt/f/STL/CalebNefzen/Cyborg-Hulk.7z")
     meta = _infer_from_path(p)
-    assert meta.author is None
+    assert meta.creator is None
 
 
 def test_infer_patreon_type():
@@ -57,7 +57,7 @@ def test_infer_from_path_with_source_dir():
     p = Path("/mnt/f/STL/Patreon/ArtistName/model.7z")
     meta = _infer_from_path(p, source_dir=source)
     assert meta.distributor == "Patreon"
-    assert meta.author == "ArtistName"
+    assert meta.creator == "ArtistName"
     assert meta.title == "model"
 
 
@@ -145,7 +145,7 @@ def test_extract_metadata_info_json_overrides_path_title():
     with patch("app.crawler.archive.find_url_file", return_value=None):
         meta = extract_metadata(Path("/tmp/path_title.zip"), contents=contents)
     assert meta.title == "JSON Title"
-    assert meta.author == "JSON Author"
+    assert meta.creator == "JSON Author"
 
 
 def test_extract_metadata_info_json_tags():
@@ -193,7 +193,7 @@ def test_extract_metadata_no_contents_falls_back_to_path():
     with patch("app.crawler.archive.find_url_file", return_value=None):
         meta = extract_metadata(p, contents={})
     assert meta.distributor == "Patreon"
-    assert meta.author == "ArtistX"
+    assert meta.creator == "ArtistX"
     assert meta.title == "robot"
     assert meta.release_date == "2023-12"
 

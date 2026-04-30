@@ -158,21 +158,21 @@ def test_apply_extracted_overwrite_false():
             archive_path="/tmp/test.7z",
             archive_hash="aaa",
             title="Original Title",
-            author="Original Author",
+            creator="Original Creator",
         )
         session.add(model)
         session.flush()
 
         extracted = {
-            "title":  "New Title",
-            "author": "New Author",
-            "source": "Patreon",   # was empty → should be filled
+            "title":   "New Title",
+            "creator": "New Creator",
+            "source":  "Patreon",   # was empty → should be filled
         }
         apply_extracted_to_model(session, model, extracted, overwrite=False)
 
-        assert model.title  == "Original Title"   # must NOT be overwritten
-        assert model.author == "Original Author"   # must NOT be overwritten
-        assert model.source == "Patreon"           # was None → filled in
+        assert model.title   == "Original Title"    # must NOT be overwritten
+        assert model.creator == "Original Creator"  # must NOT be overwritten
+        assert model.source  == "Patreon"           # was None → filled in
 
 
 # ---------------------------------------------------------------------------

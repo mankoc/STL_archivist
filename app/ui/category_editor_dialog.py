@@ -134,7 +134,7 @@ class CategoryEditorDialog(QDialog):
         self._load()
 
     def _delete(self) -> None:
-        """Delete the selected category (and its subcategories) after user confirmation."""
+        """Delete the selected category after user confirmation."""
         cat_id = self._selected_id()
         if cat_id is None:
             QMessageBox.information(self, "Delete", "Select exactly one category to delete.")
@@ -145,15 +145,12 @@ class CategoryEditorDialog(QDialog):
             cat = session.get(Category, cat_id)
             name = cat.name
             count = len(cat.models)
-            sub_count = len(cat.subcategories)
         finally:
             session.close()
 
         msg = f"Delete category '{name}'?"
         if count:
             msg += f"\n\nIt is currently used by {count} model(s)."
-        if sub_count:
-            msg += f"\nDeleting it will also remove its {sub_count} subcategory/subcategories."
         reply = QMessageBox.question(
             self, "Delete Category", msg,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
@@ -312,7 +309,6 @@ class _MergeCategoriesDialog(QDialog):
             delete_cat = session.get(Category, delete_id)
             for model in list(delete_cat.models):
                 model.category = keep_cat
-                model.subcategory = None  # subcategory belonged to the deleted category
             session.delete(delete_cat)
 
         self._scan()

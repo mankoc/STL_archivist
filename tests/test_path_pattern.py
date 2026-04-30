@@ -14,7 +14,7 @@ from app.utils.path_pattern import (
     render_path_pattern,
 )
 from app.database.db import init_db, session_scope
-from app.database.models import Category, STLModel, Subcategory, Sculptor
+from app.database.models import Collection, STLModel, Subcollection, Sculptor
 
 
 @pytest.fixture(autouse=True)
@@ -75,27 +75,27 @@ def test_pattern_to_regex_duplicate_tokens():
 
 def test_parse_path_flat_structure():
     result = parse_path(
-        "/{source}/{author}/{name}",
+        "/{source}/{creator}/{name}",
         "/Patreon/Artist/model.7z",
     )
     assert result.get("source") == "Patreon"
-    assert result.get("author") == "Artist"
+    assert result.get("creator") == "Artist"
     assert result.get("title") == "model"  # extension stripped
 
 
 def test_parse_path_nested_fills_title_from_stem():
     # Pattern matches only the parent dirs; archive stem is injected as title.
     result = parse_path(
-        "/{source}/{author}",
+        "/{source}/{creator}",
         "/Patreon/Artist/subdir/cyborg_hulk.7z",
     )
     assert result.get("source") == "Patreon"
-    assert result.get("author") == "Artist"
+    assert result.get("creator") == "Artist"
     assert result.get("title") == "cyborg_hulk"
 
 
 def test_parse_path_no_match_returns_empty():
-    result = parse_path("/{source}/{author}/{name}", "/nothing/here.7z")
+    result = parse_path("/{source}/{creator}/{name}", "/nothing/here.7z")
     # Pattern has 3 tokens but path only has 2 segments — Pass 2 still produces
     # what it can; we just check no crash and type.
     assert isinstance(result, dict)
@@ -112,34 +112,34 @@ def test_parse_path_invalid_pattern_returns_empty():
 class _StubModel:
     def __init__(self, **kw):
         self.source = kw.get("source")
-        self.author = kw.get("author")
+        self.creator = kw.get("creator")
         self.title = kw.get("title")
         self.release_year = kw.get("release_year")
         self.release_month = kw.get("release_month")
         self.url = kw.get("url")
         self.sculptor = kw.get("sculptor")
-        self.category = kw.get("category")
-        self.subcategory = kw.get("subcategory")
+        self.collection = kw.get("collection")
+        self.subcollection = kw.get("subcollection")
         self.sequence = kw.get("sequence")
         self.release = kw.get("release")
 
 
 def test_render_path_pattern_fills_tokens():
-    m = _StubModel(source="Patreon", author="Artist", title="Cyborg Hulk")
-    out = render_path_pattern("/{source}/{author}/{title}", m)
+    m = _StubModel(source="Patreon", creator="Artist", title="Cyborg Hulk")
+    out = render_path_pattern("/{source}/{creator}/{title}", m)
     assert out == "/Patreon/Artist/Cyborg Hulk"
 
 
 def test_render_path_pattern_unknown_replaced_with_unknown():
-    m = _StubModel(source=None, author="Artist", title="Hulk")
-    out = render_path_pattern("/{source}/{author}/{title}", m)
+    m = _StubModel(source=None, creator="Artist", title="Hulk")
+    out = render_path_pattern("/{source}/{creator}/{title}", m)
     assert out == "/_unknown/Artist/Hulk"
 
 
 def test_render_path_pattern_sanitises_path_chars():
     # Title contains a slash — must not split into a new directory
-    m = _StubModel(source="S", author="A", title="a/b")
-    out = render_path_pattern("/{source}/{author}/{title}", m)
+    m = _StubModel(source="S", creator="A", title="a/b")
+    out = render_path_pattern("/{source}/{creator}/{title}", m)
     assert out == "/S/A/a_b"
 
 
@@ -157,17 +157,17 @@ def test_apply_extracted_creates_fk_entities():
             session,
             model,
             {
-                "sculptor_name":    "New Sculptor",
-                "category_name":    "New Cat",
-                "subcategory_name": "New Sub",
+                "sculptor_name":      "New Sculptor",
+                "collection_name":    "New Col",
+                "subcollection_name": "New Sub",
             },
             overwrite=True,
         )
 
         assert session.query(Sculptor).filter_by(name="New Sculptor").count() == 1
-        assert session.query(Category).filter_by(name="New Cat").count() == 1
-        # Subcategory is created only when a category is set
-        assert session.query(Subcategory).filter_by(name="New Sub").count() == 1
+        assert session.query(Collection).filter_by(name="New Col").count() == 1
+        # Subcollection is created only when a collection is set
+        assert session.query(Subcollection).filter_by(name="New Sub").count() == 1
 
 
 def test_apply_extracted_parses_release_date():
@@ -271,17 +271,17 @@ def test_apply_extracted_reuses_existing_release():
 # apply_extracted_to_model — subcategory without a category is skipped
 # ---------------------------------------------------------------------------
 
-def test_apply_extracted_subcategory_without_category_not_created():
-    """If no category is set, a subcategory cannot be created."""
+def test_apply_extracted_subcollection_without_collection_not_created():
+    """If no collection is set, a subcollection cannot be created."""
     with session_scope() as session:
         model = STLModel(archive_path="/nocat.7z", archive_hash="h")
         session.add(model)
         session.flush()
 
         apply_extracted_to_model(
-            session, model, {"subcategory_name": "Orphan Sub"}, overwrite=True
+            session, model, {"subcollection_name": "Orphan Sub"}, overwrite=True
         )
-        assert model.subcategory is None
+        assert model.subcollection is None
 
 
 # ---------------------------------------------------------------------------

@@ -47,7 +47,7 @@ class StatsWorker(QThread):
         from sqlalchemy import func
         from app.database.db import session_scope
         from app.database.models import (
-            STLModel, Image, Sculptor, Category, Tag, Release, Scale, model_tags,
+            STLModel, Image, Sculptor, Collection, Category, Tag, Release, Scale, model_tags,
         )
         from app.ui.config_dialog import get_db_path, get_data_dir
 
@@ -56,13 +56,14 @@ class StatsWorker(QThread):
         try:
             with session_scope() as s:
                 # --- Counts ---
-                stats["total_models"]     = s.query(func.count(STLModel.id)).scalar() or 0
-                stats["total_images"]     = s.query(func.count(Image.id)).scalar() or 0
-                stats["total_sculptors"]  = s.query(func.count(Sculptor.id)).scalar() or 0
-                stats["total_categories"] = s.query(func.count(Category.id)).scalar() or 0
-                stats["total_releases"]   = s.query(func.count(Release.id)).scalar() or 0
-                stats["total_scales"]     = s.query(func.count(Scale.id)).scalar() or 0
-                stats["total_tags"]       = s.query(func.count(Tag.id)).scalar() or 0
+                stats["total_models"]      = s.query(func.count(STLModel.id)).scalar() or 0
+                stats["total_images"]      = s.query(func.count(Image.id)).scalar() or 0
+                stats["total_sculptors"]   = s.query(func.count(Sculptor.id)).scalar() or 0
+                stats["total_collections"] = s.query(func.count(Collection.id)).scalar() or 0
+                stats["total_categories"]  = s.query(func.count(Category.id)).scalar() or 0
+                stats["total_releases"]    = s.query(func.count(Release.id)).scalar() or 0
+                stats["total_scales"]      = s.query(func.count(Scale.id)).scalar() or 0
+                stats["total_tags"]        = s.query(func.count(Tag.id)).scalar() or 0
 
                 # --- Content quality ---
                 stats["presupported"] = s.query(func.count(STLModel.id)).filter(
@@ -111,11 +112,11 @@ class StatsWorker(QThread):
                     Tag.id
                 ).order_by(func.count(model_tags.c.model_id).desc()).limit(15).all()
 
-                # --- Top categories ---
-                stats["top_categories"] = s.query(
-                    Category.name, func.count(STLModel.id).label("n")
-                ).join(STLModel, STLModel.category_id == Category.id).group_by(
-                    Category.id
+                # --- Top collections ---
+                stats["top_collections"] = s.query(
+                    Collection.name, func.count(STLModel.id).label("n")
+                ).join(STLModel, STLModel.collection_id == Collection.id).group_by(
+                    Collection.id
                 ).order_by(func.count(STLModel.id).desc()).limit(10).all()
 
             # --- Storage ---
@@ -223,8 +224,9 @@ class StatisticsDialog(QDialog):
         self._row(ov, "Archives (models)",  f"{total:,}")
         self._row(ov, "Images",             f"{s['total_images']:,}")
         self._row(ov, "Sculptors",          f"{s['total_sculptors']:,}")
-        self._row(ov, "Releases",           f"{s['total_releases']:,}")
+        self._row(ov, "Collections",        f"{s['total_collections']:,}")
         self._row(ov, "Categories",         f"{s['total_categories']:,}")
+        self._row(ov, "Releases",           f"{s['total_releases']:,}")
         self._row(ov, "Scales",             f"{s['total_scales']:,}")
         self._row(ov, "Tags",               f"{s['total_tags']:,}")
         layout.addWidget(ov)
@@ -276,11 +278,11 @@ class StatisticsDialog(QDialog):
                 total,
             ))
 
-        # ── Top categories ───────────────────────────────────────────
-        if s["top_categories"]:
+        # ── Top collections ──────────────────────────────────────────
+        if s["top_collections"]:
             layout.addWidget(self._bar_group(
-                "Top Categories",
-                list(s["top_categories"]),
+                "Top Collections",
+                list(s["top_collections"]),
                 total,
             ))
 

@@ -16,7 +16,7 @@ from app.crawler.folder_metadata import (
     import_folder_metadata,
 )
 from app.database.db import init_db, session_scope
-from app.database.models import Category, Image, STLModel, Sculptor, Subcategory, Tag
+from app.database.models import Collection, Image, STLModel, Sculptor, Subcollection, Tag
 from app.utils.thumbnailer import get_thumbnail_bytes, init_thumbnail_store, save_thumbnail
 
 
@@ -126,23 +126,23 @@ def test_round_trip_preserves_fields_and_thumbnail(tmp_library):
     # Seed one model + thumbnail, export, wipe DB, then import.
     with session_scope() as session:
         sculptor = Sculptor(name="Artist")
-        category = Category(name="Sci-Fi")
-        subcat = Subcategory(name="Cyborg", category=category)
+        collection = Collection(name="Sci-Fi")
+        subcol = Subcollection(name="Cyborg", collection=collection)
         tag = Tag(name="robot")
-        session.add_all([sculptor, category, subcat, tag])
+        session.add_all([sculptor, collection, subcol, tag])
         session.flush()
 
         model = STLModel(
             archive_path=str(archive),
             archive_hash="abc123",
             title="Cyborg Hulk",
-            author="Artist",
+            creator="Artist",
             source="Patreon",
             release_year=2024,
             release_month=3,
             sculptor=sculptor,
-            category=category,
-            subcategory=subcat,
+            collection=collection,
+            subcollection=subcol,
         )
         model.tags.append(tag)
         session.add(model)
@@ -172,14 +172,14 @@ def test_round_trip_preserves_fields_and_thumbnail(tmp_library):
     with session_scope() as session:
         m = session.query(STLModel).filter_by(archive_path=str(archive)).one()
         assert m.title == "Cyborg Hulk"
-        assert m.author == "Artist"
+        assert m.creator == "Artist"
         assert m.source == "Patreon"
         assert m.release_year == 2024
         assert m.release_month == 3
         assert m.archive_hash == "abc123"
         assert m.sculptor.name == "Artist"
-        assert m.category.name == "Sci-Fi"
-        assert m.subcategory.name == "Cyborg"
+        assert m.collection.name == "Sci-Fi"
+        assert m.subcollection.name == "Cyborg"
         assert {t.name for t in m.tags} == {"robot"}
         assert len(m.images) == 1
         restored_img = m.images[0]
