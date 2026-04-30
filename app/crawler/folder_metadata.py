@@ -132,7 +132,7 @@ def import_folder_metadata(folder: Path, session: Session, thumb_base_dir: Path)
 
     Returns a list of archive_path strings that were newly inserted.
     """
-    from app.database.models import STLModel, Image, Sculptor, Collection, Subcollection, Category, Release, Scale, Tag
+    from app.database.models import STLModel, Image, Sculptor, Collection, Subcollection, Category, Release, Scale, Tag, STLFile
     from app.utils.thumbnailer import write_raw_thumbnail
 
     folder = Path(folder)
@@ -225,6 +225,17 @@ def import_folder_metadata(folder: Path, session: Session, thumb_base_dir: Path)
             else:
                 session.delete(img)
 
+        # STL file list
+        for sf_data in model_data.get("stl_files", []):
+            fname = sf_data.get("filename")
+            if fname:
+                session.add(STLFile(
+                    model=model,
+                    filename=fname,
+                    file_size=sf_data.get("file_size"),
+                    archive_hash=sf_data.get("archive_hash"),
+                ))
+
         imported.append(archive_str)
 
     logger.debug("import_folder_metadata: imported %d record(s) from %s", len(imported), folder)
@@ -281,6 +292,14 @@ def _serialize_models(models: list, thumb_base_dir: Path, include_thumbnails: bo
             "scale":         model.scale.name        if model.scale        else None,
             "tags":          [t.name for t in model.tags],
             "images":        images_list,
+            "stl_files":     [
+                {
+                    "filename":     sf.filename,
+                    "file_size":    sf.file_size,
+                    "archive_hash": sf.archive_hash,
+                }
+                for sf in model.stl_files
+            ],
         })
 
     return {

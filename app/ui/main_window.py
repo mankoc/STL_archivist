@@ -125,6 +125,17 @@ class MainWindow(QMainWindow):
         act_find_dupes.triggered.connect(self._open_find_duplicates_dialog)
         tools_menu.addAction(act_find_dupes)
 
+        act_find_content_dupes = QAction(
+            style.standardIcon(SP.SP_FileDialogContentsView),
+            "Find Archives by Content…",
+            self,
+        )
+        act_find_content_dupes.setStatusTip(
+            "Find archives that share a large fraction of identical STL files"
+        )
+        act_find_content_dupes.triggered.connect(self._open_find_content_duplicates_dialog)
+        tools_menu.addAction(act_find_content_dupes)
+
         tools_menu.addSeparator()
 
         act_db_maintenance = QAction(
@@ -224,6 +235,18 @@ class MainWindow(QMainWindow):
             dlg = FindDuplicatesDialog(parent=self)
             dlg.show_models_requested.connect(self._browser.show_model_ids)
             self._find_dupes_dlg = dlg
+        dlg.raise_()
+        dlg.activateWindow()
+        dlg.show()
+
+    def _open_find_content_duplicates_dialog(self) -> None:
+        """Open the find-archives-by-content dialog (non-modal)."""
+        from app.ui.find_content_duplicates_dialog import FindContentDuplicatesDialog
+        dlg = getattr(self, "_find_content_dupes_dlg", None)
+        if dlg is None or not dlg.isVisible():
+            dlg = FindContentDuplicatesDialog(parent=self)
+            dlg.show_models_requested.connect(self._browser.show_model_ids)
+            self._find_content_dupes_dlg = dlg
         dlg.raise_()
         dlg.activateWindow()
         dlg.show()

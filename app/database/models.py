@@ -158,6 +158,7 @@ class STLModel(Base):
 
     tags          = relationship("Tag",          secondary=model_tags, back_populates="models")
     images        = relationship("Image",        back_populates="model", cascade="all, delete-orphan")
+    stl_files     = relationship("STLFile",      back_populates="model", cascade="all, delete-orphan")
     sculptor      = relationship("Sculptor",     back_populates="models")
     collection    = relationship("Collection",   back_populates="models")
     subcollection = relationship("Subcollection",back_populates="models")
@@ -200,3 +201,22 @@ class Image(Base):
     thumbnail      = Column(LargeBinary, nullable=True)   # legacy blob – NULL after migration to LMDB
 
     model = relationship("STLModel", back_populates="images")
+
+
+class STLFile(Base):
+    """One STL file entry found inside a model's archive.
+
+    Populated by the crawler when 'Store STL file list' is enabled.
+    The composite primary key (model_id, filename) is unique per archive.
+    ``file_size`` is the uncompressed byte count; ``archive_hash`` mirrors
+    ``STLModel.archive_hash`` at the time of the last crawl.
+    """
+
+    __tablename__ = "stl_files"
+
+    model_id     = Column(Integer, ForeignKey("models.id", ondelete="CASCADE"), primary_key=True)
+    filename     = Column(String(512), primary_key=True)
+    file_size    = Column(Integer, nullable=True)   # uncompressed bytes; NULL if unavailable
+    archive_hash = Column(String(64), nullable=True)
+
+    model = relationship("STLModel", back_populates="stl_files")

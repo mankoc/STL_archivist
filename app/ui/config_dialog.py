@@ -190,6 +190,11 @@ def get_metadata_thumbnails_enabled() -> bool:
     return bool(_load_library_settings().get("metadata_thumbnails", True))
 
 
+def get_store_stl_file_list() -> bool:
+    """Whether the crawler records the list of STL files contained in each archive."""
+    return bool(_load_library_settings().get("store_stl_file_list", False))
+
+
 _ICONS_DIR = Path(__file__).parent.parent.parent / "resources" / "icons"
 
 
@@ -503,6 +508,19 @@ class ConfigDialog(QDialog):
 
         self._metadata_sidecar_check.toggled.connect(self._metadata_thumbnails_check.setEnabled)
 
+        self._store_stl_list_check = QCheckBox("Store STL file list")
+        form.addRow("", self._store_stl_list_check)
+        form.addRow(
+            "",
+            QLabel(
+                "<small>When enabled, the crawler records the name and uncompressed "
+                "size of every <b>.stl</b> file found inside each archive. "
+                "Stored in the <b>stl_files</b> database table. "
+                "Re-crawl existing archives to populate entries that were "
+                "processed before this option was enabled.</small>"
+            ),
+        )
+
         layout.addWidget(group)
         layout.addStretch()
         return page
@@ -628,6 +646,7 @@ class ConfigDialog(QDialog):
         self._metadata_sidecar_check.setChecked(sidecar_enabled)
         self._metadata_thumbnails_check.setEnabled(sidecar_enabled)
         self._metadata_thumbnails_check.setChecked(get_metadata_thumbnails_enabled())
+        self._store_stl_list_check.setChecked(get_store_stl_file_list())
 
         scheme = get_color_scheme()
         idx = self._theme_combo.findText(scheme)
@@ -668,6 +687,7 @@ class ConfigDialog(QDialog):
                 ],
                 "metadata_sidecar_enabled": self._metadata_sidecar_check.isChecked(),
                 "metadata_thumbnails": self._metadata_thumbnails_check.isChecked(),
+                "store_stl_file_list": self._store_stl_list_check.isChecked(),
                 "debug_menu_enabled": self._debug_menu_check.isChecked(),
             },
             data_dir=data_dir,

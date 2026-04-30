@@ -1,0 +1,878 @@
+"""
+Dialog that compares archive contents stored in the stl_files table and
+thumbnail images using perceptual hashing, reporting pairs of archives
+that share a high fraction of identical files or similar-looking images.
+
+Two separate tabs handle the two modes:
+  STL Files  — inverted-index overlap on (filename, file_size)
+  Images     — dHash perceptual matching on LMDB thumbnails (pure Pillow)
+"""
+import io
+import logging
+from collections import defaultdict
+from pathlib import Path
+from typing import Optional
+
+from PyQt6.QtCore import QEvent, QObject, QThread, pyqtSignal, Qt
+from PyQt6.QtGui import QPixmap
+from PyQt6.QtWidgets import (
+    QDialog, QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QSpinBox, QTableWidget, QTableWidgetItem, QHeaderView,
+    QProgressBar, QGroupBox, QFormLayout, QTabWidget, QWidget,
+)
+
+logger = logging.getLogger(__name__)
+
+_TAB_STL  = 0
+_TAB_IMGS = 1
+
+# ── STL tab column indices ────────────────────────────────────────────────────
+_S_ID_A    = 0   # hidden
+_S_TITLE_A = 1
+_S_FILES_A = 2
+_S_ID_B    = 3   # hidden
+_S_TITLE_B = 4
+_S_FILES_B = 5
+_S_MATCH   = 6
+_S_SIM     = 7
+_S_NCOLS   = 8
+
+# ── Images tab column indices ─────────────────────────────────────────────────
+_I_ID_A    = 0   # hidden
+_I_TITLE_A = 1
+_I_IMGS_A  = 2
+_I_ID_B    = 3   # hidden
+_I_TITLE_B = 4
+_I_IMGS_B  = 5
+_I_PAIRS   = 6
+_I_DIST    = 7
+_I_NCOLS   = 8
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Shared table helper
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _item(text: str, user_data=None,
+          align: Qt.AlignmentFlag | None = None) -> QTableWidgetItem:
+    it = QTableWidgetItem(text)
+    it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsEditable)
+    if user_data is not None:
+        it.setData(Qt.ItemDataRole.UserRole, user_data)
+    if align is not None:
+        it.setTextAlignment(align)
+    return it
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Perceptual hashing — pure Pillow, no extra dependencies
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _dhash(jpeg_bytes: bytes, hash_size: int = 8) -> Optional[int]:
+    """Compute a 64-bit difference hash (dHash) from raw JPEG bytes.
+
+    The image is converted to greyscale and resized to
+    (hash_size+1) × hash_size pixels.  For each row, each pixel is
+    compared to the one immediately to its right; the result is a
+    hash_size² -bit integer.
+
+    Returns None if the image cannot be decoded.
+    """
+    try:
+        from PIL import Image
+        img = Image.open(io.BytesIO(jpeg_bytes)).convert("L")
+        img = img.resize((hash_size + 1, hash_size), Image.LANCZOS)
+        px  = img.load()
+        result = 0
+        bit = 0
+        for row in range(hash_size):
+            for col in range(hash_size):
+                if px[col, row] > px[col + 1, row]:
+                    result |= 1 << bit
+                bit += 1
+        return result
+    except Exception:
+        return None
+
+
+def _hamming(a: int, b: int) -> int:
+    return bin(a ^ b).count("1")
+
+
+def _find_candidates(
+    hashes: list[tuple[int, int, int]],   # (image_id, model_id, hash_value)
+    max_dist: int,
+) -> set[tuple[int, int]]:
+    """Return index pairs (i, j) with i < j that may have Hamming distance ≤ max_dist.
+
+    Uses the pigeonhole principle: split the 64-bit hash into (max_dist + 1)
+    equal segments.  Two hashes that differ in ≤ max_dist bits must share at
+    least one segment verbatim, so the segment inverted index has no false
+    negatives.  False positives are removed by the caller via exact distance.
+
+    For max_dist = 0 a plain dict grouping is used instead.
+    """
+    if not hashes:
+        return set()
+
+    if max_dist == 0:
+        bucket: dict[int, list[int]] = defaultdict(list)
+        for idx, (_, _, h) in enumerate(hashes):
+            bucket[h].append(idx)
+        out: set[tuple[int, int]] = set()
+        for grp in bucket.values():
+            for a in range(len(grp)):
+                for b in range(a + 1, len(grp)):
+                    out.add((grp[a], grp[b]))
+        return out
+
+    num_seg  = max_dist + 1
+    seg_bits = 64 // num_seg
+    seg_mask = (1 << seg_bits) - 1
+
+    index: dict[tuple[int, int], list[int]] = defaultdict(list)
+    for idx, (_, _, h) in enumerate(hashes):
+        for s in range(num_seg):
+            index[(s, (h >> (s * seg_bits)) & seg_mask)].append(idx)
+
+    candidates: set[tuple[int, int]] = set()
+    for idx, (_, _, h) in enumerate(hashes):
+        for s in range(num_seg):
+            seg_val = (h >> (s * seg_bits)) & seg_mask
+            for other in index[(s, seg_val)]:
+                if other > idx:
+                    candidates.add((idx, other))
+    return candidates
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STL-files worker
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _ContentDupWorker(QThread):
+    """Find archive pairs that share a high fraction of STL files."""
+
+    progress = pyqtSignal(str)
+    finished = pyqtSignal(list)
+
+    def __init__(self, threshold: float, parent=None) -> None:
+        super().__init__(parent)
+        self._threshold = threshold
+        self._stop = False
+
+    def stop(self) -> None:
+        self._stop = True
+
+    def run(self) -> None:
+        from app.database.db import session_scope
+        from app.database.models import STLFile, STLModel
+
+        try:
+            with session_scope() as session:
+                self.progress.emit("Loading STL file records…")
+                rows = (
+                    session.query(STLFile.model_id, STLFile.filename, STLFile.file_size)
+                    .filter(STLFile.file_size.isnot(None))
+                    .all()
+                )
+                if not rows:
+                    self.finished.emit([])
+                    return
+
+                model_files: dict[int, set[tuple]] = defaultdict(set)
+                for model_id, filename, file_size in rows:
+                    if self._stop:
+                        self.finished.emit([])
+                        return
+                    model_files[model_id].add((filename, file_size))
+
+                self.progress.emit(f"Building index over {len(model_files)} archive(s)…")
+                file_to_models: dict[tuple, set[int]] = defaultdict(set)
+                for model_id, files in model_files.items():
+                    if self._stop:
+                        self.finished.emit([])
+                        return
+                    for key in files:
+                        file_to_models[key].add(model_id)
+
+                self.progress.emit("Computing pair overlaps…")
+                pair_overlap: dict[tuple[int, int], int] = defaultdict(int)
+                for key, models in file_to_models.items():
+                    if len(models) < 2:
+                        continue
+                    if self._stop:
+                        self.finished.emit([])
+                        return
+                    ms = sorted(models)
+                    for i in range(len(ms)):
+                        for j in range(i + 1, len(ms)):
+                            pair_overlap[(ms[i], ms[j])] += 1
+
+                self.progress.emit("Filtering by threshold…")
+                model_file_count = {mid: len(f) for mid, f in model_files.items()}
+                candidate_pairs = []
+                for (id_a, id_b), overlap in pair_overlap.items():
+                    if self._stop:
+                        self.finished.emit([])
+                        return
+                    ta = model_file_count.get(id_a, 0)
+                    tb = model_file_count.get(id_b, 0)
+                    if ta == 0 or tb == 0:
+                        continue
+                    sim = overlap / max(ta, tb)
+                    if sim >= self._threshold:
+                        candidate_pairs.append((id_a, id_b, overlap, ta, tb, sim))
+
+                if not candidate_pairs:
+                    self.finished.emit([])
+                    return
+
+                self.progress.emit("Loading model titles…")
+                all_ids: set[int] = set()
+                for id_a, id_b, *_ in candidate_pairs:
+                    all_ids.add(id_a)
+                    all_ids.add(id_b)
+                models_map = {
+                    m.id: m
+                    for m in session.query(STLModel)
+                        .filter(STLModel.id.in_(list(all_ids)))
+                        .all()
+                }
+
+            results = []
+            for id_a, id_b, overlap, ta, tb, sim in sorted(candidate_pairs, key=lambda x: -x[5]):
+                ma = models_map.get(id_a)
+                mb = models_map.get(id_b)
+                if ma and mb:
+                    results.append({
+                        "id_a": id_a,
+                        "title_a": ma.title or Path(ma.archive_path).stem,
+                        "total_a": ta,
+                        "id_b": id_b,
+                        "title_b": mb.title or Path(mb.archive_path).stem,
+                        "total_b": tb,
+                        "overlap": overlap,
+                        "sim":     sim,
+                    })
+            self.finished.emit(results)
+
+        except Exception as exc:
+            logger.error("STL content duplicate search failed: %s", exc, exc_info=True)
+            self.finished.emit([])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Image duplicate worker
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _ImageDupWorker(QThread):
+    """Find archive pairs that share perceptually similar thumbnail images."""
+
+    progress = pyqtSignal(str)
+    prog_val = pyqtSignal(int, int)   # (current, total) for hash-computation phase
+    finished = pyqtSignal(list)
+
+    def __init__(self, max_dist: int, parent=None) -> None:
+        super().__init__(parent)
+        self._max_dist = max_dist
+        self._stop = False
+
+    def stop(self) -> None:
+        self._stop = True
+
+    def run(self) -> None:
+        from app.database.db import session_scope
+        from app.database.models import Image, STLModel
+        from app.utils.thumbnailer import get_thumbnail_bytes
+
+        try:
+            with session_scope() as session:
+                self.progress.emit("Loading image records…")
+                image_rows = (
+                    session.query(Image.id, Image.model_id)
+                    .filter(Image.thumbnail_path.isnot(None))
+                    .all()
+                )
+                if not image_rows:
+                    self.finished.emit([])
+                    return
+
+                total = len(image_rows)
+                self.prog_val.emit(0, total)
+                self.progress.emit(f"Computing perceptual hashes for {total} image(s)…")
+
+                # (image_id, model_id, dhash_value)
+                hashes: list[tuple[int, int, int]] = []
+                model_img_count: dict[int, int] = defaultdict(int)
+
+                for n, (img_id, model_id) in enumerate(image_rows):
+                    if self._stop:
+                        self.finished.emit([])
+                        return
+                    jpeg = get_thumbnail_bytes(img_id)
+                    if jpeg:
+                        h = _dhash(jpeg)
+                        if h is not None:
+                            hashes.append((img_id, model_id, h))
+                            model_img_count[model_id] += 1
+                    if (n + 1) % 50 == 0:
+                        self.prog_val.emit(n + 1, total)
+
+                self.prog_val.emit(total, total)
+
+                if not hashes:
+                    self.finished.emit([])
+                    return
+
+                self.progress.emit(
+                    f"Finding similar image pairs among {len(hashes)} hashed image(s)…"
+                )
+                candidates = _find_candidates(hashes, self._max_dist)
+
+                if self._stop:
+                    self.finished.emit([])
+                    return
+
+                self.progress.emit(f"Scoring {len(candidates)} candidate pair(s)…")
+
+                # (model_a, model_b) → list of per-image-pair Hamming distances
+                pair_dists: dict[tuple[int, int], list[int]] = defaultdict(list)
+
+                for i, j in candidates:
+                    if self._stop:
+                        self.finished.emit([])
+                        return
+                    _, model_a, h_a = hashes[i]
+                    _, model_b, h_b = hashes[j]
+                    if model_a == model_b:
+                        continue
+                    dist = _hamming(h_a, h_b)
+                    if dist <= self._max_dist:
+                        key = (min(model_a, model_b), max(model_a, model_b))
+                        pair_dists[key].append(dist)
+
+                if not pair_dists:
+                    self.finished.emit([])
+                    return
+
+                self.progress.emit("Loading model titles…")
+                all_ids: set[int] = set()
+                for id_a, id_b in pair_dists:
+                    all_ids.add(id_a)
+                    all_ids.add(id_b)
+                models_map = {
+                    m.id: m
+                    for m in session.query(STLModel)
+                        .filter(STLModel.id.in_(list(all_ids)))
+                        .all()
+                }
+
+            results = []
+            for (id_a, id_b), dists in pair_dists.items():
+                ma = models_map.get(id_a)
+                mb = models_map.get(id_b)
+                if ma and mb:
+                    results.append({
+                        "id_a":    id_a,
+                        "title_a": ma.title or Path(ma.archive_path).stem,
+                        "imgs_a":  model_img_count.get(id_a, 0),
+                        "id_b":    id_b,
+                        "title_b": mb.title or Path(mb.archive_path).stem,
+                        "imgs_b":  model_img_count.get(id_b, 0),
+                        "pairs":   len(dists),
+                        "best":    min(dists),
+                    })
+
+            # Sort: lowest best-distance first, then most matching pairs
+            results.sort(key=lambda r: (r["best"], -r["pairs"]))
+            self.finished.emit(results)
+
+        except Exception as exc:
+            logger.error("Image duplicate search failed: %s", exc, exc_info=True)
+            self.finished.emit([])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Thumbnail hover popup
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _ThumbnailPopup(QFrame):
+    """Frameless tooltip-style window showing two archive thumbnails side-by-side."""
+
+    _MAX_DIM = 240
+
+    def __init__(self) -> None:
+        super().__init__(None, Qt.WindowType.ToolTip)
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setFrameShadow(QFrame.Shadow.Raised)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(10)
+        self._lbl_a = QLabel()
+        self._lbl_b = QLabel()
+        for lbl in (self._lbl_a, self._lbl_b):
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setMinimumSize(self._MAX_DIM, self._MAX_DIM)
+            layout.addWidget(lbl)
+
+    def set_images(self, data_a: Optional[bytes], data_b: Optional[bytes]) -> None:
+        self._set_label(self._lbl_a, data_a, "A")
+        self._set_label(self._lbl_b, data_b, "B")
+
+    def _set_label(self, lbl: QLabel, data: Optional[bytes], side: str) -> None:
+        if data:
+            px = QPixmap()
+            if px.loadFromData(data):
+                px = px.scaled(
+                    self._MAX_DIM, self._MAX_DIM,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                lbl.setPixmap(px)
+                return
+        lbl.clear()
+        lbl.setText(f"No image ({side})")
+
+
+class _ImgHoverFilter(QObject):
+    """Viewport event filter that shows a thumbnail popup when hovering image result rows."""
+
+    def __init__(
+        self,
+        table: QTableWidget,
+        popup: _ThumbnailPopup,
+        get_thumb_fn,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self._table = table
+        self._popup = popup
+        self._get_thumb = get_thumb_fn
+        self._last_row = -1
+
+    def eventFilter(self, obj, event) -> bool:
+        t = event.type()
+        if t == QEvent.Type.MouseMove:
+            item = self._table.itemAt(event.pos())
+            row = item.row() if item else -1
+            if row != self._last_row:
+                self._last_row = row
+                if row >= 0:
+                    self._show_for_row(row, event.globalPosition().toPoint())
+                else:
+                    self._popup.hide()
+            elif row >= 0:
+                self._move_popup(event.globalPosition().toPoint())
+        elif t in (QEvent.Type.Leave, QEvent.Type.MouseButtonPress):
+            self._popup.hide()
+            self._last_row = -1
+        return False
+
+    def _show_for_row(self, row: int, gpos) -> None:
+        id_a = self._table.item(row, _I_ID_A).data(Qt.ItemDataRole.UserRole)
+        id_b = self._table.item(row, _I_ID_B).data(Qt.ItemDataRole.UserRole)
+        self._popup.set_images(self._get_thumb(id_a), self._get_thumb(id_b))
+        self._popup.adjustSize()
+        self._move_popup(gpos)
+        self._popup.show()
+
+    def _move_popup(self, gpos) -> None:
+        self._popup.move(gpos.x() + 16, gpos.y() + 16)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Dialog
+# ─────────────────────────────────────────────────────────────────────────────
+
+class FindContentDuplicatesDialog(QDialog):
+    """Non-modal dialog for finding archives that share STL file content or
+    perceptually similar preview images.
+
+    Emits ``show_models_requested(list[int])`` so the parent window can filter
+    the browser to show only the selected or all flagged archives.
+    """
+
+    show_models_requested = pyqtSignal(list)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Find Archives by Content")
+        self.resize(1050, 720)
+        self._stl_worker: Optional[_ContentDupWorker] = None
+        self._img_worker: Optional[_ImageDupWorker]   = None
+        self._stl_results: list[dict] = []
+        self._img_results: list[dict] = []
+        self._img_model_thumb: dict[int, Optional[bytes]] = {}
+        self._img_popup = _ThumbnailPopup()
+        self._build_ui()
+
+    # ── UI construction ───────────────────────────────────────────────────────
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+
+        self._tabs = QTabWidget()
+        self._tabs.addTab(self._build_stl_tab(),    "STL Files")
+        self._tabs.addTab(self._build_images_tab(), "Images")
+        self._tabs.currentChanged.connect(self._on_tab_changed)
+        root.addWidget(self._tabs)
+
+        btn_row = QHBoxLayout()
+        self._show_pair_btn = QPushButton("Show Pair in Main Table")
+        self._show_pair_btn.setEnabled(False)
+        self._show_pair_btn.clicked.connect(self._show_pair)
+        self._show_all_btn = QPushButton("Show All in Main Table")
+        self._show_all_btn.setEnabled(False)
+        self._show_all_btn.clicked.connect(self._show_all)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.close)
+        btn_row.addWidget(self._show_pair_btn)
+        btn_row.addWidget(self._show_all_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(close_btn)
+        root.addLayout(btn_row)
+
+    def _build_stl_tab(self) -> QWidget:
+        page   = QWidget()
+        layout = QVBoxLayout(page)
+
+        grp  = QGroupBox("Search Parameters")
+        form = QFormLayout(grp)
+        self._stl_thresh_spin = QSpinBox()
+        self._stl_thresh_spin.setRange(1, 100)
+        self._stl_thresh_spin.setValue(80)
+        self._stl_thresh_spin.setSuffix(" %")
+        self._stl_thresh_spin.setToolTip(
+            "Minimum fraction of files (relative to the larger archive) "
+            "that must be identical for a pair to be flagged."
+        )
+        form.addRow("Similarity threshold:", self._stl_thresh_spin)
+        form.addRow("", QLabel(
+            "<small>Two archives are flagged when at least this fraction of the "
+            "<i>larger</i> archive's STL files appear in both (matched by filename "
+            "and size). Requires <b>Store STL file list</b> to be enabled in "
+            "Settings and archives to have been crawled.</small>"
+        ))
+        layout.addWidget(grp)
+
+        ctrl = QHBoxLayout()
+        self._stl_find_btn = QPushButton("Find Duplicates")
+        self._stl_find_btn.setDefault(True)
+        self._stl_find_btn.clicked.connect(self._start_stl_search)
+        self._stl_stop_btn = QPushButton("Stop")
+        self._stl_stop_btn.setEnabled(False)
+        self._stl_stop_btn.clicked.connect(self._stop_stl_search)
+        self._stl_progress = QProgressBar()
+        self._stl_progress.setRange(0, 0)
+        self._stl_progress.setVisible(False)
+        ctrl.addWidget(self._stl_find_btn)
+        ctrl.addWidget(self._stl_stop_btn)
+        ctrl.addWidget(self._stl_progress, stretch=1)
+        layout.addLayout(ctrl)
+
+        self._stl_status = QLabel("Ready.")
+        layout.addWidget(self._stl_status)
+
+        self._stl_table = _make_table(
+            ["ID A", "Title A", "Files A", "ID B", "Title B", "Files B",
+             "Matching", "Similarity"],
+            hidden=[_S_ID_A, _S_ID_B],
+            stretch=[_S_TITLE_A, _S_TITLE_B],
+        )
+        self._stl_table.itemSelectionChanged.connect(self._on_stl_selection)
+        layout.addWidget(self._stl_table)
+        return page
+
+    def _build_images_tab(self) -> QWidget:
+        page   = QWidget()
+        layout = QVBoxLayout(page)
+
+        grp  = QGroupBox("Search Parameters")
+        form = QFormLayout(grp)
+        self._img_dist_spin = QSpinBox()
+        self._img_dist_spin.setRange(0, 15)
+        self._img_dist_spin.setValue(5)
+        self._img_dist_spin.setToolTip(
+            "Maximum Hamming distance between 64-bit dHash fingerprints.\n"
+            "0 = bit-for-bit identical pixels\n"
+            "≤3 = very similar (different resolution / minor JPEG artefacts)\n"
+            "≤8 = noticeably similar (recolour, slight crop)\n"
+            "≤15 = loosely similar (use with caution — many false positives)"
+        )
+        form.addRow("Max hash distance:", self._img_dist_spin)
+        form.addRow("", QLabel(
+            "<small>Preview thumbnails are compared with a perceptual difference "
+            "hash (dHash). Two thumbnails are considered similar when their "
+            "64-bit hashes differ in at most this many bits. A distance of 0 "
+            "catches only near-identical images; 5 typically catches the same "
+            "render at different resolutions or with slight colour shifts. "
+            "Higher values increase recall but also false positives.</small>"
+        ))
+        layout.addWidget(grp)
+
+        ctrl = QHBoxLayout()
+        self._img_find_btn = QPushButton("Find Duplicates")
+        self._img_find_btn.clicked.connect(self._start_img_search)
+        self._img_stop_btn = QPushButton("Stop")
+        self._img_stop_btn.setEnabled(False)
+        self._img_stop_btn.clicked.connect(self._stop_img_search)
+        self._img_progress = QProgressBar()
+        self._img_progress.setRange(0, 1)
+        self._img_progress.setVisible(False)
+        ctrl.addWidget(self._img_find_btn)
+        ctrl.addWidget(self._img_stop_btn)
+        ctrl.addWidget(self._img_progress, stretch=1)
+        layout.addLayout(ctrl)
+
+        self._img_status = QLabel("Ready.")
+        layout.addWidget(self._img_status)
+
+        self._img_table = _make_table(
+            ["ID A", "Title A", "Images A", "ID B", "Title B", "Images B",
+             "Matching Pairs", "Best Distance"],
+            hidden=[_I_ID_A, _I_ID_B],
+            stretch=[_I_TITLE_A, _I_TITLE_B],
+        )
+        self._img_table.itemSelectionChanged.connect(self._on_img_selection)
+        self._img_table.viewport().setMouseTracking(True)
+        self._img_hover_filter = _ImgHoverFilter(
+            self._img_table, self._img_popup, self._get_model_thumb, parent=self
+        )
+        self._img_table.viewport().installEventFilter(self._img_hover_filter)
+        layout.addWidget(self._img_table)
+        return page
+
+    # ── STL search ────────────────────────────────────────────────────────────
+
+    def _start_stl_search(self) -> None:
+        self._stl_table.setRowCount(0)
+        self._stl_results = []
+        self._stl_find_btn.setEnabled(False)
+        self._stl_stop_btn.setEnabled(True)
+        self._stl_progress.setRange(0, 0)
+        self._stl_progress.setVisible(True)
+        self._stl_status.setText("Searching…")
+        self._refresh_bottom_buttons()
+
+        self._stl_worker = _ContentDupWorker(
+            self._stl_thresh_spin.value() / 100.0, parent=self
+        )
+        self._stl_worker.progress.connect(self._stl_status.setText)
+        self._stl_worker.finished.connect(self._on_stl_finished)
+        self._stl_worker.start()
+
+    def _stop_stl_search(self) -> None:
+        if self._stl_worker and self._stl_worker.isRunning():
+            self._stl_worker.stop()
+            self._stl_worker.wait()
+        self._stl_find_btn.setEnabled(True)
+        self._stl_stop_btn.setEnabled(False)
+        self._stl_progress.setVisible(False)
+        self._stl_status.setText("Search stopped.")
+
+    def _on_stl_finished(self, results: list) -> None:
+        self._stl_results = results
+        self._stl_find_btn.setEnabled(True)
+        self._stl_stop_btn.setEnabled(False)
+        self._stl_progress.setVisible(False)
+
+        self._stl_table.setSortingEnabled(False)
+        self._stl_table.setRowCount(0)
+        c = Qt.AlignmentFlag.AlignCenter
+        for row_idx, r in enumerate(results):
+            self._stl_table.insertRow(row_idx)
+            self._stl_table.setItem(row_idx, _S_ID_A,    _item(str(r["id_a"]),    r["id_a"]))
+            self._stl_table.setItem(row_idx, _S_TITLE_A, _item(r["title_a"]))
+            self._stl_table.setItem(row_idx, _S_FILES_A, _item(str(r["total_a"]), align=c))
+            self._stl_table.setItem(row_idx, _S_ID_B,    _item(str(r["id_b"]),    r["id_b"]))
+            self._stl_table.setItem(row_idx, _S_TITLE_B, _item(r["title_b"]))
+            self._stl_table.setItem(row_idx, _S_FILES_B, _item(str(r["total_b"]), align=c))
+            self._stl_table.setItem(row_idx, _S_MATCH,   _item(str(r["overlap"]), align=c))
+            self._stl_table.setItem(row_idx, _S_SIM,     _item(f"{r['sim']:.0%}", align=c))
+        self._stl_table.setSortingEnabled(True)
+
+        n = len(results)
+        self._stl_status.setText(
+            f"{n} duplicate pair(s) found." if n else
+            "No duplicate pairs found. Ensure 'Store STL file list' is enabled "
+            "in Settings and archives have been crawled."
+        )
+        self._refresh_bottom_buttons()
+
+    def _on_stl_selection(self) -> None:
+        if self._tabs.currentIndex() == _TAB_STL:
+            self._refresh_bottom_buttons()
+
+    # ── Image search ──────────────────────────────────────────────────────────
+
+    def _start_img_search(self) -> None:
+        self._img_table.setRowCount(0)
+        self._img_results = []
+        self._img_find_btn.setEnabled(False)
+        self._img_stop_btn.setEnabled(True)
+        self._img_progress.setRange(0, 1)
+        self._img_progress.setValue(0)
+        self._img_progress.setVisible(True)
+        self._img_status.setText("Searching…")
+        self._refresh_bottom_buttons()
+
+        self._img_worker = _ImageDupWorker(
+            self._img_dist_spin.value(), parent=self
+        )
+        self._img_worker.progress.connect(self._img_status.setText)
+        self._img_worker.prog_val.connect(self._on_img_progress)
+        self._img_worker.finished.connect(self._on_img_finished)
+        self._img_worker.start()
+
+    def _on_img_progress(self, current: int, total: int) -> None:
+        self._img_progress.setRange(0, total)
+        self._img_progress.setValue(current)
+
+    def _stop_img_search(self) -> None:
+        if self._img_worker and self._img_worker.isRunning():
+            self._img_worker.stop()
+            self._img_worker.wait()
+        self._img_find_btn.setEnabled(True)
+        self._img_stop_btn.setEnabled(False)
+        self._img_progress.setVisible(False)
+        self._img_status.setText("Search stopped.")
+
+    def _on_img_finished(self, results: list) -> None:
+        self._img_results = results
+        self._img_find_btn.setEnabled(True)
+        self._img_stop_btn.setEnabled(False)
+        self._img_progress.setVisible(False)
+
+        self._img_table.setSortingEnabled(False)
+        self._img_table.setRowCount(0)
+        c = Qt.AlignmentFlag.AlignCenter
+        for row_idx, r in enumerate(results):
+            self._img_table.insertRow(row_idx)
+            self._img_table.setItem(row_idx, _I_ID_A,    _item(str(r["id_a"]),  r["id_a"]))
+            self._img_table.setItem(row_idx, _I_TITLE_A, _item(r["title_a"]))
+            self._img_table.setItem(row_idx, _I_IMGS_A,  _item(str(r["imgs_a"]), align=c))
+            self._img_table.setItem(row_idx, _I_ID_B,    _item(str(r["id_b"]),  r["id_b"]))
+            self._img_table.setItem(row_idx, _I_TITLE_B, _item(r["title_b"]))
+            self._img_table.setItem(row_idx, _I_IMGS_B,  _item(str(r["imgs_b"]), align=c))
+            self._img_table.setItem(row_idx, _I_PAIRS,   _item(str(r["pairs"]),  align=c))
+            self._img_table.setItem(row_idx, _I_DIST,    _item(str(r["best"]),   align=c))
+        self._img_table.setSortingEnabled(True)
+
+        n = len(results)
+        self._img_status.setText(
+            f"{n} archive pair(s) with similar images found." if n else
+            "No similar image pairs found. "
+            "Ensure thumbnails exist (crawl with thumbnails enabled)."
+        )
+        all_ids = {r["id_a"] for r in results} | {r["id_b"] for r in results}
+        self._img_model_thumb = self._load_model_thumbs(all_ids)
+        self._refresh_bottom_buttons()
+
+    def _on_img_selection(self) -> None:
+        if self._tabs.currentIndex() == _TAB_IMGS:
+            self._refresh_bottom_buttons()
+
+    # ── Thumbnail helpers ─────────────────────────────────────────────────────
+
+    def _get_model_thumb(self, model_id: int) -> Optional[bytes]:
+        return self._img_model_thumb.get(model_id)
+
+    def _load_model_thumbs(self, model_ids: set[int]) -> dict[int, Optional[bytes]]:
+        from app.database.db import session_scope
+        from app.database.models import Image
+        from app.utils.thumbnailer import get_thumbnail_bytes
+
+        result: dict[int, Optional[bytes]] = {}
+        if not model_ids:
+            return result
+        try:
+            with session_scope() as session:
+                rows = (
+                    session.query(Image.model_id, Image.id)
+                    .filter(
+                        Image.model_id.in_(list(model_ids)),
+                        Image.thumbnail_path.isnot(None),
+                    )
+                    .all()
+                )
+            first_img: dict[int, int] = {}
+            for model_id, img_id in rows:
+                if model_id not in first_img:
+                    first_img[model_id] = img_id
+            for model_id, img_id in first_img.items():
+                result[model_id] = get_thumbnail_bytes(img_id)
+        except Exception as exc:
+            logger.warning("Failed to load model thumbnails for popup: %s", exc)
+        return result
+
+    # ── Shared bottom buttons ─────────────────────────────────────────────────
+
+    def _on_tab_changed(self, _index: int) -> None:
+        if _index != _TAB_IMGS:
+            self._img_popup.hide()
+        self._refresh_bottom_buttons()
+
+    def _refresh_bottom_buttons(self) -> None:
+        tab = self._tabs.currentIndex()
+        tbl = self._stl_table if tab == _TAB_STL else self._img_table
+        rows = {i.row() for i in tbl.selectedIndexes()}
+        self._show_pair_btn.setEnabled(len(rows) == 1)
+        self._show_all_btn.setEnabled(tbl.rowCount() > 0)
+
+    def _show_pair(self) -> None:
+        tab = self._tabs.currentIndex()
+        if tab == _TAB_STL:
+            tbl, col_a, col_b = self._stl_table, _S_ID_A, _S_ID_B
+        else:
+            tbl, col_a, col_b = self._img_table, _I_ID_A, _I_ID_B
+        rows = {i.row() for i in tbl.selectedIndexes()}
+        if len(rows) != 1:
+            return
+        row = next(iter(rows))
+        id_a = tbl.item(row, col_a).data(Qt.ItemDataRole.UserRole)
+        id_b = tbl.item(row, col_b).data(Qt.ItemDataRole.UserRole)
+        self.show_models_requested.emit([id_a, id_b])
+
+    def _show_all(self) -> None:
+        tab = self._tabs.currentIndex()
+        if tab == _TAB_STL:
+            ids = {r["id_a"] for r in self._stl_results} | {r["id_b"] for r in self._stl_results}
+        else:
+            ids = {r["id_a"] for r in self._img_results} | {r["id_b"] for r in self._img_results}
+        self.show_models_requested.emit(list(ids))
+
+    # ── Cleanup ───────────────────────────────────────────────────────────────
+
+    def closeEvent(self, event) -> None:
+        self._img_popup.hide()
+        for w in (self._stl_worker, self._img_worker):
+            if w and w.isRunning():
+                w.stop()
+                w.wait()
+        super().closeEvent(event)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Module-level table factory
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _make_table(
+    headers: list[str],
+    hidden: list[int],
+    stretch: list[int],
+) -> QTableWidget:
+    t = QTableWidget(0, len(headers))
+    t.setHorizontalHeaderLabels(headers)
+    t.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+    t.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+    t.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
+    t.setSortingEnabled(False)
+    t.verticalHeader().setVisible(False)
+    hdr = t.horizontalHeader()
+    for col in range(len(headers)):
+        mode = (QHeaderView.ResizeMode.Stretch if col in stretch
+                else QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(col, mode)
+    for col in hidden:
+        t.setColumnHidden(col, True)
+    return t
