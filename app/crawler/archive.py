@@ -202,6 +202,7 @@ def extract_archive_contents(
     archive_path: Path,
     unrar_path: str = "",
     all_names_out: Optional[list] = None,
+    stl_info_out: Optional[dict] = None,
 ) -> dict[str, bytes]:
     """
     Open the archive exactly once and return a dict of {member_name: bytes}
@@ -212,6 +213,11 @@ def extract_archive_contents(
     name read from the archive's catalog.  Callers that also need the full
     member list (e.g. for rule/warning detection) can pass a list here to
     avoid opening the archive a second time.
+
+    When *stl_info_out* is a dict, it will be populated with
+    ``{member_name: uncompressed_size_bytes}`` for every ``.stl`` member
+    found in the archive catalog.  Size may be ``None`` for formats where
+    it is not available in the catalog header.
     """
     suffix = archive_path.suffix.lower()
     result: dict[str, bytes] = {}
@@ -219,9 +225,14 @@ def extract_archive_contents(
     try:
         if suffix == ".zip":
             with _open_zip(archive_path) as zf:
-                all_names = zf.namelist()
+                infos    = zf.infolist()
+                all_names = [i.filename for i in infos]
                 if all_names_out is not None:
                     all_names_out.extend(all_names)
+                if stl_info_out is not None:
+                    for i in infos:
+                        if Path(i.filename.replace("\\", "/")).suffix.lower() == ".stl":
+                            stl_info_out[i.filename] = i.file_size
                 wanted = [n for n in all_names if _is_wanted(n)]
                 logger.debug("  ZIP: %d total members, %d wanted", len(all_names), len(wanted))
                 for name in wanted:
@@ -248,9 +259,14 @@ def extract_archive_contents(
             with tempfile.TemporaryDirectory(dir=_shm) as tmpdir:
                 tmp = Path(tmpdir)
                 with _open_7z(archive_path) as zf:
-                    all_names = zf.getnames()
+                    members   = zf.list()
+                    all_names = [f.filename for f in members]
                     if all_names_out is not None:
                         all_names_out.extend(all_names)
+                    if stl_info_out is not None:
+                        for f in members:
+                            if Path(f.filename.replace("\\", "/")).suffix.lower() == ".stl":
+                                stl_info_out[f.filename] = getattr(f, "uncompressed", None)
                     wanted = [n for n in all_names if _is_wanted(n)]
                     logger.debug("  7Z: %d total members, %d wanted", len(all_names), len(wanted))
                     if wanted:
@@ -278,9 +294,14 @@ def extract_archive_contents(
 
         elif suffix == ".rar":
             with _open_rar(archive_path, unrar_path) as rf:
-                all_names = rf.namelist()
+                infos     = [i for i in rf.infolist() if not i.is_dir()]
+                all_names = [i.filename for i in infos]
                 if all_names_out is not None:
                     all_names_out.extend(all_names)
+                if stl_info_out is not None:
+                    for i in infos:
+                        if Path(i.filename.replace("\\", "/")).suffix.lower() == ".stl":
+                            stl_info_out[i.filename] = getattr(i, "file_size", None)
                 wanted = [n for n in all_names if _is_wanted(n)]
                 logger.debug("  RAR: %d total members, %d wanted", len(all_names), len(wanted))
                 for name in wanted:

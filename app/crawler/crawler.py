@@ -23,7 +23,7 @@ from app.crawler.folder_metadata import (
 from app.crawler.metadata import extract_metadata, ModelMetadata
 from app.crawler.rules import detect_presupport, detect_scale, detect_warnings
 from app.database.db import session_scope
-from app.database.models import STLModel, Tag, Image, Release, Scale
+from app.database.models import STLModel, Tag, Image, Release, Scale, STLFile
 from app.utils.thumbnailer import save_thumbnail, delete_thumbnail, get_thumbnail_base_dir
 from app.utils.path_pattern import parse_path, apply_extracted_to_model, parse_release_date
 
@@ -175,15 +175,18 @@ class CrawlerWorker(QThread):
                 # reopening the archive.
                 contents_map:  dict[Path, dict[str, bytes]] = {}
                 all_names_map: dict[Path, list[str]]       = {}
+                stl_info_map:  dict[Path, dict[str, int | None]] = {}
 
-                def _extract_and_list(p: Path) -> tuple[dict[str, bytes], list[str]]:
-                    names: list[str] = []
+                def _extract_and_list(p: Path) -> tuple[dict[str, bytes], list[str], dict[str, int | None]]:
+                    names:    list[str]             = []
+                    stl_info: dict[str, int | None] = {}
                     data = extract_archive_contents(
                         p,
                         unrar_path=self._config.unrar_path,
                         all_names_out=names,
+                        stl_info_out=stl_info,
                     )
-                    return data, names
+                    return data, names, stl_info
 
                 if to_extract:
                     logger.debug("Phase 3: extracting %d archive(s) in parallel", len(to_extract))
@@ -192,11 +195,12 @@ class CrawlerWorker(QThread):
                         for future in as_completed(futures):
                             p = futures[future]
                             try:
-                                data, names = future.result()
+                                data, names, stl_info = future.result()
                                 contents_map[p]  = data
                                 all_names_map[p] = names
-                                logger.debug("  extracted %s → %d file(s), %d member(s)",
-                                             p.name, len(data), len(names))
+                                stl_info_map[p]  = stl_info
+                                logger.debug("  extracted %s → %d file(s), %d member(s), %d stl(s)",
+                                             p.name, len(data), len(names), len(stl_info))
                             except Exception as exc:
                                 msg = f"  ERROR extracting {p.name}: {exc}"
                                 self.log.emit(msg)
@@ -204,6 +208,7 @@ class CrawlerWorker(QThread):
                                              p.name, exc, exc_info=True)
                                 contents_map[p]  = {}
                                 all_names_map[p] = []
+                                stl_info_map[p]  = {}
                     logger.debug("Phase 3 complete — %d archive(s) extracted", len(contents_map))
                 else:
                     logger.debug("Phase 3 skipped — no archives need extraction")
@@ -231,6 +236,7 @@ class CrawlerWorker(QThread):
                             # None signals "hash unchanged — skip extraction"
                             contents=contents_map.get(archive_path),
                             all_names=all_names_map.get(archive_path),
+                            stl_info=stl_info_map.get(archive_path),
                         )
                         sp.commit()
                         modified_folders.add(archive_path.parent)
@@ -311,6 +317,7 @@ class CrawlerWorker(QThread):
         existing: Optional[STLModel],
         contents: Optional[dict[str, bytes]],
         all_names: Optional[list[str]] = None,
+        stl_info: Optional[dict] = None,
     ) -> None:
         """Write one archive to the database using pre-computed hash and contents.
 
@@ -403,6 +410,21 @@ class CrawlerWorker(QThread):
             model, existing, contents, image_names,
             session, max_thumbs, max_thumb_size, archive_path, hash_changed,
         )
+
+        # Deferred import avoids circular dependency (crawler → ui → crawler).
+        from app.ui.config_dialog import get_store_stl_file_list
+        if get_store_stl_file_list() and stl_info is not None:
+            for old in list(model.stl_files):
+                session.delete(old)
+            session.flush()
+            for fname, fsize in stl_info.items():
+                session.add(STLFile(
+                    model=model,
+                    filename=fname,
+                    file_size=fsize,
+                    archive_hash=current_hash,
+                ))
+            logger.debug("  STL file list: %d entry/entries stored", len(stl_info))
 
     def _apply_pattern_to_unchanged(
         self,
