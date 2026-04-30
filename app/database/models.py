@@ -39,43 +39,57 @@ class Sculptor(Base):
         return f"<Sculptor {self.name!r}>"
 
 
-class Category(Base):
-    """A top-level content category (e.g. Movies, Comics, Games).
+class Collection(Base):
+    """A top-level collection grouping (e.g. Movies, Comics, Games).
 
-    Deleting a category cascades to all its subcategories.
+    Deleting a collection cascades to all its subcollections.
     """
+
+    __tablename__ = "collections"
+
+    id   = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(128), unique=True, nullable=False)
+
+    subcollections = relationship("Subcollection", back_populates="collection", cascade="all, delete-orphan")
+    models         = relationship("STLModel", back_populates="collection")
+
+    def __repr__(self) -> str:
+        return f"<Collection {self.name!r}>"
+
+
+class Subcollection(Base):
+    """A sub-division of a Collection (e.g. Marvel, DC under Comics).
+
+    Names are unique per parent collection (``uq_subcollection_per_collection``).
+    """
+
+    __tablename__ = "subcollections"
+
+    id            = Column(Integer, primary_key=True, autoincrement=True)
+    collection_id = Column(Integer, ForeignKey("collections.id", ondelete="CASCADE"), nullable=False)
+    name          = Column(String(128), nullable=False)
+
+    __table_args__ = (UniqueConstraint("collection_id", "name", name="uq_subcollection_per_collection"),)
+
+    collection = relationship("Collection", back_populates="subcollections")
+    models     = relationship("STLModel", back_populates="subcollection")
+
+    def __repr__(self) -> str:
+        return f"<Subcollection {self.name!r} (collection_id={self.collection_id})>"
+
+
+class Category(Base):
+    """A standalone category label (e.g. genre, content type)."""
 
     __tablename__ = "categories"
 
     id   = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(128), unique=True, nullable=False)
 
-    subcategories = relationship("Subcategory", back_populates="category", cascade="all, delete-orphan")
-    models        = relationship("STLModel", back_populates="category")
+    models = relationship("STLModel", back_populates="category")
 
     def __repr__(self) -> str:
         return f"<Category {self.name!r}>"
-
-
-class Subcategory(Base):
-    """A sub-division of a Category (e.g. Marvel, DC under Comics).
-
-    Names are unique per parent category (``uq_subcategory_per_category``).
-    """
-
-    __tablename__ = "subcategories"
-
-    id          = Column(Integer, primary_key=True, autoincrement=True)
-    category_id = Column(Integer, ForeignKey("categories.id", ondelete="CASCADE"), nullable=False)
-    name        = Column(String(128), nullable=False)
-
-    __table_args__ = (UniqueConstraint("category_id", "name", name="uq_subcategory_per_category"),)
-
-    category = relationship("Category", back_populates="subcategories")
-    models   = relationship("STLModel", back_populates="subcategory")
-
-    def __repr__(self) -> str:
-        return f"<Subcategory {self.name!r} (category_id={self.category_id})>"
 
 
 class Release(Base):
@@ -114,14 +128,14 @@ class STLModel(Base):
     run; a changed hash triggers re-extraction of metadata and thumbnails.
 
     Nullable FK columns use ``SET NULL`` on delete so removing a sculptor,
-    category, etc. does not cascade-delete the model records.
+    collection, etc. does not cascade-delete the model records.
     """
 
     __tablename__ = "models"
 
     id               = Column(Integer, primary_key=True, autoincrement=True)
     title            = Column(String(512), index=True)
-    author           = Column(String(256), index=True)
+    creator          = Column(String(256), index=True)
     source           = Column(String(128), index=True)  # patreon / kickstarter / myminifactory / unknown
     release_year     = Column(Integer, nullable=True, index=True)
     release_month    = Column(Integer, nullable=True)   # 1-12, NULL when only year is known
@@ -135,19 +149,21 @@ class STLModel(Base):
     created_at       = Column(DateTime, default=_utcnow)
     updated_at       = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
-    sculptor_id      = Column(Integer, ForeignKey("sculptors.id",    ondelete="SET NULL"), nullable=True, index=True)
-    category_id      = Column(Integer, ForeignKey("categories.id",   ondelete="SET NULL"), nullable=True, index=True)
-    subcategory_id   = Column(Integer, ForeignKey("subcategories.id",ondelete="SET NULL"), nullable=True, index=True)
-    release_id       = Column(Integer, ForeignKey("releases.id",     ondelete="SET NULL"), nullable=True, index=True)
-    scale_id         = Column(Integer, ForeignKey("scales.id",       ondelete="SET NULL"), nullable=True, index=True)
+    sculptor_id       = Column(Integer, ForeignKey("sculptors.id",     ondelete="SET NULL"), nullable=True, index=True)
+    collection_id     = Column(Integer, ForeignKey("collections.id",   ondelete="SET NULL"), nullable=True, index=True)
+    subcollection_id  = Column(Integer, ForeignKey("subcollections.id",ondelete="SET NULL"), nullable=True, index=True)
+    category_id       = Column(Integer, ForeignKey("categories.id",    ondelete="SET NULL"), nullable=True, index=True)
+    release_id        = Column(Integer, ForeignKey("releases.id",      ondelete="SET NULL"), nullable=True, index=True)
+    scale_id          = Column(Integer, ForeignKey("scales.id",        ondelete="SET NULL"), nullable=True, index=True)
 
-    tags        = relationship("Tag",         secondary=model_tags, back_populates="models")
-    images      = relationship("Image",       back_populates="model", cascade="all, delete-orphan")
-    sculptor    = relationship("Sculptor",    back_populates="models")
-    category    = relationship("Category",   back_populates="models")
-    subcategory = relationship("Subcategory",back_populates="models")
-    release     = relationship("Release",    back_populates="models")
-    scale       = relationship("Scale",      back_populates="models")
+    tags          = relationship("Tag",          secondary=model_tags, back_populates="models")
+    images        = relationship("Image",        back_populates="model", cascade="all, delete-orphan")
+    sculptor      = relationship("Sculptor",     back_populates="models")
+    collection    = relationship("Collection",   back_populates="models")
+    subcollection = relationship("Subcollection",back_populates="models")
+    category      = relationship("Category",     back_populates="models")
+    release       = relationship("Release",      back_populates="models")
+    scale         = relationship("Scale",        back_populates="models")
 
     def __repr__(self) -> str:
         return f"<STLModel id={self.id} title={self.title!r}>"

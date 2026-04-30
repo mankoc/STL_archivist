@@ -32,8 +32,9 @@ _MONTH_NAMES = {
 
 # (display label, internal key)
 COLUMN_CHOICES: list[tuple[str, str]] = [
-    ("Author",         "author"),
     ("Category",       "category"),
+    ("Collection",     "collection"),
+    ("Creator",        "creator"),
     ("Presupports",    "presupports"),
     ("Release",        "release"),
     ("Release Month",  "release_month"),
@@ -41,7 +42,7 @@ COLUMN_CHOICES: list[tuple[str, str]] = [
     ("Scale",          "scale"),
     ("Sculptor",       "sculptor"),
     ("Source",         "source"),
-    ("Subcategory",    "subcategory"),
+    ("Subcollection",  "subcollection"),
     ("Tag",            "tag"),
 ]
 
@@ -55,7 +56,7 @@ def _query_column(session, key: str, top_n: int | None) -> tuple[list[tuple[str,
     """
     from sqlalchemy import func
     from app.database.models import (
-        STLModel, Sculptor, Category, Subcategory,
+        STLModel, Sculptor, Collection, Subcollection, Category,
         Release, Scale, Tag, model_tags,
     )
 
@@ -87,8 +88,8 @@ def _query_column(session, key: str, top_n: int | None) -> tuple[list[tuple[str,
     elif key == "presupports":
         data = _direct(STLModel.presupports, null_label="(not set)")
 
-    elif key == "author":
-        data = _direct(STLModel.author, null_label="(unknown)")
+    elif key == "creator":
+        data = _direct(STLModel.creator, null_label="(unknown)")
 
     elif key == "sculptor":
         q = (session.query(Sculptor.name, func.count(STLModel.id).label("n"))
@@ -97,17 +98,24 @@ def _query_column(session, key: str, top_n: int | None) -> tuple[list[tuple[str,
              .order_by(func.count(STLModel.id).desc()))
         data = list(_cap(q).all())
 
+    elif key == "collection":
+        q = (session.query(Collection.name, func.count(STLModel.id).label("n"))
+             .join(STLModel, STLModel.collection_id == Collection.id)
+             .group_by(Collection.id)
+             .order_by(func.count(STLModel.id).desc()))
+        data = list(_cap(q).all())
+
+    elif key == "subcollection":
+        q = (session.query(Subcollection.name, func.count(STLModel.id).label("n"))
+             .join(STLModel, STLModel.subcollection_id == Subcollection.id)
+             .group_by(Subcollection.id)
+             .order_by(func.count(STLModel.id).desc()))
+        data = list(_cap(q).all())
+
     elif key == "category":
         q = (session.query(Category.name, func.count(STLModel.id).label("n"))
              .join(STLModel, STLModel.category_id == Category.id)
              .group_by(Category.id)
-             .order_by(func.count(STLModel.id).desc()))
-        data = list(_cap(q).all())
-
-    elif key == "subcategory":
-        q = (session.query(Subcategory.name, func.count(STLModel.id).label("n"))
-             .join(STLModel, STLModel.subcategory_id == Subcategory.id)
-             .group_by(Subcategory.id)
              .order_by(func.count(STLModel.id).desc()))
         data = list(_cap(q).all())
 

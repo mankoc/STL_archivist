@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QCursor
 
 from app.database.db import session_scope, get_session
-from app.database.models import STLModel, Tag, Release, Category, Subcategory, Scale
+from app.database.models import STLModel, Tag, Release, Collection, Subcollection, Category, Scale
 import re
 
 from app.utils.path_pattern import (
@@ -31,7 +31,7 @@ _SEP = ":::"
 
 _TOKEN_HELP = (
     "You can use tokens in any text field to copy values from each model:\n"
-    "  {author}   — the model's current author\n"
+    "  {creator}  — the model's current creator\n"
     "  {source}   — the model's current source/type\n"
     "  {title}    — the model's current title\n"
     "  {date}     — the model's current release date (YYYY-MM)\n"
@@ -121,7 +121,7 @@ class MassEditorDialog(QDialog):
         # Pattern input + Parse button
         pattern_row = QHBoxLayout()
         self._pattern_edit = QLineEdit()
-        self._pattern_edit.setPlaceholderText("/mnt/f/{source}/{author}/{month}/{name}")
+        self._pattern_edit.setPlaceholderText("/mnt/f/{source}/{creator}/{month}/{name}")
         self._pattern_edit.textChanged.connect(self._update_preview)
         pattern_row.addWidget(self._pattern_edit)
         parse_btn = QPushButton("Parse all paths")
@@ -170,36 +170,39 @@ class MassEditorDialog(QDialog):
 
         session = get_session()
         try:
+            collections   = sorted(c.name for c in session.query(Collection).order_by(Collection.name).all())
+            subcollections = sorted(s.name for s in session.query(Subcollection).order_by(Subcollection.name).all())
             categories    = sorted(c.name for c in session.query(Category).order_by(Category.name).all())
-            subcategories = sorted(s.name for s in session.query(Subcategory).order_by(Subcategory.name).all())
             scales        = sorted(s.name for s in session.query(Scale).order_by(Scale.name).all())
         finally:
             session.close()
 
         self._type_edit    = QLineEdit(); self._type_edit.setPlaceholderText("e.g. patreon  or  {source} or {folder}")
-        self._author_edit  = QLineEdit(); self._author_edit.setPlaceholderText("e.g. SomeAuthor  or  {author}")
+        self._creator_edit = QLineEdit(); self._creator_edit.setPlaceholderText("e.g. SomeCreator  or  {creator}")
         self._date_edit    = QLineEdit(); self._date_edit.setPlaceholderText("e.g. 2024-01  or  {date}")
-        self._title_edit   = QLineEdit(); self._title_edit.setPlaceholderText("e.g. {filename}  or  {author} — {title}")
+        self._title_edit   = QLineEdit(); self._title_edit.setPlaceholderText("e.g. {filename}  or  {creator} — {title}")
         self._scale_combo  = self._make_combo(scales, placeholder="— no change —")
         self._presupports_combo = QComboBox()
         self._presupports_combo.addItems(["— no change —", "No", "Lychee", "Chitubox", "Presupported"])
         self._release_edit = QLineEdit(); self._release_edit.setPlaceholderText("Release name  or  {folder}")
         self._tags_edit    = QLineEdit(); self._tags_edit.setPlaceholderText("tag1, tag2, …  (replaces existing tags)")
 
-        self._category_edit    = self._make_combo(categories)
-        self._category_edit.currentTextChanged.connect(self._on_category_changed)
-        self._subcategory_edit = self._make_combo(subcategories)
+        self._collection_edit     = self._make_combo(collections)
+        self._collection_edit.currentTextChanged.connect(self._on_collection_changed)
+        self._subcollection_edit  = self._make_combo(subcollections)
+        self._category_edit       = self._make_combo(categories)
 
         form.addRow("Source:",         self._type_edit)
-        form.addRow("Author:",        self._author_edit)
-        form.addRow("Date:",          self._date_edit)
-        form.addRow("Title:",         self._title_edit)
-        form.addRow("Scale:",        self._scale_combo)
-        form.addRow("Presupports:",  self._presupports_combo)
-        form.addRow("Release:",       self._release_edit)
-        form.addRow("Category:",      self._category_edit)
-        form.addRow("Subcategory:",   self._subcategory_edit)
-        form.addRow("Tags:",          self._tags_edit)
+        form.addRow("Creator:",        self._creator_edit)
+        form.addRow("Date:",           self._date_edit)
+        form.addRow("Title:",          self._title_edit)
+        form.addRow("Scale:",          self._scale_combo)
+        form.addRow("Presupports:",    self._presupports_combo)
+        form.addRow("Release:",        self._release_edit)
+        form.addRow("Collection:",     self._collection_edit)
+        form.addRow("Subcollection:",  self._subcollection_edit)
+        form.addRow("Category:",       self._category_edit)
+        form.addRow("Tags:",           self._tags_edit)
 
         root.addWidget(manual_group)
 
@@ -237,7 +240,7 @@ class MassEditorDialog(QDialog):
         from pathlib import Path as _P
         ap = model.archive_path or ""
         ctx: dict[str, str] = {
-            "author":   model.author   or "",
+            "creator":  model.creator  or "",
             "source":   model.source   or "",
             "title":    model.title    or "",
             "date":     format_release_date(model.release_year, model.release_month),
@@ -254,25 +257,25 @@ class MassEditorDialog(QDialog):
             return context.get(m.group(1), m.group(0))
         return re.sub(r"\{(\w+)\}", _sub, value)
 
-    def _on_category_changed(self, category_name: str) -> None:
-        """Repopulate subcategory combo when the category selection changes."""
+    def _on_collection_changed(self, collection_name: str) -> None:
+        """Repopulate subcollection combo when the collection selection changes."""
         session = get_session()
         try:
-            q = session.query(Subcategory).order_by(Subcategory.name)
-            if category_name.strip():
-                cat = session.query(Category).filter_by(name=category_name.strip()).first()
-                if cat:
-                    q = q.filter(Subcategory.category_id == cat.id)
-            subcategories = [s.name for s in q.all()]
+            q = session.query(Subcollection).order_by(Subcollection.name)
+            if collection_name.strip():
+                col = session.query(Collection).filter_by(name=collection_name.strip()).first()
+                if col:
+                    q = q.filter(Subcollection.collection_id == col.id)
+            subcollections = [s.name for s in q.all()]
         finally:
             session.close()
-        current = self._subcategory_edit.currentText()
-        self._subcategory_edit.blockSignals(True)
-        self._subcategory_edit.clear()
-        self._subcategory_edit.addItem("")
-        self._subcategory_edit.addItems(subcategories)
-        self._subcategory_edit.setCurrentText(current)
-        self._subcategory_edit.blockSignals(False)
+        current = self._subcollection_edit.currentText()
+        self._subcollection_edit.blockSignals(True)
+        self._subcollection_edit.clear()
+        self._subcollection_edit.addItem("")
+        self._subcollection_edit.addItems(subcollections)
+        self._subcollection_edit.setCurrentText(current)
+        self._subcollection_edit.blockSignals(False)
 
     # ------------------------------------------------------------------
     # Settings helpers
@@ -402,8 +405,8 @@ class MassEditorDialog(QDialog):
         manual: dict[str, str | None] = {}
         if self._type_edit.text().strip():
             manual["source"] = self._type_edit.text().strip()
-        if self._author_edit.text().strip():
-            manual["author"] = self._author_edit.text().strip()
+        if self._creator_edit.text().strip():
+            manual["creator"] = self._creator_edit.text().strip()
         if self._date_edit.text().strip():
             manual["release_date"] = self._date_edit.text().strip()
         if self._title_edit.text().strip():
@@ -415,9 +418,10 @@ class MassEditorDialog(QDialog):
         apply_presupports = presup_choice != "— no change —"
         presupports_value = presup_choice if apply_presupports else None
 
-        release_tmpl     = self._release_edit.text().strip()
-        category_name    = self._category_edit.currentText().strip()
-        subcategory_name = self._subcategory_edit.currentText().strip()
+        release_tmpl       = self._release_edit.text().strip()
+        collection_name    = self._collection_edit.currentText().strip()
+        subcollection_name = self._subcollection_edit.currentText().strip()
+        category_name      = self._category_edit.currentText().strip()
 
         tags_tmpl  = self._tags_edit.text()
         apply_tags = bool(tags_tmpl.strip())
@@ -451,6 +455,24 @@ class MassEditorDialog(QDialog):
                             session.flush()
                         model.release = release_obj
 
+                if collection_name:
+                    col = session.query(Collection).filter_by(name=collection_name).first()
+                    if col is None:
+                        col = Collection(name=collection_name)
+                        session.add(col)
+                        session.flush()
+                    model.collection = col
+
+                    if subcollection_name:
+                        sub = session.query(Subcollection).filter_by(
+                            name=subcollection_name, collection_id=col.id
+                        ).first()
+                        if sub is None:
+                            sub = Subcollection(name=subcollection_name, collection_id=col.id)
+                            session.add(sub)
+                            session.flush()
+                        model.subcollection = sub
+
                 if category_name:
                     cat = session.query(Category).filter_by(name=category_name).first()
                     if cat is None:
@@ -458,16 +480,6 @@ class MassEditorDialog(QDialog):
                         session.add(cat)
                         session.flush()
                     model.category = cat
-
-                    if subcategory_name:
-                        sub = session.query(Subcategory).filter_by(
-                            name=subcategory_name, category_id=cat.id
-                        ).first()
-                        if sub is None:
-                            sub = Subcategory(name=subcategory_name, category_id=cat.id)
-                            session.add(sub)
-                            session.flush()
-                        model.subcategory = sub
 
                 if apply_scale:
                     sc = session.query(Scale).filter_by(name=scale_name).first()

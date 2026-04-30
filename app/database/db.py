@@ -34,6 +34,7 @@ def init_db(db_path: str = "stl_database.db") -> None:
         finally:
             cursor.close()
 
+    _migrate_schema(_engine)
     Base.metadata.create_all(_engine)
     _ensure_columns(_engine)
 
@@ -43,6 +44,68 @@ def init_db(db_path: str = "stl_database.db") -> None:
     init_thumbnail_store(thumb_dir)
 
     _SessionFactory = sessionmaker(bind=_engine, expire_on_commit=False)
+
+
+def _migrate_schema(engine) -> None:
+    """Rename tables and columns from old schema to new schema.
+
+    Handles the one-time migration:
+      categories  → collections
+      subcategories → subcollections
+      subcollections.category_id → collection_id
+      models.author → creator
+      models.category_id → collection_id
+      models.subcategory_id → subcollection_id
+    Safe to call repeatedly — checks current state before each operation.
+    """
+    with engine.begin() as conn:
+        conn.execute(text("PRAGMA foreign_keys=OFF"))
+        try:
+            def _tables():
+                return {r[0] for r in conn.execute(text(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )).fetchall()}
+
+            def _cols(table):
+                return {r[1] for r in conn.execute(text(
+                    f"PRAGMA table_info({table})"
+                )).fetchall()}
+
+            tables = _tables()
+
+            if "categories" in tables and "collections" not in tables:
+                conn.execute(text("ALTER TABLE categories RENAME TO collections"))
+                tables.discard("categories")
+                tables.add("collections")
+
+            if "subcategories" in tables and "subcollections" not in tables:
+                conn.execute(text("ALTER TABLE subcategories RENAME TO subcollections"))
+                tables.discard("subcategories")
+                tables.add("subcollections")
+
+            if "subcollections" in tables:
+                cols = _cols("subcollections")
+                if "category_id" in cols and "collection_id" not in cols:
+                    conn.execute(text(
+                        "ALTER TABLE subcollections RENAME COLUMN category_id TO collection_id"
+                    ))
+
+            if "models" in tables:
+                cols = _cols("models")
+                if "author" in cols and "creator" not in cols:
+                    conn.execute(text("ALTER TABLE models RENAME COLUMN author TO creator"))
+                cols = _cols("models")
+                if "category_id" in cols and "collection_id" not in cols:
+                    conn.execute(text(
+                        "ALTER TABLE models RENAME COLUMN category_id TO collection_id"
+                    ))
+                cols = _cols("models")
+                if "subcategory_id" in cols and "subcollection_id" not in cols:
+                    conn.execute(text(
+                        "ALTER TABLE models RENAME COLUMN subcategory_id TO subcollection_id"
+                    ))
+        finally:
+            conn.execute(text("PRAGMA foreign_keys=ON"))
 
 
 def _ensure_columns(engine) -> None:

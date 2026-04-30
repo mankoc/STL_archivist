@@ -506,7 +506,7 @@ class CrawlerWorker(QThread):
             session: Active session used to look up or create ``Release`` records.
         """
         model.title         = meta.title
-        model.author        = meta.author
+        model.creator       = meta.creator
         model.source        = meta.distributor
         _year, _month = parse_release_date(meta.release_date or "")
         model.release_year  = _year
@@ -593,7 +593,7 @@ class CrawlerWorker(QThread):
         """
         meta_parts = []
         if meta.title:        meta_parts.append(f"title={meta.title!r}")
-        if meta.author:       meta_parts.append(f"author={meta.author!r}")
+        if meta.creator:      meta_parts.append(f"creator={meta.creator!r}")
         if meta.distributor:  meta_parts.append(f"source={meta.distributor!r}")
         if meta.release_date: meta_parts.append(f"date={meta.release_date!r}")
         if meta.url:          meta_parts.append(f"url={meta.url!r}")

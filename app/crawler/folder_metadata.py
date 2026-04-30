@@ -132,7 +132,7 @@ def import_folder_metadata(folder: Path, session: Session, thumb_base_dir: Path)
 
     Returns a list of archive_path strings that were newly inserted.
     """
-    from app.database.models import STLModel, Image, Sculptor, Category, Subcategory, Release, Scale, Tag
+    from app.database.models import STLModel, Image, Sculptor, Collection, Subcollection, Category, Release, Scale, Tag
     from app.utils.thumbnailer import write_raw_thumbnail
 
     folder = Path(folder)
@@ -179,7 +179,7 @@ def import_folder_metadata(folder: Path, session: Session, thumb_base_dir: Path)
             archive_path  = archive_str,
             archive_hash  = model_data.get("archive_hash", ""),
             title         = model_data.get("title"),
-            author        = model_data.get("author"),
+            creator       = model_data.get("creator") or model_data.get("author"),
             source        = model_data.get("source"),
             release_year  = model_data.get("release_year"),
             release_month = model_data.get("release_month"),
@@ -264,7 +264,7 @@ def _serialize_models(models: list, thumb_base_dir: Path, include_thumbnails: bo
             "archive_name":  Path(model.archive_path).name,
             "archive_hash":  model.archive_hash or "",
             "title":         model.title,
-            "author":        model.author,
+            "creator":       model.creator,
             "source":        model.source,
             "release_year":  model.release_year,
             "release_month": model.release_month,
@@ -273,11 +273,12 @@ def _serialize_models(models: list, thumb_base_dir: Path, include_thumbnails: bo
             "sequence":      model.sequence,
             "presupports":   model.presupports,
             "warning":       model.warning,
-            "sculptor":      model.sculptor.name  if model.sculptor   else None,
-            "category":      model.category.name  if model.category   else None,
-            "subcategory":   model.subcategory.name if model.subcategory else None,
-            "release":       model.release.name   if model.release    else None,
-            "scale":         model.scale.name     if model.scale      else None,
+            "sculptor":      model.sculptor.name     if model.sculptor     else None,
+            "collection":    model.collection.name   if model.collection   else None,
+            "subcollection": model.subcollection.name if model.subcollection else None,
+            "category":      model.category.name     if model.category     else None,
+            "release":       model.release.name      if model.release      else None,
+            "scale":         model.scale.name        if model.scale        else None,
             "tags":          [t.name for t in model.tags],
             "images":        images_list,
         })
@@ -399,7 +400,7 @@ def _restore_fk(session: Session, model, model_data: dict) -> None:
         model: The ``STLModel`` being populated.
         model_data: Deserialised dict for this archive from ``metadata.json``.
     """
-    from app.database.models import Sculptor, Category, Subcategory, Release, Scale
+    from app.database.models import Sculptor, Collection, Subcollection, Category, Release, Scale
 
     sculptor_name = model_data.get("sculptor")
     if sculptor_name:
@@ -410,7 +411,29 @@ def _restore_fk(session: Session, model, model_data: dict) -> None:
             session.flush()
         model.sculptor = sc
 
-    category_name = model_data.get("category")
+    # "collection" key is new; fall back to "category" for old sidecar files
+    collection_name = model_data.get("collection") or model_data.get("category")
+    if collection_name:
+        col = session.query(Collection).filter_by(name=collection_name).first()
+        if col is None:
+            col = Collection(name=collection_name)
+            session.add(col)
+            session.flush()
+        model.collection = col
+
+    # "subcollection" key is new; fall back to "subcategory" for old sidecar files
+    subcollection_name = model_data.get("subcollection") or model_data.get("subcategory")
+    if subcollection_name and model.collection:
+        sub = session.query(Subcollection).filter_by(
+            name=subcollection_name, collection_id=model.collection.id
+        ).first()
+        if sub is None:
+            sub = Subcollection(name=subcollection_name, collection_id=model.collection.id)
+            session.add(sub)
+            session.flush()
+        model.subcollection = sub
+
+    category_name = model_data.get("category") if "collection" in model_data else None
     if category_name:
         cat = session.query(Category).filter_by(name=category_name).first()
         if cat is None:
@@ -418,17 +441,6 @@ def _restore_fk(session: Session, model, model_data: dict) -> None:
             session.add(cat)
             session.flush()
         model.category = cat
-
-    subcategory_name = model_data.get("subcategory")
-    if subcategory_name and model.category:
-        sub = session.query(Subcategory).filter_by(
-            name=subcategory_name, category_id=model.category.id
-        ).first()
-        if sub is None:
-            sub = Subcategory(name=subcategory_name, category_id=model.category.id)
-            session.add(sub)
-            session.flush()
-        model.subcategory = sub
 
     release_name = model_data.get("release")
     if release_name:

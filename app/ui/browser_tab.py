@@ -26,31 +26,32 @@ from sqlalchemy import or_, and_
 from sqlalchemy.orm import selectinload
 
 from app.database.db import get_session, session_scope
-from app.database.models import STLModel, Tag, Sculptor, Category, Subcategory, Release, Scale
+from app.database.models import STLModel, Tag, Sculptor, Collection, Subcollection, Category, Release, Scale
 from app.utils.thumbnailer import pixmap_from_path
 from app.utils.path_pattern import parse_release_date, format_release_date
 
 # Column indices
-COL_THUMB        = 0
-COL_TITLE        = 1
-COL_AUTHOR       = 2
-COL_SOURCE       = 3
-COL_DATE         = 4
-COL_TAGS         = 5
-COL_SCULPTOR     = 6
-COL_CATEGORY     = 7
-COL_SUBCATEGORY  = 8
-COL_SEQUENCE     = 9
-COL_RELEASE      = 10
-COL_PATH         = 11
-COL_SCALE        = 12
-COL_PRESUPPORTED = 13
-COL_ADDED        = 14
-COL_WARNING      = 15
-COL_FILESIZE     = 16
-_HEADERS = ["", "Title", "Author", "Source", "Date", "Tags",
-            "Sculptor", "Category", "Subcategory", "Seq", "Release", "Path",
-            "Scale", "Presupports", "Added", "Warnings", "File Size"]
+COL_THUMB         = 0
+COL_TITLE         = 1
+COL_CREATOR       = 2
+COL_SOURCE        = 3
+COL_DATE          = 4
+COL_TAGS          = 5
+COL_SCULPTOR      = 6
+COL_COLLECTION    = 7
+COL_SUBCOLLECTION = 8
+COL_SEQUENCE      = 9
+COL_RELEASE       = 10
+COL_PATH          = 11
+COL_SCALE         = 12
+COL_PRESUPPORTED  = 13
+COL_ADDED         = 14
+COL_WARNING       = 15
+COL_FILESIZE      = 16
+COL_CATEGORY      = 17
+_HEADERS = ["", "Title", "Creator", "Source", "Date", "Tags",
+            "Sculptor", "Collection", "Subcollection", "Seq", "Release", "Path",
+            "Scale", "Presupports", "Added", "Warnings", "File Size", "Category"]
 
 
 def _fmt_size(nbytes: int) -> str:
@@ -163,6 +164,30 @@ class SculptorDelegate(_ComboDelegate):
             session.close()
 
 
+class CollectionDelegate(_ComboDelegate):
+    """QComboBox of all Collection names."""
+
+    def _get_items(self) -> list[str]:
+        session = get_session()
+        try:
+            return sorted(c.name for c in session.query(Collection).order_by(Collection.name).all())
+        finally:
+            session.close()
+
+
+class SubcollectionDelegate(_ComboDelegate):
+    """QComboBox of all Subcollection names."""
+
+    def _get_items(self) -> list[str]:
+        session = get_session()
+        try:
+            return sorted(
+                s.name for s in session.query(Subcollection).order_by(Subcollection.name).all()
+            )
+        finally:
+            session.close()
+
+
 class CategoryDelegate(_ComboDelegate):
     """QComboBox of all Category names."""
 
@@ -170,19 +195,6 @@ class CategoryDelegate(_ComboDelegate):
         session = get_session()
         try:
             return sorted(c.name for c in session.query(Category).order_by(Category.name).all())
-        finally:
-            session.close()
-
-
-class SubcategoryDelegate(_ComboDelegate):
-    """QComboBox of all Subcategory names."""
-
-    def _get_items(self) -> list[str]:
-        session = get_session()
-        try:
-            return sorted(
-                s.name for s in session.query(Subcategory).order_by(Subcategory.name).all()
-            )
         finally:
             session.close()
 
@@ -640,7 +652,7 @@ class BrowserTab(QWidget):
         search_row = QHBoxLayout()
         search_row.addWidget(QLabel("Search:"))
         self._search_edit = QLineEdit()
-        self._search_edit.setPlaceholderText("Title, author or tag…")
+        self._search_edit.setPlaceholderText("Title, creator or tag…")
         self._search_edit.textChanged.connect(lambda _: self._search_timer.start())
         search_row.addWidget(self._search_edit)
         centre_layout.addLayout(search_row)
@@ -665,14 +677,15 @@ class BrowserTab(QWidget):
         self._table.verticalHeader().setVisible(False)
         self._table.setSortingEnabled(True)
         self._table.setAlternatingRowColors(True)
-        self._table.setItemDelegateForColumn(COL_SOURCE,       SourceDelegate(self._table))
-        self._table.setItemDelegateForColumn(COL_TAGS,         TagDelegate(self._table))
-        self._table.setItemDelegateForColumn(COL_SCULPTOR,     SculptorDelegate(self._table))
-        self._table.setItemDelegateForColumn(COL_CATEGORY,     CategoryDelegate(self._table))
-        self._table.setItemDelegateForColumn(COL_SUBCATEGORY,  SubcategoryDelegate(self._table))
-        self._table.setItemDelegateForColumn(COL_RELEASE,      ReleaseDelegate(self._table))
-        self._table.setItemDelegateForColumn(COL_SCALE,        ScaleDelegate(self._table))
-        self._table.setItemDelegateForColumn(COL_PRESUPPORTED, PresupportsDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_SOURCE,        SourceDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_TAGS,          TagDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_SCULPTOR,      SculptorDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_COLLECTION,    CollectionDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_SUBCOLLECTION, SubcollectionDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_CATEGORY,      CategoryDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_RELEASE,       ReleaseDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_SCALE,         ScaleDelegate(self._table))
+        self._table.setItemDelegateForColumn(COL_PRESUPPORTED,  PresupportsDelegate(self._table))
         self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._table.customContextMenuRequested.connect(self._context_menu)
         header = self._table.horizontalHeader()
@@ -809,27 +822,28 @@ class BrowserTab(QWidget):
             return item
 
         header = self._table.horizontalHeader()
-        show_author      = not header.isSectionHidden(COL_AUTHOR)
-        show_tags        = not header.isSectionHidden(COL_TAGS)
-        show_source      = not header.isSectionHidden(COL_SOURCE)
-        show_date        = not header.isSectionHidden(COL_DATE)
-        show_sculptor    = not header.isSectionHidden(COL_SCULPTOR)
-        show_category    = not header.isSectionHidden(COL_CATEGORY)
-        show_subcategory = not header.isSectionHidden(COL_SUBCATEGORY)
-        show_release     = not header.isSectionHidden(COL_RELEASE)
-        show_scale       = not header.isSectionHidden(COL_SCALE)
-        show_presupports = not header.isSectionHidden(COL_PRESUPPORTED)
-        show_warnings    = not header.isSectionHidden(COL_WARNING)
+        show_author       = not header.isSectionHidden(COL_CREATOR)
+        show_tags         = not header.isSectionHidden(COL_TAGS)
+        show_source       = not header.isSectionHidden(COL_SOURCE)
+        show_date         = not header.isSectionHidden(COL_DATE)
+        show_sculptor     = not header.isSectionHidden(COL_SCULPTOR)
+        show_collection   = not header.isSectionHidden(COL_COLLECTION)
+        show_subcollection = not header.isSectionHidden(COL_SUBCOLLECTION)
+        show_category     = not header.isSectionHidden(COL_CATEGORY)
+        show_release      = not header.isSectionHidden(COL_RELEASE)
+        show_scale        = not header.isSectionHidden(COL_SCALE)
+        show_presupports  = not header.isSectionHidden(COL_PRESUPPORTED)
+        show_warnings     = not header.isSectionHidden(COL_WARNING)
 
         session = get_session()
         try:
             if show_author:
-                authors_item = _make_leaf("Authors", ("group", "author"))
+                authors_item = _make_leaf("Creators", ("group", "creator"))
                 authors_item.setIcon(0, _icon_author)
                 self._filter_tree.addTopLevelItem(authors_item)
-                for (author,) in session.query(STLModel.author).distinct().order_by(STLModel.author).all():
-                    if author:
-                        authors_item.addChild(_make_leaf(author, ("author", author)))
+                for (creator,) in session.query(STLModel.creator).distinct().order_by(STLModel.creator).all():
+                    if creator:
+                        authors_item.addChild(_make_leaf(creator, ("creator", creator)))
 
             if show_tags:
                 tags_item = _make_leaf("Tags", ("group", "tag"))
@@ -880,28 +894,35 @@ class BrowserTab(QWidget):
                 for sc in session.query(Sculptor).order_by(Sculptor.name).all():
                     sculptor_item.addChild(_make_leaf(sc.name, ("sculptor_id", sc.id)))
 
+            if show_collection:
+                collection_item = _make_leaf("Collection", ("group", "collection"))
+                collection_item.setIcon(0, _icon_category)
+                self._filter_tree.addTopLevelItem(collection_item)
+                for col in session.query(Collection).order_by(Collection.name).all():
+                    collection_item.addChild(_make_leaf(col.name, ("collection_id", col.id)))
+
+            if show_subcollection:
+                subcol_section = _make_leaf("Subcollection", ("group", "subcollection"))
+                subcol_section.setIcon(0, _icon_subcategory)
+                self._filter_tree.addTopLevelItem(subcol_section)
+                for col in session.query(Collection).order_by(Collection.name).all():
+                    subs = (session.query(Subcollection)
+                            .filter_by(collection_id=col.id)
+                            .order_by(Subcollection.name).all())
+                    if not subs:
+                        continue
+                    col_node = QTreeWidgetItem([col.name])
+                    col_node.setFlags(Qt.ItemFlag.ItemIsEnabled)
+                    subcol_section.addChild(col_node)
+                    for sub in subs:
+                        col_node.addChild(_make_leaf(sub.name, ("subcollection_id", sub.id)))
+
             if show_category:
                 category_item = _make_leaf("Category", ("group", "category"))
                 category_item.setIcon(0, _icon_category)
                 self._filter_tree.addTopLevelItem(category_item)
                 for cat in session.query(Category).order_by(Category.name).all():
                     category_item.addChild(_make_leaf(cat.name, ("category_id", cat.id)))
-
-            if show_subcategory:
-                subcat_section = _make_leaf("Subcategory", ("group", "subcategory"))
-                subcat_section.setIcon(0, _icon_subcategory)
-                self._filter_tree.addTopLevelItem(subcat_section)
-                for cat in session.query(Category).order_by(Category.name).all():
-                    subs = (session.query(Subcategory)
-                            .filter_by(category_id=cat.id)
-                            .order_by(Subcategory.name).all())
-                    if not subs:
-                        continue
-                    cat_node = QTreeWidgetItem([cat.name])
-                    cat_node.setFlags(Qt.ItemFlag.ItemIsEnabled)
-                    subcat_section.addChild(cat_node)
-                    for sub in subs:
-                        cat_node.addChild(_make_leaf(sub.name, ("subcategory_id", sub.id)))
 
             if show_release:
                 release_item = _make_leaf("Release", ("group", "release"))
@@ -1001,19 +1022,20 @@ class BrowserTab(QWidget):
         self._load_table(id_filters=ids)
 
     def _load_table(self,
-                    author_filters=None,      author_exc_filters=None,
-                    tag_filters=None,         tag_exc_filters=None,
-                    type_filters=None,        type_exc_filters=None,
-                    path_filters=None,        path_exc_filters=None,
-                    date_filters=None,        date_exc_filters=None,
-                    sculptor_filters=None,    sculptor_exc_filters=None,
-                    category_filters=None,    category_exc_filters=None,
-                    subcategory_filters=None, subcategory_exc_filters=None,
-                    release_filters=None,     release_exc_filters=None,
-                    scale_filters=None,       scale_exc_filters=None,
-                    presupports_filters=None, presupports_exc_filters=None,
-                    warning_filters=None,     warning_exc_filters=None,
-                    has_value_groups=None,    no_value_groups=None,
+                    author_filters=None,         author_exc_filters=None,
+                    tag_filters=None,            tag_exc_filters=None,
+                    type_filters=None,           type_exc_filters=None,
+                    path_filters=None,           path_exc_filters=None,
+                    date_filters=None,           date_exc_filters=None,
+                    sculptor_filters=None,       sculptor_exc_filters=None,
+                    collection_filters=None,     collection_exc_filters=None,
+                    subcollection_filters=None,  subcollection_exc_filters=None,
+                    category_filters=None,       category_exc_filters=None,
+                    release_filters=None,        release_exc_filters=None,
+                    scale_filters=None,          scale_exc_filters=None,
+                    presupports_filters=None,    presupports_exc_filters=None,
+                    warning_filters=None,        warning_exc_filters=None,
+                    has_value_groups=None,       no_value_groups=None,
                     id_filters=None) -> None:
         """Reload the table with optional include/exclude filter lists.
 
@@ -1039,8 +1061,9 @@ class BrowserTab(QWidget):
             q = session.query(STLModel).options(
                 selectinload(STLModel.tags),
                 selectinload(STLModel.sculptor),
+                selectinload(STLModel.collection),
+                selectinload(STLModel.subcollection),
                 selectinload(STLModel.category),
-                selectinload(STLModel.subcategory),
                 selectinload(STLModel.release),
                 selectinload(STLModel.scale),
             )
@@ -1049,7 +1072,7 @@ class BrowserTab(QWidget):
                 q = q.filter(STLModel.id.in_(id_filters))
             # --- include filters (OR within category, AND across) ---
             if author_filters:
-                q = q.filter(STLModel.author.in_(author_filters))
+                q = q.filter(STLModel.creator.in_(author_filters))
             if type_filters:
                 q = q.filter(STLModel.source.in_(type_filters))
             if tag_filters:
@@ -1063,10 +1086,12 @@ class BrowserTab(QWidget):
                 q = q.filter(or_(*_date_clauses(date_filters)))
             if sculptor_filters:
                 q = q.filter(STLModel.sculptor_id.in_(sculptor_filters))
+            if collection_filters:
+                q = q.filter(STLModel.collection_id.in_(collection_filters))
+            if subcollection_filters:
+                q = q.filter(STLModel.subcollection_id.in_(subcollection_filters))
             if category_filters:
                 q = q.filter(STLModel.category_id.in_(category_filters))
-            if subcategory_filters:
-                q = q.filter(STLModel.subcategory_id.in_(subcategory_filters))
             if release_filters:
                 q = q.filter(STLModel.release_id.in_(release_filters))
             if scale_filters:
@@ -1077,7 +1102,7 @@ class BrowserTab(QWidget):
                 q = q.filter(or_(*(STLModel.warning.contains(w) for w in warning_filters)))
             # --- exclude filters (NOT, AND across) ---
             if author_exc_filters:
-                q = q.filter(~STLModel.author.in_(author_exc_filters))
+                q = q.filter(~STLModel.creator.in_(author_exc_filters))
             if type_exc_filters:
                 q = q.filter(~STLModel.source.in_(type_exc_filters))
             if tag_exc_filters:
@@ -1089,10 +1114,12 @@ class BrowserTab(QWidget):
                 q = q.filter(~or_(*_date_clauses(date_exc_filters)))
             if sculptor_exc_filters:
                 q = q.filter(~STLModel.sculptor_id.in_(sculptor_exc_filters))
+            if collection_exc_filters:
+                q = q.filter(~STLModel.collection_id.in_(collection_exc_filters))
+            if subcollection_exc_filters:
+                q = q.filter(~STLModel.subcollection_id.in_(subcollection_exc_filters))
             if category_exc_filters:
                 q = q.filter(~STLModel.category_id.in_(category_exc_filters))
-            if subcategory_exc_filters:
-                q = q.filter(~STLModel.subcategory_id.in_(subcategory_exc_filters))
             if release_exc_filters:
                 q = q.filter(~STLModel.release_id.in_(release_exc_filters))
             if scale_exc_filters:
@@ -1104,18 +1131,19 @@ class BrowserTab(QWidget):
 
             # Group-level "has/no value" filters — applied when the group header is checked.
             _group_has_value = {
-                "author":      lambda: and_(STLModel.author.isnot(None),      STLModel.author != ""),
-                "tag":         lambda: STLModel.tags.any(),
-                "source":      lambda: and_(STLModel.source.isnot(None),      STLModel.source != ""),
-                "date":        lambda: STLModel.release_year.isnot(None),
-                "sculptor":    lambda: STLModel.sculptor_id.isnot(None),
-                "category":    lambda: STLModel.category_id.isnot(None),
-                "subcategory": lambda: STLModel.subcategory_id.isnot(None),
-                "release":     lambda: STLModel.release_id.isnot(None),
-                "scale":       lambda: STLModel.scale_id.isnot(None),
-                "presupports": lambda: and_(STLModel.presupports.isnot(None), STLModel.presupports != ""),
-                "warning":     lambda: and_(STLModel.warning.isnot(None),     STLModel.warning != ""),
-                "path":        lambda: and_(STLModel.archive_path.isnot(None), STLModel.archive_path != ""),
+                "creator":       lambda: and_(STLModel.creator.isnot(None),        STLModel.creator != ""),
+                "tag":           lambda: STLModel.tags.any(),
+                "source":        lambda: and_(STLModel.source.isnot(None),         STLModel.source != ""),
+                "date":          lambda: STLModel.release_year.isnot(None),
+                "sculptor":      lambda: STLModel.sculptor_id.isnot(None),
+                "collection":    lambda: STLModel.collection_id.isnot(None),
+                "subcollection": lambda: STLModel.subcollection_id.isnot(None),
+                "category":      lambda: STLModel.category_id.isnot(None),
+                "release":       lambda: STLModel.release_id.isnot(None),
+                "scale":         lambda: STLModel.scale_id.isnot(None),
+                "presupports":   lambda: and_(STLModel.presupports.isnot(None),    STLModel.presupports != ""),
+                "warning":       lambda: and_(STLModel.warning.isnot(None),        STLModel.warning != ""),
+                "path":          lambda: and_(STLModel.archive_path.isnot(None),   STLModel.archive_path != ""),
             }
             if has_value_groups:
                 for _key in has_value_groups:
@@ -1164,13 +1192,13 @@ class BrowserTab(QWidget):
                 row = [
                     thumb_item,
                     QStandardItem(stl.title or ""),
-                    QStandardItem(stl.author or ""),
+                    QStandardItem(stl.creator or ""),
                     QStandardItem(stl.source or ""),
                     QStandardItem(format_release_date(stl.release_year, stl.release_month)),
                     QStandardItem(tags_str),
-                    QStandardItem(stl.sculptor.name if stl.sculptor else ""),
-                    QStandardItem(stl.category.name if stl.category else ""),
-                    QStandardItem(stl.subcategory.name if stl.subcategory else ""),
+                    QStandardItem(stl.sculptor.name    if stl.sculptor    else ""),
+                    QStandardItem(stl.collection.name  if stl.collection  else ""),
+                    QStandardItem(stl.subcollection.name if stl.subcollection else ""),
                     QStandardItem(seq_str),
                     QStandardItem(stl.release.name if stl.release else ""),
                     path_item,
@@ -1179,6 +1207,7 @@ class BrowserTab(QWidget):
                     added_item,
                     warning_item,
                     size_item,
+                    QStandardItem(stl.category.name if stl.category else ""),
                 ]
                 self._model.appendRow(row)
         finally:
@@ -1218,8 +1247,8 @@ class BrowserTab(QWidget):
                 return
             if col == COL_TITLE:
                 stl.title = value
-            elif col == COL_AUTHOR:
-                stl.author = value
+            elif col == COL_CREATOR:
+                stl.creator = value
             elif col == COL_SOURCE:
                 stl.source = value
             elif col == COL_DATE:
@@ -1245,6 +1274,31 @@ class BrowserTab(QWidget):
                     stl.sculptor = sc
                 else:
                     stl.sculptor = None
+            elif col == COL_COLLECTION:
+                if value:
+                    col_obj = session.query(Collection).filter_by(name=value).first()
+                    if col_obj is None:
+                        col_obj = Collection(name=value)
+                        session.add(col_obj)
+                        session.flush()
+                    stl.collection = col_obj
+                else:
+                    stl.collection = None
+                    stl.subcollection = None
+            elif col == COL_SUBCOLLECTION:
+                if value:
+                    q = session.query(Subcollection).filter_by(name=value)
+                    if stl.collection_id:
+                        q = q.filter_by(collection_id=stl.collection_id)
+                    sc = q.first()
+                    if sc is None and stl.collection_id:
+                        sc = Subcollection(name=value, collection_id=stl.collection_id)
+                        session.add(sc)
+                        session.flush()
+                    if sc:
+                        stl.subcollection = sc
+                else:
+                    stl.subcollection = None
             elif col == COL_CATEGORY:
                 if value:
                     cat = session.query(Category).filter_by(name=value).first()
@@ -1255,21 +1309,6 @@ class BrowserTab(QWidget):
                     stl.category = cat
                 else:
                     stl.category = None
-                    stl.subcategory = None  # subcategory depends on category
-            elif col == COL_SUBCATEGORY:
-                if value:
-                    q = session.query(Subcategory).filter_by(name=value)
-                    if stl.category_id:
-                        q = q.filter_by(category_id=stl.category_id)
-                    sc = q.first()
-                    if sc is None and stl.category_id:
-                        sc = Subcategory(name=value, category_id=stl.category_id)
-                        session.add(sc)
-                        session.flush()
-                    if sc:
-                        stl.subcategory = sc
-                else:
-                    stl.subcategory = None
             elif col == COL_SEQUENCE:
                 try:
                     stl.sequence = int(value) if value else None
@@ -1362,33 +1401,35 @@ class BrowserTab(QWidget):
 
     def _apply_checked_filters(self) -> None:
         """Collect include (Checked) and exclude (PartiallyChecked) filter items and reload."""
-        author_inc:       list[str]   = []; author_exc:       list[str]   = []
-        tag_inc:          list[str]   = []; tag_exc:          list[str]   = []
-        type_inc:         list[str]   = []; type_exc:         list[str]   = []
-        path_inc:         list[str]   = []; path_exc:         list[str]   = []
-        date_inc:         list[tuple] = []; date_exc:         list[tuple] = []
-        sculptor_inc:     list[int]   = []; sculptor_exc:     list[int]   = []
-        category_inc:     list[int]   = []; category_exc:     list[int]   = []
-        subcategory_inc:  list[int]   = []; subcategory_exc:  list[int]   = []
-        release_inc:      list[int]   = []; release_exc:      list[int]   = []
-        scale_inc:        list[int]   = []; scale_exc:        list[int]   = []
-        presupports_inc:  list[str]   = []; presupports_exc:  list[str]   = []
-        warning_inc:      list[str]   = []; warning_exc:      list[str]   = []
-        has_value_groups: set[str]    = set()
-        no_value_groups:  set[str]    = set()
+        author_inc:          list[str]   = []; author_exc:          list[str]   = []
+        tag_inc:             list[str]   = []; tag_exc:             list[str]   = []
+        type_inc:            list[str]   = []; type_exc:            list[str]   = []
+        path_inc:            list[str]   = []; path_exc:            list[str]   = []
+        date_inc:            list[tuple] = []; date_exc:            list[tuple] = []
+        sculptor_inc:        list[int]   = []; sculptor_exc:        list[int]   = []
+        collection_inc:      list[int]   = []; collection_exc:      list[int]   = []
+        subcollection_inc:   list[int]   = []; subcollection_exc:   list[int]   = []
+        category_inc:        list[int]   = []; category_exc:        list[int]   = []
+        release_inc:         list[int]   = []; release_exc:         list[int]   = []
+        scale_inc:           list[int]   = []; scale_exc:           list[int]   = []
+        presupports_inc:     list[str]   = []; presupports_exc:     list[str]   = []
+        warning_inc:         list[str]   = []; warning_exc:         list[str]   = []
+        has_value_groups:    set[str]    = set()
+        no_value_groups:     set[str]    = set()
 
         _buckets = {
-            "author":         (author_inc,      author_exc),
-            "tag":            (tag_inc,         tag_exc),
-            "source":         (type_inc,        type_exc),
-            "path":           (path_inc,        path_exc),
-            "sculptor_id":    (sculptor_inc,    sculptor_exc),
-            "category_id":    (category_inc,    category_exc),
-            "subcategory_id": (subcategory_inc, subcategory_exc),
-            "release_id":     (release_inc,     release_exc),
-            "scale_id":       (scale_inc,       scale_exc),
-            "presupports":    (presupports_inc, presupports_exc),
-            "warning":        (warning_inc,     warning_exc),
+            "creator":           (author_inc,       author_exc),
+            "tag":               (tag_inc,          tag_exc),
+            "source":            (type_inc,         type_exc),
+            "path":              (path_inc,         path_exc),
+            "sculptor_id":       (sculptor_inc,     sculptor_exc),
+            "collection_id":     (collection_inc,   collection_exc),
+            "subcollection_id":  (subcollection_inc, subcollection_exc),
+            "category_id":       (category_inc,     category_exc),
+            "release_id":        (release_inc,      release_exc),
+            "scale_id":          (scale_inc,        scale_exc),
+            "presupports":       (presupports_inc,  presupports_exc),
+            "warning":           (warning_inc,      warning_exc),
         }
 
         def _collect(item: QTreeWidgetItem):
@@ -1412,18 +1453,19 @@ class BrowserTab(QWidget):
             _collect(root.child(i))
 
         self._load_table(
-            author_filters=author_inc or None,         author_exc_filters=author_exc or None,
-            tag_filters=tag_inc or None,               tag_exc_filters=tag_exc or None,
-            type_filters=type_inc or None,             type_exc_filters=type_exc or None,
-            path_filters=path_inc or None,             path_exc_filters=path_exc or None,
-            date_filters=date_inc or None,             date_exc_filters=date_exc or None,
-            sculptor_filters=sculptor_inc or None,     sculptor_exc_filters=sculptor_exc or None,
-            category_filters=category_inc or None,     category_exc_filters=category_exc or None,
-            subcategory_filters=subcategory_inc or None, subcategory_exc_filters=subcategory_exc or None,
-            release_filters=release_inc or None,       release_exc_filters=release_exc or None,
-            scale_filters=scale_inc or None,           scale_exc_filters=scale_exc or None,
-            presupports_filters=presupports_inc or None, presupports_exc_filters=presupports_exc or None,
-            warning_filters=warning_inc or None,       warning_exc_filters=warning_exc or None,
+            author_filters=author_inc or None,               author_exc_filters=author_exc or None,
+            tag_filters=tag_inc or None,                     tag_exc_filters=tag_exc or None,
+            type_filters=type_inc or None,                   type_exc_filters=type_exc or None,
+            path_filters=path_inc or None,                   path_exc_filters=path_exc or None,
+            date_filters=date_inc or None,                   date_exc_filters=date_exc or None,
+            sculptor_filters=sculptor_inc or None,           sculptor_exc_filters=sculptor_exc or None,
+            collection_filters=collection_inc or None,       collection_exc_filters=collection_exc or None,
+            subcollection_filters=subcollection_inc or None, subcollection_exc_filters=subcollection_exc or None,
+            category_filters=category_inc or None,           category_exc_filters=category_exc or None,
+            release_filters=release_inc or None,             release_exc_filters=release_exc or None,
+            scale_filters=scale_inc or None,                 scale_exc_filters=scale_exc or None,
+            presupports_filters=presupports_inc or None,     presupports_exc_filters=presupports_exc or None,
+            warning_filters=warning_inc or None,             warning_exc_filters=warning_exc or None,
             has_value_groups=has_value_groups or None,
             no_value_groups=no_value_groups or None,
         )
@@ -1450,14 +1492,14 @@ class BrowserTab(QWidget):
             self._update_info_panel(model_id)
 
     def _update_info_panel(self, model_id: int) -> None:
-        """Refresh the author/tag info labels below the filter tree."""
+        """Refresh the creator/tag info labels below the filter tree."""
         session = get_session()
         try:
             stl: STLModel = session.get(STLModel, model_id)
             if stl is None:
                 return
-            if stl.author:
-                self._info_author_lbl.setText(f"<b>Author:</b> {stl.author}")
+            if stl.creator:
+                self._info_author_lbl.setText(f"<b>Creator:</b> {stl.creator}")
                 self._info_author_lbl.setVisible(True)
             else:
                 self._info_author_lbl.setVisible(False)
@@ -1538,7 +1580,7 @@ class BrowserTab(QWidget):
             col = chosen.data()
             header.setSectionHidden(col, not chosen.isChecked())
             self._save_header_state()
-            if col in (COL_AUTHOR, COL_TAGS, COL_SOURCE, COL_PATH, COL_DATE):
+            if col in (COL_CREATOR, COL_TAGS, COL_SOURCE, COL_PATH, COL_DATE):
                 self._populate_filter_tree()
 
     def _context_menu(self, pos) -> None:
@@ -1563,20 +1605,24 @@ class BrowserTab(QWidget):
 
         add_tag_act = None
         edit_tags_act = None
+        edit_collections_act = None
+        edit_subcollections_act = None
         edit_categories_act = None
-        edit_subcategories_act = None
         edit_scales_act = None
         src_col = self._proxy.mapToSource(index).column()
         if src_col == COL_TAGS:
             menu.addSeparator()
             add_tag_act = menu.addAction(style.standardIcon(SP.SP_FileDialogNewFolder), "Add Tag…")
             edit_tags_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), "Edit Tags…")
+        elif src_col == COL_COLLECTION:
+            menu.addSeparator()
+            edit_collections_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), "Edit Collections…")
+        elif src_col == COL_SUBCOLLECTION:
+            menu.addSeparator()
+            edit_subcollections_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), "Edit Subcollections…")
         elif src_col == COL_CATEGORY:
             menu.addSeparator()
             edit_categories_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), "Edit Categories…")
-        elif src_col == COL_SUBCATEGORY:
-            menu.addSeparator()
-            edit_subcategories_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), "Edit Subcategories…")
         elif src_col == COL_SCALE:
             menu.addSeparator()
             edit_scales_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), "Edit Scales…")
@@ -1621,10 +1667,12 @@ class BrowserTab(QWidget):
             self.add_tag()
         elif edit_tags_act and action == edit_tags_act:
             self._open_tag_editor()
-        elif edit_categories_act and action == edit_categories_act:
+        elif edit_collections_act and action == edit_collections_act:
             self._open_category_editor()
-        elif edit_subcategories_act and action == edit_subcategories_act:
+        elif edit_subcollections_act and action == edit_subcollections_act:
             self._open_subcategory_editor()
+        elif edit_categories_act and action == edit_categories_act:
+            self._open_category_editor(new_category=True)
         elif edit_scales_act and action == edit_scales_act:
             self._open_scale_editor()
 
@@ -1718,14 +1766,18 @@ class BrowserTab(QWidget):
         TagEditorDialog(parent=self).exec()
         self.refresh()
 
-    def _open_category_editor(self) -> None:
-        from app.ui.category_editor_dialog import CategoryEditorDialog
-        CategoryEditorDialog(parent=self).exec()
+    def _open_category_editor(self, new_category: bool = False) -> None:
+        if new_category:
+            from app.ui.category_editor_dialog import CategoryEditorDialog
+            CategoryEditorDialog(parent=self).exec()
+        else:
+            from app.ui.collection_editor_dialog import CollectionEditorDialog
+            CollectionEditorDialog(parent=self).exec()
         self.refresh()
 
     def _open_subcategory_editor(self) -> None:
-        from app.ui.subcategory_editor_dialog import SubcategoryEditorDialog
-        SubcategoryEditorDialog(parent=self).exec()
+        from app.ui.subcollection_editor_dialog import SubcollectionEditorDialog
+        SubcollectionEditorDialog(parent=self).exec()
         self.refresh()
 
     def _open_scale_editor(self) -> None:
