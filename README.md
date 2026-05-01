@@ -20,7 +20,9 @@ A desktop application for cataloguing and browsing your local collection of 3D p
 - **Image pane toggle** — show or hide the right-hand thumbnail sidebar via a toolbar button or the View menu
 - **File sorting** — optionally move and rename archive files into a structured directory layout using a path pattern (enable in Configuration)
 - **File Size column** — browser table shows each archive's size on disk (B / KB / MB / GB), sortable numerically
+- **STL file list** — optionally records the name and uncompressed size of every `.stl` file inside each archive in a dedicated `stl_files` table (enable *Store STL file list* in Configuration); populated automatically during crawling and included in METADATA.7z sidecars
 - **Find Metadata Duplicates** — Tools menu dialog that finds models with identical or phonetically similar field values; supports exact match, Levenshtein (configurable distance), and Soundex; results can be sent directly to the browser table
+- **Find Archives by Content** — two-tab tool under the Tools menu: the *STL Files* tab flags archive pairs that share a configurable fraction of identical files (by name + size); the *Images* tab finds archives with perceptually similar thumbnails using a 64-bit dHash and a configurable Hamming distance threshold; hover any image-match row to see both thumbnails in a popup
 - **Statistics** — column statistics and aggregated statistics dialogs for a quick numeric overview of any field; database maintenance dialog (vacuum, integrity check)
 - **Themes** — built-in color schemes: System Default, VS Code Dark+, Windows 11 Dark, Windows 11 Light, and nine Material Design themes (dark/light variants of Blue, Teal, Purple, Amber, Red, Orange) via qt-material
 
@@ -224,6 +226,7 @@ stl_database/
 │   │   ├── sort_dialog.py
 │   │   ├── config_dialog.py
 │   │   ├── find_duplicates_dialog.py
+│   │   ├── find_content_duplicates_dialog.py
 │   │   ├── about_dialog.py
 │   │   └── help_dialog.py
 │   └── utils/

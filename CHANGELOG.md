@@ -1,5 +1,49 @@
 # Changelog
 
+## v0.2.0 — 2026-05-01
+
+### Storage
+
+- Added **`stl_files` table** — stores the name and uncompressed size of every `.stl` file
+  inside each archive, keyed by `(model_id, filename)`; populated during crawling when
+  *Store STL file list* is enabled in Configuration → Metadata Sidecar
+- STL file list is written to and restored from `METADATA.7z` sidecar files
+
+### Configuration
+
+- Added **Store STL file list** checkbox in the Metadata Sidecar settings section
+
+### UI — Tools
+
+- Added **Find Archives by Content** dialog (Tools menu, non-modal)
+
+  **STL Files tab**
+  - Inverted-index overlap search: finds archive pairs sharing a configurable fraction of
+    identical `.stl` files (matched by filename and uncompressed size)
+  - Configurable *Similarity threshold* (1–100 %, default 80 %) relative to the larger archive
+  - Results table: Title A/B, file counts, matching file count, similarity %; sortable
+  - *Show Pair / Show All in Main Table* buttons filter the browser to the selected archives
+
+  **Images tab**
+  - Perceptual duplicate detection via 64-bit difference hash (dHash); pure-Pillow, no
+    extra dependencies
+  - Pigeonhole-principle segment index for O(N) candidate selection (no false negatives)
+  - Configurable *Max hash distance* (0–15, default 5); 0 = pixel-identical after resize,
+    ≤5 catches same render at different resolutions
+  - Results sorted by best Hamming distance, then most matching pairs
+  - Hover any result row to see a side-by-side thumbnail popup for both archives
+  - Background workers with progress bar and Stop button for both tabs
+
+### Documentation
+
+- Updated README: added STL file list and Find Archives by Content to the feature list
+  and project structure
+- Updated Help dialog: Configuration page documents the new checkbox; Statistics & Tools
+  page documents both tabs of Find Archives by Content; Sidecars page notes that the STL
+  file list is included in sidecar snapshots
+
+---
+
 ## v0.1.1 — 2026-04-29
 
 ### UI — Browser
