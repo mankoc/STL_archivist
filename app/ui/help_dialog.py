@@ -649,6 +649,12 @@ Add, edit, or remove patterns as needed for your naming conventions.</p>
   <tr><td>Include thumbnails</td>
       <td>Store JPEG thumbnails inside the sidecar as well as metadata.
           Makes the sidecar larger but allows a full restore without re-downloading images.</td></tr>
+  <tr><td>Store STL file list</td>
+      <td>Record the name and uncompressed size of every <code>.stl</code> file found inside
+          each archive in a dedicated <code>stl_files</code> database table.  Required for
+          <b>Tools &rarr; Find Archives by Content &rarr; STL Files</b> tab.
+          Re-crawl existing archives after enabling to populate historical entries.
+          The list is also written into and restored from METADATA.7z sidecars.</td></tr>
 </table>
 
 <h2>Browser</h2>
@@ -753,6 +759,46 @@ The table is sortable by any column.</p>
 is O(n&sup2;) — use the Stop button to cancel if it takes too long, or reduce the
 max distance to 1 or 2 to narrow the scope.</div>
 
+<h2>Tools &mdash; Find Archives by Content&hellip;</h2>
+<p>Open via <b>Tools &rarr; Find Archives by Content&hellip;</b></p>
+<p>A <em>non-modal</em> dialog with two independent tabs that identify pairs of archives
+sharing content &mdash; either the same STL files or visually similar thumbnail images.</p>
+
+<h3>STL Files tab</h3>
+<p>Compares every pair of archives by the fraction of <code>.stl</code> files they share
+(matched by filename and uncompressed size).  A pair is flagged when at least
+<em>Similarity threshold %</em> of the <b>larger</b> archive&rsquo;s files appear in the other.</p>
+<table>
+  <tr><th>Parameter</th><th>Description</th></tr>
+  <tr><td>Similarity threshold</td>
+      <td>1&ndash;100 % (default 80 %).  Higher values = fewer, more certain matches.</td></tr>
+</table>
+<div class="note">Requires <b>Store STL file list</b> to be enabled in
+{_link(PAGE_CONFIG, "Configuration")} and archives to have been crawled with that option on.</div>
+
+<h3>Images tab</h3>
+<p>Computes a 64-bit perceptual difference hash (dHash) for every stored thumbnail and
+reports archive pairs that contain at least one pair of visually similar images.  The
+comparison is resolution-independent, so the same render at different sizes is caught.</p>
+<table>
+  <tr><th>Parameter</th><th>Description</th></tr>
+  <tr><td>Max hash distance</td>
+      <td>0&ndash;15 (default 5).  The maximum number of bits allowed to differ between
+          two thumbnail hashes.  0 = bit-for-bit identical pixels after downscaling;
+          &le;3 = very similar (different resolution or minor JPEG artefacts);
+          &le;8 = noticeably similar; higher values increase recall but also false positives.</td></tr>
+</table>
+<div class="tip">Tip: hover any row in the Images tab to see a side-by-side popup of both
+archives&rsquo; first thumbnails, making it easy to judge whether the match is genuine.</div>
+
+<h3>Sending results to the browser</h3>
+<ul>
+  <li><b>Show Pair in Main Table</b> &mdash; select one row, then click to filter the browser
+      to the two archives in that pair.</li>
+  <li><b>Show All in Main Table</b> &mdash; filter the browser to every archive appearing in
+      any result row.</li>
+</ul>
+
 <h2>Tools &mdash; Database Maintenance&hellip;</h2>
 <p>Open via <b>Tools &rarr; Database Maintenance&hellip;</b></p>
 <p>The maintenance dialog helps you keep the database consistent with the files on disk:</p>
@@ -798,8 +844,9 @@ re-crawling and re-extracting every archive from scratch.</p>
   <tr><th>Member</th><th>Contents</th></tr>
   <tr><td><code>metadata.json</code></td>
       <td>A JSON snapshot of all DB fields for every direct-child archive in the folder
-          (title, author, tags, category, presupports, date, &hellip;) plus a schema
-          version number and a write timestamp.</td></tr>
+          (title, author, tags, category, presupports, date, &hellip;) plus the per-archive
+          STL file list when <em>Store STL file list</em> is enabled, a schema version
+          number, and a write timestamp.</td></tr>
   <tr><td><code>thumbnails/</code></td>
       <td>JPEG thumbnails for the models, included only when
           <em>Include thumbnails in sidecar</em> is enabled in
