@@ -29,9 +29,13 @@ class CrawlerTab(QWidget):
     Signals:
         close_requested: Emitted when the user clicks the Close button, so the
             parent dialog (if any) can dismiss itself.
+        progress_updated: Emitted with (current, total) when progress changes.
+        crawl_finished: Emitted when the crawl completes.
     """
 
     close_requested = pyqtSignal()
+    progress_updated = pyqtSignal(int, int)
+    crawl_finished = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -152,6 +156,13 @@ class CrawlerTab(QWidget):
         btn_row.addWidget(self._stop_btn)
 
         btn_row.addStretch()
+
+        self._bg_btn = QPushButton(
+            style.standardIcon(style.StandardPixmap.SP_ArrowDown), "Run in Background"
+        )
+        self._bg_btn.setEnabled(False)
+        self._bg_btn.clicked.connect(self.close_requested)
+        btn_row.addWidget(self._bg_btn)
 
         self._close_btn = QPushButton(
             style.standardIcon(style.StandardPixmap.SP_DialogCloseButton), "Close"
@@ -297,6 +308,7 @@ class CrawlerTab(QWidget):
         self._progress.setValue(0)
         self._start_btn.setEnabled(False)
         self._stop_btn.setEnabled(True)
+        self._bg_btn.setEnabled(True)
 
         pattern = self._pattern_edit.text().strip()
         max_thumbs = get_max_thumbnails() if self._generate_thumbs_check.isChecked() else 0
@@ -328,9 +340,13 @@ class CrawlerTab(QWidget):
         self._progress.setMaximum(total)
         self._progress.setValue(current)
         self._progress.setFormat(f"{current} / {total}")
+        self.progress_updated.emit(current, total)
 
     def _on_finished(self) -> None:
         """Re-enable the Start button and clear the worker reference when done."""
         self._start_btn.setEnabled(True)
         self._stop_btn.setEnabled(False)
+        self._bg_btn.setEnabled(False)
         self._worker = None
+        self.crawl_finished.emit()
+        self.close_requested.emit()
