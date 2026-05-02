@@ -703,13 +703,22 @@ class BrowserTab(QWidget):
 
         splitter.addWidget(centre)
 
-        # ---- Right: thumbnail sidebar ----
+        # ---- Right: thumbnail sidebar + creator info panel ----
         right = QWidget()
         self._right_pane = right
         right.setMinimumWidth(160)
-        right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(4, 0, 0, 0)
-        right_layout.addWidget(QLabel("Images"))
+        right_outer = QVBoxLayout(right)
+        right_outer.setContentsMargins(4, 0, 0, 0)
+
+        right_vsplit = QSplitter(Qt.Orientation.Vertical)
+        right_vsplit.setHandleWidth(6)
+        self._right_vsplit = right_vsplit
+
+        # Top: images
+        img_widget = QWidget()
+        img_layout = QVBoxLayout(img_widget)
+        img_layout.setContentsMargins(0, 0, 0, 0)
+        img_layout.addWidget(QLabel("Images"))
 
         self._thumb_content = QWidget()
         self._thumb_vlayout = QVBoxLayout(self._thumb_content)
@@ -721,7 +730,37 @@ class BrowserTab(QWidget):
         self._thumb_scroll.setWidgetResizable(True)
         self._thumb_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._thumb_scroll.viewport().installEventFilter(self)
-        right_layout.addWidget(self._thumb_scroll)
+        img_layout.addWidget(self._thumb_scroll)
+        right_vsplit.addWidget(img_widget)
+
+        # Bottom: creator info panel (hidden until a model with creator info is selected)
+        self._creator_panel = QFrame()
+        self._creator_panel.setFrameShape(QFrame.Shape.StyledPanel)
+        creator_layout = QVBoxLayout(self._creator_panel)
+        creator_layout.setContentsMargins(6, 6, 6, 6)
+        creator_layout.setSpacing(4)
+        self._creator_name_lbl = QLabel()
+        self._creator_name_lbl.setWordWrap(True)
+        _cfont = self._creator_name_lbl.font()
+        _cfont.setBold(True)
+        self._creator_name_lbl.setFont(_cfont)
+        creator_layout.addWidget(self._creator_name_lbl)
+        self._creator_details_lbl = QLabel()
+        self._creator_details_lbl.setWordWrap(True)
+        self._creator_details_lbl.setOpenExternalLinks(True)
+        self._creator_details_lbl.setTextFormat(Qt.TextFormat.RichText)
+        self._creator_details_lbl.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextBrowserInteraction
+        )
+        self._creator_details_lbl.setAlignment(Qt.AlignmentFlag.AlignTop)
+        creator_layout.addWidget(self._creator_details_lbl)
+        creator_layout.addStretch()
+        self._creator_panel.setVisible(False)
+        right_vsplit.addWidget(self._creator_panel)
+
+        right_vsplit.setStretchFactor(0, 3)
+        right_vsplit.setStretchFactor(1, 1)
+        right_outer.addWidget(right_vsplit)
 
         splitter.addWidget(right)
 
@@ -1490,6 +1529,7 @@ class BrowserTab(QWidget):
         if model_id is not None:
             self._show_thumbnails(model_id)
             self._update_info_panel(model_id)
+            self._update_creator_panel(model_id)
 
     def _update_info_panel(self, model_id: int) -> None:
         """Refresh the creator/tag info labels below the filter tree."""
@@ -1510,6 +1550,45 @@ class BrowserTab(QWidget):
                 self._info_tags_lbl.setVisible(False)
         finally:
             session.close()
+
+    def _update_creator_panel(self, model_id: int) -> None:
+        """Load creator profile from DB and show it in the right-pane creator panel."""
+        from app.database.models import Creator as CreatorModel
+        session = get_session()
+        try:
+            stl: STLModel = session.get(STLModel, model_id)
+            if stl is None or not stl.creator:
+                self._creator_panel.setVisible(False)
+                return
+            creator_name = stl.creator
+            c = session.query(CreatorModel).filter_by(name=creator_name).first()
+            self._creator_name_lbl.setText(creator_name)
+            if c:
+                lines: list[str] = []
+                if c.full_name:
+                    lines.append(f"<b>Full name:</b> {c.full_name}")
+                if c.patreon_url:
+                    lines.append(f'<b>Patreon:</b> <a href="{c.patreon_url}">{c.patreon_url}</a>')
+                if c.artstation_url:
+                    lines.append(f'<b>ArtStation:</b> <a href="{c.artstation_url}">{c.artstation_url}</a>')
+                if c.gumroad_url:
+                    lines.append(f'<b>Gumroad:</b> <a href="{c.gumroad_url}">{c.gumroad_url}</a>')
+                if c.myminifactory_url:
+                    lines.append(f'<b>MyMiniFactory:</b> <a href="{c.myminifactory_url}">{c.myminifactory_url}</a>')
+                self._creator_details_lbl.setText("<br>".join(lines))
+            else:
+                self._creator_details_lbl.setText("")
+            self._creator_panel.setVisible(True)
+        finally:
+            session.close()
+
+    def _open_creator_editor(self, creator_name: str) -> None:
+        from app.ui.creator_editor_dialog import CreatorEditorDialog
+        dlg = CreatorEditorDialog(creator_name, parent=self)
+        if dlg.exec():
+            ids = self._selected_model_ids()
+            if len(ids) == 1:
+                self._update_creator_panel(ids[0])
 
     def _on_double_click(self, index) -> None:
         if index.column() != COL_PATH:
@@ -1609,8 +1688,15 @@ class BrowserTab(QWidget):
         edit_subcollections_act = None
         edit_categories_act = None
         edit_scales_act = None
+        edit_creator_act = None
         src_col = self._proxy.mapToSource(index).column()
-        if src_col == COL_TAGS:
+        if src_col == COL_CREATOR:
+            menu.addSeparator()
+            edit_creator_act = menu.addAction(
+                style.standardIcon(SP.SP_FileDialogDetailedView),
+                "Edit Creator Information…",
+            )
+        elif src_col == COL_TAGS:
             menu.addSeparator()
             add_tag_act = menu.addAction(style.standardIcon(SP.SP_FileDialogNewFolder), "Add Tag…")
             edit_tags_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), "Edit Tags…")
@@ -1675,6 +1761,10 @@ class BrowserTab(QWidget):
             self._open_category_editor(new_category=True)
         elif edit_scales_act and action == edit_scales_act:
             self._open_scale_editor()
+        elif edit_creator_act and action == edit_creator_act:
+            creator_name = self._model.item(src_index.row(), COL_CREATOR).text()
+            if creator_name:
+                self._open_creator_editor(creator_name)
 
     def _delete_models(self, model_ids: list[int]) -> None:
         """Confirm then delete models and their LMDB thumbnails from the database."""
@@ -1716,6 +1806,7 @@ class BrowserTab(QWidget):
             item = self._thumb_vlayout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+        self._creator_panel.setVisible(False)
 
     def _show_thumbnails(self, model_id: int) -> None:
         """Load and display thumbnails for the model with *model_id* in the sidebar."""

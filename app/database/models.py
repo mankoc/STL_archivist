@@ -120,6 +120,27 @@ class Scale(Base):
         return f"<Scale {self.name!r}>"
 
 
+class Creator(Base):
+    """Extended profile for a model creator, keyed by their display name.
+
+    The ``name`` column mirrors ``STLModel.creator`` and acts as the primary key
+    so no FK column is needed on the models table.  All URL / name fields are
+    optional; a row is created on first edit via the Creator editor dialog.
+    """
+
+    __tablename__ = "creators"
+
+    name              = Column(String(256), primary_key=True)
+    full_name         = Column(String(512), nullable=True)
+    patreon_url       = Column(Text, nullable=True)
+    artstation_url    = Column(Text, nullable=True)
+    gumroad_url       = Column(Text, nullable=True)
+    myminifactory_url = Column(Text, nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<Creator {self.name!r}>"
+
+
 class STLModel(Base):
     """Central record for a single STL archive entry in the catalogue.
 
