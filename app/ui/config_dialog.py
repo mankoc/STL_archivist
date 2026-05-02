@@ -6,6 +6,7 @@ that each library has its own independent configuration.
 """
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -139,6 +140,44 @@ def get_max_thumb_size() -> int:
 
 def get_color_scheme() -> str:
     return _load_library_settings().get("color_scheme", COLOR_SCHEME_DEFAULT)
+
+
+def _parse_qss_token(qss_text: str, token: str) -> str | None:
+    """Extract a hex color from a QSS comment token like '--pair-a: #rrggbb'."""
+    m = re.search(rf"--{re.escape(token)}:\s*(#[0-9a-fA-F]{{3,8}})", qss_text)
+    return m.group(1) if m else None
+
+
+def get_pair_colors() -> tuple[str, str]:
+    """Return two hex color strings for duplicate-pair row highlighting.
+
+    Colors are read from the active theme's QSS ``--pair-a`` / ``--pair-b``
+    tokens.  For Material and System Default themes (no QSS file), colors are
+    derived from the active QPalette's Highlight role so they adapt to the theme.
+    """
+    from PyQt6.QtGui import QColor, QPalette
+    from PyQt6.QtWidgets import QApplication
+
+    scheme = get_color_scheme()
+    value  = THEMES.get(scheme, "")
+    if value and not value.startswith("material:"):
+        qss_path = Path(value)
+        if qss_path.exists():
+            qss = qss_path.read_text(encoding="utf-8")
+            a = _parse_qss_token(qss, "pair-a")
+            b = _parse_qss_token(qss, "pair-b")
+            if a and b:
+                return a, b
+
+    # Fallback: derive from the active QPalette Highlight color
+    palette   = QApplication.palette() if QApplication.instance() else QPalette()
+    highlight = palette.color(QPalette.ColorRole.Highlight)
+    h, s, v, _ = highlight.getHsvF()
+    s2 = min(s * 0.8, 1.0)
+    v2 = min(v * 0.55, 1.0)
+    color_a = QColor.fromHsvF(h, s2, v2)
+    color_b = QColor.fromHsvF((h + 0.5) % 1.0, s2, v2)
+    return color_a.name(), color_b.name()
 
 
 def get_file_sorting_enabled() -> bool:
@@ -399,6 +438,24 @@ class ConfigDialog(QDialog):
         )
 
         layout.addWidget(group)
+
+        file_info_group = QGroupBox("Full File Info")
+        file_info_form = QFormLayout(file_info_group)
+
+        self._store_stl_list_check = QCheckBox("Store STL file list")
+        file_info_form.addRow("", self._store_stl_list_check)
+        file_info_form.addRow(
+            "",
+            QLabel(
+                "<small>When enabled, the crawler records the name and uncompressed "
+                "size of every <b>.stl</b> file found inside each archive. "
+                "Stored in the <b>stl_files</b> database table. "
+                "Archives already in the database that are missing file information "
+                "will be automatically re-crawled to populate the missing entries.</small>"
+            ),
+        )
+
+        layout.addWidget(file_info_group)
         layout.addStretch()
         return page
 
@@ -507,19 +564,6 @@ class ConfigDialog(QDialog):
         )
 
         self._metadata_sidecar_check.toggled.connect(self._metadata_thumbnails_check.setEnabled)
-
-        self._store_stl_list_check = QCheckBox("Store STL file list")
-        form.addRow("", self._store_stl_list_check)
-        form.addRow(
-            "",
-            QLabel(
-                "<small>When enabled, the crawler records the name and uncompressed "
-                "size of every <b>.stl</b> file found inside each archive. "
-                "Stored in the <b>stl_files</b> database table. "
-                "Re-crawl existing archives to populate entries that were "
-                "processed before this option was enabled.</small>"
-            ),
-        )
 
         layout.addWidget(group)
         layout.addStretch()

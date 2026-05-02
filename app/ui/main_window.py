@@ -127,7 +127,7 @@ class MainWindow(QMainWindow):
 
         act_find_content_dupes = QAction(
             style.standardIcon(SP.SP_FileDialogContentsView),
-            "Find Archives by Content…",
+            "Find Duplicate Archives by Content…",
             self,
         )
         act_find_content_dupes.setStatusTip(
@@ -246,6 +246,7 @@ class MainWindow(QMainWindow):
         if dlg is None or not dlg.isVisible():
             dlg = FindContentDuplicatesDialog(parent=self)
             dlg.show_models_requested.connect(self._browser.show_model_ids)
+            dlg.show_duplicate_pairs_requested.connect(self._browser.show_duplicate_pairs)
             self._find_content_dupes_dlg = dlg
         dlg.raise_()
         dlg.activateWindow()

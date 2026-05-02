@@ -16,6 +16,8 @@
    --text-secondary:#6b6b6b
    --text-disabled: #a0a0a0
    --selection:     #cce4f7
+   --pair-a:        #c8e0f4   duplicate-pair highlight A (blue tint)
+   --pair-b:        #e4d0f0   duplicate-pair highlight B (purple tint)
 ================================================================ */
 
 /* ---- Base ---- */

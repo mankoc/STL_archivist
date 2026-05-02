@@ -54,6 +54,7 @@ _HEADERS = ["", "Title", "Creator", "Source", "Date", "Tags",
             "Scale", "Presupports", "Added", "Warnings", "File Size", "Category"]
 
 
+
 def _fmt_size(nbytes: int) -> str:
     for unit in ("B", "KB", "MB", "GB"):
         if nbytes < 1024:
@@ -1060,6 +1061,11 @@ class BrowserTab(QWidget):
         """Show only the models with the given IDs, ignoring all sidebar filters."""
         self._load_table(id_filters=ids)
 
+    def show_duplicate_pairs(self, pairs: list) -> None:
+        """Show duplicate pairs sorted by pair and color-coded with alternating colors."""
+        all_ids = list({pid for pair in pairs for pid in pair})
+        self._load_table(id_filters=all_ids, duplicate_pairs=pairs)
+
     def _load_table(self,
                     author_filters=None,         author_exc_filters=None,
                     tag_filters=None,            tag_exc_filters=None,
@@ -1075,7 +1081,7 @@ class BrowserTab(QWidget):
                     presupports_filters=None,    presupports_exc_filters=None,
                     warning_filters=None,        warning_exc_filters=None,
                     has_value_groups=None,       no_value_groups=None,
-                    id_filters=None) -> None:
+                    id_filters=None,             duplicate_pairs=None) -> None:
         """Reload the table with optional include/exclude filter lists.
 
         Within each category the values are OR-ed; across categories they are AND-ed.
@@ -1195,7 +1201,28 @@ class BrowserTab(QWidget):
                     if _cond:
                         q = q.filter(~_cond())
 
-            for stl in q.order_by(STLModel.title).all():
+            if duplicate_pairs is not None:
+                from app.ui.config_dialog import get_pair_colors
+                _ca, _cb = get_pair_colors()
+                _pair_colors = [QColor(_ca), QColor(_cb)]
+                _seen: set[int] = set()
+                _pair_for_id: dict[int, int] = {}
+                _ordered_pos: dict[int, int] = {}
+                _pos = 0
+                for _pi, _pair in enumerate(duplicate_pairs):
+                    for _pid in _pair:
+                        if _pid not in _seen:
+                            _seen.add(_pid)
+                            _ordered_pos[_pid] = _pos
+                            _pos += 1
+                            _pair_for_id[_pid] = _pi
+                _stls = q.all()
+                _stls.sort(key=lambda m: _ordered_pos.get(m.id, len(_ordered_pos)))
+            else:
+                _stls = q.order_by(STLModel.title).all()
+                _pair_for_id = {}
+
+            for stl in _stls:
                 thumb_item = QStandardItem()
                 thumb_item.setData(stl.id, MODEL_ID_ROLE)
                 thumb_item.setEditable(False)
@@ -1248,6 +1275,12 @@ class BrowserTab(QWidget):
                     size_item,
                     QStandardItem(stl.category.name if stl.category else ""),
                 ]
+                if _pair_for_id:
+                    _pi = _pair_for_id.get(stl.id)
+                    if _pi is not None:
+                        _color = _pair_colors[_pi % 2]
+                        for _it in row:
+                            _it.setBackground(_color)
                 self._model.appendRow(row)
         finally:
             session.close()

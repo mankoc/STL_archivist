@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.0 — 2026-05-02
+
+### UI — Tools
+
+- **Find Archives by Content**: added **Path A** and **Path B** columns to both the
+  STL Files and Images results tables, showing the full archive path for each member
+  of a duplicate pair
+
+---
+
 ## v0.2.0 — 2026-05-01
 
 ### Storage
