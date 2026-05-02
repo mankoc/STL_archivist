@@ -1,5 +1,59 @@
 # Changelog
 
+## v0.4.0 — 2026-05-02
+
+### UI — Browser
+
+- **Background crawl** — the Crawler dialog is now persistent; a new **Run in Background**
+  button dismisses the dialog without stopping the worker; a status indicator in the
+  main-window status bar shows `Crawler: N / total` while a crawl runs in the background;
+  clicking it brings the dialog back
+- **Row selection** — switched thumbnail/info-panel updates from `clicked` to
+  `selectionModel().currentChanged`; deselecting all rows now properly clears the thumbnail
+  pane and info labels
+- **Show Files** — new right-click context menu item (single selection); opens an **Archive
+  Contents** dialog listing every `.stl` file in the `stl_files` table (filename, size, hash)
+- **Delete archive file from disk** — new right-click context menu item (visible only when
+  *Allow file delete* is enabled in Configuration); physically removes or moves to trash the
+  selected archive file(s) and deletes the corresponding database records
+- Renamed the existing *Delete N model(s)…* context item to *Delete N model(s) from DB…*
+  to distinguish database-only deletion from the new physical-delete action
+- `show_model_ids()` and `show_duplicate_pairs()` now auto-select the first row after
+  filtering so the thumbnail pane is immediately populated
+
+### UI — Configuration
+
+- Renamed the **Browser** settings section to **File writing**
+- Moved the **Sidecar** settings as a child item under **File writing**
+- Added file-deletion settings under **File writing**:
+  - *Allow file delete* — destructive option highlighted in red; guarded by a confirmation
+    dialog that requires ticking a checkbox before the OK button is enabled
+  - *Use trash folder* — when enabled, files are moved to a configured folder instead of
+    being permanently deleted; a JSON recovery info sidecar is written alongside
+  - *Trash folder* path picker with a Browse… button; only editable when *Allow file delete*
+    is active
+
+### UI — Dialogs
+
+- **Archive Contents (`FileListDialog`)** — lists every STL file stored for a given model:
+  filename, formatted size, and archive hash; opened via the right-click *Show Files…* item
+- **Compare Archive Contents (`FileComparisonDialog`)** — side-by-side comparison of two
+  archives' STL file lists; configurable match key (Filename / Size / Hash); greedy matching
+  highlights paired files with a green `==` marker; unmatched files shown in trailing rows
+
+### UI — Tools
+
+- Added right-click context menus to both the **STL Files** and **Images** results tables in
+  the **Find Archives by Content** dialog
+- **Compare Archive Contents…** opens `FileComparisonDialog` for the selected duplicate pair
+
+### Bug fixes
+
+- Thumbnail sidebar infinite resize loop: `eventFilter` now watches the `QScrollArea` widget
+  instead of its viewport, and a width-cache guard skips redundant rescale passes
+
+---
+
 ## v0.3.0 — 2026-05-02
 
 ### UI — Tools

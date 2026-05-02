@@ -246,8 +246,17 @@ with a filter panel on the left and an image preview pane on the right.</p>
 <h2>Context Menu</h2>
 <p>Right-click any selected row(s) to open the context menu:</p>
 <ul>
+  <li><b>Show Files&hellip;</b> &mdash; lists every <code>.stl</code> file stored for this
+      archive (filename, size, hash); single-selection only; requires <em>Store STL file
+      list</em> to be enabled</li>
   <li><b>Edit Model</b> &mdash; opens the full Model Editor (single selection)</li>
   <li><b>Mass Edit</b> &mdash; opens the Mass Editor (multiple selections)</li>
+  <li><b>Delete N model(s) from DB&hellip;</b> &mdash; removes the selected records from the
+      database without touching the archive files on disk</li>
+  <li><b>Delete N archive file(s) from disk&hellip;</b> &mdash; physically deletes or moves to
+      trash the archive files and also removes the database records; only visible when
+      <em>Allow file delete</em> is enabled in
+      <b>Configuration &rarr; File writing</b></li>
 </ul>
 
 <h2>Inline Editing</h2>
@@ -377,7 +386,15 @@ are skipped on subsequent runs, making incremental updates fast.</p>
 
 <h2>Opening the Crawler</h2>
 <p>Click <b>Open Crawler&hellip;</b> in the toolbar, or use <b>File &rarr; Open Crawler&hellip;</b>
-(<span class="kb">Ctrl+O</span>).  The crawler runs in a docked tab inside the main window.</p>
+(<span class="kb">Ctrl+O</span>).  The crawler dialog is persistent &mdash; closing it while a
+crawl is running only hides it; the worker continues in the background.</p>
+
+<h2>Running a Crawl in the Background</h2>
+<p>Once a crawl has started the <b>Run in Background</b> button becomes available.
+Clicking it dismisses the Crawler dialog without stopping the worker.  A
+<b>status indicator</b> appears in the bottom-right corner of the main window showing
+<code>Crawler: N&nbsp;/&nbsp;total</code>.  Click the indicator at any time to bring the
+Crawler dialog back.</p>
 
 <h2>Crawler Tab Layout</h2>
 {_screenshot("crawler.jpg")}
@@ -639,7 +656,32 @@ The dialog is divided into sections shown in a tree on the left.</p>
 name substrings that trigger the &ldquo;support files detected&rdquo; warning.
 Add, edit, or remove patterns as needed for your naming conventions.</p>
 
-<h2>Metadata Sidecar</h2>
+<h2>File writing</h2>
+<table>
+  <tr><th>Setting</th><th>Description</th></tr>
+  <tr><td>Enable file sorting</td>
+      <td>Adds a <em>Sort Files into Directory&hellip;</em> right-click menu entry that
+          moves and renames archive files into a structured layout using a path pattern.</td></tr>
+  <tr><td>Allow file delete</td>
+      <td>Enables the <em>Delete archive file(s) from disk&hellip;</em> right-click menu
+          item.  <span style="color:#d32f2f;font-weight:bold;">Destructive &mdash;</span>
+          guarded by a confirmation dialog that requires ticking a checkbox before the OK
+          button is enabled.</td></tr>
+  <tr><td>Use trash folder</td>
+      <td>When <em>Allow file delete</em> is on, move files to the configured trash folder
+          instead of permanently deleting them.  A JSON recovery info file is written
+          alongside the moved archive.  Only editable when <em>Allow file delete</em>
+          is checked.</td></tr>
+  <tr><td>Trash folder</td>
+      <td>Destination folder for moved archives.  Use the <b>Browse&hellip;</b> button to
+          pick a path.</td></tr>
+  <tr><td>Enable Debug menu</td>
+      <td>Shows the <b>Debug</b> menu in the menu bar, which provides
+          <em>Delete Database</em> and <em>Delete Logs</em> actions.
+          Keep this off in everyday use.</td></tr>
+</table>
+
+<h2>File writing &rarr; Sidecar</h2>
 <table>
   <tr><th>Setting</th><th>Description</th></tr>
   <tr><td>Enable metadata sidecars</td>
@@ -655,15 +697,6 @@ Add, edit, or remove patterns as needed for your naming conventions.</p>
           <b>Tools &rarr; Find Duplicate Archives by Content &rarr; STL Files</b> tab.
           Re-crawl existing archives after enabling to populate historical entries.
           The list is also written into and restored from METADATA.7z sidecars.</td></tr>
-</table>
-
-<h2>Browser</h2>
-<table>
-  <tr><th>Setting</th><th>Description</th></tr>
-  <tr><td>Enable Debug menu</td>
-      <td>Shows the <b>Debug</b> menu in the menu bar, which provides
-          <em>Delete Database</em> and <em>Delete Logs</em> actions.
-          Keep this off in everyday use.</td></tr>
 </table>
 
 <h2>Appearance</h2>
@@ -799,6 +832,13 @@ archives&rsquo; first thumbnails, making it easy to judge whether the match is g
       any result row.</li>
 </ul>
 
+<h3>Comparing archive contents</h3>
+<p>Right-click any row in the <b>STL Files</b> or <b>Images</b> results tables and choose
+<b>Compare Archive Contents&hellip;</b> to open a side-by-side comparison of the two archives&rsquo;
+STL file lists.  Use the <b>Match by</b> dropdown to pair files by <em>Filename</em>,
+<em>Size</em>, or <em>Hash</em>.  Matched pairs are highlighted with a green <code>==</code>
+marker; unmatched files appear in the remaining rows.</p>
+
 <h2>Tools &mdash; Database Maintenance&hellip;</h2>
 <p>Open via <b>Tools &rarr; Database Maintenance&hellip;</b></p>
 <p>The maintenance dialog helps you keep the database consistent with the files on disk:</p>
@@ -855,7 +895,7 @@ re-crawling and re-extracting every archive from scratch.</p>
 
 <h2>Enabling Sidecars</h2>
 <p>Sidecars are <b>opt-in</b>.  Enable them in
-<b>File &rarr; Configuration&hellip; &rarr; Metadata Sidecar</b>:</p>
+<b>File &rarr; Configuration&hellip; &rarr; File writing &rarr; Sidecar</b>:</p>
 <ul>
   <li><b>Enable metadata sidecars</b> &mdash; must be on for any sidecar activity to occur.</li>
   <li><b>Include thumbnails</b> &mdash; embeds JPEG thumbnails inside the sidecar.

@@ -22,7 +22,10 @@ A desktop application for cataloguing and browsing your local collection of 3D p
 - **File Size column** — browser table shows each archive's size on disk (B / KB / MB / GB), sortable numerically
 - **STL file list** — optionally records the name and uncompressed size of every `.stl` file inside each archive in a dedicated `stl_files` table (enable *Store STL file list* in Configuration); populated automatically during crawling and included in METADATA.7z sidecars
 - **Find Metadata Duplicates** — Tools menu dialog that finds models with identical or phonetically similar field values; supports exact match, Levenshtein (configurable distance), and Soundex; results can be sent directly to the browser table
-- **Find Archives by Content** — two-tab tool under the Tools menu: the *STL Files* tab flags archive pairs that share a configurable fraction of identical files (by name + size); the *Images* tab finds archives with perceptually similar thumbnails using a 64-bit dHash and a configurable Hamming distance threshold; hover any image-match row to see both thumbnails in a popup
+- **Find Archives by Content** — two-tab tool under the Tools menu: the *STL Files* tab flags archive pairs that share a configurable fraction of identical files (by name + size); the *Images* tab finds archives with perceptually similar thumbnails using a 64-bit dHash and a configurable Hamming distance threshold; hover any image-match row to see both thumbnails in a popup; right-click any result row to open a side-by-side **Archive Contents** comparison
+- **Archive content viewer** — right-click a single model and choose *Show Files…* to list every `.stl` file recorded in the `stl_files` table (filename, size, hash); or choose *Compare Archive Contents…* from the Find Archives by Content dialog to compare two archives side-by-side with configurable matching by filename, size, or hash
+- **Physical file deletion** — when *Allow file delete* is enabled in Configuration → File writing, a new right-click item *Delete archive file(s) from disk…* appears; optionally moves files to a configurable trash folder (with recovery info) instead of permanently deleting them
+- **Background crawl** — start a crawl then click *Run in Background* to dismiss the Crawler dialog without stopping the worker; a status indicator in the main-window status bar shows live progress and brings the dialog back when clicked
 - **Statistics** — column statistics and aggregated statistics dialogs for a quick numeric overview of any field; database maintenance dialog (vacuum, integrity check)
 - **Themes** — built-in color schemes: System Default, VS Code Dark+, Windows 11 Dark, Windows 11 Light, and nine Material Design themes (dark/light variants of Blue, Teal, Purple, Amber, Red, Orange) via qt-material
 
@@ -84,8 +87,8 @@ On first launch, go to **File → Configuration…** and set up:
 
 - **Database** — choose where the SQLite database and thumbnails are stored (restart required after changing)
 - **Crawler** — max thumbnails per model, max image size in pixels, path to `unrar` executable, and which crawler warnings to enable
-- **Browser** — enable the *Sort files into directory* option (adds a right-click menu entry)
-- **Metadata** — enable *Metadata sidecar* to write `METADATA.7z` per folder during crawl; optionally include thumbnails
+- **File writing** — enable *Sort files into directory* (adds a right-click menu entry); optionally enable *Allow file delete* (with a confirmation guard) to physically delete or trash archive files from the right-click menu; configure a *Trash folder* to move deleted files there instead of permanently removing them
+- **File writing → Sidecar** — enable *Metadata sidecar* to write `METADATA.7z` per folder during crawl; optionally include thumbnails
 - **Appearance** — select a color scheme (preview is applied immediately; Cancel reverts)
 
 ### 2. Crawl your archive folder
@@ -145,7 +148,8 @@ Progress and log output are written to stdout.
 - Double-click a row (or press `E`) to open the **Editor** and update model details.
 - Click **Image Grid** in the toolbar to view thumbnails for all currently displayed models. Use the **Size** slider at the top of the grid to resize thumbnails from 60 to 300 px.
 - Click the **image pane** toolbar button (or use the View menu) to toggle the thumbnail sidebar.
-- Right-click for context-menu options: edit, mass-edit, delete, generate thumbnails, create/update sidecar, and (if enabled) sort files into a directory.
+- Right-click for context-menu options: *Show Files…* (single selection, lists archive STL file contents), edit, mass-edit, *Delete from DB*, *Delete archive file(s) from disk…* (shown only when enabled in Configuration), generate thumbnails, create/update sidecar, and (if enabled) sort files into a directory.
+- Start a crawl and click **Run in Background** to dismiss the Crawler dialog without stopping the worker; a status badge in the status bar shows progress and brings the dialog back when clicked.
 - Use **Mass Edit** to apply changes to multiple selected rows at once.
 
 ### 4. Tags
@@ -227,6 +231,7 @@ stl_database/
 │   │   ├── config_dialog.py
 │   │   ├── find_duplicates_dialog.py
 │   │   ├── find_content_duplicates_dialog.py
+│   │   ├── file_list_dialog.py
 │   │   ├── about_dialog.py
 │   │   └── help_dialog.py
 │   └── utils/
