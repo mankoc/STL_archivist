@@ -652,7 +652,7 @@ Add, edit, or remove patterns as needed for your naming conventions.</p>
   <tr><td>Store STL file list</td>
       <td>Record the name and uncompressed size of every <code>.stl</code> file found inside
           each archive in a dedicated <code>stl_files</code> database table.  Required for
-          <b>Tools &rarr; Find Archives by Content &rarr; STL Files</b> tab.
+          <b>Tools &rarr; Find Duplicate Archives by Content &rarr; STL Files</b> tab.
           Re-crawl existing archives after enabling to populate historical entries.
           The list is also written into and restored from METADATA.7z sidecars.</td></tr>
 </table>
@@ -759,8 +759,8 @@ The table is sortable by any column.</p>
 is O(n&sup2;) — use the Stop button to cancel if it takes too long, or reduce the
 max distance to 1 or 2 to narrow the scope.</div>
 
-<h2>Tools &mdash; Find Archives by Content&hellip;</h2>
-<p>Open via <b>Tools &rarr; Find Archives by Content&hellip;</b></p>
+<h2>Tools &mdash; Find Duplicate Archives by Content&hellip;</h2>
+<p>Open via <b>Tools &rarr; Find Duplicate Archives by Content&hellip;</b></p>
 <p>A <em>non-modal</em> dialog with two independent tabs that identify pairs of archives
 sharing content &mdash; either the same STL files or visually similar thumbnail images.</p>
 

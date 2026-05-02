@@ -9,7 +9,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QProgressBar, QPlainTextEdit,
-    QSizePolicy, QApplication,
+    QSizePolicy, QApplication, QMessageBox,
 )
 
 logger = logging.getLogger(__name__)
@@ -121,6 +121,77 @@ class MetadataSidecarWorker(QThread):
         self.finished.emit()
 
 
+class RemoveSidecarsWorker(QThread):
+    """Background thread that deletes METADATA.7z from every folder with DB records.
+
+    Signals:
+        progress(current, total): Folder index and total folder count.
+        log(message): Human-readable status line for the UI log panel.
+        finished(): Emitted when all folders are processed or the worker is stopped.
+    """
+
+    progress = pyqtSignal(int, int)
+    log      = pyqtSignal(str)
+    finished = pyqtSignal()
+
+    def __init__(self, folders=None, parent=None) -> None:
+        super().__init__(parent)
+        self._stop_requested = False
+        self._folders = folders  # None → process all DB folders
+
+    def stop(self) -> None:
+        """Request the worker to stop after the current folder finishes."""
+        self._stop_requested = True
+
+    def run(self) -> None:
+        """Main thread entry point — iterates folders and removes METADATA.7z files."""
+        from app.database.db import session_scope
+        from app.database.models import STLModel
+
+        self._stop_requested = False
+
+        if self._folders is not None:
+            folders = sorted(self._folders)
+        else:
+            with session_scope() as session:
+                rows = session.query(STLModel.archive_path).all()
+            folders = sorted({Path(row.archive_path).parent for row in rows if row.archive_path})
+
+        total = len(folders)
+
+        if total == 0:
+            self.log.emit("No folders with database records found.")
+            self.finished.emit()
+            return
+
+        self.log.emit(f"Scanning {total} folder(s) for METADATA.7z files…")
+        logger.info("RemoveSidecarsWorker: scanning %d folder(s)", total)
+
+        removed = 0
+        for idx, folder in enumerate(folders, 1):
+            if self._stop_requested:
+                self.log.emit("Stopped by user.")
+                break
+
+            self.progress.emit(idx, total)
+            sidecar = folder / "METADATA.7z"
+            if sidecar.exists():
+                try:
+                    sidecar.unlink()
+                    self.log.emit(f"[{idx}/{total}] Removed: {sidecar}")
+                    removed += 1
+                    logger.debug("  removed %s", sidecar)
+                except Exception as exc:
+                    self.log.emit(f"[{idx}/{total}] ERROR removing {sidecar}: {exc}")
+                    logger.error("Failed to remove %s: %s", sidecar, exc, exc_info=True)
+            else:
+                self.log.emit(f"[{idx}/{total}] Not found: {folder}")
+
+        self.log.emit(f"Done — removed {removed} of {total} folder(s).")
+        logger.info("RemoveSidecarsWorker finished: %d/%d removed", removed, total)
+        self.finished.emit()
+
+
 class MetadataSidecarDialog(QDialog):
     """Modal dialog that runs MetadataSidecarWorker and shows its progress.
 
@@ -192,6 +263,12 @@ class MetadataSidecarDialog(QDialog):
         self._stop_btn.clicked.connect(self._stop)
         btn_row.addWidget(self._stop_btn)
 
+        self._remove_btn = QPushButton(
+            style.standardIcon(style.StandardPixmap.SP_TrashIcon), "Remove all sidecars"
+        )
+        self._remove_btn.clicked.connect(self._remove)
+        btn_row.addWidget(self._remove_btn)
+
         btn_row.addStretch()
 
         self._close_btn = QPushButton(
@@ -214,6 +291,7 @@ class MetadataSidecarDialog(QDialog):
         self._progress.setValue(0)
         self._start_btn.setEnabled(False)
         self._stop_btn.setEnabled(True)
+        self._remove_btn.setEnabled(False)
         self._close_btn.setEnabled(False)
 
         self._worker = MetadataSidecarWorker(folders=self._folders)
@@ -227,6 +305,33 @@ class MetadataSidecarDialog(QDialog):
         if self._worker:
             self._worker.stop()
         self._stop_btn.setEnabled(False)
+
+    def _remove(self) -> None:
+        """Confirm and then delete every METADATA.7z file found in DB folders."""
+        answer = QMessageBox.question(
+            self,
+            "Remove all sidecars",
+            "This will permanently delete every <b>METADATA.7z</b> sidecar file "
+            "found in the folders that have database records.<br><br>"
+            "Are you sure you want to continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        self._log.clear()
+        self._progress.setValue(0)
+        self._start_btn.setEnabled(False)
+        self._stop_btn.setEnabled(True)
+        self._remove_btn.setEnabled(False)
+        self._close_btn.setEnabled(False)
+
+        self._worker = RemoveSidecarsWorker(folders=self._folders)
+        self._worker.log.connect(self._on_log)
+        self._worker.progress.connect(self._on_progress)
+        self._worker.finished.connect(self._on_finished)
+        self._worker.start()
 
     # ------------------------------------------------------------------
     def _on_log(self, msg: str) -> None:
@@ -243,7 +348,10 @@ class MetadataSidecarDialog(QDialog):
         """Re-enable buttons and clear the worker reference when done."""
         self._start_btn.setEnabled(True)
         self._stop_btn.setEnabled(False)
+        self._remove_btn.setEnabled(True)
         self._close_btn.setEnabled(True)
+        if self._worker is not None:
+            self._worker.deleteLater()
         self._worker = None
 
     # ------------------------------------------------------------------

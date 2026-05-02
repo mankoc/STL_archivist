@@ -153,6 +153,10 @@ class CrawlerWorker(QThread):
                 logger.debug("Phase 2 complete — %d existing record(s) found", len(existing_map))
 
                 # Decide which archives need extraction (new or hash-changed)
+                # Deferred import avoids circular dependency (crawler → ui → crawler).
+                from app.ui.config_dialog import get_store_stl_file_list
+                _store_stl = get_store_stl_file_list()
+
                 to_extract: list[Path] = []
                 unchanged: list[Path]  = []
                 for p in batch:
@@ -164,6 +168,9 @@ class CrawlerWorker(QThread):
                         to_extract.append(p)
                         logger.debug("  CHANGED: %s (old=%s… new=%s…)",
                                      p.name, ex.archive_hash[:8], hashes[p][:8])
+                    elif _store_stl and not ex.stl_files:
+                        to_extract.append(p)
+                        logger.debug("  MISSING STL LIST: %s", p.name)
                     else:
                         unchanged.append(p)
                 logger.debug("Extraction needed: %d new/changed, %d unchanged",
