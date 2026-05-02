@@ -28,6 +28,9 @@ class MainWindow(QMainWindow):
         self._browser = BrowserTab()
         self.setCentralWidget(self._browser)
         self._browser.model_count_changed.connect(self._update_status_bar)
+        
+        # Keep track of crawler state
+        self._crawler_is_running = False
 
         # ---- Actions ----
         self._act_refresh = QAction(
@@ -202,6 +205,24 @@ class MainWindow(QMainWindow):
 
         sb = QStatusBar()
         self.setStatusBar(sb)
+        
+        # Add clickable label for crawler status
+        from PyQt6.QtWidgets import QLabel
+        self._crawler_status_label = QLabel()
+        # Use the system's highlight colors to ensure perfect contrast against the background
+        self._crawler_status_label.setStyleSheet(
+            "QLabel { "
+            "background-color: palette(highlight); "
+            "color: palette(highlighted-text); "
+            "padding: 2px 6px; "
+            "border-radius: 4px; "
+            "font-weight: bold; "
+            "}"
+        )
+        self._crawler_status_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._crawler_status_label.hide()
+        self._crawler_status_label.mousePressEvent = lambda e: self._open_crawler()
+        sb.addPermanentWidget(self._crawler_status_label)
 
         self._apply_debug_menu_visibility()
 
@@ -211,10 +232,44 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"{count} model{'s' if count != 1 else ''}")
 
     def _open_crawler(self) -> None:
-        """Open the crawler dialog and refresh the browser when it closes."""
-        from app.ui.crawler_dialog import CrawlerDialog
-        CrawlerDialog(parent=self).exec()
-        self._browser.refresh()
+        """Open the crawler dialog. Keep it alive if it's hidden."""
+        if not hasattr(self, "_crawler_dialog") or self._crawler_dialog is None:
+            from app.ui.crawler_dialog import CrawlerDialog
+            self._crawler_dialog = CrawlerDialog(parent=self)
+            
+            # Forward the crawler's progress to the status bar if running in background
+            def on_progress(current, total):
+                self._crawler_is_running = True
+                if not self._crawler_dialog.isVisible():
+                    self._crawler_status_label.setText(f" Crawler: {current} / {total} ")
+                    self._crawler_status_label.show()
+                else:
+                    self._crawler_status_label.hide()
+            
+            def on_finished():
+                self._crawler_is_running = False
+                self._crawler_status_label.hide()
+                if not self._crawler_dialog.isVisible():
+                    self._update_status_bar(self._browser._model.rowCount())
+                self._browser.refresh()
+
+            def on_dialog_closed():
+                if self._crawler_dialog._crawler_tab._worker is not None:
+                    # worker is still running
+                    current = self._crawler_dialog._crawler_tab._progress.value()
+                    total = self._crawler_dialog._crawler_tab._progress.maximum()
+                    self._crawler_status_label.setText(f" Crawler: {current} / {total} ")
+                    self._crawler_status_label.show()
+            
+            self._crawler_dialog._crawler_tab.progress_updated.connect(on_progress)
+            self._crawler_dialog._crawler_tab.crawl_finished.connect(on_finished)
+            self._crawler_dialog.rejected.connect(on_dialog_closed)
+
+        self._crawler_dialog.show()
+        self._crawler_dialog.raise_()
+        self._crawler_dialog.activateWindow()
+        if hasattr(self, '_crawler_is_running') and self._crawler_is_running:
+            self._crawler_status_label.hide()
 
     def _open_config(self) -> None:
         """Open the configuration dialog and re-apply debug menu visibility."""

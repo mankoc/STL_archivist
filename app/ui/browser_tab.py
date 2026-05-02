@@ -730,7 +730,7 @@ class BrowserTab(QWidget):
         self._thumb_scroll.setWidget(self._thumb_content)
         self._thumb_scroll.setWidgetResizable(True)
         self._thumb_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._thumb_scroll.viewport().installEventFilter(self)
+        self._thumb_scroll.installEventFilter(self)
         img_layout.addWidget(self._thumb_scroll)
         right_vsplit.addWidget(img_widget)
 
@@ -1828,7 +1828,9 @@ class BrowserTab(QWidget):
 
     # ------------------------------------------------------------------
     def eventFilter(self, obj, event) -> bool:
-        if obj is self._thumb_scroll.viewport() and event.type() == QEvent.Type.Resize:
+        # Listen to the scroll area resize, not just the viewport, as viewport resize
+        # can be triggered by the scrollbar appearing/disappearing.
+        if obj is self._thumb_scroll and event.type() == QEvent.Type.Resize:
             self._rescale_thumbnails()
         return super().eventFilter(obj, event)
 
@@ -1865,7 +1867,15 @@ class BrowserTab(QWidget):
 
     def _rescale_thumbnails(self) -> None:
         """Scale all sidebar thumbnails to fit the current scroll-area width."""
-        w = max(self._thumb_scroll.viewport().width() - 12, 60)
+        # Use the total scroll area width instead of viewport width to avoid
+        # infinite resize loops (which happen when the scrollbar appearing/disappearing
+        # changes the viewport width, which in turn changes the image height, etc.)
+        w = max(self._thumb_scroll.width() - 36, 60)
+        
+        if getattr(self, '_last_thumb_w', -1) == w:
+            return
+        self._last_thumb_w = w
+
         for i, px in enumerate(self._thumb_pixmaps):
             item = self._thumb_vlayout.itemAt(i)
             if item and item.widget():
