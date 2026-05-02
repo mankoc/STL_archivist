@@ -180,6 +180,17 @@ def get_pair_colors() -> tuple[str, str]:
     return color_a.name(), color_b.name()
 
 
+def get_allow_file_delete() -> bool:
+    return bool(_load_library_settings().get("allow_file_delete", False))
+
+
+def get_use_trash_folder() -> bool:
+    return bool(_load_library_settings().get("use_trash_folder", True))
+
+
+def get_trash_folder_path() -> str:
+    return _load_library_settings().get("trash_folder_path", "")
+
 def get_file_sorting_enabled() -> bool:
     return bool(_load_library_settings().get("file_sorting_enabled", False))
 
@@ -309,11 +320,12 @@ class ConfigDialog(QDialog):
         _item(self._section_tree, "Database",   sp.SP_DriveHDIcon,            0)
         crawler_item = _item(self._section_tree, "Crawler", sp.SP_FileDialogDetailedView, 1)
         _item(crawler_item,          "Warnings", sp.SP_MessageBoxWarning,      2)
-        _item(self._section_tree, "Browser",    sp.SP_DesktopIcon,             3)
+        fw_item = _item(self._section_tree, "File writing", sp.SP_DesktopIcon,             3)
+        _item(fw_item,               "Sidecar",  sp.SP_DialogSaveButton,        5)
         _item(self._section_tree, "Appearance", sp.SP_TitleBarNormalButton,    4)
-        _item(self._section_tree, "Sidecar",    sp.SP_DialogSaveButton,        5)
 
         crawler_item.setExpanded(True)
+        fw_item.setExpanded(True)
         self._section_tree.currentItemChanged.connect(self._on_section_changed)
 
         # Right: stacked pages (indices must match the numbers assigned above)
@@ -536,6 +548,8 @@ class ConfigDialog(QDialog):
     def _build_sidecar_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
+        
+        # We now group sidecar inside "File writing" logical section, but it is its own page.
         group = QGroupBox("Metadata Sidecar (METADATA.7z)")
         form  = QFormLayout(group)
 
@@ -572,7 +586,7 @@ class ConfigDialog(QDialog):
     def _build_browser_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        group = QGroupBox("Browser")
+        group = QGroupBox("File writing")
         form = QFormLayout(group)
 
         self._file_sorting_check = QCheckBox("Enable file sorting")
@@ -586,9 +600,95 @@ class ConfigDialog(QDialog):
             ),
         )
 
+        self._allow_file_delete_check = QCheckBox("Allow file delete")
+        self._allow_file_delete_check.setStyleSheet("color: red; font-weight: bold;")
+        self._allow_file_delete_check.clicked.connect(self._on_allow_delete_clicked)
+        form.addRow("Delete:", self._allow_file_delete_check)
+        form.addRow(
+            "",
+            QLabel(
+                "<small>When enabled, a <b>Delete Archive File from Disk…</b> option "
+                "appears in the table right-click menu. This deletes the physical file.</small>"
+            ),
+        )
+
+        self._use_trash_folder_check = QCheckBox("Use trash folder")
+        form.addRow("Trash:", self._use_trash_folder_check)
+
+        trash_row = QHBoxLayout()
+        self._trash_folder_edit = QLineEdit()
+        self._trash_folder_edit.setPlaceholderText("/path/to/trash")
+        trash_row.addWidget(self._trash_folder_edit)
+
+        trash_browse_btn = QPushButton("Browse…")
+        trash_browse_btn.clicked.connect(self._browse_trash_folder)
+        trash_row.addWidget(trash_browse_btn)
+
+        form.addRow("", trash_row)
+        form.addRow(
+            "",
+            QLabel(
+                "<small>If enabled, files are moved here instead of being permanently "
+                "deleted. A sidecar file with recovery info is created alongside.</small>"
+            ),
+        )
+        
+        self._allow_file_delete_check.toggled.connect(self._update_trash_enabled)
+
         layout.addWidget(group)
         layout.addStretch()
         return page
+
+    def _update_trash_enabled(self, checked: bool) -> None:
+        self._use_trash_folder_check.setEnabled(checked)
+        self._trash_folder_edit.setEnabled(checked)
+        
+    def _on_allow_delete_clicked(self, checked: bool) -> None:
+        if not checked:
+            return
+            
+        # Uncheck it temporarily, only check if they accept the warning
+        self._allow_file_delete_check.setChecked(False)
+        
+        # Build custom warning dialog with a checkbox
+        dlg = QDialog(self)
+        dlg.setWindowTitle("DANGER: File Deletion")
+        
+        l = QVBoxLayout(dlg)
+        icon_lbl = QLabel()
+        style = QApplication.style()
+        icon_lbl.setPixmap(style.standardPixmap(style.StandardPixmap.SP_MessageBoxCritical))
+        
+        text_lbl = QLabel(
+            "<span style='color: #d32f2f; font-weight: bold;'>Enabling this option allows the application to physically DELETE your archive files from the disk.</span><br><br>"
+            "This could lead to permanent loss of data. Use with extreme caution!"
+        )
+        text_lbl.setWordWrap(True)
+        
+        h = QHBoxLayout()
+        h.addWidget(icon_lbl)
+        h.addWidget(text_lbl, stretch=1)
+        l.addLayout(h)
+        
+        confirm_cb = QCheckBox("I understand this and want to continue")
+        confirm_cb.setChecked(False)
+        l.addWidget(confirm_cb)
+        
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        btns.button(QDialogButtonBox.StandardButton.Ok).setEnabled(False)
+        confirm_cb.toggled.connect(lambda state: btns.button(QDialogButtonBox.StandardButton.Ok).setEnabled(state))
+        
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        l.addWidget(btns)
+        
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._allow_file_delete_check.setChecked(True)
+
+    def _browse_trash_folder(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, "Choose trash directory", self._trash_folder_edit.text() or "")
+        if path:
+            self._trash_folder_edit.setText(path)
 
     def _build_appearance_page(self) -> QWidget:
         page = QWidget()
@@ -678,6 +778,12 @@ class ConfigDialog(QDialog):
         self._warn_presupported_check.setChecked(get_warn_presupported_stl())
         self._warn_no_images_check.setChecked(get_warn_no_images())
         self._warn_nested_archive_check.setChecked(get_warn_nested_archive())
+        
+        self._allow_file_delete_check.setChecked(get_allow_file_delete())
+        self._use_trash_folder_check.setChecked(get_use_trash_folder())
+        self._trash_folder_edit.setText(get_trash_folder_path())
+        self._update_trash_enabled(get_allow_file_delete())
+        
         supports_enabled = get_warn_supports()
         self._warn_supports_check.setChecked(supports_enabled)
         self._supports_patterns_widget.setEnabled(supports_enabled)
@@ -733,6 +839,9 @@ class ConfigDialog(QDialog):
                 "metadata_thumbnails": self._metadata_thumbnails_check.isChecked(),
                 "store_stl_file_list": self._store_stl_list_check.isChecked(),
                 "debug_menu_enabled": self._debug_menu_check.isChecked(),
+                "allow_file_delete": self._allow_file_delete_check.isChecked(),
+                "use_trash_folder": self._use_trash_folder_check.isChecked(),
+                "trash_folder_path": self._trash_folder_edit.text().strip(),
             },
             data_dir=data_dir,
         )

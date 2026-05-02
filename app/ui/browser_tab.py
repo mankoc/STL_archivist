@@ -696,7 +696,7 @@ class BrowserTab(QWidget):
         header.sectionMoved.connect(self._save_header_state)
         header.sectionResized.connect(self._save_header_state)
         self._restore_header_state()
-        self._table.clicked.connect(self._on_row_clicked)
+        self._table.selectionModel().currentChanged.connect(self._on_current_changed)
         self._table.doubleClicked.connect(self._on_double_click)
         QShortcut(QKeySequence.StandardKey.SelectAll, self._table, self._table.selectAll)
         QShortcut(QKeySequence("E"), self._table, self._edit_selected)
@@ -1060,11 +1060,15 @@ class BrowserTab(QWidget):
     def show_model_ids(self, ids: list[int]) -> None:
         """Show only the models with the given IDs, ignoring all sidebar filters."""
         self._load_table(id_filters=ids)
+        if self._proxy.rowCount() > 0:
+            self._table.setCurrentIndex(self._proxy.index(0, 0))
 
     def show_duplicate_pairs(self, pairs: list) -> None:
         """Show duplicate pairs sorted by pair and color-coded with alternating colors."""
         all_ids = list({pid for pair in pairs for pid in pair})
         self._load_table(id_filters=all_ids, duplicate_pairs=pairs)
+        if self._proxy.rowCount() > 0:
+            self._table.setCurrentIndex(self._proxy.index(0, 0))
 
     def _load_table(self,
                     author_filters=None,         author_exc_filters=None,
@@ -1556,8 +1560,14 @@ class BrowserTab(QWidget):
         self._filter_tree.blockSignals(False)
         self._load_table()
 
-    def _on_row_clicked(self, index) -> None:
-        src_index = self._proxy.mapToSource(index)
+    def _on_current_changed(self, current, previous) -> None:
+        if not current.isValid():
+            self._clear_thumbnails()
+            self._info_author_lbl.setVisible(False)
+            self._info_tags_lbl.setVisible(False)
+            self._creator_panel.setVisible(False)
+            return
+        src_index = self._proxy.mapToSource(current)
         model_id = self._model.item(src_index.row(), COL_THUMB).data(MODEL_ID_ROLE)
         if model_id is not None:
             self._show_thumbnails(model_id)
@@ -1708,12 +1718,22 @@ class BrowserTab(QWidget):
         style = QApplication.style()
         SP = style.StandardPixmap
         menu = QMenu(self)
+        
+        show_files_act = menu.addAction(style.standardIcon(SP.SP_FileDialogContentsView), "Show Files…")
+        show_files_act.setVisible(len(selected_ids) == 1)
+        menu.addSeparator()
+
         edit_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), "Edit Model…")
         edit_act.setVisible(len(selected_ids) == 1)
         mass_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), f"Mass Edit {len(selected_ids)} model(s)…")
         mass_act.setVisible(len(selected_ids) > 1)
         menu.addSeparator()
-        delete_act = menu.addAction(style.standardIcon(SP.SP_TrashIcon), f"Delete {len(selected_ids)} model(s)…")
+        delete_act = menu.addAction(style.standardIcon(SP.SP_TrashIcon), f"Delete {len(selected_ids)} model(s) from DB…")
+        
+        from app.ui.config_dialog import get_allow_file_delete
+        delete_file_act = None
+        if get_allow_file_delete():
+            delete_file_act = menu.addAction(style.standardIcon(SP.SP_DialogDiscardButton), f"Delete {len(selected_ids)} archive file(s) from disk…")
 
         add_tag_act = None
         edit_tags_act = None
@@ -1770,12 +1790,16 @@ class BrowserTab(QWidget):
             )
 
         action = menu.exec(self._table.viewport().mapToGlobal(pos))
-        if action == edit_act:
+        if action == show_files_act:
+            self._show_files(model_id)
+        elif action == edit_act:
             self._open_editor(model_id)
         elif action == mass_act:
             self._open_mass_editor(selected_ids)
         elif action == delete_act:
             self._delete_models(selected_ids)
+        elif delete_file_act and action == delete_file_act:
+            self._delete_files_from_disk(selected_ids)
         elif sort_act and action == sort_act:
             self._sort_files(selected_ids)
         elif action == thumb_act:
@@ -1799,6 +1823,88 @@ class BrowserTab(QWidget):
             if creator_name:
                 self._open_creator_editor(creator_name)
 
+    def _show_files(self, model_id: int) -> None:
+        from app.ui.file_list_dialog import FileListDialog
+        FileListDialog(model_id, parent=self).exec()
+
+    def _delete_files_from_disk(self, model_ids: list[int]) -> None:
+        """Physically delete or move to trash the selected archive files."""
+        if not model_ids:
+            return
+
+        from app.ui.config_dialog import get_use_trash_folder, get_trash_folder_path
+        from datetime import datetime, timezone
+        def _utcnow() -> datetime:
+            return datetime.now(timezone.utc)
+        
+        use_trash = get_use_trash_folder()
+        trash_path = get_trash_folder_path()
+        
+        verb = "Move to trash" if use_trash else "Permanently delete"
+        
+        reply = QMessageBox.warning(
+            self,
+            f"{verb} {len(model_ids)} archive(s)",
+            f"Are you sure you want to <b>{verb.lower()}</b> the selected "
+            f"archive file(s) from your disk?<br><br>"
+            f"This will also remove them from the database.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+            
+        import shutil
+        import json
+        from pathlib import Path
+        
+        deleted_count = 0
+        failed_count = 0
+        
+        with session_scope() as session:
+            models = session.query(STLModel).filter(STLModel.id.in_(model_ids)).all()
+            for m in models:
+                try:
+                    p = Path(m.archive_path)
+                    if p.exists():
+                        if use_trash and trash_path:
+                            tp = Path(trash_path)
+                            tp.mkdir(parents=True, exist_ok=True)
+                            
+                            # Move file
+                            dest_file = tp / p.name
+                            # Handle naming collisions in trash
+                            idx = 1
+                            while dest_file.exists():
+                                dest_file = tp / f"{p.stem}_{idx}{p.suffix}"
+                                idx += 1
+                                
+                            shutil.move(str(p), str(dest_file))
+                            
+                            # Write DB info sidecar
+                            info = {
+                                "original_path": str(p),
+                                "title": m.title,
+                                "creator": m.creator,
+                                "archive_hash": m.archive_hash,
+                                "deleted_at": _utcnow().isoformat()
+                            }
+                            sidecar = dest_file.with_suffix(dest_file.suffix + ".json")
+                            sidecar.write_text(json.dumps(info, indent=2))
+                        else:
+                            p.unlink()
+                            
+                    session.delete(m)
+                    deleted_count += 1
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).error(f"Failed to delete {m.archive_path}: {e}")
+                    failed_count += 1
+                    
+        self.refresh()
+        if failed_count > 0:
+            QMessageBox.warning(self, "Delete Files", f"Successfully processed {deleted_count} file(s). Failed to process {failed_count} file(s).")
+        
     def _delete_models(self, model_ids: list[int]) -> None:
         """Confirm then delete models and their LMDB thumbnails from the database."""
         count = len(model_ids)
@@ -1863,16 +1969,16 @@ class BrowserTab(QWidget):
                 self._thumb_vlayout.addWidget(lbl)
         finally:
             session.close()
-        self._rescale_thumbnails()
+        self._rescale_thumbnails(force=True)
 
-    def _rescale_thumbnails(self) -> None:
+    def _rescale_thumbnails(self, force: bool = False) -> None:
         """Scale all sidebar thumbnails to fit the current scroll-area width."""
         # Use the total scroll area width instead of viewport width to avoid
         # infinite resize loops (which happen when the scrollbar appearing/disappearing
         # changes the viewport width, which in turn changes the image height, etc.)
         w = max(self._thumb_scroll.width() - 36, 60)
         
-        if getattr(self, '_last_thumb_w', -1) == w:
+        if not force and getattr(self, '_last_thumb_w', -1) == w:
             return
         self._last_thumb_w = w
 

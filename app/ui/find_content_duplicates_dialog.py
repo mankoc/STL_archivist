@@ -409,8 +409,8 @@ class _ThumbnailPopup(QFrame):
 
     _MAX_DIM = 240
 
-    def __init__(self) -> None:
-        super().__init__(None, Qt.WindowType.ToolTip)
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent, Qt.WindowType.ToolTip)
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setFrameShadow(QFrame.Shadow.Raised)
         layout = QHBoxLayout(self)
@@ -512,7 +512,7 @@ class FindContentDuplicatesDialog(QDialog):
         self._stl_results: list[dict] = []
         self._img_results: list[dict] = []
         self._img_model_thumb: dict[int, Optional[bytes]] = {}
-        self._img_popup = _ThumbnailPopup()
+        self._img_popup = _ThumbnailPopup(parent=self)
         self._build_ui()
 
     # ── UI construction ───────────────────────────────────────────────────────
@@ -590,6 +590,8 @@ class FindContentDuplicatesDialog(QDialog):
             stretch=[_S_TITLE_A, _S_PATH_A, _S_TITLE_B, _S_PATH_B],
         )
         self._stl_table.itemSelectionChanged.connect(self._on_stl_selection)
+        self._stl_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._stl_table.customContextMenuRequested.connect(self._stl_context_menu)
         layout.addWidget(self._stl_table)
         return page
 
@@ -646,6 +648,8 @@ class FindContentDuplicatesDialog(QDialog):
         )
         self._img_table.itemSelectionChanged.connect(self._on_img_selection)
         self._img_table.viewport().setMouseTracking(True)
+        self._img_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._img_table.customContextMenuRequested.connect(self._img_context_menu)
         self._img_hover_filter = _ImgHoverFilter(
             self._img_table, self._img_popup, self._get_model_thumb, parent=self
         )
@@ -715,6 +719,28 @@ class FindContentDuplicatesDialog(QDialog):
     def _on_stl_selection(self) -> None:
         if self._tabs.currentIndex() == _TAB_STL:
             self._refresh_bottom_buttons()
+
+    def _stl_context_menu(self, pos) -> None:
+        from PyQt6.QtWidgets import QMenu, QApplication
+        item = self._stl_table.itemAt(pos)
+        if not item:
+            return
+        
+        row = item.row()
+        id_a = self._stl_table.item(row, _S_ID_A).data(Qt.ItemDataRole.UserRole)
+        id_b = self._stl_table.item(row, _S_ID_B).data(Qt.ItemDataRole.UserRole)
+        
+        style = QApplication.style()
+        menu = QMenu(self)
+        compare_act = menu.addAction(
+            style.standardIcon(style.StandardPixmap.SP_FileDialogContentsView),
+            "Compare Archive Contents…"
+        )
+        
+        action = menu.exec(self._stl_table.viewport().mapToGlobal(pos))
+        if action == compare_act:
+            from app.ui.file_list_dialog import FileComparisonDialog
+            FileComparisonDialog(id_a, id_b, parent=self).exec()
 
     # ── Image search ──────────────────────────────────────────────────────────
 
@@ -786,6 +812,28 @@ class FindContentDuplicatesDialog(QDialog):
     def _on_img_selection(self) -> None:
         if self._tabs.currentIndex() == _TAB_IMGS:
             self._refresh_bottom_buttons()
+
+    def _img_context_menu(self, pos) -> None:
+        from PyQt6.QtWidgets import QMenu, QApplication
+        item = self._img_table.itemAt(pos)
+        if not item:
+            return
+        
+        row = item.row()
+        id_a = self._img_table.item(row, _I_ID_A).data(Qt.ItemDataRole.UserRole)
+        id_b = self._img_table.item(row, _I_ID_B).data(Qt.ItemDataRole.UserRole)
+        
+        style = QApplication.style()
+        menu = QMenu(self)
+        compare_act = menu.addAction(
+            style.standardIcon(style.StandardPixmap.SP_FileDialogContentsView),
+            "Compare Archive Contents…"
+        )
+        
+        action = menu.exec(self._img_table.viewport().mapToGlobal(pos))
+        if action == compare_act:
+            from app.ui.file_list_dialog import FileComparisonDialog
+            FileComparisonDialog(id_a, id_b, parent=self).exec()
 
     # ── Thumbnail helpers ─────────────────────────────────────────────────────
 
