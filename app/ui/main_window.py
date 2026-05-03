@@ -223,6 +223,14 @@ class MainWindow(QMainWindow):
         self._crawler_status_label.hide()
         self._crawler_status_label.mousePressEvent = lambda e: self._open_crawler()
         sb.addPermanentWidget(self._crawler_status_label)
+        # Also show thumbnail-generation progress in the same permanent label
+        # so background thumbnail jobs are visible even when the Crawler dialog
+        # was never opened. Keep a reference for clarity.
+        self._thumb_status_label = self._crawler_status_label
+        # Connect BrowserTab signals so the main window receives progress updates
+        # when thumbnails are generated in background.
+        self._browser.thumbnail_progress_updated.connect(self._on_thumb_progress)
+        self._browser.thumbnail_finished.connect(self._on_thumb_finished)
 
         self._apply_debug_menu_visibility()
 
@@ -231,20 +239,34 @@ class MainWindow(QMainWindow):
         """Update the status bar with the current visible model count."""
         self.statusBar().showMessage(f"{count} model{'s' if count != 1 else ''}")
 
+    # Thumbnail progress handlers -------------------------------------------------
+    def _on_thumb_progress(self, current: int, total: int) -> None:
+        """Show thumbnail generation progress in the permanent status label."""
+        if not hasattr(self, '_thumb_status_label'):
+            self._thumb_status_label = self._crawler_status_label
+        self._thumb_status_label.setText(f" Thumbs: {current} / {total} ")
+        self._thumb_status_label.show()
+
+    def _on_thumb_finished(self) -> None:
+        """Hide thumbnail progress label and refresh browser when done."""
+        if hasattr(self, '_thumb_status_label'):
+            self._thumb_status_label.hide()
+        self._browser.refresh()
+
     def _open_crawler(self) -> None:
         """Open the crawler dialog. Keep it alive if it's hidden."""
         if not hasattr(self, "_crawler_dialog") or self._crawler_dialog is None:
             from app.ui.crawler_dialog import CrawlerDialog
             self._crawler_dialog = CrawlerDialog(parent=self)
             
-            # Forward the crawler's progress to the status bar if running in background
-            def on_progress(current, total):
-                self._crawler_is_running = True
-                if not self._crawler_dialog.isVisible():
-                    self._crawler_status_label.setText(f" Crawler: {current} / {total} ")
-                    self._crawler_status_label.show()
-                else:
-                    self._crawler_status_label.hide()
+        # Forward the crawler's progress to the status bar if running in background
+        def on_progress(current, total):
+            self._crawler_is_running = True
+            if not self._crawler_dialog.isVisible():
+                self._crawler_status_label.setText(f" Crawler: {current} / {total} ")
+                self._crawler_status_label.show()
+            else:
+                self._crawler_status_label.hide()
             
             def on_finished():
                 self._crawler_is_running = False
@@ -264,6 +286,24 @@ class MainWindow(QMainWindow):
             self._crawler_dialog._crawler_tab.progress_updated.connect(on_progress)
             self._crawler_dialog._crawler_tab.crawl_finished.connect(on_finished)
             self._crawler_dialog.rejected.connect(on_dialog_closed)
+
+        # Forward thumbnail background progress into the same status label
+        def on_thumb_progress(current, total):
+            # Show as Thumbs: current / total
+            if not hasattr(self, '_thumb_status_label'):
+                self._thumb_status_label = self._crawler_status_label
+            self._thumb_status_label.setText(f" Thumbs: {current} / {total} ")
+            self._thumb_status_label.show()
+
+        def on_thumb_finished():
+            # Hide when the background thumbnailer completes
+            if hasattr(self, '_thumb_status_label'):
+                self._thumb_status_label.hide()
+            self._browser.refresh()
+
+        # Connect to the BrowserTab signals (may be created after MainWindow init)
+        self._browser.thumbnail_progress_updated.connect(on_thumb_progress)
+        self._browser.thumbnail_finished.connect(on_thumb_finished)
 
         self._crawler_dialog.show()
         self._crawler_dialog.raise_()
