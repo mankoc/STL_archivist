@@ -200,8 +200,14 @@ def get_max_workers() -> int:
 
 
 def get_warn_presupported_stl() -> bool:
-    """Whether to warn when an archive contains presupported STL files."""
+    """Whether to warn when an archive contains supported STL files."""
     return bool(_load_library_settings().get("warn_presupported_stl", True))
+
+
+def get_presupport_patterns() -> list[str]:
+    """Return the regex patterns used to detect supported STL files."""
+    from app.crawler.rules import DEFAULT_PRESUPPORT_PATTERNS
+    return list(_load_library_settings().get("presupport_patterns", DEFAULT_PRESUPPORT_PATTERNS))
 
 
 def get_warn_no_images() -> bool:
@@ -213,16 +219,6 @@ def get_warn_nested_archive() -> bool:
     """Whether to warn when an archive contains another compressed archive."""
     return bool(_load_library_settings().get("warn_nested_archive", True))
 
-
-def get_warn_supports() -> bool:
-    """Whether to warn when an archive contains files matching the supports patterns."""
-    return bool(_load_library_settings().get("warn_supports", False))
-
-
-def get_supports_patterns() -> list[str]:
-    """Return the list of regex patterns used by the 'archive with supports' warning."""
-    from app.crawler.rules import DEFAULT_SUPPORTS_PATTERNS
-    return list(_load_library_settings().get("supports_patterns", DEFAULT_SUPPORTS_PATTERNS))
 
 
 def get_debug_menu_enabled() -> bool:
@@ -496,15 +492,38 @@ class ConfigDialog(QDialog):
         group = QGroupBox("Crawler Warnings")
         form  = QFormLayout(group)
 
-        self._warn_presupported_check = QCheckBox("Archive have presupported stls")
+        self._warn_presupported_check = QCheckBox("Archive contains supported STLs")
         form.addRow("", self._warn_presupported_check)
         form.addRow(
             "",
             QLabel(
-                "<small>Warn when an archive contains STL files matching "
-                "<b>[ |_]presupported.stl</b> or <b>sup*.stl</b>.</small>"
+                "<small>Warn when an archive contains STL files matching any of the "
+                "patterns below. Each pattern is a Python regex applied "
+                "(case-insensitively) to every archive member filename.</small>"
             ),
         )
+
+        self._presupport_patterns_widget = QWidget()
+        pp_layout = QVBoxLayout(self._presupport_patterns_widget)
+        pp_layout.setContentsMargins(0, 2, 0, 0)
+        pp_layout.setSpacing(4)
+
+        self._presupport_patterns_list = QListWidget()
+        self._presupport_patterns_list.setFixedHeight(80)
+        pp_layout.addWidget(self._presupport_patterns_list)
+
+        pp_btn_row = QHBoxLayout()
+        pp_add_btn = QPushButton("Add pattern")
+        pp_add_btn.clicked.connect(self._add_presupport_pattern)
+        pp_rm_btn = QPushButton("Remove selected")
+        pp_rm_btn.clicked.connect(self._remove_presupport_pattern)
+        pp_btn_row.addWidget(pp_add_btn)
+        pp_btn_row.addWidget(pp_rm_btn)
+        pp_btn_row.addStretch()
+        pp_layout.addLayout(pp_btn_row)
+
+        form.addRow("", self._presupport_patterns_widget)
+        self._warn_presupported_check.toggled.connect(self._presupport_patterns_widget.setEnabled)
 
         self._warn_no_images_check = QCheckBox("Archive contains images")
         form.addRow("", self._warn_no_images_check)
@@ -525,40 +544,6 @@ class ConfigDialog(QDialog):
                 "(.zip, .rar, .7z).</small>"
             ),
         )
-
-        self._warn_supports_check = QCheckBox("Archive with supports")
-        form.addRow("", self._warn_supports_check)
-        form.addRow(
-            "",
-            QLabel(
-                "<small>Warn when an archive contains files matching any of the "
-                "patterns below. Each pattern is a Python regex applied "
-                "(case-insensitively) to every archive member filename.</small>"
-            ),
-        )
-
-        # Container widget so the list + buttons can be enabled/disabled together.
-        self._supports_patterns_widget = QWidget()
-        sup_layout = QVBoxLayout(self._supports_patterns_widget)
-        sup_layout.setContentsMargins(0, 2, 0, 0)
-        sup_layout.setSpacing(4)
-
-        self._supports_patterns_list = QListWidget()
-        self._supports_patterns_list.setFixedHeight(90)
-        sup_layout.addWidget(self._supports_patterns_list)
-
-        sup_btn_row = QHBoxLayout()
-        sup_add_btn = QPushButton("Add pattern")
-        sup_add_btn.clicked.connect(self._add_supports_pattern)
-        sup_rm_btn = QPushButton("Remove selected")
-        sup_rm_btn.clicked.connect(self._remove_supports_pattern)
-        sup_btn_row.addWidget(sup_add_btn)
-        sup_btn_row.addWidget(sup_rm_btn)
-        sup_btn_row.addStretch()
-        sup_layout.addLayout(sup_btn_row)
-
-        form.addRow("", self._supports_patterns_widget)
-        self._warn_supports_check.toggled.connect(self._supports_patterns_widget.setEnabled)
 
         layout.addWidget(group)
         layout.addStretch()
@@ -746,17 +731,15 @@ class ConfigDialog(QDialog):
         return page
 
     # ------------------------------------------------------------------
-    def _add_supports_pattern(self) -> None:
-        """Append a new editable pattern row and immediately open it for editing."""
+    def _add_presupport_pattern(self) -> None:
         item = QListWidgetItem("new pattern")
         item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
-        self._supports_patterns_list.addItem(item)
-        self._supports_patterns_list.editItem(item)
+        self._presupport_patterns_list.addItem(item)
+        self._presupport_patterns_list.editItem(item)
 
-    def _remove_supports_pattern(self) -> None:
-        """Remove all currently selected rows from the pattern list."""
-        for item in self._supports_patterns_list.selectedItems():
-            self._supports_patterns_list.takeItem(self._supports_patterns_list.row(item))
+    def _remove_presupport_pattern(self) -> None:
+        for item in self._presupport_patterns_list.selectedItems():
+            self._presupport_patterns_list.takeItem(self._presupport_patterns_list.row(item))
 
     # ------------------------------------------------------------------
     def _browse_data_dir(self) -> None:
@@ -794,7 +777,14 @@ class ConfigDialog(QDialog):
         self._max_workers_spin.setValue(get_max_workers())
         self._file_sorting_check.setChecked(get_file_sorting_enabled())
         self._unrar_edit.setText(get_unrar_path())
-        self._warn_presupported_check.setChecked(get_warn_presupported_stl())
+        presupported_enabled = get_warn_presupported_stl()
+        self._warn_presupported_check.setChecked(presupported_enabled)
+        self._presupport_patterns_widget.setEnabled(presupported_enabled)
+        self._presupport_patterns_list.clear()
+        for pattern in get_presupport_patterns():
+            item = QListWidgetItem(pattern)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+            self._presupport_patterns_list.addItem(item)
         self._warn_no_images_check.setChecked(get_warn_no_images())
         self._warn_nested_archive_check.setChecked(get_warn_nested_archive())
         
@@ -803,14 +793,6 @@ class ConfigDialog(QDialog):
         self._trash_folder_edit.setText(get_trash_folder_path())
         self._update_trash_enabled(get_allow_file_delete())
         
-        supports_enabled = get_warn_supports()
-        self._warn_supports_check.setChecked(supports_enabled)
-        self._supports_patterns_widget.setEnabled(supports_enabled)
-        self._supports_patterns_list.clear()
-        for pattern in get_supports_patterns():
-            item = QListWidgetItem(pattern)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
-            self._supports_patterns_list.addItem(item)
         sidecar_enabled = get_metadata_sidecar_enabled()
         self._metadata_sidecar_check.setChecked(sidecar_enabled)
         self._metadata_thumbnails_check.setEnabled(sidecar_enabled)
@@ -853,14 +835,13 @@ class ConfigDialog(QDialog):
                 "color_scheme": selected_scheme,
                 "file_sorting_enabled": self._file_sorting_check.isChecked(),
                 "warn_presupported_stl": self._warn_presupported_check.isChecked(),
+                "presupport_patterns": [
+                    self._presupport_patterns_list.item(i).text().strip()
+                    for i in range(self._presupport_patterns_list.count())
+                    if self._presupport_patterns_list.item(i).text().strip()
+                ],
                 "warn_no_images": self._warn_no_images_check.isChecked(),
                 "warn_nested_archive": self._warn_nested_archive_check.isChecked(),
-                "warn_supports": self._warn_supports_check.isChecked(),
-                "supports_patterns": [
-                    self._supports_patterns_list.item(i).text().strip()
-                    for i in range(self._supports_patterns_list.count())
-                    if self._supports_patterns_list.item(i).text().strip()
-                ],
                 "metadata_sidecar_enabled": self._metadata_sidecar_check.isChecked(),
                 "metadata_thumbnails": self._metadata_thumbnails_check.isChecked(),
                 "store_stl_file_list": self._store_stl_list_check.isChecked(),

@@ -20,18 +20,22 @@ _SCALE_MM_RE         = re.compile(r"\b(\d+)[_ ]?mm\b", re.IGNORECASE)
 # Captures the denominator in patterns like `1/35`, `1-72`.
 _SCALE_RATIO_RE      = re.compile(r"\b1[/\-](\d+)\b")
 
-# Matches filenames like "body_presupported.stl", "torso presupported.stl",
-# "supported.stl", "sup_dragon.stl" (the sup*.stl prefix form).
-_WARN_PRESUP_STL_RE    = re.compile(r"(?:[ _]presupported\.stl$|^sup.*\.stl$)", re.IGNORECASE)
-
-# Default regex patterns used by the "archive with supports" warning.
-# Each pattern is applied (re.IGNORECASE) to the bare filename of every archive member.
-#   Pattern 1 — "supported.stl" NOT preceded by "un" (so "unsupported" is excluded).
-#   Pattern 2 — Any file whose name starts with "sup" (e.g. "sup_arm.stl").
-DEFAULT_SUPPORTS_PATTERNS: list[str] = [
-    r"(?<!un)supported\.stl$",
-    r"^sup.*\.stl$",
+# Default patterns that identify a "supported" STL file (applied case-insensitively
+# to the bare filename of every archive member):
+#   · [ _-]supported.stl  — separator before "supported", not preceded by "un"
+#   · sup_*.stl           — starts with "sup_"
+#   · s_*.stl             — starts with "s_"
+# "unsupported.stl", "un_supported.stl", and "superman.stl" are excluded.
+DEFAULT_PRESUPPORT_PATTERNS: list[str] = [
+    r"(?<!un)[ _-]supported\.stl$",
+    r"^sup_.*\.stl$",
+    r"^(?:s|\[s\])_.*\.stl$",
 ]
+
+SUPPORTED_STL_RE = re.compile(
+    "|".join(f"(?:{p})" for p in DEFAULT_PRESUPPORT_PATTERNS),
+    re.IGNORECASE,
+)
 
 
 def detect_presupport(names: list[str]) -> str:
@@ -82,11 +86,10 @@ def detect_presupport(names: list[str]) -> str:
 
 def detect_warnings(
     names: list[str],
-    check_presupported: bool = True,
+    check_supported: bool = True,
     check_no_images: bool = True,
     check_nested_archive: bool = True,
-    check_supports: bool = False,
-    supports_patterns: list[str] | None = None,
+    presupport_patterns: list[str] | None = None,
 ) -> str:
     """Return a newline-separated string of warnings for an archive.
 
@@ -95,65 +98,52 @@ def detect_warnings(
 
     Args:
         names: Archive member names as returned by ``list_contents``.
-        check_presupported: Warn when the archive contains an STL matching
-            ``[ _]presupported.stl`` or the ``sup*.stl`` pattern.
+        check_supported: Warn when the archive contains a supported STL file.
         check_no_images: Warn when the archive contains no recognisable image
             file (``.jpg``, ``.jpeg``, ``.png``, ``.webp``, ``.bmp``).
         check_nested_archive: Warn when the archive contains another compressed
             archive (``.zip``, ``.rar``, ``.7z``).
-        check_supports: Warn when the archive contains files matching any of
-            the patterns in *supports_patterns*.
-        supports_patterns: List of regex strings (case-insensitive) applied to
-            the bare filename of each archive member. Invalid patterns are
-            silently skipped. Defaults to ``DEFAULT_SUPPORTS_PATTERNS`` when
-            *check_supports* is ``True`` and this argument is ``None``.
+        presupport_patterns: Regex strings (case-insensitive) applied to each
+            member's bare filename. ``None`` falls back to
+            ``DEFAULT_PRESUPPORT_PATTERNS``. Invalid patterns are skipped.
 
     Returns:
         Newline-separated warning strings, or ``""`` if no warnings apply.
     """
     warnings: list[str] = []
-    has_image            = False
-    has_presup_stl       = False
-    has_nested_archive   = False
-    has_supports         = False
+    has_image          = False
+    has_supported_stl  = False
+    has_nested_archive = False
 
-    # Pre-compile support patterns once so they are not recompiled per filename.
-    compiled_support: list[re.Pattern] = []
-    if check_supports:
-        patterns = supports_patterns if supports_patterns is not None else DEFAULT_SUPPORTS_PATTERNS
+    compiled_presupport: list[re.Pattern] = []
+    if check_supported:
+        patterns = presupport_patterns if presupport_patterns is not None else DEFAULT_PRESUPPORT_PATTERNS
         for p in patterns:
             try:
-                compiled_support.append(re.compile(p, re.IGNORECASE))
+                compiled_presupport.append(re.compile(p, re.IGNORECASE))
             except re.error:
-                logger.warning("Invalid supports pattern %r — skipped", p)
+                logger.warning("Invalid presupport pattern %r — skipped", p)
 
     for name in names:
         fname = Path(name.replace("\\", "/")).name
         suffix = Path(fname).suffix.lower()
         if check_no_images and suffix in IMAGE_SUFFIXES:
             has_image = True
-        if check_presupported and _WARN_PRESUP_STL_RE.search(fname):
-            has_presup_stl = True
+        if compiled_presupport and not has_supported_stl:
+            if any(rx.search(fname) for rx in compiled_presupport):
+                has_supported_stl = True
         if check_nested_archive and suffix in ARCHIVE_SUFFIXES:
             has_nested_archive = True
-        if compiled_support and not has_supports:
-            for rx in compiled_support:
-                if rx.search(fname):
-                    has_supports = True
-                    break
 
-    if check_presupported and has_presup_stl:
-        warnings.append("presupported stl")
-        logger.debug("  Warning: presupported stl")
+    if check_supported and has_supported_stl:
+        warnings.append("Models with presupports")
+        logger.debug("  Warning: models with presupports")
     if check_no_images and not has_image:
         warnings.append("Archive without images")
         logger.debug("  Warning: archive without images")
     if check_nested_archive and has_nested_archive:
         warnings.append("Archive inside archive")
         logger.debug("  Warning: archive inside archive")
-    if has_supports:
-        warnings.append("Archive with supports")
-        logger.debug("  Warning: archive with supports")
 
     if not warnings:
         logger.debug("  No warnings")

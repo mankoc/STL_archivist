@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QStyledItemDelegate, QComboBox, QCompleter,
     QDialog, QSizePolicy, QApplication, QPushButton,
     QProgressDialog, QStyle, QStyleOptionViewItem,
+    QTextEdit, QDialogButtonBox,
 )
 from PyQt6.QtCore import QSettings
 
@@ -370,7 +371,7 @@ class ThumbnailGeneratorWorker(QThread):
 
                 # Extract and generate new thumbnails
                 from app.crawler.rules import detect_warnings
-                from app.ui.config_dialog import get_warn_presupported_stl, get_warn_no_images, get_warn_nested_archive
+                from app.ui.config_dialog import get_warn_presupported_stl, get_warn_no_images, get_warn_nested_archive, get_presupport_patterns
 
                 all_names: list[str] = []
                 contents = extract_archive_contents(
@@ -403,9 +404,10 @@ class ThumbnailGeneratorWorker(QThread):
 
                 warnings = detect_warnings(
                     all_names,
-                    check_presupported=get_warn_presupported_stl(),
+                    check_supported=get_warn_presupported_stl(),
                     check_no_images=get_warn_no_images(),
                     check_nested_archive=get_warn_nested_archive(),
+                    presupport_patterns=get_presupport_patterns(),
                 )
                 stl.warning = warnings or None
                 if warnings:
@@ -721,6 +723,7 @@ class BrowserTab(QWidget):
         self._restore_header_state()
         self._table.selectionModel().currentChanged.connect(self._on_current_changed)
         self._table.doubleClicked.connect(self._on_double_click)
+        self._table.clicked.connect(self._on_table_click)
         QShortcut(QKeySequence.StandardKey.SelectAll, self._table, self._table.selectAll)
         QShortcut(QKeySequence("E"), self._table, self._edit_selected)
         centre_layout.addWidget(self._table)
@@ -1013,10 +1016,9 @@ class BrowserTab(QWidget):
 
             if show_warnings:
                 _WARNING_TYPES = [
-                    "presupported stl",
+                    "Models with presupports",
                     "Archive without images",
                     "Archive inside archive",
-                    "Archive with supports",
                 ]
                 warn_item = _make_leaf("Warnings", ("group", "warning"))
                 warn_item.setIcon(0, _icon_warnings)
@@ -1693,6 +1695,87 @@ class BrowserTab(QWidget):
         if model_id is not None:
             self._open_editor(model_id)
 
+    def _on_table_click(self, index) -> None:
+        if index.column() != COL_WARNING:
+            return
+        src_index = self._proxy.mapToSource(index)
+        warning_item = self._model.item(src_index.row(), COL_WARNING)
+        if not warning_item or not warning_item.text():
+            return
+        warning_text = warning_item.data(Qt.ItemDataRole.ToolTipRole) or ""
+        if not warning_text:
+            return
+        archive_path = self._model.item(src_index.row(), COL_PATH).text()
+        self._show_warning_detail(archive_path, warning_text)
+
+    def _show_warning_detail(self, archive_path: str, warning_text: str) -> None:
+        import re as _re
+        from pathlib import Path as _P
+        from app.crawler.archive import list_contents
+        from app.constants import ARCHIVE_SUFFIXES
+        from app.ui.config_dialog import get_presupport_patterns
+
+        path = _P(archive_path)
+        names = list_contents(path) if path.exists() else []
+        warnings = [w.strip() for w in warning_text.split("\n") if w.strip()]
+
+        _presupport_rxs = []
+        for p in get_presupport_patterns():
+            try:
+                _presupport_rxs.append(_re.compile(p, _re.IGNORECASE))
+            except _re.error:
+                pass
+
+        sections: list[tuple[str, list[str]]] = []
+        for w in warnings:
+            if w == "Models with presupports":
+                matched = [n.replace("\\", "/") for n in names
+                           if any(rx.search(_P(n.replace("\\", "/")).name) for rx in _presupport_rxs)]
+                sections.append((w, matched))
+            elif w == "Archive without images":
+                sections.append((w, []))
+            elif w == "Archive inside archive":
+                matched = [n.replace("\\", "/") for n in names
+                           if _P(n.replace("\\", "/")).suffix.lower() in ARCHIVE_SUFFIXES]
+                sections.append((w, matched))
+            else:
+                sections.append((w, []))
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Warning Details")
+        dlg.setMinimumSize(480, 300)
+        layout = QVBoxLayout(dlg)
+
+        header = QLabel(f"<b>{path.name}</b>")
+        header.setWordWrap(True)
+        layout.addWidget(header)
+
+        text = QTextEdit()
+        text.setReadOnly(True)
+
+        html_parts: list[str] = []
+        for w, files in sections:
+            html_parts.append(
+                f'<p><span style="color:#ff4444;font-size:14px;">⚠</span>&nbsp;<b>{w}</b></p>'
+            )
+            if files:
+                items = "".join(f"<li>{f}</li>" for f in files)
+                html_parts.append(f'<ul style="margin-top:0">{items}</ul>')
+            elif w == "Archive without images":
+                html_parts.append(
+                    '<p style="margin-left:20px;color:gray">'
+                    "<i>No image files were found in the archive.</i></p>"
+                )
+
+        text.setHtml("".join(html_parts))
+        layout.addWidget(text)
+
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        btns.rejected.connect(dlg.reject)
+        layout.addWidget(btns)
+
+        dlg.exec()
+
     def _edit_selected(self) -> None:
         """Open the single-model editor or mass editor depending on selection count."""
         ids = self._selected_model_ids()
@@ -1780,12 +1863,20 @@ class BrowserTab(QWidget):
         mass_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), f"Mass Edit {len(selected_ids)} model(s)…")
         mass_act.setVisible(len(selected_ids) > 1)
         menu.addSeparator()
-        delete_act = menu.addAction(style.standardIcon(SP.SP_TrashIcon), f"Delete {len(selected_ids)} model(s) from DB…")
-        
+
+        _warn_px = style.standardIcon(SP.SP_MessageBoxWarning).pixmap(16, 16)
+        _p = QPainter(_warn_px)
+        _p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+        _p.fillRect(_warn_px.rect(), QColor("red"))
+        _p.end()
+        delete_menu = menu.addMenu(QIcon(_warn_px), "Delete")
+
+        delete_act = delete_menu.addAction(style.standardIcon(SP.SP_TrashIcon), f"Delete {len(selected_ids)} model(s) from DB…")
+
         from app.ui.config_dialog import get_allow_file_delete
         delete_file_act = None
         if get_allow_file_delete():
-            delete_file_act = menu.addAction(style.standardIcon(SP.SP_DialogDiscardButton), f"Delete {len(selected_ids)} archive file(s) from disk…")
+            delete_file_act = delete_menu.addAction(style.standardIcon(SP.SP_DialogDiscardButton), f"Delete {len(selected_ids)} archive file(s) from disk…")
 
         add_tag_act = None
         edit_tags_act = None
@@ -2011,7 +2102,7 @@ class BrowserTab(QWidget):
         from app.database.db import session_scope
         from app.ui.config_dialog import (
             get_warn_presupported_stl, get_warn_no_images, get_warn_nested_archive,
-            get_store_stl_file_list, get_warn_supports, get_supports_patterns,
+            get_store_stl_file_list, get_presupport_patterns,
         )
 
         config = CrawlerConfig()
@@ -2083,11 +2174,10 @@ class BrowserTab(QWidget):
                     m.presupports = detect_presupport(all_names)
                     warnings = detect_warnings(
                         all_names,
-                        check_presupported=get_warn_presupported_stl(),
+                        check_supported=get_warn_presupported_stl(),
                         check_no_images=get_warn_no_images(),
                         check_nested_archive=get_warn_nested_archive(),
-                        check_supports=get_warn_supports(),
-                        supports_patterns=get_supports_patterns(),
+                        presupport_patterns=get_presupport_patterns(),
                     )
                     m.warning = warnings or None
 
