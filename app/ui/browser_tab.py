@@ -1828,20 +1828,23 @@ class BrowserTab(QWidget):
         FileListDialog(model_id, parent=self).exec()
 
     def _delete_files_from_disk(self, model_ids: list[int]) -> None:
-        """Physically delete or move to trash the selected archive files."""
+        """Confirm with the user, then delegate to the file-deletion service.
+
+        The slot itself stays UI-only: gather config, show the confirmation
+        dialog, call :func:`app.services.file_deletion.delete_archives`, and
+        report the result.  All file I/O and DB cascade handling lives in
+        the service so it can be unit-tested without a ``QApplication``.
+        """
         if not model_ids:
             return
 
-        from app.ui.config_dialog import get_use_trash_folder, get_trash_folder_path
-        from datetime import datetime, timezone
-        def _utcnow() -> datetime:
-            return datetime.now(timezone.utc)
-        
-        use_trash = get_use_trash_folder()
+        from app.ui.config_dialog import get_trash_folder_path, get_use_trash_folder
+        from app.services.file_deletion import delete_archives
+
+        use_trash  = get_use_trash_folder()
         trash_path = get_trash_folder_path()
-        
-        verb = "Move to trash" if use_trash else "Permanently delete"
-        
+        verb       = "Move to trash" if use_trash else "Permanently delete"
+
         reply = QMessageBox.warning(
             self,
             f"{verb} {len(model_ids)} archive(s)",
@@ -1853,57 +1856,18 @@ class BrowserTab(QWidget):
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-            
-        import shutil
-        import json
-        from pathlib import Path
-        
-        deleted_count = 0
-        failed_count = 0
-        
+
         with session_scope() as session:
-            models = session.query(STLModel).filter(STLModel.id.in_(model_ids)).all()
-            for m in models:
-                try:
-                    p = Path(m.archive_path)
-                    if p.exists():
-                        if use_trash and trash_path:
-                            tp = Path(trash_path)
-                            tp.mkdir(parents=True, exist_ok=True)
-                            
-                            # Move file
-                            dest_file = tp / p.name
-                            # Handle naming collisions in trash
-                            idx = 1
-                            while dest_file.exists():
-                                dest_file = tp / f"{p.stem}_{idx}{p.suffix}"
-                                idx += 1
-                                
-                            shutil.move(str(p), str(dest_file))
-                            
-                            # Write DB info sidecar
-                            info = {
-                                "original_path": str(p),
-                                "title": m.title,
-                                "creator": m.creator,
-                                "archive_hash": m.archive_hash,
-                                "deleted_at": _utcnow().isoformat()
-                            }
-                            sidecar = dest_file.with_suffix(dest_file.suffix + ".json")
-                            sidecar.write_text(json.dumps(info, indent=2))
-                        else:
-                            p.unlink()
-                            
-                    session.delete(m)
-                    deleted_count += 1
-                except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).error(f"Failed to delete {m.archive_path}: {e}")
-                    failed_count += 1
-                    
+            report = delete_archives(session, model_ids, use_trash, trash_path)
+
         self.refresh()
-        if failed_count > 0:
-            QMessageBox.warning(self, "Delete Files", f"Successfully processed {deleted_count} file(s). Failed to process {failed_count} file(s).")
+        if report.failed:
+            QMessageBox.warning(
+                self,
+                "Delete Files",
+                f"Successfully processed {report.deleted} file(s). "
+                f"Failed to process {len(report.failed)} file(s).",
+            )
         
     def _delete_models(self, model_ids: list[int]) -> None:
         """Confirm then delete models and their LMDB thumbnails from the database."""
