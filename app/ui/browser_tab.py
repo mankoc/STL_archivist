@@ -50,8 +50,8 @@ COL_WARNING       = 15
 COL_FILESIZE      = 16
 COL_CATEGORY      = 17
 _HEADERS = ["", "Title", "Creator", "Source", "Date", "Tags",
-            "Sculptor", "Collection", "Subcollection", "Seq", "Release", "Path",
-            "Scale", "Presupports", "Added", "Warnings", "File Size", "Category"]
+            "Sculptor", "Collection", "Subcollection", "Sequence", "Release", "Path",
+             "Scale", "Presupports", "Added", "Warnings", "File Size", "Category"]
 
 
 
@@ -67,8 +67,17 @@ class _BrowserProxyModel(QSortFilterProxyModel):
     """Proxy model that sorts the File Size column numerically via UserRole data."""
 
     def lessThan(self, left, right):
+        # Numeric sort for File Size (stored under UserRole)
         if left.column() == COL_FILESIZE:
             return (left.data(Qt.ItemDataRole.UserRole) or -1) < (right.data(Qt.ItemDataRole.UserRole) or -1)
+        # Numeric sort for Sequence column — use the numeric value stored under UserRole
+        if left.column() == COL_SEQUENCE:
+            def _to_int(v):
+                try:
+                    return int(v) if v is not None else -1
+                except Exception:
+                    return -1
+            return _to_int(left.data(Qt.ItemDataRole.UserRole)) < _to_int(right.data(Qt.ItemDataRole.UserRole))
         return super().lessThan(left, right)
 
 MODEL_ID_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -1296,6 +1305,12 @@ class BrowserTab(QWidget):
                 size_item.setData(raw_size, Qt.ItemDataRole.UserRole)
                 size_item.setEditable(False)
 
+                # Build row items. For numeric sorting, store numeric values under UserRole
+                seq_item = QStandardItem(seq_str)
+                seq_item.setEditable(True)
+                # store numeric sequence under UserRole so proxy can sort numerically
+                seq_item.setData(stl.sequence if stl.sequence is not None else None, Qt.ItemDataRole.UserRole)
+
                 row = [
                     thumb_item,
                     QStandardItem(stl.title or ""),
@@ -1306,7 +1321,7 @@ class BrowserTab(QWidget):
                     QStandardItem(stl.sculptor.name    if stl.sculptor    else ""),
                     QStandardItem(stl.collection.name  if stl.collection  else ""),
                     QStandardItem(stl.subcollection.name if stl.subcollection else ""),
-                    QStandardItem(seq_str),
+                    seq_item,
                     QStandardItem(stl.release.name if stl.release else ""),
                     path_item,
                     QStandardItem(stl.scale.name if stl.scale else ""),
@@ -2027,7 +2042,15 @@ class BrowserTab(QWidget):
                 else:
                     new_hash = m.archive_hash
 
-                contents = extract_archive_contents(p, unrar_path=config.unrar_path, all_names_out=None, stl_info_out=None)
+                # Extract files we need and capture the full member list so we can
+                # run the validation rules without opening the archive twice.
+                all_names: list[str] = []
+                contents = extract_archive_contents(
+                    p,
+                    unrar_path=config.unrar_path,
+                    all_names_out=all_names,
+                    stl_info_out=None,
+                )
                 meta = extract_metadata(p, contents=contents, source_dir=p.parent)
 
                 # Update model in-place
@@ -2049,22 +2072,30 @@ class BrowserTab(QWidget):
                 m.url = meta.url or m.url
                 m.description = meta.description or m.description
 
-                # Recompute warnings and stl file list if enabled
-                all_names = list_contents(p)
-                from app.crawler.rules import detect_warnings, detect_presupport
-                warnings = detect_warnings(all_names,
-                                           check_presupported=get_warn_presupported_stl(),
-                                           check_no_images=get_warn_no_images(),
-                                           check_nested_archive=get_warn_nested_archive(),
-                                           check_supports=False)
+                # Recompute presupports/warnings/scale using the full member list
+                from app.crawler.rules import detect_warnings, detect_presupport, detect_scale
+                m.presupports = detect_presupport(all_names)
+                warnings = detect_warnings(
+                    all_names,
+                    check_presupported=get_warn_presupported_stl(),
+                    check_no_images=get_warn_no_images(),
+                    check_nested_archive=get_warn_nested_archive(),
+                    check_supports=get_warn_supports(),
+                    supports_patterns=get_supports_patterns(),
+                )
                 m.warning = warnings or None
+
+                # Re-detect scale and update model.scale if found
+                scales = detect_scale([p.name] + all_names)
+                if scales:
+                    from app.database.helpers import get_or_create_scale
+                    m.scale = get_or_create_scale(session, scales[0])
 
                 if get_store_stl_file_list():
                     # Refresh stl_files entries
                     for old in list(m.stl_files):
                         session.delete(old)
                     session.flush()
-                    # Build stl_info map by reading catalog (list_contents + sizes unknown here)
                     from app.database.models import STLFile
                     for fname in [n for n in (all_names or []) if Path(n.replace('\\', '/')).suffix.lower() in {'.stl', '.obj', '.lys', '.chitubox'}]:
                         session.add(STLFile(model=m, filename=fname, file_size=None, archive_hash=new_hash))

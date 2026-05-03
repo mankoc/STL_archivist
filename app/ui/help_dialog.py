@@ -222,7 +222,7 @@ with a filter panel on the left and an image preview pane on the right.</p>
   <tr><td>Sculptor</td><td>3-D sculptor (may differ from the publisher)</td></tr>
   <tr><td>Category</td><td>Top-level category, e.g. Fantasy, Sci-Fi</td></tr>
   <tr><td>Subcategory</td><td>Sub-category within the parent category</td></tr>
-  <tr><td>Seq</td><td>Sequence number within a release</td></tr>
+  <tr><td>Sequence</td><td>Sequence number within a release</td></tr>
   <tr><td>Release</td><td>Release name or collection title</td></tr>
   <tr><td>Path</td><td>Absolute path to the archive file — double-click to open the Model Editor</td></tr>
   <tr><td>Scale</td><td>Print scale (e.g. <code>28mm</code>, <code>32mm</code>, <code>75mm</code>)</td></tr>
