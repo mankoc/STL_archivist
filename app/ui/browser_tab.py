@@ -314,6 +314,11 @@ class ThumbnailGeneratorWorker(QThread):
         super().__init__(parent)
         self._model_ids = model_ids
         self._max_thumbnails = max_thumbnails
+        self._stop = False
+
+    def stop(self) -> None:
+        """Request the worker to stop as soon as possible."""
+        self._stop = True
 
     def run(self) -> None:
         """Re-extract and save thumbnails for every model in *model_ids*, then update sidecars."""
@@ -330,6 +335,9 @@ class ThumbnailGeneratorWorker(QThread):
         modified_folders: set[Path] = set()
 
         for idx, model_id in enumerate(self._model_ids, start=1):
+            if self._stop:
+                self.log.emit("Thumbnail generation cancelled")
+                break
             self.progress.emit(idx, total)
 
             with session_scope() as session:
@@ -366,6 +374,8 @@ class ThumbnailGeneratorWorker(QThread):
 
                 count = 0
                 for filename in image_names:
+                    if self._stop:
+                        break
                     if count >= self._max_thumbnails:
                         break
                     raw_bytes = contents[filename]
@@ -581,6 +591,10 @@ class BrowserTab(QWidget):
     """
 
     model_count_changed = pyqtSignal(int)
+    # Emitted when a background thumbnail generation reports progress
+    thumbnail_progress_updated = pyqtSignal(int, int)
+    thumbnail_finished = pyqtSignal()
+    thumbnail_started = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -2158,29 +2172,79 @@ class BrowserTab(QWidget):
         if not ok:
             return
 
-        progress = QProgressDialog(
-            "Generating thumbnails…", "Cancel", 0, len(model_ids), self
-        )
-        progress.setWindowTitle("Generate Thumbnails")
-        progress.setMinimumDuration(0)
-        progress.setModal(True)
-        progress.setValue(0)
+        # Custom progress dialog with a "Send to background" button and Cancel
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Generate Thumbnails")
+        dlg.setModal(True)
+        vlay = QVBoxLayout(dlg)
+        label = QLabel("Generating thumbnails…")
+        vlay.addWidget(label)
+        progress_bar = QProgressBar()
+        progress_bar.setRange(0, len(model_ids))
+        progress_bar.setValue(0)
+        vlay.addWidget(progress_bar)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        send_bg_btn = QPushButton("Send to background")
+        cancel_btn = QPushButton("Cancel")
+        btn_row.addWidget(send_bg_btn)
+        btn_row.addWidget(cancel_btn)
+        vlay.addLayout(btn_row)
+        dlg.setMinimumWidth(420)
 
         self._thumb_worker = ThumbnailGeneratorWorker(model_ids, count, parent=self)
+        # Prevent starting if another background job is active
+        from app.utils.background_jobs import start_job, active_job
+        if not start_job("thumbnails"):
+            QMessageBox.warning(self, "Generate Thumbnails", "Another background job is already running. Try again later.")
+            return
 
         def _on_progress(current, total):
-            progress.setValue(current)
-            progress.setLabelText(f"Processing model {current} of {total}…")
+            # Update our custom dialog progress
+            progress_bar.setValue(current)
+            label.setText(f"Processing model {current} of {total}…")
+            # Forward progress for optional background display in main window
+            self.thumbnail_progress_updated.emit(current, total)
 
         def _on_finished():
-            progress.setValue(len(model_ids))
+            progress_bar.setValue(len(model_ids))
+            # Close the dialog if it's still open
+            if dlg.isVisible():
+                dlg.accept()
             self.refresh()
             self._thumb_worker = None
+            from app.utils.background_jobs import end_job
+            end_job("thumbnails")
 
         self._thumb_worker.progress.connect(_on_progress)
         self._thumb_worker.finished.connect(_on_finished)
-        progress.canceled.connect(lambda: None)  # worker runs to completion; cancel just closes dialog
+        # Wire up buttons: Send to background hides the dialog; Cancel stops the worker
+        def _send_background():
+            dlg.hide()
+            # show current progress in status bar via signal
+            self.thumbnail_progress_updated.emit(progress_bar.value(), progress_bar.maximum())
+
+        def _on_cancel():
+            # Request worker to stop and close dialog
+            if self._thumb_worker is not None:
+                self._thumb_worker.stop()
+            dlg.reject()
+            from app.utils.background_jobs import end_job
+            end_job("thumbnails")
+
+        send_bg_btn.clicked.connect(_send_background)
+        cancel_btn.clicked.connect(_on_cancel)
+
         self._thumb_worker.start()
+        # Show modal dialog (blocks until accept/reject) — if Send to background was clicked
+        # dlg.exec() will return but the worker continues running; if Cancel was clicked,
+        # the worker is requested to stop.
+        dlg.exec()
+
+        # Ensure main window knows when the worker finishes
+        self._thumb_worker.finished.connect(lambda: self.thumbnail_finished.emit())
 
     def generate_thumbnails_for_selected(self) -> None:
         """Generate thumbnails for the rows currently selected in the table.
