@@ -178,12 +178,13 @@ def parse_path(pattern: str, path: str) -> dict[str, str]:
     Returns an empty dict if neither pass matches.
     """
     import os
-    rx = pattern_to_regex(pattern)
+    # Normalise both the path and the pattern to forward slashes for consistent matching
+    norm = path.replace("\\", "/")
+    norm_pattern = pattern.replace("\\", "/")
+    
+    rx = pattern_to_regex(norm_pattern)
     if rx is None:
         return {}
-
-    # Normalise to forward slashes for consistent matching
-    norm = path.replace("\\", "/")
     parent = norm.rsplit("/", 1)[0] if "/" in norm else norm
     archive_stem, _ = os.path.splitext(norm.rsplit("/", 1)[-1])
 
@@ -191,9 +192,26 @@ def parse_path(pattern: str, path: str) -> dict[str, str]:
 
     # Pass 1: full path — accept only if the match reaches the string end
     # (meaning {name} captured the actual archive filename, not a directory)
-    m = rx.search(norm)
-    if m and m.end() == len(norm):
-        return _result_from_match(m)
+    
+    # Try searching on the whole path
+    # If the pattern starts with a slash, we want to match from the beginning.
+    # Otherwise, we want to match as much of the suffix as possible for non-absolute patterns.
+    
+    if norm_pattern.startswith("/"):
+        m = rx.search(norm)
+        if m and m.end() == len(norm):
+            return _result_from_match(m)
+    else:
+        # Find the shortest suffix that matches
+        for i in range(len(norm)):
+            m_suffix = rx.fullmatch(norm[i:])
+            if m_suffix:
+                return _result_from_match(m_suffix)
+        
+        # Fallback to search if fullmatch fails
+        m = rx.search(norm)
+        if m and m.end() == len(norm):
+            return _result_from_match(m)
 
     # Pass 1b: filename only — for patterns without path separators, match
     # against just the last segment so a directory with the same separator

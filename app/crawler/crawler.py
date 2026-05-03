@@ -24,7 +24,8 @@ from app.crawler.metadata import extract_metadata, ModelMetadata
 from app.crawler.rules import detect_presupport, detect_scale, detect_warnings
 from app.database.db import session_scope
 from app.database.models import STLModel, Tag, Image, Release, Scale, STLFile
-from app.utils.thumbnailer import save_thumbnail, delete_thumbnail, get_thumbnail_base_dir
+from app.utils.thumbnailer import save_thumbnail, delete_thumbnail, get_thumbnail_base_dir, get_thumbnail_bytes
+from app.ui.find_content_duplicates_dialog import compute_dhash_from_jpeg
 from app.utils.path_pattern import parse_path, apply_extracted_to_model, parse_release_date
 
 
@@ -603,6 +604,16 @@ class CrawlerWorker(QThread):
                 rel_path = save_thumbnail(raw_bytes, img.id, max_size=max_thumb_size)
                 if rel_path:
                     img.thumbnail_path = rel_path
+                    # Compute and persist perceptual dHash for the stored thumbnail
+                    try:
+                        jpeg = get_thumbnail_bytes(img.id)
+                        if jpeg:
+                            h = compute_dhash_from_jpeg(jpeg)
+                            if h is not None:
+                                img.dhash = int(h)
+                    except Exception:
+                        # Protect crawl from any hashing errors
+                        logger.debug("  Failed to compute dHash for image id %s", img.id)
                     count += 1
                     logger.debug("  Thumbnail saved: %s → %s", filename, rel_path)
                 else:

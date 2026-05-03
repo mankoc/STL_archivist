@@ -454,7 +454,7 @@ class ConfigDialog(QDialog):
         file_info_group = QGroupBox("Full File Info")
         file_info_form = QFormLayout(file_info_group)
 
-        self._store_stl_list_check = QCheckBox("Store STL file list")
+        self._store_stl_list_check = QCheckBox("Store STL, OBJ, LYS, and Chitubox file list")
         file_info_form.addRow("", self._store_stl_list_check)
         file_info_form.addRow(
             "",
