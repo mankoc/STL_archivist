@@ -11,13 +11,14 @@ import sys
 from pathlib import Path
 
 from PyQt6.QtCore import QSettings, QSize, Qt
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QHBoxLayout,
     QDialogButtonBox, QFileDialog, QMessageBox, QSpinBox,
-    QComboBox, QCheckBox, QApplication,
+    QComboBox, QCheckBox, QApplication, QColorDialog, QInputDialog,
     QListWidget, QListWidgetItem, QStackedWidget, QSplitter, QWidget, QStyle,
-    QTreeWidget, QTreeWidgetItem,
+    QTreeWidget, QTreeWidgetItem, QScrollArea,
 )
 
 DATA_DIR_KEY           = "config/data_dir"
@@ -148,28 +149,101 @@ def _parse_qss_token(qss_text: str, token: str) -> str | None:
     return m.group(1) if m else None
 
 
+# Hardcoded fallback defaults when no theme token or override is set.
+_UI_COLOR_DEFAULTS: dict[str, str] = {
+    "pair_a":            "",         # derives from QPalette if blank
+    "pair_b":            "",         # derives from QPalette if blank
+    "status_neutral":    "#888888",
+    "status_ok":         "#4CAF50",
+    "status_warn":       "#F44336",
+    "warn_row_bg":       "#4a4a4a",
+    "warn_row_fg":       "#FFD700",
+    "missing_file":      "#d24646",
+    "found_file":        "#3c9650",
+    "match_highlight":   "#64c864",
+    "selection_border":  "#1565c0",
+    "selection_bg":      "#e3f2fd",
+}
+
+# Maps each key to the QSS comment-token name defined in .qss theme files.
+_UI_COLOR_QSS_TOKENS: dict[str, str] = {
+    "pair_a":            "pair-a",
+    "pair_b":            "pair-b",
+    "status_neutral":    "status-neutral",
+    "status_ok":         "status-ok",
+    "status_warn":       "status-warn",
+    "warn_row_bg":       "warn-row-bg",
+    "warn_row_fg":       "warn-row-fg",
+    "missing_file":      "missing-file",
+    "found_file":        "found-file",
+    "match_highlight":   "match-highlight",
+    "selection_border":  "selection-border",
+    "selection_bg":      "selection-bg",
+}
+
+
+def _get_ui_color(key: str, settings: dict | None = None) -> str:
+    """Resolve a UI color by key.
+
+    Priority: per-session override → active custom scheme → QSS token → default.
+    Pass *settings* to avoid a redundant JSON load when the caller already has it.
+    """
+    if settings is None:
+        settings = _load_library_settings()
+
+    # 1. Explicit per-session override stored in ui_color_overrides
+    overrides = settings.get("ui_color_overrides", {})
+    if overrides.get(key):
+        return overrides[key]
+
+    # 2. Legacy keys for pair colors (backwards compat with older settings files)
+    if key == "pair_a" and settings.get("custom_pair_a"):
+        return settings["custom_pair_a"]
+    if key == "pair_b" and settings.get("custom_pair_b"):
+        return settings["custom_pair_b"]
+
+    # 3. Active custom scheme — also supports old pair_a/pair_b at top level
+    scheme = settings.get("color_scheme", COLOR_SCHEME_DEFAULT)
+    custom_schemes = settings.get("custom_color_schemes", {})
+    base_scheme = scheme
+    if scheme in custom_schemes:
+        cs = custom_schemes[scheme]
+        cs_overrides = cs.get("ui_color_overrides", {})
+        if cs_overrides.get(key):
+            return cs_overrides[key]
+        # Old format stored pair_a/pair_b at top level of custom scheme
+        if key in ("pair_a", "pair_b") and cs.get(key):
+            return cs[key]
+        base_scheme = cs.get("base_theme", "System Default")
+
+    # 4. QSS comment token from the active built-in theme file
+    token = _UI_COLOR_QSS_TOKENS.get(key)
+    if token:
+        value = THEMES.get(base_scheme, "")
+        if value and not value.startswith("material:"):
+            qss_path = Path(value)
+            if qss_path.exists():
+                color = _parse_qss_token(qss_path.read_text(encoding="utf-8"), token)
+                if color:
+                    return color
+
+    return _UI_COLOR_DEFAULTS.get(key, "")
+
+
 def get_pair_colors() -> tuple[str, str]:
     """Return two hex color strings for duplicate-pair row highlighting.
 
-    Colors are read from the active theme's QSS ``--pair-a`` / ``--pair-b``
-    tokens.  For Material and System Default themes (no QSS file), colors are
-    derived from the active QPalette's Highlight role so they adapt to the theme.
+    Delegates to ``_get_ui_color``; falls back to QPalette when no color is set.
     """
-    from PyQt6.QtGui import QColor, QPalette
-    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtGui import QPalette
 
-    scheme = get_color_scheme()
-    value  = THEMES.get(scheme, "")
-    if value and not value.startswith("material:"):
-        qss_path = Path(value)
-        if qss_path.exists():
-            qss = qss_path.read_text(encoding="utf-8")
-            a = _parse_qss_token(qss, "pair-a")
-            b = _parse_qss_token(qss, "pair-b")
-            if a and b:
-                return a, b
+    settings = _load_library_settings()
+    a = _get_ui_color("pair_a", settings)
+    b = _get_ui_color("pair_b", settings)
+    if a and b:
+        return a, b
 
-    # Fallback: derive from the active QPalette Highlight color
+    # Fallback: derive complementary colors from the active QPalette Highlight
     palette   = QApplication.palette() if QApplication.instance() else QPalette()
     highlight = palette.color(QPalette.ColorRole.Highlight)
     h, s, v, _ = highlight.getHsvF()
@@ -221,6 +295,42 @@ def get_warn_nested_archive() -> bool:
 
 
 
+def get_status_neutral_color() -> str:
+    return _get_ui_color("status_neutral")
+
+def get_status_ok_color() -> str:
+    return _get_ui_color("status_ok")
+
+def get_status_warn_color() -> str:
+    return _get_ui_color("status_warn")
+
+def get_warn_row_bg_color() -> str:
+    return _get_ui_color("warn_row_bg")
+
+def get_warn_row_fg_color() -> str:
+    return _get_ui_color("warn_row_fg")
+
+def get_missing_file_color() -> str:
+    return _get_ui_color("missing_file")
+
+def get_found_file_color() -> str:
+    return _get_ui_color("found_file")
+
+def get_match_highlight_color() -> str:
+    return _get_ui_color("match_highlight")
+
+def get_selection_border_color() -> str:
+    return _get_ui_color("selection_border")
+
+def get_selection_bg_color() -> str:
+    return _get_ui_color("selection_bg")
+
+
+def get_custom_color_schemes() -> dict:
+    """Return the dict of user-saved custom color schemes."""
+    return dict(_load_library_settings().get("custom_color_schemes", {}))
+
+
 def get_debug_menu_enabled() -> bool:
     """Whether the Debug menu is visible in the main window."""
     return bool(_load_library_settings().get("debug_menu_enabled", False))
@@ -254,6 +364,10 @@ def apply_color_scheme(scheme_name: str) -> None:
     app = QApplication.instance()
     if app is None:
         return
+    # Resolve user-saved custom schemes to their base built-in theme
+    custom_schemes = _load_library_settings().get("custom_color_schemes", {})
+    if scheme_name in custom_schemes:
+        scheme_name = custom_schemes[scheme_name].get("base_theme", "System Default")
     value = THEMES.get(scheme_name, "")
     if value.startswith("material:"):
         from qt_material import apply_stylesheet
@@ -271,7 +385,7 @@ class ConfigDialog(QDialog):
     """Multi-page settings dialog.
 
     Sidebar sections:
-      Database | Crawler > Warnings | Browser | Appearance | Sidecar
+      Database | Crawler > Warnings | File writing > Sidecar | Appearance | Debug
 
     Settings are persisted in two places:
     - ``DATA_DIR_KEY`` and ``UNRAR_TOOL_KEY`` in ``QSettings`` (global, cross-library).
@@ -287,6 +401,8 @@ class ConfigDialog(QDialog):
         self.setMinimumWidth(580)
         self.setMinimumHeight(300)
         self._original_scheme: str = get_color_scheme()
+        self._ui_color_btns: dict[str, QPushButton] = {}
+        self._ui_color_overrides: dict[str, str] = {}
         self._build_ui()
         self._load()
 
@@ -302,7 +418,8 @@ class ConfigDialog(QDialog):
 
         # Left: section tree
         # Page indices must match the order pages are added to self._stack below.
-        # 0=Database  1=Crawler  2=Warnings(child)  3=Browser  4=Appearance  5=Sidecar
+        # 0=Database  1=Crawler  2=Warnings(child)  3=File writing  4=Appearance
+        # 5=Sidecar(child)  6=Debug
         self._section_tree = QTreeWidget()
         self._section_tree.setFixedWidth(155)
         self._section_tree.setHeaderHidden(True)
@@ -318,12 +435,13 @@ class ConfigDialog(QDialog):
             item.setData(0, Qt.ItemDataRole.UserRole, page_idx)
             return item
 
-        _item(self._section_tree, "Database",   sp.SP_DriveHDIcon,            0)
+        _item(self._section_tree, "Database",     sp.SP_DriveHDIcon,              0)
         crawler_item = _item(self._section_tree, "Crawler", sp.SP_FileDialogDetailedView, 1)
-        _item(crawler_item,          "Warnings", sp.SP_MessageBoxWarning,      2)
-        fw_item = _item(self._section_tree, "File writing", sp.SP_DesktopIcon,             3)
-        _item(fw_item,               "Sidecar",  sp.SP_DialogSaveButton,        5)
-        _item(self._section_tree, "Appearance", sp.SP_TitleBarNormalButton,    4)
+        _item(crawler_item,            "Warnings", sp.SP_MessageBoxWarning,        2)
+        fw_item = _item(self._section_tree, "File writing", sp.SP_DesktopIcon,     3)
+        _item(fw_item,                 "Sidecar",  sp.SP_DialogSaveButton,         5)
+        _item(self._section_tree, "Appearance",   sp.SP_TitleBarNormalButton,      4)
+        _item(self._section_tree, "Debug",        sp.SP_MessageBoxCritical,        6)
 
         crawler_item.setExpanded(True)
         fw_item.setExpanded(True)
@@ -344,6 +462,7 @@ class ConfigDialog(QDialog):
         self._stack.addWidget(self._build_browser_page())     # 3
         self._stack.addWidget(self._build_appearance_page())  # 4
         self._stack.addWidget(self._build_sidecar_page())     # 5
+        self._stack.addWidget(self._build_debug_page())       # 6
 
         self._section_tree.setCurrentItem(
             self._section_tree.topLevelItem(0)
@@ -587,6 +706,27 @@ class ConfigDialog(QDialog):
         layout.addStretch()
         return page
 
+    def _build_debug_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        group = QGroupBox("Debug")
+        form = QFormLayout(group)
+
+        self._debug_menu_check = QCheckBox("Show Debug menu")
+        form.addRow("", self._debug_menu_check)
+        form.addRow(
+            "",
+            QLabel(
+                "<small>Shows the <b>Debug</b> menu in the menu bar, which gives "
+                "access to destructive operations such as deleting the database "
+                "and log files.</small>"
+            ),
+        )
+
+        layout.addWidget(group)
+        layout.addStretch()
+        return page
+
     def _build_browser_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -695,39 +835,107 @@ class ConfigDialog(QDialog):
             self._trash_folder_edit.setText(path)
 
     def _build_appearance_page(self) -> QWidget:
+        # Outer page widget holds only the scroll area (no extra margins)
         page = QWidget()
-        layout = QVBoxLayout(page)
-        group = QGroupBox("Appearance")
-        form = QFormLayout(group)
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
 
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(scroll.Shape.NoFrame)
+
+        inner = QWidget()
+        layout = QVBoxLayout(inner)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        # ---- Color Scheme ------------------------------------------------
+        theme_group = QGroupBox("Color Scheme")
+        form = QFormLayout(theme_group)
         self._theme_combo = QComboBox()
         for name in THEMES:
             self._theme_combo.addItem(name)
         self._theme_combo.currentTextChanged.connect(self._preview_theme)
-        form.addRow("Color scheme:", self._theme_combo)
+        form.addRow("Scheme:", self._theme_combo)
         form.addRow(
             "",
             QLabel("<small>Preview is applied immediately. Cancel reverts to the previous scheme.</small>"),
         )
+        layout.addWidget(theme_group)
 
-        layout.addWidget(group)
+        # ---- Duplicate Highlight Colors ----------------------------------
+        pair_group = QGroupBox("Duplicate Highlight Colors")
+        pair_form = QFormLayout(pair_group)
+        self._add_color_row(pair_form, "pair_a", "Pair A:")
+        self._add_color_row(pair_form, "pair_b", "Pair B:")
+        pair_form.addRow(
+            "",
+            QLabel("<small>Row highlight colors used in the duplicate finder.</small>"),
+        )
+        layout.addWidget(pair_group)
 
-        adv_group = QGroupBox("Advanced")
-        adv_form  = QFormLayout(adv_group)
+        # ---- Status Indicator Colors -------------------------------------
+        status_group = QGroupBox("Status Indicators")
+        status_form = QFormLayout(status_group)
+        self._add_color_row(status_form, "status_neutral", "Neutral:")
+        self._add_color_row(status_form, "status_ok",      "OK:")
+        self._add_color_row(status_form, "status_warn",    "Warning:")
+        status_form.addRow(
+            "",
+            QLabel("<small>Circle indicators drawn on group items in the browser tree.</small>"),
+        )
+        layout.addWidget(status_group)
 
-        self._debug_menu_check = QCheckBox("Show Debug menu")
-        adv_form.addRow("", self._debug_menu_check)
-        adv_form.addRow(
+        # ---- Warning Row Colors ------------------------------------------
+        warn_group = QGroupBox("Warning Rows")
+        warn_form = QFormLayout(warn_group)
+        self._add_color_row(warn_form, "warn_row_bg", "Background:")
+        self._add_color_row(warn_form, "warn_row_fg", "Text:")
+        warn_form.addRow(
+            "",
+            QLabel("<small>Row colors for archive entries flagged with a warning in the browser.</small>"),
+        )
+        layout.addWidget(warn_group)
+
+        # ---- Maintenance View Colors -------------------------------------
+        maint_group = QGroupBox("Maintenance View")
+        maint_form = QFormLayout(maint_group)
+        self._add_color_row(maint_form, "missing_file", "Missing file:")
+        self._add_color_row(maint_form, "found_file",   "Found file:")
+        maint_form.addRow(
+            "",
+            QLabel("<small>Row colors in the database maintenance / verification table.</small>"),
+        )
+        layout.addWidget(maint_group)
+
+        # ---- Highlight Colors --------------------------------------------
+        hl_group = QGroupBox("Highlights")
+        hl_form = QFormLayout(hl_group)
+        self._add_color_row(hl_form, "match_highlight",   "File match:")
+        self._add_color_row(hl_form, "selection_border",  "Selection border:")
+        self._add_color_row(hl_form, "selection_bg",      "Selection background:")
+        hl_form.addRow(
             "",
             QLabel(
-                "<small>Shows the <b>Debug</b> menu in the menu bar, which gives "
-                "access to destructive operations such as deleting the database "
-                "and log files.</small>"
+                "<small>File match: translucent tint on matched rows in the file-comparison table. "
+                "Selection: thumbnail selection in the image grid.</small>"
             ),
         )
+        layout.addWidget(hl_group)
 
-        layout.addWidget(adv_group)
+        # ---- Global actions ---------------------------------------------
+        action_row = QHBoxLayout()
+        reset_btn = QPushButton("Reset all to theme defaults")
+        reset_btn.clicked.connect(self._reset_all_colors)
+        save_scheme_btn = QPushButton("Save as color scheme…")
+        save_scheme_btn.clicked.connect(self._save_as_color_scheme)
+        action_row.addWidget(reset_btn)
+        action_row.addWidget(save_scheme_btn)
+        action_row.addStretch()
+        layout.addLayout(action_row)
         layout.addStretch()
+
+        scroll.setWidget(inner)
+        page_layout.addWidget(scroll)
         return page
 
     # ------------------------------------------------------------------
@@ -764,8 +972,90 @@ class ConfigDialog(QDialog):
             self._unrar_edit.setText(path)
 
     # ------------------------------------------------------------------
+    def _add_color_row(self, form: QFormLayout, key: str, label: str) -> None:
+        """Add a swatch-button row to *form* for the given color *key*."""
+        row = QHBoxLayout()
+        btn = QPushButton()
+        btn.setFixedSize(40, 20)
+        btn.setFlat(True)
+        btn.clicked.connect(lambda _checked, k=key: self._pick_ui_color(k))
+        self._ui_color_btns[key] = btn
+        row.addWidget(btn)
+        row.addStretch()
+        form.addRow(label, row)
+
+    def _pick_ui_color(self, key: str) -> None:
+        current = self._ui_color_overrides.get(key) or _get_ui_color(key)
+        color = QColorDialog.getColor(
+            QColor(current) if current else QColor(),
+            self,
+        )
+        if color.isValid():
+            self._ui_color_overrides[key] = color.name()
+            self._refresh_ui_color_btn(key)
+
+    def _refresh_ui_color_btn(self, key: str) -> None:
+        btn = self._ui_color_btns.get(key)
+        if btn is None:
+            return
+        color = self._ui_color_overrides.get(key) or _get_ui_color(key)
+        if color:
+            btn.setStyleSheet(f"background-color: {color}; border: 1px solid #888;")
+        else:
+            btn.setStyleSheet("border: 1px solid #888;")
+
+    def _refresh_all_ui_color_btns(self) -> None:
+        for key in self._ui_color_btns:
+            self._refresh_ui_color_btn(key)
+
+    def _reset_all_colors(self) -> None:
+        """Clear all overrides so colors fall back to theme/QSS defaults."""
+        self._ui_color_overrides.clear()
+        self._refresh_all_ui_color_btns()
+
+    # ------------------------------------------------------------------
     def _preview_theme(self, scheme_name: str) -> None:
         apply_color_scheme(scheme_name)
+        # If a saved custom scheme is selected, load its color overrides into the pickers
+        custom_schemes = _load_library_settings().get("custom_color_schemes", {})
+        if scheme_name in custom_schemes:
+            cs = custom_schemes[scheme_name]
+            self._ui_color_overrides = dict(cs.get("ui_color_overrides", {}))
+            # Handle old format where pair_a/pair_b were stored at top level
+            for k in ("pair_a", "pair_b"):
+                if k not in self._ui_color_overrides and cs.get(k):
+                    self._ui_color_overrides[k] = cs[k]
+            self._refresh_all_ui_color_btns()
+
+    def _save_as_color_scheme(self) -> None:
+        name, ok = QInputDialog.getText(self, "Save Color Scheme", "Scheme name:")
+        if not ok or not name.strip():
+            return
+        name = name.strip()
+        if name in THEMES:
+            QMessageBox.warning(
+                self, "Save Color Scheme",
+                f"'{name}' is a built-in scheme and cannot be overwritten.",
+            )
+            return
+
+        settings = _load_library_settings()
+        custom_schemes = settings.get("custom_color_schemes", {})
+
+        base_theme = self._theme_combo.currentText()
+        if base_theme in custom_schemes:
+            base_theme = custom_schemes[base_theme].get("base_theme", "System Default")
+
+        custom_schemes[name] = {
+            "base_theme":       base_theme,
+            "ui_color_overrides": dict(self._ui_color_overrides),
+        }
+        settings["custom_color_schemes"] = custom_schemes
+        _save_library_settings(settings)
+
+        if self._theme_combo.findText(name) < 0:
+            self._theme_combo.addItem(name)
+        self._theme_combo.setCurrentText(name)
 
     # ------------------------------------------------------------------
     def _load(self) -> None:
@@ -798,13 +1088,18 @@ class ConfigDialog(QDialog):
         self._metadata_thumbnails_check.setEnabled(sidecar_enabled)
         self._metadata_thumbnails_check.setChecked(get_metadata_thumbnails_enabled())
         self._store_stl_list_check.setChecked(get_store_stl_file_list())
-        # New: recurse subdirectories setting
-        try:
-            from app.ui.config_dialog import get_recurse_subdirs  # type: ignore
-            self._recurse_subdirs_check.setChecked(get_recurse_subdirs())
-        except Exception:
-            # backwards-compat — default True
-            self._recurse_subdirs_check.setChecked(True)
+        self._recurse_subdirs_check.setChecked(get_recurse_subdirs())
+
+        # Populate custom saved schemes into the dropdown (after a separator)
+        custom_schemes = get_custom_color_schemes()
+        if custom_schemes:
+            # Remove any previously added custom entries first
+            n_builtin = len(THEMES)
+            while self._theme_combo.count() > n_builtin:
+                self._theme_combo.removeItem(self._theme_combo.count() - 1)
+            self._theme_combo.insertSeparator(n_builtin)
+            for cs_name in custom_schemes:
+                self._theme_combo.addItem(cs_name)
 
         scheme = get_color_scheme()
         idx = self._theme_combo.findText(scheme)
@@ -812,6 +1107,15 @@ class ConfigDialog(QDialog):
             self._theme_combo.setCurrentIndex(idx)
         else:
             self._theme_combo.setCurrentIndex(0)
+
+        # Load all UI color overrides from settings
+        settings = _load_library_settings()
+        self._ui_color_overrides = dict(settings.get("ui_color_overrides", {}))
+        # Migrate legacy custom_pair_a / custom_pair_b into the new dict
+        for leg_key, new_key in (("custom_pair_a", "pair_a"), ("custom_pair_b", "pair_b")):
+            if leg_key in settings and settings[leg_key] and new_key not in self._ui_color_overrides:
+                self._ui_color_overrides[new_key] = settings[leg_key]
+        self._refresh_all_ui_color_btns()
 
         self._debug_menu_check.setChecked(get_debug_menu_enabled())
 
@@ -826,13 +1130,19 @@ class ConfigDialog(QDialog):
 
         selected_scheme = self._theme_combo.currentText()
 
+        # Preserve existing custom_color_schemes (not edited here)
+        existing = _load_library_settings()
+        custom_color_schemes = existing.get("custom_color_schemes", {})
+
         # Save all other settings into the library's own settings file
         _save_library_settings(
             {
-                "max_thumbnails": self._max_thumbs_spin.value(),
-                "max_thumb_size": self._max_thumb_size_spin.value(),
-                "max_workers":    self._max_workers_spin.value(),
-                "color_scheme": selected_scheme,
+                "max_thumbnails":    self._max_thumbs_spin.value(),
+                "max_thumb_size":    self._max_thumb_size_spin.value(),
+                "max_workers":       self._max_workers_spin.value(),
+                "color_scheme":      selected_scheme,
+                "ui_color_overrides": self._ui_color_overrides,
+                "custom_color_schemes": custom_color_schemes,
                 "file_sorting_enabled": self._file_sorting_check.isChecked(),
                 "warn_presupported_stl": self._warn_presupported_check.isChecked(),
                 "presupport_patterns": [

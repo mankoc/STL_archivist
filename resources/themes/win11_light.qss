@@ -2,22 +2,32 @@
 
 /* ================================================================
    Color tokens
-   --bg-base:       #f3f3f3   window / mica base
-   --bg-surface:    #ffffff   card / panel surface
-   --bg-control:    #fbfbfb   control fill (button, input, combo)
-   --bg-hover:      #f0f0f0   control fill on hover
-   --bg-pressed:    #e5e5e5   control fill on press
-   --border:        #d1d1d1   subtle border
-   --border-focus:  #0067c0   focus ring
-   --accent:        #0067c0   Windows blue
-   --accent-hover:  #1576c7
-   --accent-press:  #0050a0
-   --text-primary:  #1b1b1b
-   --text-secondary:#6b6b6b
-   --text-disabled: #a0a0a0
-   --selection:     #cce4f7
-   --pair-a:        #c8e0f4   duplicate-pair highlight A (blue tint)
-   --pair-b:        #e4d0f0   duplicate-pair highlight B (purple tint)
+   --bg-base:        #f3f3f3   window / mica base
+   --bg-surface:     #ffffff   card / panel surface
+   --bg-control:     #fbfbfb   control fill (button, input, combo)
+   --bg-hover:       #f0f0f0   control fill on hover
+   --bg-pressed:     #e5e5e5   control fill on press
+   --border:         #d1d1d1   subtle border
+   --border-focus:   #0067c0   focus ring
+   --accent:         #0067c0   Windows blue
+   --accent-hover:   #1576c7
+   --accent-press:   #0050a0
+   --text-primary:   #1b1b1b
+   --text-secondary: #6b6b6b
+   --text-disabled:  #a0a0a0
+   --selection:      #cce4f7
+   --pair-a:         #c8e0f4   duplicate-pair highlight A (blue tint)
+   --pair-b:         #e4d0f0   duplicate-pair highlight B (purple tint)
+   --status-neutral: #888888   unchecked group indicator dot
+   --status-ok:      #388E3C   ok / include group indicator dot
+   --status-warn:    #D32F2F   warning / exclude group indicator dot
+   --warn-row-bg:    #fff3e0   background of archive rows with warnings
+   --warn-row-fg:    #e65100   text color of archive rows with warnings
+   --missing-file:   #d32f2f   missing archive rows in maintenance view
+   --found-file:     #388e3c   found / relocated archive rows in maintenance view
+   --match-highlight:#c8e6c9   file-match row tint in file comparison table
+   --selection-border:#1565c0  selected-thumbnail border in image grid
+   --selection-bg:   #e3f2fd   selected-thumbnail background in image grid
 ================================================================ */
 
 /* ---- Base ---- */

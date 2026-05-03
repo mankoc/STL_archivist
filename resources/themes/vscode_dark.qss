@@ -2,15 +2,25 @@
 
 /* ================================================================
    Color tokens
-   --bg-base:       #1e1e1e   editor background
-   --bg-surface:    #252526   sidebar / panel background
-   --bg-control:    #3c3c3c   input / button fill
-   --selection:     #264f78   selected item background
-   --accent:        #007acc   VS Code blue
-   --text-primary:  #d4d4d4
-   --text-secondary:#969696
-   --pair-a:        #28405a   duplicate-pair highlight A (blue tint)
-   --pair-b:        #3c2850   duplicate-pair highlight B (purple tint)
+   --bg-base:        #1e1e1e   editor background
+   --bg-surface:     #252526   sidebar / panel background
+   --bg-control:     #3c3c3c   input / button fill
+   --selection:      #264f78   selected item background
+   --accent:         #007acc   VS Code blue
+   --text-primary:   #d4d4d4
+   --text-secondary: #969696
+   --pair-a:         #28405a   duplicate-pair highlight A (blue tint)
+   --pair-b:         #3c2850   duplicate-pair highlight B (purple tint)
+   --status-neutral: #888888   unchecked group indicator dot
+   --status-ok:      #4CAF50   ok / include group indicator dot
+   --status-warn:    #F44336   warning / exclude group indicator dot
+   --warn-row-bg:    #4a4a4a   background of archive rows with warnings
+   --warn-row-fg:    #FFD700   text color of archive rows with warnings
+   --missing-file:   #d24646   missing archive rows in maintenance view
+   --found-file:     #3c9650   found / relocated archive rows in maintenance view
+   --match-highlight:#64c864   file-match row tint in file comparison table
+   --selection-border:#1565c0  selected-thumbnail border in image grid
+   --selection-bg:   #1a3a5c   selected-thumbnail background in image grid
 ================================================================ */
 
 QWidget {

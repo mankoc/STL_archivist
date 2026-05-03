@@ -480,14 +480,16 @@ class FilterItemDelegate(QStyledItemDelegate):
 
         if state == Qt.CheckState.Unchecked:
             # Neutral gray circle — "parent / not selected"
-            painter.setPen(QPen(QColor("#888888"), 1.5))
+            from app.ui.config_dialog import get_status_neutral_color
+            painter.setPen(QPen(QColor(get_status_neutral_color()), 1.5))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawEllipse(rf)
 
         elif state == Qt.CheckState.Checked:
             # Green filled circle with white "+"
+            from app.ui.config_dialog import get_status_ok_color
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor("#4CAF50"))
+            painter.setBrush(QColor(get_status_ok_color()))
             painter.drawEllipse(rf)
             pen = QPen(QColor("white"), pw, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
             painter.setPen(pen)
@@ -500,8 +502,9 @@ class FilterItemDelegate(QStyledItemDelegate):
 
         elif state == Qt.CheckState.PartiallyChecked:
             # Red filled circle with white "−"
+            from app.ui.config_dialog import get_status_warn_color
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor("#F44336"))
+            painter.setBrush(QColor(get_status_warn_color()))
             painter.drawEllipse(rf)
             pen = QPen(QColor("white"), pw, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
             painter.setPen(pen)
@@ -1291,8 +1294,9 @@ class BrowserTab(QWidget):
                 warning_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 if stl.warning:
                     warning_item.setData(stl.warning, Qt.ItemDataRole.ToolTipRole)
-                    warning_item.setBackground(QColor("#4a4a4a"))
-                    warning_item.setForeground(QColor("#FFD700"))
+                    from app.ui.config_dialog import get_warn_row_bg_color, get_warn_row_fg_color
+                    warning_item.setBackground(QColor(get_warn_row_bg_color()))
+                    warning_item.setForeground(QColor(get_warn_row_fg_color()))
                     _warn_font = QFont()
                     _warn_font.setPointSize(16)
                     _warn_font.setBold(True)

@@ -37,9 +37,15 @@ _COL_TITLE  = 1
 _COL_PATH   = 2
 _COL_STATUS = 3
 
-_COLOR_MISSING = QColor(210, 70, 70)
-_COLOR_FOUND   = QColor(60, 150, 80)
-_COLOR_FG      = QColor(255, 255, 255)
+def _color_missing() -> QColor:
+    from app.ui.config_dialog import get_missing_file_color
+    return QColor(get_missing_file_color())
+
+def _color_found() -> QColor:
+    from app.ui.config_dialog import get_found_file_color
+    return QColor(get_found_file_color())
+
+_COLOR_FG = QColor(255, 255, 255)
 
 
 class VerifyWorker(QThread):
@@ -408,9 +414,9 @@ class DbMaintenanceDialog(QDialog):
 
             status = row["status"]
             if status == _STATUS_MISSING:
-                self._color_row(items, _COLOR_MISSING)
+                self._color_row(items, _color_missing())
             elif status == _STATUS_FOUND:
-                self._color_row(items, _COLOR_FOUND)
+                self._color_row(items, _color_found())
 
             for col, item in enumerate(items):
                 self._table.setItem(r, col, item)
@@ -488,7 +494,7 @@ class DbMaintenanceDialog(QDialog):
                 items = [self._table.item(i, col) for col in range(4)]
                 self._table.item(i, _COL_PATH).setText(new_path)
                 self._table.item(i, _COL_STATUS).setText(_STATUS_FOUND)
-                self._color_row([it for it in items if it], _COLOR_FOUND)
+                self._color_row([it for it in items if it], _color_found())
                 if self._only_failed_cb.isChecked():
                     self._table.setRowHidden(i, True)
                 break

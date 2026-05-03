@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QHBoxLayout, QSplitter, QLabel, QComboBox
 )
 
-from app.constants import MATCH_HIGHLIGHT_RGBA
+from app.ui.config_dialog import get_match_highlight_color
 from app.database.db import session_scope
 from app.database.models import STLFile, STLModel
 from app.utils.file_matching import match_files
@@ -145,7 +145,8 @@ class FileComparisonDialog(QDialog):
             if fa and fb:
                 item_match = QTableWidgetItem("==")
                 item_match.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                item_match.setBackground(QColor(*MATCH_HIGHLIGHT_RGBA))
+                c = QColor(get_match_highlight_color()); c.setAlpha(50)
+                item_match.setBackground(c)
                 self.table.setItem(i, 2, item_match)
             else:
                 self.table.setItem(i, 2, QTableWidgetItem(""))
