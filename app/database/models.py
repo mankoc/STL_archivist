@@ -220,6 +220,7 @@ class Image(Base):
     filename       = Column(String(512))
     thumbnail_path = Column(String(512), nullable=True)
     thumbnail      = Column(LargeBinary, nullable=True)   # legacy blob – NULL after migration to LMDB
+    dhash          = Column(Integer, nullable=True)      # 64-bit perceptual hash (dHash)
 
     model = relationship("STLModel", back_populates="images")
 

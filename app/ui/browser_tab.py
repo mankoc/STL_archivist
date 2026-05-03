@@ -5,7 +5,7 @@ Centre: sortable table with thumbnail, title, author, category, date, tags, path
 Right panel: image thumbnail sidebar (populated on single-click).
 Right-click or double-click: Edit Model.
 """
-from pathlib import Path as FSPath
+from pathlib import Path as FSPath, Path
 
 _ICONS_DIR = FSPath(__file__).parent.parent.parent / "resources" / "icons"
 
@@ -1781,6 +1781,12 @@ class BrowserTab(QWidget):
             f"Generate Thumbnails for {len(selected_ids)} model(s)…",
         )
 
+        # Recrawl action: only enabled in debug mode
+        recrawl_act = None
+        from app.ui.config_dialog import get_debug_menu_enabled
+        if get_debug_menu_enabled():
+            recrawl_act = menu.addAction(style.standardIcon(SP.SP_BrowserReload), f"Recrawl {len(selected_ids)} model(s)…")
+
         from app.ui.config_dialog import get_metadata_sidecar_enabled
         sidecar_act = None
         if get_metadata_sidecar_enabled():
@@ -1804,6 +1810,8 @@ class BrowserTab(QWidget):
             self._sort_files(selected_ids)
         elif action == thumb_act:
             self._generate_thumbnails(selected_ids)
+        elif recrawl_act and action == recrawl_act:
+            self._recrawl_selection(selected_ids)
         elif sidecar_act and action == sidecar_act:
             self._create_sidecar_for_selection(selected_ids)
         elif add_tag_act and action == add_tag_act:
@@ -1826,6 +1834,110 @@ class BrowserTab(QWidget):
     def _show_files(self, model_id: int) -> None:
         from app.ui.file_list_dialog import FileListDialog
         FileListDialog(model_id, parent=self).exec()
+
+    def _recrawl_selection(self, model_ids: list[int]) -> None:
+        """Run the crawler extraction for the selected model(s) and show a preview
+        of the changes before applying them to the DB.
+
+        This is synchronous and may be slow for many models – callers already
+        invoke it from the UI thread via the context menu.
+        """
+        if not model_ids:
+            return
+
+        from app.ui.recrawl_dialog import RecrawlPreviewDialog
+        from app.crawler.archive import extract_archive_contents, list_contents, archive_hash
+        from app.crawler.metadata import extract_metadata
+        from app.database.db import session_scope
+        from app.config import CrawlerConfig
+
+        changes_all: dict[int, list[tuple[str, str, str]]] = {}
+
+        # For each selected model, open the archive, extract relevant files and
+        # compute the metadata. Build a list of (field, current, new) tuples.
+        with session_scope() as session:
+            models = session.query(STLModel).filter(STLModel.id.in_(model_ids)).all()
+            for m in models:
+                p = m.archive_path
+                try:
+                    archive_path = Path(p)
+                except Exception:
+                    continue
+                # Extract only the relevant files (no thumbnail generation here)
+                contents = extract_archive_contents(archive_path, unrar_path=CrawlerConfig().unrar_path)
+                meta = extract_metadata(archive_path, contents=contents, source_dir=archive_path.parent)
+
+                # Compare fields and collect changes
+                changes: list[tuple[str, str, str]] = []
+                def _add_if_diff(field: str, current: str, new: str) -> None:
+                    cur = "" if current is None else str(current)
+                    nw = "" if new is None else str(new)
+                    if cur != nw:
+                        changes.append((field, cur, nw))
+
+                _add_if_diff("Title", m.title, meta.title)
+                _add_if_diff("Creator", m.creator, meta.creator)
+                # ModelMetadata uses 'distributor' as the field name for the source/platform
+                _add_if_diff("Source", m.source, meta.distributor)
+                # release_date -> year/month
+                if meta.release_date:
+                    ry, rm = parse_release_date(meta.release_date)
+                    new_date = format_release_date(ry, rm)
+                else:
+                    new_date = ""
+                _add_if_diff("Release date", format_release_date(m.release_year, m.release_month), new_date)
+                _add_if_diff("URL", m.url, meta.url)
+
+                # Tags comparison – join into a comma-separated string for preview
+                cur_tags = ", ".join(t.name for t in m.tags)
+                new_tags = ", ".join(meta.tags)
+                _add_if_diff("Tags", cur_tags, new_tags)
+
+                # STL file list preview – show count change only
+                cur_files = str(len(m.stl_files))
+                new_files = str(len([n for n in (list_contents(archive_path) or []) if Path(n.replace("\\", "/")).suffix.lower() in {".stl", ".obj", ".lys", ".chitubox"}]))
+                _add_if_diff("File list count", cur_files, new_files)
+
+                changes_all[m.id] = changes
+
+        # If no changes for any selected model, inform the user
+        all_changes = [(f"ID {mid}",) + ch for mid, chlist in changes_all.items() for ch in chlist]
+        # Flatten into (field, current, new) with model prefix in the field name
+        flat: list[tuple[str, str, str]] = []
+        for mid, chlist in changes_all.items():
+            for field, cur, nw in chlist:
+                flat.append((f"[{mid}] {field}", cur, nw))
+
+        dlg = RecrawlPreviewDialog(f"Recrawl preview for {len(model_ids)} model(s)", flat, parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        # User accepted — apply changes by re-running the upsert logic for each archive
+        # We'll reuse the crawler's _upsert_archive via a temporary CrawlerWorker instance
+        from app.crawler.crawler import CrawlerWorker
+        config = CrawlerConfig()
+        worker = CrawlerWorker(str(Path(models[0].archive_path).parent), pattern="", config=config)
+
+        # Run per-model upsert synchronously using session_scope and the crawler helper
+        with session_scope() as session:
+            for mid in model_ids:
+                m = session.query(STLModel).get(mid)
+                if not m:
+                    continue
+                archive_path = Path(m.archive_path)
+                # compute hash and extract contents
+                cur_hash = archive_hash(archive_path, unrar_path=config.unrar_path)
+                data = extract_archive_contents(archive_path, unrar_path=config.unrar_path, all_names_out=None, stl_info_out=None)
+                # call the private upsert method on the worker instance
+                try:
+                    worker._upsert_archive(archive_path, session, config.max_thumbnails, config.max_thumb_size, current_hash=cur_hash, existing=m, contents=data, all_names=None, stl_info=None)
+                    session.commit()
+                except Exception as exc:
+                    session.rollback()
+                    QMessageBox.warning(self, "Recrawl failed", f"Failed to recrawl {archive_path}: {exc}")
+                    continue
+
+        QMessageBox.information(self, "Recrawl complete", f"Recrawl applied for {len(model_ids)} model(s).")
 
     def _delete_files_from_disk(self, model_ids: list[int]) -> None:
         """Physically delete or move to trash the selected archive files."""

@@ -99,6 +99,11 @@ def _dhash(jpeg_bytes: bytes, hash_size: int = 8) -> Optional[int]:
         return None
 
 
+def compute_dhash_from_jpeg(jpeg_bytes: bytes) -> Optional[int]:
+    """Public wrapper used by other modules to compute dHash from JPEG bytes."""
+    return _dhash(jpeg_bytes)
+
+
 def _hamming(a: int, b: int) -> int:
     return bin(a ^ b).count("1")
 
@@ -315,11 +320,26 @@ class _ImageDupWorker(QThread):
                     if self._stop:
                         self.finished.emit([])
                         return
-                    jpeg = get_thumbnail_bytes(img_id)
-                    if jpeg:
-                        h = _dhash(jpeg)
-                        if h is not None:
-                            hashes.append((img_id, model_id, h))
+                    # Prefer a stored dhash in the Image row when available to avoid recomputing
+                    # (load Image.dhash lazily via a separate query to keep the main query simple)
+                    from app.database.db import get_session
+                    s = get_session()
+                    try:
+                        row = s.execute(
+                            "SELECT dhash FROM images WHERE id = :id",
+                            {"id": img_id},
+                        ).fetchone()
+                        dh = row[0] if row is not None else None
+                    finally:
+                        s.close()
+                    if dh is not None:
+                        hashes.append((img_id, model_id, int(dh)))
+                    else:
+                        jpeg = get_thumbnail_bytes(img_id)
+                        if jpeg:
+                            h = _dhash(jpeg)
+                            if h is not None:
+                                hashes.append((img_id, model_id, h))
                             model_img_count[model_id] += 1
                     if (n + 1) % 50 == 0:
                         self.prog_val.emit(n + 1, total)

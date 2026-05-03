@@ -215,9 +215,9 @@ def extract_archive_contents(
     avoid opening the archive a second time.
 
     When *stl_info_out* is a dict, it will be populated with
-    ``{member_name: uncompressed_size_bytes}`` for every ``.stl`` member
-    found in the archive catalog.  Size may be ``None`` for formats where
-    it is not available in the catalog header.
+    ``{member_name: uncompressed_size_bytes}`` for every ``.stl``, ``.obj``,
+    ``.lys``, and ``.chitubox`` member found in the archive catalog. Size may
+    be ``None`` for formats where it is not available in the catalog header.
     """
     suffix = archive_path.suffix.lower()
     result: dict[str, bytes] = {}
@@ -230,8 +230,9 @@ def extract_archive_contents(
                 if all_names_out is not None:
                     all_names_out.extend(all_names)
                 if stl_info_out is not None:
+                    target_exts = {".stl", ".obj", ".lys", ".chitubox"}
                     for i in infos:
-                        if Path(i.filename.replace("\\", "/")).suffix.lower() == ".stl":
+                        if Path(i.filename.replace("\\", "/")).suffix.lower() in target_exts:
                             stl_info_out[i.filename] = i.file_size
                 wanted = [n for n in all_names if _is_wanted(n)]
                 logger.debug("  ZIP: %d total members, %d wanted", len(all_names), len(wanted))
@@ -264,8 +265,9 @@ def extract_archive_contents(
                     if all_names_out is not None:
                         all_names_out.extend(all_names)
                     if stl_info_out is not None:
+                        target_exts = {".stl", ".obj", ".lys", ".chitubox"}
                         for f in members:
-                            if Path(f.filename.replace("\\", "/")).suffix.lower() == ".stl":
+                            if Path(f.filename.replace("\\", "/")).suffix.lower() in target_exts:
                                 stl_info_out[f.filename] = getattr(f, "uncompressed", None)
                     wanted = [n for n in all_names if _is_wanted(n)]
                     logger.debug("  7Z: %d total members, %d wanted", len(all_names), len(wanted))
@@ -299,8 +301,9 @@ def extract_archive_contents(
                 if all_names_out is not None:
                     all_names_out.extend(all_names)
                 if stl_info_out is not None:
+                    target_exts = {".stl", ".obj", ".lys", ".chitubox"}
                     for i in infos:
-                        if Path(i.filename.replace("\\", "/")).suffix.lower() == ".stl":
+                        if Path(i.filename.replace("\\", "/")).suffix.lower() in target_exts:
                             stl_info_out[i.filename] = getattr(i, "file_size", None)
                 wanted = [n for n in all_names if _is_wanted(n)]
                 logger.debug("  RAR: %d total members, %d wanted", len(all_names), len(wanted))
