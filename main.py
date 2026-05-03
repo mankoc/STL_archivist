@@ -70,8 +70,11 @@ def main() -> None:
     from app.ui.config_dialog import get_db_path, get_color_scheme, apply_color_scheme
 
     # Initialise logging before anything else that might log.
-    from app.utils.logger import setup_logging
-    setup_logging()
+    from app.utils.logger import setup_logging, setup_excepthook
+    from app.ui.config_dialog import get_logging_enabled
+    if get_logging_enabled():
+        setup_logging()
+    setup_excepthook()
 
     import logging
     logging.getLogger(__name__).info(

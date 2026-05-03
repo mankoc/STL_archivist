@@ -11,14 +11,14 @@ import sys
 from pathlib import Path
 
 from PyQt6.QtCore import QSettings, QSize, Qt
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QHBoxLayout,
     QDialogButtonBox, QFileDialog, QMessageBox, QSpinBox,
     QComboBox, QCheckBox, QApplication, QColorDialog, QInputDialog,
     QListWidget, QListWidgetItem, QStackedWidget, QSplitter, QWidget, QStyle,
-    QTreeWidget, QTreeWidgetItem, QScrollArea,
+    QTreeWidget, QTreeWidgetItem, QScrollArea, QFontComboBox,
 )
 
 DATA_DIR_KEY           = "config/data_dir"
@@ -163,6 +163,8 @@ _UI_COLOR_DEFAULTS: dict[str, str] = {
     "match_highlight":   "#64c864",
     "selection_border":  "#1565c0",
     "selection_bg":      "#e3f2fd",
+    "window_bg":         "",         # overrides QWidget background; blank = from theme
+    "window_text":       "",         # overrides QWidget text color; blank = from theme
 }
 
 # Maps each key to the QSS comment-token name defined in .qss theme files.
@@ -289,6 +291,16 @@ def get_supports_patterns() -> list[str]:
     return get_presupport_patterns()
 
 
+def get_font_family() -> str:
+    """Return the user-configured font family, or empty string for the theme default."""
+    return str(_load_library_settings().get("font_family", ""))
+
+
+def get_font_size() -> int:
+    """Return the user-configured font size in points, or 0 for the theme default."""
+    return int(_load_library_settings().get("font_size", 0))
+
+
 def get_warn_supports() -> bool:
     """Whether to warn when an archive contains supported STL files (supports check)."""
     return bool(_load_library_settings().get("warn_supports", False))
@@ -346,6 +358,11 @@ def get_debug_menu_enabled() -> bool:
     return bool(_load_library_settings().get("debug_menu_enabled", False))
 
 
+def get_logging_enabled() -> bool:
+    """Whether file (and stderr) logging is active. Defaults to True."""
+    return bool(_load_library_settings().get("logging_enabled", True))
+
+
 def get_metadata_sidecar_enabled() -> bool:
     """Whether per-folder METADATA.7z sidecar files are created at all."""
     return bool(_load_library_settings().get("metadata_sidecar_enabled", True))
@@ -369,26 +386,58 @@ def get_recurse_subdirs() -> bool:
 _ICONS_DIR = Path(__file__).parent.parent.parent / "resources" / "icons"
 
 
+def _build_user_override_css(settings: dict) -> str:
+    """Build a QSS snippet applying window-color and font overrides from *settings*."""
+    overrides = settings.get("ui_color_overrides", {})
+    window_bg   = overrides.get("window_bg", "")
+    window_text = overrides.get("window_text", "")
+    font_family = settings.get("font_family", "")
+    font_size   = int(settings.get("font_size", 0))
+
+    parts: list[str] = []
+    if window_bg:
+        parts.append(f"background-color: {window_bg};")
+    if window_text:
+        parts.append(f"color: {window_text};")
+    if font_family:
+        parts.append(f'font-family: "{font_family}";')
+    if font_size > 0:
+        parts.append(f"font-size: {font_size}px;")
+
+    if not parts:
+        return ""
+    rule = " ".join(parts)
+    return (
+        f"QWidget {{ {rule} }}\n"
+        f"QMainWindow {{ {rule} }}\n"
+        f"QDialog {{ {rule} }}\n"
+    )
+
+
 def apply_color_scheme(scheme_name: str) -> None:
     """Apply a color scheme to the running QApplication."""
     app = QApplication.instance()
     if app is None:
         return
+    settings = _load_library_settings()
     # Resolve user-saved custom schemes to their base built-in theme
-    custom_schemes = _load_library_settings().get("custom_color_schemes", {})
+    custom_schemes = settings.get("custom_color_schemes", {})
     if scheme_name in custom_schemes:
         scheme_name = custom_schemes[scheme_name].get("base_theme", "System Default")
     value = THEMES.get(scheme_name, "")
+    override_css = _build_user_override_css(settings)
     if value.startswith("material:"):
         from qt_material import apply_stylesheet
         apply_stylesheet(app, theme=value[len("material:"):])
+        if override_css:
+            app.setStyleSheet(app.styleSheet() + "\n" + override_css)
     elif value and Path(value).exists():
         icons = str(_ICONS_DIR).replace("\\", "/")
         qss = Path(value).read_text(encoding="utf-8")
         qss = qss.replace("%(ICONS_DIR)s", icons)
-        app.setStyleSheet(qss)
+        app.setStyleSheet(qss + "\n" + override_css)
     else:
-        app.setStyleSheet("")
+        app.setStyleSheet(override_css)
 
 
 class ConfigDialog(QDialog):
@@ -733,6 +782,17 @@ class ConfigDialog(QDialog):
             ),
         )
 
+        self._logging_enabled_check = QCheckBox("Enable logging")
+        form.addRow("", self._logging_enabled_check)
+        form.addRow(
+            "",
+            QLabel(
+                "<small>Write application events and errors to the log file. "
+                "Uncheck to silence all log output. "
+                "Uncaught exceptions are always captured regardless of this setting.</small>"
+            ),
+        )
+
         layout.addWidget(group)
         layout.addStretch()
         return page
@@ -932,6 +992,46 @@ class ConfigDialog(QDialog):
         )
         layout.addWidget(hl_group)
 
+        # ---- Window Colors ----------------------------------------------
+        wc_group = QGroupBox("Window Colors")
+        wc_form = QFormLayout(wc_group)
+        self._add_color_row(wc_form, "window_bg",   "Background:")
+        self._add_color_row(wc_form, "window_text", "Text:")
+        wc_form.addRow(
+            "",
+            QLabel("<small>Override the background and text color for all windows. "
+                   "Leave blank to use the active theme's colors.</small>"),
+        )
+        layout.addWidget(wc_group)
+
+        # ---- Typography -------------------------------------------------
+        font_group = QGroupBox("Typography")
+        font_form = QFormLayout(font_group)
+
+        self._font_family_combo = QFontComboBox()
+        self._font_family_combo.setEditable(True)
+        self._font_family_combo.setCurrentFont(QApplication.font())
+        font_form.addRow("Font family:", self._font_family_combo)
+
+        self._font_size_spin = QSpinBox()
+        self._font_size_spin.setRange(6, 48)
+        self._font_size_spin.setValue(QApplication.font().pointSize())
+        self._font_size_spin.setSuffix(" pt")
+        self._font_size_spin.setSpecialValueText("(theme default)")
+        self._font_size_spin.setMinimum(0)
+        font_form.addRow("Font size:", self._font_size_spin)
+
+        font_reset_btn = QPushButton("Reset to theme font")
+        font_reset_btn.clicked.connect(self._reset_font)
+        font_form.addRow("", font_reset_btn)
+
+        font_form.addRow(
+            "",
+            QLabel("<small>Changes take effect after clicking OK. "
+                   "Set size to 0 to use the theme default.</small>"),
+        )
+        layout.addWidget(font_group)
+
         # ---- Global actions ---------------------------------------------
         action_row = QHBoxLayout()
         reset_btn = QPushButton("Reset all to theme defaults")
@@ -1022,6 +1122,11 @@ class ConfigDialog(QDialog):
         """Clear all overrides so colors fall back to theme/QSS defaults."""
         self._ui_color_overrides.clear()
         self._refresh_all_ui_color_btns()
+
+    def _reset_font(self) -> None:
+        """Clear the font overrides back to theme defaults."""
+        self._font_family_combo.setCurrentFont(QApplication.font())
+        self._font_size_spin.setValue(0)
 
     # ------------------------------------------------------------------
     def _preview_theme(self, scheme_name: str) -> None:
@@ -1127,7 +1232,17 @@ class ConfigDialog(QDialog):
                 self._ui_color_overrides[new_key] = settings[leg_key]
         self._refresh_all_ui_color_btns()
 
+        # Load font settings
+        family = settings.get("font_family", "")
+        if family:
+            self._font_family_combo.setCurrentFont(QFont(family))
+        else:
+            self._font_family_combo.setCurrentFont(QApplication.font())
+        size = int(settings.get("font_size", 0))
+        self._font_size_spin.setValue(size)
+
         self._debug_menu_check.setChecked(get_debug_menu_enabled())
+        self._logging_enabled_check.setChecked(get_logging_enabled())
 
     def _save(self) -> None:
         """Persist all form values to QSettings and the library settings JSON."""
@@ -1145,6 +1260,9 @@ class ConfigDialog(QDialog):
         custom_color_schemes = existing.get("custom_color_schemes", {})
 
         # Save all other settings into the library's own settings file
+        font_family = self._font_family_combo.currentFont().family()
+        font_size   = self._font_size_spin.value()
+
         _save_library_settings(
             {
                 "max_thumbnails":    self._max_thumbs_spin.value(),
@@ -1167,12 +1285,27 @@ class ConfigDialog(QDialog):
                 "store_stl_file_list": self._store_stl_list_check.isChecked(),
                 "recurse_subdirs": self._recurse_subdirs_check.isChecked(),
                 "debug_menu_enabled": self._debug_menu_check.isChecked(),
+                "logging_enabled":    self._logging_enabled_check.isChecked(),
                 "allow_file_delete": self._allow_file_delete_check.isChecked(),
                 "use_trash_folder": self._use_trash_folder_check.isChecked(),
                 "trash_folder_path": self._trash_folder_edit.text().strip(),
+                "font_family": font_family,
+                "font_size":   font_size,
             },
             data_dir=data_dir,
         )
+
+        # Re-apply appearance so font/color changes take effect immediately
+        apply_color_scheme(selected_scheme)
+
+        # Apply logging toggle immediately so the change doesn't require a restart
+        import logging as _logging
+        from app.utils.logger import setup_logging, disable_logging
+        if self._logging_enabled_check.isChecked():
+            if not _logging.getLogger().handlers:
+                setup_logging(data_dir)
+        else:
+            disable_logging()
 
         self._original_scheme = selected_scheme
 
