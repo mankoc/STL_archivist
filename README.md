@@ -2,6 +2,8 @@
 
 A desktop application for cataloguing and browsing your local collection of 3D printable STL model archives. Built with PyQt6 and SQLAlchemy.
 
+Version: 0.5.0
+
 ## Features
 
 - **Crawler** — scans a folder of archives (`.zip`, `.7z`, `.rar`) and automatically imports model metadata into a local SQLite database; runs with parallel workers for fast processing

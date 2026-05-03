@@ -33,6 +33,12 @@ def build_crawler_config(max_thumbnails: int | None = None) -> CrawlerConfig:
             the value is read from settings.
     """
     thumbs = max_thumbnails if max_thumbnails is not None else get_max_thumbnails()
+    # Import get_recurse_subdirs lazily to avoid import cycles at module import time
+    try:
+        from app.ui.config_dialog import get_recurse_subdirs
+        recurse = bool(get_recurse_subdirs())
+    except Exception:
+        recurse = True
     return CrawlerConfig(
         max_thumbnails=thumbs,
         max_thumb_size=get_max_thumb_size(),
@@ -46,4 +52,5 @@ def build_crawler_config(max_thumbnails: int | None = None) -> CrawlerConfig:
         warn_nested_archive=get_warn_nested_archive(),
         warn_supports=get_warn_supports(),
         support_patterns=get_supports_patterns(),
+        recurse_subdirs=recurse,
     )

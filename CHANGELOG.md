@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.5.0 — 2026-05-03
+
+### Misc
+
+- Bumped version to v0.5.0. Help and About dialogs now display the correct application version.
+
+---
+
 ## v0.4.0 — 2026-05-02
 
 ### UI — Browser

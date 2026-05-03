@@ -75,8 +75,12 @@ class CrawlerWorker(QThread):
                     self.source_dir, self._pattern, self._config.max_workers)
         self._remove_missing()
 
-        logger.debug("Scanning source directory for archives: %s", self.source_dir)
-        archives = sorted(iter_archives(self.source_dir))
+        logger.debug("Scanning source directory for archives: %s (recurse=%s)", self.source_dir, self._config.recurse_subdirs)
+        if self._config.recurse_subdirs:
+            archives = sorted(iter_archives(self.source_dir))
+        else:
+            # Only list archives directly in the selected folder (no recursion)
+            archives = sorted([p for p in self.source_dir.iterdir() if p.is_file() and p.suffix.lower() in ('.zip', '.7z', '.rar')])
         total    = len(archives)
         msg      = f"Found {total} archives in {self.source_dir}"
         self.log.emit(msg)
@@ -142,9 +146,36 @@ class CrawlerWorker(QThread):
         """Phase 1: parallel CRC-based fingerprinting of each archive."""
         workers = self._config.max_workers
         logger.debug("Phase 1: computing archive hashes (parallel, %d workers)", workers)
-        hash_fn = partial(archive_hash, unrar_path=self._config.unrar_path)
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            hashes: dict[Path, str] = dict(zip(batch, pool.map(hash_fn, batch)))
+
+        # Optimization: if the archive exists in DB and its cached size and mtime
+        # match the filesystem, assume unchanged and reuse the stored hash.
+        hashes: dict[Path, str] = {}
+        to_hash: list[Path] = []
+        with session_scope() as session:
+            for p in batch:
+                pstr = str(p)
+                m = session.query(STLModel).filter_by(archive_path=pstr).first()
+                try:
+                    st = p.stat()
+                    fs_size = int(st.st_size)
+                    fs_mtime = int(st.st_mtime_ns)
+                except Exception:
+                    fs_size = None
+                    fs_mtime = None
+
+                if m is not None and m.archive_size is not None and m.archive_mtime_ns is not None:
+                    if fs_size == m.archive_size and fs_mtime == m.archive_mtime_ns:
+                        # unchanged
+                        hashes[p] = m.archive_hash
+                        continue
+                # Otherwise schedule full hash
+                to_hash.append(p)
+
+        if to_hash:
+            hash_fn = partial(archive_hash, unrar_path=self._config.unrar_path)
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                for p, h in zip(to_hash, pool.map(hash_fn, to_hash)):
+                    hashes[p] = h
         logger.debug("Phase 1 complete — %d hashes computed", len(hashes))
         return hashes
 
@@ -173,9 +204,18 @@ class CrawlerWorker(QThread):
                 to_extract.append(p)
                 logger.debug("  NEW: %s", p.name)
             elif ex.archive_hash != hashes[p]:
+                # File has changed (hash mismatch) — mark for extraction and refresh cached fs metadata
                 to_extract.append(p)
                 logger.debug("  CHANGED: %s (old=%s… new=%s…)",
                              p.name, ex.archive_hash[:8], hashes[p][:8])
+                try:
+                    st = p.stat()
+                    ex.archive_size = int(st.st_size)
+                    ex.archive_mtime_ns = int(st.st_mtime_ns)
+                    session.add(ex)
+                    session.flush()
+                except Exception:
+                    pass
             elif store_stl and not ex.stl_files:
                 to_extract.append(p)
                 logger.debug("  MISSING STL LIST: %s", p.name)
@@ -413,6 +453,13 @@ class CrawlerWorker(QThread):
             logger.debug("  %s — inserting new record", archive_path.name)
 
         model.archive_hash = current_hash
+        # Update cached filesystem metadata
+        try:
+            st = archive_path.stat()
+            model.archive_size = int(st.st_size)
+            model.archive_mtime_ns = int(st.st_mtime_ns)
+        except Exception:
+            pass
 
         if all_names is None:
             logger.debug("  Listing archive contents for rule detection: %s", archive_path.name)

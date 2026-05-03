@@ -1813,6 +1813,7 @@ class BrowserTab(QWidget):
             )
 
         menu.addSeparator()
+        rescan_act = menu.addAction(style.standardIcon(SP.SP_BrowserReload), f"Rescan {len(selected_ids)} file(s)")
         thumb_act = menu.addAction(
             style.standardIcon(SP.SP_BrowserReload),
             f"Generate Thumbnails for {len(selected_ids)} model(s)…",
@@ -1847,6 +1848,8 @@ class BrowserTab(QWidget):
             self._sort_files(selected_ids)
         elif action == thumb_act:
             self._generate_thumbnails(selected_ids)
+        elif action == rescan_act:
+            self._rescan_files(selected_ids)
         elif recrawl_act and action == recrawl_act:
             self._recrawl_selection(selected_ids)
         elif sidecar_act and action == sidecar_act:
@@ -1975,6 +1978,101 @@ class BrowserTab(QWidget):
                     continue
 
         QMessageBox.information(self, "Recrawl complete", f"Recrawl applied for {len(model_ids)} model(s).")
+
+    def _rescan_files(self, model_ids: list[int]) -> None:
+        """Run validations and re-extract metadata for the selected files.
+
+        This is a faster, focused check compared to a full recrawl: it will
+        compute the archive hash if the filesystem indicates modification,
+        re-run rule detection (warnings), refresh STL file list (if enabled),
+        and update metadata fields from info.json/.url.
+        """
+        if not model_ids:
+            return
+
+        from app.crawler.archive import archive_hash, extract_archive_contents, list_contents
+        from app.crawler.metadata import extract_metadata
+        from app.config import CrawlerConfig
+        from app.database.db import session_scope
+        from app.ui.config_dialog import get_warn_presupported_stl, get_warn_no_images, get_warn_nested_archive, get_store_stl_file_list
+
+        config = CrawlerConfig()
+        updated = 0
+        with session_scope() as session:
+            for mid in model_ids:
+                m = session.get(STLModel, mid)
+                if not m or not m.archive_path:
+                    continue
+                p = Path(m.archive_path)
+                if not p.exists():
+                    QMessageBox.warning(self, "Rescan", f"Archive not found: {m.archive_path}")
+                    continue
+
+                # Quick check: if size/mtime matches DB, skip heavy work
+                try:
+                    st = p.stat()
+                    fs_size = int(st.st_size)
+                    fs_mtime = int(st.st_mtime_ns)
+                except Exception:
+                    fs_size = None
+                    fs_mtime = None
+
+                need_hash = True
+                if fs_size is not None and fs_mtime is not None and m.archive_size is not None and m.archive_mtime_ns is not None:
+                    if fs_size == m.archive_size and fs_mtime == m.archive_mtime_ns:
+                        need_hash = False
+
+                if need_hash:
+                    new_hash = archive_hash(p, unrar_path=config.unrar_path)
+                else:
+                    new_hash = m.archive_hash
+
+                contents = extract_archive_contents(p, unrar_path=config.unrar_path, all_names_out=None, stl_info_out=None)
+                meta = extract_metadata(p, contents=contents, source_dir=p.parent)
+
+                # Update model in-place
+                m.archive_hash = new_hash
+                try:
+                    m.archive_size = fs_size
+                    m.archive_mtime_ns = fs_mtime
+                except Exception:
+                    pass
+                # assign metadata fields
+                m.title = meta.title or m.title
+                m.creator = meta.creator or m.creator
+                m.source = meta.distributor or m.source
+                if meta.release_date:
+                    ry, rm = parse_release_date(meta.release_date)
+                    if ry is not None:
+                        m.release_year = ry
+                        m.release_month = rm
+                m.url = meta.url or m.url
+                m.description = meta.description or m.description
+
+                # Recompute warnings and stl file list if enabled
+                all_names = list_contents(p)
+                from app.crawler.rules import detect_warnings, detect_presupport
+                warnings = detect_warnings(all_names,
+                                           check_presupported=get_warn_presupported_stl(),
+                                           check_no_images=get_warn_no_images(),
+                                           check_nested_archive=get_warn_nested_archive(),
+                                           check_supports=False)
+                m.warning = warnings or None
+
+                if get_store_stl_file_list():
+                    # Refresh stl_files entries
+                    for old in list(m.stl_files):
+                        session.delete(old)
+                    session.flush()
+                    # Build stl_info map by reading catalog (list_contents + sizes unknown here)
+                    from app.database.models import STLFile
+                    for fname in [n for n in (all_names or []) if Path(n.replace('\\', '/')).suffix.lower() in {'.stl', '.obj', '.lys', '.chitubox'}]:
+                        session.add(STLFile(model=m, filename=fname, file_size=None, archive_hash=new_hash))
+
+                updated += 1
+            session.flush()
+
+        QMessageBox.information(self, "Rescan complete", f"Rescan applied for {updated} model(s).")
 
     def _delete_files_from_disk(self, model_ids: list[int]) -> None:
         """Confirm with the user, then delegate to the file-deletion service.

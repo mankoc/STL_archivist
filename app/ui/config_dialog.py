@@ -245,6 +245,11 @@ def get_store_stl_file_list() -> bool:
     return bool(_load_library_settings().get("store_stl_file_list", False))
 
 
+def get_recurse_subdirs() -> bool:
+    """Whether the crawler should recurse into subdirectories of the selected folder."""
+    return bool(_load_library_settings().get("recurse_subdirs", True))
+
+
 _ICONS_DIR = Path(__file__).parent.parent.parent / "resources" / "icons"
 
 
@@ -450,6 +455,20 @@ class ConfigDialog(QDialog):
         )
 
         layout.addWidget(group)
+
+        # Recurse option
+        recurse_group = QGroupBox("Crawl Scope")
+        recurse_form = QFormLayout(recurse_group)
+        self._recurse_subdirs_check = QCheckBox("Recurse subdirectories")
+        recurse_form.addRow("Recurse subdirs:", self._recurse_subdirs_check)
+        recurse_form.addRow(
+            "",
+            QLabel(
+                "<small>When enabled, the crawler will search the selected folder and all its subfolders. "
+                "When disabled, only archives directly inside the selected folder are processed.</small>"
+            ),
+        )
+        layout.addWidget(recurse_group)
 
         file_info_group = QGroupBox("Full File Info")
         file_info_form = QFormLayout(file_info_group)
@@ -797,6 +816,13 @@ class ConfigDialog(QDialog):
         self._metadata_thumbnails_check.setEnabled(sidecar_enabled)
         self._metadata_thumbnails_check.setChecked(get_metadata_thumbnails_enabled())
         self._store_stl_list_check.setChecked(get_store_stl_file_list())
+        # New: recurse subdirectories setting
+        try:
+            from app.ui.config_dialog import get_recurse_subdirs  # type: ignore
+            self._recurse_subdirs_check.setChecked(get_recurse_subdirs())
+        except Exception:
+            # backwards-compat — default True
+            self._recurse_subdirs_check.setChecked(True)
 
         scheme = get_color_scheme()
         idx = self._theme_combo.findText(scheme)
@@ -838,6 +864,7 @@ class ConfigDialog(QDialog):
                 "metadata_sidecar_enabled": self._metadata_sidecar_check.isChecked(),
                 "metadata_thumbnails": self._metadata_thumbnails_check.isChecked(),
                 "store_stl_file_list": self._store_stl_list_check.isChecked(),
+                "recurse_subdirs": self._recurse_subdirs_check.isChecked(),
                 "debug_menu_enabled": self._debug_menu_check.isChecked(),
                 "allow_file_delete": self._allow_file_delete_check.isChecked(),
                 "use_trash_folder": self._use_trash_folder_check.isChecked(),
