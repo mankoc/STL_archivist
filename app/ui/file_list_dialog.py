@@ -1,11 +1,14 @@
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView,
     QPushButton, QHBoxLayout, QSplitter, QLabel, QComboBox
 )
 
+from app.constants import MATCH_HIGHLIGHT_RGBA
 from app.database.db import session_scope
 from app.database.models import STLFile, STLModel
+from app.utils.file_matching import match_files
 
 def format_size(size_bytes: int) -> str:
     """Format an integer byte count into a human-readable string (e.g. 1.2 MB)."""
@@ -51,7 +54,7 @@ class FileListDialog(QDialog):
         btn_layout.addWidget(close_btn)
         layout.addLayout(btn_layout)
 
-    def load_files(self):
+    def load_files(self) -> None:
         with session_scope() as session:
             files = session.query(STLFile).filter(STLFile.model_id == self.model_id).order_by(STLFile.filename).all()
             self.table.setRowCount(len(files))
@@ -114,7 +117,7 @@ class FileComparisonDialog(QDialog):
         self.load_data()
         self.rebuild_table()
         
-    def load_data(self):
+    def load_data(self) -> None:
         with session_scope() as session:
             ma = session.get(STLModel, self.model_id_a)
             mb = session.get(STLModel, self.model_id_b)
@@ -124,44 +127,9 @@ class FileComparisonDialog(QDialog):
             self.files_a = session.query(STLFile).filter(STLFile.model_id == self.model_id_a).all()
             self.files_b = session.query(STLFile).filter(STLFile.model_id == self.model_id_b).all()
 
-    def rebuild_table(self):
+    def rebuild_table(self) -> None:
         mode = self.match_combo.currentText()
-        
-        # Build matches
-        unmatched_a = list(self.files_a)
-        unmatched_b = list(self.files_b)
-        
-        rows = []
-        
-        if mode == "Filename":
-            from pathlib import Path
-            key_fn = lambda f: Path(f.filename).name.lower()
-        elif mode == "Size":
-            key_fn = lambda f: f.file_size
-        else:
-            key_fn = lambda f: f.archive_hash
-            
-        # Greedy matching
-        for fa in list(unmatched_a):
-            ka = key_fn(fa)
-            if ka is None: continue
-            
-            best_match = None
-            for fb in unmatched_b:
-                if key_fn(fb) == ka:
-                    best_match = fb
-                    break
-            
-            if best_match:
-                rows.append((fa, best_match))
-                unmatched_a.remove(fa)
-                unmatched_b.remove(best_match)
-                
-        # Remaining unmatched
-        for fa in unmatched_a:
-            rows.append((fa, None))
-        for fb in unmatched_b:
-            rows.append((None, fb))
+        rows = match_files(self.files_a, self.files_b, key=mode.lower())
             
         self.table.setRowCount(len(rows))
         for i, (fa, fb) in enumerate(rows):
@@ -177,9 +145,7 @@ class FileComparisonDialog(QDialog):
             if fa and fb:
                 item_match = QTableWidgetItem("==")
                 item_match.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                # highlight green?
-                from PyQt6.QtGui import QColor
-                item_match.setBackground(QColor(100, 200, 100, 50))
+                item_match.setBackground(QColor(*MATCH_HIGHLIGHT_RGBA))
                 self.table.setItem(i, 2, item_match)
             else:
                 self.table.setItem(i, 2, QTableWidgetItem(""))

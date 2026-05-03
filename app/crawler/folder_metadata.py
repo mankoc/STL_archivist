@@ -31,6 +31,16 @@ from typing import Optional
 import py7zr
 from sqlalchemy.orm import Session
 
+from app.database.helpers import (
+    get_or_create_category,
+    get_or_create_collection,
+    get_or_create_release,
+    get_or_create_scale,
+    get_or_create_sculptor,
+    get_or_create_subcollection,
+    get_or_create_tag,
+)
+
 logger = logging.getLogger(__name__)
 
 METADATA_FILENAME = "METADATA.7z"
@@ -132,7 +142,7 @@ def import_folder_metadata(folder: Path, session: Session, thumb_base_dir: Path)
 
     Returns a list of archive_path strings that were newly inserted.
     """
-    from app.database.models import STLModel, Image, Sculptor, Collection, Subcollection, Category, Release, Scale, Tag, STLFile
+    from app.database.models import STLModel, Image, STLFile
     from app.utils.thumbnailer import write_raw_thumbnail
 
     folder = Path(folder)
@@ -196,15 +206,8 @@ def import_folder_metadata(folder: Path, session: Session, thumb_base_dir: Path)
 
         # Tags
         for tag_name in model_data.get("tags", []):
-            tag_name = tag_name.strip().lower()
-            if not tag_name:
-                continue
-            tag = session.query(Tag).filter_by(name=tag_name).first()
-            if tag is None:
-                tag = Tag(name=tag_name)
-                session.add(tag)
-                session.flush()
-            model.tags.append(tag)
+            if tag_name.strip():
+                model.tags.append(get_or_create_tag(session, tag_name))
 
         session.flush()  # get model.id
 
@@ -419,62 +422,30 @@ def _restore_fk(session: Session, model, model_data: dict) -> None:
         model: The ``STLModel`` being populated.
         model_data: Deserialised dict for this archive from ``metadata.json``.
     """
-    from app.database.models import Sculptor, Collection, Subcollection, Category, Release, Scale
-
     sculptor_name = model_data.get("sculptor")
     if sculptor_name:
-        sc = session.query(Sculptor).filter_by(name=sculptor_name).first()
-        if sc is None:
-            sc = Sculptor(name=sculptor_name)
-            session.add(sc)
-            session.flush()
-        model.sculptor = sc
+        model.sculptor = get_or_create_sculptor(session, sculptor_name)
 
     # "collection" key is new; fall back to "category" for old sidecar files
     collection_name = model_data.get("collection") or model_data.get("category")
     if collection_name:
-        col = session.query(Collection).filter_by(name=collection_name).first()
-        if col is None:
-            col = Collection(name=collection_name)
-            session.add(col)
-            session.flush()
-        model.collection = col
+        model.collection = get_or_create_collection(session, collection_name)
 
     # "subcollection" key is new; fall back to "subcategory" for old sidecar files
     subcollection_name = model_data.get("subcollection") or model_data.get("subcategory")
     if subcollection_name and model.collection:
-        sub = session.query(Subcollection).filter_by(
-            name=subcollection_name, collection_id=model.collection.id
-        ).first()
-        if sub is None:
-            sub = Subcollection(name=subcollection_name, collection_id=model.collection.id)
-            session.add(sub)
-            session.flush()
-        model.subcollection = sub
+        model.subcollection = get_or_create_subcollection(
+            session, subcollection_name, model.collection.id,
+        )
 
     category_name = model_data.get("category") if "collection" in model_data else None
     if category_name:
-        cat = session.query(Category).filter_by(name=category_name).first()
-        if cat is None:
-            cat = Category(name=category_name)
-            session.add(cat)
-            session.flush()
-        model.category = cat
+        model.category = get_or_create_category(session, category_name)
 
     release_name = model_data.get("release")
     if release_name:
-        rel = session.query(Release).filter_by(name=release_name).first()
-        if rel is None:
-            rel = Release(name=release_name)
-            session.add(rel)
-            session.flush()
-        model.release = rel
+        model.release = get_or_create_release(session, release_name)
 
     scale_name = model_data.get("scale")
     if scale_name:
-        sc = session.query(Scale).filter_by(name=scale_name).first()
-        if sc is None:
-            sc = Scale(name=scale_name)
-            session.add(sc)
-            session.flush()
-        model.scale = sc
+        model.scale = get_or_create_scale(session, scale_name)

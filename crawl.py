@@ -83,21 +83,24 @@ def main() -> None:
     from app.utils.logger import setup_logging
     setup_logging()
 
-    from app.ui.config_dialog import get_db_path, get_unrar_path
+    from app.ui.config_dialog import get_db_path
     from app.database.db import init_db
-    from app.config import CrawlerConfig
     from app.crawler.crawler import CrawlerWorker
+    from app.ui.settings_loader import build_crawler_config
 
     db_path = args.db or get_db_path()
     init_db(db_path)
     print(f"Database: {db_path}")
     print(f"Scanning: {folder}")
 
-    config = CrawlerConfig(
-        max_thumbnails=args.max_thumbnails if args.max_thumbnails is not None else 5,
-        max_thumb_size=args.max_thumb_size if args.max_thumb_size is not None else 512,
-        unrar_path=args.unrar if args.unrar is not None else get_unrar_path(),
+    config = build_crawler_config(
+        max_thumbnails=args.max_thumbnails,
     )
+    # CLI overrides — explicit args win over stored settings
+    if args.max_thumb_size is not None:
+        config.max_thumb_size = args.max_thumb_size
+    if args.unrar is not None:
+        config.unrar_path = args.unrar
     if args.workers is not None:
         config.max_workers = args.workers
 
