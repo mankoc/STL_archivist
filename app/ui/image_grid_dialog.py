@@ -6,10 +6,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QComboBox, QDialog, QDialogButtonBox, QFormLayout, QFrame, QGridLayout,
+    QComboBox, QDialog, QFormLayout, QFrame, QGridLayout,
     QHBoxLayout, QLabel, QScrollArea, QSlider, QPushButton, QSplitter,
     QToolButton, QVBoxLayout, QWidget,
 )
@@ -33,6 +33,9 @@ _SORT_OPTIONS: list[tuple[str, str]] = [
 ]
 
 
+_SELECTED_STYLE = "QLabel { border: 3px solid #1565c0; background-color: #e3f2fd; }"
+
+
 def _format_size(size_bytes: int) -> str:
     if size_bytes < 1024:
         return f"{size_bytes} B"
@@ -51,7 +54,8 @@ class _CellData:
     model_id: int
     cell_widget: QWidget
     thumb_lbl: QLabel
-    orig_px: QPixmap
+    orig_px: QPixmap          # first image (used for thumbnail in grid)
+    all_images: list[QPixmap] # all images for the archive
     title_lbl: QLabel
     # Display fields (original case)
     title: str
@@ -74,24 +78,23 @@ class _CellData:
 
 
 class _GridImageViewer(QDialog):
-    """Full-size image viewer with metadata panel and prev/next navigation.
+    """Full-size viewer for all images of a single archive.
 
-    Left pane: scaled image (click to close).
-    Right pane: scrollable metadata from the database record.
-    Keyboard shortcuts: Left/Right arrows navigate, Escape closes.
+    Left pane: scaled image (click to close); Left/Right arrows or buttons
+    navigate between the archive's images.
+    Right pane: scrollable metadata for the archive (static — same for all images).
     """
 
-    def __init__(self, entries: list[_CellData], start_index: int, parent=None) -> None:
+    def __init__(self, cd: _CellData, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Image Viewer")
+        self._images = cd.all_images
+        self._index  = 0
+        self.setWindowTitle(cd.title or "Image Viewer")
         self.setModal(True)
-        self._entries = entries
-        self._index = start_index
 
         screen = self.screen().availableGeometry()
-        self._max_w = int(screen.width() * 0.92)
-        self._max_h = int(screen.height() * 0.92)
-        self.resize(min(self._max_w, 1100), min(self._max_h, 780))
+        self.resize(min(int(screen.width() * 0.92), 1100),
+                    min(int(screen.height() * 0.92), 780))
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(8, 8, 8, 8)
@@ -100,7 +103,6 @@ class _GridImageViewer(QDialog):
         # ── Splitter: image left, metadata right ─────────────────────────────
         self._splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # Image pane
         img_widget = QWidget()
         img_layout = QVBoxLayout(img_widget)
         img_layout.setContentsMargins(0, 0, 4, 0)
@@ -114,7 +116,6 @@ class _GridImageViewer(QDialog):
 
         self._splitter.addWidget(img_widget)
 
-        # Metadata pane
         meta_scroll = QScrollArea()
         meta_scroll.setWidgetResizable(True)
         meta_scroll.setFrameShape(QFrame.Shape.StyledPanel)
@@ -154,43 +155,51 @@ class _GridImageViewer(QDialog):
         QShortcut(QKeySequence(Qt.Key.Key_Right),  self, self._go_next)
         QShortcut(QKeySequence(Qt.Key.Key_Escape), self, self.accept)
 
+        # Metadata is the same for every image in this archive — populate once.
+        self._populate_meta(cd)
         self._show_current()
 
-    # ── Show / navigate ───────────────────────────────────────────────────────
+    # ── Navigation ────────────────────────────────────────────────────────────
 
     def _show_current(self) -> None:
-        cd = self._entries[self._index]
-        self.setWindowTitle(cd.title or "Image Viewer")
         self._rescale_image()
-        self._populate_meta(cd)
-        total = len(self._entries)
-        self._counter_lbl.setText(f"{self._index + 1} / {total}")
+        total = len(self._images)
+        self._counter_lbl.setText(f"Image {self._index + 1} / {total}")
         self._prev_btn.setEnabled(self._index > 0)
         self._next_btn.setEnabled(self._index < total - 1)
 
+    def _go_prev(self) -> None:
+        if self._index > 0:
+            self._index -= 1
+            self._show_current()
+
+    def _go_next(self) -> None:
+        if self._index < len(self._images) - 1:
+            self._index += 1
+            self._show_current()
+
+    # ── Image rendering ───────────────────────────────────────────────────────
+
     def _rescale_image(self) -> None:
-        if not self._entries:
+        if not self._images:
             return
-        px = self._entries[self._index].orig_px
+        px = self._images[self._index]
         if px.isNull():
             return
         w = self._image_lbl.width()
         h = self._image_lbl.height()
         if w < 10 or h < 10:
-            # Before first layout pass: estimate from dialog size
             w = max(300, self.width() - 310)
             h = max(300, self.height() - 60)
-        scaled = px.scaled(
-            w, h,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
+        self._image_lbl.setPixmap(
+            px.scaled(w, h,
+                      Qt.AspectRatioMode.KeepAspectRatio,
+                      Qt.TransformationMode.SmoothTransformation)
         )
-        self._image_lbl.setPixmap(scaled)
+
+    # ── Metadata ──────────────────────────────────────────────────────────────
 
     def _populate_meta(self, cd: _CellData) -> None:
-        while self._meta_form.rowCount():
-            self._meta_form.removeRow(0)
-
         def _row(label: str, value: str, *, color: str = "") -> None:
             if not value:
                 return
@@ -216,7 +225,6 @@ class _GridImageViewer(QDialog):
         if cd.sort_size:
             _row("Size",    _format_size(cd.sort_size))
         _row("Description", cd.description)
-
         if cd.url:
             lbl = QLabel("<b>URL</b>")
             lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
@@ -225,21 +233,10 @@ class _GridImageViewer(QDialog):
             url_lbl.setWordWrap(True)
             self._meta_form.addRow(lbl, url_lbl)
 
-    def _go_prev(self) -> None:
-        if self._index > 0:
-            self._index -= 1
-            self._show_current()
-
-    def _go_next(self) -> None:
-        if self._index < len(self._entries) - 1:
-            self._index += 1
-            self._show_current()
-
     # ── Qt events ─────────────────────────────────────────────────────────────
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        # Initialise splitter proportions and correct the initial image scale.
         self._splitter.setSizes([self.width() - 290, 280])
         self._rescale_image()
 
@@ -251,11 +248,16 @@ class _GridImageViewer(QDialog):
 class ImageGridDialog(QDialog):
     """Scrollable thumbnail grid for all models currently visible in the browser."""
 
+    #: Emitted when the user clicks "Show selected in main window".
+    #: Carries the list of selected model IDs.
+    show_selection_requested = pyqtSignal(list)
+
     def __init__(self, model_ids: list[int], parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"Image Grid — {len(model_ids)} model{'s' if len(model_ids) != 1 else ''}")
         self.resize(920, 700)
         self._cells_data: list[_CellData] = []
+        self._selected_indices: set[int] = set()   # tracks original_index values
         self._thumb_size = THUMB_SIZE_DEFAULT
         self._current_cols = 0
         self._sort_key = "original"
@@ -303,6 +305,22 @@ class ImageGridDialog(QDialog):
         self._sort_dir_btn.toggled.connect(self._on_sort_dir_toggled)
         toolbar.addWidget(self._sort_dir_btn)
 
+        toolbar.addSpacing(16)
+
+        sel_all_btn = QPushButton("Select All")
+        sel_all_btn.setFixedWidth(80)
+        sel_all_btn.clicked.connect(self._select_all)
+        toolbar.addWidget(sel_all_btn)
+
+        sel_none_btn = QPushButton("Deselect All")
+        sel_none_btn.setFixedWidth(90)
+        sel_none_btn.clicked.connect(self._deselect_all)
+        toolbar.addWidget(sel_none_btn)
+
+        self._sel_count_lbl = QLabel()
+        self._sel_count_lbl.setFixedWidth(90)
+        toolbar.addWidget(self._sel_count_lbl)
+
         toolbar.addStretch()
         layout.addLayout(toolbar)
 
@@ -324,12 +342,12 @@ class ImageGridDialog(QDialog):
                 if stl is None:
                     continue
 
-                px = QPixmap()
+                all_images: list[QPixmap] = []
                 for img in stl.images:
                     candidate = pixmap_from_path(img.thumbnail_path)
                     if not candidate.isNull():
-                        px = candidate
-                        break
+                        all_images.append(candidate)
+                px = all_images[0] if all_images else QPixmap()
 
                 title = stl.title or ""
                 creator = stl.creator or ""
@@ -364,6 +382,7 @@ class ImageGridDialog(QDialog):
                     cell_widget=cell,
                     thumb_lbl=thumb_lbl,
                     orig_px=px,
+                    all_images=all_images,
                     title_lbl=title_lbl,
                     title=title,
                     creator=creator,
@@ -387,9 +406,18 @@ class ImageGridDialog(QDialog):
 
         self._scroll.setWidget(container)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        bottom = QHBoxLayout()
+        self._show_btn = QPushButton("Show selected in main window")
+        self._show_btn.setEnabled(False)
+        self._show_btn.setToolTip("Filter the main browser to show only selected models")
+        self._show_btn.clicked.connect(self._on_show_selected)
+        bottom.addWidget(self._show_btn)
+        bottom.addStretch()
+        close_btn = QPushButton("Close")
+        close_btn.setDefault(True)
+        close_btn.clicked.connect(self.reject)
+        bottom.addWidget(close_btn)
+        layout.addLayout(bottom)
 
     def _make_cell(self, px: QPixmap, title: str, entry_index: int) -> tuple[QWidget, QLabel, QLabel]:
         """Build a single thumbnail cell; returns (cell_widget, thumb_label, title_label)."""
@@ -412,9 +440,10 @@ class ImageGridDialog(QDialog):
             )
             thumb.setPixmap(scaled)
             thumb.setCursor(Qt.CursorShape.PointingHandCursor)
-            thumb.mousePressEvent = lambda _e, i=entry_index: self._view_image(i)
+            thumb.mousePressEvent = lambda e, i=entry_index: self._on_thumb_press(i, e)
         else:
             thumb.setText("No image")
+            thumb.mousePressEvent = lambda e, i=entry_index: self._on_thumb_press(i, e)
 
         title_lbl = QLabel(title)
         title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -459,6 +488,58 @@ class ImageGridDialog(QDialog):
         self._sort_dir_btn.setToolTip("Descending" if checked else "Ascending")
         self._current_cols = 0
         self._relayout()
+
+    # ── Selection ────────────────────────────────────────────────────────────
+
+    def _on_thumb_press(self, original_index: int, event) -> None:
+        """Ctrl+click toggles selection; plain click opens the viewer."""
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            self._toggle_select(original_index)
+        else:
+            self._view_image(original_index)
+
+    def _toggle_select(self, original_index: int) -> None:
+        if original_index in self._selected_indices:
+            self._selected_indices.discard(original_index)
+        else:
+            self._selected_indices.add(original_index)
+        for cd in self._cells_data:
+            if cd.original_index == original_index:
+                self._apply_cell_style(cd)
+                break
+        self._update_selection_ui()
+
+    def _apply_cell_style(self, cd: _CellData) -> None:
+        if cd.original_index in self._selected_indices:
+            cd.thumb_lbl.setStyleSheet(_SELECTED_STYLE)
+        else:
+            cd.thumb_lbl.setStyleSheet("")
+
+    def _update_selection_ui(self) -> None:
+        n = len(self._selected_indices)
+        self._sel_count_lbl.setText(f"{n} selected" if n else "")
+        self._show_btn.setEnabled(n > 0)
+
+    def _select_all(self) -> None:
+        self._selected_indices = {cd.original_index for cd in self._cells_data}
+        for cd in self._cells_data:
+            self._apply_cell_style(cd)
+        self._update_selection_ui()
+
+    def _deselect_all(self) -> None:
+        self._selected_indices.clear()
+        for cd in self._cells_data:
+            self._apply_cell_style(cd)
+        self._update_selection_ui()
+
+    def _on_show_selected(self) -> None:
+        ids = [
+            cd.model_id for cd in self._cells_data
+            if cd.original_index in self._selected_indices
+        ]
+        if ids:
+            self.show_selection_requested.emit(ids)
+            self.accept()
 
     # ── Layout ───────────────────────────────────────────────────────────────
 
@@ -511,14 +592,9 @@ class ImageGridDialog(QDialog):
         self._relayout()
 
     def _view_image(self, original_index: int) -> None:
-        """Open the detail viewer starting at the entry with *original_index*."""
-        viewable: list[_CellData] = []
-        view_start = 0
-        for cd in self._sorted_cells():
-            if not cd.orig_px.isNull():
-                if cd.original_index == original_index:
-                    view_start = len(viewable)
-                viewable.append(cd)
-        if not viewable:
-            return
-        _GridImageViewer(viewable, view_start, self).exec()
+        """Open the full-size viewer showing all images for the clicked archive."""
+        for cd in self._cells_data:
+            if cd.original_index == original_index:
+                if cd.all_images:
+                    _GridImageViewer(cd, self).exec()
+                return
