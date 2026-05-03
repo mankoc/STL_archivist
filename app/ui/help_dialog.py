@@ -139,8 +139,10 @@ li    { margin: 2px 0; }
 # ── Page content ──────────────────────────────────────────────────────────────
 
 def _page_overview() -> str:
+    # Import version here to avoid module-level circular imports
+    from app import __version__
     return _css() + _nav_bar(PAGE_OVERVIEW) + f"""
-<h1>STL Database &mdash; Help</h1>
+<h1>STL Database v{__version__} &mdash; Help</h1>
 <p>STL Database is a desktop application for cataloguing and browsing local collections
 of 3D-printable model archives (<code>.zip</code>, <code>.7z</code>, <code>.rar</code>).
 It extracts thumbnails, infers metadata from folder structure, and stores everything in

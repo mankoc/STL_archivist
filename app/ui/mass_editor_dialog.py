@@ -181,6 +181,7 @@ class MassEditorDialog(QDialog):
         self._creator_edit = QLineEdit(); self._creator_edit.setPlaceholderText("e.g. SomeCreator  or  {creator}")
         self._date_edit    = QLineEdit(); self._date_edit.setPlaceholderText("e.g. 2024-01  or  {date}")
         self._title_edit   = QLineEdit(); self._title_edit.setPlaceholderText("e.g. {filename}  or  {creator} — {title}")
+        self._url_edit     = QLineEdit(); self._url_edit.setPlaceholderText("e.g. https://example.com or {url}")
         self._scale_combo  = self._make_combo(scales, placeholder="— no change —")
         self._presupports_combo = QComboBox()
         self._presupports_combo.addItems(["— no change —", "No", "Lychee", "Chitubox", "Presupported"])
@@ -196,6 +197,7 @@ class MassEditorDialog(QDialog):
         form.addRow("Creator:",        self._creator_edit)
         form.addRow("Date:",           self._date_edit)
         form.addRow("Title:",          self._title_edit)
+        form.addRow("URL:",            self._url_edit)
         form.addRow("Scale:",          self._scale_combo)
         form.addRow("Presupports:",    self._presupports_combo)
         form.addRow("Release:",        self._release_edit)
@@ -409,6 +411,8 @@ class MassEditorDialog(QDialog):
             manual["creator"] = self._creator_edit.text().strip()
         if self._date_edit.text().strip():
             manual["release_date"] = self._date_edit.text().strip()
+        if self._url_edit.text().strip():
+            manual["url"] = self._url_edit.text().strip()
         if self._title_edit.text().strip():
             manual["title"] = self._title_edit.text().strip()
         scale_name   = self._scale_combo.currentText().strip()

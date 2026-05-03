@@ -64,3 +64,7 @@ class CrawlerConfig:
     warn_nested_archive: bool = True
     warn_supports: bool = False
     support_patterns: list[str] = field(default_factory=_default_support_patterns)
+    # Whether to recurse into subdirectories of the selected source folder.
+    # When False the crawler only processes archives directly inside the selected
+    # directory (no recursive walk).
+    recurse_subdirs: bool = True
