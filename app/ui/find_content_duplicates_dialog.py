@@ -325,8 +325,9 @@ class _ImageDupWorker(QThread):
                     from app.database.db import get_session
                     s = get_session()
                     try:
+                        from sqlalchemy import text
                         row = s.execute(
-                            "SELECT dhash FROM images WHERE id = :id",
+                            text("SELECT dhash FROM images WHERE id = :id"),
                             {"id": img_id},
                         ).fetchone()
                         dh = row[0] if row is not None else None
@@ -438,7 +439,10 @@ class _ThumbnailPopup(QFrame):
     _MAX_DIM = 240
 
     def __init__(self, parent=None) -> None:
-        super().__init__(parent, Qt.WindowType.ToolTip)
+        super().__init__(
+            parent,
+            Qt.WindowType.ToolTip | Qt.WindowType.WindowStaysOnTopHint,
+        )
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setFrameShadow(QFrame.Shadow.Raised)
         layout = QHBoxLayout(self)
@@ -511,6 +515,7 @@ class _ImgHoverFilter(QObject):
         self._popup.adjustSize()
         self._move_popup(gpos)
         self._popup.show()
+        self._popup.raise_()
 
     def _move_popup(self, gpos) -> None:
         self._popup.move(gpos.x() + 16, gpos.y() + 16)

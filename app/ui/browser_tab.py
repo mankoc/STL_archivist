@@ -404,10 +404,11 @@ class ThumbnailGeneratorWorker(QThread):
 
                 warnings = detect_warnings(
                     all_names,
-                    check_supported=get_warn_presupported_stl(),
+                    check_presupported=get_warn_presupported_stl(),
                     check_no_images=get_warn_no_images(),
                     check_nested_archive=get_warn_nested_archive(),
-                    presupport_patterns=get_presupport_patterns(),
+                    check_supports=get_warn_presupported_stl(),
+                    supports_patterns=get_presupport_patterns(),
                 )
                 stl.warning = warnings or None
                 if warnings:
@@ -1019,9 +1020,10 @@ class BrowserTab(QWidget):
 
             if show_warnings:
                 _WARNING_TYPES = [
-                    "Models with presupports",
+                    "Models with presupported stl",
                     "Archive without images",
                     "Archive inside archive",
+                    "Archive with supports",
                 ]
                 warn_item = _make_leaf("Warnings", ("group", "warning"))
                 warn_item.setIcon(0, _icon_warnings)
@@ -1732,7 +1734,7 @@ class BrowserTab(QWidget):
 
         sections: list[tuple[str, list[str]]] = []
         for w in warnings:
-            if w == "Models with presupports":
+            if w in ("Models with presupported stl", "Archive with supports"):
                 matched = [n.replace("\\", "/") for n in names
                            if any(rx.search(_P(n.replace("\\", "/")).name) for rx in _presupport_rxs)]
                 sections.append((w, matched))
@@ -2178,10 +2180,11 @@ class BrowserTab(QWidget):
                     m.presupports = detect_presupport(all_names)
                     warnings = detect_warnings(
                         all_names,
-                        check_supported=get_warn_presupported_stl(),
+                        check_presupported=get_warn_presupported_stl(),
                         check_no_images=get_warn_no_images(),
                         check_nested_archive=get_warn_nested_archive(),
-                        presupport_patterns=get_presupport_patterns(),
+                        check_supports=get_warn_presupported_stl(),
+                        supports_patterns=get_presupport_patterns(),
                     )
                     m.warning = warnings or None
 
