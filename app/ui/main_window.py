@@ -258,58 +258,45 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "_crawler_dialog") or self._crawler_dialog is None:
             from app.ui.crawler_dialog import CrawlerDialog
             self._crawler_dialog = CrawlerDialog(parent=self)
-            
-        # Forward the crawler's progress to the status bar if running in background
-        def on_progress(current, total):
+            self._wire_crawler_signals()
+
+        self._crawler_dialog.show()
+        self._crawler_dialog.raise_()
+        self._crawler_dialog.activateWindow()
+        # When user re-opens the dialog while it's running, hide the status label
+        if self._crawler_is_running:
+            self._crawler_status_label.hide()
+
+    def _wire_crawler_signals(self) -> None:
+        """Connect crawler-tab and browser signals to the status-bar label.
+
+        Called once when the CrawlerDialog is first created.
+        """
+        tab = self._crawler_dialog._crawler_tab
+
+        def on_progress(current: int, total: int) -> None:
             self._crawler_is_running = True
             if not self._crawler_dialog.isVisible():
                 self._crawler_status_label.setText(f" Crawler: {current} / {total} ")
                 self._crawler_status_label.show()
             else:
                 self._crawler_status_label.hide()
-            
-            def on_finished():
-                self._crawler_is_running = False
-                self._crawler_status_label.hide()
-                if not self._crawler_dialog.isVisible():
-                    self._update_status_bar(self._browser._model.rowCount())
-                self._browser.refresh()
 
-            def on_dialog_closed():
-                if self._crawler_dialog._crawler_tab._worker is not None:
-                    # worker is still running
-                    current = self._crawler_dialog._crawler_tab._progress.value()
-                    total = self._crawler_dialog._crawler_tab._progress.maximum()
-                    self._crawler_status_label.setText(f" Crawler: {current} / {total} ")
-                    self._crawler_status_label.show()
-            
-            self._crawler_dialog._crawler_tab.progress_updated.connect(on_progress)
-            self._crawler_dialog._crawler_tab.crawl_finished.connect(on_finished)
-            self._crawler_dialog.rejected.connect(on_dialog_closed)
-
-        # Forward thumbnail background progress into the same status label
-        def on_thumb_progress(current, total):
-            # Show as Thumbs: current / total
-            if not hasattr(self, '_thumb_status_label'):
-                self._thumb_status_label = self._crawler_status_label
-            self._thumb_status_label.setText(f" Thumbs: {current} / {total} ")
-            self._thumb_status_label.show()
-
-        def on_thumb_finished():
-            # Hide when the background thumbnailer completes
-            if hasattr(self, '_thumb_status_label'):
-                self._thumb_status_label.hide()
+        def on_finished() -> None:
+            self._crawler_is_running = False
+            self._crawler_status_label.hide()
             self._browser.refresh()
 
-        # Connect to the BrowserTab signals (may be created after MainWindow init)
-        self._browser.thumbnail_progress_updated.connect(on_thumb_progress)
-        self._browser.thumbnail_finished.connect(on_thumb_finished)
+        def on_dialog_closed() -> None:
+            if tab._worker is not None:
+                current = tab._progress.value()
+                total   = tab._progress.maximum()
+                self._crawler_status_label.setText(f" Crawler: {current} / {total} ")
+                self._crawler_status_label.show()
 
-        self._crawler_dialog.show()
-        self._crawler_dialog.raise_()
-        self._crawler_dialog.activateWindow()
-        if hasattr(self, '_crawler_is_running') and self._crawler_is_running:
-            self._crawler_status_label.hide()
+        tab.progress_updated.connect(on_progress)
+        tab.crawl_finished.connect(on_finished)
+        self._crawler_dialog.rejected.connect(on_dialog_closed)
 
     def _open_config(self) -> None:
         """Open the configuration dialog and re-apply debug menu visibility."""
