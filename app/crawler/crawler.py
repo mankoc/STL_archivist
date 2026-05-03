@@ -64,10 +64,12 @@ class CrawlerWorker(QThread):
         self._stop_requested = True
 
     BATCH_SIZE = 50
+    MAX_CONSECUTIVE_FAILURES = 50
 
     def run(self) -> None:
         """Main thread entry point — orchestrates the full crawl pipeline."""
         self._stop_requested = False
+        self._consecutive_failures = 0
         logger.info("Crawl started — source: %s, pattern: %r, workers: %d",
                     self.source_dir, self._pattern, self._config.max_workers)
         self._remove_missing()
@@ -277,12 +279,22 @@ class CrawlerWorker(QThread):
                 )
                 sp.commit()
                 modified_folders.add(archive_path.parent)
+                self._consecutive_failures = 0
                 logger.debug("  Upsert committed: %s", archive_path.name)
             except Exception as exc:
                 sp.rollback()
                 msg = f"  ERROR: {exc}"
                 self.log.emit(msg)
                 logger.error("Upsert failed for %s: %s", archive_path.name, exc, exc_info=True)
+                self._consecutive_failures += 1
+                if self._consecutive_failures >= self.MAX_CONSECUTIVE_FAILURES:
+                    abort_msg = (
+                        f"Crawl aborted: {self._consecutive_failures} consecutive upsert "
+                        f"failures — last error: {exc}"
+                    )
+                    self.log.emit(abort_msg)
+                    logger.error(abort_msg)
+                    return True
             self.progress.emit(idx, total)
 
         return False

@@ -13,7 +13,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import QEvent, QObject, QThread, pyqtSignal, Qt
+from PyQt6.QtCore import QEvent, QObject, QPoint, QThread, pyqtSignal, Qt
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QApplication, QDialog, QFrame, QMenu, QVBoxLayout, QHBoxLayout, QLabel,
@@ -725,7 +725,7 @@ class FindContentDuplicatesDialog(QDialog):
         table: QTableWidget,
         id_col_a: int,
         id_col_b: int,
-        pos,
+        pos: QPoint,
     ) -> None:
         """Show a 'Compare Archive Contents…' context menu for the clicked row.
 
@@ -750,7 +750,7 @@ class FindContentDuplicatesDialog(QDialog):
             from app.ui.file_list_dialog import FileComparisonDialog
             FileComparisonDialog(id_a, id_b, parent=self).exec()
 
-    def _stl_context_menu(self, pos) -> None:
+    def _stl_context_menu(self, pos: QPoint) -> None:
         self._show_compare_menu(self._stl_table, _S_ID_A, _S_ID_B, pos)
 
     # ── Image search ──────────────────────────────────────────────────────────
@@ -824,7 +824,7 @@ class FindContentDuplicatesDialog(QDialog):
         if self._tabs.currentIndex() == _TAB_IMGS:
             self._refresh_bottom_buttons()
 
-    def _img_context_menu(self, pos) -> None:
+    def _img_context_menu(self, pos: QPoint) -> None:
         self._show_compare_menu(self._img_table, _I_ID_A, _I_ID_B, pos)
 
     # ── Thumbnail helpers ─────────────────────────────────────────────────────

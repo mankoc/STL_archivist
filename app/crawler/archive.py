@@ -260,7 +260,7 @@ def archive_hash(path: Path, unrar_path: str = "") -> str:
     return digest
 
 
-def iter_archives(root: Path):
+def iter_archives(root: Path) -> Iterator[Path]:
     """Yield every archive file under *root*, filtering on the fly.
 
     Using a generator avoids materialising non-archive paths into memory and
