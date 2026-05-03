@@ -60,8 +60,11 @@ class CrawlerConfig:
     store_stl_file_list: bool = False
 
     # Warning flags
-    warn_supported_stl: bool = True
+    warn_supported_stl: bool = True        # legacy alias — kept for existing callers
+    warn_presupported_stl: bool = True
+    warn_supports: bool = False
     presupport_patterns: list[str] = field(default_factory=_default_presupport_patterns)
+    support_patterns: list[str] = field(default_factory=_default_presupport_patterns)
     warn_no_images: bool = True
     warn_nested_archive: bool = True
     # Whether to recurse into subdirectories of the selected source folder.

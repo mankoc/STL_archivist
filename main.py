@@ -85,6 +85,8 @@ def main() -> None:
 
     window = MainWindow()
     window.show()
+    window.raise_()
+    window.activateWindow()
 
     sys.exit(app.exec())
 
