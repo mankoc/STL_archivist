@@ -1,0 +1,16 @@
+{
+  "session": "claude_agents",
+  "numAgents": 1,
+  "agents": {
+    "0": {
+      "status": "disabled",
+      "contextUsage": 100,
+      "lastActivity": "2026-05-02T20:34:09.277Z",
+      "lastHeartbeat": "2026-05-02T20:34:09.288Z",
+      "restartCount": 2,
+      "errors": 3,
+      "workCycles": 0
+    }
+  },
+  "timestamp": "2026-05-02T20:50:59.927Z"
+}

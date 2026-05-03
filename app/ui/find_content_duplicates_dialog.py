@@ -16,8 +16,8 @@ from typing import Optional
 from PyQt6.QtCore import QEvent, QObject, QThread, pyqtSignal, Qt
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
-    QDialog, QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QSpinBox, QTableWidget, QTableWidgetItem, QHeaderView,
+    QApplication, QDialog, QFrame, QMenu, QVBoxLayout, QHBoxLayout, QLabel,
+    QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QHeaderView,
     QProgressBar, QGroupBox, QFormLayout, QTabWidget, QWidget,
 )
 
@@ -720,27 +720,38 @@ class FindContentDuplicatesDialog(QDialog):
         if self._tabs.currentIndex() == _TAB_STL:
             self._refresh_bottom_buttons()
 
-    def _stl_context_menu(self, pos) -> None:
-        from PyQt6.QtWidgets import QMenu, QApplication
-        item = self._stl_table.itemAt(pos)
+    def _show_compare_menu(
+        self,
+        table: QTableWidget,
+        id_col_a: int,
+        id_col_b: int,
+        pos,
+    ) -> None:
+        """Show a 'Compare Archive Contents…' context menu for the clicked row.
+
+        Extracts model IDs from *id_col_a* / *id_col_b* of the clicked row and
+        opens :class:`~app.ui.file_list_dialog.FileComparisonDialog`.
+        """
+        item = table.itemAt(pos)
         if not item:
             return
-        
-        row = item.row()
-        id_a = self._stl_table.item(row, _S_ID_A).data(Qt.ItemDataRole.UserRole)
-        id_b = self._stl_table.item(row, _S_ID_B).data(Qt.ItemDataRole.UserRole)
-        
-        style = QApplication.style()
-        menu = QMenu(self)
+        row  = item.row()
+        id_a = table.item(row, id_col_a).data(Qt.ItemDataRole.UserRole)
+        id_b = table.item(row, id_col_b).data(Qt.ItemDataRole.UserRole)
+
+        menu        = QMenu(self)
         compare_act = menu.addAction(
-            style.standardIcon(style.StandardPixmap.SP_FileDialogContentsView),
-            "Compare Archive Contents…"
+            QApplication.style().standardIcon(
+                QApplication.style().StandardPixmap.SP_FileDialogContentsView
+            ),
+            "Compare Archive Contents…",
         )
-        
-        action = menu.exec(self._stl_table.viewport().mapToGlobal(pos))
-        if action == compare_act:
+        if menu.exec(table.viewport().mapToGlobal(pos)) == compare_act:
             from app.ui.file_list_dialog import FileComparisonDialog
             FileComparisonDialog(id_a, id_b, parent=self).exec()
+
+    def _stl_context_menu(self, pos) -> None:
+        self._show_compare_menu(self._stl_table, _S_ID_A, _S_ID_B, pos)
 
     # ── Image search ──────────────────────────────────────────────────────────
 
@@ -814,26 +825,7 @@ class FindContentDuplicatesDialog(QDialog):
             self._refresh_bottom_buttons()
 
     def _img_context_menu(self, pos) -> None:
-        from PyQt6.QtWidgets import QMenu, QApplication
-        item = self._img_table.itemAt(pos)
-        if not item:
-            return
-        
-        row = item.row()
-        id_a = self._img_table.item(row, _I_ID_A).data(Qt.ItemDataRole.UserRole)
-        id_b = self._img_table.item(row, _I_ID_B).data(Qt.ItemDataRole.UserRole)
-        
-        style = QApplication.style()
-        menu = QMenu(self)
-        compare_act = menu.addAction(
-            style.standardIcon(style.StandardPixmap.SP_FileDialogContentsView),
-            "Compare Archive Contents…"
-        )
-        
-        action = menu.exec(self._img_table.viewport().mapToGlobal(pos))
-        if action == compare_act:
-            from app.ui.file_list_dialog import FileComparisonDialog
-            FileComparisonDialog(id_a, id_b, parent=self).exec()
+        self._show_compare_menu(self._img_table, _I_ID_A, _I_ID_B, pos)
 
     # ── Thumbnail helpers ─────────────────────────────────────────────────────
 
