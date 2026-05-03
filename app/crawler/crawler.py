@@ -571,10 +571,11 @@ class CrawlerWorker(QThread):
 
         warnings = detect_warnings(
             all_names,
-            check_supported=self._config.warn_supported_stl,
+            check_presupported=self._config.warn_supported_stl,
             check_no_images=self._config.warn_no_images,
             check_nested_archive=self._config.warn_nested_archive,
-            presupport_patterns=self._config.presupport_patterns,
+            check_supports=self._config.warn_supported_stl,
+            supports_patterns=self._config.presupport_patterns,
         )
         model.warning = warnings or None
         if warnings:
