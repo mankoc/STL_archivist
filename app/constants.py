@@ -21,10 +21,6 @@ METADATA_FILENAME = "METADATA.7z"
 # config dialog warning text.
 CRITICAL_RED = "#d32f2f"
 
-# Translucent green tint applied behind matched-pair rows in the file
-# comparison table.  Tuple is (R, G, B, alpha) on 0–255 scale.
-MATCH_HIGHLIGHT_RGBA: tuple[int, int, int, int] = (100, 200, 100, 50)
-
 
 # ── Dialog window sizes ──────────────────────────────────────────────────────
 

@@ -33,7 +33,12 @@ _SORT_OPTIONS: list[tuple[str, str]] = [
 ]
 
 
-_SELECTED_STYLE = "QLabel { border: 3px solid #1565c0; background-color: #e3f2fd; }"
+def _selected_style() -> str:
+    from app.ui.config_dialog import get_selection_border_color, get_selection_bg_color
+    return (
+        f"QLabel {{ border: 3px solid {get_selection_border_color()}; "
+        f"background-color: {get_selection_bg_color()}; }}"
+    )
 
 
 def _format_size(size_bytes: int) -> str:
@@ -511,7 +516,7 @@ class ImageGridDialog(QDialog):
 
     def _apply_cell_style(self, cd: _CellData) -> None:
         if cd.original_index in self._selected_indices:
-            cd.thumb_lbl.setStyleSheet(_SELECTED_STYLE)
+            cd.thumb_lbl.setStyleSheet(_selected_style())
         else:
             cd.thumb_lbl.setStyleSheet("")
 
