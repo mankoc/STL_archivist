@@ -23,28 +23,14 @@ from app.crawler.folder_metadata import (
 from app.crawler.metadata import extract_metadata, ModelMetadata
 from app.crawler.rules import detect_presupport, detect_scale, detect_warnings
 from app.database.db import session_scope
-from app.database.models import STLModel, Tag, Image, Release, Scale, STLFile
+from app.database.helpers import (
+    get_or_create_release,
+    get_or_create_scale,
+    get_or_create_tag,
+)
+from app.database.models import STLModel, Image, STLFile
 from app.utils.thumbnailer import save_thumbnail, delete_thumbnail, get_thumbnail_base_dir
 from app.utils.path_pattern import parse_path, apply_extracted_to_model, parse_release_date
-
-
-def _get_or_create_tag(session: Session, name: str) -> Tag:
-    """Return an existing Tag with the given name, or create and flush a new one.
-
-    Args:
-        session: Active SQLAlchemy session.
-        name: Raw tag string — will be stripped and lower-cased before lookup.
-
-    Returns:
-        The existing or newly created ``Tag`` instance.
-    """
-    name = name.strip().lower()
-    tag = session.query(Tag).filter_by(name=name).first()
-    if tag is None:
-        tag = Tag(name=name)
-        session.add(tag)
-        session.flush()
-    return tag
 
 
 class CrawlerWorker(QThread):
@@ -78,211 +64,258 @@ class CrawlerWorker(QThread):
         self._stop_requested = True
 
     BATCH_SIZE = 50
+    MAX_CONSECUTIVE_FAILURES = 50
 
     def run(self) -> None:
         """Main thread entry point — orchestrates the full crawl pipeline."""
         self._stop_requested = False
+        self._consecutive_failures = 0
         logger.info("Crawl started — source: %s, pattern: %r, workers: %d",
                     self.source_dir, self._pattern, self._config.max_workers)
         self._remove_missing()
 
         logger.debug("Scanning source directory for archives: %s", self.source_dir)
         archives = sorted(iter_archives(self.source_dir))
-        total = len(archives)
-        msg = f"Found {total} archives in {self.source_dir}"
+        total    = len(archives)
+        msg      = f"Found {total} archives in {self.source_dir}"
         self.log.emit(msg)
         logger.info(msg)
 
-        # Pre-crawl: restore from METADATA.7z for any archive not yet in DB.
-        # Deferred import avoids a circular dependency (crawler → ui → crawler).
-        from app.ui.config_dialog import get_metadata_sidecar_enabled
         thumb_base = get_thumbnail_base_dir()
-        if thumb_base is not None and get_metadata_sidecar_enabled():
-            folder_archives: dict[Path, list[Path]] = defaultdict(list)
-            for p in archives:
-                folder_archives[p.parent].append(p)
+        if thumb_base is not None and self._config.metadata_sidecar_enabled:
+            self._pre_crawl_import(archives, thumb_base)
 
-            with session_scope() as session:
-                for folder in folder_archives:
-                    if self._stop_requested:
-                        break
-                    metadata_path = folder / "METADATA.7z"
-                    if metadata_path.exists():
-                        logger.info("Pre-crawl import from %s", metadata_path)
-                        imported = import_folder_metadata(folder, session, thumb_base)
-                        if imported:
-                            msg = (f"Imported {len(imported)} record(s) "
-                                   f"from METADATA.7z in {folder.name}")
-                            self.log.emit(msg)
-                            logger.info(msg)
-
-        max_thumbs     = self._config.max_thumbnails
-        max_thumb_size = self._config.max_thumb_size
-        workers        = self._config.max_workers
-        num_batches    = (total + self.BATCH_SIZE - 1) // self.BATCH_SIZE
-        logger.debug("Processing %d archive(s) in %d batch(es) of up to %d",
-                     total, num_batches, self.BATCH_SIZE)
-
+        num_batches      = (total + self.BATCH_SIZE - 1) // self.BATCH_SIZE
         modified_folders: set[Path] = set()
 
         for batch_start in range(0, total, self.BATCH_SIZE):
             if self._stop_requested:
                 break
-            batch       = archives[batch_start:batch_start + self.BATCH_SIZE]
-            batch_idx   = batch_start // self.BATCH_SIZE + 1
-            logger.debug("--- Batch %d/%d (%d archives) ---",
-                         batch_idx, num_batches, len(batch))
+            batch     = archives[batch_start:batch_start + self.BATCH_SIZE]
+            batch_idx = batch_start // self.BATCH_SIZE + 1
+            logger.debug("--- Batch %d/%d (%d archives) ---", batch_idx, num_batches, len(batch))
 
-            # Phase 1: read per-member CRCs from each archive's catalog (no decompression)
-            logger.debug("Phase 1: computing archive hashes (parallel, %d workers)", workers)
-            hash_fn = partial(archive_hash, unrar_path=self._config.unrar_path)
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                hashes: dict[Path, str] = dict(zip(batch, pool.map(hash_fn, batch)))
-            logger.debug("Phase 1 complete — %d hashes computed", len(hashes))
+            hashes = self._phase_hash(batch)
 
             with session_scope() as session:
-                # Phase 2: batch-query existing records — one round-trip for the whole batch
-                logger.debug("Phase 2: querying database for %d existing records", len(batch))
-                batch_strs = [str(p) for p in batch]
-                existing_map: dict[str, STLModel] = {
-                    m.archive_path: m
-                    for m in session.query(STLModel)
-                        .filter(STLModel.archive_path.in_(batch_strs))
-                        .all()
-                }
-                logger.debug("Phase 2 complete — %d existing record(s) found", len(existing_map))
+                to_extract, existing_map = self._phase_diff(batch, hashes, session)
+                contents_map, all_names_map, stl_info_map = self._phase_extract(to_extract)
+                stopped = self._phase_upsert(
+                    batch, batch_start, total, hashes,
+                    existing_map, contents_map, all_names_map, stl_info_map,
+                    session, modified_folders,
+                )
 
-                # Decide which archives need extraction (new or hash-changed)
-                # Deferred import avoids circular dependency (crawler → ui → crawler).
-                from app.ui.config_dialog import get_store_stl_file_list
-                _store_stl = get_store_stl_file_list()
-
-                to_extract: list[Path] = []
-                unchanged: list[Path]  = []
-                for p in batch:
-                    ex = existing_map.get(str(p))
-                    if ex is None:
-                        to_extract.append(p)
-                        logger.debug("  NEW: %s", p.name)
-                    elif ex.archive_hash != hashes[p]:
-                        to_extract.append(p)
-                        logger.debug("  CHANGED: %s (old=%s… new=%s…)",
-                                     p.name, ex.archive_hash[:8], hashes[p][:8])
-                    elif _store_stl and not ex.stl_files:
-                        to_extract.append(p)
-                        logger.debug("  MISSING STL LIST: %s", p.name)
-                    else:
-                        unchanged.append(p)
-                logger.debug("Extraction needed: %d new/changed, %d unchanged",
-                             len(to_extract), len(unchanged))
-
-                # Phase 3: extract archive contents in parallel (IO/CPU-bound).
-                # We also capture the full member name list from each archive's
-                # catalog so Phase 4 can run rule/warning detection without
-                # reopening the archive.
-                contents_map:  dict[Path, dict[str, bytes]] = {}
-                all_names_map: dict[Path, list[str]]       = {}
-                stl_info_map:  dict[Path, dict[str, int | None]] = {}
-
-                def _extract_and_list(p: Path) -> tuple[dict[str, bytes], list[str], dict[str, int | None]]:
-                    names:    list[str]             = []
-                    stl_info: dict[str, int | None] = {}
-                    data = extract_archive_contents(
-                        p,
-                        unrar_path=self._config.unrar_path,
-                        all_names_out=names,
-                        stl_info_out=stl_info,
-                    )
-                    return data, names, stl_info
-
-                if to_extract:
-                    logger.debug("Phase 3: extracting %d archive(s) in parallel", len(to_extract))
-                    with ThreadPoolExecutor(max_workers=workers) as pool:
-                        futures = {pool.submit(_extract_and_list, p): p for p in to_extract}
-                        for future in as_completed(futures):
-                            p = futures[future]
-                            try:
-                                data, names, stl_info = future.result()
-                                contents_map[p]  = data
-                                all_names_map[p] = names
-                                stl_info_map[p]  = stl_info
-                                logger.debug("  extracted %s → %d file(s), %d member(s), %d stl(s)",
-                                             p.name, len(data), len(names), len(stl_info))
-                            except Exception as exc:
-                                msg = f"  ERROR extracting {p.name}: {exc}"
-                                self.log.emit(msg)
-                                logger.error("Extraction failed for %s: %s",
-                                             p.name, exc, exc_info=True)
-                                contents_map[p]  = {}
-                                all_names_map[p] = []
-                                stl_info_map[p]  = {}
-                    logger.debug("Phase 3 complete — %d archive(s) extracted", len(contents_map))
-                else:
-                    logger.debug("Phase 3 skipped — no archives need extraction")
-
-                # Phase 4: serial DB upserts with all expensive work already done
-                logger.debug("Phase 4: upserting %d archive(s) into database", len(batch))
-                for idx, archive_path in enumerate(batch, start=batch_start + 1):
-                    if self._stop_requested:
-                        msg = "Crawl stopped by user."
-                        self.log.emit(msg)
-                        logger.info(msg)
-                        break
-
-                    self.log.emit(f"[{idx}/{total}] {archive_path.name}")
-                    logger.debug("[%d/%d] Upserting: %s", idx, total, archive_path)
-                    sp = session.begin_nested()
-                    try:
-                        self._upsert_archive(
-                            archive_path,
-                            session,
-                            max_thumbs,
-                            max_thumb_size,
-                            current_hash=hashes[archive_path],
-                            existing=existing_map.get(str(archive_path)),
-                            # None signals "hash unchanged — skip extraction"
-                            contents=contents_map.get(archive_path),
-                            all_names=all_names_map.get(archive_path),
-                            stl_info=stl_info_map.get(archive_path),
-                        )
-                        sp.commit()
-                        modified_folders.add(archive_path.parent)
-                        logger.debug("  Upsert committed: %s", archive_path.name)
-                    except Exception as exc:
-                        sp.rollback()
-                        msg = f"  ERROR: {exc}"
-                        self.log.emit(msg)
-                        logger.error("Upsert failed for %s: %s",
-                                     archive_path.name, exc, exc_info=True)
-                    self.progress.emit(idx, total)
-
-            if self._stop_requested:
+            if stopped or self._stop_requested:
                 break
 
-        # Post-crawl: update METADATA.7z for every folder that was modified.
-        # Deferred import avoids a circular dependency (crawler → ui → crawler).
-        if modified_folders and thumb_base is not None and get_metadata_sidecar_enabled():
-            from app.ui.config_dialog import get_metadata_thumbnails_enabled
-            include_thumbs = get_metadata_thumbnails_enabled()
-            self.log.emit(f"Updating METADATA.7z in {len(modified_folders)} folder(s)…")
-            logger.info("Post-crawl: updating METADATA.7z in %d folder(s) (thumbnails=%s)",
-                        len(modified_folders), include_thumbs)
-            with session_scope() as session:
-                for folder in sorted(modified_folders):
-                    if self._stop_requested:
-                        break
-                    try:
-                        export_folder_metadata(folder, session, thumb_base,
-                                               include_thumbnails=include_thumbs)
-                        self.log.emit(f"  Updated METADATA.7z in {folder.name}")
-                    except Exception as exc:
-                        logger.error("Failed to update METADATA.7z in %s: %s",
-                                     folder, exc, exc_info=True)
+        if modified_folders and thumb_base is not None and self._config.metadata_sidecar_enabled:
+            self._post_export_metadata(modified_folders, thumb_base)
 
         msg = "Crawl complete."
         self.log.emit(msg)
         logger.info(msg)
         self.finished.emit()
+
+    def _pre_crawl_import(self, archives: list[Path], thumb_base: Path) -> None:
+        """Restore DB records from METADATA.7z sidecars before crawling."""
+        folder_archives: dict[Path, list[Path]] = defaultdict(list)
+        for p in archives:
+            folder_archives[p.parent].append(p)
+
+        with session_scope() as session:
+            for folder in folder_archives:
+                if self._stop_requested:
+                    break
+                metadata_path = folder / "METADATA.7z"
+                if metadata_path.exists():
+                    logger.info("Pre-crawl import from %s", metadata_path)
+                    imported = import_folder_metadata(folder, session, thumb_base)
+                    if imported:
+                        msg = (f"Imported {len(imported)} record(s) "
+                               f"from METADATA.7z in {folder.name}")
+                        self.log.emit(msg)
+                        logger.info(msg)
+
+    def _phase_hash(self, batch: list[Path]) -> dict[Path, str]:
+        """Phase 1: parallel CRC-based fingerprinting of each archive."""
+        workers = self._config.max_workers
+        logger.debug("Phase 1: computing archive hashes (parallel, %d workers)", workers)
+        hash_fn = partial(archive_hash, unrar_path=self._config.unrar_path)
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            hashes: dict[Path, str] = dict(zip(batch, pool.map(hash_fn, batch)))
+        logger.debug("Phase 1 complete — %d hashes computed", len(hashes))
+        return hashes
+
+    def _phase_diff(
+        self,
+        batch: list[Path],
+        hashes: dict[Path, str],
+        session: Session,
+    ) -> tuple[list[Path], dict[str, STLModel]]:
+        """Phase 2: query the DB to decide which archives need (re-)extraction."""
+        logger.debug("Phase 2: querying database for %d existing records", len(batch))
+        batch_strs = [str(p) for p in batch]
+        existing_map: dict[str, STLModel] = {
+            m.archive_path: m
+            for m in session.query(STLModel)
+                .filter(STLModel.archive_path.in_(batch_strs))
+                .all()
+        }
+        logger.debug("Phase 2 complete — %d existing record(s) found", len(existing_map))
+
+        to_extract: list[Path] = []
+        store_stl = self._config.store_stl_file_list
+        for p in batch:
+            ex = existing_map.get(str(p))
+            if ex is None:
+                to_extract.append(p)
+                logger.debug("  NEW: %s", p.name)
+            elif ex.archive_hash != hashes[p]:
+                to_extract.append(p)
+                logger.debug("  CHANGED: %s (old=%s… new=%s…)",
+                             p.name, ex.archive_hash[:8], hashes[p][:8])
+            elif store_stl and not ex.stl_files:
+                to_extract.append(p)
+                logger.debug("  MISSING STL LIST: %s", p.name)
+            else:
+                logger.debug("  UNCHANGED: %s", p.name)
+
+        logger.debug("Extraction needed: %d, unchanged: %d",
+                     len(to_extract), len(batch) - len(to_extract))
+        return to_extract, existing_map
+
+    def _phase_extract(
+        self,
+        to_extract: list[Path],
+    ) -> tuple[
+        dict[Path, dict[str, bytes]],
+        dict[Path, list[str]],
+        dict[Path, dict[str, int | None]],
+    ]:
+        """Phase 3: parallel archive decompression for new/changed archives."""
+        contents_map:  dict[Path, dict[str, bytes]]       = {}
+        all_names_map: dict[Path, list[str]]              = {}
+        stl_info_map:  dict[Path, dict[str, int | None]]  = {}
+
+        if not to_extract:
+            logger.debug("Phase 3 skipped — no archives need extraction")
+            return contents_map, all_names_map, stl_info_map
+
+        def _extract_one(p: Path) -> tuple[dict[str, bytes], list[str], dict[str, int | None]]:
+            names:    list[str]             = []
+            stl_info: dict[str, int | None] = {}
+            data = extract_archive_contents(
+                p,
+                unrar_path=self._config.unrar_path,
+                all_names_out=names,
+                stl_info_out=stl_info,
+            )
+            return data, names, stl_info
+
+        workers = self._config.max_workers
+        logger.debug("Phase 3: extracting %d archive(s) in parallel", len(to_extract))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(_extract_one, p): p for p in to_extract}
+            for future in as_completed(futures):
+                p = futures[future]
+                try:
+                    data, names, stl_info = future.result()
+                    contents_map[p]  = data
+                    all_names_map[p] = names
+                    stl_info_map[p]  = stl_info
+                    logger.debug("  extracted %s → %d file(s), %d member(s), %d stl(s)",
+                                 p.name, len(data), len(names), len(stl_info))
+                except Exception as exc:
+                    msg = f"  ERROR extracting {p.name}: {exc}"
+                    self.log.emit(msg)
+                    logger.error("Extraction failed for %s: %s", p.name, exc, exc_info=True)
+                    contents_map[p]  = {}
+                    all_names_map[p] = []
+                    stl_info_map[p]  = {}
+
+        logger.debug("Phase 3 complete — %d archive(s) extracted", len(contents_map))
+        return contents_map, all_names_map, stl_info_map
+
+    def _phase_upsert(
+        self,
+        batch: list[Path],
+        batch_start: int,
+        total: int,
+        hashes: dict[Path, str],
+        existing_map: dict[str, STLModel],
+        contents_map: dict[Path, dict[str, bytes]],
+        all_names_map: dict[Path, list[str]],
+        stl_info_map: dict[Path, dict],
+        session: Session,
+        modified_folders: set[Path],
+    ) -> bool:
+        """Phase 4: serial DB upserts.  Returns ``True`` if stop was requested."""
+        logger.debug("Phase 4: upserting %d archive(s) into database", len(batch))
+        max_thumbs     = self._config.max_thumbnails
+        max_thumb_size = self._config.max_thumb_size
+
+        for idx, archive_path in enumerate(batch, start=batch_start + 1):
+            if self._stop_requested:
+                msg = "Crawl stopped by user."
+                self.log.emit(msg)
+                logger.info(msg)
+                return True
+
+            self.log.emit(f"[{idx}/{total}] {archive_path.name}")
+            logger.debug("[%d/%d] Upserting: %s", idx, total, archive_path)
+            sp = session.begin_nested()
+            try:
+                self._upsert_archive(
+                    archive_path,
+                    session,
+                    max_thumbs,
+                    max_thumb_size,
+                    current_hash=hashes[archive_path],
+                    existing=existing_map.get(str(archive_path)),
+                    contents=contents_map.get(archive_path),
+                    all_names=all_names_map.get(archive_path),
+                    stl_info=stl_info_map.get(archive_path),
+                )
+                sp.commit()
+                modified_folders.add(archive_path.parent)
+                self._consecutive_failures = 0
+                logger.debug("  Upsert committed: %s", archive_path.name)
+            except Exception as exc:
+                sp.rollback()
+                msg = f"  ERROR: {exc}"
+                self.log.emit(msg)
+                logger.error("Upsert failed for %s: %s", archive_path.name, exc, exc_info=True)
+                self._consecutive_failures += 1
+                if self._consecutive_failures >= self.MAX_CONSECUTIVE_FAILURES:
+                    abort_msg = (
+                        f"Crawl aborted: {self._consecutive_failures} consecutive upsert "
+                        f"failures — last error: {exc}"
+                    )
+                    self.log.emit(abort_msg)
+                    logger.error(abort_msg)
+                    return True
+            self.progress.emit(idx, total)
+
+        return False
+
+    def _post_export_metadata(self, modified_folders: set[Path], thumb_base: Path) -> None:
+        """Post-crawl: write METADATA.7z sidecars for all modified folders."""
+        include_thumbs = self._config.metadata_thumbnails
+        self.log.emit(f"Updating METADATA.7z in {len(modified_folders)} folder(s)…")
+        logger.info("Post-crawl: updating METADATA.7z in %d folder(s) (thumbnails=%s)",
+                    len(modified_folders), include_thumbs)
+        with session_scope() as session:
+            for folder in sorted(modified_folders):
+                if self._stop_requested:
+                    break
+                try:
+                    export_folder_metadata(folder, session, thumb_base,
+                                           include_thumbnails=include_thumbs)
+                    self.log.emit(f"  Updated METADATA.7z in {folder.name}")
+                except Exception as exc:
+                    logger.error("Failed to update METADATA.7z in %s: %s",
+                                 folder, exc, exc_info=True)
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -408,7 +441,7 @@ class CrawlerWorker(QThread):
         model.tags.clear()
         for tag_name in meta.tags:
             if tag_name.strip():
-                model.tags.append(_get_or_create_tag(session, tag_name))
+                model.tags.append(get_or_create_tag(session, tag_name))
         logger.debug("  Tags: %d → %d (%s)",
                      prev_tag_count, len(model.tags),
                      ", ".join(t.name for t in model.tags) or "none")
@@ -418,9 +451,7 @@ class CrawlerWorker(QThread):
             session, max_thumbs, max_thumb_size, archive_path, hash_changed,
         )
 
-        # Deferred import avoids circular dependency (crawler → ui → crawler).
-        from app.ui.config_dialog import get_store_stl_file_list
-        if get_store_stl_file_list() and stl_info is not None:
+        if self._config.store_stl_file_list and stl_info is not None:
             for old in list(model.stl_files):
                 session.delete(old)
             session.flush()
@@ -490,18 +521,13 @@ class CrawlerWorker(QThread):
         model.presupports = presupport
         logger.debug("  Presupport detected: %s", presupport)
 
-        # Deferred import avoids circular dependency (crawler → ui → crawler).
-        from app.ui.config_dialog import (
-            get_warn_presupported_stl, get_warn_no_images, get_warn_nested_archive,
-            get_warn_supports, get_supports_patterns,
-        )
         warnings = detect_warnings(
             all_names,
-            check_presupported=get_warn_presupported_stl(),
-            check_no_images=get_warn_no_images(),
-            check_nested_archive=get_warn_nested_archive(),
-            check_supports=get_warn_supports(),
-            supports_patterns=get_supports_patterns(),
+            check_presupported=self._config.warn_presupported_stl,
+            check_no_images=self._config.warn_no_images,
+            check_nested_archive=self._config.warn_nested_archive,
+            check_supports=self._config.warn_supports,
+            supports_patterns=self._config.support_patterns,
         )
         model.warning = warnings or None
         if warnings:
@@ -513,13 +539,7 @@ class CrawlerWorker(QThread):
         scales = detect_scale([archive_path.name] + all_names)
         logger.debug("  Scales detected: %s", scales or "none")
         if scales:
-            sc = session.query(Scale).filter_by(name=scales[0]).first()
-            if sc is None:
-                sc = Scale(name=scales[0])
-                session.add(sc)
-                session.flush()
-                logger.debug("  Created new Scale record: %r", scales[0])
-            model.scale = sc
+            model.scale = get_or_create_scale(session, scales[0])
 
     def _assign_metadata(
         self,
@@ -544,13 +564,7 @@ class CrawlerWorker(QThread):
         model.description   = meta.description
 
         if meta.release:
-            rel = session.query(Release).filter_by(name=meta.release).first()
-            if rel is None:
-                rel = Release(name=meta.release)
-                session.add(rel)
-                session.flush()
-                logger.debug("  Created new Release record: %r", meta.release)
-            model.release = rel
+            model.release = get_or_create_release(session, meta.release)
 
     def _update_thumbnails(
         self,

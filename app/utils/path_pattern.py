@@ -14,6 +14,16 @@ to resolve them into the correct DB objects.
 import re
 from functools import lru_cache
 
+from sqlalchemy.orm import Session
+
+from app.database.helpers import (
+    get_or_create_collection,
+    get_or_create_release,
+    get_or_create_sculptor,
+    get_or_create_subcollection,
+)
+from app.database.models import STLModel, Subcollection
+
 
 def parse_release_date(s: str) -> tuple[int | None, int | None]:
     """Parse a date string like 'YYYY-MM', 'YYYY_MM', or 'YYYY' into (year, month).
@@ -271,22 +281,30 @@ def render_path_pattern(pattern: str, model) -> str:
     return rendered
 
 
-def apply_extracted_to_model(session, model, extracted: dict[str, str],
-                             overwrite: bool = True) -> None:
+def apply_extracted_to_model(
+    session: Session,
+    model: STLModel,
+    extracted: dict[str, str],
+    overwrite: bool = True,
+) -> None:
     """Write *extracted* field values onto *model* inside *session*.
 
-    Simple string fields are set directly.  FK-backed fields (sculptor_name,
-    model_type_name, subtype_name, sequence) trigger a DB lookup / create.
+    Simple string fields are set directly.  FK-backed fields (``sculptor_name``,
+    ``collection_name``, ``subcollection_name``, ``release_name``) trigger a DB
+    lookup-and-create via :mod:`app.database.helpers`.
 
-    When *overwrite* is False, only fields that are currently None / empty are
-    filled in (used by the crawler to let archive metadata take precedence).
+    Args:
+        session: Active SQLAlchemy session.  Caller commits.
+        model: The ``STLModel`` row being updated.
+        extracted: Field values from ``parse_path()``.  Unknown keys are
+            ignored silently.
+        overwrite: When ``False`` (the crawler's use case), only fields whose
+            current value is falsy (None / empty string / 0) are written, so
+            user-edited values survive a re-crawl.
     """
-    from app.database.models import Sculptor, Collection, Subcollection, Release  # local to avoid circular imports
 
     def _should_set(current_value) -> bool:
-        if overwrite:
-            return True
-        return not current_value
+        return True if overwrite else not current_value
 
     for attr, value in extracted.items():
         if not value:
@@ -305,35 +323,34 @@ def apply_extracted_to_model(session, model, extracted: dict[str, str],
 
         elif attr == "sculptor_name":
             if _should_set(model.sculptor_id):
-                sc = session.query(Sculptor).filter_by(name=value).first()
-                if sc is None:
-                    sc = Sculptor(name=value)
-                    session.add(sc)
-                    session.flush()
-                model.sculptor = sc
+                model.sculptor = get_or_create_sculptor(session, value)
 
         elif attr == "collection_name":
             if _should_set(model.collection_id):
-                col = session.query(Collection).filter_by(name=value).first()
-                if col is None:
-                    col = Collection(name=value)
-                    session.add(col)
-                    session.flush()
-                model.collection = col
+                model.collection = get_or_create_collection(session, value)
 
         elif attr == "subcollection_name":
             if _should_set(model.subcollection_id):
-                # Prefer a subcollection that matches the model's current collection
-                q = session.query(Subcollection).filter_by(name=value)
-                if model.collection_id:
-                    q = q.filter_by(collection_id=model.collection_id)
-                sc = q.first()
-                if sc is None and model.collection_id:
-                    sc = Subcollection(name=value, collection_id=model.collection_id)
-                    session.add(sc)
-                    session.flush()
-                if sc:
-                    model.subcollection = sc
+                # Subcollection is unique per parent collection, so the
+                # lookup needs both the name and the parent ID.  Read from
+                # the relationship attribute (`model.collection`) rather
+                # than the FK column (`model.collection_id`): a relationship
+                # set earlier in this same loop is visible immediately, but
+                # the FK column is not synced until the next flush.
+                parent = model.collection
+                if parent is not None:
+                    session.flush()  # ensure parent.id is populated
+                    model.subcollection = get_or_create_subcollection(
+                        session, value, parent.id,
+                    )
+                else:
+                    sc = (
+                        session.query(Subcollection)
+                        .filter_by(name=value)
+                        .first()
+                    )
+                    if sc is not None:
+                        model.subcollection = sc
 
         elif attr == "sequence":
             if _should_set(model.sequence):
@@ -344,9 +361,4 @@ def apply_extracted_to_model(session, model, extracted: dict[str, str],
 
         elif attr == "release_name":
             if _should_set(model.release_id):
-                rel = session.query(Release).filter_by(name=value).first()
-                if rel is None:
-                    rel = Release(name=value)
-                    session.add(rel)
-                    session.flush()
-                model.release = rel
+                model.release = get_or_create_release(session, value)

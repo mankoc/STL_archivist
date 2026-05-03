@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import QSettings
 
-from sqlalchemy import or_, and_
+from sqlalchemy import func, or_, and_
 from sqlalchemy.orm import selectinload
 
 from app.database.db import get_session, session_scope
@@ -1007,7 +1007,9 @@ class BrowserTab(QWidget):
             dirs: set[str] = set()
             for (ap,) in session.query(STLModel.archive_path).distinct().all():
                 if ap:
-                    dirs.add(str(FSPath(ap).parent))
+                    # Use as_posix() so the filter tree always uses forward slashes,
+                    # regardless of OS — the LIKE query normalises the DB column too.
+                    dirs.add(FSPath(ap).parent.as_posix())
             new_dirs = frozenset(dirs)
             if new_dirs != self._cached_path_dirs:
                 self._cached_path_dirs = new_dirs
@@ -1036,11 +1038,11 @@ class BrowserTab(QWidget):
         for d in dirs:
             parts = FSPath(d).parts
             for depth in range(1, len(parts) + 1):
-                full = str(FSPath(*parts[:depth]))
+                full = FSPath(*parts[:depth]).as_posix()
                 if full in node_map:
                     continue
                 label = parts[depth - 1]
-                parent = node_map.get(str(FSPath(*parts[:depth - 1]))) if depth > 1 else root_item
+                parent = node_map.get(FSPath(*parts[:depth - 1]).as_posix()) if depth > 1 else root_item
                 if parent is None:
                     parent = root_item
                 data = ("path", full)
@@ -1070,22 +1072,39 @@ class BrowserTab(QWidget):
         if self._proxy.rowCount() > 0:
             self._table.setCurrentIndex(self._proxy.index(0, 0))
 
-    def _load_table(self,
-                    author_filters=None,         author_exc_filters=None,
-                    tag_filters=None,            tag_exc_filters=None,
-                    type_filters=None,           type_exc_filters=None,
-                    path_filters=None,           path_exc_filters=None,
-                    date_filters=None,           date_exc_filters=None,
-                    sculptor_filters=None,       sculptor_exc_filters=None,
-                    collection_filters=None,     collection_exc_filters=None,
-                    subcollection_filters=None,  subcollection_exc_filters=None,
-                    category_filters=None,       category_exc_filters=None,
-                    release_filters=None,        release_exc_filters=None,
-                    scale_filters=None,          scale_exc_filters=None,
-                    presupports_filters=None,    presupports_exc_filters=None,
-                    warning_filters=None,        warning_exc_filters=None,
-                    has_value_groups=None,       no_value_groups=None,
-                    id_filters=None,             duplicate_pairs=None) -> None:
+    def _load_table(
+        self,
+        author_filters:        list[str] | None = None,
+        author_exc_filters:    list[str] | None = None,
+        tag_filters:           list[str] | None = None,
+        tag_exc_filters:       list[str] | None = None,
+        type_filters:          list[str] | None = None,
+        type_exc_filters:      list[str] | None = None,
+        path_filters:          list[str] | None = None,
+        path_exc_filters:      list[str] | None = None,
+        date_filters:          list[tuple[int, int | None]] | None = None,
+        date_exc_filters:      list[tuple[int, int | None]] | None = None,
+        sculptor_filters:      list[str] | None = None,
+        sculptor_exc_filters:  list[str] | None = None,
+        collection_filters:    list[str] | None = None,
+        collection_exc_filters: list[str] | None = None,
+        subcollection_filters: list[str] | None = None,
+        subcollection_exc_filters: list[str] | None = None,
+        category_filters:      list[str] | None = None,
+        category_exc_filters:  list[str] | None = None,
+        release_filters:       list[str] | None = None,
+        release_exc_filters:   list[str] | None = None,
+        scale_filters:         list[str] | None = None,
+        scale_exc_filters:     list[str] | None = None,
+        presupports_filters:   list[str] | None = None,
+        presupports_exc_filters: list[str] | None = None,
+        warning_filters:       list[str] | None = None,
+        warning_exc_filters:   list[str] | None = None,
+        has_value_groups:      list[str] | None = None,
+        no_value_groups:       list[str] | None = None,
+        id_filters:            list[int] | None = None,
+        duplicate_pairs:       list[list[int]] | None = None,
+    ) -> None:
         """Reload the table with optional include/exclude filter lists.
 
         Within each category the values are OR-ed; across categories they are AND-ed.
@@ -1127,8 +1146,11 @@ class BrowserTab(QWidget):
             if tag_filters:
                 q = q.filter(STLModel.tags.any(Tag.name.in_(tag_filters)))
             if path_filters:
+                # Normalise the DB column to forward slashes so the filter works
+                # on Windows where archive_path is stored with backslashes.
+                _norm = func.replace(STLModel.archive_path, "\\", "/")
                 q = q.filter(or_(*(
-                    STLModel.archive_path.like(p.rstrip("/") + "/%")
+                    _norm.like(p.rstrip("/") + "/%")
                     for p in path_filters
                 )))
             if date_filters:
@@ -1157,8 +1179,9 @@ class BrowserTab(QWidget):
             if tag_exc_filters:
                 q = q.filter(~STLModel.tags.any(Tag.name.in_(tag_exc_filters)))
             if path_exc_filters:
+                _norm = func.replace(STLModel.archive_path, "\\", "/")
                 for p in path_exc_filters:
-                    q = q.filter(~STLModel.archive_path.like(p.rstrip("/") + "/%"))
+                    q = q.filter(~_norm.like(p.rstrip("/") + "/%"))
             if date_exc_filters:
                 q = q.filter(~or_(*_date_clauses(date_exc_filters)))
             if sculptor_exc_filters:
@@ -1828,20 +1851,23 @@ class BrowserTab(QWidget):
         FileListDialog(model_id, parent=self).exec()
 
     def _delete_files_from_disk(self, model_ids: list[int]) -> None:
-        """Physically delete or move to trash the selected archive files."""
+        """Confirm with the user, then delegate to the file-deletion service.
+
+        The slot itself stays UI-only: gather config, show the confirmation
+        dialog, call :func:`app.services.file_deletion.delete_archives`, and
+        report the result.  All file I/O and DB cascade handling lives in
+        the service so it can be unit-tested without a ``QApplication``.
+        """
         if not model_ids:
             return
 
-        from app.ui.config_dialog import get_use_trash_folder, get_trash_folder_path
-        from datetime import datetime, timezone
-        def _utcnow() -> datetime:
-            return datetime.now(timezone.utc)
-        
-        use_trash = get_use_trash_folder()
+        from app.ui.config_dialog import get_trash_folder_path, get_use_trash_folder
+        from app.services.file_deletion import delete_archives
+
+        use_trash  = get_use_trash_folder()
         trash_path = get_trash_folder_path()
-        
-        verb = "Move to trash" if use_trash else "Permanently delete"
-        
+        verb       = "Move to trash" if use_trash else "Permanently delete"
+
         reply = QMessageBox.warning(
             self,
             f"{verb} {len(model_ids)} archive(s)",
@@ -1853,57 +1879,18 @@ class BrowserTab(QWidget):
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-            
-        import shutil
-        import json
-        from pathlib import Path
-        
-        deleted_count = 0
-        failed_count = 0
-        
+
         with session_scope() as session:
-            models = session.query(STLModel).filter(STLModel.id.in_(model_ids)).all()
-            for m in models:
-                try:
-                    p = Path(m.archive_path)
-                    if p.exists():
-                        if use_trash and trash_path:
-                            tp = Path(trash_path)
-                            tp.mkdir(parents=True, exist_ok=True)
-                            
-                            # Move file
-                            dest_file = tp / p.name
-                            # Handle naming collisions in trash
-                            idx = 1
-                            while dest_file.exists():
-                                dest_file = tp / f"{p.stem}_{idx}{p.suffix}"
-                                idx += 1
-                                
-                            shutil.move(str(p), str(dest_file))
-                            
-                            # Write DB info sidecar
-                            info = {
-                                "original_path": str(p),
-                                "title": m.title,
-                                "creator": m.creator,
-                                "archive_hash": m.archive_hash,
-                                "deleted_at": _utcnow().isoformat()
-                            }
-                            sidecar = dest_file.with_suffix(dest_file.suffix + ".json")
-                            sidecar.write_text(json.dumps(info, indent=2))
-                        else:
-                            p.unlink()
-                            
-                    session.delete(m)
-                    deleted_count += 1
-                except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).error(f"Failed to delete {m.archive_path}: {e}")
-                    failed_count += 1
-                    
+            report = delete_archives(session, model_ids, use_trash, trash_path)
+
         self.refresh()
-        if failed_count > 0:
-            QMessageBox.warning(self, "Delete Files", f"Successfully processed {deleted_count} file(s). Failed to process {failed_count} file(s).")
+        if report.failed:
+            QMessageBox.warning(
+                self,
+                "Delete Files",
+                f"Successfully processed {report.deleted} file(s). "
+                f"Failed to process {len(report.failed)} file(s).",
+            )
         
     def _delete_models(self, model_ids: list[int]) -> None:
         """Confirm then delete models and their LMDB thumbnails from the database."""
@@ -2130,4 +2117,6 @@ class BrowserTab(QWidget):
                 if mid is not None:
                     model_ids.append(mid)
         from app.ui.image_grid_dialog import ImageGridDialog
-        ImageGridDialog(model_ids, parent=self).exec()
+        dlg = ImageGridDialog(model_ids, parent=self)
+        dlg.show_selection_requested.connect(self.show_model_ids)
+        dlg.exec()
