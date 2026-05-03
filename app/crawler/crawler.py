@@ -624,7 +624,10 @@ class CrawlerWorker(QThread):
                         if jpeg:
                             h = compute_dhash_from_jpeg(jpeg)
                             if h is not None:
-                                img.dhash = int(h)
+                                # Store dHash as a 16-character hex string (lowercase,
+                                # zero-padded) to avoid integer range issues in SQLite.
+                                hval = int(h) & ((1 << 64) - 1)
+                                img.dhash = f"{hval:016x}"
                     except Exception:
                         # Protect crawl from any hashing errors
                         logger.debug("  Failed to compute dHash for image id %s", img.id)
