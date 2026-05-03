@@ -7,8 +7,6 @@ import zipfile
 import zlib
 from pathlib import Path
 
-import pytest
-
 from app.crawler.folder_metadata import (
     METADATA_FILENAME,
     export_folder_metadata,
@@ -18,14 +16,6 @@ from app.crawler.folder_metadata import (
 from app.database.db import init_db, session_scope
 from app.database.models import Collection, Image, STLModel, Sculptor, Subcollection, Tag
 from app.utils.thumbnailer import get_thumbnail_bytes, init_thumbnail_store, save_thumbnail
-
-
-@pytest.fixture
-def tmp_library(tmp_path):
-    """Fresh DB + LMDB thumbnail store rooted in *tmp_path*."""
-    init_db(":memory:")
-    init_thumbnail_store(tmp_path / "thumbnails.lmdb")
-    return tmp_path
 
 
 def _minimal_png() -> bytes:

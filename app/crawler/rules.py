@@ -5,18 +5,24 @@ import logging
 import re
 from pathlib import Path
 
+from app.constants import ARCHIVE_SUFFIXES, IMAGE_SUFFIXES
+
 logger = logging.getLogger(__name__)
 
 
+# Matches `body_supported`, `arm-supported`, `torso supported`. Used as the
+# stem-level test for the "Presupported" classification.
 _PRESUPPORTED_RE     = re.compile(r"[_ -]supported", re.IGNORECASE)
+
+# Captures the integer in patterns like `28mm`, `32 mm`, `75_mm`.
 _SCALE_MM_RE         = re.compile(r"\b(\d+)[_ ]?mm\b", re.IGNORECASE)
+
+# Captures the denominator in patterns like `1/35`, `1-72`.
 _SCALE_RATIO_RE      = re.compile(r"\b1[/\-](\d+)\b")
 
 # Matches filenames like "body_presupported.stl", "torso presupported.stl",
 # "supported.stl", "sup_dragon.stl" (the sup*.stl prefix form).
 _WARN_PRESUP_STL_RE    = re.compile(r"(?:[ _]presupported\.stl$|^sup.*\.stl$)", re.IGNORECASE)
-_WARN_IMAGE_SUFFIXES   = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
-_WARN_ARCHIVE_SUFFIXES = {".zip", ".rar", ".7z"}
 
 # Default regex patterns used by the "archive with supports" warning.
 # Each pattern is applied (re.IGNORECASE) to the bare filename of every archive member.
@@ -124,11 +130,11 @@ def detect_warnings(
     for name in names:
         fname = Path(name.replace("\\", "/")).name
         suffix = Path(fname).suffix.lower()
-        if check_no_images and suffix in _WARN_IMAGE_SUFFIXES:
+        if check_no_images and suffix in IMAGE_SUFFIXES:
             has_image = True
         if check_presupported and _WARN_PRESUP_STL_RE.search(fname):
             has_presup_stl = True
-        if check_nested_archive and suffix in _WARN_ARCHIVE_SUFFIXES:
+        if check_nested_archive and suffix in ARCHIVE_SUFFIXES:
             has_nested_archive = True
         if compiled_support and not has_supports:
             for rx in compiled_support:

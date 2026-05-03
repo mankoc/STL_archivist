@@ -3,14 +3,9 @@ Tests for database model creation, tag relationships, clear_db,
 session rollback, cascade deletes, and repr methods.
 """
 import pytest
-from app.database.db import init_db, session_scope
+
+from app.database.db import session_scope
 from app.database.models import STLModel, Tag
-
-
-@pytest.fixture(autouse=True)
-def in_memory_db():
-    """Use a fresh in-memory SQLite for each test."""
-    init_db(":memory:")
 
 
 def test_create_model():

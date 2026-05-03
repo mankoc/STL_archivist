@@ -3,8 +3,6 @@ Unit tests for app.utils.path_pattern.
 Covers pattern_to_regex, parse_path, parse_release_date, render_path_pattern,
 and apply_extracted_to_model.
 """
-import pytest
-
 from app.utils.path_pattern import (
     apply_extracted_to_model,
     format_release_date,
@@ -13,13 +11,8 @@ from app.utils.path_pattern import (
     pattern_to_regex,
     render_path_pattern,
 )
-from app.database.db import init_db, session_scope
+from app.database.db import session_scope
 from app.database.models import Collection, STLModel, Subcollection, Sculptor
-
-
-@pytest.fixture(autouse=True)
-def in_memory_db():
-    init_db(":memory:")
 
 
 # ---------------------------------------------------------------------------
