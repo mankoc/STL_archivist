@@ -139,6 +139,17 @@ class MainWindow(QMainWindow):
         act_find_content_dupes.triggered.connect(self._open_find_content_duplicates_dialog)
         tools_menu.addAction(act_find_content_dupes)
 
+        act_find_by_image = QAction(
+            style.standardIcon(SP.SP_FileDialogContentsView),
+            "Find by Image…",
+            self,
+        )
+        act_find_by_image.setStatusTip(
+            "Find models with images perceptually similar to a file on disk"
+        )
+        act_find_by_image.triggered.connect(self._open_find_by_image_dialog)
+        tools_menu.addAction(act_find_by_image)
+
         tools_menu.addSeparator()
 
         act_db_maintenance = QAction(
@@ -330,6 +341,18 @@ class MainWindow(QMainWindow):
             dlg.show_models_requested.connect(self._browser.show_model_ids)
             dlg.show_duplicate_pairs_requested.connect(self._browser.show_duplicate_pairs)
             self._find_content_dupes_dlg = dlg
+        dlg.raise_()
+        dlg.activateWindow()
+        dlg.show()
+
+    def _open_find_by_image_dialog(self) -> None:
+        """Open the find-by-image dialog (non-modal)."""
+        from app.ui.find_by_image_dialog import FindByImageDialog
+        dlg = getattr(self, "_find_by_image_dlg", None)
+        if dlg is None or not dlg.isVisible():
+            dlg = FindByImageDialog(parent=self)
+            dlg.show_models_requested.connect(self._browser.show_model_ids)
+            self._find_by_image_dlg = dlg
         dlg.raise_()
         dlg.activateWindow()
         dlg.show()

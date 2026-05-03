@@ -237,6 +237,100 @@ class SearchWorker(QThread):
         self.finished.emit()
 
 
+class DHashWorker(QThread):
+    """Compute and persist dHash values for Image records that are missing them.
+
+    For each image, LMDB thumbnail bytes are tried first; if absent the legacy
+    thumbnail blob stored in the DB column is used as a fallback.
+
+    Signals:
+        progress(current, total): Image index and total count.
+        log(message): Human-readable status line for the UI log panel.
+        finished(computed, skipped): Counts once the run completes.
+    """
+
+    progress = pyqtSignal(int, int)
+    log      = pyqtSignal(str)
+    finished = pyqtSignal(int, int)   # (computed, skipped)
+
+    _BATCH = 200
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._stop_requested = False
+
+    def stop(self) -> None:
+        self._stop_requested = True
+
+    def run(self) -> None:
+        from app.database.db import session_scope
+        from app.database.models import Image as DBImage
+        from app.utils.thumbnailer import get_thumbnail_bytes
+        from app.ui.find_content_duplicates_dialog import compute_dhash_from_jpeg
+
+        self._stop_requested = False
+        computed = 0
+        skipped  = 0
+
+        with session_scope() as session:
+            rows = (
+                session.query(DBImage.id, DBImage.thumbnail)
+                .filter(DBImage.dhash.is_(None))
+                .all()
+            )
+
+        total = len(rows)
+        if total == 0:
+            self.log.emit("All images already have a dHash computed.")
+            self.finished.emit(0, 0)
+            return
+
+        self.log.emit(f"Computing dHash for {total} image(s)…")
+
+        pending: list[tuple[int, str]] = []   # (image_id, dhash_hex)
+
+        def flush() -> None:
+            if not pending:
+                return
+            with session_scope() as s:
+                for img_id, dhash_hex in pending:
+                    img = s.query(DBImage).filter(DBImage.id == img_id).first()
+                    if img:
+                        img.dhash = dhash_hex
+            pending.clear()
+
+        for idx, (image_id, legacy_blob) in enumerate(rows, 1):
+            if self._stop_requested:
+                self.log.emit("Stopped by user.")
+                break
+
+            self.progress.emit(idx, total)
+
+            jpeg = get_thumbnail_bytes(image_id) or legacy_blob
+            if not jpeg:
+                skipped += 1
+                continue
+
+            h = compute_dhash_from_jpeg(jpeg)
+            if h is None:
+                skipped += 1
+                continue
+
+            pending.append((image_id, format(h, "016x")))
+            computed += 1
+
+            if len(pending) >= self._BATCH:
+                flush()
+
+        flush()
+
+        self.log.emit(
+            f"Done — {computed} dHash(es) computed, "
+            f"{skipped} skipped (no thumbnail or decode error)."
+        )
+        self.finished.emit(computed, skipped)
+
+
 class DbMaintenanceDialog(QDialog):
     """Database maintenance dialog.
 
@@ -244,6 +338,8 @@ class DbMaintenanceDialog(QDialog):
       - Relocate: search a user-selected folder tree for missing archives by content hash.
       - Remove Selected: delete chosen records from the database.
       - Remove All Missing: delete every record whose archive file no longer exists.
+    Compute dHashes fills the dhash column for any images that are missing it,
+    enabling the Find by Image feature.
     """
 
     def __init__(self, parent=None) -> None:
@@ -253,6 +349,7 @@ class DbMaintenanceDialog(QDialog):
         self.setModal(True)
         self._verify_worker: VerifyWorker | None = None
         self._search_worker: SearchWorker | None = None
+        self._dhash_worker: DHashWorker | None = None
         self._results: list[dict] = []
         self._build_ui()
 
@@ -282,6 +379,18 @@ class DbMaintenanceDialog(QDialog):
         self._stop_btn.setEnabled(False)
         self._stop_btn.clicked.connect(self._stop)
         btn_row.addWidget(self._stop_btn)
+
+        btn_row.addStretch()
+
+        self._dhash_btn = QPushButton(
+            style.standardIcon(SP.SP_BrowserReload), "Compute dHashes"
+        )
+        self._dhash_btn.setToolTip(
+            "Compute perceptual dHash values for all images that don't have one yet.\n"
+            "Required for the Find by Image feature."
+        )
+        self._dhash_btn.clicked.connect(self._start_dhash)
+        btn_row.addWidget(self._dhash_btn)
 
         btn_row.addStretch()
 
@@ -354,6 +463,7 @@ class DbMaintenanceDialog(QDialog):
     # ------------------------------------------------------------------
     def _set_busy(self, busy: bool) -> None:
         self._verify_btn.setEnabled(not busy)
+        self._dhash_btn.setEnabled(not busy)
         self._stop_btn.setEnabled(busy)
         self._search_btn.setEnabled(False)
         self._remove_sel_btn.setEnabled(False)
@@ -364,6 +474,7 @@ class DbMaintenanceDialog(QDialog):
         has_missing = any(r["status"] == _STATUS_MISSING for r in self._results)
         has_any     = bool(self._results)
         self._verify_btn.setEnabled(True)
+        self._dhash_btn.setEnabled(True)
         self._stop_btn.setEnabled(False)
         self._search_btn.setEnabled(has_missing)
         self._remove_sel_btn.setEnabled(has_any)
@@ -375,6 +486,8 @@ class DbMaintenanceDialog(QDialog):
             self._verify_worker.stop()
         if self._search_worker and self._search_worker.isRunning():
             self._search_worker.stop()
+        if self._dhash_worker and self._dhash_worker.isRunning():
+            self._dhash_worker.stop()
         self._stop_btn.setEnabled(False)
 
     # ------------------------------------------------------------------
@@ -395,6 +508,22 @@ class DbMaintenanceDialog(QDialog):
         self._results = results
         self._populate_table(results)
         self._verify_worker = None
+        self._set_idle()
+
+    # ------------------------------------------------------------------
+    def _start_dhash(self) -> None:
+        self._log.clear()
+        self._progress.setValue(0)
+        self._set_busy(True)
+
+        self._dhash_worker = DHashWorker()
+        self._dhash_worker.log.connect(self._on_log)
+        self._dhash_worker.progress.connect(self._on_progress)
+        self._dhash_worker.finished.connect(self._on_dhash_finished)
+        self._dhash_worker.start()
+
+    def _on_dhash_finished(self, computed: int, skipped: int) -> None:
+        self._dhash_worker = None
         self._set_idle()
 
     def _populate_table(self, results: list) -> None:
@@ -590,7 +719,7 @@ class DbMaintenanceDialog(QDialog):
 
     # ------------------------------------------------------------------
     def closeEvent(self, event) -> None:
-        for worker in (self._verify_worker, self._search_worker):
+        for worker in (self._verify_worker, self._search_worker, self._dhash_worker):
             if worker and worker.isRunning():
                 worker.stop()
                 worker.wait(3000)
