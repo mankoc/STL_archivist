@@ -84,6 +84,34 @@ def setup_logging(data_dir: Path | str | None = None) -> None:
     )
 
 
+def setup_excepthook() -> None:
+    """Install sys.excepthook so uncaught exceptions are logged as CRITICAL.
+
+    KeyboardInterrupt is forwarded to the default handler so Ctrl-C still works.
+    """
+    import sys
+    _log = logging.getLogger("uncaught")
+
+    def _handle(exc_type, exc_value, exc_traceback):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+        _log.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+
+    sys.excepthook = _handle
+
+
+def disable_logging() -> None:
+    """Remove all handlers from the root logger, silencing all log output."""
+    root = logging.getLogger()
+    for handler in root.handlers[:]:
+        try:
+            handler.close()
+        except Exception:
+            pass
+        root.removeHandler(handler)
+
+
 def delete_logs() -> int:
     """Delete the active log file and all compressed backups.
 
