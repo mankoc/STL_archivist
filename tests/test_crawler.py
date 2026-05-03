@@ -9,17 +9,9 @@ import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from app.config import CrawlerConfig
-from app.database.db import init_db, session_scope
+from app.database.db import session_scope
 from app.database.models import Image, STLModel
-
-
-@pytest.fixture(autouse=True)
-def in_memory_db():
-    """Fresh in-memory SQLite for each test."""
-    init_db(":memory:")
 
 
 # ---------------------------------------------------------------------------

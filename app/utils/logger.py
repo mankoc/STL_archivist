@@ -27,19 +27,29 @@ def _rotator(source: str, dest: str) -> None:
     Path(source).unlink()
 
 
-def get_log_path() -> Path:
-    """Return the path to the active (uncompressed) log file."""
-    from app.ui.config_dialog import get_data_dir
-    return Path(get_data_dir()) / LOG_FILENAME
+def get_log_path(data_dir: Path | str | None = None) -> Path:
+    """Return the path to the active (uncompressed) log file.
+
+    When *data_dir* is ``None`` the path is looked up from ``QSettings``.
+    Passing *data_dir* explicitly avoids importing the UI layer and makes
+    the function testable without a running ``QApplication``.
+    """
+    if data_dir is None:
+        from app.ui.config_dialog import get_data_dir
+        data_dir = get_data_dir()
+    return Path(data_dir) / LOG_FILENAME
 
 
-def setup_logging() -> None:
+def setup_logging(data_dir: Path | str | None = None) -> None:
     """Configure the root logger with a rotating compressed file handler.
 
-    Must be called after QApplication and QSettings are initialised so that
-    ``get_data_dir()`` can resolve the configured data directory.
+    Args:
+        data_dir: Directory where the log file is written.  When ``None``
+            the value is read from ``QSettings`` via ``get_data_dir()``;
+            callers that already have the path should pass it explicitly to
+            avoid a dependency on the UI layer.
     """
-    log_path = get_log_path()
+    log_path = get_log_path(data_dir)
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     handler = logging.handlers.RotatingFileHandler(

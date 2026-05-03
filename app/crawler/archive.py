@@ -1,24 +1,212 @@
 """
 Helpers for opening 7z / zip / rar archives and streaming file contents
 without full extraction to disk (memory-efficient).
+
+The public API (``archive_hash``, ``extract_archive_contents``, etc.) is
+unchanged; internally all format-specific code is isolated in three
+``ArchiveReader`` subclasses so the top-level functions contain no
+format dispatch.
 """
-import io
 import logging
 import tempfile
 import zipfile
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Iterator, Optional
 
 import py7zr
 import rarfile
 
+from app.constants import (
+    ARCHIVE_SUFFIXES,
+    IMAGE_SUFFIXES,
+    METADATA_FILENAME,
+    SLICER_SUFFIXES,
+)
+
 logger = logging.getLogger(__name__)
+
+# Re-exports for callers that import from app.crawler.archive (kept for
+# backwards compatibility — new code should import from app.constants).
+__all__ = [
+    "ARCHIVE_SUFFIXES", "IMAGE_SUFFIXES", "METADATA_FILENAME", "SLICER_SUFFIXES",
+    "is_archive", "archive_hash", "iter_archives", "list_contents", "read_file",
+    "extract_archive_contents", "read_url_file", "find_url_file",
+]
 
 # Per-file size caps applied when loading archive members into memory.
 # Oversized entries are skipped with a warning instead of being read.
 _SIZE_LIMIT_IMAGE = 50 * 1024 * 1024   # 50 MB – images / thumbnails
 _SIZE_LIMIT_META  =  1 * 1024 * 1024   #  1 MB – info.json / .url files
 
+# Exceptions that indicate a corrupt or unreadable archive (expected errors).
+_ARCHIVE_ERRORS = (
+    zipfile.BadZipFile,
+    py7zr.Bad7zFile,
+    rarfile.BadRarFile,
+    rarfile.NotRarFile,
+    rarfile.Error,
+    OSError,
+)
+
+
+# ---------------------------------------------------------------------------
+# Reader abstraction
+# ---------------------------------------------------------------------------
+
+@dataclass
+class MemberInfo:
+    """Catalog entry for a single archive member."""
+    name: str
+    crc: int
+    size: int | None   # uncompressed size in bytes; None when not in catalog
+
+
+class ArchiveReader(ABC):
+    """Unified context-manager interface over ZIP, 7z, and RAR archives."""
+
+    def __enter__(self) -> "ArchiveReader":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
+    @abstractmethod
+    def iter_members(self) -> Iterator[MemberInfo]:
+        """Yield one :class:`MemberInfo` per archive member (catalog-only, no decompression)."""
+
+    @abstractmethod
+    def read_batch(self, names: list[str]) -> dict[str, bytes]:
+        """Decompress and return the named members as ``{name: bytes}``.
+
+        Members that cannot be read are silently omitted.
+        """
+
+    @abstractmethod
+    def close(self) -> None:
+        """Release the underlying file handle."""
+
+
+class _ZipReader(ArchiveReader):
+    def __init__(self, path: Path) -> None:
+        self._zf = zipfile.ZipFile(str(path), "r")
+
+    def iter_members(self) -> Iterator[MemberInfo]:
+        for info in self._zf.infolist():
+            yield MemberInfo(
+                name=info.filename,
+                crc=info.CRC & 0xFFFFFFFF,
+                size=info.file_size,
+            )
+
+    def read_batch(self, names: list[str]) -> dict[str, bytes]:
+        result: dict[str, bytes] = {}
+        for name in names:
+            try:
+                data = self._zf.read(name)
+                if data:
+                    result[name] = data
+                    logger.debug("  Read %r (%d B)", name, len(data))
+            except Exception as exc:
+                logger.warning("Failed to read member %r: %s", name, exc)
+        return result
+
+    def close(self) -> None:
+        self._zf.close()
+
+
+class _SevenZReader(ArchiveReader):
+    def __init__(self, path: Path) -> None:
+        self._path = path
+        self._zf = py7zr.SevenZipFile(str(path), mode="r")
+        self._members_cache: list[MemberInfo] | None = None
+
+    def iter_members(self) -> Iterator[MemberInfo]:
+        if self._members_cache is None:
+            self._members_cache = [
+                MemberInfo(
+                    name=f.filename,
+                    crc=f.crc32 or 0,
+                    size=getattr(f, "uncompressed", None),
+                )
+                for f in self._zf.list()
+            ]
+        yield from self._members_cache
+
+    def read_batch(self, names: list[str]) -> dict[str, bytes]:
+        if not names:
+            return {}
+        _shm = "/dev/shm" if Path("/dev/shm").is_dir() else None
+        result: dict[str, bytes] = {}
+        with tempfile.TemporaryDirectory(dir=_shm) as tmpdir:
+            tmp = Path(tmpdir)
+            self._zf.extract(path=tmpdir, targets=names)
+            for filepath in sorted(tmp.rglob("*")):
+                if not filepath.is_file():
+                    continue
+                name = filepath.relative_to(tmp).as_posix()
+                data = filepath.read_bytes()
+                if data:
+                    result[name] = data
+                    logger.debug("  Read %r (%d B)", name, len(data))
+        return result
+
+    def close(self) -> None:
+        self._zf.close()
+
+
+class _RarReader(ArchiveReader):
+    def __init__(self, path: Path, unrar_path: str = "") -> None:
+        if unrar_path:
+            rarfile.UNRAR_TOOL = unrar_path
+        self._rf = rarfile.RarFile(str(path), "r")
+
+    def iter_members(self) -> Iterator[MemberInfo]:
+        for info in self._rf.infolist():
+            if info.is_dir():
+                continue
+            yield MemberInfo(
+                name=info.filename,
+                crc=getattr(info, "CRC", 0) or 0,
+                size=getattr(info, "file_size", None),
+            )
+
+    def read_batch(self, names: list[str]) -> dict[str, bytes]:
+        result: dict[str, bytes] = {}
+        for name in names:
+            try:
+                data = self._rf.read(name)
+                if data:
+                    result[name] = data
+                    logger.debug("  Read %r (%d B)", name, len(data))
+            except Exception as exc:
+                logger.warning("Failed to read member %r: %s", name, exc)
+        return result
+
+    def close(self) -> None:
+        self._rf.close()
+
+
+def open_archive(path: Path, unrar_path: str = "") -> ArchiveReader:
+    """Open *path* and return the appropriate :class:`ArchiveReader`.
+
+    Raises :exc:`ValueError` for unrecognised extensions.  Archive-format
+    errors (``BadZipFile``, ``Bad7zFile``, etc.) propagate to the caller.
+    """
+    suffix = path.suffix.lower()
+    if suffix == ".zip":
+        return _ZipReader(path)
+    elif suffix == ".7z":
+        return _SevenZReader(path)
+    elif suffix == ".rar":
+        return _RarReader(path, unrar_path)
+    raise ValueError(f"Unsupported archive format: {path.suffix!r}")
+
+
+# ---------------------------------------------------------------------------
+# Public utilities
+# ---------------------------------------------------------------------------
 
 def _member_size_limit(name: str) -> int:
     """Return the maximum number of bytes we will load for *name* into memory.
@@ -31,18 +219,6 @@ def _member_size_limit(name: str) -> int:
     if Path(name.replace("\\", "/")).suffix.lower() in IMAGE_SUFFIXES:
         return _SIZE_LIMIT_IMAGE
     return _SIZE_LIMIT_META
-
-
-ARCHIVE_SUFFIXES = {".7z", ".zip", ".rar"}
-
-# Name of the per-folder metadata sidecar — never treated as an STL archive
-METADATA_FILENAME = "METADATA.7z"
-
-# Image extensions we consider as potential thumbnails
-IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
-
-# Slicer / metadata extensions to record but not store
-SLICER_SUFFIXES = {".lys", ".chitu", ".ctb", ".photon"}
 
 
 def is_archive(path: Path) -> bool:
@@ -60,32 +236,13 @@ def archive_hash(path: Path, unrar_path: str = "") -> str:
     archive cannot be opened (e.g. truncated file).
     """
     import xxhash
-    suffix = path.suffix.lower()
-    members: list[tuple[str, int]] = []
     logger.debug("Computing hash for: %s", path.name)
     try:
-        if suffix == ".zip":
-            with zipfile.ZipFile(str(path), "r") as zf:
-                members = sorted(
-                    (info.filename, info.CRC & 0xFFFFFFFF)
-                    for info in zf.infolist()
-                )
-        elif suffix == ".7z":
-            with py7zr.SevenZipFile(str(path), mode="r") as zf:
-                members = sorted(
-                    (f.filename, f.crc32 or 0)
-                    for f in zf.list()
-                )
-        elif suffix == ".rar":
-            if unrar_path:
-                rarfile.UNRAR_TOOL = unrar_path
-            with rarfile.RarFile(str(path), "r") as rf:
-                members = sorted(
-                    (info.filename, getattr(info, "CRC", 0) or 0)
-                    for info in rf.infolist()
-                    if not info.is_dir()
-                )
-    except Exception as exc:
+        with open_archive(path, unrar_path) as ar:
+            members = sorted(
+                (m.name, m.crc) for m in ar.iter_members()
+            )
+    except _ARCHIVE_ERRORS as exc:
         stat = path.stat()
         fingerprint = f"fallback:{stat.st_size}:{stat.st_mtime_ns}"
         logger.warning(
@@ -103,7 +260,7 @@ def archive_hash(path: Path, unrar_path: str = "") -> str:
     return digest
 
 
-def iter_archives(root: Path):
+def iter_archives(root: Path) -> Iterator[Path]:
     """Yield every archive file under *root*, filtering on the fly.
 
     Using a generator avoids materialising non-archive paths into memory and
@@ -118,66 +275,27 @@ def iter_archives(root: Path):
             yield p
 
 
-def _open_zip(path: Path):
-    return zipfile.ZipFile(str(path), "r")
-
-
-def _open_7z(path: Path):
-    return py7zr.SevenZipFile(str(path), mode="r")
-
-
-def _open_rar(path: Path, unrar_path: str = ""):
-    if unrar_path:
-        rarfile.UNRAR_TOOL = unrar_path
-    return rarfile.RarFile(str(path), "r")
-
-
 def list_contents(archive_path: Path, unrar_path: str = "") -> list[str]:
     """Return a list of all file names inside the archive."""
-    suffix = archive_path.suffix.lower()
     logger.debug("Listing contents of: %s", archive_path.name)
     try:
-        if suffix == ".zip":
-            with _open_zip(archive_path) as zf:
-                names = zf.namelist()
-        elif suffix == ".7z":
-            with _open_7z(archive_path) as zf:
-                names = zf.getnames()
-        elif suffix == ".rar":
-            with _open_rar(archive_path, unrar_path) as rf:
-                names = rf.namelist()
-        else:
-            return []
+        with open_archive(archive_path, unrar_path) as ar:
+            names = [m.name for m in ar.iter_members()]
         logger.debug("  %d member(s) in %s", len(names), archive_path.name)
         return names
     except PermissionError as exc:
         logger.warning("Permission denied reading archive %s: %s", archive_path.name, exc)
         return []
-    except Exception as exc:
+    except (ValueError, *_ARCHIVE_ERRORS) as exc:
         logger.error("Failed to list contents of %s: %s", archive_path.name, exc, exc_info=True)
         return []
 
 
 def read_file(archive_path: Path, member_name: str, unrar_path: str = "") -> Optional[bytes]:
     """Read a single member from the archive and return its bytes."""
-    suffix = archive_path.suffix.lower()
     try:
-        if suffix == ".zip":
-            with _open_zip(archive_path) as zf:
-                return zf.read(member_name)
-        elif suffix == ".7z":
-            _shm = "/dev/shm" if Path("/dev/shm").is_dir() else None
-            with tempfile.TemporaryDirectory(dir=_shm) as tmpdir:
-                tmp = Path(tmpdir)
-                with _open_7z(archive_path) as zf:
-                    zf.extract(path=tmpdir, targets=[member_name])
-                extracted = tmp / Path(member_name.replace("\\", "/"))
-                if extracted.exists():
-                    return extracted.read_bytes()
-            return None
-        elif suffix == ".rar":
-            with _open_rar(archive_path, unrar_path) as rf:
-                return rf.read(member_name)
+        with open_archive(archive_path, unrar_path) as ar:
+            return ar.read_batch([member_name]).get(member_name)
     except Exception:
         return None
 
@@ -185,7 +303,6 @@ def read_file(archive_path: Path, member_name: str, unrar_path: str = "") -> Opt
 def _image_suffix(name: str) -> str:
     """Return the lowercase suffix of a member name, normalising Windows backslashes."""
     return Path(name.replace("\\", "/")).suffix.lower()
-
 
 
 def _is_wanted(name: str) -> bool:
@@ -219,121 +336,59 @@ def extract_archive_contents(
     ``.lys``, and ``.chitubox`` member found in the archive catalog. Size may
     be ``None`` for formats where it is not available in the catalog header.
     """
-    suffix = archive_path.suffix.lower()
     result: dict[str, bytes] = {}
-    logger.debug("Extracting wanted files from: %s (type: %s)", archive_path.name, suffix)
+    logger.debug("Extracting wanted files from: %s", archive_path.name)
     try:
-        if suffix == ".zip":
-            with _open_zip(archive_path) as zf:
-                infos    = zf.infolist()
-                all_names = [i.filename for i in infos]
-                if all_names_out is not None:
-                    all_names_out.extend(all_names)
-                if stl_info_out is not None:
-                    target_exts = {".stl", ".obj", ".lys", ".chitubox"}
-                    for i in infos:
-                        if Path(i.filename.replace("\\", "/")).suffix.lower() in target_exts:
-                            stl_info_out[i.filename] = i.file_size
-                wanted = [n for n in all_names if _is_wanted(n)]
-                logger.debug("  ZIP: %d total members, %d wanted", len(all_names), len(wanted))
-                for name in wanted:
-                    limit = _member_size_limit(name)
-                    file_size = zf.getinfo(name).file_size
-                    if file_size > limit:
-                        logger.warning(
-                            "Skipping oversized member %r (%d B > %d B limit) in %s",
-                            name, file_size, limit, archive_path,
-                        )
-                        continue
-                    try:
-                        data = zf.read(name)
-                        if data:
-                            result[name] = data
-                            logger.debug("  Read %r (%d B)", name, len(data))
-                    except Exception as exc:
-                        logger.warning("Failed to read member %r in %s: %s",
-                                       name, archive_path.name, exc)
-                        continue
+        with open_archive(archive_path, unrar_path) as ar:
+            all_members = list(ar.iter_members())
+            all_names   = [m.name for m in all_members]
 
-        elif suffix == ".7z":
-            _shm = "/dev/shm" if Path("/dev/shm").is_dir() else None
-            with tempfile.TemporaryDirectory(dir=_shm) as tmpdir:
-                tmp = Path(tmpdir)
-                with _open_7z(archive_path) as zf:
-                    members   = zf.list()
-                    all_names = [f.filename for f in members]
-                    if all_names_out is not None:
-                        all_names_out.extend(all_names)
-                    if stl_info_out is not None:
-                        target_exts = {".stl", ".obj", ".lys", ".chitubox"}
-                        for f in members:
-                            if Path(f.filename.replace("\\", "/")).suffix.lower() in target_exts:
-                                stl_info_out[f.filename] = getattr(f, "uncompressed", None)
-                    wanted = [n for n in all_names if _is_wanted(n)]
-                    logger.debug("  7Z: %d total members, %d wanted", len(all_names), len(wanted))
-                    if wanted:
-                        zf.extract(path=tmpdir, targets=wanted)
-                # Walk the extracted tree so files at any subfolder depth are found,
-                # regardless of how the archive member names were encoded.
-                for filepath in sorted(tmp.rglob("*")):
-                    if not filepath.is_file():
-                        continue
-                    name = filepath.relative_to(tmp).as_posix()
-                    if not _is_wanted(name):
-                        continue
-                    limit = _member_size_limit(name)
-                    file_size = filepath.stat().st_size
-                    if file_size > limit:
-                        logger.warning(
-                            "Skipping oversized member %r (%d B > %d B limit) in %s",
-                            name, file_size, limit, archive_path,
-                        )
-                        continue
-                    data = filepath.read_bytes()
-                    if data:
-                        result[name] = data
-                        logger.debug("  Read %r (%d B)", name, len(data))
+            if all_names_out is not None:
+                all_names_out.extend(all_names)
 
-        elif suffix == ".rar":
-            with _open_rar(archive_path, unrar_path) as rf:
-                infos     = [i for i in rf.infolist() if not i.is_dir()]
-                all_names = [i.filename for i in infos]
-                if all_names_out is not None:
-                    all_names_out.extend(all_names)
-                if stl_info_out is not None:
-                    target_exts = {".stl", ".obj", ".lys", ".chitubox"}
-                    for i in infos:
-                        if Path(i.filename.replace("\\", "/")).suffix.lower() in target_exts:
-                            stl_info_out[i.filename] = getattr(i, "file_size", None)
-                wanted = [n for n in all_names if _is_wanted(n)]
-                logger.debug("  RAR: %d total members, %d wanted", len(all_names), len(wanted))
-                for name in wanted:
-                    limit = _member_size_limit(name)
-                    file_size = rf.getinfo(name).file_size
-                    if file_size > limit:
-                        logger.warning(
-                            "Skipping oversized member %r (%d B > %d B limit) in %s",
-                            name, file_size, limit, archive_path,
-                        )
-                        continue
-                    try:
-                        data = rf.read(name)
-                        if data:
-                            result[name] = data
-                            logger.debug("  Read %r (%d B)", name, len(data))
-                    except Exception as exc:
-                        logger.warning("Failed to read member %r in %s: %s",
-                                       name, archive_path.name, exc)
-                        continue
+            if stl_info_out is not None:
+                target_exts = {".stl", ".obj", ".lys", ".chitubox"}
+                for m in all_members:
+                    if Path(m.name.replace("\\", "/")).suffix.lower() in target_exts:
+                        stl_info_out[m.name] = m.size
+
+            size_by_name = {m.name: m.size for m in all_members}
+            wanted = [n for n in all_names if _is_wanted(n)]
+            logger.debug("  %d total members, %d wanted", len(all_names), len(wanted))
+
+            # Apply size limits before extraction where catalog size is known.
+            to_read: list[str] = []
+            for name in wanted:
+                limit     = _member_size_limit(name)
+                file_size = size_by_name.get(name)
+                if file_size is not None and file_size > limit:
+                    logger.warning(
+                        "Skipping oversized member %r (%d B > %d B limit) in %s",
+                        name, file_size, limit, archive_path,
+                    )
+                    continue
+                to_read.append(name)
+
+            batch = ar.read_batch(to_read)
+
+            # Secondary size check for formats where catalog size was unavailable.
+            for name, data in batch.items():
+                limit = _member_size_limit(name)
+                if len(data) > limit:
+                    logger.warning(
+                        "Skipping oversized member %r (%d B > %d B limit) in %s",
+                        name, len(data), limit, archive_path,
+                    )
+                    continue
+                result[name] = data
 
     except PermissionError as exc:
         logger.warning("Permission denied reading archive %s: %s", archive_path, exc)
-    except Exception as exc:
+    except (ValueError, *_ARCHIVE_ERRORS) as exc:
         logger.error("Failed to open archive %s: %s", archive_path, exc, exc_info=True)
 
     logger.debug("Extraction complete for %s — %d file(s) loaded", archive_path.name, len(result))
     return result
-
 
 
 def read_url_file(archive_path: Path) -> Optional[str]:
