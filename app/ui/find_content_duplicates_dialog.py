@@ -333,7 +333,15 @@ class _ImageDupWorker(QThread):
                     finally:
                         s.close()
                     if dh is not None:
-                        hashes.append((img_id, model_id, int(dh)))
+                        # dh may be stored as a hex string (preferred) or an int
+                        # from older DBs. Normalize to an int for in-memory hashing.
+                        try:
+                            h_int = int(dh, 16) if isinstance(dh, str) else int(dh)
+                        except Exception:
+                            # Fallback: skip this stored value
+                            h_int = None
+                        if h_int is not None:
+                            hashes.append((img_id, model_id, h_int))
                     else:
                         jpeg = get_thumbnail_bytes(img_id)
                         if jpeg:
