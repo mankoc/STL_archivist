@@ -2117,4 +2117,6 @@ class BrowserTab(QWidget):
                 if mid is not None:
                     model_ids.append(mid)
         from app.ui.image_grid_dialog import ImageGridDialog
-        ImageGridDialog(model_ids, parent=self).exec()
+        dlg = ImageGridDialog(model_ids, parent=self)
+        dlg.show_selection_requested.connect(self.show_model_ids)
+        dlg.exec()
