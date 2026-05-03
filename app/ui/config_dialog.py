@@ -284,6 +284,16 @@ def get_presupport_patterns() -> list[str]:
     return list(_load_library_settings().get("presupport_patterns", DEFAULT_PRESUPPORT_PATTERNS))
 
 
+def get_supports_patterns() -> list[str]:
+    """Alias for get_presupport_patterns — used by settings_loader."""
+    return get_presupport_patterns()
+
+
+def get_warn_supports() -> bool:
+    """Whether to warn when an archive contains supported STL files (supports check)."""
+    return bool(_load_library_settings().get("warn_supports", False))
+
+
 def get_warn_no_images() -> bool:
     """Whether to warn when an archive contains no image files."""
     return bool(_load_library_settings().get("warn_no_images", True))
