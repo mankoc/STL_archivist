@@ -2005,105 +2005,119 @@ class BrowserTab(QWidget):
         if not model_ids:
             return
 
-        from app.crawler.archive import archive_hash, extract_archive_contents, list_contents
+        from app.crawler.archive import archive_hash, extract_archive_contents
         from app.crawler.metadata import extract_metadata
         from app.config import CrawlerConfig
         from app.database.db import session_scope
-        from app.ui.config_dialog import get_warn_presupported_stl, get_warn_no_images, get_warn_nested_archive, get_store_stl_file_list
+        from app.ui.config_dialog import (
+            get_warn_presupported_stl, get_warn_no_images, get_warn_nested_archive,
+            get_store_stl_file_list, get_warn_supports, get_supports_patterns,
+        )
 
         config = CrawlerConfig()
         updated = 0
-        with session_scope() as session:
-            for mid in model_ids:
+        for mid in model_ids:
+            # Use a separate transactional scope per model so failures don't
+            # roll back other models' updates.
+            with session_scope() as session:
                 m = session.get(STLModel, mid)
                 if not m or not m.archive_path:
                     continue
                 p = Path(m.archive_path)
-                if not p.exists():
-                    QMessageBox.warning(self, "Rescan", f"Archive not found: {m.archive_path}")
+                try:
+                    if not p.exists():
+                        QMessageBox.warning(self, "Rescan", f"Archive not found: {m.archive_path}")
+                        continue
+
+                    # Quick check: if size/mtime matches DB, skip heavy work
+                    try:
+                        st = p.stat()
+                        fs_size = int(st.st_size)
+                        fs_mtime = int(st.st_mtime_ns)
+                    except Exception:
+                        fs_size = None
+                        fs_mtime = None
+
+                    need_hash = True
+                    if fs_size is not None and fs_mtime is not None and m.archive_size is not None and m.archive_mtime_ns is not None:
+                        if fs_size == m.archive_size and fs_mtime == m.archive_mtime_ns:
+                            need_hash = False
+
+                    if need_hash:
+                        new_hash = archive_hash(p, unrar_path=config.unrar_path)
+                    else:
+                        new_hash = m.archive_hash
+
+                    # Extract files we need and capture the full member list so we can
+                    # run the validation rules without opening the archive twice.
+                    all_names: list[str] = []
+                    contents = extract_archive_contents(
+                        p,
+                        unrar_path=config.unrar_path,
+                        all_names_out=all_names,
+                        stl_info_out=None,
+                    )
+                    meta = extract_metadata(p, contents=contents, source_dir=p.parent)
+
+                    # Update model in-place
+                    m.archive_hash = new_hash
+                    try:
+                        m.archive_size = fs_size
+                        m.archive_mtime_ns = fs_mtime
+                    except Exception:
+                        pass
+                    # assign metadata fields
+                    m.title = meta.title or m.title
+                    m.creator = meta.creator or m.creator
+                    m.source = meta.distributor or m.source
+                    if meta.release_date:
+                        ry, rm = parse_release_date(meta.release_date)
+                        if ry is not None:
+                            m.release_year = ry
+                            m.release_month = rm
+                    m.url = meta.url or m.url
+                    m.description = meta.description or m.description
+
+                    # Recompute presupports/warnings/scale using the full member list
+                    from app.crawler.rules import detect_warnings, detect_presupport, detect_scale
+                    m.presupports = detect_presupport(all_names)
+                    warnings = detect_warnings(
+                        all_names,
+                        check_presupported=get_warn_presupported_stl(),
+                        check_no_images=get_warn_no_images(),
+                        check_nested_archive=get_warn_nested_archive(),
+                        check_supports=get_warn_supports(),
+                        supports_patterns=get_supports_patterns(),
+                    )
+                    m.warning = warnings or None
+
+                    # Re-detect scale and update model.scale if found
+                    scales = detect_scale([p.name] + all_names)
+                    if scales:
+                        from app.database.helpers import get_or_create_scale
+                        m.scale = get_or_create_scale(session, scales[0])
+
+                    if get_store_stl_file_list():
+                        # Refresh stl_files entries
+                        for old in list(m.stl_files):
+                            session.delete(old)
+                        session.flush()
+                        from app.database.models import STLFile
+                        for fname in [n for n in (all_names or []) if Path(n.replace('\\', '/')).suffix.lower() in {'.stl', '.obj', '.lys', '.chitubox'}]:
+                            session.add(STLFile(model=m, filename=fname, file_size=None, archive_hash=new_hash))
+
+                    updated += 1
+                except Exception as exc:
+                    # Protect the UI from uncaught exceptions during rescan of
+                    # an individual archive. Inform the user and continue.
+                    logger = __import__("logging").getLogger(__name__)
+                    logger.exception("Rescan failed for %s: %s", p, exc)
+                    QMessageBox.warning(self, "Rescan failed", f"Failed to rescan {p}: {exc}")
                     continue
 
-                # Quick check: if size/mtime matches DB, skip heavy work
-                try:
-                    st = p.stat()
-                    fs_size = int(st.st_size)
-                    fs_mtime = int(st.st_mtime_ns)
-                except Exception:
-                    fs_size = None
-                    fs_mtime = None
-
-                need_hash = True
-                if fs_size is not None and fs_mtime is not None and m.archive_size is not None and m.archive_mtime_ns is not None:
-                    if fs_size == m.archive_size and fs_mtime == m.archive_mtime_ns:
-                        need_hash = False
-
-                if need_hash:
-                    new_hash = archive_hash(p, unrar_path=config.unrar_path)
-                else:
-                    new_hash = m.archive_hash
-
-                # Extract files we need and capture the full member list so we can
-                # run the validation rules without opening the archive twice.
-                all_names: list[str] = []
-                contents = extract_archive_contents(
-                    p,
-                    unrar_path=config.unrar_path,
-                    all_names_out=all_names,
-                    stl_info_out=None,
-                )
-                meta = extract_metadata(p, contents=contents, source_dir=p.parent)
-
-                # Update model in-place
-                m.archive_hash = new_hash
-                try:
-                    m.archive_size = fs_size
-                    m.archive_mtime_ns = fs_mtime
-                except Exception:
-                    pass
-                # assign metadata fields
-                m.title = meta.title or m.title
-                m.creator = meta.creator or m.creator
-                m.source = meta.distributor or m.source
-                if meta.release_date:
-                    ry, rm = parse_release_date(meta.release_date)
-                    if ry is not None:
-                        m.release_year = ry
-                        m.release_month = rm
-                m.url = meta.url or m.url
-                m.description = meta.description or m.description
-
-                # Recompute presupports/warnings/scale using the full member list
-                from app.crawler.rules import detect_warnings, detect_presupport, detect_scale
-                m.presupports = detect_presupport(all_names)
-                warnings = detect_warnings(
-                    all_names,
-                    check_presupported=get_warn_presupported_stl(),
-                    check_no_images=get_warn_no_images(),
-                    check_nested_archive=get_warn_nested_archive(),
-                    check_supports=get_warn_supports(),
-                    supports_patterns=get_supports_patterns(),
-                )
-                m.warning = warnings or None
-
-                # Re-detect scale and update model.scale if found
-                scales = detect_scale([p.name] + all_names)
-                if scales:
-                    from app.database.helpers import get_or_create_scale
-                    m.scale = get_or_create_scale(session, scales[0])
-
-                if get_store_stl_file_list():
-                    # Refresh stl_files entries
-                    for old in list(m.stl_files):
-                        session.delete(old)
-                    session.flush()
-                    from app.database.models import STLFile
-                    for fname in [n for n in (all_names or []) if Path(n.replace('\\', '/')).suffix.lower() in {'.stl', '.obj', '.lys', '.chitubox'}]:
-                        session.add(STLFile(model=m, filename=fname, file_size=None, archive_hash=new_hash))
-
-                updated += 1
-            session.flush()
-
         QMessageBox.information(self, "Rescan complete", f"Rescan applied for {updated} model(s).")
+        # Refresh the browser so any updated warnings / presupports / scale are shown
+        self.refresh()
 
     def _delete_files_from_disk(self, model_ids: list[int]) -> None:
         """Confirm with the user, then delegate to the file-deletion service.
