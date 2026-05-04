@@ -71,3 +71,13 @@ class CrawlerConfig:
     # When False the crawler only processes archives directly inside the selected
     # directory (no recursive walk).
     recurse_subdirs: bool = True
+
+    # When False, log lines for archives whose hash has not changed are suppressed.
+    log_unchanged: bool = True
+
+    # Force re-extraction of all archives even when hash/size/mtime are unchanged.
+    force_rescan: bool = False
+
+    # Warn when an archive's compression rate (compressed/uncompressed) is too high.
+    warn_low_compression: bool = False
+    low_compression_threshold: float = 0.95

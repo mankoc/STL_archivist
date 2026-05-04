@@ -122,6 +122,11 @@ def export_folder_metadata(
 
     data = _serialize_models(models, thumb_base_dir, include_thumbnails=include_thumbnails)
 
+    # Persist the crawl pattern so it can be restored on a new machine.
+    from app.database.models import CrawledFolder
+    crawled_folder = session.query(CrawledFolder).filter_by(path=str(folder)).first()
+    data["pattern"] = crawled_folder.pattern if crawled_folder else None
+
     metadata_path = folder / METADATA_FILENAME
     try:
         _write_metadata_7z(
@@ -163,6 +168,17 @@ def import_folder_metadata(folder: Path, session: Session, thumb_base_dir: Path)
         logger.warning("Unsupported METADATA.7z schema version %s in %s — skipping import", version, folder)
         return []
 
+    # Restore folder-level crawl pattern into CrawledFolder, if available.
+    folder_pattern = data.get("pattern")
+    if folder_pattern:
+        from app.database.models import CrawledFolder
+        crawled = session.query(CrawledFolder).filter_by(path=str(folder)).first()
+        if crawled is None:
+            crawled = CrawledFolder(path=str(folder), pattern=folder_pattern)
+            session.add(crawled)
+        elif not crawled.pattern:
+            crawled.pattern = folder_pattern
+
     imported: list[str] = []
 
     for model_data in data.get("models", []):
@@ -187,17 +203,18 @@ def import_folder_metadata(folder: Path, session: Session, thumb_base_dir: Path)
 
         model = STLModel(
             archive_path  = archive_str,
-            archive_hash  = model_data.get("archive_hash", ""),
-            title         = model_data.get("title"),
-            creator       = model_data.get("creator") or model_data.get("author"),
-            source        = model_data.get("source"),
-            release_year  = model_data.get("release_year"),
-            release_month = model_data.get("release_month"),
-            url           = model_data.get("url"),
-            description   = model_data.get("description"),
-            sequence      = model_data.get("sequence"),
-            presupports   = model_data.get("presupports"),
-            warning       = model_data.get("warning"),
+            archive_hash     = model_data.get("archive_hash", ""),
+            title            = model_data.get("title"),
+            creator          = model_data.get("creator") or model_data.get("author"),
+            source           = model_data.get("source"),
+            release_year     = model_data.get("release_year"),
+            release_month    = model_data.get("release_month"),
+            url              = model_data.get("url"),
+            description      = model_data.get("description"),
+            sequence         = model_data.get("sequence"),
+            presupports      = model_data.get("presupports"),
+            warning          = model_data.get("warning"),
+            compression_rate = model_data.get("compression_rate"),
         )
         session.add(model)
 
@@ -275,18 +292,19 @@ def _serialize_models(models: list, thumb_base_dir: Path, include_thumbnails: bo
                     })
 
         entries.append({
-            "archive_name":  Path(model.archive_path).name,
-            "archive_hash":  model.archive_hash or "",
-            "title":         model.title,
-            "creator":       model.creator,
-            "source":        model.source,
-            "release_year":  model.release_year,
-            "release_month": model.release_month,
-            "url":           model.url,
-            "description":   model.description,
-            "sequence":      model.sequence,
-            "presupports":   model.presupports,
-            "warning":       model.warning,
+            "archive_name":     Path(model.archive_path).name,
+            "archive_hash":     model.archive_hash or "",
+            "title":            model.title,
+            "creator":          model.creator,
+            "source":           model.source,
+            "release_year":     model.release_year,
+            "release_month":    model.release_month,
+            "url":              model.url,
+            "description":      model.description,
+            "sequence":         model.sequence,
+            "presupports":      model.presupports,
+            "warning":          model.warning,
+            "compression_rate": model.compression_rate,
             "sculptor":      model.sculptor.name     if model.sculptor     else None,
             "collection":    model.collection.name   if model.collection   else None,
             "subcollection": model.subcollection.name if model.subcollection else None,

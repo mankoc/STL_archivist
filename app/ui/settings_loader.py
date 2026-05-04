@@ -20,10 +20,12 @@ from app.ui.config_dialog import (
     get_warn_no_images,
     get_warn_presupported_stl,
     get_warn_supports,
+    get_warn_low_compression,
+    get_low_compression_threshold,
 )
 
 
-def build_crawler_config(max_thumbnails: int | None = None) -> CrawlerConfig:
+def build_crawler_config(max_thumbnails: int | None = None, force_rescan: bool = False) -> CrawlerConfig:
     """Return a :class:`CrawlerConfig` populated from the current settings.
 
     Args:
@@ -53,4 +55,7 @@ def build_crawler_config(max_thumbnails: int | None = None) -> CrawlerConfig:
         warn_supports=get_warn_supports(),
         support_patterns=get_supports_patterns(),
         recurse_subdirs=recurse,
+        force_rescan=force_rescan,
+        warn_low_compression=get_warn_low_compression(),
+        low_compression_threshold=get_low_compression_threshold(),
     )

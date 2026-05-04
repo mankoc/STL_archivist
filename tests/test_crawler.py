@@ -42,6 +42,7 @@ def _make_worker(source_dir: str = "/tmp", pattern: str = ""):
     ns._detect_rules               = lambda *a, **kw: CrawlerWorker._detect_rules(ns, *a, **kw)
     ns._assign_metadata            = lambda *a, **kw: CrawlerWorker._assign_metadata(ns, *a, **kw)
     ns._update_thumbnails          = lambda *a, **kw: CrawlerWorker._update_thumbnails(ns, *a, **kw)
+    ns._store_folder_images        = lambda *a, **kw: CrawlerWorker._store_folder_images(ns, *a, **kw)
     return ns
 
 

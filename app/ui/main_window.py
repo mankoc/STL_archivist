@@ -45,6 +45,13 @@ class MainWindow(QMainWindow):
         self._act_open_crawler.setStatusTip("Open the Crawler window")
         self._act_open_crawler.triggered.connect(self._open_crawler)
 
+        self._act_update_folders = QAction(
+            style.standardIcon(SP.SP_BrowserReload), "Update Crawled Folders…", self)
+        self._act_update_folders.setStatusTip(
+            "Re-crawl all stored folders to pick up new and modified archives"
+        )
+        self._act_update_folders.triggered.connect(self._update_crawled_folders)
+
         self._act_exit = QAction(
             style.standardIcon(SP.SP_DialogCloseButton), "Exit", self)
         self._act_exit.setShortcut(QKeySequence.StandardKey.Quit)
@@ -79,6 +86,7 @@ class MainWindow(QMainWindow):
 
         file_menu = mb.addMenu("&File")
         file_menu.addAction(self._act_open_crawler)
+        file_menu.addAction(self._act_update_folders)
         file_menu.addSeparator()
         act_config = QAction(
             style.standardIcon(SP.SP_FileDialogDetailedView), "Configuration…", self)
@@ -308,6 +316,12 @@ class MainWindow(QMainWindow):
         tab.progress_updated.connect(on_progress)
         tab.crawl_finished.connect(on_finished)
         self._crawler_dialog.rejected.connect(on_dialog_closed)
+
+    def _update_crawled_folders(self) -> None:
+        """Open the Update Crawled Folders dialog and refresh the browser when done."""
+        from app.ui.update_crawled_folders_dialog import UpdateCrawledFoldersDialog
+        UpdateCrawledFoldersDialog(parent=self).exec()
+        self._browser.refresh()
 
     def _open_config(self) -> None:
         """Open the configuration dialog and re-apply debug menu visibility."""

@@ -6,7 +6,7 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 from sqlalchemy import (
-    Column, Integer, String, Text, LargeBinary, DateTime,
+    Column, Integer, Float, String, Text, LargeBinary, DateTime,
     ForeignKey, Table, UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -170,6 +170,7 @@ class STLModel(Base):
     sequence         = Column(Integer, nullable=True)               # position in a series, e.g. 3
     presupports      = Column(String(32), nullable=True)            # No / Lychee / Chitubox / Presupported
     warning          = Column(Text, nullable=True)                  # newline-separated warning strings, NULL if none
+    compression_rate = Column(Float, nullable=True)                 # archive_size / total_uncompressed_size (0‥1+)
     created_at       = Column(DateTime, default=_utcnow)
     updated_at       = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
@@ -247,3 +248,23 @@ class STLFile(Base):
     archive_hash = Column(String(64), nullable=True)
 
     model = relationship("STLModel", back_populates="stl_files")
+
+
+class CrawledFolder(Base):
+    """A root folder submitted to the crawler, tracked for change monitoring.
+
+    One row per unique ``path``; updated on every successful crawl run.
+    """
+
+    __tablename__ = "crawled_folders"
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    path            = Column(Text, unique=True, nullable=False)
+    pattern         = Column(Text, nullable=True)
+    last_crawled_at = Column(DateTime, nullable=True)
+    archive_count   = Column(Integer, nullable=True)
+    new_count       = Column(Integer, nullable=True)
+    updated_count   = Column(Integer, nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<CrawledFolder {self.path!r}>"
