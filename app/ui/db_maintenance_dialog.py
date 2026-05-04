@@ -28,9 +28,10 @@ from PyQt6.QtWidgets import (
 
 logger = logging.getLogger(__name__)
 
-_STATUS_OK      = "OK"
-_STATUS_MISSING = "Missing"
-_STATUS_FOUND   = "Relocated"
+_STATUS_OK       = "OK"
+_STATUS_MISSING  = "Missing"
+_STATUS_FOUND    = "Relocated"
+_STATUS_MODIFIED = "Modified"
 
 _COL_ID     = 0
 _COL_TITLE  = 1
@@ -44,6 +45,9 @@ def _color_missing() -> QColor:
 def _color_found() -> QColor:
     from app.ui.config_dialog import get_found_file_color
     return QColor(get_found_file_color())
+
+def _color_modified() -> QColor:
+    return QColor(180, 100, 0)
 
 _COLOR_FG = QColor(255, 255, 255)
 
@@ -81,6 +85,7 @@ class VerifyWorker(QThread):
                 STLModel.title,
                 STLModel.archive_path,
                 STLModel.archive_hash,
+                STLModel.archive_size,
             ).all()
 
         total = len(records)
@@ -91,15 +96,21 @@ class VerifyWorker(QThread):
 
         self.log.emit(f"Verifying {total} archive(s)…")
         missing = 0
-        for idx, (model_id, title, path, ahash) in enumerate(records, 1):
+        modified = 0
+        for idx, (model_id, title, path, ahash, stored_size) in enumerate(records, 1):
             if self._stop_requested:
                 self.log.emit("Stopped by user.")
                 break
             self.progress.emit(idx, total)
-            exists = bool(path and Path(path).is_file())
-            status = _STATUS_OK if exists else _STATUS_MISSING
-            if not exists:
+            p = Path(path) if path else None
+            if p is None or not p.is_file():
+                status = _STATUS_MISSING
                 missing += 1
+            elif stored_size is not None and p.stat().st_size != stored_size:
+                status = _STATUS_MODIFIED
+                modified += 1
+            else:
+                status = _STATUS_OK
             results.append({
                 "id":     model_id,
                 "title":  title or "",
@@ -108,9 +119,10 @@ class VerifyWorker(QThread):
                 "status": status,
             })
 
-        found_count = total - missing
+        ok_count = total - missing - modified
         self.log.emit(
-            f"Done — {found_count} OK, {missing} missing out of {total} archive(s)."
+            f"Done — {ok_count} OK, {modified} modified, {missing} missing "
+            f"out of {total} archive(s)."
         )
         self.finished.emit(results)
 
@@ -434,7 +446,7 @@ class DbMaintenanceDialog(QDialog):
         root.addWidget(self._progress)
 
         filter_row = QHBoxLayout()
-        self._only_failed_cb = QCheckBox("Show only missing")
+        self._only_failed_cb = QCheckBox("Show only problems (missing / modified)")
         self._only_failed_cb.toggled.connect(self._apply_filter)
         filter_row.addWidget(self._only_failed_cb)
         filter_row.addStretch()
@@ -471,7 +483,7 @@ class DbMaintenanceDialog(QDialog):
         self._close_btn.setEnabled(not busy)
 
     def _set_idle(self) -> None:
-        has_missing = any(r["status"] == _STATUS_MISSING for r in self._results)
+        has_missing = any(r["status"] in (_STATUS_MISSING, _STATUS_MODIFIED) for r in self._results)
         has_any     = bool(self._results)
         self._verify_btn.setEnabled(True)
         self._dhash_btn.setEnabled(True)
@@ -546,6 +558,8 @@ class DbMaintenanceDialog(QDialog):
                 self._color_row(items, _color_missing())
             elif status == _STATUS_FOUND:
                 self._color_row(items, _color_found())
+            elif status == _STATUS_MODIFIED:
+                self._color_row(items, _color_modified())
 
             for col, item in enumerate(items):
                 self._table.setItem(r, col, item)
@@ -553,12 +567,13 @@ class DbMaintenanceDialog(QDialog):
         self._apply_filter()
 
     def _apply_filter(self) -> None:
-        only_missing = self._only_failed_cb.isChecked()
+        only_problems = self._only_failed_cb.isChecked()
+        _OK_STATUSES = {_STATUS_OK, _STATUS_FOUND}
         for row in range(self._table.rowCount()):
             status_item = self._table.item(row, _COL_STATUS)
             if status_item is None:
                 continue
-            hide = only_missing and status_item.text() != _STATUS_MISSING
+            hide = only_problems and status_item.text() in _OK_STATUSES
             self._table.setRowHidden(row, hide)
 
     @staticmethod

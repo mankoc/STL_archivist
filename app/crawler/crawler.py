@@ -5,6 +5,7 @@ into the database. Runs inside a QThread to keep the UI responsive.
 import logging
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
 from typing import Optional
@@ -28,7 +29,7 @@ from app.database.helpers import (
     get_or_create_scale,
     get_or_create_tag,
 )
-from app.database.models import STLModel, Image, STLFile
+from app.database.models import STLModel, Image, STLFile, CrawledFolder
 from app.utils.thumbnailer import save_thumbnail, delete_thumbnail, get_thumbnail_base_dir, get_thumbnail_bytes
 from app.ui.find_content_duplicates_dialog import compute_dhash_from_jpeg
 from app.utils.path_pattern import parse_path, apply_extracted_to_model, parse_release_date
@@ -43,9 +44,10 @@ class CrawlerWorker(QThread):
         finished(): Emitted when the crawl completes or is stopped by the user.
     """
 
-    progress = pyqtSignal(int, int)
-    log      = pyqtSignal(str)
-    finished = pyqtSignal()
+    progress      = pyqtSignal(int, int)
+    log           = pyqtSignal(str)
+    finished      = pyqtSignal()
+    counts_changed = pyqtSignal(int, int, int)  # new, updated, unchanged
 
     def __init__(
         self,
@@ -71,6 +73,9 @@ class CrawlerWorker(QThread):
         """Main thread entry point — orchestrates the full crawl pipeline."""
         self._stop_requested = False
         self._consecutive_failures = 0
+        self._stats_new = 0
+        self._stats_updated = 0
+        self._stats_unchanged = 0
         logger.info("Crawl started — source: %s, pattern: %r, workers: %d",
                     self.source_dir, self._pattern, self._config.max_workers)
         self._remove_missing()
@@ -104,10 +109,10 @@ class CrawlerWorker(QThread):
 
             with session_scope() as session:
                 to_extract, existing_map = self._phase_diff(batch, hashes, session)
-                contents_map, all_names_map, stl_info_map = self._phase_extract(to_extract)
+                contents_map, all_names_map, stl_info_map, uncompressed_map = self._phase_extract(to_extract)
                 stopped = self._phase_upsert(
                     batch, batch_start, total, hashes,
-                    existing_map, contents_map, all_names_map, stl_info_map,
+                    existing_map, contents_map, all_names_map, stl_info_map, uncompressed_map,
                     session, modified_folders,
                 )
 
@@ -116,6 +121,8 @@ class CrawlerWorker(QThread):
 
         if modified_folders and thumb_base is not None and self._config.metadata_sidecar_enabled:
             self._post_export_metadata(modified_folders, thumb_base)
+
+        self._record_crawled_folder(total)
 
         msg = "Crawl complete."
         self.log.emit(msg)
@@ -163,11 +170,14 @@ class CrawlerWorker(QThread):
                     fs_size = None
                     fs_mtime = None
 
-                if m is not None and m.archive_size is not None and m.archive_mtime_ns is not None:
-                    if fs_size == m.archive_size and fs_mtime == m.archive_mtime_ns:
-                        # unchanged
-                        hashes[p] = m.archive_hash
-                        continue
+                if (not self._config.force_rescan
+                        and m is not None
+                        and m.archive_size is not None
+                        and m.archive_mtime_ns is not None
+                        and fs_size == m.archive_size
+                        and fs_mtime == m.archive_mtime_ns):
+                    hashes[p] = m.archive_hash
+                    continue
                 # Otherwise schedule full hash
                 to_hash.append(p)
 
@@ -198,24 +208,28 @@ class CrawlerWorker(QThread):
 
         to_extract: list[Path] = []
         store_stl = self._config.store_stl_file_list
+        force = self._config.force_rescan
         for p in batch:
             ex = existing_map.get(str(p))
             if ex is None:
                 to_extract.append(p)
                 logger.debug("  NEW: %s", p.name)
-            elif ex.archive_hash != hashes[p]:
-                # File has changed (hash mismatch) — mark for extraction and refresh cached fs metadata
+            elif force or ex.archive_hash != hashes[p]:
+                reason = "FORCE" if force else "CHANGED"
                 to_extract.append(p)
-                logger.debug("  CHANGED: %s (old=%s… new=%s…)",
-                             p.name, ex.archive_hash[:8], hashes[p][:8])
-                try:
-                    st = p.stat()
-                    ex.archive_size = int(st.st_size)
-                    ex.archive_mtime_ns = int(st.st_mtime_ns)
-                    session.add(ex)
-                    session.flush()
-                except Exception:
-                    pass
+                if not force:
+                    logger.debug("  %s: %s (old=%s… new=%s…)",
+                                 reason, p.name, ex.archive_hash[:8], hashes[p][:8])
+                    try:
+                        st = p.stat()
+                        ex.archive_size = int(st.st_size)
+                        ex.archive_mtime_ns = int(st.st_mtime_ns)
+                        session.add(ex)
+                        session.flush()
+                    except Exception:
+                        pass
+                else:
+                    logger.debug("  %s: %s", reason, p.name)
             elif store_stl and not ex.stl_files:
                 to_extract.append(p)
                 logger.debug("  MISSING STL LIST: %s", p.name)
@@ -233,26 +247,33 @@ class CrawlerWorker(QThread):
         dict[Path, dict[str, bytes]],
         dict[Path, list[str]],
         dict[Path, dict[str, int | None]],
+        dict[Path, int | None],
     ]:
         """Phase 3: parallel archive decompression for new/changed archives."""
-        contents_map:  dict[Path, dict[str, bytes]]       = {}
-        all_names_map: dict[Path, list[str]]              = {}
-        stl_info_map:  dict[Path, dict[str, int | None]]  = {}
+        contents_map:      dict[Path, dict[str, bytes]]       = {}
+        all_names_map:     dict[Path, list[str]]              = {}
+        stl_info_map:      dict[Path, dict[str, int | None]]  = {}
+        uncompressed_map:  dict[Path, int | None]             = {}
 
         if not to_extract:
             logger.debug("Phase 3 skipped — no archives need extraction")
-            return contents_map, all_names_map, stl_info_map
+            return contents_map, all_names_map, stl_info_map, uncompressed_map
 
-        def _extract_one(p: Path) -> tuple[dict[str, bytes], list[str], dict[str, int | None]]:
+        def _extract_one(
+            p: Path,
+        ) -> tuple[dict[str, bytes], list[str], dict[str, int | None], int | None]:
             names:    list[str]             = []
             stl_info: dict[str, int | None] = {}
+            uncompressed_out: list[int]     = []
             data = extract_archive_contents(
                 p,
                 unrar_path=self._config.unrar_path,
                 all_names_out=names,
                 stl_info_out=stl_info,
+                uncompressed_size_out=uncompressed_out,
             )
-            return data, names, stl_info
+            uncompressed = uncompressed_out[0] if uncompressed_out else None
+            return data, names, stl_info, uncompressed
 
         workers = self._config.max_workers
         logger.debug("Phase 3: extracting %d archive(s) in parallel", len(to_extract))
@@ -261,22 +282,24 @@ class CrawlerWorker(QThread):
             for future in as_completed(futures):
                 p = futures[future]
                 try:
-                    data, names, stl_info = future.result()
-                    contents_map[p]  = data
-                    all_names_map[p] = names
-                    stl_info_map[p]  = stl_info
+                    data, names, stl_info, uncompressed = future.result()
+                    contents_map[p]     = data
+                    all_names_map[p]    = names
+                    stl_info_map[p]     = stl_info
+                    uncompressed_map[p] = uncompressed
                     logger.debug("  extracted %s → %d file(s), %d member(s), %d stl(s)",
                                  p.name, len(data), len(names), len(stl_info))
                 except Exception as exc:
                     msg = f"  ERROR extracting {p.name}: {exc}"
                     self.log.emit(msg)
                     logger.error("Extraction failed for %s: %s", p.name, exc, exc_info=True)
-                    contents_map[p]  = {}
-                    all_names_map[p] = []
-                    stl_info_map[p]  = {}
+                    contents_map[p]     = {}
+                    all_names_map[p]    = []
+                    stl_info_map[p]     = {}
+                    uncompressed_map[p] = None
 
         logger.debug("Phase 3 complete — %d archive(s) extracted", len(contents_map))
-        return contents_map, all_names_map, stl_info_map
+        return contents_map, all_names_map, stl_info_map, uncompressed_map
 
     def _phase_upsert(
         self,
@@ -288,6 +311,7 @@ class CrawlerWorker(QThread):
         contents_map: dict[Path, dict[str, bytes]],
         all_names_map: dict[Path, list[str]],
         stl_info_map: dict[Path, dict],
+        uncompressed_map: dict[Path, int | None],
         session: Session,
         modified_folders: set[Path],
     ) -> bool:
@@ -303,7 +327,10 @@ class CrawlerWorker(QThread):
                 logger.info(msg)
                 return True
 
-            self.log.emit(f"[{idx}/{total}] {archive_path.name}")
+            _existing  = existing_map.get(str(archive_path))
+            _contents  = contents_map.get(archive_path)
+            if _contents is not None or self._config.log_unchanged:
+                self.log.emit(f"[{idx}/{total}] {archive_path.name}")
             logger.debug("[%d/%d] Upserting: %s", idx, total, archive_path)
             sp = session.begin_nested()
             try:
@@ -313,12 +340,21 @@ class CrawlerWorker(QThread):
                     max_thumbs,
                     max_thumb_size,
                     current_hash=hashes[archive_path],
-                    existing=existing_map.get(str(archive_path)),
-                    contents=contents_map.get(archive_path),
+                    existing=_existing,
+                    contents=_contents,
                     all_names=all_names_map.get(archive_path),
                     stl_info=stl_info_map.get(archive_path),
+                    uncompressed_size=uncompressed_map.get(archive_path),
                 )
                 sp.commit()
+                if _contents is not None:
+                    if _existing is None:
+                        self._stats_new += 1
+                    else:
+                        self._stats_updated += 1
+                else:
+                    self._stats_unchanged += 1
+                self.counts_changed.emit(self._stats_new, self._stats_updated, self._stats_unchanged)
                 modified_folders.add(archive_path.parent)
                 self._consecutive_failures = 0
                 logger.debug("  Upsert committed: %s", archive_path.name)
@@ -362,6 +398,25 @@ class CrawlerWorker(QThread):
     # Private helpers
     # ------------------------------------------------------------------
 
+    def _record_crawled_folder(self, archive_count: int) -> None:
+        """Upsert a CrawledFolder row for source_dir with stats from this run."""
+        path_str = str(self.source_dir)
+        try:
+            with session_scope() as session:
+                folder = session.query(CrawledFolder).filter_by(path=path_str).first()
+                if folder is None:
+                    folder = CrawledFolder(path=path_str)
+                    session.add(folder)
+                folder.pattern         = self._pattern or None
+                folder.last_crawled_at = datetime.now(timezone.utc)
+                folder.archive_count   = archive_count
+                folder.new_count       = self._stats_new
+                folder.updated_count   = self._stats_updated
+            logger.info("CrawledFolder recorded: path=%s archives=%d new=%d updated=%d",
+                        path_str, archive_count, self._stats_new, self._stats_updated)
+        except Exception as exc:
+            logger.error("Failed to record crawled folder %s: %s", path_str, exc)
+
     def _remove_missing(self) -> None:
         """Delete DB records whose archive file no longer exists on disk,
         including any thumbnail files stored on disk."""
@@ -399,6 +454,7 @@ class CrawlerWorker(QThread):
         contents: Optional[dict[str, bytes]],
         all_names: Optional[list[str]] = None,
         stl_info: Optional[dict] = None,
+        uncompressed_size: Optional[int] = None,
     ) -> None:
         """Write one archive to the database using pre-computed hash and contents.
 
@@ -461,12 +517,26 @@ class CrawlerWorker(QThread):
         except Exception:
             pass
 
+        if uncompressed_size is not None and uncompressed_size > 0 and model.archive_size is not None:
+            model.compression_rate = round(model.archive_size / uncompressed_size, 4)
+
         if all_names is None:
             logger.debug("  Listing archive contents for rule detection: %s", archive_path.name)
             all_names = list_contents(archive_path, self._config.unrar_path)
         logger.debug("  %d member(s) in archive", len(all_names))
 
         self._detect_rules(model, all_names, archive_path, session)
+
+        if (self._config.warn_low_compression
+                and model.compression_rate is not None
+                and model.compression_rate >= self._config.low_compression_threshold):
+            _warn_text = "Archive with low compression rate"
+            if model.warning:
+                if _warn_text not in model.warning:
+                    model.warning += "\n" + _warn_text
+            else:
+                model.warning = _warn_text
+
         self._assign_metadata(model, meta, session)
 
         if self._pattern:
@@ -540,14 +610,17 @@ class CrawlerWorker(QThread):
             extracted = parse_path(self._pattern, rel_path)
             if extracted:
                 apply_extracted_to_model(session, model=existing, extracted=extracted, overwrite=False)
-                msg = "  unchanged – pattern applied: " + ", ".join(f"{k}={v!r}" for k, v in extracted.items())
-                self.log.emit(msg)
-                logger.debug("  %s — %s", archive_path.name, msg.strip())
+                if self._config.log_unchanged:
+                    msg = "  unchanged – pattern applied: " + ", ".join(f"{k}={v!r}" for k, v in extracted.items())
+                    self.log.emit(msg)
+                    logger.debug("  %s — %s", archive_path.name, msg.strip())
             else:
-                self.log.emit("  unchanged – pattern: no match")
+                if self._config.log_unchanged:
+                    self.log.emit("  unchanged – pattern: no match")
                 logger.debug("  %s — unchanged, pattern had no match", archive_path.name)
         else:
-            self.log.emit("  unchanged – skipped")
+            if self._config.log_unchanged:
+                self.log.emit("  unchanged – skipped")
             logger.debug("  %s — unchanged, skipped (no pattern)", archive_path.name)
 
     def _detect_rules(
@@ -608,7 +681,6 @@ class CrawlerWorker(QThread):
         _year, _month = parse_release_date(meta.release_date or "")
         model.release_year  = _year
         model.release_month = _month
-        model.url           = meta.url
         model.description   = meta.description
 
         if meta.release:
@@ -688,6 +760,70 @@ class CrawlerWorker(QThread):
                                    filename, archive_path.name)
             self.log.emit(f"  {count} thumbnail(s) stored")
             logger.debug("  %d thumbnail(s) stored for %s", count, archive_path.name)
+
+            folder_count = self._store_folder_images(model, archive_path, session, max_thumb_size)
+            if folder_count:
+                self.log.emit(f"  {folder_count} folder image(s) stored")
+                logger.debug("  %d folder image(s) for %s", folder_count, archive_path.name)
+
+    def _store_folder_images(
+        self,
+        model: STLModel,
+        archive_path: Path,
+        session: Session,
+        max_thumb_size: int,
+    ) -> int:
+        """Store on-disk image files from ancestor folders as extra thumbnails.
+
+        Scans the archive's parent directory and each ancestor up to and
+        including ``source_dir``.  Found images are stored without counting
+        toward the per-archive thumbnail limit.
+
+        Returns the number of images successfully stored.
+        """
+        count = 0
+        folder = archive_path.parent
+        while True:
+            try:
+                folder.relative_to(self.source_dir)
+            except ValueError:
+                break  # above source_dir — stop
+            try:
+                candidates = sorted(
+                    p for p in folder.iterdir()
+                    if p.is_file() and p.suffix.lower() in IMAGE_SUFFIXES
+                )
+            except OSError:
+                candidates = []
+            for p in candidates:
+                try:
+                    raw = p.read_bytes()
+                except OSError:
+                    continue
+                img = Image(model=model, filename=str(p))
+                session.add(img)
+                session.flush()
+                rel_path = save_thumbnail(raw, img.id, max_size=max_thumb_size)
+                if rel_path:
+                    img.thumbnail_path = rel_path
+                    try:
+                        jpeg = get_thumbnail_bytes(img.id)
+                        if jpeg:
+                            h = compute_dhash_from_jpeg(jpeg)
+                            if h is not None:
+                                hval = int(h) & ((1 << 64) - 1)
+                                img.dhash = f"{hval:016x}"
+                    except Exception:
+                        pass
+                    count += 1
+                    logger.debug("  Folder image stored: %s", p.name)
+                else:
+                    session.delete(img)
+                    logger.debug("  Folder image thumbnail failed: %s", p.name)
+            if folder == self.source_dir:
+                break
+            folder = folder.parent
+        return count
 
     def _log_metadata(self, meta: ModelMetadata) -> None:
         """Emit a log line summarising the extracted metadata fields.

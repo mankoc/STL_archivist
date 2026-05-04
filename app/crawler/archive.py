@@ -320,6 +320,7 @@ def extract_archive_contents(
     unrar_path: str = "",
     all_names_out: Optional[list] = None,
     stl_info_out: Optional[dict] = None,
+    uncompressed_size_out: Optional[list] = None,
 ) -> dict[str, bytes]:
     """
     Open the archive exactly once and return a dict of {member_name: bytes}
@@ -345,6 +346,10 @@ def extract_archive_contents(
 
             if all_names_out is not None:
                 all_names_out.extend(all_names)
+
+            if uncompressed_size_out is not None:
+                total = sum(m.size for m in all_members if m.size is not None)
+                uncompressed_size_out.append(total)
 
             if stl_info_out is not None:
                 target_exts = {".stl", ".obj", ".lys", ".chitubox"}

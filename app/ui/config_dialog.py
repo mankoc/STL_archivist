@@ -15,7 +15,7 @@ from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QHBoxLayout,
-    QDialogButtonBox, QFileDialog, QMessageBox, QSpinBox,
+    QDialogButtonBox, QFileDialog, QMessageBox, QSpinBox, QDoubleSpinBox,
     QComboBox, QCheckBox, QApplication, QColorDialog, QInputDialog,
     QListWidget, QListWidgetItem, QStackedWidget, QSplitter, QWidget, QStyle,
     QTreeWidget, QTreeWidgetItem, QScrollArea, QFontComboBox,
@@ -314,6 +314,16 @@ def get_warn_no_images() -> bool:
 def get_warn_nested_archive() -> bool:
     """Whether to warn when an archive contains another compressed archive."""
     return bool(_load_library_settings().get("warn_nested_archive", True))
+
+
+def get_warn_low_compression() -> bool:
+    """Whether to warn when an archive has a low compression rate."""
+    return bool(_load_library_settings().get("warn_low_compression", False))
+
+
+def get_low_compression_threshold() -> float:
+    """Compression rate threshold above which the low-compression warning fires."""
+    return float(_load_library_settings().get("low_compression_threshold", 0.95))
 
 
 
@@ -721,6 +731,31 @@ class ConfigDialog(QDialog):
                 "<small>Warn when an archive contains another compressed archive "
                 "(.zip, .rar, .7z).</small>"
             ),
+        )
+
+        self._warn_low_compression_check = QCheckBox("Archive with low compression rate")
+        form.addRow("", self._warn_low_compression_check)
+
+        threshold_row = QHBoxLayout()
+        threshold_row.addWidget(QLabel("Threshold (compressed/uncompressed ratio):"))
+        self._low_compression_threshold_spin = QDoubleSpinBox()
+        self._low_compression_threshold_spin.setRange(0.50, 1.00)
+        self._low_compression_threshold_spin.setSingleStep(0.01)
+        self._low_compression_threshold_spin.setDecimals(2)
+        self._low_compression_threshold_spin.setValue(0.95)
+        self._low_compression_threshold_spin.setFixedWidth(80)
+        threshold_row.addWidget(self._low_compression_threshold_spin)
+        threshold_row.addStretch()
+        form.addRow("", threshold_row)
+        form.addRow(
+            "",
+            QLabel(
+                "<small>Warn when compressed size ÷ uncompressed size exceeds this value "
+                "(e.g. 0.95 = 95 %). Values near 1.0 indicate little or no compression.</small>"
+            ),
+        )
+        self._warn_low_compression_check.toggled.connect(
+            self._low_compression_threshold_spin.setEnabled
         )
 
         layout.addWidget(group)
@@ -1192,6 +1227,10 @@ class ConfigDialog(QDialog):
             self._presupport_patterns_list.addItem(item)
         self._warn_no_images_check.setChecked(get_warn_no_images())
         self._warn_nested_archive_check.setChecked(get_warn_nested_archive())
+        warn_low_compression = get_warn_low_compression()
+        self._warn_low_compression_check.setChecked(warn_low_compression)
+        self._low_compression_threshold_spin.setValue(get_low_compression_threshold())
+        self._low_compression_threshold_spin.setEnabled(warn_low_compression)
         
         self._allow_file_delete_check.setChecked(get_allow_file_delete())
         self._use_trash_folder_check.setChecked(get_use_trash_folder())
@@ -1280,6 +1319,8 @@ class ConfigDialog(QDialog):
                 ],
                 "warn_no_images": self._warn_no_images_check.isChecked(),
                 "warn_nested_archive": self._warn_nested_archive_check.isChecked(),
+                "warn_low_compression": self._warn_low_compression_check.isChecked(),
+                "low_compression_threshold": self._low_compression_threshold_spin.value(),
                 "metadata_sidecar_enabled": self._metadata_sidecar_check.isChecked(),
                 "metadata_thumbnails": self._metadata_thumbnails_check.isChecked(),
                 "store_stl_file_list": self._store_stl_list_check.isChecked(),

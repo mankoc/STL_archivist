@@ -139,6 +139,9 @@ class CrawlerTab(QWidget):
         self._generate_thumbs_check.setChecked(True)
         root.addWidget(self._generate_thumbs_check)
 
+        self._force_rescan_check = QCheckBox("Force rescan (re-extract all archives regardless of hash)")
+        root.addWidget(self._force_rescan_check)
+
         # --- Control buttons ---
         style = QApplication.style()
         btn_row = QHBoxLayout()
@@ -296,6 +299,24 @@ class CrawlerTab(QWidget):
         path = QFileDialog.getExistingDirectory(self, "Select STL folder", start)
         if path:
             self._folder_edit.setText(path)
+            self._autofill_pattern(path)
+
+    def _autofill_pattern(self, folder_path: str) -> None:
+        """Populate the pattern field from the stored CrawledFolder record, if empty."""
+        if self._pattern_edit.text().strip():
+            return
+        try:
+            from app.database.db import get_session
+            from app.database.models import CrawledFolder
+            session = get_session()
+            try:
+                record = session.query(CrawledFolder).filter_by(path=folder_path).first()
+                if record and record.pattern:
+                    self._pattern_edit.setText(record.pattern)
+            finally:
+                session.close()
+        except Exception:
+            pass
 
     def _start_crawl(self) -> None:
         source = self._folder_edit.text().strip()
@@ -312,7 +333,10 @@ class CrawlerTab(QWidget):
 
         pattern = self._pattern_edit.text().strip()
         max_thumbs = get_max_thumbnails() if self._generate_thumbs_check.isChecked() else 0
-        config = build_crawler_config(max_thumbnails=max_thumbs)
+        config = build_crawler_config(
+            max_thumbnails=max_thumbs,
+            force_rescan=self._force_rescan_check.isChecked(),
+        )
         self._worker = CrawlerWorker(source, pattern=pattern, config=config)
         self._worker.log.connect(self._on_log)
         self._worker.progress.connect(self._on_progress)

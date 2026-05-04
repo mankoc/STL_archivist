@@ -904,6 +904,7 @@ class BrowserTab(QWidget):
         show_scale        = not header.isSectionHidden(COL_SCALE)
         show_presupports  = not header.isSectionHidden(COL_PRESUPPORTED)
         show_warnings     = not header.isSectionHidden(COL_WARNING)
+        show_path         = not header.isSectionHidden(COL_PATH)
 
         session = get_session()
         try:
@@ -1031,20 +1032,21 @@ class BrowserTab(QWidget):
                 for wtype in _WARNING_TYPES:
                     warn_item.addChild(_make_leaf(wtype, ("warning", wtype)))
 
-            paths_item = _make_leaf("Path", ("group", "path"))
-            paths_item.setIcon(0, _icon_path)
-            self._filter_tree.addTopLevelItem(paths_item)
-            dirs: set[str] = set()
-            for (ap,) in session.query(STLModel.archive_path).distinct().all():
-                if ap:
-                    # Use as_posix() so the filter tree always uses forward slashes,
-                    # regardless of OS — the LIKE query normalises the DB column too.
-                    dirs.add(FSPath(ap).parent.as_posix())
-            new_dirs = frozenset(dirs)
-            if new_dirs != self._cached_path_dirs:
-                self._cached_path_dirs = new_dirs
-                self._cached_sorted_dirs = sorted(dirs)
-            self._build_path_tree(paths_item, self._cached_sorted_dirs, checked_data, excluded_data)
+            if show_path:
+                paths_item = _make_leaf("Path", ("group", "path"))
+                paths_item.setIcon(0, _icon_path)
+                self._filter_tree.addTopLevelItem(paths_item)
+                dirs: set[str] = set()
+                for (ap,) in session.query(STLModel.archive_path).distinct().all():
+                    if ap:
+                        # Use as_posix() so the filter tree always uses forward slashes,
+                        # regardless of OS — the LIKE query normalises the DB column too.
+                        dirs.add(FSPath(ap).parent.as_posix())
+                new_dirs = frozenset(dirs)
+                if new_dirs != self._cached_path_dirs:
+                    self._cached_path_dirs = new_dirs
+                    self._cached_sorted_dirs = sorted(dirs)
+                self._build_path_tree(paths_item, self._cached_sorted_dirs, checked_data, excluded_data)
         finally:
             session.close()
 
@@ -1843,7 +1845,12 @@ class BrowserTab(QWidget):
             col = chosen.data()
             header.setSectionHidden(col, not chosen.isChecked())
             self._save_header_state()
-            if col in (COL_CREATOR, COL_TAGS, COL_SOURCE, COL_PATH, COL_DATE):
+            _FILTER_COLS = (
+                COL_CREATOR, COL_TAGS, COL_SOURCE, COL_PATH, COL_DATE,
+                COL_SCULPTOR, COL_COLLECTION, COL_SUBCOLLECTION, COL_CATEGORY,
+                COL_RELEASE, COL_SCALE, COL_PRESUPPORTED, COL_WARNING,
+            )
+            if col in _FILTER_COLS:
                 self._populate_filter_tree()
 
     def _context_menu(self, pos) -> None:
