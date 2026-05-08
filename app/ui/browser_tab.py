@@ -856,12 +856,21 @@ class BrowserTab(QWidget):
         return visible
 
     # ------------------------------------------------------------------
-    def _populate_filter_tree(self, scope_ids: list[int] | None = None) -> None:
+    def _populate_filter_tree(
+        self,
+        scope_by_section: dict[str, list[int] | None] | None = None,
+    ) -> None:
         """Rebuild the left-panel filter tree from the current DB contents.
 
-        When *scope_ids* is not None, the Tags, Date, Collection, Subcollection,
-        and Release sections only show values present among those models.
+        *scope_by_section* is a dict keyed by section name (``"tag"``, ``"date"``,
+        ``"collection"``, ``"subcollection"``, ``"release"``).  When a section's
+        value is a non-empty list, only values present in those model IDs are shown
+        for that section.  ``None`` or a missing key means "show all".
         """
+        def _scope(section: str) -> list[int] | None:
+            if scope_by_section is None:
+                return None
+            return scope_by_section.get(section)
         # Save checked items and expanded top-level sections so they survive the rebuild.
         # expanded_sections is None on the very first call (tree is empty) → default collapsed.
         checked_data:  set = set()
@@ -1028,36 +1037,56 @@ class BrowserTab(QWidget):
                         _f = _p
                 _counts[("group", "path")] = session.query(_func.count(STLModel.id)).scalar() or 0
 
-            # Scoped counts for the 5 cascading sections
+            # Scoped counts for the 5 cascading sections (one scope per section)
             _scoped_counts: dict = {}
-            if show_counts and scope_ids is not None:
+            if show_counts and scope_by_section is not None:
                 from app.database.models import model_tags as _mt2
-                for tn, c in session.query(Tag.name, _func.count(_mt2.c.model_id)).join(_mt2, Tag.id == _mt2.c.tag_id).filter(_mt2.c.model_id.in_(scope_ids)).group_by(Tag.name).all():
-                    _scoped_counts[("tag", tn)] = c
-                _scoped_counts[("group", "tag")] = session.query(_func.count(_mt2.c.model_id.distinct())).filter(_mt2.c.model_id.in_(scope_ids)).scalar() or 0
-                _sc_year: dict[int, int] = {}
-                for yr, mo, c in session.query(STLModel.release_year, STLModel.release_month, _func.count(STLModel.id)).filter(STLModel.id.in_(scope_ids)).filter(STLModel.release_year.isnot(None)).group_by(STLModel.release_year, STLModel.release_month).all():
-                    _scoped_counts[("date_month", (yr, mo))] = c
-                    _sc_year[yr] = _sc_year.get(yr, 0) + c
-                for yr, c in _sc_year.items():
-                    _scoped_counts[("date_year", yr)] = c
-                _scoped_counts[("group", "date")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(scope_ids)).filter(STLModel.release_year.isnot(None)).scalar() or 0
-                for cid, c in session.query(STLModel.collection_id, _func.count(STLModel.id)).filter(STLModel.id.in_(scope_ids)).filter(STLModel.collection_id.isnot(None)).group_by(STLModel.collection_id).all():
-                    _scoped_counts[("collection_id", cid)] = c
-                _scoped_counts[("group", "collection")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(scope_ids)).filter(STLModel.collection_id.isnot(None)).scalar() or 0
-                for sid, c in session.query(STLModel.subcollection_id, _func.count(STLModel.id)).filter(STLModel.id.in_(scope_ids)).filter(STLModel.subcollection_id.isnot(None)).group_by(STLModel.subcollection_id).all():
-                    _scoped_counts[("subcollection_id", sid)] = c
-                _scoped_counts[("group", "subcollection")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(scope_ids)).filter(STLModel.subcollection_id.isnot(None)).scalar() or 0
-                for rid, c in session.query(STLModel.release_id, _func.count(STLModel.id)).filter(STLModel.id.in_(scope_ids)).filter(STLModel.release_id.isnot(None)).group_by(STLModel.release_id).all():
-                    _scoped_counts[("release_id", rid)] = c
-                _scoped_counts[("group", "release")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(scope_ids)).filter(STLModel.release_id.isnot(None)).scalar() or 0
+                def _sc_query(section, col, q_base):
+                    ids = _scope(section)
+                    return q_base.filter(col.in_(ids)) if ids is not None else q_base
+                # Tags
+                _tag_ids = _scope("tag")
+                if _tag_ids is not None:
+                    for tn, c in session.query(Tag.name, _func.count(_mt2.c.model_id)).join(_mt2, Tag.id == _mt2.c.tag_id).filter(_mt2.c.model_id.in_(_tag_ids)).group_by(Tag.name).all():
+                        _scoped_counts[("tag", tn)] = c
+                    _scoped_counts[("group", "tag")] = session.query(_func.count(_mt2.c.model_id.distinct())).filter(_mt2.c.model_id.in_(_tag_ids)).scalar() or 0
+                # Date
+                _date_ids = _scope("date")
+                if _date_ids is not None:
+                    _sc_year: dict[int, int] = {}
+                    for yr, mo, c in session.query(STLModel.release_year, STLModel.release_month, _func.count(STLModel.id)).filter(STLModel.id.in_(_date_ids)).filter(STLModel.release_year.isnot(None)).group_by(STLModel.release_year, STLModel.release_month).all():
+                        _scoped_counts[("date_month", (yr, mo))] = c
+                        _sc_year[yr] = _sc_year.get(yr, 0) + c
+                    for yr, c in _sc_year.items():
+                        _scoped_counts[("date_year", yr)] = c
+                    _scoped_counts[("group", "date")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(_date_ids)).filter(STLModel.release_year.isnot(None)).scalar() or 0
+                # Collection
+                _col_sc_ids = _scope("collection")
+                if _col_sc_ids is not None:
+                    for cid, c in session.query(STLModel.collection_id, _func.count(STLModel.id)).filter(STLModel.id.in_(_col_sc_ids)).filter(STLModel.collection_id.isnot(None)).group_by(STLModel.collection_id).all():
+                        _scoped_counts[("collection_id", cid)] = c
+                    _scoped_counts[("group", "collection")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(_col_sc_ids)).filter(STLModel.collection_id.isnot(None)).scalar() or 0
+                # Subcollection
+                _sub_sc_ids = _scope("subcollection")
+                if _sub_sc_ids is not None:
+                    for sid, c in session.query(STLModel.subcollection_id, _func.count(STLModel.id)).filter(STLModel.id.in_(_sub_sc_ids)).filter(STLModel.subcollection_id.isnot(None)).group_by(STLModel.subcollection_id).all():
+                        _scoped_counts[("subcollection_id", sid)] = c
+                    _scoped_counts[("group", "subcollection")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(_sub_sc_ids)).filter(STLModel.subcollection_id.isnot(None)).scalar() or 0
+                # Release
+                _rel_sc_ids = _scope("release")
+                if _rel_sc_ids is not None:
+                    for rid, c in session.query(STLModel.release_id, _func.count(STLModel.id)).filter(STLModel.id.in_(_rel_sc_ids)).filter(STLModel.release_id.isnot(None)).group_by(STLModel.release_id).all():
+                        _scoped_counts[("release_id", rid)] = c
+                    _scoped_counts[("group", "release")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(_rel_sc_ids)).filter(STLModel.release_id.isnot(None)).scalar() or 0
 
             _SCOPED_KINDS = ("tag", "date_month", "date_year", "collection_id", "subcollection_id", "release_id", "group")
             _SCOPED_GROUPS = ("tag", "date", "collection", "subcollection", "release")
 
             def _c(data) -> int | None:
-                if scope_ids is not None and data[0] in _SCOPED_KINDS and (data[0] != "group" or data[1] in _SCOPED_GROUPS):
+                if scope_by_section is not None and data[0] in _SCOPED_KINDS and (data[0] != "group" or data[1] in _SCOPED_GROUPS):
                     v = _scoped_counts.get(data)
+                    if v is None:
+                        v = _counts.get(data)  # fall back to full count if section not scoped
                 else:
                     v = _counts.get(data)
                 return v if v else None
@@ -1076,9 +1105,10 @@ class BrowserTab(QWidget):
                 tags_item.setIcon(0, _icon_tag)
                 self._filter_tree.addTopLevelItem(tags_item)
                 _tag_q = session.query(Tag).order_by(Tag.name)
-                if scope_ids is not None:
+                _tag_scope = _scope("tag")
+                if _tag_scope is not None:
                     from app.database.models import model_tags as _mt3
-                    _tag_q = _tag_q.join(_mt3, Tag.id == _mt3.c.tag_id).filter(_mt3.c.model_id.in_(scope_ids)).distinct()
+                    _tag_q = _tag_q.join(_mt3, Tag.id == _mt3.c.tag_id).filter(_mt3.c.model_id.in_(_tag_scope)).distinct()
                 for tag in _tag_q.all():
                     tags_item.addChild(_make_leaf(tag.name, ("tag", tag.name), _c(("tag", tag.name))))
 
@@ -1104,8 +1134,9 @@ class BrowserTab(QWidget):
                     .distinct()
                     .order_by(STLModel.release_year.desc(), STLModel.release_month)
                 )
-                if scope_ids is not None:
-                    _date_q = _date_q.filter(STLModel.id.in_(scope_ids))
+                _date_scope = _scope("date")
+                if _date_scope is not None:
+                    _date_q = _date_q.filter(STLModel.id.in_(_date_scope))
                 rows = _date_q.all()
                 year_items: dict[int, QTreeWidgetItem] = {}
                 for year, month in rows:
@@ -1131,8 +1162,9 @@ class BrowserTab(QWidget):
                 collection_item.setIcon(0, _icon_category)
                 self._filter_tree.addTopLevelItem(collection_item)
                 _col_q = session.query(Collection).order_by(Collection.name)
-                if scope_ids is not None:
-                    _scoped_col_ids = {cid for (cid,) in session.query(STLModel.collection_id).filter(STLModel.id.in_(scope_ids)).filter(STLModel.collection_id.isnot(None)).distinct()}
+                _col_scope = _scope("collection")
+                if _col_scope is not None:
+                    _scoped_col_ids = {cid for (cid,) in session.query(STLModel.collection_id).filter(STLModel.id.in_(_col_scope)).filter(STLModel.collection_id.isnot(None)).distinct()}
                     _col_q = _col_q.filter(Collection.id.in_(_scoped_col_ids))
                 for col in _col_q.all():
                     collection_item.addChild(_make_leaf(col.name, ("collection_id", col.id), _c(("collection_id", col.id))))
@@ -1142,8 +1174,9 @@ class BrowserTab(QWidget):
                 subcol_section.setIcon(0, _icon_subcategory)
                 self._filter_tree.addTopLevelItem(subcol_section)
                 _scoped_sub_ids: set[int] | None = None
-                if scope_ids is not None:
-                    _scoped_sub_ids = {sid for (sid,) in session.query(STLModel.subcollection_id).filter(STLModel.id.in_(scope_ids)).filter(STLModel.subcollection_id.isnot(None)).distinct()}
+                _sub_scope = _scope("subcollection")
+                if _sub_scope is not None:
+                    _scoped_sub_ids = {sid for (sid,) in session.query(STLModel.subcollection_id).filter(STLModel.id.in_(_sub_scope)).filter(STLModel.subcollection_id.isnot(None)).distinct()}
                 for col in session.query(Collection).order_by(Collection.name).all():
                     subs = (session.query(Subcollection)
                             .filter_by(collection_id=col.id)
@@ -1170,8 +1203,9 @@ class BrowserTab(QWidget):
                 release_item.setIcon(0, _icon_release)
                 self._filter_tree.addTopLevelItem(release_item)
                 _rel_q = session.query(Release).order_by(Release.name)
-                if scope_ids is not None:
-                    _scoped_rel_ids = {rid for (rid,) in session.query(STLModel.release_id).filter(STLModel.id.in_(scope_ids)).filter(STLModel.release_id.isnot(None)).distinct()}
+                _rel_scope = _scope("release")
+                if _rel_scope is not None:
+                    _scoped_rel_ids = {rid for (rid,) in session.query(STLModel.release_id).filter(STLModel.id.in_(_rel_scope)).filter(STLModel.release_id.isnot(None)).distinct()}
                     _rel_q = _rel_q.filter(Release.id.in_(_scoped_rel_ids))
                 for rel in _rel_q.all():
                     release_item.addChild(_make_leaf(rel.name, ("release_id", rel.id), _c(("release_id", rel.id))))
@@ -1786,23 +1820,96 @@ class BrowserTab(QWidget):
             no_value_groups=no_value_groups or None,
         )
 
-        has_any_filter = any([
-            author_inc, author_exc, tag_inc, tag_exc, type_inc, type_exc,
-            path_inc, path_exc, date_inc, date_exc, sculptor_inc, sculptor_exc,
-            collection_inc, collection_exc, subcollection_inc, subcollection_exc,
-            category_inc, category_exc, release_inc, release_exc,
+        # Compute per-section scopes for faceted filter pane.
+        # Each section's scope = IDs matching all OTHER active filters (not its own).
+        _base_filters = [
+            author_inc, author_exc, type_inc, type_exc, path_inc, path_exc,
+            sculptor_inc, sculptor_exc, collection_inc, collection_exc,
+            subcollection_inc, subcollection_exc, category_inc, category_exc,
             scale_inc, scale_exc, presupports_inc, presupports_exc,
             warning_inc, warning_exc, has_value_groups, no_value_groups,
-        ])
-        if has_any_filter:
-            scope_ids = [
-                self._model.item(r, 0).data(MODEL_ID_ROLE)
-                for r in range(self._model.rowCount())
-                if self._model.item(r, 0) is not None
-            ]
-        else:
-            scope_ids = None
-        self._populate_filter_tree(scope_ids=scope_ids)
+        ]
+        _has_base = any(_base_filters)
+        _has_tag  = bool(tag_inc or tag_exc)
+        _has_date = bool(date_inc or date_exc)
+        _has_col  = bool(collection_inc or collection_exc)
+        _has_sub  = bool(subcollection_inc or subcollection_exc)
+        _has_rel  = bool(release_inc or release_exc)
+
+        scope_by_section: dict[str, list[int] | None] | None = None
+
+        if _has_base or _has_tag or _has_date or _has_col or _has_sub or _has_rel:
+            scope_by_section = {}
+            _session = get_session()
+            try:
+                def _run_id_query(
+                    skip_tag=False, skip_date=False, skip_col=False,
+                    skip_sub=False, skip_rel=False,
+                ) -> list[int]:
+                    q = _session.query(STLModel.id)
+                    if author_inc:       q = q.filter(STLModel.creator.in_(author_inc))
+                    if author_exc:       q = q.filter(~STLModel.creator.in_(author_exc))
+                    if type_inc:         q = q.filter(STLModel.source.in_(type_inc))
+                    if type_exc:         q = q.filter(~STLModel.source.in_(type_exc))
+                    if not skip_tag:
+                        if tag_inc:      q = q.filter(STLModel.tags.any(Tag.name.in_(tag_inc)))
+                        if tag_exc:      q = q.filter(~STLModel.tags.any(Tag.name.in_(tag_exc)))
+                    if path_inc:
+                        _n = func.replace(STLModel.archive_path, "\\", "/")
+                        q = q.filter(or_(*(_n.like(p.rstrip("/") + "/%") for p in path_inc)))
+                    if path_exc:
+                        _n = func.replace(STLModel.archive_path, "\\", "/")
+                        for p in path_exc:
+                            q = q.filter(~_n.like(p.rstrip("/") + "/%"))
+                    if not skip_date:
+                        def _dc(pairs):
+                            return [and_(STLModel.release_year == y, STLModel.release_month == mo) if mo is not None else (STLModel.release_year == y) for y, mo in pairs]
+                        if date_inc:     q = q.filter(or_(*_dc(date_inc)))
+                        if date_exc:     q = q.filter(~or_(*_dc(date_exc)))
+                    if sculptor_inc:     q = q.filter(STLModel.sculptor_id.in_(sculptor_inc))
+                    if sculptor_exc:     q = q.filter(~STLModel.sculptor_id.in_(sculptor_exc))
+                    if not skip_col:
+                        if collection_inc:  q = q.filter(STLModel.collection_id.in_(collection_inc))
+                        if collection_exc:  q = q.filter(~STLModel.collection_id.in_(collection_exc))
+                    if not skip_sub:
+                        if subcollection_inc: q = q.filter(STLModel.subcollection_id.in_(subcollection_inc))
+                        if subcollection_exc: q = q.filter(~STLModel.subcollection_id.in_(subcollection_exc))
+                    if category_inc:     q = q.filter(STLModel.category_id.in_(category_inc))
+                    if category_exc:     q = q.filter(~STLModel.category_id.in_(category_exc))
+                    if not skip_rel:
+                        if release_inc:  q = q.filter(STLModel.release_id.in_(release_inc))
+                        if release_exc:  q = q.filter(~STLModel.release_id.in_(release_exc))
+                    if scale_inc:        q = q.filter(STLModel.scale_id.in_(scale_inc))
+                    if scale_exc:        q = q.filter(~STLModel.scale_id.in_(scale_exc))
+                    if presupports_inc:  q = q.filter(STLModel.presupports.in_(presupports_inc))
+                    if presupports_exc:  q = q.filter(~STLModel.presupports.in_(presupports_exc))
+                    if warning_inc:      q = q.filter(or_(*(STLModel.warning.contains(w) for w in warning_inc)))
+                    if warning_exc:      q = q.filter(and_(*(~STLModel.warning.contains(w) for w in warning_exc)))
+                    if has_value_groups:
+                        for _k in has_value_groups:
+                            _c2 = {"creator": lambda: and_(STLModel.creator.isnot(None), STLModel.creator != ""), "tag": lambda: STLModel.tags.any(), "source": lambda: and_(STLModel.source.isnot(None), STLModel.source != ""), "date": lambda: STLModel.release_year.isnot(None), "sculptor": lambda: STLModel.sculptor_id.isnot(None), "collection": lambda: STLModel.collection_id.isnot(None), "subcollection": lambda: STLModel.subcollection_id.isnot(None), "category": lambda: STLModel.category_id.isnot(None), "release": lambda: STLModel.release_id.isnot(None), "scale": lambda: STLModel.scale_id.isnot(None), "presupports": lambda: and_(STLModel.presupports.isnot(None), STLModel.presupports != ""), "warning": lambda: and_(STLModel.warning.isnot(None), STLModel.warning != "")}.get(_k)
+                            if _c2: q = q.filter(_c2())
+                    if no_value_groups:
+                        for _k in no_value_groups:
+                            _c2 = {"creator": lambda: and_(STLModel.creator.isnot(None), STLModel.creator != ""), "tag": lambda: STLModel.tags.any(), "source": lambda: and_(STLModel.source.isnot(None), STLModel.source != ""), "date": lambda: STLModel.release_year.isnot(None), "sculptor": lambda: STLModel.sculptor_id.isnot(None), "collection": lambda: STLModel.collection_id.isnot(None), "subcollection": lambda: STLModel.subcollection_id.isnot(None), "category": lambda: STLModel.category_id.isnot(None), "release": lambda: STLModel.release_id.isnot(None), "scale": lambda: STLModel.scale_id.isnot(None), "presupports": lambda: and_(STLModel.presupports.isnot(None), STLModel.presupports != ""), "warning": lambda: and_(STLModel.warning.isnot(None), STLModel.warning != "")}.get(_k)
+                            if _c2: q = q.filter(~_c2())
+                    return [rid for (rid,) in q.all()]
+
+                # Only scope a section when other filters are active
+                if _has_base or _has_date or _has_col or _has_sub or _has_rel:
+                    scope_by_section["tag"]         = _run_id_query(skip_tag=True)
+                if _has_base or _has_tag or _has_col or _has_sub or _has_rel:
+                    scope_by_section["date"]        = _run_id_query(skip_date=True)
+                if _has_base or _has_tag or _has_date or _has_sub or _has_rel:
+                    scope_by_section["collection"]  = _run_id_query(skip_col=True)
+                if _has_base or _has_tag or _has_date or _has_col or _has_rel:
+                    scope_by_section["subcollection"] = _run_id_query(skip_sub=True)
+                if _has_base or _has_tag or _has_date or _has_col or _has_sub:
+                    scope_by_section["release"]     = _run_id_query(skip_rel=True)
+            finally:
+                _session.close()
+
+        self._populate_filter_tree(scope_by_section=scope_by_section)
 
     def _clear_filters(self) -> None:
         """Uncheck all filter items and reload the full table."""
