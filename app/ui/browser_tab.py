@@ -50,9 +50,11 @@ COL_ADDED         = 14
 COL_WARNING       = 15
 COL_FILESIZE      = 16
 COL_CATEGORY      = 17
+COL_COMPRESSION   = 18
 _HEADERS = ["", "Title", "Creator", "Source", "Date", "Tags",
             "Sculptor", "Collection", "Subcollection", "Sequence", "Release", "Path",
-             "Scale", "Presupports", "Added", "Warnings", "File Size", "Category"]
+             "Scale", "Presupports", "Added", "Warnings", "File Size", "Category",
+             "Compression"]
 
 
 
@@ -68,8 +70,8 @@ class _BrowserProxyModel(QSortFilterProxyModel):
     """Proxy model that sorts the File Size column numerically via UserRole data."""
 
     def lessThan(self, left, right):
-        # Numeric sort for File Size (stored under UserRole)
-        if left.column() == COL_FILESIZE:
+        # Numeric sort for File Size and Compression (stored under UserRole)
+        if left.column() in (COL_FILESIZE, COL_COMPRESSION):
             return (left.data(Qt.ItemDataRole.UserRole) or -1) < (right.data(Qt.ItemDataRole.UserRole) or -1)
         # Numeric sort for Sequence column — use the numeric value stored under UserRole
         if left.column() == COL_SEQUENCE:
@@ -1533,6 +1535,18 @@ class BrowserTab(QWidget):
                 # store numeric sequence under UserRole so proxy can sort numerically
                 seq_item.setData(stl.sequence if stl.sequence is not None else None, Qt.ItemDataRole.UserRole)
 
+                cr = stl.compression_rate
+                if cr and cr > 0:
+                    compression_display = f"{1 / cr:.1f}x"
+                    compression_sort    = cr
+                else:
+                    compression_display = ""
+                    compression_sort    = -1.0
+                compression_item = QStandardItem(compression_display)
+                compression_item.setData(compression_sort, Qt.ItemDataRole.UserRole)
+                compression_item.setEditable(False)
+                compression_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+
                 row = [
                     thumb_item,
                     QStandardItem(stl.title or ""),
@@ -1552,6 +1566,7 @@ class BrowserTab(QWidget):
                     warning_item,
                     size_item,
                     QStandardItem(stl.category.name if stl.category else ""),
+                    compression_item,
                 ]
                 if _pair_for_id:
                     _pi = _pair_for_id.get(stl.id)
@@ -1571,7 +1586,7 @@ class BrowserTab(QWidget):
         if self._loading:
             return
         col = item.column()
-        if col in (COL_THUMB, COL_ADDED, COL_WARNING, COL_FILESIZE):
+        if col in (COL_THUMB, COL_ADDED, COL_WARNING, COL_FILESIZE, COL_COMPRESSION):
             return
         # Debounce: store the latest item for this cell and (re)start the timer.
         self._pending_edits[(item.row(), col)] = item
@@ -2139,6 +2154,7 @@ class BrowserTab(QWidget):
             settings.remove("browser/header_column_count")
             self._table.setColumnWidth(COL_TITLE, 260)
             self._table.setColumnWidth(COL_PATH,  320)
+            self._table.setColumnHidden(COL_COMPRESSION, True)
 
     def _header_context_menu(self, pos) -> None:
         """Show a column-visibility toggle menu when the table header is right-clicked."""
