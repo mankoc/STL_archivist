@@ -343,11 +343,28 @@ and multiple excludes freely.</div>
 and checks <em>only</em> the clicked item. This is a quick way to isolate a single author,
 tag, or category without having to manually uncheck everything else.</p>
 
+<h2>Faceted (Cascading) Filtering</h2>
+<p>The <b>Tags</b>, <b>Date</b>, <b>Collection</b>, <b>Subcollection</b>, and <b>Release</b>
+groups update dynamically whenever any other filter changes:</p>
+<ul>
+  <li>Each of these five sections shows only the values that exist among the models currently
+      passing all <em>other</em> active filters.</li>
+  <li>A section&rsquo;s own filter is <b>not</b> included in its own scope &mdash; so selecting
+      one release does not hide the other releases in that group. You can always pick
+      additional values from the same section.</li>
+  <li>When no other filters are active, the section reverts to showing all values in the
+      database.</li>
+</ul>
+<div class="tip">Example: filter by Creator &ldquo;Jane Doe&rdquo; and the Release group instantly
+narrows to only Jane Doe&rsquo;s releases. You can then include several of her releases
+without the list collapsing further.</div>
+
 <h2>Model Counts</h2>
 <p>When <em>Show model counts in filter pane</em> is enabled in
 <b>Configuration &rarr; Browser</b>, each filter item shows the number of matching models
 in parentheses — for example <code>Jane Doe (42)</code>. Path tree nodes accumulate the
-counts of all archives in their subtrees.</p>
+counts of all archives in their subtrees. Counts in the five cascading sections reflect
+the current scope, not the full database.</p>
 
 <h2>Group Header Filters</h2>
 <p>The <em>circle indicator</em> next to a group header (e.g. the circle beside &ldquo;Authors&rdquo;)
