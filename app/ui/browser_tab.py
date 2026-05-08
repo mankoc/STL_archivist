@@ -1695,6 +1695,12 @@ class BrowserTab(QWidget):
             if len(ids) == 1:
                 self._update_creator_panel(ids[0])
 
+    def _open_author_editor(self) -> None:
+        from app.ui.author_editor_dialog import AuthorEditorDialog
+        dlg = AuthorEditorDialog(parent=self)
+        dlg.exec()
+        self.refresh()
+
     def _on_double_click(self, index) -> None:
         if index.column() != COL_PATH:
             return  # let the cell editor handle it
@@ -1898,12 +1904,17 @@ class BrowserTab(QWidget):
         edit_categories_act = None
         edit_scales_act = None
         edit_creator_act = None
+        edit_authors_act = None
         src_col = self._proxy.mapToSource(index).column()
         if src_col == COL_CREATOR:
             menu.addSeparator()
             edit_creator_act = menu.addAction(
                 style.standardIcon(SP.SP_FileDialogDetailedView),
                 "Edit Creator Information…",
+            )
+            edit_authors_act = menu.addAction(
+                style.standardIcon(SP.SP_FileDialogDetailedView),
+                "Edit Authors…",
             )
         elif src_col == COL_TAGS:
             menu.addSeparator()
@@ -1989,6 +2000,8 @@ class BrowserTab(QWidget):
             creator_name = self._model.item(src_index.row(), COL_CREATOR).text()
             if creator_name:
                 self._open_creator_editor(creator_name)
+        elif edit_authors_act and action == edit_authors_act:
+            self._open_author_editor()
 
     def _show_files(self, model_id: int) -> None:
         from app.ui.file_list_dialog import FileListDialog
