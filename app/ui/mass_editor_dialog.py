@@ -5,11 +5,12 @@ Two modes can be combined:
   • Path pattern  — extract field values from each model's archive_path
   • Manual fields — apply the same value to all selected models
 """
-from PyQt6.QtCore import Qt, QSettings
+from PyQt6.QtCore import Qt, QSettings, QStringListModel
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
-    QLabel, QLineEdit, QDialogButtonBox, QPushButton,
-    QComboBox, QInputDialog, QMessageBox, QToolButton, QToolTip,
+    QLabel, QLineEdit, QDialogButtonBox, QPushButton, QCheckBox,
+    QComboBox, QCompleter, QInputDialog, QMessageBox, QToolButton, QToolTip,
+    QWidget,
 )
 from PyQt6.QtGui import QCursor
 
@@ -170,43 +171,107 @@ class MassEditorDialog(QDialog):
 
         session = get_session()
         try:
-            collections   = sorted(c.name for c in session.query(Collection).order_by(Collection.name).all())
+            _uniq = lambda col: sorted(filter(None, (v for (v,) in session.query(col).distinct())))
+            sources        = _uniq(STLModel.source)
+            creators       = _uniq(STLModel.creator)
+            dates          = sorted({
+                format_release_date(y, mo)
+                for (y, mo) in session.query(STLModel.release_year, STLModel.release_month)
+                                      .filter(STLModel.release_year.isnot(None)).distinct()
+            })
+            titles         = _uniq(STLModel.title)
+            releases       = sorted(r.name for r in session.query(Release).order_by(Release.name).all())
+            all_tags       = [t.name for t in session.query(Tag).order_by(Tag.name).all()]
+            collections    = sorted(c.name for c in session.query(Collection).order_by(Collection.name).all())
             subcollections = sorted(s.name for s in session.query(Subcollection).order_by(Subcollection.name).all())
-            categories    = sorted(c.name for c in session.query(Category).order_by(Category.name).all())
-            scales        = sorted(s.name for s in session.query(Scale).order_by(Scale.name).all())
+            categories     = sorted(c.name for c in session.query(Category).order_by(Category.name).all())
+            scales         = sorted(s.name for s in session.query(Scale).order_by(Scale.name).all())
         finally:
             session.close()
 
-        self._type_edit    = QLineEdit(); self._type_edit.setPlaceholderText("e.g. patreon  or  {source} or {folder}")
-        self._creator_edit = QLineEdit(); self._creator_edit.setPlaceholderText("e.g. SomeCreator  or  {creator}")
-        self._date_edit    = QLineEdit(); self._date_edit.setPlaceholderText("e.g. 2024-01  or  {date}")
-        self._title_edit   = QLineEdit(); self._title_edit.setPlaceholderText("e.g. {filename}  or  {creator} — {title}")
-        self._url_edit     = QLineEdit(); self._url_edit.setPlaceholderText("e.g. https://example.com or {url}")
+        self._type_edit    = self._make_ac_edit(sources,  "e.g. patreon  or  {source}")
+        self._creator_edit = self._make_ac_edit(creators, "e.g. SomeCreator  or  {creator}")
+        self._date_edit    = self._make_ac_edit(dates,    "e.g. 2024-01  or  {date}")
+        self._title_edit   = self._make_ac_edit(titles,   "e.g. {filename}  or  {creator} — {title}")
+        self._url_edit     = self._make_ac_edit([],       "e.g. https://example.com or {url}")
+        self._release_edit = self._make_ac_edit(releases, "Release name  or  {folder}")
+        self._tags_edit    = self._make_ac_edit(all_tags, "tag1, tag2, …  (replaces existing tags)")
+
         self._scale_combo  = self._make_combo(scales, placeholder="— no change —")
         self._presupports_combo = QComboBox()
         self._presupports_combo.addItems(["— no change —", "No", "Lychee", "Chitubox", "Presupported"])
-        self._release_edit = QLineEdit(); self._release_edit.setPlaceholderText("Release name  or  {folder}")
-        self._tags_edit    = QLineEdit(); self._tags_edit.setPlaceholderText("tag1, tag2, …  (replaces existing tags)")
 
         self._collection_edit     = self._make_combo(collections)
         self._collection_edit.currentTextChanged.connect(self._on_collection_changed)
         self._subcollection_edit  = self._make_combo(subcollections)
         self._category_edit       = self._make_combo(categories)
 
-        form.addRow("Source:",         self._type_edit)
-        form.addRow("Creator:",        self._creator_edit)
-        form.addRow("Date:",           self._date_edit)
-        form.addRow("Title:",          self._title_edit)
-        form.addRow("URL:",            self._url_edit)
-        form.addRow("Scale:",          self._scale_combo)
-        form.addRow("Presupports:",    self._presupports_combo)
-        form.addRow("Release:",        self._release_edit)
-        form.addRow("Collection:",     self._collection_edit)
-        form.addRow("Subcollection:",  self._subcollection_edit)
-        form.addRow("Category:",       self._category_edit)
-        form.addRow("Tags:",           self._tags_edit)
+        # Clear-mode checkboxes — when checked, the field is explicitly nulled on save.
+        self._clear_cbs: dict[str, QCheckBox] = {}
+        _clearable_fields = [
+            ("source",         self._type_edit),
+            ("creator",        self._creator_edit),
+            ("release_date",   self._date_edit),
+            ("title",          self._title_edit),
+            ("url",            self._url_edit),
+            ("release",        self._release_edit),
+            ("tags",           self._tags_edit),
+            ("scale",          self._scale_combo),
+            ("presupports",    self._presupports_combo),
+            ("collection",     self._collection_edit),
+            ("subcollection",  self._subcollection_edit),
+            ("category",       self._category_edit),
+        ]
+        for field_name, widget in _clearable_fields:
+            cb = QCheckBox("clear")
+            cb.setToolTip(f"When checked, {field_name} will be set to blank on all selected models")
+            cb.setStyleSheet("QCheckBox { color: gray; font-size: 10px; }")
+            cb.toggled.connect(widget.setDisabled)
+            self._clear_cbs[field_name] = cb
+
+        def _row(label, field_name, widget):
+            container = QWidget()
+            lay = QHBoxLayout(container)
+            lay.setContentsMargins(0, 0, 0, 0)
+            lay.setSpacing(4)
+            lay.addWidget(widget, stretch=1)
+            lay.addWidget(self._clear_cbs[field_name])
+            form.addRow(label, container)
+
+        _row("Source:",         "source",        self._type_edit)
+        _row("Creator:",        "creator",       self._creator_edit)
+        _row("Date:",           "release_date",  self._date_edit)
+        _row("Title:",          "title",         self._title_edit)
+        _row("URL:",            "url",           self._url_edit)
+        _row("Scale:",          "scale",         self._scale_combo)
+        _row("Presupports:",    "presupports",   self._presupports_combo)
+        _row("Release:",        "release",       self._release_edit)
+        _row("Collection:",     "collection",    self._collection_edit)
+        _row("Subcollection:",  "subcollection", self._subcollection_edit)
+        _row("Category:",       "category",      self._category_edit)
+        _row("Tags:",           "tags",          self._tags_edit)
 
         root.addWidget(manual_group)
+
+        # ---- Find & Replace group ----
+        fnr_group = QGroupBox("Find & Replace in Title")
+        fnr_layout = QFormLayout(fnr_group)
+        fnr_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+
+        self._find_edit = QLineEdit()
+        self._find_edit.setPlaceholderText("substring to find")
+        self._find_edit.setClearButtonEnabled(True)
+        fnr_layout.addRow("Find:", self._find_edit)
+
+        self._replace_edit = QLineEdit()
+        self._replace_edit.setPlaceholderText("replacement (leave empty to delete)")
+        self._replace_edit.setClearButtonEnabled(True)
+        fnr_layout.addRow("Replace with:", self._replace_edit)
+
+        self._fnr_case_check = QCheckBox("Case-sensitive")
+        fnr_layout.addRow("", self._fnr_case_check)
+
+        root.addWidget(fnr_group)
 
         # ---- Buttons ----
         buttons = QDialogButtonBox(
@@ -219,8 +284,20 @@ class MassEditorDialog(QDialog):
         self._refresh_saved_combo()
 
     # ------------------------------------------------------------------
-    # Combo helper
+    # Widget helpers
     # ------------------------------------------------------------------
+    @staticmethod
+    def _make_ac_edit(values: list[str], placeholder: str = "") -> QLineEdit:
+        edit = QLineEdit()
+        edit.setPlaceholderText(placeholder)
+        edit.setClearButtonEnabled(True)
+        if values:
+            completer = QCompleter(values, edit)
+            completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+            completer.setFilterMode(Qt.MatchFlag.MatchContains)
+            edit.setCompleter(completer)
+        return edit
+
     @staticmethod
     def _make_combo(values: list[str], *, placeholder: str = "") -> QComboBox:
         combo = QComboBox()
@@ -404,23 +481,28 @@ class MassEditorDialog(QDialog):
     def _save(self) -> None:
         self._save_last_pattern()
 
+        clearing = {k for k, cb in self._clear_cbs.items() if cb.isChecked()}
+
         manual: dict[str, str | None] = {}
-        if self._type_edit.text().strip():
-            manual["source"] = self._type_edit.text().strip()
-        if self._creator_edit.text().strip():
-            manual["creator"] = self._creator_edit.text().strip()
-        if self._date_edit.text().strip():
-            manual["release_date"] = self._date_edit.text().strip()
-        if self._url_edit.text().strip():
-            manual["url"] = self._url_edit.text().strip()
-        if self._title_edit.text().strip():
-            manual["title"] = self._title_edit.text().strip()
+        for field, edit in (
+            ("source",       self._type_edit),
+            ("creator",      self._creator_edit),
+            ("release_date", self._date_edit),
+            ("url",          self._url_edit),
+            ("title",        self._title_edit),
+        ):
+            if field in clearing:
+                manual[field] = None
+            elif edit.text().strip():
+                manual[field] = edit.text().strip()
+
         scale_name   = self._scale_combo.currentText().strip()
-        apply_scale  = bool(scale_name) and scale_name != "— no change —"
+        apply_scale  = "scale" in clearing or (bool(scale_name) and scale_name != "— no change —")
+        scale_value  = None if "scale" in clearing else scale_name
 
         presup_choice     = self._presupports_combo.currentText()
-        apply_presupports = presup_choice != "— no change —"
-        presupports_value = presup_choice if apply_presupports else None
+        apply_presupports = "presupports" in clearing or presup_choice != "— no change —"
+        presupports_value = None if "presupports" in clearing else (presup_choice if apply_presupports else None)
 
         release_tmpl       = self._release_edit.text().strip()
         collection_name    = self._collection_edit.currentText().strip()
@@ -428,7 +510,7 @@ class MassEditorDialog(QDialog):
         category_name      = self._category_edit.currentText().strip()
 
         tags_tmpl  = self._tags_edit.text()
-        apply_tags = bool(tags_tmpl.strip())
+        apply_tags = "tags" in clearing or bool(tags_tmpl.strip())
 
         with session_scope() as session:
             for mid in self._model_ids:
@@ -441,15 +523,24 @@ class MassEditorDialog(QDialog):
 
                 ctx = self._token_context(model, path_extracted)
                 for attr, value in manual.items():
-                    resolved = self._resolve_tokens(value, ctx)
-                    if attr == "release_date":
-                        _year, _month = parse_release_date(resolved or "")
-                        model.release_year  = _year
-                        model.release_month = _month
+                    if value is None:
+                        if attr == "release_date":
+                            model.release_year  = None
+                            model.release_month = None
+                        else:
+                            setattr(model, attr, None)
                     else:
-                        setattr(model, attr, resolved or None)
+                        resolved = self._resolve_tokens(value, ctx)
+                        if attr == "release_date":
+                            _year, _month = parse_release_date(resolved or "")
+                            model.release_year  = _year
+                            model.release_month = _month
+                        else:
+                            setattr(model, attr, resolved or None)
 
-                if release_tmpl:
+                if "release" in clearing:
+                    model.release = None
+                elif release_tmpl:
                     release_name = self._resolve_tokens(release_tmpl, ctx)
                     if release_name:
                         release_obj = session.query(Release).filter_by(name=release_name).first()
@@ -459,7 +550,10 @@ class MassEditorDialog(QDialog):
                             session.flush()
                         model.release = release_obj
 
-                if collection_name:
+                if "collection" in clearing:
+                    model.collection    = None
+                    model.subcollection = None
+                elif collection_name:
                     col = session.query(Collection).filter_by(name=collection_name).first()
                     if col is None:
                         col = Collection(name=collection_name)
@@ -467,7 +561,9 @@ class MassEditorDialog(QDialog):
                         session.flush()
                     model.collection = col
 
-                    if subcollection_name:
+                    if "subcollection" in clearing:
+                        model.subcollection = None
+                    elif subcollection_name:
                         sub = session.query(Subcollection).filter_by(
                             name=subcollection_name, collection_id=col.id
                         ).first()
@@ -477,7 +573,9 @@ class MassEditorDialog(QDialog):
                             session.flush()
                         model.subcollection = sub
 
-                if category_name:
+                if "category" in clearing:
+                    model.category = None
+                elif category_name:
                     cat = session.query(Category).filter_by(name=category_name).first()
                     if cat is None:
                         cat = Category(name=category_name)
@@ -486,26 +584,47 @@ class MassEditorDialog(QDialog):
                     model.category = cat
 
                 if apply_scale:
-                    sc = session.query(Scale).filter_by(name=scale_name).first()
-                    if sc is None:
-                        sc = Scale(name=scale_name)
-                        session.add(sc)
-                        session.flush()
-                    model.scale = sc
+                    if scale_value:
+                        sc = session.query(Scale).filter_by(name=scale_value).first()
+                        if sc is None:
+                            sc = Scale(name=scale_value)
+                            session.add(sc)
+                            session.flush()
+                        model.scale = sc
+                    else:
+                        model.scale = None
 
                 if apply_presupports:
                     model.presupports = presupports_value or None
 
                 if apply_tags:
-                    resolved_tags = self._resolve_tokens(tags_tmpl, ctx)
-                    tag_names = [t.strip().lower() for t in resolved_tags.split(",") if t.strip()]
-                    model.tags.clear()
-                    for name in tag_names:
-                        tag = session.query(Tag).filter_by(name=name).first()
-                        if tag is None:
-                            tag = Tag(name=name)
-                            session.add(tag)
-                            session.flush()
-                        model.tags.append(tag)
+                    if "tags" in clearing and not tags_tmpl.strip():
+                        model.tags.clear()
+                    else:
+                        resolved_tags = self._resolve_tokens(tags_tmpl, ctx)
+                        tag_names = [t.strip().lower() for t in resolved_tags.split(",") if t.strip()]
+                        model.tags.clear()
+                        for name in tag_names:
+                            tag = session.query(Tag).filter_by(name=name).first()
+                            if tag is None:
+                                tag = Tag(name=name)
+                                session.add(tag)
+                                session.flush()
+                            model.tags.append(tag)
+
+        find_str = self._find_edit.text()
+        if find_str and find_str.strip():
+            replace_str = self._replace_edit.text()
+            case_sensitive = self._fnr_case_check.isChecked()
+            flags = 0 if case_sensitive else re.IGNORECASE
+            pattern = re.compile(re.escape(find_str), flags)
+            with session_scope() as session:
+                for mid in self._model_ids:
+                    model = session.get(STLModel, mid)
+                    if model is None or not model.title:
+                        continue
+                    new_title = pattern.sub(replace_str, model.title)
+                    if new_title != model.title:
+                        model.title = new_title or None
 
         self.accept()

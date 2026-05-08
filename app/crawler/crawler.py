@@ -76,9 +76,10 @@ class CrawlerWorker(QThread):
         self._stats_new = 0
         self._stats_updated = 0
         self._stats_unchanged = 0
+        self._new_archive_paths: set[str] = set()
         logger.info("Crawl started — source: %s, pattern: %r, workers: %d",
                     self.source_dir, self._pattern, self._config.max_workers)
-        self._remove_missing()
+        missing_records = self._collect_missing()
 
         logger.debug("Scanning source directory for archives: %s (recurse=%s)", self.source_dir, self._config.recurse_subdirs)
         if self._config.recurse_subdirs:
@@ -121,6 +122,9 @@ class CrawlerWorker(QThread):
 
         if modified_folders and thumb_base is not None and self._config.metadata_sidecar_enabled:
             self._post_export_metadata(modified_folders, thumb_base)
+
+        if missing_records:
+            self._reconcile_moved_files(missing_records)
 
         self._record_crawled_folder(total)
 
@@ -350,6 +354,7 @@ class CrawlerWorker(QThread):
                 if _contents is not None:
                     if _existing is None:
                         self._stats_new += 1
+                        self._new_archive_paths.add(str(archive_path))
                     else:
                         self._stats_updated += 1
                 else:
@@ -417,22 +422,141 @@ class CrawlerWorker(QThread):
         except Exception as exc:
             logger.error("Failed to record crawled folder %s: %s", path_str, exc)
 
-    def _remove_missing(self) -> None:
-        """Delete DB records whose archive file no longer exists on disk,
-        including any thumbnail files stored on disk."""
-        logger.debug("Checking for missing archives in database…")
+    def _collect_missing(self) -> list[dict]:
+        """Return a snapshot of DB records whose archive file no longer exists on disk.
+
+        Does NOT delete them — deletion (or metadata transfer for moved files)
+        happens later in :meth:`_reconcile_moved_files`.
+        """
+        logger.debug("Collecting missing archive records from database…")
+        missing: list[dict] = []
         with session_scope() as session:
-            all_models = session.query(STLModel).all()
-            logger.debug("  %d record(s) in database", len(all_models))
+            for model in session.query(STLModel).all():
+                if model.archive_path and not Path(model.archive_path).exists():
+                    missing.append({
+                        "id":       model.id,
+                        "path":     model.archive_path,
+                        "hash":     model.archive_hash or "",
+                        "filename": Path(model.archive_path).name,
+                        "size":     model.archive_size,
+                    })
+        if missing:
+            msg = (f"Found {len(missing)} missing archive(s) — "
+                   "will check for moved files after crawl.")
+            self.log.emit(msg)
+            logger.info(msg)
+        else:
+            logger.debug("No missing archives found.")
+        return missing
+
+    def _reconcile_moved_files(self, missing: list[dict]) -> None:
+        """Match missing records against new archives found in this crawl.
+
+        For each match, the old (missing) record's *archive_path* is updated to
+        the new location so all user-edited metadata is preserved.  The freshly-
+        created record at the new path is removed.  Unmatched missing records are
+        deleted as before.
+
+        Matching strategy (in order):
+        1. Identical content hash → definitive match.
+        2. Same filename + same file size → likely moved.
+        """
+        new_paths = self._new_archive_paths
+        if not new_paths:
+            self._delete_missing_records(missing)
+            return
+
+        msg = (f"Reconciling {len(missing)} missing record(s) against "
+               f"{len(new_paths)} new archive(s)…")
+        self.log.emit(msg)
+        logger.info(msg)
+
+        matched_ids: set[int] = set()
+
+        with session_scope() as session:
+            new_models: dict[str, STLModel] = {
+                m.archive_path: m
+                for m in session.query(STLModel)
+                    .filter(STLModel.archive_path.in_(list(new_paths)))
+                    .all()
+            }
+
+            hash_to_path:     dict[str, str] = {}
+            namesize_to_path: dict[tuple, str] = {}
+            for path, m in new_models.items():
+                if m.archive_hash:
+                    hash_to_path.setdefault(m.archive_hash, path)
+                if m.archive_size is not None:
+                    namesize_to_path.setdefault((Path(path).name, m.archive_size), path)
+
+            used_new: set[str] = set()
+
+            for rec in missing:
+                new_path = hash_to_path.get(rec["hash"])
+                if new_path is None and rec["filename"] and rec["size"] is not None:
+                    new_path = namesize_to_path.get((rec["filename"], rec["size"]))
+                if new_path is None or new_path in used_new:
+                    continue
+
+                old_model = session.get(STLModel, rec["id"])
+                new_model = new_models.get(new_path)
+                if old_model is None or new_model is None:
+                    continue
+
+                # Capture new model's filesystem metadata before deletion
+                new_archive_path  = new_model.archive_path
+                new_archive_hash  = new_model.archive_hash
+                new_archive_size  = new_model.archive_size
+                new_archive_mtime = new_model.archive_mtime_ns
+                new_compression   = new_model.compression_rate
+
+                # Delete new model's thumbnails; old record keeps its existing ones
+                for img in list(new_model.images):
+                    if img.thumbnail_path:
+                        delete_thumbnail(img.thumbnail_path)
+                    session.delete(img)
+                session.flush()
+
+                # Remove the freshly-created (shallow) record
+                session.delete(new_model)
+                session.flush()
+
+                # Redirect old record to new location
+                old_model.archive_path     = new_archive_path
+                old_model.archive_hash     = new_archive_hash
+                old_model.archive_size     = new_archive_size
+                old_model.archive_mtime_ns = new_archive_mtime
+                if new_compression is not None:
+                    old_model.compression_rate = new_compression
+                session.flush()
+
+                matched_ids.add(rec["id"])
+                used_new.add(new_path)
+
+                msg = f"Moved: {rec['filename']} → {new_archive_path}"
+                self.log.emit(msg)
+                logger.info("File moved: %s → %s", rec["path"], new_archive_path)
+
+        if matched_ids:
+            self.log.emit(f"Matched {len(matched_ids)} moved file(s).")
+
+        unmatched = [r for r in missing if r["id"] not in matched_ids]
+        self._delete_missing_records(unmatched)
+
+    def _delete_missing_records(self, missing: list[dict]) -> None:
+        """Delete DB records and their thumbnails for unmatched missing archives."""
+        if not missing:
+            return
+        with session_scope() as session:
             removed = 0
-            for model in all_models:
-                if not Path(model.archive_path).exists():
-                    msg = f"Removing missing: {model.archive_path}"
+            for rec in missing:
+                model = session.get(STLModel, rec["id"])
+                if model is not None:
+                    msg = f"Removing missing: {rec['path']}"
                     self.log.emit(msg)
                     logger.info(msg)
                     for image in model.images:
                         if image.thumbnail_path:
-                            logger.debug("  Deleting thumbnail: %s", image.thumbnail_path)
                             delete_thumbnail(image.thumbnail_path)
                     session.delete(model)
                     removed += 1
@@ -440,8 +564,6 @@ class CrawlerWorker(QThread):
             msg = f"Removed {removed} missing record(s) from database."
             self.log.emit(msg)
             logger.info(msg)
-        else:
-            logger.debug("No missing archives found.")
 
     def _upsert_archive(
         self,

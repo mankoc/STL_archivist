@@ -32,11 +32,13 @@ _STATUS_OK       = "OK"
 _STATUS_MISSING  = "Missing"
 _STATUS_FOUND    = "Relocated"
 _STATUS_MODIFIED = "Modified"
+_STATUS_MOVED_DB = "Moved (in DB)"
 
-_COL_ID     = 0
-_COL_TITLE  = 1
-_COL_PATH   = 2
-_COL_STATUS = 3
+_COL_ID       = 0
+_COL_TITLE    = 1
+_COL_PATH     = 2
+_COL_STATUS   = 3
+_COL_MATCH    = 4
 
 def _color_missing() -> QColor:
     from app.ui.config_dialog import get_missing_file_color
@@ -48,6 +50,9 @@ def _color_found() -> QColor:
 
 def _color_modified() -> QColor:
     return QColor(180, 100, 0)
+
+def _color_moved_db() -> QColor:
+    return QColor(30, 100, 180)
 
 _COLOR_FG = QColor(255, 255, 255)
 
@@ -112,11 +117,13 @@ class VerifyWorker(QThread):
             else:
                 status = _STATUS_OK
             results.append({
-                "id":     model_id,
-                "title":  title or "",
-                "path":   path or "",
-                "hash":   ahash or "",
-                "status": status,
+                "id":         model_id,
+                "title":      title or "",
+                "path":       path or "",
+                "hash":       ahash or "",
+                "size":       stored_size,
+                "status":     status,
+                "match_path": "",
             })
 
         ok_count = total - missing - modified
@@ -343,6 +350,84 @@ class DHashWorker(QThread):
         self.finished.emit(computed, skipped)
 
 
+class MovedInDbWorker(QThread):
+    """Search the DB for records whose content matches a missing archive at a different path.
+
+    For each missing record, looks for another DB record sharing the same content
+    hash, or the same filename + file size, whose path still exists on disk.
+
+    Signals:
+        progress(current, total): Index of missing record being checked.
+        log(message): Human-readable status line.
+        found(missing_model_id, match_path): Emitted when a match is located.
+        finished(count): Total number of matches found.
+    """
+
+    progress = pyqtSignal(int, int)
+    log      = pyqtSignal(str)
+    found    = pyqtSignal(int, str)   # (missing_model_id, match_archive_path)
+    finished = pyqtSignal(int)
+
+    def __init__(self, missing_records: list[dict], parent=None) -> None:
+        super().__init__(parent)
+        self._missing = missing_records
+
+    def run(self) -> None:
+        from collections import defaultdict
+        from app.database.db import get_session
+        from app.database.models import STLModel
+
+        if not self._missing:
+            self.log.emit("No missing records to check.")
+            self.finished.emit(0)
+            return
+
+        self.log.emit(f"Searching {len(self._missing)} missing record(s) in the database…")
+
+        session = get_session()
+        try:
+            rows = session.query(
+                STLModel.id, STLModel.archive_path,
+                STLModel.archive_hash, STLModel.archive_size,
+            ).all()
+        finally:
+            session.close()
+
+        # Build lookup tables keyed by hash and by (filename, size)
+        hash_to_candidates:     dict[str, list[tuple[str, int]]] = defaultdict(list)
+        namesize_to_candidates: dict[tuple, list[tuple[str, int]]] = defaultdict(list)
+        for model_id, path, ahash, asize in rows:
+            if not path:
+                continue
+            if ahash:
+                hash_to_candidates[ahash].append((path, model_id))
+            if asize is not None:
+                namesize_to_candidates[(Path(path).name, asize)].append((path, model_id))
+
+        matched = 0
+        total   = len(self._missing)
+        for idx, rec in enumerate(self._missing, 1):
+            self.progress.emit(idx, total)
+
+            candidates: list[tuple[str, int]] = []
+            if rec.get("hash"):
+                candidates = hash_to_candidates.get(rec["hash"], [])
+            if not candidates and rec.get("path") and rec.get("size") is not None:
+                fname = Path(rec["path"]).name
+                candidates = namesize_to_candidates.get((fname, rec["size"]), [])
+
+            for match_path, match_id in candidates:
+                if match_id == rec["id"]:
+                    continue
+                if match_path and Path(match_path).exists():
+                    self.found.emit(rec["id"], match_path)
+                    matched += 1
+                    break
+
+        self.log.emit(f"Found {matched} potential DB match(es) for missing archive(s).")
+        self.finished.emit(matched)
+
+
 class DbMaintenanceDialog(QDialog):
     """Database maintenance dialog.
 
@@ -359,9 +444,10 @@ class DbMaintenanceDialog(QDialog):
         self.setWindowTitle("Database Maintenance")
         self.resize(900, 620)
         self.setModal(True)
-        self._verify_worker: VerifyWorker | None = None
-        self._search_worker: SearchWorker | None = None
-        self._dhash_worker: DHashWorker | None = None
+        self._verify_worker:   VerifyWorker      | None = None
+        self._search_worker:   SearchWorker      | None = None
+        self._dhash_worker:    DHashWorker        | None = None
+        self._moved_db_worker: MovedInDbWorker   | None = None
         self._results: list[dict] = []
         self._build_ui()
 
@@ -414,6 +500,27 @@ class DbMaintenanceDialog(QDialog):
         self._search_btn.clicked.connect(self._start_search)
         btn_row.addWidget(self._search_btn)
 
+        self._find_moved_btn = QPushButton(
+            style.standardIcon(SP.SP_FileDialogContentsView), "Find Moved in DB…"
+        )
+        self._find_moved_btn.setToolTip(
+            "Check whether missing archives have been re-crawled at a different location "
+            "and offer to transfer their metadata"
+        )
+        self._find_moved_btn.setEnabled(False)
+        self._find_moved_btn.clicked.connect(self._start_find_moved_in_db)
+        btn_row.addWidget(self._find_moved_btn)
+
+        self._merge_moved_btn = QPushButton(
+            style.standardIcon(SP.SP_ArrowRight), "Merge Moved"
+        )
+        self._merge_moved_btn.setToolTip(
+            "Transfer metadata from selected 'Moved (in DB)' records to their new locations"
+        )
+        self._merge_moved_btn.setEnabled(False)
+        self._merge_moved_btn.clicked.connect(self._merge_moved_records)
+        btn_row.addWidget(self._merge_moved_btn)
+
         self._remove_sel_btn = QPushButton(style.standardIcon(SP.SP_TrashIcon), "Remove Selected")
         self._remove_sel_btn.setToolTip("Remove the selected records from the database")
         self._remove_sel_btn.setEnabled(False)
@@ -452,13 +559,16 @@ class DbMaintenanceDialog(QDialog):
         filter_row.addStretch()
         root.addLayout(filter_row)
 
-        self._table = QTableWidget(0, 4)
-        self._table.setHorizontalHeaderLabels(["ID", "Title", "Archive Path", "Status"])
+        self._table = QTableWidget(0, 5)
+        self._table.setHorizontalHeaderLabels(
+            ["ID", "Title", "Archive Path", "Status", "Match Path"]
+        )
         hh = self._table.horizontalHeader()
         hh.setSectionResizeMode(_COL_ID,     QHeaderView.ResizeMode.ResizeToContents)
         hh.setSectionResizeMode(_COL_TITLE,  QHeaderView.ResizeMode.ResizeToContents)
         hh.setSectionResizeMode(_COL_PATH,   QHeaderView.ResizeMode.Stretch)
         hh.setSectionResizeMode(_COL_STATUS, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(_COL_MATCH,  QHeaderView.ResizeMode.Stretch)
         self._table.setColumnHidden(_COL_ID, True)
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -478,28 +588,33 @@ class DbMaintenanceDialog(QDialog):
         self._dhash_btn.setEnabled(not busy)
         self._stop_btn.setEnabled(busy)
         self._search_btn.setEnabled(False)
+        self._find_moved_btn.setEnabled(False)
+        self._merge_moved_btn.setEnabled(False)
         self._remove_sel_btn.setEnabled(False)
         self._remove_all_btn.setEnabled(False)
         self._close_btn.setEnabled(not busy)
 
     def _set_idle(self) -> None:
-        has_missing = any(r["status"] in (_STATUS_MISSING, _STATUS_MODIFIED) for r in self._results)
-        has_any     = bool(self._results)
+        has_missing  = any(r["status"] in (_STATUS_MISSING, _STATUS_MODIFIED) for r in self._results)
+        has_moved_db = any(r["status"] == _STATUS_MOVED_DB for r in self._results)
+        has_any      = bool(self._results)
         self._verify_btn.setEnabled(True)
         self._dhash_btn.setEnabled(True)
         self._stop_btn.setEnabled(False)
         self._search_btn.setEnabled(has_missing)
+        self._find_moved_btn.setEnabled(has_missing)
+        self._merge_moved_btn.setEnabled(has_moved_db)
         self._remove_sel_btn.setEnabled(has_any)
         self._remove_all_btn.setEnabled(has_missing)
         self._close_btn.setEnabled(True)
 
     def _stop(self) -> None:
-        if self._verify_worker and self._verify_worker.isRunning():
-            self._verify_worker.stop()
-        if self._search_worker and self._search_worker.isRunning():
-            self._search_worker.stop()
-        if self._dhash_worker and self._dhash_worker.isRunning():
-            self._dhash_worker.stop()
+        for worker in (
+            self._verify_worker, self._search_worker,
+            self._dhash_worker, self._moved_db_worker,
+        ):
+            if worker and worker.isRunning():
+                worker.stop()
         self._stop_btn.setEnabled(False)
 
     # ------------------------------------------------------------------
@@ -549,6 +664,7 @@ class DbMaintenanceDialog(QDialog):
                 QTableWidgetItem(row["title"]),
                 QTableWidgetItem(row["path"]),
                 QTableWidgetItem(row["status"]),
+                QTableWidgetItem(row.get("match_path", "")),
             ]
             for item in items:
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -560,6 +676,8 @@ class DbMaintenanceDialog(QDialog):
                 self._color_row(items, _color_found())
             elif status == _STATUS_MODIFIED:
                 self._color_row(items, _color_modified())
+            elif status == _STATUS_MOVED_DB:
+                self._color_row(items, _color_moved_db())
 
             for col, item in enumerate(items):
                 self._table.setItem(r, col, item)
@@ -575,6 +693,9 @@ class DbMaintenanceDialog(QDialog):
                 continue
             hide = only_problems and status_item.text() in _OK_STATUSES
             self._table.setRowHidden(row, hide)
+        # Hide match-path column when no moved-in-DB rows are present
+        has_moved = any(r.get("status") == _STATUS_MOVED_DB for r in self._results)
+        self._table.setColumnHidden(_COL_MATCH, not has_moved)
 
     @staticmethod
     def _color_row(items: list[QTableWidgetItem], bg: QColor) -> None:
@@ -648,6 +769,152 @@ class DbMaintenanceDialog(QDialog):
         self._set_idle()
 
     # ------------------------------------------------------------------
+    def _start_find_moved_in_db(self) -> None:
+        missing = [r for r in self._results if r["status"] in (_STATUS_MISSING, _STATUS_MODIFIED)]
+        if not missing:
+            QMessageBox.information(self, "Find Moved", "No missing archives to check.")
+            return
+
+        self._set_busy(True)
+        self._log.appendPlainText(
+            f"Searching the database for {len(missing)} missing archive(s)…"
+        )
+
+        self._moved_db_worker = MovedInDbWorker(missing)
+        self._moved_db_worker.log.connect(self._on_log)
+        self._moved_db_worker.progress.connect(self._on_progress)
+        self._moved_db_worker.found.connect(self._on_moved_in_db_found)
+        self._moved_db_worker.finished.connect(self._on_moved_in_db_finished)
+        self._moved_db_worker.start()
+
+    def _on_moved_in_db_found(self, missing_id: int, match_path: str) -> None:
+        for i, row in enumerate(self._results):
+            if row["id"] == missing_id:
+                row["status"]     = _STATUS_MOVED_DB
+                row["match_path"] = match_path
+                self._table.item(i, _COL_STATUS).setText(_STATUS_MOVED_DB)
+                match_item = self._table.item(i, _COL_MATCH)
+                if match_item:
+                    match_item.setText(match_path)
+                items = [self._table.item(i, c) for c in range(5)]
+                self._color_row([it for it in items if it], _color_moved_db())
+                break
+        self._apply_filter()
+
+    def _on_moved_in_db_finished(self, count: int) -> None:
+        self._moved_db_worker = None
+        self._set_idle()
+
+    def _merge_moved_records(self) -> None:
+        """Transfer metadata from 'Moved (in DB)' records to their matched new locations."""
+        selected_rows = sorted({idx.row() for idx in self._table.selectedIndexes()})
+        if selected_rows:
+            to_merge = [
+                self._results[r] for r in selected_rows
+                if r < len(self._results)
+                and self._results[r]["status"] == _STATUS_MOVED_DB
+                and self._results[r].get("match_path")
+            ]
+        else:
+            to_merge = [
+                r for r in self._results
+                if r["status"] == _STATUS_MOVED_DB and r.get("match_path")
+            ]
+
+        if not to_merge:
+            QMessageBox.information(
+                self, "Merge Moved",
+                "No 'Moved (in DB)' records selected (or none found).\n\n"
+                "Run 'Find Moved in DB' first, then select rows to merge.",
+            )
+            return
+
+        reply = QMessageBox.question(
+            self, "Merge Moved Records",
+            f"Transfer metadata from <b>{len(to_merge)}</b> missing record(s) to their "
+            f"matched locations?\n\n"
+            "• The missing record's manually-edited metadata will be kept.\n"
+            "• The matched (re-crawled) record at the new path will be removed.\n"
+            "• Thumbnails of the removed record will be deleted.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        from app.database.db import session_scope
+        from app.database.models import STLModel
+        from app.utils.thumbnailer import delete_thumbnail
+
+        merged = 0
+        errors = 0
+        try:
+            with session_scope() as session:
+                for rec in to_merge:
+                    match_path = rec["match_path"]
+                    old_model = session.query(STLModel).filter_by(id=rec["id"]).first()
+                    new_model = session.query(STLModel).filter_by(
+                        archive_path=match_path
+                    ).first()
+                    if old_model is None or new_model is None:
+                        errors += 1
+                        continue
+
+                    # Capture new location's filesystem metadata before deletion
+                    new_path  = new_model.archive_path
+                    new_hash  = new_model.archive_hash
+                    new_size  = new_model.archive_size
+                    new_mtime = new_model.archive_mtime_ns
+                    new_compr = new_model.compression_rate
+
+                    # Delete new model's images/thumbnails
+                    for img in list(new_model.images):
+                        if img.thumbnail_path:
+                            delete_thumbnail(img.thumbnail_path)
+                        session.delete(img)
+                    session.flush()
+
+                    # Remove the re-crawled (shallow) record
+                    session.delete(new_model)
+                    session.flush()
+
+                    # Redirect old record to new location
+                    old_model.archive_path     = new_path
+                    old_model.archive_hash     = new_hash
+                    old_model.archive_size     = new_size
+                    old_model.archive_mtime_ns = new_mtime
+                    if new_compr is not None:
+                        old_model.compression_rate = new_compr
+                    session.flush()
+                    merged += 1
+
+        except Exception as exc:
+            self._log.appendPlainText(f"ERROR during merge: {exc}")
+            logger.error("Merge moved records failed: %s", exc, exc_info=True)
+
+        # Update UI to reflect merged rows
+        merged_ids = {r["id"] for r in to_merge}
+        for i, row in enumerate(self._results):
+            if row["id"] in merged_ids and row["status"] == _STATUS_MOVED_DB:
+                row["path"]       = row["match_path"]
+                row["status"]     = _STATUS_FOUND
+                row["match_path"] = ""
+                self._table.item(i, _COL_PATH).setText(row["path"])
+                self._table.item(i, _COL_STATUS).setText(_STATUS_FOUND)
+                match_item = self._table.item(i, _COL_MATCH)
+                if match_item:
+                    match_item.setText("")
+                items = [self._table.item(i, c) for c in range(5)]
+                self._color_row([it for it in items if it], _color_found())
+
+        self._apply_filter()
+        self._log.appendPlainText(
+            f"Merged {merged} record(s)."
+            + (f" {errors} error(s)." if errors else "")
+        )
+        self._set_idle()
+
+    # ------------------------------------------------------------------
     def _remove_selected(self) -> None:
         selected_rows = sorted(
             {idx.row() for idx in self._table.selectedIndexes()}, reverse=True
@@ -718,8 +985,11 @@ class DbMaintenanceDialog(QDialog):
             logger.error("Failed to remove DB records: %s", exc, exc_info=True)
 
     def _refresh_action_buttons(self) -> None:
-        has_missing = any(r["status"] == _STATUS_MISSING for r in self._results)
+        has_missing  = any(r["status"] in (_STATUS_MISSING, _STATUS_MODIFIED) for r in self._results)
+        has_moved_db = any(r["status"] == _STATUS_MOVED_DB for r in self._results)
         self._search_btn.setEnabled(has_missing)
+        self._find_moved_btn.setEnabled(has_missing)
+        self._merge_moved_btn.setEnabled(has_moved_db)
         self._remove_all_btn.setEnabled(has_missing)
         self._remove_sel_btn.setEnabled(bool(self._results))
 
@@ -734,7 +1004,10 @@ class DbMaintenanceDialog(QDialog):
 
     # ------------------------------------------------------------------
     def closeEvent(self, event) -> None:
-        for worker in (self._verify_worker, self._search_worker, self._dhash_worker):
+        for worker in (
+            self._verify_worker, self._search_worker,
+            self._dhash_worker, self._moved_db_worker,
+        ):
             if worker and worker.isRunning():
                 worker.stop()
                 worker.wait(3000)

@@ -145,7 +145,7 @@ class EditorDialog(QDialog):
 
         self._title_edit  = self._autocomplete_edit(titles)
         self._creator_edit = self._autocomplete_edit(creators)
-        self._source_edit = self._make_combo(sources)
+        self._source_edit = self._make_combo(sources, blank_first=True)
         self._date_edit   = self._autocomplete_edit(dates)
         self._url_edit    = QLineEdit()
         self._url_edit.setClearButtonEnabled(True)
@@ -168,26 +168,28 @@ class EditorDialog(QDialog):
         self._scale_edit = self._make_combo(scales, blank_first=True)
         self._presupports_edit = self._make_combo(["No", "Lychee", "Chitubox", "Presupported"], blank_first=True)
 
+        _c0 = lambda combo: (lambda: combo.setCurrentIndex(0))
+
         form.addRow("Archive Path:",  self._path_edit)
         form.addRow("Title:",         self._title_edit)
         form.addRow("Creator:",       self._creator_edit)
-        form.addRow("Source:",        self._source_edit)
+        form.addRow("Source:",        self._with_clear_btn(self._source_edit,       _c0(self._source_edit)))
         form.addRow("Date:",          self._date_edit)
-        form.addRow("Release:",       self._release_edit)
-        form.addRow("Sculptor:",      self._sculptor_edit)
-        form.addRow("Collection:",    self._collection_edit)
-        form.addRow("Subcollection:", self._subcollection_edit)
-        form.addRow("Category:",      self._category_edit)
-        form.addRow("Sequence:",     self._with_clear_btn(
+        form.addRow("Release:",       self._with_clear_btn(self._release_edit,      _c0(self._release_edit)))
+        form.addRow("Sculptor:",      self._with_clear_btn(self._sculptor_edit,     _c0(self._sculptor_edit)))
+        form.addRow("Collection:",    self._with_clear_btn(self._collection_edit,   _c0(self._collection_edit)))
+        form.addRow("Subcollection:", self._with_clear_btn(self._subcollection_edit,_c0(self._subcollection_edit)))
+        form.addRow("Category:",      self._with_clear_btn(self._category_edit,     _c0(self._category_edit)))
+        form.addRow("Sequence:",      self._with_clear_btn(
             self._sequence_spin, lambda: self._sequence_spin.setValue(0)
         ))
-        form.addRow("Scale:",        self._scale_edit)
-        form.addRow("Presupports:",  self._presupports_edit)
-        form.addRow("URL:",          self._url_edit)
-        form.addRow("Description:",  self._with_clear_btn(
+        form.addRow("Scale:",         self._with_clear_btn(self._scale_edit,        _c0(self._scale_edit)))
+        form.addRow("Presupports:",   self._with_clear_btn(self._presupports_edit,  _c0(self._presupports_edit)))
+        form.addRow("URL:",           self._url_edit)
+        form.addRow("Description:",   self._with_clear_btn(
             self._desc_edit, self._desc_edit.clear
         ))
-        form.addRow("Tags:",         self._tags_edit)
+        form.addRow("Tags:",          self._tags_edit)
         left_layout.addLayout(form)
 
         # ---- Pattern inference group ----
