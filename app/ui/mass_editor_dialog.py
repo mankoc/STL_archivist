@@ -192,15 +192,19 @@ class MassEditorDialog(QDialog):
                 .filter(model_tags.c.model_id.in_(self._model_ids))
                 .distinct().order_by(Tag.name).all()
             )
+            def _fk_ids(fk_col):
+                return [
+                    cid for (cid,) in session.query(fk_col)
+                    .filter(STLModel.id.in_(self._model_ids))
+                    .filter(fk_col.isnot(None)).distinct()
+                ]
             collections    = sorted(filter(None, (
-                c.name for (c,) in session.query(Collection)
-                .join(STLModel, STLModel.collection_id == Collection.id)
-                .filter(STLModel.id.in_(self._model_ids)).distinct()
+                c.name for c in session.query(Collection)
+                .filter(Collection.id.in_(_fk_ids(STLModel.collection_id))).all()
             )))
             subcollections = sorted(filter(None, (
-                s.name for (s,) in session.query(Subcollection)
-                .join(STLModel, STLModel.subcollection_id == Subcollection.id)
-                .filter(STLModel.id.in_(self._model_ids)).distinct()
+                s.name for s in session.query(Subcollection)
+                .filter(Subcollection.id.in_(_fk_ids(STLModel.subcollection_id))).all()
             )))
             categories     = sorted(c.name for c in session.query(Category).order_by(Category.name).all())
             scales         = sorted(s.name for s in session.query(Scale).order_by(Scale.name).all())
