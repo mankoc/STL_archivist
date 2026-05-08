@@ -12,7 +12,7 @@ class CrawlerDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Crawler")
-        self.resize(700, 480)
+        self.resize(700, 624)
         self.setModal(True)
 
         layout = QVBoxLayout(self)

@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QCursor
 
 from app.database.db import session_scope, get_session
-from app.database.models import STLModel, Tag, Release, Collection, Subcollection, Category, Scale
+from app.database.models import STLModel, Tag, Release, Collection, Subcollection, Category, Scale, model_tags
 import re
 
 from app.utils.path_pattern import (
@@ -172,18 +172,36 @@ class MassEditorDialog(QDialog):
         session = get_session()
         try:
             _uniq = lambda col: sorted(filter(None, (v for (v,) in session.query(col).distinct())))
+            _uniq_sel = lambda col: sorted(filter(None, (
+                v for (v,) in session.query(col)
+                .filter(STLModel.id.in_(self._model_ids)).distinct()
+            )))
             sources        = _uniq(STLModel.source)
             creators       = _uniq(STLModel.creator)
             dates          = sorted({
                 format_release_date(y, mo)
                 for (y, mo) in session.query(STLModel.release_year, STLModel.release_month)
+                                      .filter(STLModel.id.in_(self._model_ids))
                                       .filter(STLModel.release_year.isnot(None)).distinct()
             })
             titles         = _uniq(STLModel.title)
             releases       = sorted(r.name for r in session.query(Release).order_by(Release.name).all())
-            all_tags       = [t.name for t in session.query(Tag).order_by(Tag.name).all()]
-            collections    = sorted(c.name for c in session.query(Collection).order_by(Collection.name).all())
-            subcollections = sorted(s.name for s in session.query(Subcollection).order_by(Subcollection.name).all())
+            all_tags       = sorted(
+                t.name for t in session.query(Tag)
+                .join(model_tags, Tag.id == model_tags.c.tag_id)
+                .filter(model_tags.c.model_id.in_(self._model_ids))
+                .distinct().order_by(Tag.name).all()
+            )
+            collections    = sorted(filter(None, (
+                c.name for (c,) in session.query(Collection)
+                .join(STLModel, STLModel.collection_id == Collection.id)
+                .filter(STLModel.id.in_(self._model_ids)).distinct()
+            )))
+            subcollections = sorted(filter(None, (
+                s.name for (s,) in session.query(Subcollection)
+                .join(STLModel, STLModel.subcollection_id == Subcollection.id)
+                .filter(STLModel.id.in_(self._model_ids)).distinct()
+            )))
             categories     = sorted(c.name for c in session.query(Category).order_by(Category.name).all())
             scales         = sorted(s.name for s in session.query(Scale).order_by(Scale.name).all())
         finally:
@@ -254,7 +272,7 @@ class MassEditorDialog(QDialog):
         root.addWidget(manual_group)
 
         # ---- Find & Replace group ----
-        fnr_group = QGroupBox("Find & Replace in Title")
+        fnr_group = QGroupBox("Find & Replace")
         fnr_layout = QFormLayout(fnr_group)
         fnr_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
@@ -268,8 +286,39 @@ class MassEditorDialog(QDialog):
         self._replace_edit.setClearButtonEnabled(True)
         fnr_layout.addRow("Replace with:", self._replace_edit)
 
+        # Field selection — which string columns to apply F&R to
+        self._fnr_fields: dict[str, QCheckBox] = {}
+        fields_row = QWidget()
+        fields_lay = QHBoxLayout(fields_row)
+        fields_lay.setContentsMargins(0, 0, 0, 0)
+        fields_lay.setSpacing(12)
+        for field_name, label in (
+            ("title",   "Title"),
+            ("creator", "Creator"),
+            ("source",  "Source"),
+            ("url",     "URL"),
+        ):
+            cb = QCheckBox(label)
+            cb.setChecked(field_name == "title")
+            self._fnr_fields[field_name] = cb
+            fields_lay.addWidget(cb)
+        fields_lay.addStretch()
+        fnr_layout.addRow("Apply to:", fields_row)
+
+        options_row = QWidget()
+        options_lay = QHBoxLayout(options_row)
+        options_lay.setContentsMargins(0, 0, 0, 0)
+        options_lay.setSpacing(16)
         self._fnr_case_check = QCheckBox("Case-sensitive")
-        fnr_layout.addRow("", self._fnr_case_check)
+        self._fnr_regex_check = QCheckBox("Use regex")
+        self._fnr_regex_check.setToolTip(
+            "When checked, the Find field is treated as a Python regular expression.\n"
+            "Use capture groups in Replace with: \\1, \\2, …"
+        )
+        options_lay.addWidget(self._fnr_case_check)
+        options_lay.addWidget(self._fnr_regex_check)
+        options_lay.addStretch()
+        fnr_layout.addRow("", options_row)
 
         root.addWidget(fnr_group)
 
@@ -613,18 +662,28 @@ class MassEditorDialog(QDialog):
                             model.tags.append(tag)
 
         find_str = self._find_edit.text()
-        if find_str and find_str.strip():
+        target_fields = [f for f, cb in self._fnr_fields.items() if cb.isChecked()]
+        if find_str and find_str.strip() and target_fields:
             replace_str = self._replace_edit.text()
-            case_sensitive = self._fnr_case_check.isChecked()
-            flags = 0 if case_sensitive else re.IGNORECASE
-            pattern = re.compile(re.escape(find_str), flags)
+            flags = 0 if self._fnr_case_check.isChecked() else re.IGNORECASE
+            raw = find_str if self._fnr_regex_check.isChecked() else re.escape(find_str)
+            try:
+                pattern = re.compile(raw, flags)
+            except re.error as exc:
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Invalid Regex", f"The pattern is not valid:\n{exc}")
+                return
             with session_scope() as session:
                 for mid in self._model_ids:
                     model = session.get(STLModel, mid)
-                    if model is None or not model.title:
+                    if model is None:
                         continue
-                    new_title = pattern.sub(replace_str, model.title)
-                    if new_title != model.title:
-                        model.title = new_title or None
+                    for field in target_fields:
+                        old_val = getattr(model, field, None)
+                        if not old_val:
+                            continue
+                        new_val = pattern.sub(replace_str, old_val)
+                        if new_val != old_val:
+                            setattr(model, field, new_val or None)
 
         self.accept()

@@ -253,6 +253,9 @@ with a filter panel on the left and an image preview pane on the right.</p>
       list</em> to be enabled</li>
   <li><b>Edit Model</b> &mdash; opens the full Model Editor (single selection)</li>
   <li><b>Mass Edit</b> &mdash; opens the Mass Editor (multiple selections)</li>
+  <li><b>Edit Authors&hellip;</b> &mdash; opens the Author Editor when right-clicking the
+      Author column; lets you rename, delete, and merge author records across the whole
+      database (see below)</li>
   <li><b>Delete N model(s) from DB&hellip;</b> &mdash; removes the selected records from the
       database without touching the archive files on disk</li>
   <li><b>Delete N archive file(s) from disk&hellip;</b> &mdash; physically deletes or moves to
@@ -260,6 +263,25 @@ with a filter panel on the left and an image preview pane on the right.</p>
       <em>Allow file delete</em> is enabled in
       <b>Configuration &rarr; File writing</b></li>
 </ul>
+
+<h2>Author Editor</h2>
+<p>Right-click the <b>Author</b> column and choose <b>Edit Authors&hellip;</b> to open the
+Author Editor, which lists every distinct author value in the database together with its
+model count.</p>
+<table>
+  <tr><th>Action</th><th>Effect</th></tr>
+  <tr><td><b>Rename</b></td>
+      <td>Give the selected author a new name; all models and the creator profile are updated.
+          If the target name already exists you are offered a merge instead.</td></tr>
+  <tr><td><b>Delete</b></td>
+      <td>Set <code>creator = null</code> on all affected models and remove the creator profile.</td></tr>
+  <tr><td><b>Merge</b></td>
+      <td>Ctrl+select exactly two authors and click Merge; choose which name to keep.
+          All models from the discarded author are reassigned to the kept one.</td></tr>
+  <tr><td><b>Merge Similar&hellip;</b></td>
+      <td>Scans all author names for pairs within a configurable Levenshtein distance;
+          works identically to the Tag editor&rsquo;s similarity merge.</td></tr>
+</table>
 
 <h2>Inline Editing</h2>
 <p>Double-click a cell (except the Path column) to edit it in place.
@@ -315,6 +337,17 @@ on its left. Clicking the item cycles through three states:</p>
 
 <div class="note">You can combine multiple includes (OR within the same group)
 and multiple excludes freely.</div>
+
+<h2>Solo Mode (Double-Click)</h2>
+<p><b>Double-clicking</b> the text label of any leaf item clears all other active filters
+and checks <em>only</em> the clicked item. This is a quick way to isolate a single author,
+tag, or category without having to manually uncheck everything else.</p>
+
+<h2>Model Counts</h2>
+<p>When <em>Show model counts in filter pane</em> is enabled in
+<b>Configuration &rarr; Browser</b>, each filter item shows the number of matching models
+in parentheses — for example <code>Jane Doe (42)</code>. Path tree nodes accumulate the
+counts of all archives in their subtrees.</p>
 
 <h2>Group Header Filters</h2>
 <p>The <em>circle indicator</em> next to a group header (e.g. the circle beside &ldquo;Authors&rdquo;)
@@ -470,9 +503,25 @@ chosen file path would extract.</p>
   <li>An <code>info.json</code> file inside the archive overrides all path-inferred values.</li>
 </ul>
 
+<h2>Moved Archive Detection</h2>
+<p>When the crawler would normally delete a record for a missing archive, it first searches
+the set of newly-discovered archives for a match:</p>
+<ol>
+  <li><b>Hash match</b> (definitive) &mdash; if a new archive has the same CRC fingerprint as
+      the missing record, the old record&rsquo;s path is updated to the new location.</li>
+  <li><b>Filename + size match</b> (fallback) &mdash; if no hash match is found, a match on
+      both filename and file size is used instead.</li>
+</ol>
+<p>On a match all existing metadata, images, and thumbnails are preserved under the new path.
+Archives that match neither criterion are removed as before.</p>
+
+<h2>Running in the Background</h2>
+<p>When the Crawler dialog is hidden and the crawl finishes, the dialog is automatically
+brought back to the foreground so you do not miss the completion notification.</p>
+
 <h2>Deleted Archives</h2>
-<p>If an archive that was previously crawled no longer exists on disk, its database
-record is <b>automatically removed</b> the next time the same root folder is crawled.</p>
+<p>If a missing archive cannot be matched to any newly-discovered file during a crawl, its
+database record is <b>automatically removed</b>.</p>
 
 <h2>Four-Phase Pipeline</h2>
 <table>
@@ -581,8 +630,13 @@ models</b> in a single operation.  Leave a field empty to leave it unchanged.</p
 {_screenshot("mass_editor.jpg")}
 <h2>Manual Field Overwrite</h2>
 <p>Fill in any field in the lower section to overwrite that field on all selected models.
-Leaving a field empty means &ldquo;do not change&rdquo;. The Title field is deliberately absent
-because setting the same title on many models rarely makes sense.</p>
+Leaving a field empty means &ldquo;do not change&rdquo;.</p>
+<p>Each field also has a <b>clear</b> checkbox: when checked, that field is explicitly set to
+blank on all selected models, regardless of its current value.</p>
+
+<div class="tip">Tip: The autocomplete suggestions for <em>Collection</em>, <em>Subcollection</em>,
+<em>Release date</em>, and <em>Tags</em> are scoped to the values that already exist among
+the selected models, keeping the list short and relevant.</div>
 
 <h2>Path Pattern Extraction</h2>
 <p>The upper section offers an optional <em>path pattern</em> that can extract field
@@ -593,8 +647,8 @@ same folder structure but have different values:</p>
 <ol>
   <li>Enter a pattern using the same <code>&#123;token&#125;</code> syntax as the Crawler
       (see {_link(PAGE_CRAWLER, "Crawler &rarr; Path Patterns")}).</li>
-  <li>Click <b>Parse &rsaquo;</b> to preview the result on the example path shown.</li>
-  <li>If the preview looks correct, click <b>Apply to N models</b>.</li>
+  <li>Click <b>Parse all paths</b> to preview the result on the example path shown.</li>
+  <li>Click <b>OK</b> to apply.</li>
 </ol>
 
 <div class="note">Path-extracted values are applied <em>per model</em>; manual field values are applied
@@ -603,6 +657,24 @@ same folder structure but have different values:</p>
 <h2>Saving and Loading Patterns</h2>
 <p>Just like the Crawler tab, the Mass Editor lets you save patterns to the
 <em>Saved</em> dropdown and recall them for future use.</p>
+
+<h2>Find &amp; Replace</h2>
+<p>The <b>Find &amp; Replace</b> section at the bottom applies a substring substitution to one
+or more text fields on all selected models.</p>
+<table>
+  <tr><th>Control</th><th>Description</th></tr>
+  <tr><td><b>Find</b></td>
+      <td>The substring to search for (treated as a literal string, not a regex).</td></tr>
+  <tr><td><b>Replace with</b></td>
+      <td>The replacement string; leave empty to delete the matched substring.</td></tr>
+  <tr><td><b>Apply to</b></td>
+      <td>Checkboxes for <em>Title</em>, <em>Creator</em>, <em>Source</em>, and <em>URL</em>;
+          tick any combination to apply the replacement to those fields.</td></tr>
+  <tr><td><b>Case-sensitive</b></td>
+      <td>When checked, the search is case-sensitive; otherwise it matches regardless of case.</td></tr>
+</table>
+<div class="note">Find &amp; Replace runs after all manual field overwrites and path-pattern
+extractions within the same OK operation.</div>
 {_prev_next(PAGE_MASS_EDITOR)}"""
 
 
@@ -699,6 +771,15 @@ Add, edit, or remove patterns as needed for your naming conventions.</p>
           <b>Tools &rarr; Find Duplicate Archives by Content &rarr; STL Files</b> tab.
           Re-crawl existing archives after enabling to populate historical entries.
           The list is also written into and restored from METADATA.7z sidecars.</td></tr>
+</table>
+
+<h2>Browser</h2>
+<table>
+  <tr><th>Setting</th><th>Description</th></tr>
+  <tr><td>Show model counts in filter pane</td>
+      <td>When enabled, each filter panel item shows the number of matching models in
+          parentheses (e.g. <code>Jane Doe (42)</code>). Path-tree nodes show cumulative
+          counts. Disable for a less cluttered panel or on very large collections.</td></tr>
 </table>
 
 <h2>Appearance</h2>
@@ -852,6 +933,14 @@ marker; unmatched files appear in the remaining rows.</p>
       <td>Checks every archive path in the database to see whether the file still exists on disk.
           Results appear in the table: <span style="color:green">&#10003; OK</span> or
           <span style="color:red">&#10007; Missing</span>.</td></tr>
+  <tr><td><b>Find Moved in DB&hellip;</b></td>
+      <td>Scans all database records to detect archives that have been moved to another
+          path already present in the database. Matches by hash first, then by filename + size.
+          Matches are highlighted as <em>Moved (in DB)</em> with the matching path shown in
+          a <em>Match Path</em> column.</td></tr>
+  <tr><td><b>Merge Moved</b></td>
+      <td>For every <em>Moved (in DB)</em> row, updates the original record to the new path
+          and removes the duplicate record, preserving all metadata and thumbnails.</td></tr>
   <tr><td><b>Search folder</b></td>
       <td>Recursively search a folder for archives whose filename matches a
           <em>missing</em> record.  When a match is found, the database path is updated

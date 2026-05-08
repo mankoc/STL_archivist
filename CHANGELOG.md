@@ -1,5 +1,60 @@
 # Changelog
 
+## v0.6.0 — 2026-05-08
+
+### UI — Browser
+
+- **Edit Authors dialog** — new right-click context menu item *Edit Authors…* (available when
+  clicking the Author column); lists every distinct author with model counts and supports:
+  - **Rename** — updates all models and the underlying creator profile
+  - **Delete** — sets `creator = null` on all affected models and removes the profile
+  - **Merge** — Ctrl+select two authors and merge them into one; prompts to choose the kept name
+  - **Merge Similar** — Levenshtein-distance scan with a configurable threshold; same UX as the
+    Tag editor's similarity merge
+
+### UI — Filter Panel
+
+- **Solo on double-click** — double-clicking the *text label* of any leaf filter item clears
+  all other active filters and checks only the clicked item, making it easy to isolate a single
+  value without manually unchecking everything else
+- **Model counts** — each filter item now shows the number of matching models in parentheses
+  (e.g. `Jane Doe (42)`); counts for path-tree nodes accumulate all descendant models;
+  configurable via **Configuration → Browser → Show model counts in filter pane**
+
+### UI — Crawler
+
+- **Moved-file detection** — when the crawler would normally delete a missing archive record,
+  it first searches among newly discovered archives for a match by hash (definitive) or by
+  filename + size (fallback); on a match the old record's path is updated to the new location
+  and the duplicate new record is removed, preserving all metadata, images, and thumbnails
+- **Auto-restore on finish** — when the crawler dialog is hidden (running in background) and
+  the crawl completes, the dialog is automatically brought back to the foreground
+
+### UI — Database Maintenance
+
+- **Find Moved in DB** — new *Find Moved in DB…* button scans all database records to find
+  archives flagged as missing that appear to have been moved elsewhere in the database; matching
+  is done by hash first, then by filename + size; matches are highlighted as
+  *Moved (in DB)* rows in a new *Match Path* column
+- **Merge Moved** — new *Merge Moved* button updates the matched old record to the new path
+  and removes the duplicate, consolidating both records into one
+
+### UI — Mass Editor
+
+- **Find & Replace — field selection** — the Find & Replace operation now applies to any
+  combination of user-selected fields (Title, Creator, Source, URL); previously it was limited
+  to Title only; each field has an individual checkbox under *Apply to:*
+- **Filtered autocomplete** — the autocomplete/dropdown suggestions for Collection,
+  Subcollection, Release date, and Tags are now scoped to only the values present among the
+  currently selected models, reducing noise when editing a focused subset
+
+### Configuration
+
+- Added **Show model counts in filter pane** checkbox in **Configuration → Browser**;
+  when unchecked the parenthesised counts are hidden from all filter panel items
+
+---
+
 ## v0.5.0 — 2026-05-03
 
 ### Misc
