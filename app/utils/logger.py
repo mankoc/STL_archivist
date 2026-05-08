@@ -85,11 +85,13 @@ def setup_logging(data_dir: Path | str | None = None) -> None:
 
 
 def setup_excepthook() -> None:
-    """Install sys.excepthook so uncaught exceptions are logged as CRITICAL.
+    """Install sys.excepthook so uncaught exceptions are logged as CRITICAL
+    and shown in an error dialog.
 
     KeyboardInterrupt is forwarded to the default handler so Ctrl-C still works.
     """
     import sys
+    import traceback
     _log = logging.getLogger("uncaught")
 
     def _handle(exc_type, exc_value, exc_traceback):
@@ -97,6 +99,34 @@ def setup_excepthook() -> None:
             sys.__excepthook__(exc_type, exc_value, exc_traceback)
             return
         _log.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+        try:
+            from PyQt6.QtWidgets import QApplication, QMessageBox, QDialog, QVBoxLayout, \
+                QLabel, QTextEdit, QDialogButtonBox
+            app = QApplication.instance()
+            if app is None:
+                return
+            tb_text = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+            dlg = QDialog()
+            dlg.setWindowTitle("Uncaught Exception")
+            dlg.resize(700, 400)
+            layout = QVBoxLayout(dlg)
+            label = QLabel(
+                f"<b style='color:#d32f2f;'>An unexpected error occurred:</b><br>"
+                f"{exc_type.__name__}: {exc_value}"
+            )
+            label.setWordWrap(True)
+            layout.addWidget(label)
+            tb_edit = QTextEdit()
+            tb_edit.setReadOnly(True)
+            tb_edit.setFontFamily("monospace")
+            tb_edit.setPlainText(tb_text)
+            layout.addWidget(tb_edit)
+            buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+            buttons.rejected.connect(dlg.reject)
+            layout.addWidget(buttons)
+            dlg.exec()
+        except Exception:
+            pass
 
     sys.excepthook = _handle
 
