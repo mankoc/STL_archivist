@@ -185,7 +185,6 @@ class MassEditorDialog(QDialog):
                                       .filter(STLModel.release_year.isnot(None)).distinct()
             })
             titles         = _uniq(STLModel.title)
-            releases       = sorted(r.name for r in session.query(Release).order_by(Release.name).all())
             all_tags       = sorted(
                 t.name for t in session.query(Tag)
                 .join(model_tags, Tag.id == model_tags.c.tag_id)
@@ -198,14 +197,21 @@ class MassEditorDialog(QDialog):
                     .filter(STLModel.id.in_(self._model_ids))
                     .filter(fk_col.isnot(None)).distinct()
                 ]
+            _rel_ids = _fk_ids(STLModel.release_id)
+            releases       = sorted(filter(None, (
+                r.name for r in session.query(Release)
+                .filter(Release.id.in_(_rel_ids)).all()
+            ))) if _rel_ids else sorted(r.name for r in session.query(Release).order_by(Release.name).all())
+            _col_ids = _fk_ids(STLModel.collection_id)
             collections    = sorted(filter(None, (
                 c.name for c in session.query(Collection)
-                .filter(Collection.id.in_(_fk_ids(STLModel.collection_id))).all()
-            )))
+                .filter(Collection.id.in_(_col_ids)).all()
+            ))) if _col_ids else sorted(c.name for c in session.query(Collection).order_by(Collection.name).all())
+            _sub_ids = _fk_ids(STLModel.subcollection_id)
             subcollections = sorted(filter(None, (
                 s.name for s in session.query(Subcollection)
-                .filter(Subcollection.id.in_(_fk_ids(STLModel.subcollection_id))).all()
-            )))
+                .filter(Subcollection.id.in_(_sub_ids)).all()
+            ))) if _sub_ids else sorted(s.name for s in session.query(Subcollection).order_by(Subcollection.name).all())
             categories     = sorted(c.name for c in session.query(Category).order_by(Category.name).all())
             scales         = sorted(s.name for s in session.query(Scale).order_by(Scale.name).all())
         finally:
@@ -297,10 +303,11 @@ class MassEditorDialog(QDialog):
         fields_lay.setContentsMargins(0, 0, 0, 0)
         fields_lay.setSpacing(12)
         for field_name, label in (
-            ("title",   "Title"),
-            ("creator", "Creator"),
-            ("source",  "Source"),
-            ("url",     "URL"),
+            ("title",         "Title"),
+            ("creator",       "Creator"),
+            ("source",        "Source"),
+            ("collection",    "Collection"),
+            ("subcollection", "Subcollection"),
         ):
             cb = QCheckBox(label)
             cb.setChecked(field_name == "title")
@@ -677,17 +684,42 @@ class MassEditorDialog(QDialog):
                 from PyQt6.QtWidgets import QMessageBox
                 QMessageBox.warning(self, "Invalid Regex", f"The pattern is not valid:\n{exc}")
                 return
+            simple_fields = [f for f in target_fields if f not in ("collection", "subcollection")]
+            do_collection    = "collection"    in target_fields
+            do_subcollection = "subcollection" in target_fields
             with session_scope() as session:
                 for mid in self._model_ids:
                     model = session.get(STLModel, mid)
                     if model is None:
                         continue
-                    for field in target_fields:
+                    for field in simple_fields:
                         old_val = getattr(model, field, None)
                         if not old_val:
                             continue
                         new_val = pattern.sub(replace_str, old_val)
                         if new_val != old_val:
                             setattr(model, field, new_val or None)
+                    if do_collection and model.collection:
+                        new_name = pattern.sub(replace_str, model.collection.name)
+                        if new_name and new_name != model.collection.name:
+                            col = session.query(Collection).filter_by(name=new_name).first()
+                            if col is None:
+                                col = Collection(name=new_name)
+                                session.add(col)
+                                session.flush()
+                            model.collection = col
+                    if do_subcollection and model.subcollection:
+                        new_name = pattern.sub(replace_str, model.subcollection.name)
+                        if new_name and new_name != model.subcollection.name:
+                            parent_id = model.collection.id if model.collection else None
+                            sub = session.query(Subcollection).filter_by(
+                                name=new_name, collection_id=parent_id
+                            ).first()
+                            if sub is None and parent_id is not None:
+                                sub = Subcollection(name=new_name, collection_id=parent_id)
+                                session.add(sub)
+                                session.flush()
+                            if sub:
+                                model.subcollection = sub
 
         self.accept()

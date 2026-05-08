@@ -856,8 +856,12 @@ class BrowserTab(QWidget):
         return visible
 
     # ------------------------------------------------------------------
-    def _populate_filter_tree(self) -> None:
-        """Rebuild the left-panel filter tree from the current DB contents."""
+    def _populate_filter_tree(self, scope_ids: list[int] | None = None) -> None:
+        """Rebuild the left-panel filter tree from the current DB contents.
+
+        When *scope_ids* is not None, the Tags, Date, Collection, Subcollection,
+        and Release sections only show values present among those models.
+        """
         # Save checked items and expanded top-level sections so they survive the rebuild.
         # expanded_sections is None on the very first call (tree is empty) → default collapsed.
         checked_data:  set = set()
@@ -1024,8 +1028,38 @@ class BrowserTab(QWidget):
                         _f = _p
                 _counts[("group", "path")] = session.query(_func.count(STLModel.id)).scalar() or 0
 
+            # Scoped counts for the 5 cascading sections
+            _scoped_counts: dict = {}
+            if show_counts and scope_ids is not None:
+                from app.database.models import model_tags as _mt2
+                for tn, c in session.query(Tag.name, _func.count(_mt2.c.model_id)).join(_mt2, Tag.id == _mt2.c.tag_id).filter(_mt2.c.model_id.in_(scope_ids)).group_by(Tag.name).all():
+                    _scoped_counts[("tag", tn)] = c
+                _scoped_counts[("group", "tag")] = session.query(_func.count(_mt2.c.model_id.distinct())).filter(_mt2.c.model_id.in_(scope_ids)).scalar() or 0
+                _sc_year: dict[int, int] = {}
+                for yr, mo, c in session.query(STLModel.release_year, STLModel.release_month, _func.count(STLModel.id)).filter(STLModel.id.in_(scope_ids)).filter(STLModel.release_year.isnot(None)).group_by(STLModel.release_year, STLModel.release_month).all():
+                    _scoped_counts[("date_month", (yr, mo))] = c
+                    _sc_year[yr] = _sc_year.get(yr, 0) + c
+                for yr, c in _sc_year.items():
+                    _scoped_counts[("date_year", yr)] = c
+                _scoped_counts[("group", "date")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(scope_ids)).filter(STLModel.release_year.isnot(None)).scalar() or 0
+                for cid, c in session.query(STLModel.collection_id, _func.count(STLModel.id)).filter(STLModel.id.in_(scope_ids)).filter(STLModel.collection_id.isnot(None)).group_by(STLModel.collection_id).all():
+                    _scoped_counts[("collection_id", cid)] = c
+                _scoped_counts[("group", "collection")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(scope_ids)).filter(STLModel.collection_id.isnot(None)).scalar() or 0
+                for sid, c in session.query(STLModel.subcollection_id, _func.count(STLModel.id)).filter(STLModel.id.in_(scope_ids)).filter(STLModel.subcollection_id.isnot(None)).group_by(STLModel.subcollection_id).all():
+                    _scoped_counts[("subcollection_id", sid)] = c
+                _scoped_counts[("group", "subcollection")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(scope_ids)).filter(STLModel.subcollection_id.isnot(None)).scalar() or 0
+                for rid, c in session.query(STLModel.release_id, _func.count(STLModel.id)).filter(STLModel.id.in_(scope_ids)).filter(STLModel.release_id.isnot(None)).group_by(STLModel.release_id).all():
+                    _scoped_counts[("release_id", rid)] = c
+                _scoped_counts[("group", "release")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(scope_ids)).filter(STLModel.release_id.isnot(None)).scalar() or 0
+
+            _SCOPED_KINDS = ("tag", "date_month", "date_year", "collection_id", "subcollection_id", "release_id", "group")
+            _SCOPED_GROUPS = ("tag", "date", "collection", "subcollection", "release")
+
             def _c(data) -> int | None:
-                v = _counts.get(data)
+                if scope_ids is not None and data[0] in _SCOPED_KINDS and (data[0] != "group" or data[1] in _SCOPED_GROUPS):
+                    v = _scoped_counts.get(data)
+                else:
+                    v = _counts.get(data)
                 return v if v else None
 
             # ------------------------------------------------------------------
@@ -1041,7 +1075,11 @@ class BrowserTab(QWidget):
                 tags_item = _make_leaf("Tags", ("group", "tag"), _c(("group", "tag")))
                 tags_item.setIcon(0, _icon_tag)
                 self._filter_tree.addTopLevelItem(tags_item)
-                for tag in session.query(Tag).order_by(Tag.name).all():
+                _tag_q = session.query(Tag).order_by(Tag.name)
+                if scope_ids is not None:
+                    from app.database.models import model_tags as _mt3
+                    _tag_q = _tag_q.join(_mt3, Tag.id == _mt3.c.tag_id).filter(_mt3.c.model_id.in_(scope_ids)).distinct()
+                for tag in _tag_q.all():
                     tags_item.addChild(_make_leaf(tag.name, ("tag", tag.name), _c(("tag", tag.name))))
 
             if show_source:
@@ -1060,13 +1098,15 @@ class BrowserTab(QWidget):
                 dates_item = _make_leaf("Date", ("group", "date"), _c(("group", "date")))
                 dates_item.setIcon(0, _icon_date)
                 self._filter_tree.addTopLevelItem(dates_item)
-                rows = (
+                _date_q = (
                     session.query(STLModel.release_year, STLModel.release_month)
                     .filter(STLModel.release_year.isnot(None))
                     .distinct()
                     .order_by(STLModel.release_year.desc(), STLModel.release_month)
-                    .all()
                 )
+                if scope_ids is not None:
+                    _date_q = _date_q.filter(STLModel.id.in_(scope_ids))
+                rows = _date_q.all()
                 year_items: dict[int, QTreeWidgetItem] = {}
                 for year, month in rows:
                     if year not in year_items:
@@ -1090,17 +1130,26 @@ class BrowserTab(QWidget):
                 collection_item = _make_leaf("Collection", ("group", "collection"), _c(("group", "collection")))
                 collection_item.setIcon(0, _icon_category)
                 self._filter_tree.addTopLevelItem(collection_item)
-                for col in session.query(Collection).order_by(Collection.name).all():
+                _col_q = session.query(Collection).order_by(Collection.name)
+                if scope_ids is not None:
+                    _scoped_col_ids = {cid for (cid,) in session.query(STLModel.collection_id).filter(STLModel.id.in_(scope_ids)).filter(STLModel.collection_id.isnot(None)).distinct()}
+                    _col_q = _col_q.filter(Collection.id.in_(_scoped_col_ids))
+                for col in _col_q.all():
                     collection_item.addChild(_make_leaf(col.name, ("collection_id", col.id), _c(("collection_id", col.id))))
 
             if show_subcollection:
                 subcol_section = _make_leaf("Subcollection", ("group", "subcollection"), _c(("group", "subcollection")))
                 subcol_section.setIcon(0, _icon_subcategory)
                 self._filter_tree.addTopLevelItem(subcol_section)
+                _scoped_sub_ids: set[int] | None = None
+                if scope_ids is not None:
+                    _scoped_sub_ids = {sid for (sid,) in session.query(STLModel.subcollection_id).filter(STLModel.id.in_(scope_ids)).filter(STLModel.subcollection_id.isnot(None)).distinct()}
                 for col in session.query(Collection).order_by(Collection.name).all():
                     subs = (session.query(Subcollection)
                             .filter_by(collection_id=col.id)
                             .order_by(Subcollection.name).all())
+                    if _scoped_sub_ids is not None:
+                        subs = [s for s in subs if s.id in _scoped_sub_ids]
                     if not subs:
                         continue
                     col_node = QTreeWidgetItem([col.name])
@@ -1120,7 +1169,11 @@ class BrowserTab(QWidget):
                 release_item = _make_leaf("Release", ("group", "release"), _c(("group", "release")))
                 release_item.setIcon(0, _icon_release)
                 self._filter_tree.addTopLevelItem(release_item)
-                for rel in session.query(Release).order_by(Release.name).all():
+                _rel_q = session.query(Release).order_by(Release.name)
+                if scope_ids is not None:
+                    _scoped_rel_ids = {rid for (rid,) in session.query(STLModel.release_id).filter(STLModel.id.in_(scope_ids)).filter(STLModel.release_id.isnot(None)).distinct()}
+                    _rel_q = _rel_q.filter(Release.id.in_(_scoped_rel_ids))
+                for rel in _rel_q.all():
                     release_item.addChild(_make_leaf(rel.name, ("release_id", rel.id), _c(("release_id", rel.id))))
 
             if show_scale:
@@ -1733,6 +1786,24 @@ class BrowserTab(QWidget):
             no_value_groups=no_value_groups or None,
         )
 
+        has_any_filter = any([
+            author_inc, author_exc, tag_inc, tag_exc, type_inc, type_exc,
+            path_inc, path_exc, date_inc, date_exc, sculptor_inc, sculptor_exc,
+            collection_inc, collection_exc, subcollection_inc, subcollection_exc,
+            category_inc, category_exc, release_inc, release_exc,
+            scale_inc, scale_exc, presupports_inc, presupports_exc,
+            warning_inc, warning_exc, has_value_groups, no_value_groups,
+        ])
+        if has_any_filter:
+            scope_ids = [
+                self._model.item(r, 0).data(MODEL_ID_ROLE)
+                for r in range(self._model.rowCount())
+                if self._model.item(r, 0) is not None
+            ]
+        else:
+            scope_ids = None
+        self._populate_filter_tree(scope_ids=scope_ids)
+
     def _clear_filters(self) -> None:
         """Uncheck all filter items and reload the full table."""
         self._filter_tree.blockSignals(True)
@@ -1746,6 +1817,7 @@ class BrowserTab(QWidget):
             _uncheck(root.child(i))
         self._filter_tree.blockSignals(False)
         self._load_table()
+        self._populate_filter_tree()
 
     def _on_current_changed(self, current, previous) -> None:
         if not current.isValid():
