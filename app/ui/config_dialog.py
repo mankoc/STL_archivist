@@ -393,6 +393,11 @@ def get_recurse_subdirs() -> bool:
     return bool(_load_library_settings().get("recurse_subdirs", True))
 
 
+def get_filter_show_counts() -> bool:
+    """Whether to show model counts next to each item in the filter pane."""
+    return bool(_load_library_settings().get("filter_show_counts", True))
+
+
 _ICONS_DIR = Path(__file__).parent.parent.parent / "resources" / "icons"
 
 
@@ -838,6 +843,9 @@ class ConfigDialog(QDialog):
         group = QGroupBox("File writing")
         form = QFormLayout(group)
 
+        self._filter_show_counts_check = QCheckBox("Show model counts in filter pane")
+        form.addRow("Filter pane:", self._filter_show_counts_check)
+
         self._file_sorting_check = QCheckBox("Enable file sorting")
         form.addRow("File sorting:", self._file_sorting_check)
         form.addRow(
@@ -1215,6 +1223,7 @@ class ConfigDialog(QDialog):
         self._max_thumb_size_spin.setValue(get_max_thumb_size())
 
         self._max_workers_spin.setValue(get_max_workers())
+        self._filter_show_counts_check.setChecked(get_filter_show_counts())
         self._file_sorting_check.setChecked(get_file_sorting_enabled())
         self._unrar_edit.setText(get_unrar_path())
         presupported_enabled = get_warn_presupported_stl()
@@ -1310,6 +1319,7 @@ class ConfigDialog(QDialog):
                 "color_scheme":      selected_scheme,
                 "ui_color_overrides": self._ui_color_overrides,
                 "custom_color_schemes": custom_color_schemes,
+                "filter_show_counts": self._filter_show_counts_check.isChecked(),
                 "file_sorting_enabled": self._file_sorting_check.isChecked(),
                 "warn_presupported_stl": self._warn_presupported_check.isChecked(),
                 "presupport_patterns": [

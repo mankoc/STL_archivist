@@ -564,18 +564,39 @@ class FilterTreeWidget(QTreeWidget):
             self._pre_click_states[id(item)] = item.checkState(0)
             super().mousePressEvent(event)
         else:
-            data_tuple = item.data(0, Qt.ItemDataRole.UserRole)
-            if isinstance(data_tuple, tuple) and data_tuple[0] == "group":
-                # Group header text click → expand/collapse only; state changes via checkbox.
-                super().mousePressEvent(event)
-            else:
-                # Leaf / path item text click → advance through the full 3-state cycle.
-                new_state = self._next_check_state(item.checkState(0))
-                self.blockSignals(True)
-                item.setCheckState(0, new_state)
-                self.blockSignals(False)
-                self.itemChanged.emit(item, 0)
-                event.accept()
+            # Text click on any item → default Qt behaviour (select / expand-collapse).
+            super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
+            super().mouseDoubleClickEvent(event)
+            return
+
+        item = self.itemAt(event.pos())
+        if item is None:
+            super().mouseDoubleClickEvent(event)
+            return
+
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if data is None:
+            super().mouseDoubleClickEvent(event)
+            return
+
+        # Ignore double-clicks on the checkbox area and on group headers.
+        vis_rect = self.visualItemRect(item)
+        indicator_w = self.style().pixelMetric(
+            QStyle.PixelMetric.PM_IndicatorWidth, None, self
+        )
+        is_checkbox_click = event.pos().x() <= vis_rect.left() + indicator_w + 4
+        is_group = isinstance(data, tuple) and data[0] == "group"
+
+        if is_checkbox_click or is_group:
+            super().mouseDoubleClickEvent(event)
+            return
+
+        # Double-click on a leaf item's text → solo this filter.
+        self._solo_item(item)
+        event.accept()
 
     @staticmethod
     def _next_check_state(state: Qt.CheckState) -> Qt.CheckState:
@@ -584,6 +605,14 @@ class FilterTreeWidget(QTreeWidget):
         if state == Qt.CheckState.Checked:
             return Qt.CheckState.PartiallyChecked
         return Qt.CheckState.Unchecked
+
+    def _solo_item(self, target: QTreeWidgetItem) -> None:
+        """Check only *target*, clearing every other checkable item in the tree."""
+        self.blockSignals(True)
+        self._clear_all(self.invisibleRootItem())
+        target.setCheckState(0, Qt.CheckState.Checked)
+        self.blockSignals(False)
+        self.itemChanged.emit(target, 0)
 
     def _clear_all(self, root: QTreeWidgetItem) -> None:
         d = root.data(0, Qt.ItemDataRole.UserRole)
@@ -878,8 +907,9 @@ class BrowserTab(QWidget):
 
         _CHECKABLE = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable
 
-        def _make_leaf(label: str, data) -> QTreeWidgetItem:
-            item = QTreeWidgetItem([label])
+        def _make_leaf(label: str, data, count: int | None = None) -> QTreeWidgetItem:
+            display = f"{label} ({count})" if count is not None else label
+            item = QTreeWidgetItem([display])
             item.setData(0, Qt.ItemDataRole.UserRole, data)
             item.setFlags(_CHECKABLE)
             if data in checked_data:
@@ -906,37 +936,128 @@ class BrowserTab(QWidget):
         show_warnings     = not header.isSectionHidden(COL_WARNING)
         show_path         = not header.isSectionHidden(COL_PATH)
 
+        from app.ui.config_dialog import get_filter_show_counts as _get_fsc
+        show_counts = _get_fsc()
+
         session = get_session()
         try:
+            # ------------------------------------------------------------------
+            # Build count lookup when enabled (one pass, all fields)
+            # ------------------------------------------------------------------
+            _counts: dict = {}
+            _path_counts: dict[str, int] | None = None  # folder → model count (cumulative)
+
+            if show_counts:
+                from sqlalchemy import func as _func
+                from app.database.models import model_tags as _mt
+
+                for v, c in session.query(STLModel.creator, _func.count(STLModel.id)).filter(STLModel.creator.isnot(None)).group_by(STLModel.creator).all():
+                    _counts[("creator", v)] = c
+                _counts[("group", "creator")] = session.query(_func.count(STLModel.id)).filter(STLModel.creator.isnot(None)).scalar() or 0
+
+                for v, c in session.query(STLModel.source, _func.count(STLModel.id)).filter(STLModel.source.isnot(None)).group_by(STLModel.source).all():
+                    _counts[("source", v)] = c
+                _counts[("group", "source")] = session.query(_func.count(STLModel.id)).filter(STLModel.source.isnot(None)).scalar() or 0
+
+                for tn, c in session.query(Tag.name, _func.count(_mt.c.model_id)).join(_mt, Tag.id == _mt.c.tag_id).group_by(Tag.name).all():
+                    _counts[("tag", tn)] = c
+                _counts[("group", "tag")] = session.query(_func.count(_mt.c.model_id.distinct())).scalar() or 0
+
+                _year_cnt: dict[int, int] = {}
+                for yr, mo, c in session.query(STLModel.release_year, STLModel.release_month, _func.count(STLModel.id)).filter(STLModel.release_year.isnot(None)).group_by(STLModel.release_year, STLModel.release_month).all():
+                    _counts[("date_month", (yr, mo))] = c
+                    _year_cnt[yr] = _year_cnt.get(yr, 0) + c
+                for yr, c in _year_cnt.items():
+                    _counts[("date_year", yr)] = c
+                _counts[("group", "date")] = session.query(_func.count(STLModel.id)).filter(STLModel.release_year.isnot(None)).scalar() or 0
+
+                for sid, c in session.query(STLModel.sculptor_id, _func.count(STLModel.id)).filter(STLModel.sculptor_id.isnot(None)).group_by(STLModel.sculptor_id).all():
+                    _counts[("sculptor_id", sid)] = c
+                _counts[("group", "sculptor")] = session.query(_func.count(STLModel.id)).filter(STLModel.sculptor_id.isnot(None)).scalar() or 0
+
+                for cid, c in session.query(STLModel.collection_id, _func.count(STLModel.id)).filter(STLModel.collection_id.isnot(None)).group_by(STLModel.collection_id).all():
+                    _counts[("collection_id", cid)] = c
+                _counts[("group", "collection")] = session.query(_func.count(STLModel.id)).filter(STLModel.collection_id.isnot(None)).scalar() or 0
+
+                for sid, c in session.query(STLModel.subcollection_id, _func.count(STLModel.id)).filter(STLModel.subcollection_id.isnot(None)).group_by(STLModel.subcollection_id).all():
+                    _counts[("subcollection_id", sid)] = c
+                _counts[("group", "subcollection")] = session.query(_func.count(STLModel.id)).filter(STLModel.subcollection_id.isnot(None)).scalar() or 0
+
+                for cid, c in session.query(STLModel.category_id, _func.count(STLModel.id)).filter(STLModel.category_id.isnot(None)).group_by(STLModel.category_id).all():
+                    _counts[("category_id", cid)] = c
+                _counts[("group", "category")] = session.query(_func.count(STLModel.id)).filter(STLModel.category_id.isnot(None)).scalar() or 0
+
+                for rid, c in session.query(STLModel.release_id, _func.count(STLModel.id)).filter(STLModel.release_id.isnot(None)).group_by(STLModel.release_id).all():
+                    _counts[("release_id", rid)] = c
+                _counts[("group", "release")] = session.query(_func.count(STLModel.id)).filter(STLModel.release_id.isnot(None)).scalar() or 0
+
+                for sid, c in session.query(STLModel.scale_id, _func.count(STLModel.id)).filter(STLModel.scale_id.isnot(None)).group_by(STLModel.scale_id).all():
+                    _counts[("scale_id", sid)] = c
+                _counts[("group", "scale")] = session.query(_func.count(STLModel.id)).filter(STLModel.scale_id.isnot(None)).scalar() or 0
+
+                for v, c in session.query(STLModel.presupports, _func.count(STLModel.id)).filter(STLModel.presupports.isnot(None)).group_by(STLModel.presupports).all():
+                    _counts[("presupports", v)] = c
+                _counts[("group", "presupports")] = session.query(_func.count(STLModel.id)).filter(STLModel.presupports.isnot(None)).scalar() or 0
+
+                _all_warnings = [w for (w,) in session.query(STLModel.warning).filter(STLModel.warning.isnot(None)).all()]
+                for _wt in ("Models with presupported stl", "Archive without images",
+                            "Archive inside archive", "Archive with supports"):
+                    _wc = sum(1 for w in _all_warnings if _wt in w)
+                    _counts[("warning", _wt)] = _wc
+                _counts[("group", "warning")] = sum(1 for w in _all_warnings if w)
+
+                # Path counts — cumulative (directory = sum of all models in its subtree)
+                _direct: dict[str, int] = {}
+                for (ap,) in session.query(STLModel.archive_path).filter(STLModel.archive_path.isnot(None)).all():
+                    _folder = FSPath(ap).parent.as_posix()
+                    _direct[_folder] = _direct.get(_folder, 0) + 1
+                _path_counts = {}
+                for _folder, _c in _direct.items():
+                    _path_counts[_folder] = _path_counts.get(_folder, 0) + _c
+                    _f = FSPath(_folder)
+                    while True:
+                        _p = _f.parent
+                        if _p == _f:
+                            break
+                        _ps = _p.as_posix()
+                        _path_counts[_ps] = _path_counts.get(_ps, 0) + _c
+                        _f = _p
+                _counts[("group", "path")] = session.query(_func.count(STLModel.id)).scalar() or 0
+
+            def _c(data) -> int | None:
+                v = _counts.get(data)
+                return v if v else None
+
+            # ------------------------------------------------------------------
             if show_author:
-                authors_item = _make_leaf("Creators", ("group", "creator"))
+                authors_item = _make_leaf("Creators", ("group", "creator"), _c(("group", "creator")))
                 authors_item.setIcon(0, _icon_author)
                 self._filter_tree.addTopLevelItem(authors_item)
                 for (creator,) in session.query(STLModel.creator).distinct().order_by(STLModel.creator).all():
                     if creator:
-                        authors_item.addChild(_make_leaf(creator, ("creator", creator)))
+                        authors_item.addChild(_make_leaf(creator, ("creator", creator), _c(("creator", creator))))
 
             if show_tags:
-                tags_item = _make_leaf("Tags", ("group", "tag"))
+                tags_item = _make_leaf("Tags", ("group", "tag"), _c(("group", "tag")))
                 tags_item.setIcon(0, _icon_tag)
                 self._filter_tree.addTopLevelItem(tags_item)
                 for tag in session.query(Tag).order_by(Tag.name).all():
-                    tags_item.addChild(_make_leaf(tag.name, ("tag", tag.name)))
+                    tags_item.addChild(_make_leaf(tag.name, ("tag", tag.name), _c(("tag", tag.name))))
 
             if show_source:
-                types_item = _make_leaf("Type", ("group", "source"))
+                types_item = _make_leaf("Type", ("group", "source"), _c(("group", "source")))
                 types_item.setIcon(0, _icon_type)
                 self._filter_tree.addTopLevelItem(types_item)
                 for (t,) in session.query(STLModel.source).distinct().order_by(STLModel.source).all():
                     if t:
-                        types_item.addChild(_make_leaf(t, ("source", t)))
+                        types_item.addChild(_make_leaf(t, ("source", t), _c(("source", t))))
 
             if show_date:
                 _MONTH_NAMES = [
                     "", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
                     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
                 ]
-                dates_item = _make_leaf("Date", ("group", "date"))
+                dates_item = _make_leaf("Date", ("group", "date"), _c(("group", "date")))
                 dates_item.setIcon(0, _icon_date)
                 self._filter_tree.addTopLevelItem(dates_item)
                 rows = (
@@ -949,31 +1070,31 @@ class BrowserTab(QWidget):
                 year_items: dict[int, QTreeWidgetItem] = {}
                 for year, month in rows:
                     if year not in year_items:
-                        yi = _make_leaf(str(year), ("date_year", year))
+                        yi = _make_leaf(str(year), ("date_year", year), _c(("date_year", year)))
                         dates_item.addChild(yi)
                         year_items[year] = yi
                     if month is not None:
                         label = _MONTH_NAMES[month] if 1 <= month <= 12 else str(month)
                         year_items[year].addChild(
-                            _make_leaf(label, ("date_month", (year, month)))
+                            _make_leaf(label, ("date_month", (year, month)), _c(("date_month", (year, month))))
                         )
 
             if show_sculptor:
-                sculptor_item = _make_leaf("Sculptor", ("group", "sculptor"))
+                sculptor_item = _make_leaf("Sculptor", ("group", "sculptor"), _c(("group", "sculptor")))
                 sculptor_item.setIcon(0, _icon_sculptor)
                 self._filter_tree.addTopLevelItem(sculptor_item)
                 for sc in session.query(Sculptor).order_by(Sculptor.name).all():
-                    sculptor_item.addChild(_make_leaf(sc.name, ("sculptor_id", sc.id)))
+                    sculptor_item.addChild(_make_leaf(sc.name, ("sculptor_id", sc.id), _c(("sculptor_id", sc.id))))
 
             if show_collection:
-                collection_item = _make_leaf("Collection", ("group", "collection"))
+                collection_item = _make_leaf("Collection", ("group", "collection"), _c(("group", "collection")))
                 collection_item.setIcon(0, _icon_category)
                 self._filter_tree.addTopLevelItem(collection_item)
                 for col in session.query(Collection).order_by(Collection.name).all():
-                    collection_item.addChild(_make_leaf(col.name, ("collection_id", col.id)))
+                    collection_item.addChild(_make_leaf(col.name, ("collection_id", col.id), _c(("collection_id", col.id))))
 
             if show_subcollection:
-                subcol_section = _make_leaf("Subcollection", ("group", "subcollection"))
+                subcol_section = _make_leaf("Subcollection", ("group", "subcollection"), _c(("group", "subcollection")))
                 subcol_section.setIcon(0, _icon_subcategory)
                 self._filter_tree.addTopLevelItem(subcol_section)
                 for col in session.query(Collection).order_by(Collection.name).all():
@@ -986,38 +1107,38 @@ class BrowserTab(QWidget):
                     col_node.setFlags(Qt.ItemFlag.ItemIsEnabled)
                     subcol_section.addChild(col_node)
                     for sub in subs:
-                        col_node.addChild(_make_leaf(sub.name, ("subcollection_id", sub.id)))
+                        col_node.addChild(_make_leaf(sub.name, ("subcollection_id", sub.id), _c(("subcollection_id", sub.id))))
 
             if show_category:
-                category_item = _make_leaf("Category", ("group", "category"))
+                category_item = _make_leaf("Category", ("group", "category"), _c(("group", "category")))
                 category_item.setIcon(0, _icon_category)
                 self._filter_tree.addTopLevelItem(category_item)
                 for cat in session.query(Category).order_by(Category.name).all():
-                    category_item.addChild(_make_leaf(cat.name, ("category_id", cat.id)))
+                    category_item.addChild(_make_leaf(cat.name, ("category_id", cat.id), _c(("category_id", cat.id))))
 
             if show_release:
-                release_item = _make_leaf("Release", ("group", "release"))
+                release_item = _make_leaf("Release", ("group", "release"), _c(("group", "release")))
                 release_item.setIcon(0, _icon_release)
                 self._filter_tree.addTopLevelItem(release_item)
                 for rel in session.query(Release).order_by(Release.name).all():
-                    release_item.addChild(_make_leaf(rel.name, ("release_id", rel.id)))
+                    release_item.addChild(_make_leaf(rel.name, ("release_id", rel.id), _c(("release_id", rel.id))))
 
             if show_scale:
-                scale_item = _make_leaf("Scale", ("group", "scale"))
+                scale_item = _make_leaf("Scale", ("group", "scale"), _c(("group", "scale")))
                 scale_item.setIcon(0, _icon_scale)
                 self._filter_tree.addTopLevelItem(scale_item)
                 for sc in session.query(Scale).order_by(Scale.name).all():
-                    scale_item.addChild(_make_leaf(sc.name, ("scale_id", sc.id)))
+                    scale_item.addChild(_make_leaf(sc.name, ("scale_id", sc.id), _c(("scale_id", sc.id))))
 
             if show_presupports:
-                presup_item = _make_leaf("Presupports", ("group", "presupports"))
+                presup_item = _make_leaf("Presupports", ("group", "presupports"), _c(("group", "presupports")))
                 presup_item.setIcon(0, _icon_presupports)
                 self._filter_tree.addTopLevelItem(presup_item)
                 for (val,) in (session.query(STLModel.presupports)
                                .filter(STLModel.presupports.isnot(None))
                                .distinct().order_by(STLModel.presupports).all()):
                     if val:
-                        presup_item.addChild(_make_leaf(val, ("presupports", val)))
+                        presup_item.addChild(_make_leaf(val, ("presupports", val), _c(("presupports", val))))
 
             if show_warnings:
                 _WARNING_TYPES = [
@@ -1026,14 +1147,14 @@ class BrowserTab(QWidget):
                     "Archive inside archive",
                     "Archive with supports",
                 ]
-                warn_item = _make_leaf("Warnings", ("group", "warning"))
+                warn_item = _make_leaf("Warnings", ("group", "warning"), _c(("group", "warning")))
                 warn_item.setIcon(0, _icon_warnings)
                 self._filter_tree.addTopLevelItem(warn_item)
                 for wtype in _WARNING_TYPES:
-                    warn_item.addChild(_make_leaf(wtype, ("warning", wtype)))
+                    warn_item.addChild(_make_leaf(wtype, ("warning", wtype), _c(("warning", wtype))))
 
             if show_path:
-                paths_item = _make_leaf("Path", ("group", "path"))
+                paths_item = _make_leaf("Path", ("group", "path"), _c(("group", "path")))
                 paths_item.setIcon(0, _icon_path)
                 self._filter_tree.addTopLevelItem(paths_item)
                 dirs: set[str] = set()
@@ -1046,7 +1167,8 @@ class BrowserTab(QWidget):
                 if new_dirs != self._cached_path_dirs:
                     self._cached_path_dirs = new_dirs
                     self._cached_sorted_dirs = sorted(dirs)
-                self._build_path_tree(paths_item, self._cached_sorted_dirs, checked_data, excluded_data)
+                self._build_path_tree(paths_item, self._cached_sorted_dirs, checked_data, excluded_data,
+                                      path_counts=_path_counts)
         finally:
             session.close()
 
@@ -1062,7 +1184,8 @@ class BrowserTab(QWidget):
     @staticmethod
     def _build_path_tree(root_item: QTreeWidgetItem, dirs: list[str],
                          checked_data: set | None = None,
-                         excluded_data: set | None = None) -> None:
+                         excluded_data: set | None = None,
+                         path_counts: dict[str, int] | None = None) -> None:
         """Build a nested tree of directory segments under *root_item*."""
         _CHECKABLE = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable
         node_map: dict[str, QTreeWidgetItem] = {}
@@ -1073,7 +1196,9 @@ class BrowserTab(QWidget):
                 full = FSPath(*parts[:depth]).as_posix()
                 if full in node_map:
                     continue
-                label = parts[depth - 1]
+                base_label = parts[depth - 1]
+                cnt = path_counts.get(full) if path_counts is not None else None
+                label = f"{base_label} ({cnt})" if cnt is not None else base_label
                 parent = node_map.get(FSPath(*parts[:depth - 1]).as_posix()) if depth > 1 else root_item
                 if parent is None:
                     parent = root_item

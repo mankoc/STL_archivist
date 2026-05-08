@@ -305,6 +305,10 @@ class MainWindow(QMainWindow):
             self._crawler_is_running = False
             self._crawler_status_label.hide()
             self._browser.refresh()
+            if not self._crawler_dialog.isVisible():
+                self._crawler_dialog.show()
+                self._crawler_dialog.raise_()
+                self._crawler_dialog.activateWindow()
 
         def on_dialog_closed() -> None:
             if tab._worker is not None:
