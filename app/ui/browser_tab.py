@@ -891,7 +891,7 @@ class BrowserTab(QWidget):
                     elif state == Qt.CheckState.PartiallyChecked:
                         excluded_data.add(d)
                 if item.childCount() and item.isExpanded():
-                    expanded_sections.add(item.text(0))
+                    expanded_sections.add(d if d else item.text(0))
                 for i in range(item.childCount()):
                     _collect_state(item.child(i))
             for i in range(root_item.childCount()):
@@ -1265,10 +1265,14 @@ class BrowserTab(QWidget):
 
         # Restore expansion: first run → all collapsed; subsequent runs → restore state.
         if expanded_sections is not None:
+            def _restore_expansion(item: QTreeWidgetItem) -> None:
+                d = item.data(0, Qt.ItemDataRole.UserRole)
+                item.setExpanded((d if d else item.text(0)) in expanded_sections)
+                for i in range(item.childCount()):
+                    _restore_expansion(item.child(i))
             root_item = self._filter_tree.invisibleRootItem()
             for i in range(root_item.childCount()):
-                section = root_item.child(i)
-                section.setExpanded(section.text(0) in expanded_sections)
+                _restore_expansion(root_item.child(i))
 
     @staticmethod
     def _build_path_tree(root_item: QTreeWidgetItem, dirs: list[str],
