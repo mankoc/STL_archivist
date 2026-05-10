@@ -84,5 +84,11 @@ class CrawlerConfig:
     low_compression_threshold: float = 0.95
 
     # Per-crawl metadata overrides (empty string = do not override).
-    force_creator: str = ""
-    force_source: str = ""
+    force_creator:    str = ""
+    force_source:     str = ""
+    force_sculptor:   str = ""
+    force_category:   str = ""
+    force_collection: str = ""
+    force_release:    str = ""
+    force_scale:      str = ""
+    force_date:       str = ""  # YYYY-MM or YYYY

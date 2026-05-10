@@ -5,9 +5,9 @@ Two modes can be combined:
   • Path pattern  — extract field values from each model's archive_path
   • Manual fields — apply the same value to all selected models
 """
-from PyQt6.QtCore import Qt, QSettings, QStringListModel
+from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
+    QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout, QGroupBox,
     QLabel, QLineEdit, QDialogButtonBox, QPushButton, QCheckBox,
     QComboBox, QCompleter, QInputDialog, QMessageBox, QToolButton, QToolTip,
     QWidget,
@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QCursor
 
 from app.database.db import session_scope, get_session
-from app.database.models import STLModel, Tag, Release, Collection, Subcollection, Category, Scale, model_tags
+from app.database.models import STLModel, Tag, Release, Collection, Subcollection, Category, Scale, Sculptor, model_tags
 import re
 
 from app.utils.path_pattern import (
@@ -165,17 +165,16 @@ class MassEditorDialog(QDialog):
         token_row.addWidget(token_help_btn)
         manual_vbox.addLayout(token_row)
 
-        form = QFormLayout()
-        manual_vbox.addLayout(form)
-        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        grid = QGridLayout()
+        manual_vbox.addLayout(grid)
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(3, 1)
+        grid.setHorizontalSpacing(6)
+        grid.setVerticalSpacing(4)
 
         session = get_session()
         try:
             _uniq = lambda col: sorted(filter(None, (v for (v,) in session.query(col).distinct())))
-            _uniq_sel = lambda col: sorted(filter(None, (
-                v for (v,) in session.query(col)
-                .filter(STLModel.id.in_(self._model_ids)).distinct()
-            )))
             sources        = _uniq(STLModel.source)
             creators       = _uniq(STLModel.creator)
             dates          = sorted({
@@ -214,6 +213,7 @@ class MassEditorDialog(QDialog):
             ))) if _sub_ids else sorted(s.name for s in session.query(Subcollection).order_by(Subcollection.name).all())
             categories     = sorted(c.name for c in session.query(Category).order_by(Category.name).all())
             scales         = sorted(s.name for s in session.query(Scale).order_by(Scale.name).all())
+            sculptors      = sorted(s.name for s in session.query(Sculptor).order_by(Sculptor.name).all())
         finally:
             session.close()
 
@@ -233,6 +233,7 @@ class MassEditorDialog(QDialog):
         self._collection_edit.currentTextChanged.connect(self._on_collection_changed)
         self._subcollection_edit  = self._make_combo(subcollections)
         self._category_edit       = self._make_combo(categories)
+        self._sculptor_edit       = self._make_combo(sculptors)
 
         # Clear-mode checkboxes — when checked, the field is explicitly nulled on save.
         self._clear_cbs: dict[str, QCheckBox] = {}
@@ -249,6 +250,7 @@ class MassEditorDialog(QDialog):
             ("collection",     self._collection_edit),
             ("subcollection",  self._subcollection_edit),
             ("category",       self._category_edit),
+            ("sculptor",       self._sculptor_edit),
         ]
         for field_name, widget in _clearable_fields:
             cb = QCheckBox("clear")
@@ -257,27 +259,42 @@ class MassEditorDialog(QDialog):
             cb.toggled.connect(widget.setDisabled)
             self._clear_cbs[field_name] = cb
 
-        def _row(label, field_name, widget):
+        def _cell(r: int, c: int, label: str, field_name: str, widget) -> None:
+            lbl = QLabel(label)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             container = QWidget()
             lay = QHBoxLayout(container)
             lay.setContentsMargins(0, 0, 0, 0)
             lay.setSpacing(4)
             lay.addWidget(widget, stretch=1)
             lay.addWidget(self._clear_cbs[field_name])
-            form.addRow(label, container)
+            grid.addWidget(lbl,       r, c * 2)
+            grid.addWidget(container, r, c * 2 + 1)
 
-        _row("Source:",         "source",        self._type_edit)
-        _row("Creator:",        "creator",       self._creator_edit)
-        _row("Date:",           "release_date",  self._date_edit)
-        _row("Title:",          "title",         self._title_edit)
-        _row("URL:",            "url",           self._url_edit)
-        _row("Scale:",          "scale",         self._scale_combo)
-        _row("Presupports:",    "presupports",   self._presupports_combo)
-        _row("Release:",        "release",       self._release_edit)
-        _row("Collection:",     "collection",    self._collection_edit)
-        _row("Subcollection:",  "subcollection", self._subcollection_edit)
-        _row("Category:",       "category",      self._category_edit)
-        _row("Tags:",           "tags",          self._tags_edit)
+        _cell(0, 0, "Creator:",      "creator",       self._creator_edit)
+        _cell(0, 1, "Source:",       "source",        self._type_edit)
+        _cell(1, 0, "Date:",         "release_date",  self._date_edit)
+        _cell(1, 1, "Title:",        "title",         self._title_edit)
+        _cell(2, 0, "URL:",          "url",           self._url_edit)
+        _cell(2, 1, "Release:",      "release",       self._release_edit)
+        _cell(3, 0, "Sculptor:",     "sculptor",      self._sculptor_edit)
+        _cell(3, 1, "Category:",     "category",      self._category_edit)
+        _cell(4, 0, "Collection:",   "collection",    self._collection_edit)
+        _cell(4, 1, "Subcollection:","subcollection", self._subcollection_edit)
+        _cell(5, 0, "Scale:",        "scale",         self._scale_combo)
+        _cell(5, 1, "Presupports:",  "presupports",   self._presupports_combo)
+
+        # Tags spans the full width
+        tags_lbl = QLabel("Tags:")
+        tags_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        tags_container = QWidget()
+        tags_lay = QHBoxLayout(tags_container)
+        tags_lay.setContentsMargins(0, 0, 0, 0)
+        tags_lay.setSpacing(4)
+        tags_lay.addWidget(self._tags_edit, stretch=1)
+        tags_lay.addWidget(self._clear_cbs["tags"])
+        grid.addWidget(tags_lbl,       6, 0)
+        grid.addWidget(tags_container, 6, 1, 1, 3)
 
         root.addWidget(manual_group)
 
@@ -642,6 +659,17 @@ class MassEditorDialog(QDialog):
                         session.add(cat)
                         session.flush()
                     model.category = cat
+
+                sculptor_name = self._sculptor_edit.currentText().strip()
+                if "sculptor" in clearing:
+                    model.sculptor = None
+                elif sculptor_name:
+                    sc = session.query(Sculptor).filter_by(name=sculptor_name).first()
+                    if sc is None:
+                        sc = Sculptor(name=sculptor_name)
+                        session.add(sc)
+                        session.flush()
+                    model.sculptor = sc
 
                 if apply_scale:
                     if scale_value:

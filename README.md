@@ -2,7 +2,7 @@
 
 A desktop application for cataloguing and browsing your local collection of 3D printable STL model archives. Built with PyQt6 and SQLAlchemy.
 
-Version: 0.7.0
+Version: 2026.19
 
 ## Features
 

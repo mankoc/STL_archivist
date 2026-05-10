@@ -25,8 +25,11 @@ from app.crawler.metadata import extract_metadata, ModelMetadata
 from app.crawler.rules import detect_presupport, detect_scale, detect_warnings
 from app.database.db import session_scope
 from app.database.helpers import (
+    get_or_create_category,
+    get_or_create_collection,
     get_or_create_release,
     get_or_create_scale,
+    get_or_create_sculptor,
     get_or_create_tag,
 )
 from app.database.models import STLModel, Image, STLFile, CrawledFolder
@@ -661,10 +664,26 @@ class CrawlerWorker(QThread):
 
         self._assign_metadata(model, meta, session)
 
-        if self._config.force_creator:
-            model.creator = self._config.force_creator
-        if self._config.force_source:
-            model.source = self._config.force_source
+        cfg = self._config
+        if cfg.force_creator:
+            model.creator = cfg.force_creator
+        if cfg.force_source:
+            model.source = cfg.force_source
+        if cfg.force_sculptor:
+            model.sculptor = get_or_create_sculptor(session, cfg.force_sculptor)
+        if cfg.force_category:
+            model.category = get_or_create_category(session, cfg.force_category)
+        if cfg.force_collection:
+            model.collection = get_or_create_collection(session, cfg.force_collection)
+        if cfg.force_release:
+            model.release = get_or_create_release(session, cfg.force_release)
+        if cfg.force_scale:
+            model.scale = get_or_create_scale(session, cfg.force_scale)
+        if cfg.force_date:
+            _year, _month = parse_release_date(cfg.force_date)
+            if _year:
+                model.release_year  = _year
+                model.release_month = _month
 
         if self._pattern:
             try:
