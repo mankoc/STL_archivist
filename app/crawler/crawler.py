@@ -661,6 +661,11 @@ class CrawlerWorker(QThread):
 
         self._assign_metadata(model, meta, session)
 
+        if self._config.force_creator:
+            model.creator = self._config.force_creator
+        if self._config.force_source:
+            model.source = self._config.force_source
+
         if self._pattern:
             try:
                 rel_path = "/" + str(archive_path.relative_to(self.source_dir)).replace("\\", "/")
@@ -770,6 +775,7 @@ class CrawlerWorker(QThread):
             check_no_images=self._config.warn_no_images,
             check_nested_archive=self._config.warn_nested_archive,
             check_supports=self._config.warn_supports,
+            check_no_printable=self._config.warn_no_printable,
             supports_patterns=self._config.support_patterns,
         )
         model.warning = warnings or None

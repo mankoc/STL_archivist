@@ -67,6 +67,7 @@ class CrawlerConfig:
     support_patterns: list[str] = field(default_factory=_default_presupport_patterns)
     warn_no_images: bool = True
     warn_nested_archive: bool = True
+    warn_no_printable: bool = True
     # Whether to recurse into subdirectories of the selected source folder.
     # When False the crawler only processes archives directly inside the selected
     # directory (no recursive walk).
@@ -81,3 +82,7 @@ class CrawlerConfig:
     # Warn when an archive's compression rate (compressed/uncompressed) is too high.
     warn_low_compression: bool = False
     low_compression_threshold: float = 0.95
+
+    # Per-crawl metadata overrides (empty string = do not override).
+    force_creator: str = ""
+    force_source: str = ""

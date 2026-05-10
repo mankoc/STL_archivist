@@ -7,6 +7,8 @@ from pathlib import Path
 
 from app.constants import ARCHIVE_SUFFIXES, IMAGE_SUFFIXES
 
+_PRINTABLE_SUFFIXES = frozenset({".stl", ".obj", ".lys", ".chitubox"})
+
 logger = logging.getLogger(__name__)
 
 
@@ -102,6 +104,7 @@ def detect_warnings(
     check_no_images: bool = True,
     check_nested_archive: bool = True,
     check_supports: bool = False,
+    check_no_printable: bool = True,
     supports_patterns: list[str] | None = None,
 ) -> str:
     """Return a newline-separated string of warnings for an archive.
@@ -120,6 +123,8 @@ def detect_warnings(
             archive (``.zip``, ``.rar``, ``.7z``).
         check_supports: Warn when the archive contains a supported STL file
             matched by *supports_patterns*.
+        check_no_printable: Warn when the archive contains no printable model
+            file (``.stl``, ``.obj``, ``.lys``, ``.chitubox``).
         supports_patterns: Regex strings (case-insensitive) applied to each
             member's bare filename for the ``check_supports`` test. ``None``
             falls back to ``DEFAULT_SUPPORTS_PATTERNS``. Invalid patterns are
@@ -133,6 +138,7 @@ def detect_warnings(
     has_presupported   = False
     has_supported_stl  = False
     has_nested_archive = False
+    has_printable      = False
 
     compiled_supports: list[re.Pattern] = []
     if check_supports:
@@ -156,6 +162,8 @@ def detect_warnings(
                 has_supported_stl = True
         if check_nested_archive and suffix in ARCHIVE_SUFFIXES:
             has_nested_archive = True
+        if check_no_printable and suffix in _PRINTABLE_SUFFIXES:
+            has_printable = True
 
     if check_presupported and has_presupported:
         warnings.append("Models with presupported stl")
@@ -169,6 +177,9 @@ def detect_warnings(
     if check_supports and has_supported_stl:
         warnings.append("Archive with supports")
         logger.debug("  Warning: archive with supports")
+    if check_no_printable and not has_printable:
+        warnings.append("Archive without printable files")
+        logger.debug("  Warning: archive without printable files")
 
     if not warnings:
         logger.debug("  No warnings")

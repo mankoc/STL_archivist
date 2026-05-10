@@ -427,9 +427,7 @@ def find_url_file(archive_path: Path) -> Optional[str]:
     Search for a .url file for the given archive in this priority order:
       1. Inside the archive itself
       2. Same directory as the archive
-      3. Subfolders of the archive's directory
-      4. One level above the archive
-      5. Subfolders of the directory one level above the archive
+      3. Any *-links or *_links sibling folder in the same directory
     Returns the first URL found, or None.
     """
     # 1. Inside the archive
@@ -438,30 +436,18 @@ def find_url_file(archive_path: Path) -> Optional[str]:
         return url
 
     parent = archive_path.parent
-    grandparent = parent.parent
 
     # 2. Same directory as archive
-    for f in parent.glob("*.url"):
+    for f in sorted(parent.glob("*.url")):
         url = _parse_url_shortcut(f)
         if url:
             return url
 
-    # 3. Subfolders of archive's directory
-    for f in parent.glob("*/*.url"):
-        url = _parse_url_shortcut(f)
-        if url:
-            return url
-
-    # 4. One level above the archive
-    for f in grandparent.glob("*.url"):
-        url = _parse_url_shortcut(f)
-        if url:
-            return url
-
-    # 5. Subfolders of the directory one level above
-    for f in grandparent.glob("*/*.url"):
-        url = _parse_url_shortcut(f)
-        if url:
-            return url
+    # 3. Any *-links or *_links sibling folder (e.g. "Patreon-links/")
+    for pattern in ("*-links/*.url", "*_links/*.url"):
+        for f in sorted(parent.glob(pattern)):
+            url = _parse_url_shortcut(f)
+            if url:
+                return url
 
     return None
