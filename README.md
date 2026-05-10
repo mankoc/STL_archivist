@@ -2,19 +2,20 @@
 
 A desktop application for cataloguing and browsing your local collection of 3D printable STL model archives. Built with PyQt6 and SQLAlchemy.
 
-Version: 0.5.0
+Version: 0.7.0
 
 ## Features
 
 - **Crawler** — scans a folder of archives (`.zip`, `.7z`, `.rar`) and automatically imports model metadata into a local SQLite database; runs with parallel workers for fast processing
-- **Path pattern parsing** — extract sculptor, release name, model title, and more directly from your folder/file naming conventions
+- **Path pattern parsing** — extract sculptor, release name, model title, and more directly from your folder/file naming conventions; an optional toggle lets you disable pattern extraction without clearing the saved pattern
+- **Metadata overrides** — force a specific Creator or Type/Source value for every archive in a crawl, overriding whatever is auto-detected from the path or `info.json`
 - **Thumbnail generation** — extracts preview images from archives and stores them locally; configurable count and resolution
 - **Scale detection** — automatically detects miniature scale (e.g. `28mm`, `32mm`, `1/35`) from archive and file names
 - **Presupport detection** — identifies whether an archive contains Lychee, Chitubox, or presupported STL files
-- **Crawler warnings** — flags archives that contain presupported STLs, no images, or nested archives
+- **Crawler warnings** — flags archives that contain presupported STLs, no images, no printable files (`.stl`/`.obj`/`.lys`/`.chitubox`), or nested archives
 - **Tagging** — add and manage tags per model for easy filtering
 - **Browser** — search, filter, and browse your collection with inline editing, tri-state filters (include / exclude / no filter), and a clear-filters button
-- **Filter panel** — each filter group header shows an icon and acts as a "has value / no value" toggle; individual values cycle through include (green **+**), exclude (red **−**), and off states
+- **Filter panel** — each filter group header shows an icon and acts as a "has value / no value" toggle; individual values cycle through include (green **+**), exclude (red **−**), and off states; all 13 filter sections update dynamically (faceted / cascading filtering) when any other filter changes
 - **Image grid** — display a scrollable grid of thumbnails for the currently filtered set of models; resize thumbnails live with a slider (60–300 px)
 - **Editor** — edit model metadata (title, author, sculptor, category, subcategory, release, scale, presupports, source, URL, date, sequence, tags)
 - **Mass editor** — apply bulk changes across multiple models at once, including category and subcategory
@@ -88,7 +89,7 @@ python main.py
 On first launch, go to **File → Configuration…** and set up:
 
 - **Database** — choose where the SQLite database and thumbnails are stored (restart required after changing)
-- **Crawler** — max thumbnails per model, max image size in pixels, path to `unrar` executable, and which crawler warnings to enable
+- **Crawler** — max thumbnails per model, max image size in pixels, path to `unrar` executable, and which crawler warnings to enable (pre-supported STL, no images, no printable files, nested archives, support files)
 - **File writing** — enable *Sort files into directory* (adds a right-click menu entry); optionally enable *Allow file delete* (with a confirmation guard) to physically delete or trash archive files from the right-click menu; configure a *Trash folder* to move deleted files there instead of permanently removing them
 - **File writing → Sidecar** — enable *Metadata sidecar* to write `METADATA.7z` per folder during crawl; optionally include thumbnails
 - **Appearance** — select a color scheme (preview is applied immediately; Cancel reverts)
@@ -99,8 +100,9 @@ On first launch, go to **File → Configuration…** and set up:
 
 1. Click **Open Crawler** (toolbar icon or `Ctrl+O`).
 2. Select the root folder that contains your STL archives.
-3. Optionally set a **path pattern** to auto-populate metadata fields from your folder/file naming convention (see [Path Patterns](#path-patterns) below).
-4. Click **Start**. The crawler will walk the directory recursively, hash each archive, detect scale and presupport information, extract preview images, and upsert records into the database.
+3. Optionally set a **path pattern** to auto-populate metadata fields from your folder/file naming convention (see [Path Patterns](#path-patterns) below). Tick or untick **Apply path pattern to metadata extraction** to toggle pattern extraction without losing the saved pattern text.
+4. Optionally expand **Override metadata** to force a specific Creator or Type/Source value for every archive in this crawl.
+5. Click **Start**. The crawler will walk the directory recursively, hash each archive, detect scale and presupport information, extract preview images, and upsert records into the database.
 
 #### Command line
 
