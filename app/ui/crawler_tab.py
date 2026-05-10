@@ -3,7 +3,7 @@ Tab 1 – Crawler controls: folder picker, start/stop, progress bar, log.
 """
 from PyQt6.QtCore import Qt, QSettings, pyqtSignal
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
+    QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QFileDialog,
     QProgressBar, QPlainTextEdit, QSizePolicy,
     QComboBox, QInputDialog, QMessageBox, QApplication, QToolButton, QToolTip,
@@ -152,13 +152,39 @@ class CrawlerTab(QWidget):
 
         # --- Metadata overrides ---
         overrides_group = QGroupBox("Override metadata (leave blank to auto-detect)")
-        overrides_form = QFormLayout(overrides_group)
-        self._force_creator_edit = QLineEdit()
-        self._force_creator_edit.setPlaceholderText("e.g. CA3D")
-        overrides_form.addRow("Creator:", self._force_creator_edit)
-        self._force_source_edit = QLineEdit()
-        self._force_source_edit.setPlaceholderText("e.g. Patreon")
-        overrides_form.addRow("Type / Source:", self._force_source_edit)
+        grid = QGridLayout(overrides_group)
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(3, 1)
+        grid.setHorizontalSpacing(6)
+        grid.setVerticalSpacing(4)
+
+        def _override_field(placeholder: str) -> QLineEdit:
+            w = QLineEdit()
+            w.setPlaceholderText(placeholder)
+            return w
+
+        def _add_row(row: int, col: int, label: str, widget: QLineEdit) -> None:
+            grid.addWidget(QLabel(label), row, col * 2)
+            grid.addWidget(widget, row, col * 2 + 1)
+
+        self._force_creator_edit    = _override_field("e.g. CA3D")
+        self._force_source_edit     = _override_field("e.g. Patreon")
+        self._force_sculptor_edit   = _override_field("e.g. Jane Doe")
+        self._force_scale_edit      = _override_field("e.g. 32mm")
+        self._force_category_edit   = _override_field("e.g. Fantasy")
+        self._force_collection_edit = _override_field("e.g. Undead Legion")
+        self._force_release_edit    = _override_field("e.g. 2024-01 Dragon Set")
+        self._force_date_edit       = _override_field("YYYY-MM or YYYY")
+
+        _add_row(0, 0, "Creator:",    self._force_creator_edit)
+        _add_row(0, 1, "Source:",     self._force_source_edit)
+        _add_row(1, 0, "Sculptor:",   self._force_sculptor_edit)
+        _add_row(1, 1, "Scale:",      self._force_scale_edit)
+        _add_row(2, 0, "Category:",   self._force_category_edit)
+        _add_row(2, 1, "Collection:", self._force_collection_edit)
+        _add_row(3, 0, "Release:",    self._force_release_edit)
+        _add_row(3, 1, "Date:",       self._force_date_edit)
+
         root.addWidget(overrides_group)
 
         # --- Control buttons ---
@@ -358,8 +384,14 @@ class CrawlerTab(QWidget):
             max_thumbnails=max_thumbs,
             force_rescan=self._force_rescan_check.isChecked(),
         )
-        config.force_creator = self._force_creator_edit.text().strip()
-        config.force_source  = self._force_source_edit.text().strip()
+        config.force_creator    = self._force_creator_edit.text().strip()
+        config.force_source     = self._force_source_edit.text().strip()
+        config.force_sculptor   = self._force_sculptor_edit.text().strip()
+        config.force_scale      = self._force_scale_edit.text().strip()
+        config.force_category   = self._force_category_edit.text().strip()
+        config.force_collection = self._force_collection_edit.text().strip()
+        config.force_release    = self._force_release_edit.text().strip()
+        config.force_date       = self._force_date_edit.text().strip()
         self._worker = CrawlerWorker(source, pattern=pattern, config=config)
         self._worker.log.connect(self._on_log)
         self._worker.progress.connect(self._on_progress)
