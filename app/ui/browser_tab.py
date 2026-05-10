@@ -9,7 +9,7 @@ from pathlib import Path as FSPath, Path
 
 _ICONS_DIR = FSPath(__file__).parent.parent.parent / "resources" / "icons"
 
-from PyQt6.QtCore import Qt, QSortFilterProxyModel, QSize, QStringListModel, QEvent, pyqtSignal, QItemSelection, QTimer, QThread, QRect, QPointF, QRectF
+from PyQt6.QtCore import Qt, QSortFilterProxyModel, QSize, QStringListModel, QEvent, pyqtSignal, QItemSelection, QTimer, QThread, QRect, QPointF, QRectF, QUrl
 from PyQt6.QtGui import QStandardItemModel, QStandardItem, QPixmap, QIcon, QKeySequence, QShortcut, QColor, QFont, QPainter, QPen
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
@@ -27,9 +27,11 @@ from sqlalchemy import func, or_, and_
 from sqlalchemy.orm import selectinload
 
 from app.database.db import get_session, session_scope
-from app.database.models import STLModel, Tag, Sculptor, Collection, Subcollection, Category, Release, Scale
-from app.utils.thumbnailer import pixmap_from_path
+from app.database.models import STLModel, Tag, Sculptor, Collection, Subcollection, Category, Release, Scale, Image
+from app.utils.thumbnailer import pixmap_from_path, save_thumbnail
 from app.utils.path_pattern import parse_release_date, format_release_date
+
+_IMAGE_DROP_EXTS = frozenset({'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif'})
 
 # Column indices
 COL_THUMB         = 0
@@ -645,6 +647,7 @@ class BrowserTab(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._loading = False
+        self._current_model_id: int | None = None
         self._thumb_pixmaps: list[QPixmap] = []  # original (unscaled) pixmaps
         self._cached_path_dirs: frozenset[str] = frozenset()
         self._cached_sorted_dirs: list[str] = []
@@ -791,6 +794,7 @@ class BrowserTab(QWidget):
         self._thumb_scroll.setWidget(self._thumb_content)
         self._thumb_scroll.setWidgetResizable(True)
         self._thumb_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._thumb_scroll.setAcceptDrops(True)
         self._thumb_scroll.installEventFilter(self)
         img_layout.addWidget(self._thumb_scroll)
         right_vsplit.addWidget(img_widget)
@@ -2110,6 +2114,7 @@ class BrowserTab(QWidget):
 
     def _on_current_changed(self, current, previous) -> None:
         if not current.isValid():
+            self._current_model_id = None
             self._clear_thumbnails()
             self._info_author_lbl.setVisible(False)
             self._info_tags_lbl.setVisible(False)
@@ -2118,6 +2123,7 @@ class BrowserTab(QWidget):
         src_index = self._proxy.mapToSource(current)
         model_id = self._model.item(src_index.row(), COL_THUMB).data(MODEL_ID_ROLE)
         if model_id is not None:
+            self._current_model_id = model_id
             self._show_thumbnails(model_id)
             self._update_info_panel(model_id)
             self._update_creator_panel(model_id)
@@ -2796,9 +2802,63 @@ class BrowserTab(QWidget):
     def eventFilter(self, obj, event) -> bool:
         # Listen to the scroll area resize, not just the viewport, as viewport resize
         # can be triggered by the scrollbar appearing/disappearing.
-        if obj is self._thumb_scroll and event.type() == QEvent.Type.Resize:
-            self._rescale_thumbnails()
+        if obj is self._thumb_scroll:
+            etype = event.type()
+            if etype == QEvent.Type.Resize:
+                self._rescale_thumbnails()
+            elif etype in (QEvent.Type.DragEnter, QEvent.Type.DragMove):
+                if self._current_model_id is not None:
+                    mime = event.mimeData()
+                    if mime.hasUrls() and any(
+                        u.isLocalFile()
+                        and FSPath(u.toLocalFile()).suffix.lower() in _IMAGE_DROP_EXTS
+                        for u in mime.urls()
+                    ):
+                        event.acceptProposedAction()
+                        return True
+            elif etype == QEvent.Type.Drop:
+                self._handle_image_drop(event)
+                return True
         return super().eventFilter(obj, event)
+
+    def _handle_image_drop(self, event) -> None:
+        """Import dropped image files as thumbnails for the currently selected model."""
+        if self._current_model_id is None:
+            return
+        paths = [
+            FSPath(u.toLocalFile())
+            for u in event.mimeData().urls()
+            if u.isLocalFile()
+            and FSPath(u.toLocalFile()).suffix.lower() in _IMAGE_DROP_EXTS
+        ]
+        if not paths:
+            return
+        errors: list[str] = []
+        added = 0
+        with session_scope() as session:
+            for path in paths:
+                try:
+                    raw = path.read_bytes()
+                except OSError:
+                    errors.append(path.name)
+                    continue
+                img_rec = Image(model_id=self._current_model_id, filename=path.name)
+                session.add(img_rec)
+                session.flush()
+                thumb_path = save_thumbnail(raw, img_rec.id)
+                if thumb_path is None:
+                    errors.append(path.name)
+                    session.delete(img_rec)
+                    continue
+                img_rec.thumbnail_path = thumb_path
+                added += 1
+        if added:
+            self._show_thumbnails(self._current_model_id)
+        if errors:
+            QMessageBox.warning(
+                self, "Image import",
+                "Could not import:\n" + "\n".join(errors),
+            )
 
     def _clear_thumbnails(self) -> None:
         """Remove all thumbnail widgets from the sidebar and drop the pixmap cache."""
