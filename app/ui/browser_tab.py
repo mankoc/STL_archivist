@@ -936,6 +936,26 @@ class BrowserTab(QWidget):
             item.setCheckState(0, state)
             return item
 
+        _ALPHA_THRESHOLD = 50
+
+        def _add_children(parent: QTreeWidgetItem,
+                          entries: list[tuple[str, object, "int | None"]]) -> None:
+            if len(entries) <= _ALPHA_THRESHOLD:
+                for label, data, count in entries:
+                    parent.addChild(_make_leaf(label, data, count))
+                return
+            letter_nodes: dict[str, QTreeWidgetItem] = {}
+            for label, data, count in entries:
+                first = label[0].upper() if label else "#"
+                if not first.isalpha():
+                    first = "#"
+                if first not in letter_nodes:
+                    ln = QTreeWidgetItem([first])
+                    ln.setFlags(Qt.ItemFlag.ItemIsEnabled)
+                    parent.addChild(ln)
+                    letter_nodes[first] = ln
+                letter_nodes[first].addChild(_make_leaf(label, data, count))
+
         header = self._table.horizontalHeader()
         show_author       = not header.isSectionHidden(COL_CREATOR)
         show_tags         = not header.isSectionHidden(COL_TAGS)
@@ -1173,9 +1193,10 @@ class BrowserTab(QWidget):
                 _author_scope = _scope("creator")
                 if _author_scope is not None:
                     _author_q = _author_q.filter(STLModel.id.in_(_author_scope))
-                for (creator,) in _author_q.all():
-                    if creator:
-                        authors_item.addChild(_make_leaf(creator, ("creator", creator), _c(("creator", creator))))
+                _add_children(authors_item, [
+                    (c, ("creator", c), _c(("creator", c)))
+                    for (c,) in _author_q.all() if c
+                ])
 
             if show_tags:
                 tags_item = _make_leaf("Tags", ("group", "tag"), _c(("group", "tag")))
@@ -1186,8 +1207,10 @@ class BrowserTab(QWidget):
                 if _tag_scope is not None:
                     from app.database.models import model_tags as _mt3
                     _tag_q = _tag_q.join(_mt3, Tag.id == _mt3.c.tag_id).filter(_mt3.c.model_id.in_(_tag_scope)).distinct()
-                for tag in _tag_q.all():
-                    tags_item.addChild(_make_leaf(tag.name, ("tag", tag.name), _c(("tag", tag.name))))
+                _add_children(tags_item, [
+                    (tag.name, ("tag", tag.name), _c(("tag", tag.name)))
+                    for tag in _tag_q.all()
+                ])
 
             if show_source:
                 types_item = _make_leaf("Type", ("group", "source"), _c(("group", "source")))
@@ -1197,9 +1220,10 @@ class BrowserTab(QWidget):
                 _source_scope = _scope("source")
                 if _source_scope is not None:
                     _source_q = _source_q.filter(STLModel.id.in_(_source_scope))
-                for (t,) in _source_q.all():
-                    if t:
-                        types_item.addChild(_make_leaf(t, ("source", t), _c(("source", t))))
+                _add_children(types_item, [
+                    (t, ("source", t), _c(("source", t)))
+                    for (t,) in _source_q.all() if t
+                ])
 
             if show_date:
                 _MONTH_NAMES = [
@@ -1240,8 +1264,10 @@ class BrowserTab(QWidget):
                 if _sculptor_scope is not None:
                     _scoped_sculptor_ids = {sid for (sid,) in session.query(STLModel.sculptor_id).filter(STLModel.id.in_(_sculptor_scope)).filter(STLModel.sculptor_id.isnot(None)).distinct()}
                     _sculptor_q = _sculptor_q.filter(Sculptor.id.in_(_scoped_sculptor_ids))
-                for sc in _sculptor_q.all():
-                    sculptor_item.addChild(_make_leaf(sc.name, ("sculptor_id", sc.id), _c(("sculptor_id", sc.id))))
+                _add_children(sculptor_item, [
+                    (sc.name, ("sculptor_id", sc.id), _c(("sculptor_id", sc.id)))
+                    for sc in _sculptor_q.all()
+                ])
 
             if show_collection:
                 collection_item = _make_leaf("Collection", ("group", "collection"), _c(("group", "collection")))
@@ -1252,8 +1278,10 @@ class BrowserTab(QWidget):
                 if _col_scope is not None:
                     _scoped_col_ids = {cid for (cid,) in session.query(STLModel.collection_id).filter(STLModel.id.in_(_col_scope)).filter(STLModel.collection_id.isnot(None)).distinct()}
                     _col_q = _col_q.filter(Collection.id.in_(_scoped_col_ids))
-                for col in _col_q.all():
-                    collection_item.addChild(_make_leaf(col.name, ("collection_id", col.id), _c(("collection_id", col.id))))
+                _add_children(collection_item, [
+                    (col.name, ("collection_id", col.id), _c(("collection_id", col.id)))
+                    for col in _col_q.all()
+                ])
 
             if show_subcollection:
                 subcol_section = _make_leaf("Subcollection", ("group", "subcollection"), _c(("group", "subcollection")))
@@ -1286,8 +1314,10 @@ class BrowserTab(QWidget):
                 if _category_scope is not None:
                     _scoped_cat_ids = {cid for (cid,) in session.query(STLModel.category_id).filter(STLModel.id.in_(_category_scope)).filter(STLModel.category_id.isnot(None)).distinct()}
                     _category_q = _category_q.filter(Category.id.in_(_scoped_cat_ids))
-                for cat in _category_q.all():
-                    category_item.addChild(_make_leaf(cat.name, ("category_id", cat.id), _c(("category_id", cat.id))))
+                _add_children(category_item, [
+                    (cat.name, ("category_id", cat.id), _c(("category_id", cat.id)))
+                    for cat in _category_q.all()
+                ])
 
             if show_release:
                 release_item = _make_leaf("Release", ("group", "release"), _c(("group", "release")))
@@ -1298,8 +1328,10 @@ class BrowserTab(QWidget):
                 if _rel_scope is not None:
                     _scoped_rel_ids = {rid for (rid,) in session.query(STLModel.release_id).filter(STLModel.id.in_(_rel_scope)).filter(STLModel.release_id.isnot(None)).distinct()}
                     _rel_q = _rel_q.filter(Release.id.in_(_scoped_rel_ids))
-                for rel in _rel_q.all():
-                    release_item.addChild(_make_leaf(rel.name, ("release_id", rel.id), _c(("release_id", rel.id))))
+                _add_children(release_item, [
+                    (rel.name, ("release_id", rel.id), _c(("release_id", rel.id)))
+                    for rel in _rel_q.all()
+                ])
 
             if show_scale:
                 scale_item = _make_leaf("Scale", ("group", "scale"), _c(("group", "scale")))
@@ -1310,8 +1342,10 @@ class BrowserTab(QWidget):
                 if _scale_scope is not None:
                     _scoped_scale_ids = {sid for (sid,) in session.query(STLModel.scale_id).filter(STLModel.id.in_(_scale_scope)).filter(STLModel.scale_id.isnot(None)).distinct()}
                     _scale_q = _scale_q.filter(Scale.id.in_(_scoped_scale_ids))
-                for sc in _scale_q.all():
-                    scale_item.addChild(_make_leaf(sc.name, ("scale_id", sc.id), _c(("scale_id", sc.id))))
+                _add_children(scale_item, [
+                    (sc.name, ("scale_id", sc.id), _c(("scale_id", sc.id)))
+                    for sc in _scale_q.all()
+                ])
 
             if show_presupports:
                 presup_item = _make_leaf("Presupports", ("group", "presupports"), _c(("group", "presupports")))
