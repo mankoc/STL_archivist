@@ -360,7 +360,7 @@ without the list collapsing further.</div>
 
 <h2>Model Counts</h2>
 <p>When <em>Show model counts in filter pane</em> is enabled in
-<b>Configuration &rarr; Browser</b>, each filter item shows the number of matching models
+<b>Configuration &rarr; File writing</b>, each filter item shows the number of matching models
 in parentheses — for example <code>Jane Doe (42)</code>. Path tree nodes accumulate the
 counts of all archives in their subtrees. Counts in each section reflect
 the current scope, not the full database.</p>
@@ -793,6 +793,10 @@ Add, edit, or remove patterns as needed for your naming conventions.</p>
 <h2>File writing</h2>
 <table>
   <tr><th>Setting</th><th>Description</th></tr>
+  <tr><td>Show model counts in filter pane</td>
+      <td>When enabled, each filter panel item shows the number of matching models in
+          parentheses (e.g. <code>Jane Doe (42)</code>). Path-tree nodes show cumulative
+          counts. Disable for a less cluttered panel or on very large collections.</td></tr>
   <tr><td>Enable file sorting</td>
       <td>Adds a <em>Sort Files into Directory&hellip;</em> right-click menu entry that
           moves and renames archive files into a structured layout using a path pattern.</td></tr>
@@ -833,14 +837,6 @@ Add, edit, or remove patterns as needed for your naming conventions.</p>
           The list is also written into and restored from METADATA.7z sidecars.</td></tr>
 </table>
 
-<h2>Browser</h2>
-<table>
-  <tr><th>Setting</th><th>Description</th></tr>
-  <tr><td>Show model counts in filter pane</td>
-      <td>When enabled, each filter panel item shows the number of matching models in
-          parentheses (e.g. <code>Jane Doe (42)</code>). Path-tree nodes show cumulative
-          counts. Disable for a less cluttered panel or on very large collections.</td></tr>
-</table>
 
 <h2>Appearance</h2>
 <table>

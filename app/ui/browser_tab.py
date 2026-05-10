@@ -936,11 +936,13 @@ class BrowserTab(QWidget):
             item.setCheckState(0, state)
             return item
 
-        _ALPHA_THRESHOLD = 50
+        from app.ui.config_dialog import get_filter_alpha_enabled, get_filter_alpha_threshold
+        _ALPHA_ENABLED   = get_filter_alpha_enabled()
+        _ALPHA_THRESHOLD = get_filter_alpha_threshold()
 
         def _add_children(parent: QTreeWidgetItem,
                           entries: list[tuple[str, object, "int | None"]]) -> None:
-            if len(entries) <= _ALPHA_THRESHOLD:
+            if not _ALPHA_ENABLED or len(entries) <= _ALPHA_THRESHOLD:
                 for label, data, count in entries:
                     parent.addChild(_make_leaf(label, data, count))
                 return

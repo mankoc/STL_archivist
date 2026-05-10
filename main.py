@@ -26,26 +26,35 @@ from app.ui.main_window import MainWindow
 def _show_splash():
     from PyQt6.QtWidgets import QSplashScreen
     from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont
+    from PyQt6.QtCore import QRect
 
-    W, H = 400, 180
+    ICON_SIZE = 96
+    W, H = 400, 240
     pix = QPixmap(W, H)
     pix.fill(QColor("#1e1e2e"))
 
     p = QPainter(pix)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
 
+    icon_path = _resource("resources/icon.ico")
+    if icon_path.exists():
+        from PyQt6.QtGui import QIcon
+        icon_pix = QIcon(str(icon_path)).pixmap(ICON_SIZE, ICON_SIZE)
+        p.drawPixmap((W - ICON_SIZE) // 2, 16, icon_pix)
+
+    title_y = 16 + ICON_SIZE + 10
     title_font = QFont()
-    title_font.setPointSize(20)
+    title_font.setPointSize(18)
     title_font.setBold(True)
     p.setFont(title_font)
     p.setPen(QColor("#cdd6f4"))
-    p.drawText(0, 20, W, 80, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter, "STL Database")
+    p.drawText(QRect(0, title_y, W, 36), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter, "STL Database")
 
     ver_font = QFont()
     ver_font.setPointSize(10)
     p.setFont(ver_font)
     p.setPen(QColor("#888ba8"))
-    p.drawText(0, 90, W, 30, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter, f"v{__version__}")
+    p.drawText(QRect(0, title_y + 34, W, 26), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter, f"v{__version__}")
 
     p.end()
 
