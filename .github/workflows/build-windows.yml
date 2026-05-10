@@ -6,9 +6,6 @@ on:
       - 'v*'
   workflow_dispatch:
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   build:
     runs-on: windows-latest
@@ -17,10 +14,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
           cache: 'pip'
@@ -39,7 +36,7 @@ jobs:
         run: mv dist/STLDatabase.exe "dist/STLDatabase-${{ github.ref_name }}.exe"
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: STLDatabase-windows-${{ github.ref_name }}
           path: dist/STLDatabase-${{ github.ref_name }}.exe
@@ -62,10 +59,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
           cache: 'pip'
@@ -84,7 +81,7 @@ jobs:
         run: mv dist/crawl.exe "dist/crawl-${{ github.ref_name }}.exe"
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: crawl-windows-${{ github.ref_name }}
           path: dist/crawl-${{ github.ref_name }}.exe
