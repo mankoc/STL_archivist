@@ -403,6 +403,16 @@ def get_filter_show_counts() -> bool:
     return bool(_load_library_settings().get("filter_show_counts", True))
 
 
+def get_filter_alpha_enabled() -> bool:
+    """Whether to group large filter sections into alphabetical letter bins."""
+    return bool(_load_library_settings().get("filter_alpha_enabled", True))
+
+
+def get_filter_alpha_threshold() -> int:
+    """Min number of items in a filter section before alphabetical grouping kicks in."""
+    return int(_load_library_settings().get("filter_alpha_threshold", 50))
+
+
 _ICONS_DIR = Path(__file__).parent.parent.parent / "resources" / "icons"
 
 
@@ -498,7 +508,7 @@ class ConfigDialog(QDialog):
         # Left: section tree
         # Page indices must match the order pages are added to self._stack below.
         # 0=Database  1=Crawler  2=Warnings(child)  3=File writing  4=Appearance
-        # 5=Sidecar(child)  6=Debug
+        # 5=Sidecar(child)  6=Debug  7=Browser
         self._section_tree = QTreeWidget()
         self._section_tree.setFixedWidth(155)
         self._section_tree.setHeaderHidden(True)
@@ -519,6 +529,7 @@ class ConfigDialog(QDialog):
         _item(crawler_item,            "Warnings", sp.SP_MessageBoxWarning,        2)
         fw_item = _item(self._section_tree, "File writing", sp.SP_DesktopIcon,     3)
         _item(fw_item,                 "Sidecar",  sp.SP_DialogSaveButton,         5)
+        _item(self._section_tree, "Browser",      sp.SP_FileDialogListView,        7)
         _item(self._section_tree, "Appearance",   sp.SP_TitleBarNormalButton,      4)
         _item(self._section_tree, "Debug",        sp.SP_MessageBoxCritical,        6)
 
@@ -535,13 +546,14 @@ class ConfigDialog(QDialog):
         splitter.setStretchFactor(1, 1)
         root.addWidget(splitter)
 
-        self._stack.addWidget(self._build_database_page())    # 0
-        self._stack.addWidget(self._build_crawler_page())     # 1
-        self._stack.addWidget(self._build_warnings_page())    # 2
-        self._stack.addWidget(self._build_browser_page())     # 3
-        self._stack.addWidget(self._build_appearance_page())  # 4
-        self._stack.addWidget(self._build_sidecar_page())     # 5
-        self._stack.addWidget(self._build_debug_page())       # 6
+        self._stack.addWidget(self._build_database_page())        # 0
+        self._stack.addWidget(self._build_crawler_page())         # 1
+        self._stack.addWidget(self._build_warnings_page())        # 2
+        self._stack.addWidget(self._build_file_writing_page())    # 3
+        self._stack.addWidget(self._build_appearance_page())      # 4
+        self._stack.addWidget(self._build_sidecar_page())         # 5
+        self._stack.addWidget(self._build_debug_page())           # 6
+        self._stack.addWidget(self._build_browser_config_page())  # 7
 
         self._section_tree.setCurrentItem(
             self._section_tree.topLevelItem(0)
@@ -852,14 +864,40 @@ class ConfigDialog(QDialog):
         layout.addStretch()
         return page
 
-    def _build_browser_page(self) -> QWidget:
+    def _build_browser_config_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        group = QGroupBox("Filter pane")
+        form = QFormLayout(group)
+
+        self._filter_show_counts_check = QCheckBox("Show model counts in filter pane")
+        form.addRow("Counts:", self._filter_show_counts_check)
+
+        self._filter_alpha_enabled_check = QCheckBox("Group large sections into letter bins (A, B, C, …)")
+        self._filter_alpha_enabled_check.toggled.connect(self._update_alpha_threshold_enabled)
+        form.addRow("Letter bins:", self._filter_alpha_enabled_check)
+
+        self._filter_alpha_threshold_spin = QSpinBox()
+        self._filter_alpha_threshold_spin.setRange(5, 10000)
+        self._filter_alpha_threshold_spin.setSingleStep(5)
+        self._filter_alpha_threshold_spin.setSuffix(" items")
+        self._filter_alpha_threshold_spin.setToolTip(
+            "Split a filter section into A/B/C… groups when it has more than this many entries."
+        )
+        form.addRow("Split above:", self._filter_alpha_threshold_spin)
+
+        layout.addWidget(group)
+        layout.addStretch()
+        return page
+
+    def _update_alpha_threshold_enabled(self, enabled: bool) -> None:
+        self._filter_alpha_threshold_spin.setEnabled(enabled)
+
+    def _build_file_writing_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
         group = QGroupBox("File writing")
         form = QFormLayout(group)
-
-        self._filter_show_counts_check = QCheckBox("Show model counts in filter pane")
-        form.addRow("Filter pane:", self._filter_show_counts_check)
 
         self._file_sorting_check = QCheckBox("Enable file sorting")
         form.addRow("File sorting:", self._file_sorting_check)
@@ -1239,6 +1277,10 @@ class ConfigDialog(QDialog):
 
         self._max_workers_spin.setValue(get_max_workers())
         self._filter_show_counts_check.setChecked(get_filter_show_counts())
+        alpha_enabled = get_filter_alpha_enabled()
+        self._filter_alpha_enabled_check.setChecked(alpha_enabled)
+        self._filter_alpha_threshold_spin.setValue(get_filter_alpha_threshold())
+        self._filter_alpha_threshold_spin.setEnabled(alpha_enabled)
         self._file_sorting_check.setChecked(get_file_sorting_enabled())
         self._unrar_edit.setText(get_unrar_path())
         presupported_enabled = get_warn_presupported_stl()
@@ -1336,6 +1378,8 @@ class ConfigDialog(QDialog):
                 "ui_color_overrides": self._ui_color_overrides,
                 "custom_color_schemes": custom_color_schemes,
                 "filter_show_counts": self._filter_show_counts_check.isChecked(),
+                "filter_alpha_enabled": self._filter_alpha_enabled_check.isChecked(),
+                "filter_alpha_threshold": self._filter_alpha_threshold_spin.value(),
                 "file_sorting_enabled": self._file_sorting_check.isChecked(),
                 "warn_presupported_stl": self._warn_presupported_check.isChecked(),
                 "presupport_patterns": [
