@@ -1,10 +1,12 @@
 """
-Dialog that re-crawls all stored CrawledFolder records to pick up new and
+Dialog that re-crawls stored CrawledFolder records to pick up new and
 modified archives, using the pattern saved with each folder.
+
+The user can select which folders to re-crawl via a checkbox list.
 """
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
-    QApplication, QDialog, QHBoxLayout, QLabel,
+    QApplication, QDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
     QPlainTextEdit, QProgressBar, QPushButton,
     QSizePolicy, QVBoxLayout,
 )
@@ -70,13 +72,14 @@ class _UpdateAllWorker(QThread):
 
 
 class UpdateCrawledFoldersDialog(QDialog):
-    """Shows progress while re-crawling all stored CrawledFolder entries."""
+    """Shows a folder checklist and crawl progress for re-crawling stored CrawledFolder entries."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Update Crawled Folders")
-        self.resize(700, 500)
+        self.resize(700, 620)
         self._worker: _UpdateAllWorker | None = None
+        self._all_folders: list[tuple[str, str | None]] = []
         self._build_ui()
         self._load_folders()
 
@@ -84,6 +87,25 @@ class UpdateCrawledFoldersDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
 
+        # --- Folder selection list ---
+        layout.addWidget(QLabel("Select folders to re-crawl:"))
+
+        self._folder_list = QListWidget()
+        self._folder_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._folder_list.setMinimumHeight(160)
+        layout.addWidget(self._folder_list)
+
+        sel_row = QHBoxLayout()
+        select_all_btn = QPushButton("Select All")
+        select_all_btn.clicked.connect(self._select_all)
+        sel_row.addWidget(select_all_btn)
+        deselect_all_btn = QPushButton("Deselect All")
+        deselect_all_btn.clicked.connect(self._deselect_all)
+        sel_row.addWidget(deselect_all_btn)
+        sel_row.addStretch()
+        layout.addLayout(sel_row)
+
+        # --- Run status ---
         self._status_label = QLabel()
         layout.addWidget(self._status_label)
 
@@ -142,9 +164,16 @@ class UpdateCrawledFoldersDialog(QDialog):
                 .order_by(CrawledFolder.path)
                 .all()
             )
-            self._folders = [(r.path, r.pattern) for r in rows]
+            self._all_folders = [(r.path, r.pattern) for r in rows]
 
-        n = len(self._folders)
+        self._folder_list.clear()
+        for path, _pattern in self._all_folders:
+            item = QListWidgetItem(path)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked)
+            self._folder_list.addItem(item)
+
+        n = len(self._all_folders)
         if n == 0:
             self._status_label.setText(
                 "No crawled folders stored yet. "
@@ -152,11 +181,32 @@ class UpdateCrawledFoldersDialog(QDialog):
             )
             self._start_btn.setEnabled(False)
         else:
-            self._status_label.setText(f"{n} folder{'s' if n != 1 else ''} queued for update.")
+            self._status_label.setText(f"{n} folder{'s' if n != 1 else ''} available.")
+
+    def _select_all(self) -> None:
+        for i in range(self._folder_list.count()):
+            self._folder_list.item(i).setCheckState(Qt.CheckState.Checked)
+
+    def _deselect_all(self) -> None:
+        for i in range(self._folder_list.count()):
+            self._folder_list.item(i).setCheckState(Qt.CheckState.Unchecked)
+
+    def _selected_folders(self) -> list[tuple[str, str | None]]:
+        checked: list[tuple[str, str | None]] = []
+        for i in range(self._folder_list.count()):
+            item = self._folder_list.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                checked.append(self._all_folders[i])
+        return checked
 
     def _start(self) -> None:
         from app.ui.config_dialog import get_max_thumbnails
         from app.ui.settings_loader import build_crawler_config
+
+        folders = self._selected_folders()
+        if not folders:
+            self._status_label.setText("No folders selected — tick at least one folder to re-crawl.")
+            return
 
         self._log.clear()
         self._progress.setValue(0)
@@ -164,10 +214,14 @@ class UpdateCrawledFoldersDialog(QDialog):
         self._start_btn.setEnabled(False)
         self._stop_btn.setEnabled(True)
         self._close_btn.setEnabled(False)
+        self._folder_list.setEnabled(False)
+
+        n = len(folders)
+        self._status_label.setText(f"Re-crawling {n} folder{'s' if n != 1 else ''}…")
 
         config = build_crawler_config(max_thumbnails=get_max_thumbnails())
         config.log_unchanged = False
-        self._worker = _UpdateAllWorker(self._folders, config=config, parent=self)
+        self._worker = _UpdateAllWorker(folders, config=config, parent=self)
         self._worker.log.connect(self._on_log)
         self._worker.folder_started.connect(self._on_folder_started)
         self._worker.progress.connect(self._on_progress)
@@ -203,7 +257,7 @@ class UpdateCrawledFoldersDialog(QDialog):
         )
 
     def _on_finished(self) -> None:
-        n = len(self._folders)
+        n = len(self._selected_folders()) if self._worker else 0
         self._status_label.setText(
             f"Update complete — {n} folder{'s' if n != 1 else ''} processed."
         )
@@ -214,6 +268,7 @@ class UpdateCrawledFoldersDialog(QDialog):
         self._start_btn.setEnabled(True)
         self._stop_btn.setEnabled(False)
         self._close_btn.setEnabled(True)
+        self._folder_list.setEnabled(True)
         self._worker = None
 
     def closeEvent(self, event) -> None:

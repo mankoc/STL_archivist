@@ -316,6 +316,11 @@ def get_warn_nested_archive() -> bool:
     return bool(_load_library_settings().get("warn_nested_archive", True))
 
 
+def get_warn_no_printable() -> bool:
+    """Whether to warn when an archive contains no printable model files."""
+    return bool(_load_library_settings().get("warn_no_printable", True))
+
+
 def get_warn_low_compression() -> bool:
     """Whether to warn when an archive has a low compression rate."""
     return bool(_load_library_settings().get("warn_low_compression", False))
@@ -735,6 +740,16 @@ class ConfigDialog(QDialog):
             QLabel(
                 "<small>Warn when an archive contains another compressed archive "
                 "(.zip, .rar, .7z).</small>"
+            ),
+        )
+
+        self._warn_no_printable_check = QCheckBox("Archive without printable files")
+        form.addRow("", self._warn_no_printable_check)
+        form.addRow(
+            "",
+            QLabel(
+                "<small>Warn when an archive contains no printable model files "
+                "(.stl, .obj, .lys, .chitubox).</small>"
             ),
         )
 
@@ -1236,6 +1251,7 @@ class ConfigDialog(QDialog):
             self._presupport_patterns_list.addItem(item)
         self._warn_no_images_check.setChecked(get_warn_no_images())
         self._warn_nested_archive_check.setChecked(get_warn_nested_archive())
+        self._warn_no_printable_check.setChecked(get_warn_no_printable())
         warn_low_compression = get_warn_low_compression()
         self._warn_low_compression_check.setChecked(warn_low_compression)
         self._low_compression_threshold_spin.setValue(get_low_compression_threshold())
@@ -1329,6 +1345,7 @@ class ConfigDialog(QDialog):
                 ],
                 "warn_no_images": self._warn_no_images_check.isChecked(),
                 "warn_nested_archive": self._warn_nested_archive_check.isChecked(),
+                "warn_no_printable": self._warn_no_printable_check.isChecked(),
                 "warn_low_compression": self._warn_low_compression_check.isChecked(),
                 "low_compression_threshold": self._low_compression_threshold_spin.value(),
                 "metadata_sidecar_enabled": self._metadata_sidecar_check.isChecked(),

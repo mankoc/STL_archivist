@@ -1016,7 +1016,8 @@ class BrowserTab(QWidget):
 
                 _all_warnings = [w for (w,) in session.query(STLModel.warning).filter(STLModel.warning.isnot(None)).all()]
                 for _wt in ("Models with presupported stl", "Archive without images",
-                            "Archive inside archive", "Archive with supports"):
+                            "Archive inside archive", "Archive with supports",
+                            "Archive without printable files"):
                     _wc = sum(1 for w in _all_warnings if _wt in w)
                     _counts[("warning", _wt)] = _wc
                 _counts[("group", "warning")] = sum(1 for w in _all_warnings if w)
@@ -1039,13 +1040,23 @@ class BrowserTab(QWidget):
                         _f = _p
                 _counts[("group", "path")] = session.query(_func.count(STLModel.id)).scalar() or 0
 
-            # Scoped counts for the 5 cascading sections (one scope per section)
+            # Scoped counts for all sections (each section scoped by all other active filters)
             _scoped_counts: dict = {}
+            _sc_path_counts: dict[str, int] | None = None
             if show_counts and scope_by_section is not None:
                 from app.database.models import model_tags as _mt2
-                def _sc_query(section, col, q_base):
-                    ids = _scope(section)
-                    return q_base.filter(col.in_(ids)) if ids is not None else q_base
+                # Creator
+                _creator_sc_ids = _scope("creator")
+                if _creator_sc_ids is not None:
+                    for v, c in session.query(STLModel.creator, _func.count(STLModel.id)).filter(STLModel.id.in_(_creator_sc_ids)).filter(STLModel.creator.isnot(None)).group_by(STLModel.creator).all():
+                        _scoped_counts[("creator", v)] = c
+                    _scoped_counts[("group", "creator")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(_creator_sc_ids)).filter(STLModel.creator.isnot(None)).scalar() or 0
+                # Source/Type
+                _source_sc_ids = _scope("source")
+                if _source_sc_ids is not None:
+                    for v, c in session.query(STLModel.source, _func.count(STLModel.id)).filter(STLModel.id.in_(_source_sc_ids)).filter(STLModel.source.isnot(None)).group_by(STLModel.source).all():
+                        _scoped_counts[("source", v)] = c
+                    _scoped_counts[("group", "source")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(_source_sc_ids)).filter(STLModel.source.isnot(None)).scalar() or 0
                 # Tags
                 _tag_ids = _scope("tag")
                 if _tag_ids is not None:
@@ -1062,6 +1073,12 @@ class BrowserTab(QWidget):
                     for yr, c in _sc_year.items():
                         _scoped_counts[("date_year", yr)] = c
                     _scoped_counts[("group", "date")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(_date_ids)).filter(STLModel.release_year.isnot(None)).scalar() or 0
+                # Sculptor
+                _sculptor_sc_ids = _scope("sculptor")
+                if _sculptor_sc_ids is not None:
+                    for sid, c in session.query(STLModel.sculptor_id, _func.count(STLModel.id)).filter(STLModel.id.in_(_sculptor_sc_ids)).filter(STLModel.sculptor_id.isnot(None)).group_by(STLModel.sculptor_id).all():
+                        _scoped_counts[("sculptor_id", sid)] = c
+                    _scoped_counts[("group", "sculptor")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(_sculptor_sc_ids)).filter(STLModel.sculptor_id.isnot(None)).scalar() or 0
                 # Collection
                 _col_sc_ids = _scope("collection")
                 if _col_sc_ids is not None:
@@ -1074,15 +1091,69 @@ class BrowserTab(QWidget):
                     for sid, c in session.query(STLModel.subcollection_id, _func.count(STLModel.id)).filter(STLModel.id.in_(_sub_sc_ids)).filter(STLModel.subcollection_id.isnot(None)).group_by(STLModel.subcollection_id).all():
                         _scoped_counts[("subcollection_id", sid)] = c
                     _scoped_counts[("group", "subcollection")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(_sub_sc_ids)).filter(STLModel.subcollection_id.isnot(None)).scalar() or 0
+                # Category
+                _category_sc_ids = _scope("category")
+                if _category_sc_ids is not None:
+                    for cid, c in session.query(STLModel.category_id, _func.count(STLModel.id)).filter(STLModel.id.in_(_category_sc_ids)).filter(STLModel.category_id.isnot(None)).group_by(STLModel.category_id).all():
+                        _scoped_counts[("category_id", cid)] = c
+                    _scoped_counts[("group", "category")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(_category_sc_ids)).filter(STLModel.category_id.isnot(None)).scalar() or 0
                 # Release
                 _rel_sc_ids = _scope("release")
                 if _rel_sc_ids is not None:
                     for rid, c in session.query(STLModel.release_id, _func.count(STLModel.id)).filter(STLModel.id.in_(_rel_sc_ids)).filter(STLModel.release_id.isnot(None)).group_by(STLModel.release_id).all():
                         _scoped_counts[("release_id", rid)] = c
                     _scoped_counts[("group", "release")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(_rel_sc_ids)).filter(STLModel.release_id.isnot(None)).scalar() or 0
+                # Scale
+                _scale_sc_ids = _scope("scale")
+                if _scale_sc_ids is not None:
+                    for sid, c in session.query(STLModel.scale_id, _func.count(STLModel.id)).filter(STLModel.id.in_(_scale_sc_ids)).filter(STLModel.scale_id.isnot(None)).group_by(STLModel.scale_id).all():
+                        _scoped_counts[("scale_id", sid)] = c
+                    _scoped_counts[("group", "scale")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(_scale_sc_ids)).filter(STLModel.scale_id.isnot(None)).scalar() or 0
+                # Presupports
+                _presup_sc_ids = _scope("presupports")
+                if _presup_sc_ids is not None:
+                    for v, c in session.query(STLModel.presupports, _func.count(STLModel.id)).filter(STLModel.id.in_(_presup_sc_ids)).filter(STLModel.presupports.isnot(None)).group_by(STLModel.presupports).all():
+                        _scoped_counts[("presupports", v)] = c
+                    _scoped_counts[("group", "presupports")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(_presup_sc_ids)).filter(STLModel.presupports.isnot(None)).scalar() or 0
+                # Warning
+                _warn_sc_ids = _scope("warning")
+                if _warn_sc_ids is not None:
+                    _sc_all_warnings = [w for (w,) in session.query(STLModel.warning).filter(STLModel.id.in_(_warn_sc_ids)).filter(STLModel.warning.isnot(None)).all()]
+                    for _wt in ("Models with presupported stl", "Archive without images",
+                                "Archive inside archive", "Archive with supports",
+                                "Archive without printable files"):
+                        _scoped_counts[("warning", _wt)] = sum(1 for w in _sc_all_warnings if _wt in w)
+                    _scoped_counts[("group", "warning")] = sum(1 for w in _sc_all_warnings if w)
+                # Path counts (cumulative, scoped)
+                _path_sc_ids = _scope("path")
+                if _path_sc_ids is not None:
+                    _sc_direct: dict[str, int] = {}
+                    for (ap,) in session.query(STLModel.archive_path).filter(STLModel.id.in_(_path_sc_ids)).filter(STLModel.archive_path.isnot(None)).all():
+                        _folder = FSPath(ap).parent.as_posix()
+                        _sc_direct[_folder] = _sc_direct.get(_folder, 0) + 1
+                    _sc_path_counts: dict[str, int] = {}
+                    for _folder, _c in _sc_direct.items():
+                        _sc_path_counts[_folder] = _sc_path_counts.get(_folder, 0) + _c
+                        _f = FSPath(_folder)
+                        while True:
+                            _p = _f.parent
+                            if _p == _f:
+                                break
+                            _ps = _p.as_posix()
+                            _sc_path_counts[_ps] = _sc_path_counts.get(_ps, 0) + _c
+                            _f = _p
+                    _scoped_counts[("group", "path")] = len(_path_sc_ids)
 
-            _SCOPED_KINDS = ("tag", "date_month", "date_year", "collection_id", "subcollection_id", "release_id", "group")
-            _SCOPED_GROUPS = ("tag", "date", "collection", "subcollection", "release")
+            _SCOPED_KINDS = (
+                "creator", "source", "tag", "date_month", "date_year",
+                "sculptor_id", "collection_id", "subcollection_id", "category_id",
+                "release_id", "scale_id", "presupports", "warning", "path", "group",
+            )
+            _SCOPED_GROUPS = (
+                "creator", "source", "tag", "date", "sculptor",
+                "collection", "subcollection", "category", "release",
+                "scale", "presupports", "warning", "path",
+            )
 
             def _c(data) -> int | None:
                 if scope_by_section is not None and data[0] in _SCOPED_KINDS and (data[0] != "group" or data[1] in _SCOPED_GROUPS):
@@ -1098,7 +1169,11 @@ class BrowserTab(QWidget):
                 authors_item = _make_leaf("Creators", ("group", "creator"), _c(("group", "creator")))
                 authors_item.setIcon(0, _icon_author)
                 self._filter_tree.addTopLevelItem(authors_item)
-                for (creator,) in session.query(STLModel.creator).distinct().order_by(STLModel.creator).all():
+                _author_q = session.query(STLModel.creator).distinct().order_by(STLModel.creator)
+                _author_scope = _scope("creator")
+                if _author_scope is not None:
+                    _author_q = _author_q.filter(STLModel.id.in_(_author_scope))
+                for (creator,) in _author_q.all():
                     if creator:
                         authors_item.addChild(_make_leaf(creator, ("creator", creator), _c(("creator", creator))))
 
@@ -1118,7 +1193,11 @@ class BrowserTab(QWidget):
                 types_item = _make_leaf("Type", ("group", "source"), _c(("group", "source")))
                 types_item.setIcon(0, _icon_type)
                 self._filter_tree.addTopLevelItem(types_item)
-                for (t,) in session.query(STLModel.source).distinct().order_by(STLModel.source).all():
+                _source_q = session.query(STLModel.source).distinct().order_by(STLModel.source)
+                _source_scope = _scope("source")
+                if _source_scope is not None:
+                    _source_q = _source_q.filter(STLModel.id.in_(_source_scope))
+                for (t,) in _source_q.all():
                     if t:
                         types_item.addChild(_make_leaf(t, ("source", t), _c(("source", t))))
 
@@ -1156,7 +1235,12 @@ class BrowserTab(QWidget):
                 sculptor_item = _make_leaf("Sculptor", ("group", "sculptor"), _c(("group", "sculptor")))
                 sculptor_item.setIcon(0, _icon_sculptor)
                 self._filter_tree.addTopLevelItem(sculptor_item)
-                for sc in session.query(Sculptor).order_by(Sculptor.name).all():
+                _sculptor_q = session.query(Sculptor).order_by(Sculptor.name)
+                _sculptor_scope = _scope("sculptor")
+                if _sculptor_scope is not None:
+                    _scoped_sculptor_ids = {sid for (sid,) in session.query(STLModel.sculptor_id).filter(STLModel.id.in_(_sculptor_scope)).filter(STLModel.sculptor_id.isnot(None)).distinct()}
+                    _sculptor_q = _sculptor_q.filter(Sculptor.id.in_(_scoped_sculptor_ids))
+                for sc in _sculptor_q.all():
                     sculptor_item.addChild(_make_leaf(sc.name, ("sculptor_id", sc.id), _c(("sculptor_id", sc.id))))
 
             if show_collection:
@@ -1197,7 +1281,12 @@ class BrowserTab(QWidget):
                 category_item = _make_leaf("Category", ("group", "category"), _c(("group", "category")))
                 category_item.setIcon(0, _icon_category)
                 self._filter_tree.addTopLevelItem(category_item)
-                for cat in session.query(Category).order_by(Category.name).all():
+                _category_q = session.query(Category).order_by(Category.name)
+                _category_scope = _scope("category")
+                if _category_scope is not None:
+                    _scoped_cat_ids = {cid for (cid,) in session.query(STLModel.category_id).filter(STLModel.id.in_(_category_scope)).filter(STLModel.category_id.isnot(None)).distinct()}
+                    _category_q = _category_q.filter(Category.id.in_(_scoped_cat_ids))
+                for cat in _category_q.all():
                     category_item.addChild(_make_leaf(cat.name, ("category_id", cat.id), _c(("category_id", cat.id))))
 
             if show_release:
@@ -1216,16 +1305,25 @@ class BrowserTab(QWidget):
                 scale_item = _make_leaf("Scale", ("group", "scale"), _c(("group", "scale")))
                 scale_item.setIcon(0, _icon_scale)
                 self._filter_tree.addTopLevelItem(scale_item)
-                for sc in session.query(Scale).order_by(Scale.name).all():
+                _scale_q = session.query(Scale).order_by(Scale.name)
+                _scale_scope = _scope("scale")
+                if _scale_scope is not None:
+                    _scoped_scale_ids = {sid for (sid,) in session.query(STLModel.scale_id).filter(STLModel.id.in_(_scale_scope)).filter(STLModel.scale_id.isnot(None)).distinct()}
+                    _scale_q = _scale_q.filter(Scale.id.in_(_scoped_scale_ids))
+                for sc in _scale_q.all():
                     scale_item.addChild(_make_leaf(sc.name, ("scale_id", sc.id), _c(("scale_id", sc.id))))
 
             if show_presupports:
                 presup_item = _make_leaf("Presupports", ("group", "presupports"), _c(("group", "presupports")))
                 presup_item.setIcon(0, _icon_presupports)
                 self._filter_tree.addTopLevelItem(presup_item)
-                for (val,) in (session.query(STLModel.presupports)
-                               .filter(STLModel.presupports.isnot(None))
-                               .distinct().order_by(STLModel.presupports).all()):
+                _presup_q = (session.query(STLModel.presupports)
+                             .filter(STLModel.presupports.isnot(None))
+                             .distinct().order_by(STLModel.presupports))
+                _presup_scope = _scope("presupports")
+                if _presup_scope is not None:
+                    _presup_q = _presup_q.filter(STLModel.id.in_(_presup_scope))
+                for (val,) in _presup_q.all():
                     if val:
                         presup_item.addChild(_make_leaf(val, ("presupports", val), _c(("presupports", val))))
 
@@ -1235,6 +1333,7 @@ class BrowserTab(QWidget):
                     "Archive without images",
                     "Archive inside archive",
                     "Archive with supports",
+                    "Archive without printable files",
                 ]
                 warn_item = _make_leaf("Warnings", ("group", "warning"), _c(("group", "warning")))
                 warn_item.setIcon(0, _icon_warnings)
@@ -1246,18 +1345,27 @@ class BrowserTab(QWidget):
                 paths_item = _make_leaf("Path", ("group", "path"), _c(("group", "path")))
                 paths_item.setIcon(0, _icon_path)
                 self._filter_tree.addTopLevelItem(paths_item)
-                dirs: set[str] = set()
-                for (ap,) in session.query(STLModel.archive_path).distinct().all():
-                    if ap:
-                        # Use as_posix() so the filter tree always uses forward slashes,
-                        # regardless of OS — the LIKE query normalises the DB column too.
-                        dirs.add(FSPath(ap).parent.as_posix())
-                new_dirs = frozenset(dirs)
-                if new_dirs != self._cached_path_dirs:
-                    self._cached_path_dirs = new_dirs
-                    self._cached_sorted_dirs = sorted(dirs)
-                self._build_path_tree(paths_item, self._cached_sorted_dirs, checked_data, excluded_data,
-                                      path_counts=_path_counts)
+                _path_scope = _scope("path")
+                if _path_scope is not None:
+                    # Scoped: compute dirs from filtered models only, bypass the unscoped cache.
+                    _scoped_dirs: set[str] = set()
+                    for (ap,) in session.query(STLModel.archive_path).filter(STLModel.id.in_(_path_scope)).filter(STLModel.archive_path.isnot(None)).distinct().all():
+                        _scoped_dirs.add(FSPath(ap).parent.as_posix())
+                    self._build_path_tree(paths_item, sorted(_scoped_dirs), checked_data, excluded_data,
+                                          path_counts=_sc_path_counts)
+                else:
+                    dirs: set[str] = set()
+                    for (ap,) in session.query(STLModel.archive_path).distinct().all():
+                        if ap:
+                            # Use as_posix() so the filter tree always uses forward slashes,
+                            # regardless of OS — the LIKE query normalises the DB column too.
+                            dirs.add(FSPath(ap).parent.as_posix())
+                    new_dirs = frozenset(dirs)
+                    if new_dirs != self._cached_path_dirs:
+                        self._cached_path_dirs = new_dirs
+                        self._cached_sorted_dirs = sorted(dirs)
+                    self._build_path_tree(paths_item, self._cached_sorted_dirs, checked_data, excluded_data,
+                                          path_counts=_path_counts)
         finally:
             session.close()
 
@@ -1841,69 +1949,86 @@ class BrowserTab(QWidget):
 
         # Compute per-section scopes for faceted filter pane.
         # Each section's scope = IDs matching all OTHER active filters (not its own).
-        _base_filters = [
-            author_inc, author_exc, type_inc, type_exc, path_inc, path_exc,
-            sculptor_inc, sculptor_exc, collection_inc, collection_exc,
-            subcollection_inc, subcollection_exc, category_inc, category_exc,
-            scale_inc, scale_exc, presupports_inc, presupports_exc,
-            warning_inc, warning_exc, has_value_groups, no_value_groups,
-        ]
-        _has_base = any(_base_filters)
-        _has_tag  = bool(tag_inc or tag_exc)
-        _has_date = bool(date_inc or date_exc)
-        _has_col  = bool(collection_inc or collection_exc)
-        _has_sub  = bool(subcollection_inc or subcollection_exc)
-        _has_rel  = bool(release_inc or release_exc)
+        _has_creator     = bool(author_inc or author_exc)
+        _has_type        = bool(type_inc or type_exc)
+        _has_path        = bool(path_inc or path_exc)
+        _has_tag         = bool(tag_inc or tag_exc)
+        _has_date        = bool(date_inc or date_exc)
+        _has_sculptor    = bool(sculptor_inc or sculptor_exc)
+        _has_col         = bool(collection_inc or collection_exc)
+        _has_sub         = bool(subcollection_inc or subcollection_exc)
+        _has_category    = bool(category_inc or category_exc)
+        _has_rel         = bool(release_inc or release_exc)
+        _has_scale       = bool(scale_inc or scale_exc)
+        _has_presupports = bool(presupports_inc or presupports_exc)
+        _has_warning     = bool(warning_inc or warning_exc)
+        _has_group       = bool(has_value_groups or no_value_groups)
+        _has_any = any([
+            _has_creator, _has_type, _has_path, _has_tag, _has_date,
+            _has_sculptor, _has_col, _has_sub, _has_category, _has_rel,
+            _has_scale, _has_presupports, _has_warning, _has_group,
+        ])
 
         scope_by_section: dict[str, list[int] | None] | None = None
 
-        if _has_base or _has_tag or _has_date or _has_col or _has_sub or _has_rel:
+        if _has_any:
             scope_by_section = {}
             _session = get_session()
             try:
                 def _run_id_query(
-                    skip_tag=False, skip_date=False, skip_col=False,
-                    skip_sub=False, skip_rel=False,
+                    skip_creator=False, skip_type=False, skip_path=False,
+                    skip_tag=False, skip_date=False, skip_sculptor=False,
+                    skip_col=False, skip_sub=False, skip_category=False,
+                    skip_rel=False, skip_scale=False, skip_presupports=False,
+                    skip_warning=False,
                 ) -> list[int]:
                     q = _session.query(STLModel.id)
-                    if author_inc:       q = q.filter(STLModel.creator.in_(author_inc))
-                    if author_exc:       q = q.filter(~STLModel.creator.in_(author_exc))
-                    if type_inc:         q = q.filter(STLModel.source.in_(type_inc))
-                    if type_exc:         q = q.filter(~STLModel.source.in_(type_exc))
+                    if not skip_creator:
+                        if author_inc:  q = q.filter(STLModel.creator.in_(author_inc))
+                        if author_exc:  q = q.filter(~STLModel.creator.in_(author_exc))
+                    if not skip_type:
+                        if type_inc:    q = q.filter(STLModel.source.in_(type_inc))
+                        if type_exc:    q = q.filter(~STLModel.source.in_(type_exc))
                     if not skip_tag:
-                        if tag_inc:      q = q.filter(STLModel.tags.any(Tag.name.in_(tag_inc)))
-                        if tag_exc:      q = q.filter(~STLModel.tags.any(Tag.name.in_(tag_exc)))
-                    if path_inc:
-                        _n = func.replace(STLModel.archive_path, "\\", "/")
-                        q = q.filter(or_(*(_n.like(p.rstrip("/") + "/%") for p in path_inc)))
-                    if path_exc:
-                        _n = func.replace(STLModel.archive_path, "\\", "/")
-                        for p in path_exc:
-                            q = q.filter(~_n.like(p.rstrip("/") + "/%"))
+                        if tag_inc:     q = q.filter(STLModel.tags.any(Tag.name.in_(tag_inc)))
+                        if tag_exc:     q = q.filter(~STLModel.tags.any(Tag.name.in_(tag_exc)))
+                    if not skip_path:
+                        if path_inc:
+                            _n = func.replace(STLModel.archive_path, "\\", "/")
+                            q = q.filter(or_(*(_n.like(p.rstrip("/") + "/%") for p in path_inc)))
+                        if path_exc:
+                            _n = func.replace(STLModel.archive_path, "\\", "/")
+                            for p in path_exc:
+                                q = q.filter(~_n.like(p.rstrip("/") + "/%"))
                     if not skip_date:
                         def _dc(pairs):
                             return [and_(STLModel.release_year == y, STLModel.release_month == mo) if mo is not None else (STLModel.release_year == y) for y, mo in pairs]
-                        if date_inc:     q = q.filter(or_(*_dc(date_inc)))
-                        if date_exc:     q = q.filter(~or_(*_dc(date_exc)))
-                    if sculptor_inc:     q = q.filter(STLModel.sculptor_id.in_(sculptor_inc))
-                    if sculptor_exc:     q = q.filter(~STLModel.sculptor_id.in_(sculptor_exc))
+                        if date_inc:    q = q.filter(or_(*_dc(date_inc)))
+                        if date_exc:    q = q.filter(~or_(*_dc(date_exc)))
+                    if not skip_sculptor:
+                        if sculptor_inc: q = q.filter(STLModel.sculptor_id.in_(sculptor_inc))
+                        if sculptor_exc: q = q.filter(~STLModel.sculptor_id.in_(sculptor_exc))
                     if not skip_col:
                         if collection_inc:  q = q.filter(STLModel.collection_id.in_(collection_inc))
                         if collection_exc:  q = q.filter(~STLModel.collection_id.in_(collection_exc))
                     if not skip_sub:
                         if subcollection_inc: q = q.filter(STLModel.subcollection_id.in_(subcollection_inc))
                         if subcollection_exc: q = q.filter(~STLModel.subcollection_id.in_(subcollection_exc))
-                    if category_inc:     q = q.filter(STLModel.category_id.in_(category_inc))
-                    if category_exc:     q = q.filter(~STLModel.category_id.in_(category_exc))
+                    if not skip_category:
+                        if category_inc: q = q.filter(STLModel.category_id.in_(category_inc))
+                        if category_exc: q = q.filter(~STLModel.category_id.in_(category_exc))
                     if not skip_rel:
                         if release_inc:  q = q.filter(STLModel.release_id.in_(release_inc))
                         if release_exc:  q = q.filter(~STLModel.release_id.in_(release_exc))
-                    if scale_inc:        q = q.filter(STLModel.scale_id.in_(scale_inc))
-                    if scale_exc:        q = q.filter(~STLModel.scale_id.in_(scale_exc))
-                    if presupports_inc:  q = q.filter(STLModel.presupports.in_(presupports_inc))
-                    if presupports_exc:  q = q.filter(~STLModel.presupports.in_(presupports_exc))
-                    if warning_inc:      q = q.filter(or_(*(STLModel.warning.contains(w) for w in warning_inc)))
-                    if warning_exc:      q = q.filter(and_(*(~STLModel.warning.contains(w) for w in warning_exc)))
+                    if not skip_scale:
+                        if scale_inc:    q = q.filter(STLModel.scale_id.in_(scale_inc))
+                        if scale_exc:    q = q.filter(~STLModel.scale_id.in_(scale_exc))
+                    if not skip_presupports:
+                        if presupports_inc: q = q.filter(STLModel.presupports.in_(presupports_inc))
+                        if presupports_exc: q = q.filter(~STLModel.presupports.in_(presupports_exc))
+                    if not skip_warning:
+                        if warning_inc:  q = q.filter(or_(*(STLModel.warning.contains(w) for w in warning_inc)))
+                        if warning_exc:  q = q.filter(and_(*(~STLModel.warning.contains(w) for w in warning_exc)))
                     if has_value_groups:
                         for _k in has_value_groups:
                             _c2 = {"creator": lambda: and_(STLModel.creator.isnot(None), STLModel.creator != ""), "tag": lambda: STLModel.tags.any(), "source": lambda: and_(STLModel.source.isnot(None), STLModel.source != ""), "date": lambda: STLModel.release_year.isnot(None), "sculptor": lambda: STLModel.sculptor_id.isnot(None), "collection": lambda: STLModel.collection_id.isnot(None), "subcollection": lambda: STLModel.subcollection_id.isnot(None), "category": lambda: STLModel.category_id.isnot(None), "release": lambda: STLModel.release_id.isnot(None), "scale": lambda: STLModel.scale_id.isnot(None), "presupports": lambda: and_(STLModel.presupports.isnot(None), STLModel.presupports != ""), "warning": lambda: and_(STLModel.warning.isnot(None), STLModel.warning != "")}.get(_k)
@@ -1914,17 +2039,19 @@ class BrowserTab(QWidget):
                             if _c2: q = q.filter(~_c2())
                     return [rid for (rid,) in q.all()]
 
-                # Only scope a section when other filters are active
-                if _has_base or _has_date or _has_col or _has_sub or _has_rel:
-                    scope_by_section["tag"]         = _run_id_query(skip_tag=True)
-                if _has_base or _has_tag or _has_col or _has_sub or _has_rel:
-                    scope_by_section["date"]        = _run_id_query(skip_date=True)
-                if _has_base or _has_tag or _has_date or _has_sub or _has_rel:
-                    scope_by_section["collection"]  = _run_id_query(skip_col=True)
-                if _has_base or _has_tag or _has_date or _has_col or _has_rel:
-                    scope_by_section["subcollection"] = _run_id_query(skip_sub=True)
-                if _has_base or _has_tag or _has_date or _has_col or _has_sub:
-                    scope_by_section["release"]     = _run_id_query(skip_rel=True)
+                scope_by_section["creator"]       = _run_id_query(skip_creator=True)
+                scope_by_section["source"]        = _run_id_query(skip_type=True)
+                scope_by_section["tag"]           = _run_id_query(skip_tag=True)
+                scope_by_section["path"]          = _run_id_query(skip_path=True)
+                scope_by_section["date"]          = _run_id_query(skip_date=True)
+                scope_by_section["sculptor"]      = _run_id_query(skip_sculptor=True)
+                scope_by_section["collection"]    = _run_id_query(skip_col=True)
+                scope_by_section["subcollection"] = _run_id_query(skip_sub=True)
+                scope_by_section["category"]      = _run_id_query(skip_category=True)
+                scope_by_section["release"]       = _run_id_query(skip_rel=True)
+                scope_by_section["scale"]         = _run_id_query(skip_scale=True)
+                scope_by_section["presupports"]   = _run_id_query(skip_presupports=True)
+                scope_by_section["warning"]       = _run_id_query(skip_warning=True)
             finally:
                 _session.close()
 

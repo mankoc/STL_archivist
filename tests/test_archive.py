@@ -275,14 +275,25 @@ def test_find_url_file_same_dir_fallback(tmp_path):
     assert result == "https://cults3d.com/model"
 
 
-def test_find_url_file_parent_dir_fallback(tmp_path):
-    """A .url file one level up is used when lower levels have none."""
+def test_find_url_file_grandparent_not_searched(tmp_path):
+    """A .url file one level above the archive's parent is NOT returned (search is restricted)."""
     sub = tmp_path / "release"
     sub.mkdir()
     p = _make_zip(sub, members=[("model.stl", b"solid")])
     (tmp_path / "artist.url").write_text(
         "[InternetShortcut]\nURL=https://patreon.com/artist\n"
     )
+    assert find_url_file(p) is None
+
+
+def test_find_url_file_links_folder_fallback(tmp_path):
+    """A .url file in a *-links sibling folder is used."""
+    links_dir = tmp_path / "Patreon-links"
+    links_dir.mkdir()
+    (links_dir / "artist.url").write_text(
+        "[InternetShortcut]\nURL=https://patreon.com/artist\n"
+    )
+    p = _make_zip(tmp_path, members=[("model.stl", b"solid")])
     result = find_url_file(p)
     assert result == "https://patreon.com/artist"
 

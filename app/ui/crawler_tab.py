@@ -3,7 +3,7 @@ Tab 1 – Crawler controls: folder picker, start/stop, progress bar, log.
 """
 from PyQt6.QtCore import Qt, QSettings, pyqtSignal
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
+    QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QFileDialog,
     QProgressBar, QPlainTextEdit, QSizePolicy,
     QComboBox, QInputDialog, QMessageBox, QApplication, QToolButton, QToolTip,
@@ -119,6 +119,14 @@ class CrawlerTab(QWidget):
         self._preview_label.setStyleSheet("color: #555; font-style: italic;")
         pattern_layout.addWidget(self._preview_label)
 
+        self._use_pattern_check = QCheckBox("Apply path pattern to metadata extraction")
+        self._use_pattern_check.setChecked(True)
+        self._use_pattern_check.setEnabled(False)
+        self._pattern_edit.textChanged.connect(
+            lambda t: self._use_pattern_check.setEnabled(bool(t.strip()))
+        )
+        pattern_layout.addWidget(self._use_pattern_check)
+
         root.addWidget(pattern_group)
 
         # --- Progress bar ---
@@ -141,6 +149,17 @@ class CrawlerTab(QWidget):
 
         self._force_rescan_check = QCheckBox("Force rescan (re-extract all archives regardless of hash)")
         root.addWidget(self._force_rescan_check)
+
+        # --- Metadata overrides ---
+        overrides_group = QGroupBox("Override metadata (leave blank to auto-detect)")
+        overrides_form = QFormLayout(overrides_group)
+        self._force_creator_edit = QLineEdit()
+        self._force_creator_edit.setPlaceholderText("e.g. CA3D")
+        overrides_form.addRow("Creator:", self._force_creator_edit)
+        self._force_source_edit = QLineEdit()
+        self._force_source_edit.setPlaceholderText("e.g. Patreon")
+        overrides_form.addRow("Type / Source:", self._force_source_edit)
+        root.addWidget(overrides_group)
 
         # --- Control buttons ---
         style = QApplication.style()
@@ -332,11 +351,15 @@ class CrawlerTab(QWidget):
         self._bg_btn.setEnabled(True)
 
         pattern = self._pattern_edit.text().strip()
+        if not self._use_pattern_check.isChecked():
+            pattern = ""
         max_thumbs = get_max_thumbnails() if self._generate_thumbs_check.isChecked() else 0
         config = build_crawler_config(
             max_thumbnails=max_thumbs,
             force_rescan=self._force_rescan_check.isChecked(),
         )
+        config.force_creator = self._force_creator_edit.text().strip()
+        config.force_source  = self._force_source_edit.text().strip()
         self._worker = CrawlerWorker(source, pattern=pattern, config=config)
         self._worker.log.connect(self._on_log)
         self._worker.progress.connect(self._on_progress)
