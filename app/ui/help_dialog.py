@@ -344,10 +344,9 @@ and checks <em>only</em> the clicked item. This is a quick way to isolate a sing
 tag, or category without having to manually uncheck everything else.</p>
 
 <h2>Faceted (Cascading) Filtering</h2>
-<p>The <b>Tags</b>, <b>Date</b>, <b>Collection</b>, <b>Subcollection</b>, and <b>Release</b>
-groups update dynamically whenever any other filter changes:</p>
+<p>All filter sections update dynamically whenever any other filter changes:</p>
 <ul>
-  <li>Each of these five sections shows only the values that exist among the models currently
+  <li>Each section shows only the values that exist among the models currently
       passing all <em>other</em> active filters.</li>
   <li>A section&rsquo;s own filter is <b>not</b> included in its own scope &mdash; so selecting
       one release does not hide the other releases in that group. You can always pick
@@ -363,7 +362,7 @@ without the list collapsing further.</div>
 <p>When <em>Show model counts in filter pane</em> is enabled in
 <b>Configuration &rarr; Browser</b>, each filter item shows the number of matching models
 in parentheses — for example <code>Jane Doe (42)</code>. Path tree nodes accumulate the
-counts of all archives in their subtrees. Counts in the five cascading sections reflect
+counts of all archives in their subtrees. Counts in each section reflect
 the current scope, not the full database.</p>
 
 <h2>Group Header Filters</h2>
@@ -507,6 +506,46 @@ Extracted:
 <em>Saved</em> dropdown. Select a saved pattern and click <b>Delete</b> to remove it.
 The <b>Preview</b> line updates in real time as you type, showing what a randomly
 chosen file path would extract.</p>
+
+<h2>Apply Path Pattern Toggle</h2>
+<p>The <b>Apply path pattern to metadata extraction</b> checkbox (below the pattern input)
+controls whether the pattern is actually used during the crawl. It is enabled only when
+the pattern field contains text.</p>
+<ul>
+  <li><b>Checked</b> — pattern extraction is active; field values are inferred from the
+      folder structure.</li>
+  <li><b>Unchecked</b> — the pattern is saved for future use but <em>not</em> applied;
+      only automatic inference and <code>info.json</code> are used.</li>
+</ul>
+<div class="tip">Tip: untick the checkbox when you want to try a crawl without pattern
+extraction but don&rsquo;t want to lose the pattern text you typed.</div>
+
+<h2>Override Metadata</h2>
+<p>Expand the <b>Override metadata (leave blank to auto-detect)</b> group to force specific
+field values across every archive in the current crawl:</p>
+<table>
+  <tr><th>Field</th><th>Effect</th></tr>
+  <tr><td><b>Creator</b></td>
+      <td>Overrides the author/creator field on every imported archive.
+          Useful when crawling a folder that belongs entirely to one artist.</td></tr>
+  <tr><td><b>Type / Source</b></td>
+      <td>Overrides the source platform field (e.g. <code>Patreon</code>,
+          <code>Kickstarter</code>) on every imported archive.
+          Useful when the folder name does not match a known platform keyword.</td></tr>
+</table>
+<p>Leave either field blank to use the auto-detected value as normal. Override values are
+applied after all automatic inference, so they always take precedence over path patterns
+and <code>info.json</code>.</p>
+
+<h2>Update Crawled Folders</h2>
+<p>Open <b>Tools &rarr; Update Crawled Folders&hellip;</b> to re-crawl all folders that were
+previously imported. The dialog shows a checkbox list of every stored folder:</p>
+<ul>
+  <li>All folders are pre-selected; untick any you want to skip.</li>
+  <li>Use <b>Select All</b> / <b>Deselect All</b> to quickly toggle the whole list.</li>
+  <li>Click <b>Start</b> to process only the checked folders sequentially;
+      the progress bar and log update for each folder in turn.</li>
+</ul>
 
 <h2>Automatic Metadata Inference (without a pattern)</h2>
 <p>Even without a pattern, the crawler infers some metadata from the folder structure:</p>
@@ -742,6 +781,10 @@ The dialog is divided into sections shown in a tree on the left.</p>
       <td>A <code>.zip</code> / <code>.7z</code> / <code>.rar</code> is found inside the archive</td></tr>
   <tr><td>Support files detected</td>
       <td>Files matching a custom list of support-related name patterns are present</td></tr>
+  <tr><td>Archive without printable files</td>
+      <td>The archive contains no file with a printable extension
+          (<code>.stl</code>, <code>.obj</code>, <code>.lys</code>, <code>.chitubox</code>)
+          &mdash; may indicate a non-model archive or a content issue</td></tr>
 </table>
 <p>The <em>Support file patterns</em> list (editable in the Warnings section) defines
 name substrings that trigger the &ldquo;support files detected&rdquo; warning.

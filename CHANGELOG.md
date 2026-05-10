@@ -1,5 +1,51 @@
 # Changelog
 
+## v0.7.0 — 2026-05-10
+
+### UI — Crawler
+
+- **Path pattern toggle** — a new *Apply path pattern to metadata extraction* checkbox
+  sits below the pattern input; it is enabled only when the pattern field is non-empty.
+  Unticking it runs the crawl without path-pattern extraction while keeping the saved
+  pattern text for future use.
+- **Override metadata** — a new *Override metadata (leave blank to auto-detect)* group box
+  exposes two force fields: **Creator** and **Type / Source**. Any non-blank value is
+  applied to every archive in the crawl, overriding whatever was auto-detected from the
+  path or `info.json`.
+
+### UI — Update Crawled Folders dialog
+
+- **Folder selection list** — the dialog now shows a checkbox list of every stored
+  `CrawledFolder` record. All folders are pre-selected; individual folders can be
+  unchecked to skip them. **Select All** / **Deselect All** buttons are provided.
+  The list is disabled while a crawl is in progress and re-enabled on completion.
+
+### UI — Filter Panel
+
+- **Faceted filtering extended to all sections** — all 13 filter sections (Authors, Tags,
+  Type, Date, Sculptor, Category, Subcategory, Release, Scale, Presupports, Warnings,
+  Path, and the group-header has/no-value filters) now update dynamically whenever any
+  other filter changes. Previously only five sections were cascading.
+- **Expansion state preserved** — expanding or collapsing a group with sub-items (e.g.
+  Path tree nodes) no longer collapses unexpanded siblings when a filter is applied or
+  the tree is rebuilt.
+
+### Crawler — Warnings
+
+- **Archive without printable files** — new warning flag raised when an archive contains
+  no file with a printable extension (`.stl`, `.obj`, `.lys`, `.chitubox`). Configurable
+  via **Configuration → Crawler → Warnings → Archive without printable files**.
+
+### Crawler — URL discovery
+
+- **Restricted URL search scope** — `find_url_file()` now limits its search to three
+  locations: (1) a `.url` file inside the archive itself, (2) a `.url` file in the same
+  directory as the archive, and (3) a `.url` file inside any `*-links` or `*_links`
+  sibling folder. Grandparent directory traversal has been removed to avoid picking up
+  unrelated `.url` files from parent artist folders.
+
+---
+
 ## v0.6.0 — 2026-05-08
 
 ### UI — Browser
