@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QMenu, QScrollArea, QFrame, QInputDialog, QMessageBox,
     QStyledItemDelegate, QComboBox, QCompleter,
     QDialog, QSizePolicy, QApplication, QPushButton,
-    QProgressDialog, QStyle, QStyleOptionViewItem,
+    QProgressBar, QProgressDialog, QStyle, QStyleOptionViewItem,
     QTextEdit, QDialogButtonBox,
 )
 from PyQt6.QtCore import QSettings
@@ -127,6 +127,191 @@ class ImageViewerDialog(QDialog):
         layout.addWidget(label)
 
         self.resize(scaled.width(), scaled.height())
+
+
+class RescanWorker(QThread):
+    """Background thread that re-extracts metadata for a list of model IDs."""
+
+    progress    = pyqtSignal(int, int, str)  # (current_index, total, filename)
+    file_error  = pyqtSignal(str, str)       # (filename, error_message)
+    finished_ok = pyqtSignal(int)            # updated_count
+
+    def __init__(self, model_ids: list[int], parent=None) -> None:
+        super().__init__(parent)
+        self._model_ids = model_ids
+        self._stop = False
+
+    def stop(self) -> None:
+        self._stop = True
+
+    def run(self) -> None:
+        import logging
+        from pathlib import Path
+        from app.crawler.archive import archive_hash, extract_archive_contents
+        from app.crawler.metadata import extract_metadata
+        from app.crawler.rules import detect_warnings, detect_presupport, detect_scale
+        from app.config import CrawlerConfig
+        from app.database.db import session_scope
+        from app.database.models import STLModel, STLFile
+        from app.database.helpers import get_or_create_scale
+        from app.ui.config_dialog import (
+            get_warn_presupported_stl, get_warn_no_images, get_warn_nested_archive,
+            get_store_stl_file_list, get_presupport_patterns,
+        )
+        from app.utils.path_pattern import parse_release_date
+
+        _log = logging.getLogger(__name__)
+        config = CrawlerConfig()
+        total = len(self._model_ids)
+        updated = 0
+
+        for i, mid in enumerate(self._model_ids, start=1):
+            if self._stop:
+                break
+            with session_scope() as session:
+                m = session.get(STLModel, mid)
+                if not m or not m.archive_path:
+                    self.progress.emit(i, total, "")
+                    continue
+                p = Path(m.archive_path)
+                self.progress.emit(i, total, p.name)
+                try:
+                    if not p.exists():
+                        self.file_error.emit(p.name, "Archive not found")
+                        continue
+
+                    try:
+                        st = p.stat()
+                        fs_size  = int(st.st_size)
+                        fs_mtime = int(st.st_mtime_ns)
+                    except Exception:
+                        fs_size = fs_mtime = None
+
+                    need_hash = not (
+                        fs_size is not None and fs_mtime is not None
+                        and m.archive_size is not None and m.archive_mtime_ns is not None
+                        and fs_size == m.archive_size and fs_mtime == m.archive_mtime_ns
+                    )
+                    new_hash = archive_hash(p, unrar_path=config.unrar_path) if need_hash else m.archive_hash
+
+                    all_names: list[str] = []
+                    uncompressed_out: list[int] = []
+                    contents = extract_archive_contents(
+                        p,
+                        unrar_path=config.unrar_path,
+                        all_names_out=all_names,
+                        stl_info_out=None,
+                        uncompressed_size_out=uncompressed_out,
+                    )
+                    uncompressed = uncompressed_out[0] if uncompressed_out else None
+                    meta = extract_metadata(p, contents=contents, source_dir=p.parent)
+
+                    m.archive_hash    = new_hash
+                    m.archive_size    = fs_size
+                    m.archive_mtime_ns = fs_mtime
+                    if uncompressed and uncompressed > 0 and fs_size is not None:
+                        m.compression_rate = round(fs_size / uncompressed, 4)
+
+                    m.title       = meta.title       or m.title
+                    m.creator     = meta.creator     or m.creator
+                    m.source      = meta.distributor or m.source
+                    if meta.release_date:
+                        ry, rm = parse_release_date(meta.release_date)
+                        if ry is not None:
+                            m.release_year  = ry
+                            m.release_month = rm
+                    m.url         = meta.url         or m.url
+                    m.description = meta.description or m.description
+
+                    m.presupports = detect_presupport(all_names)
+                    warnings = detect_warnings(
+                        all_names,
+                        check_presupported=get_warn_presupported_stl(),
+                        check_no_images=get_warn_no_images(),
+                        check_nested_archive=get_warn_nested_archive(),
+                        check_supports=get_warn_presupported_stl(),
+                        supports_patterns=get_presupport_patterns(),
+                    )
+                    m.warning = warnings or None
+
+                    scales = detect_scale([p.name] + all_names)
+                    if scales:
+                        m.scale = get_or_create_scale(session, scales[0])
+
+                    if get_store_stl_file_list():
+                        for old in list(m.stl_files):
+                            session.delete(old)
+                        session.flush()
+                        _stl_exts = {'.stl', '.obj', '.lys', '.chitubox'}
+                        for fname in all_names:
+                            if Path(fname.replace('\\', '/')).suffix.lower() in _stl_exts:
+                                session.add(STLFile(model=m, filename=fname,
+                                                    file_size=None, archive_hash=new_hash))
+
+                    updated += 1
+                except Exception as exc:
+                    _log.exception("Rescan failed for %s", p)
+                    self.file_error.emit(p.name, str(exc))
+
+        self.finished_ok.emit(updated)
+
+
+class RescanProgressDialog(QDialog):
+    """Progress window for a running RescanWorker; supports 'Send to Background'."""
+
+    def __init__(self, worker: RescanWorker, total: int, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Rescan Files")
+        self.setMinimumWidth(440)
+        self.setModal(True)
+        self._worker = worker
+        self._in_background = False
+
+        layout = QVBoxLayout(self)
+
+        self._label = QLabel(f"Rescanning 0 / {total}…")
+        self._label.setWordWrap(True)
+        layout.addWidget(self._label)
+
+        self._bar = QProgressBar()
+        self._bar.setRange(0, total)
+        self._bar.setValue(0)
+        self._bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        layout.addWidget(self._bar)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        self._bg_btn     = QPushButton("Send to Background")
+        self._cancel_btn = QPushButton("Cancel")
+        btn_row.addWidget(self._bg_btn)
+        btn_row.addWidget(self._cancel_btn)
+        layout.addLayout(btn_row)
+
+        worker.progress.connect(self._on_progress)
+        worker.finished_ok.connect(self._on_worker_done)
+        self._bg_btn.clicked.connect(self._send_to_bg)
+        self._cancel_btn.clicked.connect(self._cancel)
+
+    def _on_progress(self, current: int, total: int, filename: str) -> None:
+        self._bar.setValue(current)
+        name = filename or "…"
+        self._label.setText(f"Rescanning {current} / {total}: {name}")
+
+    def _on_worker_done(self, _updated: int) -> None:
+        if not self._in_background:
+            self.accept()
+
+    def _send_to_bg(self) -> None:
+        self._in_background = True
+        self.accept()
+
+    def _cancel(self) -> None:
+        self._worker.stop()
+        self.reject()
+
+    @property
+    def in_background(self) -> bool:
+        return self._in_background
 
 
 class _ComboDelegate(QStyledItemDelegate):
@@ -2648,129 +2833,37 @@ class BrowserTab(QWidget):
         QMessageBox.information(self, "Recrawl complete", f"Recrawl applied for {len(model_ids)} model(s).")
 
     def _rescan_files(self, model_ids: list[int]) -> None:
-        """Run validations and re-extract metadata for the selected files.
+        """Re-extract metadata for the selected files in a background thread.
 
-        This is a faster, focused check compared to a full recrawl: it will
-        compute the archive hash if the filesystem indicates modification,
-        re-run rule detection (warnings), refresh STL file list (if enabled),
-        and update metadata fields from info.json/.url.
+        Shows a progress dialog with a 'Send to Background' button. When sent
+        to background the thread keeps running and reports completion via the
+        status bar instead of a modal dialog.
         """
         if not model_ids:
             return
 
-        from app.crawler.archive import archive_hash, extract_archive_contents
-        from app.crawler.metadata import extract_metadata
-        from app.config import CrawlerConfig
-        from app.database.db import session_scope
-        from app.ui.config_dialog import (
-            get_warn_presupported_stl, get_warn_no_images, get_warn_nested_archive,
-            get_store_stl_file_list, get_presupport_patterns,
-        )
+        worker = RescanWorker(model_ids, parent=self)
+        dlg    = RescanProgressDialog(worker, len(model_ids), parent=self)
 
-        config = CrawlerConfig()
-        updated = 0
-        for mid in model_ids:
-            # Use a separate transactional scope per model so failures don't
-            # roll back other models' updates.
-            with session_scope() as session:
-                m = session.get(STLModel, mid)
-                if not m or not m.archive_path:
-                    continue
-                p = Path(m.archive_path)
-                try:
-                    if not p.exists():
-                        QMessageBox.warning(self, "Rescan", f"Archive not found: {m.archive_path}")
-                        continue
+        def _on_done(updated: int) -> None:
+            if dlg.in_background:
+                sb = self.window().statusBar()
+                if sb:
+                    sb.showMessage(f"Rescan complete: {updated} model(s) updated.", 5000)
+            else:
+                QMessageBox.information(
+                    self, "Rescan complete",
+                    f"Rescan applied for {updated} model(s).",
+                )
+            self.refresh()
 
-                    # Quick check: if size/mtime matches DB, skip heavy work
-                    try:
-                        st = p.stat()
-                        fs_size = int(st.st_size)
-                        fs_mtime = int(st.st_mtime_ns)
-                    except Exception:
-                        fs_size = None
-                        fs_mtime = None
+        def _on_error(filename: str, err: str) -> None:
+            QMessageBox.warning(self, "Rescan failed", f"Failed to rescan {filename}:\n{err}")
 
-                    need_hash = True
-                    if fs_size is not None and fs_mtime is not None and m.archive_size is not None and m.archive_mtime_ns is not None:
-                        if fs_size == m.archive_size and fs_mtime == m.archive_mtime_ns:
-                            need_hash = False
-
-                    if need_hash:
-                        new_hash = archive_hash(p, unrar_path=config.unrar_path)
-                    else:
-                        new_hash = m.archive_hash
-
-                    # Extract files we need and capture the full member list so we can
-                    # run the validation rules without opening the archive twice.
-                    all_names: list[str] = []
-                    contents = extract_archive_contents(
-                        p,
-                        unrar_path=config.unrar_path,
-                        all_names_out=all_names,
-                        stl_info_out=None,
-                    )
-                    meta = extract_metadata(p, contents=contents, source_dir=p.parent)
-
-                    # Update model in-place
-                    m.archive_hash = new_hash
-                    try:
-                        m.archive_size = fs_size
-                        m.archive_mtime_ns = fs_mtime
-                    except Exception:
-                        pass
-                    # assign metadata fields
-                    m.title = meta.title or m.title
-                    m.creator = meta.creator or m.creator
-                    m.source = meta.distributor or m.source
-                    if meta.release_date:
-                        ry, rm = parse_release_date(meta.release_date)
-                        if ry is not None:
-                            m.release_year = ry
-                            m.release_month = rm
-                    m.url = meta.url or m.url
-                    m.description = meta.description or m.description
-
-                    # Recompute presupports/warnings/scale using the full member list
-                    from app.crawler.rules import detect_warnings, detect_presupport, detect_scale
-                    m.presupports = detect_presupport(all_names)
-                    warnings = detect_warnings(
-                        all_names,
-                        check_presupported=get_warn_presupported_stl(),
-                        check_no_images=get_warn_no_images(),
-                        check_nested_archive=get_warn_nested_archive(),
-                        check_supports=get_warn_presupported_stl(),
-                        supports_patterns=get_presupport_patterns(),
-                    )
-                    m.warning = warnings or None
-
-                    # Re-detect scale and update model.scale if found
-                    scales = detect_scale([p.name] + all_names)
-                    if scales:
-                        from app.database.helpers import get_or_create_scale
-                        m.scale = get_or_create_scale(session, scales[0])
-
-                    if get_store_stl_file_list():
-                        # Refresh stl_files entries
-                        for old in list(m.stl_files):
-                            session.delete(old)
-                        session.flush()
-                        from app.database.models import STLFile
-                        for fname in [n for n in (all_names or []) if Path(n.replace('\\', '/')).suffix.lower() in {'.stl', '.obj', '.lys', '.chitubox'}]:
-                            session.add(STLFile(model=m, filename=fname, file_size=None, archive_hash=new_hash))
-
-                    updated += 1
-                except Exception as exc:
-                    # Protect the UI from uncaught exceptions during rescan of
-                    # an individual archive. Inform the user and continue.
-                    logger = __import__("logging").getLogger(__name__)
-                    logger.exception("Rescan failed for %s: %s", p, exc)
-                    QMessageBox.warning(self, "Rescan failed", f"Failed to rescan {p}: {exc}")
-                    continue
-
-        QMessageBox.information(self, "Rescan complete", f"Rescan applied for {updated} model(s).")
-        # Refresh the browser so any updated warnings / presupports / scale are shown
-        self.refresh()
+        worker.finished_ok.connect(_on_done)
+        worker.file_error.connect(_on_error)
+        worker.start()
+        dlg.exec()
 
     def _delete_files_from_disk(self, model_ids: list[int]) -> None:
         """Confirm with the user, then delegate to the file-deletion service.
