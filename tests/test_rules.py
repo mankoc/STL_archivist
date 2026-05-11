@@ -81,7 +81,7 @@ def test_warn_images_present_suppresses_warning():
 def test_warn_nested_archive():
     names = ["body.stl", "extras.zip"]
     out = detect_warnings(names, check_presupported=False, check_no_images=False)
-    assert "Archive inside archive" in out
+    assert "Nested archives" in out
 
 
 def test_warn_all_disabled_returns_empty():
@@ -173,7 +173,7 @@ def test_warn_webp_image_suppresses_no_images_warning():
 def test_warn_rar_nested_archive():
     names = ["model.stl", "extras.rar"]
     out = detect_warnings(names, check_presupported=False, check_no_images=False)
-    assert "Archive inside archive" in out
+    assert "Nested archives" in out
 
 
 def test_warn_multiple_warnings_joined_by_newline():

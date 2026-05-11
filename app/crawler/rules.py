@@ -172,8 +172,8 @@ def detect_warnings(
         warnings.append("Archive without images")
         logger.debug("  Warning: archive without images")
     if check_nested_archive and has_nested_archive:
-        warnings.append("Archive inside archive")
-        logger.debug("  Warning: archive inside archive")
+        warnings.append("Nested archives")
+        logger.debug("  Warning: nested archives")
     if check_supports and has_supported_stl:
         warnings.append("Archive with supports")
         logger.debug("  Warning: archive with supports")
