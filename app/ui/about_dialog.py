@@ -40,7 +40,7 @@ class AboutDialog(QDialog):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("About STL Database")
+        self.setWindowTitle("About stlLibrary")
         self.resize(540, 420)
         self._build_ui()
 
@@ -49,7 +49,7 @@ class AboutDialog(QDialog):
 
         from app import __version__
         header = QLabel(
-            f"<b>STL Database</b> v{__version__}<br>"
+            f"<b>stlLibrary</b> v{__version__}<br>"
             "A desktop application for cataloguing and browsing<br>"
             "3D-print model archives.<br><br>"
             "Built with Python + PyQt6 + SQLAlchemy."

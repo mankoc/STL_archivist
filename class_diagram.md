@@ -1,4 +1,4 @@
-# STL Database — Class Diagram
+# stlLibrary — Class Diagram
 
 ```mermaid
 classDiagram

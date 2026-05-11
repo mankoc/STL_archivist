@@ -10,7 +10,7 @@ import logging.handlers
 import shutil
 from pathlib import Path
 
-LOG_FILENAME = "stl_database.log"
+LOG_FILENAME = "stlLibrary.log"
 MAX_LOG_SIZE = 10 * 1024 * 1024   # 10 MB before rotation
 BACKUP_COUNT = 3                   # number of compressed backups to keep
 

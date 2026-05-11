@@ -16,7 +16,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("STL Database")
+        self.setWindowTitle("stlLibrary")
         self.resize(1280, 860)
         self._build_ui()
 
@@ -55,7 +55,7 @@ class MainWindow(QMainWindow):
         self._act_exit = QAction(
             style.standardIcon(SP.SP_DialogCloseButton), "Exit", self)
         self._act_exit.setShortcut(QKeySequence.StandardKey.Quit)
-        self._act_exit.setStatusTip("Quit STL Database")
+        self._act_exit.setStatusTip("Quit stlLibrary")
         self._act_exit.triggered.connect(QApplication.quit)
 
         self._act_image_grid = QAction(
@@ -72,7 +72,7 @@ class MainWindow(QMainWindow):
 
         self._act_about = QAction(
             style.standardIcon(SP.SP_MessageBoxInformation), "About…", self)
-        self._act_about.setStatusTip("About STL Database")
+        self._act_about.setStatusTip("About stlLibrary")
         self._act_about.triggered.connect(self._show_about)
 
         self._act_help = QAction(

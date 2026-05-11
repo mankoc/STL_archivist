@@ -1,5 +1,5 @@
 """
-Multi-page help reference for STL Database.
+Multi-page help reference for stlLibrary.
 
 Navigation is handled internally: pages are stored as HTML-returning callables
 keyed by a page-ID string.  Hyperlinks use the custom scheme  help:<page_id>
@@ -142,8 +142,8 @@ def _page_overview() -> str:
     # Import version here to avoid module-level circular imports
     from app import __version__
     return _css() + _nav_bar(PAGE_OVERVIEW) + f"""
-<h1>STL Database v{__version__} &mdash; Help</h1>
-<p>STL Database is a desktop application for cataloguing and browsing local collections
+<h1>stlLibrary v{__version__} &mdash; Help</h1>
+<p>stlLibrary is a desktop application for cataloguing and browsing local collections
 of 3D-printable model archives (<code>.zip</code>, <code>.7z</code>, <code>.rar</code>).
 It extracts thumbnails, infers metadata from folder structure, and stores everything in
 a local SQLite + LMDB database so you can search, filter, and tag your collection.</p>
@@ -152,7 +152,7 @@ a local SQLite + LMDB database so you can search, filter, and tag your collectio
 <ol>
   <li>Launch the application: <code>python main.py</code></li>
   <li>Open <b>File &rarr; Configuration&hellip;</b> and set the <em>Data Directory</em>
-      (defaults to <code>~/.stl_database</code>).</li>
+      (defaults to <code>~/.local/share/stlLibrary</code>).</li>
   <li>Click <b>Open Crawler&hellip;</b> (toolbar or <span class="kb">Ctrl+O</span>)
       and select the root folder that contains your archive files.</li>
   <li>Optionally enter a <em>path pattern</em> such as
@@ -745,7 +745,7 @@ The dialog is divided into sections shown in a tree on the left.</p>
   <tr><th>Setting</th><th>Description</th></tr>
   <tr><td>Data Directory</td>
       <td>Where the <code>.db</code> file, LMDB thumbnail store, and log files are kept.
-          Default: <code>~/.stl_database</code>.
+          Default: <code>~/.local/share/stlLibrary</code>.
           <b>A restart is required after changing this.</b></td></tr>
   <tr><td>unrar path</td>
       <td>Full path to the <code>unrar</code> binary, required to open
@@ -1118,7 +1118,7 @@ class HelpDialog(QDialog):
 
     def __init__(self, parent=None, start_page: str = PAGE_OVERVIEW) -> None:
         super().__init__(parent)
-        self.setWindowTitle("STL Database — Help")
+        self.setWindowTitle("stlLibrary — Help")
         self.resize(960, 720)
 
         self._history: list[str] = []

@@ -45,20 +45,20 @@ def _platform_defaults() -> dict:
 
     if sys.platform == "win32":
         local_app_data = os.environ.get("LOCALAPPDATA", str(Path.home()))
-        data_dir       = str(Path(local_app_data) / "STL Database")
+        data_dir       = str(Path(local_app_data) / "stlLibrary")
         color_scheme   = "Windows 11 Dark"
         unrar_hint     = (
             r"C:\Program Files\WinRAR\UnRAR.exe  "
             r"(or C:\Program Files (x86)\WinRAR\UnRAR.exe)"
         )
     elif sys.platform == "darwin":
-        data_dir     = str(Path.home() / "Library" / "Application Support" / "STL Database")
+        data_dir     = str(Path.home() / "Library" / "Application Support" / "stlLibrary")
         color_scheme = "System Default"
         unrar_hint   = "/opt/homebrew/bin/unrar  (or /usr/local/bin/unrar)"
     else:
         # Linux / BSD — follow XDG Base Directory spec
         xdg_data = os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))
-        data_dir     = str(Path(xdg_data) / "stl_database")
+        data_dir     = str(Path(xdg_data) / "stlLibrary")
         color_scheme = "System Default"
         unrar_hint   = "/usr/bin/unrar"
 
@@ -108,7 +108,7 @@ def get_unrar_path() -> str:
 
 
 def get_db_path() -> str:
-    return str(Path(get_data_dir()) / "stl_database.db")
+    return str(Path(get_data_dir()) / "stlLibrary.db")
 
 
 def _library_settings_path(data_dir: str | None = None) -> Path:

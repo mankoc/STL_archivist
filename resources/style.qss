@@ -1,4 +1,4 @@
-/* VS Code Dark+ stylesheet for STL Database */
+/* VS Code Dark+ stylesheet for stlLibrary */
 
 QWidget {
     background-color: #1e1e1e;

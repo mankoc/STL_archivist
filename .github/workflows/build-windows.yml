@@ -45,13 +45,13 @@ jobs:
 
       - name: Rename executable with version
         shell: bash
-        run: mv dist/STLDatabase.exe "dist/STLDatabase-${{ steps.version.outputs.value }}.exe"
+        run: mv dist/stlLibrary.exe "dist/stlLibrary-${{ steps.version.outputs.value }}.exe"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v6
         with:
-          name: STLDatabase-windows-${{ steps.version.outputs.value }}
-          path: dist/STLDatabase-${{ steps.version.outputs.value }}.exe
+          name: stlLibrary-windows-${{ steps.version.outputs.value }}
+          path: dist/stlLibrary-${{ steps.version.outputs.value }}.exe
           if-no-files-found: error
 
       - name: Create GitHub Release
@@ -62,4 +62,4 @@ jobs:
           tag_name: ${{ steps.version.outputs.value }}
           prerelease: ${{ contains(steps.version.outputs.value, 'alpha') || contains(steps.version.outputs.value, 'beta') || contains(steps.version.outputs.value, 'rc') }}
           generate_release_notes: true
-          files: dist/STLDatabase-${{ steps.version.outputs.value }}.exe
+          files: dist/stlLibrary-${{ steps.version.outputs.value }}.exe

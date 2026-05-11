@@ -2,7 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Run STL Database",
+            "name": "Run stlLibrary",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/main.py",
