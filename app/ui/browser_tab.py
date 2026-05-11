@@ -1043,7 +1043,7 @@ class BrowserTab(QWidget):
 
                 _all_warnings = [w for (w,) in session.query(STLModel.warning).filter(STLModel.warning.isnot(None)).all()]
                 for _wt in ("Models with presupported stl", "Archive without images",
-                            "Archive inside archive", "Archive with supports",
+                            "Nested archives", "Archive with supports",
                             "Archive without printable files"):
                     _wc = sum(1 for w in _all_warnings if _wt in w)
                     _counts[("warning", _wt)] = _wc
@@ -1147,7 +1147,7 @@ class BrowserTab(QWidget):
                 if _warn_sc_ids is not None:
                     _sc_all_warnings = [w for (w,) in session.query(STLModel.warning).filter(STLModel.id.in_(_warn_sc_ids)).filter(STLModel.warning.isnot(None)).all()]
                     for _wt in ("Models with presupported stl", "Archive without images",
-                                "Archive inside archive", "Archive with supports",
+                                "Nested archives", "Archive with supports",
                                 "Archive without printable files"):
                         _scoped_counts[("warning", _wt)] = sum(1 for w in _sc_all_warnings if _wt in w)
                     _scoped_counts[("group", "warning")] = sum(1 for w in _sc_all_warnings if w)
@@ -1372,7 +1372,7 @@ class BrowserTab(QWidget):
                 _WARNING_TYPES = [
                     "Models with presupported stl",
                     "Archive without images",
-                    "Archive inside archive",
+                    "Nested archives",
                     "Archive with supports",
                     "Archive without printable files",
                 ]
@@ -2252,7 +2252,7 @@ class BrowserTab(QWidget):
                 sections.append((w, matched))
             elif w == "Archive without images":
                 sections.append((w, []))
-            elif w == "Archive inside archive":
+            elif w == "Nested archives":
                 matched = [n.replace("\\", "/") for n in names
                            if _P(n.replace("\\", "/")).suffix.lower() in ARCHIVE_SUFFIXES]
                 sections.append((w, matched))

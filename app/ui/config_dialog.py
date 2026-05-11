@@ -745,7 +745,7 @@ class ConfigDialog(QDialog):
             ),
         )
 
-        self._warn_nested_archive_check = QCheckBox("Archive inside archive")
+        self._warn_nested_archive_check = QCheckBox("Nested archives")
         form.addRow("", self._warn_nested_archive_check)
         form.addRow(
             "",
