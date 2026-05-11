@@ -117,6 +117,14 @@ def _check_db_on_startup(db_path: str, splash=None) -> str:
     return db_path
 
 
+def _migrate_db_filename(new_db_path: str) -> None:
+    """Rename stl_database.db → stlLibrary.db if the old file exists and the new one doesn't."""
+    new = Path(new_db_path)
+    old = new.parent / "stl_database.db"
+    if old.exists() and not new.exists():
+        old.rename(new)
+
+
 def main() -> None:
     app = QApplication(sys.argv)
     app.setStyle("Fusion")  # flat base style — QSS overrides work fully on all platforms
@@ -147,7 +155,9 @@ def main() -> None:
     )
 
     _update_splash(splash, "Opening database…")
-    db_path = _check_db_on_startup(get_db_path(), splash)
+    db_path = get_db_path()
+    _migrate_db_filename(db_path)
+    db_path = _check_db_on_startup(db_path, splash)
     init_db(db_path)
 
     _update_splash(splash, "Applying theme…")

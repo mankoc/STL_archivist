@@ -639,6 +639,7 @@ class BrowserTab(QWidget):
     """
 
     model_count_changed = pyqtSignal(int)
+    loading_started = pyqtSignal()
     # Emitted when a background thumbnail generation reports progress
     thumbnail_progress_updated = pyqtSignal(int, int)
     thumbnail_finished = pyqtSignal()
@@ -1511,6 +1512,7 @@ class BrowserTab(QWidget):
         *date_filters* / *date_exc_filters* are lists of (year, month_or_None) tuples.
         """
         self._loading = True
+        self.loading_started.emit()
         self._model.removeRows(0, self._model.rowCount())
         session = get_session()
 
