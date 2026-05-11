@@ -1169,7 +1169,7 @@ class BrowserTab(QWidget):
                             _ps = _p.as_posix()
                             _sc_path_counts[_ps] = _sc_path_counts.get(_ps, 0) + _c
                             _f = _p
-                    _scoped_counts[("group", "path")] = len(_path_sc_ids)
+                    _scoped_counts[("group", "path")] = sum(_sc_direct.values())
 
             _SCOPED_KINDS = (
                 "creator", "source", "tag", "date_month", "date_year",
