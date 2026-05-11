@@ -104,6 +104,12 @@ def _migrate_schema(engine) -> None:
                     conn.execute(text(
                         "ALTER TABLE models RENAME COLUMN subcategory_id TO subcollection_id"
                     ))
+                # Rename warning string: "Archive inside archive" → "Nested archives"
+                conn.execute(text(
+                    "UPDATE models SET warning = REPLACE(warning, "
+                    "'Archive inside archive', 'Nested archives') "
+                    "WHERE warning LIKE '%Archive inside archive%'"
+                ))
         finally:
             conn.execute(text("PRAGMA foreign_keys=ON"))
 

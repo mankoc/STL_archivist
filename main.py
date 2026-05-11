@@ -68,7 +68,20 @@ def _show_splash():
     return splash
 
 
-def _check_db_on_startup(db_path: str) -> str:
+def _update_splash(splash, message: str) -> None:
+    if splash is None or not splash.isVisible():
+        return
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtGui import QColor
+    splash.showMessage(
+        message,
+        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
+        QColor("#6c7086"),
+    )
+    QApplication.processEvents()
+
+
+def _check_db_on_startup(db_path: str, splash=None) -> str:
     """If no database file exists at *db_path*, show an alert and optionally open
     Configuration so the user can point to an existing library.
 
@@ -77,6 +90,9 @@ def _check_db_on_startup(db_path: str) -> str:
     """
     if Path(db_path).exists():
         return db_path
+
+    if splash is not None:
+        splash.close()
 
     from PyQt6.QtWidgets import QMessageBox
     msg = QMessageBox()
@@ -115,9 +131,10 @@ def main() -> None:
     splash = _show_splash()
     app.processEvents()
 
+    _update_splash(splash, "Loading configuration…")
     from app.ui.config_dialog import get_db_path, get_color_scheme, apply_color_scheme
 
-    # Initialise logging before anything else that might log.
+    _update_splash(splash, "Initialising logging…")
     from app.utils.logger import setup_logging, setup_excepthook
     from app.ui.config_dialog import get_logging_enabled
     if get_logging_enabled():
@@ -129,11 +146,14 @@ def main() -> None:
         "STL Database %s starting up", __version__
     )
 
-    db_path = _check_db_on_startup(get_db_path())
+    _update_splash(splash, "Opening database…")
+    db_path = _check_db_on_startup(get_db_path(), splash)
     init_db(db_path)
 
+    _update_splash(splash, "Applying theme…")
     apply_color_scheme(get_color_scheme())
 
+    _update_splash(splash, "Starting up…")
     window = MainWindow()
     window.show()
     splash.finish(window)
