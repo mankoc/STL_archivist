@@ -27,7 +27,7 @@ from sqlalchemy import func, or_, and_, select as sa_select
 from sqlalchemy.orm import selectinload
 
 from app.database.db import get_session, session_scope
-from app.database.models import STLModel, Tag, Sculptor, Collection, Subcollection, Category, Release, Scale, Image
+from app.database.models import STLModel, Tag, Sculptor, Collection, Subcollection, Category, Release, Scale, Image, model_tags as _mt_global
 from app.utils.thumbnailer import pixmap_from_path, save_thumbnail
 from app.utils.path_pattern import parse_release_date, format_release_date
 
@@ -811,6 +811,115 @@ class FilterTreeWidget(QTreeWidget):
             self._clear_all(root.child(i))
 
 
+class TableLoaderWorker(QThread):
+    """Fetches table rows in a background thread and emits them in batches.
+
+    Receives a pre-built SQLAlchemy ``select()`` statement (constructed on the
+    main thread; SA expressions are thread-safe to pass).  Executes it with its
+    own session, merges pre-fetched tag strings, and emits batches of plain
+    Python tuples so the main thread can create ``QStandardItem`` rows without
+    blocking.
+    """
+
+    rows_ready = pyqtSignal(list)  # list[tuple] — one tuple per row
+    finished   = pyqtSignal(int)   # total rows emitted
+
+    _BATCH = 200
+
+    def __init__(
+        self,
+        main_stmt,
+        tags_stmt,
+        pair_order:   dict | None = None,  # {model_id: sort_position} for dup pairs
+        pair_for_id:  dict | None = None,  # {model_id: pair_index}
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self._main_stmt  = main_stmt
+        self._tags_stmt  = tags_stmt
+        self._pair_order = pair_order
+        self._pair_for_id = pair_for_id
+        self._stop = False
+
+    def stop(self) -> None:
+        self._stop = True
+
+    def run(self) -> None:
+        from app.database.db import get_session
+        session = get_session()
+        try:
+            # Tags: single GROUP_CONCAT query → {model_id: "tag1, tag2"}
+            tags_for: dict[int, str] = {}
+            for mid, ts in session.execute(self._tags_stmt).all():
+                tags_for[mid] = ts or ""
+
+            pair_for_id = self._pair_for_id or {}
+
+            if self._pair_order is not None:
+                # Duplicate-pairs mode: collect all, sort by pair position, then batch
+                all_rows = session.execute(self._main_stmt).all()
+                all_rows.sort(key=lambda r: self._pair_order.get(r.id, len(self._pair_order)))
+                batched = []
+                for row in all_rows:
+                    if self._stop:
+                        break
+                    batched.append(self._pack(row, tags_for, pair_for_id))
+                    if len(batched) >= self._BATCH:
+                        self.rows_ready.emit(batched)
+                        batched = []
+                if batched and not self._stop:
+                    self.rows_ready.emit(batched)
+                if not self._stop:
+                    self.finished.emit(len(all_rows))
+            else:
+                # Normal mode: stream with yield_per for progressive display
+                result = session.execute(
+                    self._main_stmt.execution_options(yield_per=self._BATCH)
+                )
+                batch: list = []
+                total = 0
+                for row in result:
+                    if self._stop:
+                        break
+                    batch.append(self._pack(row, tags_for, pair_for_id))
+                    total += 1
+                    if len(batch) >= self._BATCH:
+                        self.rows_ready.emit(batch)
+                        batch = []
+                if batch and not self._stop:
+                    self.rows_ready.emit(batch)
+                if not self._stop:
+                    self.finished.emit(total)
+        finally:
+            session.close()
+
+    @staticmethod
+    def _pack(row, tags_for: dict, pair_for_id: dict) -> tuple:
+        return (
+            row.id,
+            row.title,
+            row.creator,
+            row.source,
+            row.release_year,
+            row.release_month,
+            row.archive_path,
+            row.presupports,
+            row.warning,
+            row.archive_size,
+            row.compression_rate,
+            row.sequence,
+            row.created_at,
+            row.sculptor_name,
+            row.collection_name,
+            row.subcollection_name,
+            row.category_name,
+            row.release_name,
+            row.scale_name,
+            tags_for.get(row.id, ""),
+            pair_for_id.get(row.id, -1),
+        )
+
+
 class BrowserTab(QWidget):
     """Main model-browser widget.
 
@@ -833,6 +942,9 @@ class BrowserTab(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._loading = False
+        self._table_loader: TableLoaderWorker | None = None
+        self._load_gen: int = 0          # incremented on each _load_table call
+        self._load_pair_colors: list | None = None  # QColor list for dup-pair mode
         self._current_model_id: int | None = None
         self._thumb_pixmaps: list[QPixmap] = []  # original (unscaled) pixmaps
         self._cached_path_dirs: frozenset[str] = frozenset()
@@ -1717,11 +1829,17 @@ class BrowserTab(QWidget):
         Within each category the values are OR-ed; across categories they are AND-ed.
         *_exc_filters* variants exclude rows that match those values.
         *date_filters* / *date_exc_filters* are lists of (year, month_or_None) tuples.
+
+        Data is fetched in a background thread (TableLoaderWorker) and appended
+        to the model in 200-row batches so the UI stays responsive during loading.
         """
+        self._stop_loader()
+        self._load_gen += 1
+        gen = self._load_gen
+
         self._loading = True
         self.loading_started.emit()
         self._model.removeRows(0, self._model.rowCount())
-        session = get_session()
 
         def _date_clauses(pairs):
             conds = []
@@ -1733,209 +1851,269 @@ class BrowserTab(QWidget):
                                       STLModel.release_month == month))
             return conds
 
-        try:
-            q = session.query(STLModel).options(
-                selectinload(STLModel.tags),
-                selectinload(STLModel.sculptor),
-                selectinload(STLModel.collection),
-                selectinload(STLModel.subcollection),
-                selectinload(STLModel.category),
-                selectinload(STLModel.release),
-                selectinload(STLModel.scale),
+        # ------------------------------------------------------------------
+        # Build flat SELECT with outerjoin — no ORM selectinload required.
+        # SAexpressions are thread-safe to construct here and execute in the
+        # worker's own session.
+        # ------------------------------------------------------------------
+        stmt = (
+            sa_select(
+                STLModel.id, STLModel.title, STLModel.creator, STLModel.source,
+                STLModel.release_year, STLModel.release_month,
+                STLModel.archive_path, STLModel.presupports, STLModel.warning,
+                STLModel.archive_size, STLModel.compression_rate,
+                STLModel.sequence, STLModel.created_at,
+                Sculptor.name.label("sculptor_name"),
+                Collection.name.label("collection_name"),
+                Subcollection.name.label("subcollection_name"),
+                Category.name.label("category_name"),
+                Release.name.label("release_name"),
+                Scale.name.label("scale_name"),
             )
-            # --- explicit ID set (from duplicate finder etc.) ---
-            if id_filters:
-                q = q.filter(STLModel.id.in_(id_filters))
-            # --- include filters (OR within category, AND across) ---
-            if author_filters:
-                q = q.filter(STLModel.creator.in_(author_filters))
-            if type_filters:
-                q = q.filter(STLModel.source.in_(type_filters))
-            if tag_filters:
-                q = q.filter(STLModel.tags.any(Tag.name.in_(tag_filters)))
-            if path_filters:
-                # Normalise the DB column to forward slashes so the filter works
-                # on Windows where archive_path is stored with backslashes.
-                _norm = func.replace(STLModel.archive_path, "\\", "/")
-                q = q.filter(or_(*(
-                    _norm.like(p.rstrip("/") + "/%")
-                    for p in path_filters
-                )))
-            if date_filters:
-                q = q.filter(or_(*_date_clauses(date_filters)))
-            if sculptor_filters:
-                q = q.filter(STLModel.sculptor_id.in_(sculptor_filters))
-            if collection_filters:
-                q = q.filter(STLModel.collection_id.in_(collection_filters))
-            if subcollection_filters:
-                q = q.filter(STLModel.subcollection_id.in_(subcollection_filters))
-            if category_filters:
-                q = q.filter(STLModel.category_id.in_(category_filters))
-            if release_filters:
-                q = q.filter(STLModel.release_id.in_(release_filters))
-            if scale_filters:
-                q = q.filter(STLModel.scale_id.in_(scale_filters))
-            if presupports_filters:
-                q = q.filter(STLModel.presupports.in_(presupports_filters))
-            if warning_filters:
-                q = q.filter(or_(*(STLModel.warning.contains(w) for w in warning_filters)))
-            # --- exclude filters (NOT, AND across) ---
-            if author_exc_filters:
-                q = q.filter(~STLModel.creator.in_(author_exc_filters))
-            if type_exc_filters:
-                q = q.filter(~STLModel.source.in_(type_exc_filters))
-            if tag_exc_filters:
-                q = q.filter(~STLModel.tags.any(Tag.name.in_(tag_exc_filters)))
-            if path_exc_filters:
-                _norm = func.replace(STLModel.archive_path, "\\", "/")
-                for p in path_exc_filters:
-                    q = q.filter(~_norm.like(p.rstrip("/") + "/%"))
-            if date_exc_filters:
-                q = q.filter(~or_(*_date_clauses(date_exc_filters)))
-            if sculptor_exc_filters:
-                q = q.filter(~STLModel.sculptor_id.in_(sculptor_exc_filters))
-            if collection_exc_filters:
-                q = q.filter(~STLModel.collection_id.in_(collection_exc_filters))
-            if subcollection_exc_filters:
-                q = q.filter(~STLModel.subcollection_id.in_(subcollection_exc_filters))
-            if category_exc_filters:
-                q = q.filter(~STLModel.category_id.in_(category_exc_filters))
-            if release_exc_filters:
-                q = q.filter(~STLModel.release_id.in_(release_exc_filters))
-            if scale_exc_filters:
-                q = q.filter(~STLModel.scale_id.in_(scale_exc_filters))
-            if presupports_exc_filters:
-                q = q.filter(~STLModel.presupports.in_(presupports_exc_filters))
-            if warning_exc_filters:
-                q = q.filter(and_(*(~STLModel.warning.contains(w) for w in warning_exc_filters)))
+            .outerjoin(Sculptor,     STLModel.sculptor_id      == Sculptor.id)
+            .outerjoin(Collection,   STLModel.collection_id    == Collection.id)
+            .outerjoin(Subcollection,STLModel.subcollection_id == Subcollection.id)
+            .outerjoin(Category,     STLModel.category_id      == Category.id)
+            .outerjoin(Release,      STLModel.release_id       == Release.id)
+            .outerjoin(Scale,        STLModel.scale_id         == Scale.id)
+        )
 
-            # Group-level "has/no value" filters — applied when the group header is checked.
-            _group_has_value = {
-                "creator":       lambda: and_(STLModel.creator.isnot(None),        STLModel.creator != ""),
-                "tag":           lambda: STLModel.tags.any(),
-                "source":        lambda: and_(STLModel.source.isnot(None),         STLModel.source != ""),
-                "date":          lambda: STLModel.release_year.isnot(None),
-                "sculptor":      lambda: STLModel.sculptor_id.isnot(None),
-                "collection":    lambda: STLModel.collection_id.isnot(None),
-                "subcollection": lambda: STLModel.subcollection_id.isnot(None),
-                "category":      lambda: STLModel.category_id.isnot(None),
-                "release":       lambda: STLModel.release_id.isnot(None),
-                "scale":         lambda: STLModel.scale_id.isnot(None),
-                "presupports":   lambda: and_(STLModel.presupports.isnot(None),    STLModel.presupports != ""),
-                "warning":       lambda: and_(STLModel.warning.isnot(None),        STLModel.warning != ""),
-                "path":          lambda: and_(STLModel.archive_path.isnot(None),   STLModel.archive_path != ""),
-            }
-            if has_value_groups:
-                for _key in has_value_groups:
-                    _cond = _group_has_value.get(_key)
-                    if _cond:
-                        q = q.filter(_cond())
-            if no_value_groups:
-                for _key in no_value_groups:
-                    _cond = _group_has_value.get(_key)
-                    if _cond:
-                        q = q.filter(~_cond())
+        _tag_sub = sa_select(_mt_global.c.model_id).join(Tag, _mt_global.c.tag_id == Tag.id)
 
-            if duplicate_pairs is not None:
-                from app.ui.config_dialog import get_pair_colors
-                _ca, _cb = get_pair_colors()
-                _pair_colors = [QColor(_ca), QColor(_cb)]
-                _seen: set[int] = set()
-                _pair_for_id: dict[int, int] = {}
-                _ordered_pos: dict[int, int] = {}
-                _pos = 0
-                for _pi, _pair in enumerate(duplicate_pairs):
-                    for _pid in _pair:
-                        if _pid not in _seen:
-                            _seen.add(_pid)
-                            _ordered_pos[_pid] = _pos
-                            _pos += 1
-                            _pair_for_id[_pid] = _pi
-                _stls = q.all()
-                _stls.sort(key=lambda m: _ordered_pos.get(m.id, len(_ordered_pos)))
+        # --- explicit ID set ---
+        if id_filters:
+            stmt = stmt.where(STLModel.id.in_(id_filters))
+        # --- include filters ---
+        if author_filters:
+            stmt = stmt.where(STLModel.creator.in_(author_filters))
+        if type_filters:
+            stmt = stmt.where(STLModel.source.in_(type_filters))
+        if tag_filters:
+            stmt = stmt.where(STLModel.id.in_(_tag_sub.where(Tag.name.in_(tag_filters))))
+        if path_filters:
+            _norm = func.replace(STLModel.archive_path, "\\", "/")
+            stmt = stmt.where(or_(*(_norm.like(p.rstrip("/") + "/%") for p in path_filters)))
+        if date_filters:
+            stmt = stmt.where(or_(*_date_clauses(date_filters)))
+        if sculptor_filters:
+            stmt = stmt.where(STLModel.sculptor_id.in_(sculptor_filters))
+        if collection_filters:
+            stmt = stmt.where(STLModel.collection_id.in_(collection_filters))
+        if subcollection_filters:
+            stmt = stmt.where(STLModel.subcollection_id.in_(subcollection_filters))
+        if category_filters:
+            stmt = stmt.where(STLModel.category_id.in_(category_filters))
+        if release_filters:
+            stmt = stmt.where(STLModel.release_id.in_(release_filters))
+        if scale_filters:
+            stmt = stmt.where(STLModel.scale_id.in_(scale_filters))
+        if presupports_filters:
+            stmt = stmt.where(STLModel.presupports.in_(presupports_filters))
+        if warning_filters:
+            stmt = stmt.where(or_(*(STLModel.warning.contains(w) for w in warning_filters)))
+        # --- exclude filters ---
+        if author_exc_filters:
+            stmt = stmt.where(~STLModel.creator.in_(author_exc_filters))
+        if type_exc_filters:
+            stmt = stmt.where(~STLModel.source.in_(type_exc_filters))
+        if tag_exc_filters:
+            stmt = stmt.where(STLModel.id.notin_(_tag_sub.where(Tag.name.in_(tag_exc_filters))))
+        if path_exc_filters:
+            _norm = func.replace(STLModel.archive_path, "\\", "/")
+            for p in path_exc_filters:
+                stmt = stmt.where(~_norm.like(p.rstrip("/") + "/%"))
+        if date_exc_filters:
+            stmt = stmt.where(~or_(*_date_clauses(date_exc_filters)))
+        if sculptor_exc_filters:
+            stmt = stmt.where(~STLModel.sculptor_id.in_(sculptor_exc_filters))
+        if collection_exc_filters:
+            stmt = stmt.where(~STLModel.collection_id.in_(collection_exc_filters))
+        if subcollection_exc_filters:
+            stmt = stmt.where(~STLModel.subcollection_id.in_(subcollection_exc_filters))
+        if category_exc_filters:
+            stmt = stmt.where(~STLModel.category_id.in_(category_exc_filters))
+        if release_exc_filters:
+            stmt = stmt.where(~STLModel.release_id.in_(release_exc_filters))
+        if scale_exc_filters:
+            stmt = stmt.where(~STLModel.scale_id.in_(scale_exc_filters))
+        if presupports_exc_filters:
+            stmt = stmt.where(~STLModel.presupports.in_(presupports_exc_filters))
+        if warning_exc_filters:
+            stmt = stmt.where(and_(*(~STLModel.warning.contains(w) for w in warning_exc_filters)))
+
+        # --- group-level has/no-value filters ---
+        _has_tag_sub = sa_select(_mt_global.c.model_id).distinct()
+        _group_has_value = {
+            "creator":       lambda: and_(STLModel.creator.isnot(None),      STLModel.creator != ""),
+            "tag":           lambda: STLModel.id.in_(_has_tag_sub),
+            "source":        lambda: and_(STLModel.source.isnot(None),        STLModel.source != ""),
+            "date":          lambda: STLModel.release_year.isnot(None),
+            "sculptor":      lambda: STLModel.sculptor_id.isnot(None),
+            "collection":    lambda: STLModel.collection_id.isnot(None),
+            "subcollection": lambda: STLModel.subcollection_id.isnot(None),
+            "category":      lambda: STLModel.category_id.isnot(None),
+            "release":       lambda: STLModel.release_id.isnot(None),
+            "scale":         lambda: STLModel.scale_id.isnot(None),
+            "presupports":   lambda: and_(STLModel.presupports.isnot(None),  STLModel.presupports != ""),
+            "warning":       lambda: and_(STLModel.warning.isnot(None),      STLModel.warning != ""),
+            "path":          lambda: and_(STLModel.archive_path.isnot(None), STLModel.archive_path != ""),
+        }
+        if has_value_groups:
+            for _key in has_value_groups:
+                _cond = _group_has_value.get(_key)
+                if _cond:
+                    stmt = stmt.where(_cond())
+        if no_value_groups:
+            for _key in no_value_groups:
+                _cond = _group_has_value.get(_key)
+                if _cond:
+                    stmt = stmt.where(~_cond())
+
+        # --- duplicate-pairs ordering ---
+        pair_order:  dict | None = None
+        pair_for_id: dict | None = None
+        if duplicate_pairs is not None:
+            from app.ui.config_dialog import get_pair_colors
+            _ca, _cb = get_pair_colors()
+            self._load_pair_colors = [QColor(_ca), QColor(_cb)]
+            _seen: set[int] = set()
+            pair_for_id = {}
+            pair_order  = {}
+            _pos = 0
+            for _pi, _pair in enumerate(duplicate_pairs):
+                for _pid in _pair:
+                    if _pid not in _seen:
+                        _seen.add(_pid)
+                        pair_order[_pid]  = _pos
+                        _pos += 1
+                        pair_for_id[_pid] = _pi
+        else:
+            self._load_pair_colors = None
+            stmt = stmt.order_by(STLModel.title)
+
+        # Tags GROUP_CONCAT query (one round-trip regardless of row count)
+        tags_stmt = (
+            sa_select(_mt_global.c.model_id, func.group_concat(Tag.name, ", "))
+            .join(Tag, _mt_global.c.tag_id == Tag.id)
+            .group_by(_mt_global.c.model_id)
+        )
+
+        # ------------------------------------------------------------------
+        # Start background worker — appends rows via _append_rows signal slot
+        # ------------------------------------------------------------------
+        worker = TableLoaderWorker(stmt, tags_stmt, pair_order, pair_for_id, parent=self)
+        self._table_loader = worker
+        worker.rows_ready.connect(
+            lambda rows, g=gen: self._append_rows(rows, g)
+        )
+        worker.finished.connect(
+            lambda n, g=gen: self._on_load_finished(n, g)
+        )
+        worker.start()
+
+    # ------------------------------------------------------------------
+    def _stop_loader(self) -> None:
+        """Stop any in-flight TableLoaderWorker gracefully."""
+        if self._table_loader is not None:
+            self._table_loader.stop()
+            self._table_loader = None
+
+    def _append_rows(self, rows: list, gen: int) -> None:
+        """Slot: receive a batch of raw tuples from TableLoaderWorker and build QStandardItem rows."""
+        if gen != self._load_gen:
+            return  # stale batch from a cancelled load
+
+        from app.ui.config_dialog import get_warn_row_bg_color, get_warn_row_fg_color
+        warn_bg   = QColor(get_warn_row_bg_color())
+        warn_fg   = QColor(get_warn_row_fg_color())
+        warn_font = QFont()
+        warn_font.setPointSize(16)
+        warn_font.setBold(True)
+        pair_colors = self._load_pair_colors
+
+        for (mid, title, creator, source, yr, mo, ap, presupports, warning,
+             archive_size, compression_rate, sequence, created_at,
+             sculptor_name, collection_name, subcollection_name, category_name,
+             release_name, scale_name, tags_str, pair_idx) in rows:
+
+            thumb_item = QStandardItem()
+            thumb_item.setData(mid, MODEL_ID_ROLE)
+            thumb_item.setEditable(False)
+
+            seq_str  = str(sequence) if sequence is not None else ""
+            seq_item = QStandardItem(seq_str)
+            seq_item.setEditable(True)
+            seq_item.setData(sequence, Qt.ItemDataRole.UserRole)
+
+            added_str  = created_at.strftime("%Y-%m-%d %H:%M") if created_at else ""
+            added_item = QStandardItem(added_str)
+            added_item.setEditable(False)
+
+            warning_item = QStandardItem("⚠" if warning else "")
+            warning_item.setEditable(False)
+            warning_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            if warning:
+                warning_item.setData(warning, Qt.ItemDataRole.ToolTipRole)
+                warning_item.setBackground(warn_bg)
+                warning_item.setForeground(warn_fg)
+                warning_item.setFont(warn_font)
+
+            raw_size   = archive_size if archive_size is not None else -1
+            size_item  = QStandardItem(_fmt_size(raw_size) if raw_size >= 0 else "")
+            size_item.setData(raw_size, Qt.ItemDataRole.UserRole)
+            size_item.setEditable(False)
+
+            cr = compression_rate
+            if cr and cr > 0:
+                comp_display = f"{1 / cr:.1f}x"
+                comp_sort    = cr
             else:
-                _stls = q.order_by(STLModel.title).all()
-                _pair_for_id = {}
+                comp_display = ""
+                comp_sort    = -1.0
+            comp_item = QStandardItem(comp_display)
+            comp_item.setData(comp_sort, Qt.ItemDataRole.UserRole)
+            comp_item.setEditable(False)
+            comp_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
-            for stl in _stls:
-                thumb_item = QStandardItem()
-                thumb_item.setData(stl.id, MODEL_ID_ROLE)
-                thumb_item.setEditable(False)
+            path_item = QStandardItem(ap or "")
+            path_item.setEditable(False)
 
-                tags_str = ", ".join(t.name for t in stl.tags)
-                path_item = QStandardItem(stl.archive_path or "")
-                path_item.setEditable(False)
-                seq_str = str(stl.sequence) if stl.sequence is not None else ""
-                added_str = stl.created_at.strftime("%Y-%m-%d %H:%M") if stl.created_at else ""
-                added_item = QStandardItem(added_str)
-                added_item.setEditable(False)
-                warning_item = QStandardItem("⚠" if stl.warning else "")
-                warning_item.setEditable(False)
-                warning_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                if stl.warning:
-                    warning_item.setData(stl.warning, Qt.ItemDataRole.ToolTipRole)
-                    from app.ui.config_dialog import get_warn_row_bg_color, get_warn_row_fg_color
-                    warning_item.setBackground(QColor(get_warn_row_bg_color()))
-                    warning_item.setForeground(QColor(get_warn_row_fg_color()))
-                    _warn_font = QFont()
-                    _warn_font.setPointSize(16)
-                    _warn_font.setBold(True)
-                    warning_item.setFont(_warn_font)
-                raw_size = stl.archive_size if stl.archive_size is not None else -1
-                size_display = _fmt_size(raw_size) if raw_size >= 0 else ""
-                size_item = QStandardItem(size_display)
-                size_item.setData(raw_size, Qt.ItemDataRole.UserRole)
-                size_item.setEditable(False)
+            row = [
+                thumb_item,
+                QStandardItem(title or ""),
+                QStandardItem(creator or ""),
+                QStandardItem(source or ""),
+                QStandardItem(format_release_date(yr, mo)),
+                QStandardItem(tags_str),
+                QStandardItem(sculptor_name or ""),
+                QStandardItem(collection_name or ""),
+                QStandardItem(subcollection_name or ""),
+                seq_item,
+                QStandardItem(release_name or ""),
+                path_item,
+                QStandardItem(scale_name or ""),
+                QStandardItem(presupports or ""),
+                added_item,
+                warning_item,
+                size_item,
+                QStandardItem(category_name or ""),
+                comp_item,
+            ]
+            if pair_colors is not None and pair_idx >= 0:
+                _color = pair_colors[pair_idx % 2]
+                for _it in row:
+                    _it.setBackground(_color)
 
-                # Build row items. For numeric sorting, store numeric values under UserRole
-                seq_item = QStandardItem(seq_str)
-                seq_item.setEditable(True)
-                # store numeric sequence under UserRole so proxy can sort numerically
-                seq_item.setData(stl.sequence if stl.sequence is not None else None, Qt.ItemDataRole.UserRole)
+            self._model.appendRow(row)
 
-                cr = stl.compression_rate
-                if cr and cr > 0:
-                    compression_display = f"{1 / cr:.1f}x"
-                    compression_sort    = cr
-                else:
-                    compression_display = ""
-                    compression_sort    = -1.0
-                compression_item = QStandardItem(compression_display)
-                compression_item.setData(compression_sort, Qt.ItemDataRole.UserRole)
-                compression_item.setEditable(False)
-                compression_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.model_count_changed.emit(self._model.rowCount())
 
-                row = [
-                    thumb_item,
-                    QStandardItem(stl.title or ""),
-                    QStandardItem(stl.creator or ""),
-                    QStandardItem(stl.source or ""),
-                    QStandardItem(format_release_date(stl.release_year, stl.release_month)),
-                    QStandardItem(tags_str),
-                    QStandardItem(stl.sculptor.name    if stl.sculptor    else ""),
-                    QStandardItem(stl.collection.name  if stl.collection  else ""),
-                    QStandardItem(stl.subcollection.name if stl.subcollection else ""),
-                    seq_item,
-                    QStandardItem(stl.release.name if stl.release else ""),
-                    path_item,
-                    QStandardItem(stl.scale.name if stl.scale else ""),
-                    QStandardItem(stl.presupports or ""),
-                    added_item,
-                    warning_item,
-                    size_item,
-                    QStandardItem(stl.category.name if stl.category else ""),
-                    compression_item,
-                ]
-                if _pair_for_id:
-                    _pi = _pair_for_id.get(stl.id)
-                    if _pi is not None:
-                        _color = _pair_colors[_pi % 2]
-                        for _it in row:
-                            _it.setBackground(_color)
-                self._model.appendRow(row)
-        finally:
-            session.close()
-            self._loading = False
+    def _on_load_finished(self, _total: int, gen: int) -> None:
+        """Slot: called when TableLoaderWorker has emitted all rows."""
+        if gen != self._load_gen:
+            return
+        self._loading = False
+        self._table_loader = None
         self.model_count_changed.emit(self._model.rowCount())
 
     # ------------------------------------------------------------------
