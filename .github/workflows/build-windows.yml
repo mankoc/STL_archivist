@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - 'v*'
+    branches:
+      - dev
   workflow_dispatch:
 
 jobs:
@@ -15,6 +17,16 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+
+      - name: Set version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "value=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "value=dev-$(echo '${{ github.sha }}' | cut -c1-7)" >> $GITHUB_OUTPUT
+          fi
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v6
@@ -33,24 +45,24 @@ jobs:
 
       - name: Rename executable with version
         shell: bash
-        run: mv dist/STLDatabase.exe "dist/STLDatabase-${{ github.ref_name }}.exe"
+        run: mv dist/STLDatabase.exe "dist/STLDatabase-${{ steps.version.outputs.value }}.exe"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v6
         with:
-          name: STLDatabase-windows-${{ github.ref_name }}
-          path: dist/STLDatabase-${{ github.ref_name }}.exe
+          name: STLDatabase-windows-${{ steps.version.outputs.value }}
+          path: dist/STLDatabase-${{ steps.version.outputs.value }}.exe
           if-no-files-found: error
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          name: STL Database ${{ github.ref_name }}
-          tag_name: ${{ github.ref_name }}
-          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
+          name: STL Database ${{ steps.version.outputs.value }}
+          tag_name: ${{ steps.version.outputs.value }}
+          prerelease: ${{ contains(steps.version.outputs.value, 'alpha') || contains(steps.version.outputs.value, 'beta') || contains(steps.version.outputs.value, 'rc') }}
           generate_release_notes: true
-          files: dist/STLDatabase-${{ github.ref_name }}.exe
+          files: dist/STLDatabase-${{ steps.version.outputs.value }}.exe
 
   build-crawler:
     runs-on: windows-latest
@@ -60,6 +72,16 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+
+      - name: Set version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "value=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "value=dev-$(echo '${{ github.sha }}' | cut -c1-7)" >> $GITHUB_OUTPUT
+          fi
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v6
@@ -78,18 +100,18 @@ jobs:
 
       - name: Rename executable with version
         shell: bash
-        run: mv dist/crawl.exe "dist/crawl-${{ github.ref_name }}.exe"
+        run: mv dist/crawl.exe "dist/crawl-${{ steps.version.outputs.value }}.exe"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v6
         with:
-          name: crawl-windows-${{ github.ref_name }}
-          path: dist/crawl-${{ github.ref_name }}.exe
+          name: crawl-windows-${{ steps.version.outputs.value }}
+          path: dist/crawl-${{ steps.version.outputs.value }}.exe
           if-no-files-found: error
 
       - name: Attach to GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          files: dist/crawl-${{ github.ref_name }}.exe
+          tag_name: ${{ steps.version.outputs.value }}
+          files: dist/crawl-${{ steps.version.outputs.value }}.exe
