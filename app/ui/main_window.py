@@ -269,6 +269,24 @@ class MainWindow(QMainWindow):
         self._browser.thumbnail_progress_updated.connect(self._on_thumb_progress)
         self._browser.thumbnail_finished.connect(self._on_thumb_finished)
 
+        # Rescan-in-background status label (same style as crawler label)
+        self._rescan_status_label = QLabel()
+        self._rescan_status_label.setStyleSheet(
+            "QLabel { "
+            "background-color: palette(highlight); "
+            "color: palette(highlighted-text); "
+            "padding: 2px 6px; "
+            "border-radius: 4px; "
+            "font-weight: bold; "
+            "}"
+        )
+        self._rescan_status_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._rescan_status_label.hide()
+        self._rescan_status_label.mousePressEvent = lambda _e: self._show_rescan_dialog()
+        sb.addPermanentWidget(self._rescan_status_label)
+        self._browser.rescan_progress.connect(self._on_rescan_progress)
+        self._browser.rescan_finished.connect(self._on_rescan_finished)
+
         self._apply_debug_menu_visibility()
 
     # ------------------------------------------------------------------
@@ -289,6 +307,24 @@ class MainWindow(QMainWindow):
         if hasattr(self, '_thumb_status_label'):
             self._thumb_status_label.hide()
         self._browser.refresh()
+
+    # Rescan progress handlers ---------------------------------------------------
+    def _on_rescan_progress(self, current: int, total: int) -> None:
+        dlg = self._browser._rescan_dialog
+        if dlg is None or not dlg.isVisible():
+            self._rescan_status_label.setText(f" Rescan: {current} / {total} ")
+            self._rescan_status_label.show()
+
+    def _on_rescan_finished(self) -> None:
+        self._rescan_status_label.hide()
+
+    def _show_rescan_dialog(self) -> None:
+        dlg = self._browser._rescan_dialog
+        if dlg is not None:
+            dlg.show()
+            dlg.raise_()
+            dlg.activateWindow()
+            self._rescan_status_label.hide()
 
     def _open_crawler(self) -> None:
         """Open the crawler dialog. Keep it alive if it's hidden."""
