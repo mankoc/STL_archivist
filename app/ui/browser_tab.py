@@ -10,7 +10,7 @@ from pathlib import Path as FSPath, Path
 _ICONS_DIR = FSPath(__file__).parent.parent.parent / "resources" / "icons"
 
 from PyQt6.QtCore import Qt, QSortFilterProxyModel, QSize, QStringListModel, QEvent, pyqtSignal, QItemSelection, QTimer, QThread, QRect, QPointF, QRectF, QUrl
-from PyQt6.QtGui import QStandardItemModel, QStandardItem, QPixmap, QIcon, QKeySequence, QShortcut, QColor, QFont, QPainter, QPen
+from PyQt6.QtGui import QStandardItemModel, QStandardItem, QPixmap, QIcon, QKeySequence, QShortcut, QColor, QFont, QPainter, QPen, QDesktopServices
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
     QTreeWidget, QTreeWidgetItem, QTableView,
@@ -2380,6 +2380,8 @@ class BrowserTab(QWidget):
         
         show_files_act = menu.addAction(style.standardIcon(SP.SP_FileDialogContentsView), "Show Files…")
         show_files_act.setVisible(len(selected_ids) == 1)
+        open_folder_act = menu.addAction(style.standardIcon(SP.SP_DirOpenIcon), "Open Containing Folder")
+        open_folder_act.setVisible(len(selected_ids) == 1)
         menu.addSeparator()
 
         edit_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), "Edit Model…")
@@ -2471,6 +2473,8 @@ class BrowserTab(QWidget):
         action = menu.exec(self._table.viewport().mapToGlobal(pos))
         if action == show_files_act:
             self._show_files(model_id)
+        elif action == open_folder_act:
+            self._open_containing_folder(src_index.row())
         elif action == edit_act:
             self._open_editor(model_id)
         elif action == mass_act:
@@ -2511,6 +2515,13 @@ class BrowserTab(QWidget):
     def _show_files(self, model_id: int) -> None:
         from app.ui.file_list_dialog import FileListDialog
         FileListDialog(model_id, parent=self).exec()
+
+    def _open_containing_folder(self, source_row: int) -> None:
+        archive_path = self._model.item(source_row, COL_PATH).text()
+        if not archive_path:
+            return
+        folder = Path(archive_path).parent
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
     def _recrawl_selection(self, model_ids: list[int]) -> None:
         """Run the crawler extraction for the selected model(s) and show a preview
