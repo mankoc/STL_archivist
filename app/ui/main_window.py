@@ -1,14 +1,18 @@
 """
 Main application window — menu bar, toolbar, browser.
 """
+from pathlib import Path as _Path
+
 from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QAction, QKeySequence
+from PyQt6.QtGui import QAction, QKeySequence, QIcon
 from PyQt6.QtWidgets import (
     QMainWindow, QStatusBar, QToolBar,
     QApplication, QMessageBox,
 )
 
 from app.ui.browser_tab import BrowserTab
+
+_ICONS_DIR = _Path(__file__).parent.parent.parent / "resources" / "icons"
 
 
 class MainWindow(QMainWindow):
@@ -33,6 +37,13 @@ class MainWindow(QMainWindow):
         self._crawler_is_running = False
 
         # ---- Actions ----
+        from app.ui.config_dialog import get_color_scheme as _get_cs
+        _v = "light" if "light" in _get_cs().lower() else "dark"
+
+        def _icon(name: str) -> QIcon:
+            p = _ICONS_DIR / f"{name}_{_v}.svg"
+            return QIcon(str(p)) if p.exists() else QIcon()
+
         self._act_refresh = QAction(
             style.standardIcon(SP.SP_BrowserReload), "Refresh", self)
         self._act_refresh.setShortcut(QKeySequence("F5"))
@@ -40,7 +51,7 @@ class MainWindow(QMainWindow):
         self._act_refresh.triggered.connect(self._browser.refresh)
 
         self._act_open_crawler = QAction(
-            style.standardIcon(SP.SP_DirOpenIcon), "Open Crawler…", self)
+            _icon("open_crawler"), "Open Crawler…", self)
         self._act_open_crawler.setShortcut(QKeySequence.StandardKey.Open)
         self._act_open_crawler.setStatusTip("Open the Crawler window")
         self._act_open_crawler.triggered.connect(self._open_crawler)
@@ -59,12 +70,12 @@ class MainWindow(QMainWindow):
         self._act_exit.triggered.connect(QApplication.quit)
 
         self._act_image_grid = QAction(
-            style.standardIcon(SP.SP_FileDialogListView), "Image Grid", self)
+            _icon("image_grid"), "Image Grid", self)
         self._act_image_grid.setStatusTip("Show a grid of images for the current table")
         self._act_image_grid.triggered.connect(self._browser.show_image_grid)
 
         self._act_toggle_images = QAction(
-            style.standardIcon(SP.SP_FileDialogContentsView), "Images", self)
+            _icon("toggle_images"), "Images", self)
         self._act_toggle_images.setCheckable(True)
         self._act_toggle_images.setChecked(True)
         self._act_toggle_images.setStatusTip("Show or hide the image preview pane")
@@ -97,8 +108,8 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self._act_exit)
 
         view_menu = mb.addMenu("&View")
-        view_menu.addAction(self._act_refresh)
         view_menu.addAction(self._act_toggle_images)
+        view_menu.addAction(self._act_image_grid)
 
         tools_menu = mb.addMenu("&Tools")
         self._act_gen_metadata = QAction(
@@ -125,38 +136,38 @@ class MainWindow(QMainWindow):
 
         tools_menu.addSeparator()
 
-        act_find_dupes = QAction(
-            style.standardIcon(SP.SP_FileDialogContentsView),
+        self._act_find_dupes = QAction(
+            _icon("find_dupes"),
             "Find Metadata Duplicates…",
             self,
         )
-        act_find_dupes.setStatusTip(
+        self._act_find_dupes.setStatusTip(
             "Find models with identical or phonetically similar field values"
         )
-        act_find_dupes.triggered.connect(self._open_find_duplicates_dialog)
-        tools_menu.addAction(act_find_dupes)
+        self._act_find_dupes.triggered.connect(self._open_find_duplicates_dialog)
+        tools_menu.addAction(self._act_find_dupes)
 
-        act_find_content_dupes = QAction(
-            style.standardIcon(SP.SP_FileDialogContentsView),
+        self._act_find_content_dupes = QAction(
+            _icon("find_content_dupes"),
             "Find Duplicate Archives by Content…",
             self,
         )
-        act_find_content_dupes.setStatusTip(
+        self._act_find_content_dupes.setStatusTip(
             "Find archives that share a large fraction of identical STL files"
         )
-        act_find_content_dupes.triggered.connect(self._open_find_content_duplicates_dialog)
-        tools_menu.addAction(act_find_content_dupes)
+        self._act_find_content_dupes.triggered.connect(self._open_find_content_duplicates_dialog)
+        tools_menu.addAction(self._act_find_content_dupes)
 
-        act_find_by_image = QAction(
-            style.standardIcon(SP.SP_FileDialogContentsView),
+        self._act_find_by_image = QAction(
+            _icon("find_by_image"),
             "Find by Image…",
             self,
         )
-        act_find_by_image.setStatusTip(
+        self._act_find_by_image.setStatusTip(
             "Find models with images perceptually similar to a file on disk"
         )
-        act_find_by_image.triggered.connect(self._open_find_by_image_dialog)
-        tools_menu.addAction(act_find_by_image)
+        self._act_find_by_image.triggered.connect(self._open_find_by_image_dialog)
+        tools_menu.addAction(self._act_find_by_image)
 
         tools_menu.addSeparator()
 
@@ -218,7 +229,11 @@ class MainWindow(QMainWindow):
         self.addToolBar(toolbar)
 
         toolbar.addAction(self._act_open_crawler)
-        toolbar.addAction(self._act_refresh)
+        toolbar.addSeparator()
+        toolbar.addAction(self._act_find_dupes)
+        toolbar.addAction(self._act_find_content_dupes)
+        toolbar.addAction(self._act_find_by_image)
+        toolbar.addSeparator()
         toolbar.addAction(self._act_image_grid)
         toolbar.addAction(self._act_toggle_images)
 
