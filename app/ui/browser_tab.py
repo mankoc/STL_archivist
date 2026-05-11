@@ -938,6 +938,9 @@ class BrowserTab(QWidget):
     thumbnail_progress_updated = pyqtSignal(int, int)
     thumbnail_finished = pyqtSignal()
     thumbnail_started = pyqtSignal()
+    # Emitted while a rescan runs in background (current, total)
+    rescan_progress = pyqtSignal(int, int)
+    rescan_finished = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -945,6 +948,7 @@ class BrowserTab(QWidget):
         self._table_loader: TableLoaderWorker | None = None
         self._load_gen: int = 0          # incremented on each _load_table call
         self._load_pair_colors: list | None = None  # QColor list for dup-pair mode
+        self._rescan_dialog: RescanProgressDialog | None = None
         self._current_model_id: int | None = None
         self._thumb_pixmaps: list[QPixmap] = []  # original (unscaled) pixmaps
         self._cached_path_dirs: frozenset[str] = frozenset()
@@ -3022,8 +3026,15 @@ class BrowserTab(QWidget):
 
         worker = RescanWorker(model_ids, parent=self)
         dlg    = RescanProgressDialog(worker, len(model_ids), parent=self)
+        self._rescan_dialog = dlg
+
+        worker.progress.connect(
+            lambda curr, tot, _fn: self.rescan_progress.emit(curr, tot)
+        )
 
         def _on_done(updated: int) -> None:
+            self.rescan_finished.emit()
+            self._rescan_dialog = None
             if dlg.in_background:
                 sb = self.window().statusBar()
                 if sb:
