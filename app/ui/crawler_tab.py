@@ -10,6 +10,9 @@ from PyQt6.QtWidgets import (
     QCheckBox,
 )
 from PyQt6.QtGui import QIcon, QCursor
+from pathlib import Path as _Path
+
+_ICONS_DIR = _Path(__file__).parent.parent.parent / "resources" / "icons"
 
 from app.crawler.crawler import CrawlerWorker
 from app.ui.config_dialog import get_max_thumbnails
@@ -189,33 +192,31 @@ class CrawlerTab(QWidget):
         root.addWidget(overrides_group)
 
         # --- Control buttons ---
-        style = QApplication.style()
+        from app.ui.config_dialog import get_color_scheme as _get_cs
+        _v = "light" if "light" in _get_cs().lower() else "dark"
+
+        def _icon(name: str) -> QIcon:
+            p = _ICONS_DIR / f"{name}_{_v}.svg"
+            return QIcon(str(p)) if p.exists() else QIcon()
+
         btn_row = QHBoxLayout()
-        self._start_btn = QPushButton(
-            style.standardIcon(style.StandardPixmap.SP_MediaPlay), "Start Crawl"
-        )
+        self._start_btn = QPushButton(_icon("crawler_start"), "Start Crawl")
         self._start_btn.clicked.connect(self._start_crawl)
         btn_row.addWidget(self._start_btn)
 
-        self._stop_btn = QPushButton(
-            style.standardIcon(style.StandardPixmap.SP_MediaStop), "Stop"
-        )
+        self._stop_btn = QPushButton(_icon("crawler_stop"), "Stop")
         self._stop_btn.setEnabled(False)
         self._stop_btn.clicked.connect(self._stop_crawl)
         btn_row.addWidget(self._stop_btn)
 
         btn_row.addStretch()
 
-        self._bg_btn = QPushButton(
-            style.standardIcon(style.StandardPixmap.SP_ArrowDown), "Run in Background"
-        )
+        self._bg_btn = QPushButton(_icon("crawler_bg"), "Run in Background")
         self._bg_btn.setEnabled(False)
         self._bg_btn.clicked.connect(self.close_requested)
         btn_row.addWidget(self._bg_btn)
 
-        self._close_btn = QPushButton(
-            style.standardIcon(style.StandardPixmap.SP_DialogCloseButton), "Close"
-        )
+        self._close_btn = QPushButton(_icon("crawler_close"), "Close")
         self._close_btn.clicked.connect(self.close_requested)
         btn_row.addWidget(self._close_btn)
 
