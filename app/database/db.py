@@ -147,6 +147,21 @@ def _ensure_columns(engine) -> None:
         finally:
             conn.execute(text("PRAGMA foreign_keys=ON"))
 
+    _ensure_indexes(engine)
+
+
+def _ensure_indexes(engine) -> None:
+    """Create any missing indexes on existing databases."""
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_models_archive_hash "
+            "ON models (archive_hash)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_models_release_date "
+            "ON models (release_year, release_month)"
+        ))
+
 
 def get_session() -> Session:
     """Return a new session from the factory.

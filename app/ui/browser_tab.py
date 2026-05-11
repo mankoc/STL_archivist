@@ -991,70 +991,82 @@ class BrowserTab(QWidget):
             _path_counts: dict[str, int] | None = None  # folder → model count (cumulative)
 
             if show_counts:
-                from sqlalchemy import func as _func
+                from sqlalchemy import func as _func, select as _select
                 from app.database.models import model_tags as _mt
 
-                for v, c in session.query(STLModel.creator, _func.count(STLModel.id)).filter(STLModel.creator.isnot(None)).group_by(STLModel.creator).all():
-                    _counts[("creator", v)] = c
-                _counts[("group", "creator")] = session.query(_func.count(STLModel.id)).filter(STLModel.creator.isnot(None)).scalar() or 0
+                # One scan across all scalar columns; build per-value counts in Python
+                _scan = session.execute(
+                    _select(
+                        STLModel.creator, STLModel.source,
+                        STLModel.release_year, STLModel.release_month,
+                        STLModel.sculptor_id, STLModel.collection_id,
+                        STLModel.subcollection_id, STLModel.category_id,
+                        STLModel.release_id, STLModel.scale_id,
+                        STLModel.presupports, STLModel.warning, STLModel.archive_path,
+                    )
+                ).all()
 
-                for v, c in session.query(STLModel.source, _func.count(STLModel.id)).filter(STLModel.source.isnot(None)).group_by(STLModel.source).all():
-                    _counts[("source", v)] = c
-                _counts[("group", "source")] = session.query(_func.count(STLModel.id)).filter(STLModel.source.isnot(None)).scalar() or 0
+                _year_cnt: dict[int, int] = {}
+                _direct: dict[str, int] = {}
+                _all_warnings: list[str] = []
+                _grp: dict[str, int] = {}
 
+                for (creator, source, yr, mo, sculptor_id, collection_id,
+                     subcollection_id, category_id, release_id, scale_id,
+                     presupports, warning, ap) in _scan:
+                    if creator is not None:
+                        _counts[("creator", creator)] = _counts.get(("creator", creator), 0) + 1
+                        _grp["creator"] = _grp.get("creator", 0) + 1
+                    if source is not None:
+                        _counts[("source", source)] = _counts.get(("source", source), 0) + 1
+                        _grp["source"] = _grp.get("source", 0) + 1
+                    if yr is not None:
+                        _counts[("date_month", (yr, mo))] = _counts.get(("date_month", (yr, mo)), 0) + 1
+                        _year_cnt[yr] = _year_cnt.get(yr, 0) + 1
+                        _grp["date"] = _grp.get("date", 0) + 1
+                    if sculptor_id is not None:
+                        _counts[("sculptor_id", sculptor_id)] = _counts.get(("sculptor_id", sculptor_id), 0) + 1
+                        _grp["sculptor"] = _grp.get("sculptor", 0) + 1
+                    if collection_id is not None:
+                        _counts[("collection_id", collection_id)] = _counts.get(("collection_id", collection_id), 0) + 1
+                        _grp["collection"] = _grp.get("collection", 0) + 1
+                    if subcollection_id is not None:
+                        _counts[("subcollection_id", subcollection_id)] = _counts.get(("subcollection_id", subcollection_id), 0) + 1
+                        _grp["subcollection"] = _grp.get("subcollection", 0) + 1
+                    if category_id is not None:
+                        _counts[("category_id", category_id)] = _counts.get(("category_id", category_id), 0) + 1
+                        _grp["category"] = _grp.get("category", 0) + 1
+                    if release_id is not None:
+                        _counts[("release_id", release_id)] = _counts.get(("release_id", release_id), 0) + 1
+                        _grp["release"] = _grp.get("release", 0) + 1
+                    if scale_id is not None:
+                        _counts[("scale_id", scale_id)] = _counts.get(("scale_id", scale_id), 0) + 1
+                        _grp["scale"] = _grp.get("scale", 0) + 1
+                    if presupports is not None:
+                        _counts[("presupports", presupports)] = _counts.get(("presupports", presupports), 0) + 1
+                        _grp["presupports"] = _grp.get("presupports", 0) + 1
+                    if warning is not None:
+                        _all_warnings.append(warning)
+                    if ap is not None:
+                        _folder = FSPath(ap).parent.as_posix()
+                        _direct[_folder] = _direct.get(_folder, 0) + 1
+
+                for yr, c in _year_cnt.items():
+                    _counts[("date_year", yr)] = c
+                for _wt in ("Models with presupported stl", "Archive without images",
+                            "Nested archives", "Archive with supports",
+                            "Archive without printable files"):
+                    _counts[("warning", _wt)] = sum(1 for w in _all_warnings if _wt in w)
+                _grp["warning"] = sum(1 for w in _all_warnings if w)
+                for k, v in _grp.items():
+                    _counts[("group", k)] = v
+
+                # Tags — join query (many-to-many, unavoidable separate query)
                 for tn, c in session.query(Tag.name, _func.count(_mt.c.model_id)).join(_mt, Tag.id == _mt.c.tag_id).group_by(Tag.name).all():
                     _counts[("tag", tn)] = c
                 _counts[("group", "tag")] = session.query(_func.count(_mt.c.model_id.distinct())).scalar() or 0
 
-                _year_cnt: dict[int, int] = {}
-                for yr, mo, c in session.query(STLModel.release_year, STLModel.release_month, _func.count(STLModel.id)).filter(STLModel.release_year.isnot(None)).group_by(STLModel.release_year, STLModel.release_month).all():
-                    _counts[("date_month", (yr, mo))] = c
-                    _year_cnt[yr] = _year_cnt.get(yr, 0) + c
-                for yr, c in _year_cnt.items():
-                    _counts[("date_year", yr)] = c
-                _counts[("group", "date")] = session.query(_func.count(STLModel.id)).filter(STLModel.release_year.isnot(None)).scalar() or 0
-
-                for sid, c in session.query(STLModel.sculptor_id, _func.count(STLModel.id)).filter(STLModel.sculptor_id.isnot(None)).group_by(STLModel.sculptor_id).all():
-                    _counts[("sculptor_id", sid)] = c
-                _counts[("group", "sculptor")] = session.query(_func.count(STLModel.id)).filter(STLModel.sculptor_id.isnot(None)).scalar() or 0
-
-                for cid, c in session.query(STLModel.collection_id, _func.count(STLModel.id)).filter(STLModel.collection_id.isnot(None)).group_by(STLModel.collection_id).all():
-                    _counts[("collection_id", cid)] = c
-                _counts[("group", "collection")] = session.query(_func.count(STLModel.id)).filter(STLModel.collection_id.isnot(None)).scalar() or 0
-
-                for sid, c in session.query(STLModel.subcollection_id, _func.count(STLModel.id)).filter(STLModel.subcollection_id.isnot(None)).group_by(STLModel.subcollection_id).all():
-                    _counts[("subcollection_id", sid)] = c
-                _counts[("group", "subcollection")] = session.query(_func.count(STLModel.id)).filter(STLModel.subcollection_id.isnot(None)).scalar() or 0
-
-                for cid, c in session.query(STLModel.category_id, _func.count(STLModel.id)).filter(STLModel.category_id.isnot(None)).group_by(STLModel.category_id).all():
-                    _counts[("category_id", cid)] = c
-                _counts[("group", "category")] = session.query(_func.count(STLModel.id)).filter(STLModel.category_id.isnot(None)).scalar() or 0
-
-                for rid, c in session.query(STLModel.release_id, _func.count(STLModel.id)).filter(STLModel.release_id.isnot(None)).group_by(STLModel.release_id).all():
-                    _counts[("release_id", rid)] = c
-                _counts[("group", "release")] = session.query(_func.count(STLModel.id)).filter(STLModel.release_id.isnot(None)).scalar() or 0
-
-                for sid, c in session.query(STLModel.scale_id, _func.count(STLModel.id)).filter(STLModel.scale_id.isnot(None)).group_by(STLModel.scale_id).all():
-                    _counts[("scale_id", sid)] = c
-                _counts[("group", "scale")] = session.query(_func.count(STLModel.id)).filter(STLModel.scale_id.isnot(None)).scalar() or 0
-
-                for v, c in session.query(STLModel.presupports, _func.count(STLModel.id)).filter(STLModel.presupports.isnot(None)).group_by(STLModel.presupports).all():
-                    _counts[("presupports", v)] = c
-                _counts[("group", "presupports")] = session.query(_func.count(STLModel.id)).filter(STLModel.presupports.isnot(None)).scalar() or 0
-
-                _all_warnings = [w for (w,) in session.query(STLModel.warning).filter(STLModel.warning.isnot(None)).all()]
-                for _wt in ("Models with presupported stl", "Archive without images",
-                            "Nested archives", "Archive with supports",
-                            "Archive without printable files"):
-                    _wc = sum(1 for w in _all_warnings if _wt in w)
-                    _counts[("warning", _wt)] = _wc
-                _counts[("group", "warning")] = sum(1 for w in _all_warnings if w)
-
                 # Path counts — cumulative (directory = sum of all models in its subtree)
-                _direct: dict[str, int] = {}
-                for (ap,) in session.query(STLModel.archive_path).filter(STLModel.archive_path.isnot(None)).all():
-                    _folder = FSPath(ap).parent.as_posix()
-                    _direct[_folder] = _direct.get(_folder, 0) + 1
                 _path_counts = {}
                 for _folder, _c in _direct.items():
                     _path_counts[_folder] = _path_counts.get(_folder, 0) + _c
@@ -1066,7 +1078,7 @@ class BrowserTab(QWidget):
                         _ps = _p.as_posix()
                         _path_counts[_ps] = _path_counts.get(_ps, 0) + _c
                         _f = _p
-                _counts[("group", "path")] = session.query(_func.count(STLModel.id)).scalar() or 0
+                _counts[("group", "path")] = sum(_direct.values())
 
             # Scoped counts for all sections (each section scoped by all other active filters)
             _scoped_counts: dict = {}
@@ -1076,15 +1088,17 @@ class BrowserTab(QWidget):
                 # Creator
                 _creator_sc_ids = _scope("creator")
                 if _creator_sc_ids is not None:
-                    for v, c in session.query(STLModel.creator, _func.count(STLModel.id)).filter(STLModel.id.in_(_creator_sc_ids)).filter(STLModel.creator.isnot(None)).group_by(STLModel.creator).all():
+                    _cr_rows = session.query(STLModel.creator, _func.count(STLModel.id)).filter(STLModel.id.in_(_creator_sc_ids)).filter(STLModel.creator.isnot(None)).group_by(STLModel.creator).all()
+                    for v, c in _cr_rows:
                         _scoped_counts[("creator", v)] = c
-                    _scoped_counts[("group", "creator")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(_creator_sc_ids)).filter(STLModel.creator.isnot(None)).scalar() or 0
+                    _scoped_counts[("group", "creator")] = sum(c for _, c in _cr_rows)
                 # Source/Type
                 _source_sc_ids = _scope("source")
                 if _source_sc_ids is not None:
-                    for v, c in session.query(STLModel.source, _func.count(STLModel.id)).filter(STLModel.id.in_(_source_sc_ids)).filter(STLModel.source.isnot(None)).group_by(STLModel.source).all():
+                    _src_rows = session.query(STLModel.source, _func.count(STLModel.id)).filter(STLModel.id.in_(_source_sc_ids)).filter(STLModel.source.isnot(None)).group_by(STLModel.source).all()
+                    for v, c in _src_rows:
                         _scoped_counts[("source", v)] = c
-                    _scoped_counts[("group", "source")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(_source_sc_ids)).filter(STLModel.source.isnot(None)).scalar() or 0
+                    _scoped_counts[("group", "source")] = sum(c for _, c in _src_rows)
                 # Tags
                 _tag_ids = _scope("tag")
                 if _tag_ids is not None:
@@ -1095,54 +1109,62 @@ class BrowserTab(QWidget):
                 _date_ids = _scope("date")
                 if _date_ids is not None:
                     _sc_year: dict[int, int] = {}
-                    for yr, mo, c in session.query(STLModel.release_year, STLModel.release_month, _func.count(STLModel.id)).filter(STLModel.id.in_(_date_ids)).filter(STLModel.release_year.isnot(None)).group_by(STLModel.release_year, STLModel.release_month).all():
+                    _date_rows = session.query(STLModel.release_year, STLModel.release_month, _func.count(STLModel.id)).filter(STLModel.id.in_(_date_ids)).filter(STLModel.release_year.isnot(None)).group_by(STLModel.release_year, STLModel.release_month).all()
+                    for yr, mo, c in _date_rows:
                         _scoped_counts[("date_month", (yr, mo))] = c
                         _sc_year[yr] = _sc_year.get(yr, 0) + c
                     for yr, c in _sc_year.items():
                         _scoped_counts[("date_year", yr)] = c
-                    _scoped_counts[("group", "date")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(_date_ids)).filter(STLModel.release_year.isnot(None)).scalar() or 0
+                    _scoped_counts[("group", "date")] = sum(c for _, _, c in _date_rows)
                 # Sculptor
                 _sculptor_sc_ids = _scope("sculptor")
                 if _sculptor_sc_ids is not None:
-                    for sid, c in session.query(STLModel.sculptor_id, _func.count(STLModel.id)).filter(STLModel.id.in_(_sculptor_sc_ids)).filter(STLModel.sculptor_id.isnot(None)).group_by(STLModel.sculptor_id).all():
+                    _sc_rows = session.query(STLModel.sculptor_id, _func.count(STLModel.id)).filter(STLModel.id.in_(_sculptor_sc_ids)).filter(STLModel.sculptor_id.isnot(None)).group_by(STLModel.sculptor_id).all()
+                    for sid, c in _sc_rows:
                         _scoped_counts[("sculptor_id", sid)] = c
-                    _scoped_counts[("group", "sculptor")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(_sculptor_sc_ids)).filter(STLModel.sculptor_id.isnot(None)).scalar() or 0
+                    _scoped_counts[("group", "sculptor")] = sum(c for _, c in _sc_rows)
                 # Collection
                 _col_sc_ids = _scope("collection")
                 if _col_sc_ids is not None:
-                    for cid, c in session.query(STLModel.collection_id, _func.count(STLModel.id)).filter(STLModel.id.in_(_col_sc_ids)).filter(STLModel.collection_id.isnot(None)).group_by(STLModel.collection_id).all():
+                    _col_rows = session.query(STLModel.collection_id, _func.count(STLModel.id)).filter(STLModel.id.in_(_col_sc_ids)).filter(STLModel.collection_id.isnot(None)).group_by(STLModel.collection_id).all()
+                    for cid, c in _col_rows:
                         _scoped_counts[("collection_id", cid)] = c
-                    _scoped_counts[("group", "collection")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(_col_sc_ids)).filter(STLModel.collection_id.isnot(None)).scalar() or 0
+                    _scoped_counts[("group", "collection")] = sum(c for _, c in _col_rows)
                 # Subcollection
                 _sub_sc_ids = _scope("subcollection")
                 if _sub_sc_ids is not None:
-                    for sid, c in session.query(STLModel.subcollection_id, _func.count(STLModel.id)).filter(STLModel.id.in_(_sub_sc_ids)).filter(STLModel.subcollection_id.isnot(None)).group_by(STLModel.subcollection_id).all():
+                    _sub_rows = session.query(STLModel.subcollection_id, _func.count(STLModel.id)).filter(STLModel.id.in_(_sub_sc_ids)).filter(STLModel.subcollection_id.isnot(None)).group_by(STLModel.subcollection_id).all()
+                    for sid, c in _sub_rows:
                         _scoped_counts[("subcollection_id", sid)] = c
-                    _scoped_counts[("group", "subcollection")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(_sub_sc_ids)).filter(STLModel.subcollection_id.isnot(None)).scalar() or 0
+                    _scoped_counts[("group", "subcollection")] = sum(c for _, c in _sub_rows)
                 # Category
                 _category_sc_ids = _scope("category")
                 if _category_sc_ids is not None:
-                    for cid, c in session.query(STLModel.category_id, _func.count(STLModel.id)).filter(STLModel.id.in_(_category_sc_ids)).filter(STLModel.category_id.isnot(None)).group_by(STLModel.category_id).all():
+                    _cat_rows = session.query(STLModel.category_id, _func.count(STLModel.id)).filter(STLModel.id.in_(_category_sc_ids)).filter(STLModel.category_id.isnot(None)).group_by(STLModel.category_id).all()
+                    for cid, c in _cat_rows:
                         _scoped_counts[("category_id", cid)] = c
-                    _scoped_counts[("group", "category")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(_category_sc_ids)).filter(STLModel.category_id.isnot(None)).scalar() or 0
+                    _scoped_counts[("group", "category")] = sum(c for _, c in _cat_rows)
                 # Release
                 _rel_sc_ids = _scope("release")
                 if _rel_sc_ids is not None:
-                    for rid, c in session.query(STLModel.release_id, _func.count(STLModel.id)).filter(STLModel.id.in_(_rel_sc_ids)).filter(STLModel.release_id.isnot(None)).group_by(STLModel.release_id).all():
+                    _rel_rows = session.query(STLModel.release_id, _func.count(STLModel.id)).filter(STLModel.id.in_(_rel_sc_ids)).filter(STLModel.release_id.isnot(None)).group_by(STLModel.release_id).all()
+                    for rid, c in _rel_rows:
                         _scoped_counts[("release_id", rid)] = c
-                    _scoped_counts[("group", "release")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(_rel_sc_ids)).filter(STLModel.release_id.isnot(None)).scalar() or 0
+                    _scoped_counts[("group", "release")] = sum(c for _, c in _rel_rows)
                 # Scale
                 _scale_sc_ids = _scope("scale")
                 if _scale_sc_ids is not None:
-                    for sid, c in session.query(STLModel.scale_id, _func.count(STLModel.id)).filter(STLModel.id.in_(_scale_sc_ids)).filter(STLModel.scale_id.isnot(None)).group_by(STLModel.scale_id).all():
+                    _scl_rows = session.query(STLModel.scale_id, _func.count(STLModel.id)).filter(STLModel.id.in_(_scale_sc_ids)).filter(STLModel.scale_id.isnot(None)).group_by(STLModel.scale_id).all()
+                    for sid, c in _scl_rows:
                         _scoped_counts[("scale_id", sid)] = c
-                    _scoped_counts[("group", "scale")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(_scale_sc_ids)).filter(STLModel.scale_id.isnot(None)).scalar() or 0
+                    _scoped_counts[("group", "scale")] = sum(c for _, c in _scl_rows)
                 # Presupports
                 _presup_sc_ids = _scope("presupports")
                 if _presup_sc_ids is not None:
-                    for v, c in session.query(STLModel.presupports, _func.count(STLModel.id)).filter(STLModel.id.in_(_presup_sc_ids)).filter(STLModel.presupports.isnot(None)).group_by(STLModel.presupports).all():
+                    _psp_rows = session.query(STLModel.presupports, _func.count(STLModel.id)).filter(STLModel.id.in_(_presup_sc_ids)).filter(STLModel.presupports.isnot(None)).group_by(STLModel.presupports).all()
+                    for v, c in _psp_rows:
                         _scoped_counts[("presupports", v)] = c
-                    _scoped_counts[("group", "presupports")] = session.query(_func.count(STLModel.id)).filter(STLModel.id.in_(_presup_sc_ids)).filter(STLModel.presupports.isnot(None)).scalar() or 0
+                    _scoped_counts[("group", "presupports")] = sum(c for _, c in _psp_rows)
                 # Warning
                 _warn_sc_ids = _scope("warning")
                 if _warn_sc_ids is not None:
@@ -1674,12 +1696,8 @@ class BrowserTab(QWidget):
                     _warn_font.setPointSize(16)
                     _warn_font.setBold(True)
                     warning_item.setFont(_warn_font)
-                try:
-                    raw_size = FSPath(stl.archive_path).stat().st_size
-                    size_display = _fmt_size(raw_size)
-                except OSError:
-                    raw_size = -1
-                    size_display = ""
+                raw_size = stl.archive_size if stl.archive_size is not None else -1
+                size_display = _fmt_size(raw_size) if raw_size >= 0 else ""
                 size_item = QStandardItem(size_display)
                 size_item.setData(raw_size, Qt.ItemDataRole.UserRole)
                 size_item.setEditable(False)
