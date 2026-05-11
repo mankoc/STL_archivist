@@ -68,6 +68,20 @@ def _fmt_size(nbytes: int) -> str:
     return f"{nbytes:.1f} TB"
 
 
+def _prune_ancestor_paths(paths: list[str]) -> list[str]:
+    """Return a minimal covering subset: drop paths whose ancestor is already present.
+
+    Prevents SQLite "Expression tree is too large" when a high-level folder is
+    checked in the tree and hundreds of descendant paths are also collected.
+    """
+    normalized = sorted(p.replace("\\", "/").rstrip("/") for p in paths)
+    result: list[str] = []
+    for p in normalized:
+        if not any(p.startswith(kept + "/") for kept in result):
+            result.append(p)
+    return result
+
+
 class _BrowserProxyModel(QSortFilterProxyModel):
     """Proxy model that sorts the File Size column numerically via UserRole data."""
 
@@ -1896,7 +1910,8 @@ class BrowserTab(QWidget):
             stmt = stmt.where(STLModel.id.in_(_tag_sub.where(Tag.name.in_(tag_filters))))
         if path_filters:
             _norm = func.replace(STLModel.archive_path, "\\", "/")
-            stmt = stmt.where(or_(*(_norm.like(p.rstrip("/") + "/%") for p in path_filters)))
+            _pruned_paths = _prune_ancestor_paths(path_filters)
+            stmt = stmt.where(or_(*(_norm.like(p.rstrip("/") + "/%") for p in _pruned_paths)))
         if date_filters:
             stmt = stmt.where(or_(*_date_clauses(date_filters)))
         if sculptor_filters:
