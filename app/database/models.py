@@ -6,7 +6,7 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 from sqlalchemy import (
-    Column, Integer, Float, String, Text, LargeBinary, DateTime,
+    Column, Index, Integer, Float, String, Text, LargeBinary, DateTime,
     ForeignKey, Table, UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -163,7 +163,7 @@ class STLModel(Base):
     url              = Column(Text)
     description      = Column(Text)
     archive_path     = Column(Text, unique=True, nullable=False)
-    archive_hash     = Column(String(64), nullable=False)
+    archive_hash     = Column(String(64), nullable=False, index=True)
     # Cached filesystem metadata to speed change detection without opening archives
     archive_size     = Column(Integer, nullable=True)
     archive_mtime_ns = Column(Integer, nullable=True)
@@ -180,6 +180,10 @@ class STLModel(Base):
     category_id       = Column(Integer, ForeignKey("categories.id",    ondelete="SET NULL"), nullable=True, index=True)
     release_id        = Column(Integer, ForeignKey("releases.id",      ondelete="SET NULL"), nullable=True, index=True)
     scale_id          = Column(Integer, ForeignKey("scales.id",        ondelete="SET NULL"), nullable=True, index=True)
+
+    __table_args__ = (
+        Index("ix_models_release_date", "release_year", "release_month"),
+    )
 
     tags          = relationship("Tag",          secondary=model_tags, back_populates="models")
     images        = relationship("Image",        back_populates="model", cascade="all, delete-orphan")

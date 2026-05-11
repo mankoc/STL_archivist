@@ -434,14 +434,17 @@ class CrawlerWorker(QThread):
         logger.debug("Collecting missing archive records from database…")
         missing: list[dict] = []
         with session_scope() as session:
-            for model in session.query(STLModel).all():
-                if model.archive_path and not Path(model.archive_path).exists():
+            for mid, ap, ah, asize in session.query(
+                STLModel.id, STLModel.archive_path,
+                STLModel.archive_hash, STLModel.archive_size,
+            ).all():
+                if ap and not Path(ap).exists():
                     missing.append({
-                        "id":       model.id,
-                        "path":     model.archive_path,
-                        "hash":     model.archive_hash or "",
-                        "filename": Path(model.archive_path).name,
-                        "size":     model.archive_size,
+                        "id":       mid,
+                        "path":     ap,
+                        "hash":     ah or "",
+                        "filename": Path(ap).name,
+                        "size":     asize,
                     })
         if missing:
             msg = (f"Found {len(missing)} missing archive(s) — "
