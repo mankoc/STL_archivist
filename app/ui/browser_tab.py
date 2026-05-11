@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import QSettings
 
-from sqlalchemy import func, or_, and_
+from sqlalchemy import func, or_, and_, select as sa_select
 from sqlalchemy.orm import selectinload
 
 from app.database.db import get_session, session_scope
@@ -864,16 +864,17 @@ class BrowserTab(QWidget):
     # ------------------------------------------------------------------
     def _populate_filter_tree(
         self,
-        scope_by_section: dict[str, list[int] | None] | None = None,
+        scope_by_section: dict | None = None,
     ) -> None:
         """Rebuild the left-panel filter tree from the current DB contents.
 
         *scope_by_section* is a dict keyed by section name (``"tag"``, ``"date"``,
         ``"collection"``, ``"subcollection"``, ``"release"``).  When a section's
-        value is a non-empty list, only values present in those model IDs are shown
-        for that section.  ``None`` or a missing key means "show all".
+        value is a non-None SQLAlchemy subquery, only values present in those
+        model IDs are shown for that section.  ``None`` or a missing key means
+        "show all".
         """
-        def _scope(section: str) -> list[int] | None:
+        def _scope(section: str):
             if scope_by_section is None:
                 return None
             return scope_by_section.get(section)
@@ -2009,91 +2010,102 @@ class BrowserTab(QWidget):
             _has_scale, _has_presupports, _has_warning, _has_group,
         ])
 
-        scope_by_section: dict[str, list[int] | None] | None = None
+        scope_by_section: dict | None = None
 
         if _has_any:
-            scope_by_section = {}
-            _session = get_session()
-            try:
-                def _run_id_query(
-                    skip_creator=False, skip_type=False, skip_path=False,
-                    skip_tag=False, skip_date=False, skip_sculptor=False,
-                    skip_col=False, skip_sub=False, skip_category=False,
-                    skip_rel=False, skip_scale=False, skip_presupports=False,
-                    skip_warning=False,
-                ) -> list[int]:
-                    q = _session.query(STLModel.id)
-                    if not skip_creator:
-                        if author_inc:  q = q.filter(STLModel.creator.in_(author_inc))
-                        if author_exc:  q = q.filter(~STLModel.creator.in_(author_exc))
-                    if not skip_type:
-                        if type_inc:    q = q.filter(STLModel.source.in_(type_inc))
-                        if type_exc:    q = q.filter(~STLModel.source.in_(type_exc))
-                    if not skip_tag:
-                        if tag_inc:     q = q.filter(STLModel.tags.any(Tag.name.in_(tag_inc)))
-                        if tag_exc:     q = q.filter(~STLModel.tags.any(Tag.name.in_(tag_exc)))
-                    if not skip_path:
-                        if path_inc:
-                            _n = func.replace(STLModel.archive_path, "\\", "/")
-                            q = q.filter(or_(*(_n.like(p.rstrip("/") + "/%") for p in path_inc)))
-                        if path_exc:
-                            _n = func.replace(STLModel.archive_path, "\\", "/")
-                            for p in path_exc:
-                                q = q.filter(~_n.like(p.rstrip("/") + "/%"))
-                    if not skip_date:
-                        def _dc(pairs):
-                            return [and_(STLModel.release_year == y, STLModel.release_month == mo) if mo is not None else (STLModel.release_year == y) for y, mo in pairs]
-                        if date_inc:    q = q.filter(or_(*_dc(date_inc)))
-                        if date_exc:    q = q.filter(~or_(*_dc(date_exc)))
-                    if not skip_sculptor:
-                        if sculptor_inc: q = q.filter(STLModel.sculptor_id.in_(sculptor_inc))
-                        if sculptor_exc: q = q.filter(~STLModel.sculptor_id.in_(sculptor_exc))
-                    if not skip_col:
-                        if collection_inc:  q = q.filter(STLModel.collection_id.in_(collection_inc))
-                        if collection_exc:  q = q.filter(~STLModel.collection_id.in_(collection_exc))
-                    if not skip_sub:
-                        if subcollection_inc: q = q.filter(STLModel.subcollection_id.in_(subcollection_inc))
-                        if subcollection_exc: q = q.filter(~STLModel.subcollection_id.in_(subcollection_exc))
-                    if not skip_category:
-                        if category_inc: q = q.filter(STLModel.category_id.in_(category_inc))
-                        if category_exc: q = q.filter(~STLModel.category_id.in_(category_exc))
-                    if not skip_rel:
-                        if release_inc:  q = q.filter(STLModel.release_id.in_(release_inc))
-                        if release_exc:  q = q.filter(~STLModel.release_id.in_(release_exc))
-                    if not skip_scale:
-                        if scale_inc:    q = q.filter(STLModel.scale_id.in_(scale_inc))
-                        if scale_exc:    q = q.filter(~STLModel.scale_id.in_(scale_exc))
-                    if not skip_presupports:
-                        if presupports_inc: q = q.filter(STLModel.presupports.in_(presupports_inc))
-                        if presupports_exc: q = q.filter(~STLModel.presupports.in_(presupports_exc))
-                    if not skip_warning:
-                        if warning_inc:  q = q.filter(or_(*(STLModel.warning.contains(w) for w in warning_inc)))
-                        if warning_exc:  q = q.filter(and_(*(~STLModel.warning.contains(w) for w in warning_exc)))
-                    if has_value_groups:
-                        for _k in has_value_groups:
-                            _c2 = {"creator": lambda: and_(STLModel.creator.isnot(None), STLModel.creator != ""), "tag": lambda: STLModel.tags.any(), "source": lambda: and_(STLModel.source.isnot(None), STLModel.source != ""), "date": lambda: STLModel.release_year.isnot(None), "sculptor": lambda: STLModel.sculptor_id.isnot(None), "collection": lambda: STLModel.collection_id.isnot(None), "subcollection": lambda: STLModel.subcollection_id.isnot(None), "category": lambda: STLModel.category_id.isnot(None), "release": lambda: STLModel.release_id.isnot(None), "scale": lambda: STLModel.scale_id.isnot(None), "presupports": lambda: and_(STLModel.presupports.isnot(None), STLModel.presupports != ""), "warning": lambda: and_(STLModel.warning.isnot(None), STLModel.warning != "")}.get(_k)
-                            if _c2: q = q.filter(_c2())
-                    if no_value_groups:
-                        for _k in no_value_groups:
-                            _c2 = {"creator": lambda: and_(STLModel.creator.isnot(None), STLModel.creator != ""), "tag": lambda: STLModel.tags.any(), "source": lambda: and_(STLModel.source.isnot(None), STLModel.source != ""), "date": lambda: STLModel.release_year.isnot(None), "sculptor": lambda: STLModel.sculptor_id.isnot(None), "collection": lambda: STLModel.collection_id.isnot(None), "subcollection": lambda: STLModel.subcollection_id.isnot(None), "category": lambda: STLModel.category_id.isnot(None), "release": lambda: STLModel.release_id.isnot(None), "scale": lambda: STLModel.scale_id.isnot(None), "presupports": lambda: and_(STLModel.presupports.isnot(None), STLModel.presupports != ""), "warning": lambda: and_(STLModel.warning.isnot(None), STLModel.warning != "")}.get(_k)
-                            if _c2: q = q.filter(~_c2())
-                    return [rid for (rid,) in q.all()]
+            # Build a subquery for each filter section (all filters except that
+            # section's own).  Using sa_select().subquery() means the DB sees
+            # "WHERE id IN (SELECT id FROM models WHERE …)" — a proper SQL
+            # subquery — instead of a huge IN (?, ?, …) parameter list.
+            def _run_id_subquery(
+                skip_creator=False, skip_type=False, skip_path=False,
+                skip_tag=False, skip_date=False, skip_sculptor=False,
+                skip_col=False, skip_sub=False, skip_category=False,
+                skip_rel=False, skip_scale=False, skip_presupports=False,
+                skip_warning=False,
+            ):
+                q = sa_select(STLModel.id)
+                if not skip_creator:
+                    if author_inc:  q = q.where(STLModel.creator.in_(author_inc))
+                    if author_exc:  q = q.where(~STLModel.creator.in_(author_exc))
+                if not skip_type:
+                    if type_inc:    q = q.where(STLModel.source.in_(type_inc))
+                    if type_exc:    q = q.where(~STLModel.source.in_(type_exc))
+                if not skip_tag:
+                    if tag_inc:     q = q.where(STLModel.tags.any(Tag.name.in_(tag_inc)))
+                    if tag_exc:     q = q.where(~STLModel.tags.any(Tag.name.in_(tag_exc)))
+                if not skip_path:
+                    _n = func.replace(STLModel.archive_path, "\\", "/")
+                    if path_inc:    q = q.where(or_(*(_n.like(p.rstrip("/") + "/%") for p in path_inc)))
+                    if path_exc:
+                        for p in path_exc:
+                            q = q.where(~_n.like(p.rstrip("/") + "/%"))
+                if not skip_date:
+                    def _dc(pairs):
+                        return [and_(STLModel.release_year == y, STLModel.release_month == mo) if mo is not None else (STLModel.release_year == y) for y, mo in pairs]
+                    if date_inc:    q = q.where(or_(*_dc(date_inc)))
+                    if date_exc:    q = q.where(~or_(*_dc(date_exc)))
+                if not skip_sculptor:
+                    if sculptor_inc: q = q.where(STLModel.sculptor_id.in_(sculptor_inc))
+                    if sculptor_exc: q = q.where(~STLModel.sculptor_id.in_(sculptor_exc))
+                if not skip_col:
+                    if collection_inc:    q = q.where(STLModel.collection_id.in_(collection_inc))
+                    if collection_exc:    q = q.where(~STLModel.collection_id.in_(collection_exc))
+                if not skip_sub:
+                    if subcollection_inc: q = q.where(STLModel.subcollection_id.in_(subcollection_inc))
+                    if subcollection_exc: q = q.where(~STLModel.subcollection_id.in_(subcollection_exc))
+                if not skip_category:
+                    if category_inc: q = q.where(STLModel.category_id.in_(category_inc))
+                    if category_exc: q = q.where(~STLModel.category_id.in_(category_exc))
+                if not skip_rel:
+                    if release_inc:  q = q.where(STLModel.release_id.in_(release_inc))
+                    if release_exc:  q = q.where(~STLModel.release_id.in_(release_exc))
+                if not skip_scale:
+                    if scale_inc:    q = q.where(STLModel.scale_id.in_(scale_inc))
+                    if scale_exc:    q = q.where(~STLModel.scale_id.in_(scale_exc))
+                if not skip_presupports:
+                    if presupports_inc: q = q.where(STLModel.presupports.in_(presupports_inc))
+                    if presupports_exc: q = q.where(~STLModel.presupports.in_(presupports_exc))
+                if not skip_warning:
+                    if warning_inc:  q = q.where(or_(*(STLModel.warning.contains(w) for w in warning_inc)))
+                    if warning_exc:  q = q.where(and_(*(~STLModel.warning.contains(w) for w in warning_exc)))
+                _group_conds = {
+                    "creator":       lambda: and_(STLModel.creator.isnot(None),      STLModel.creator != ""),
+                    "tag":           lambda: STLModel.tags.any(),
+                    "source":        lambda: and_(STLModel.source.isnot(None),        STLModel.source != ""),
+                    "date":          lambda: STLModel.release_year.isnot(None),
+                    "sculptor":      lambda: STLModel.sculptor_id.isnot(None),
+                    "collection":    lambda: STLModel.collection_id.isnot(None),
+                    "subcollection": lambda: STLModel.subcollection_id.isnot(None),
+                    "category":      lambda: STLModel.category_id.isnot(None),
+                    "release":       lambda: STLModel.release_id.isnot(None),
+                    "scale":         lambda: STLModel.scale_id.isnot(None),
+                    "presupports":   lambda: and_(STLModel.presupports.isnot(None),   STLModel.presupports != ""),
+                    "warning":       lambda: and_(STLModel.warning.isnot(None),       STLModel.warning != ""),
+                }
+                for _k in has_value_groups:
+                    _c2 = _group_conds.get(_k)
+                    if _c2: q = q.where(_c2())
+                for _k in no_value_groups:
+                    _c2 = _group_conds.get(_k)
+                    if _c2: q = q.where(~_c2())
+                return q.subquery()
 
-                scope_by_section["creator"]       = _run_id_query(skip_creator=True)
-                scope_by_section["source"]        = _run_id_query(skip_type=True)
-                scope_by_section["tag"]           = _run_id_query(skip_tag=True)
-                scope_by_section["path"]          = _run_id_query(skip_path=True)
-                scope_by_section["date"]          = _run_id_query(skip_date=True)
-                scope_by_section["sculptor"]      = _run_id_query(skip_sculptor=True)
-                scope_by_section["collection"]    = _run_id_query(skip_col=True)
-                scope_by_section["subcollection"] = _run_id_query(skip_sub=True)
-                scope_by_section["category"]      = _run_id_query(skip_category=True)
-                scope_by_section["release"]       = _run_id_query(skip_rel=True)
-                scope_by_section["scale"]         = _run_id_query(skip_scale=True)
-                scope_by_section["presupports"]   = _run_id_query(skip_presupports=True)
-                scope_by_section["warning"]       = _run_id_query(skip_warning=True)
-            finally:
-                _session.close()
+            scope_by_section = {
+                "creator":       _run_id_subquery(skip_creator=True),
+                "source":        _run_id_subquery(skip_type=True),
+                "tag":           _run_id_subquery(skip_tag=True),
+                "path":          _run_id_subquery(skip_path=True),
+                "date":          _run_id_subquery(skip_date=True),
+                "sculptor":      _run_id_subquery(skip_sculptor=True),
+                "collection":    _run_id_subquery(skip_col=True),
+                "subcollection": _run_id_subquery(skip_sub=True),
+                "category":      _run_id_subquery(skip_category=True),
+                "release":       _run_id_subquery(skip_rel=True),
+                "scale":         _run_id_subquery(skip_scale=True),
+                "presupports":   _run_id_subquery(skip_presupports=True),
+                "warning":       _run_id_subquery(skip_warning=True),
+            }
 
         self._populate_filter_tree(scope_by_section=scope_by_section)
 

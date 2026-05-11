@@ -25,12 +25,18 @@ python -m pytest tests/ -v
 stl_database/
 ├── main.py                  # GUI entry point
 ├── crawl.py                 # CLI entry point (headless crawler)
+├── create_icon.py           # Regenerate resources/icon.{ico,png,svg} (run manually)
 ├── app/
 │   ├── config.py            # CrawlerConfig dataclass (passed to crawler, not imported by UI layer)
 │   ├── crawler/             # Archive processing pipeline
 │   ├── database/            # SQLAlchemy ORM + session helpers
 │   ├── ui/                  # PyQt6 widgets and dialogs
 │   └── utils/               # Shared utilities (thumbnails, logging, string ops, path patterns)
+├── resources/
+│   ├── icon.ico             # Multi-size ICO (16–256 px) used as the window icon
+│   ├── icon.png             # 256 × 256 PNG for packaging / taskbar
+│   ├── icon.svg             # Scalable vector version
+│   └── icons/               # Toolbar / tree-view SVG icon set (light + dark variants)
 └── tests/                   # pytest test suite
 ```
 
@@ -63,9 +69,19 @@ PyQt6 widgets and dialogs. The main window (`main_window.py`) hosts a `BrowserTa
 `CrawlerTab` on demand. Fourteen dialog files cover configuration, editing, bulk operations,
 and metadata management.
 
+**Image preview pane** (`browser_tab.py` — `_thumb_scroll` / `_thumb_vlayout`):
+- Displays JPEG thumbnails stored in LMDB for the currently selected model.
+- Accepts drag-and-drop of local image files (`.jpg`, `.jpeg`, `.png`, `.gif`, `.bmp`, `.webp`,
+  `.tiff`): each dropped file is stored as a new `Image` DB record and its thumbnail is written
+  to LMDB via `save_thumbnail()`, then the pane refreshes automatically.
+- Drop handling lives in `eventFilter` (already filtering the scroll area for resize events) and
+  `_handle_image_drop`. The selected model is tracked in `self._current_model_id`.
+
 ### `app/utils/`
 
 - **`thumbnailer.py`** — LMDB key-value store for JPEG thumbnails (keyed by `Image.id`).
+  Key API: `save_thumbnail(bytes, image_id)` resizes and writes; `pixmap_from_path(str)` reads
+  back a `QPixmap`; `delete_thumbnail(id)` removes an entry.
 - **`path_pattern.py`** — parses structured folder paths using `{sculptor}/{release}/{title}`
   syntax and maps extracted values onto ORM model fields.
 - **`string_utils.py`** — Levenshtein distance and Soundex (used for fuzzy name matching).
