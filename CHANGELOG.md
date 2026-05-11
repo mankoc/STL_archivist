@@ -241,7 +241,7 @@
 
 ## 2026.17 — 2026-04-26
 
-Initial alpha release of STL Database, a desktop application for cataloguing local collections of
+Initial alpha release of stlLibrary, a desktop application for cataloguing local collections of
 3D-printable STL model archives.
 
 ### Crawler
@@ -305,7 +305,7 @@ Initial alpha release of STL Database, a desktop application for cataloguing loc
 
 ### Build & CI
 
-- PyInstaller spec for the GUI application (`STLDatabase.exe`)
+- PyInstaller spec for the GUI application (`stlLibrary.exe`)
 - PyInstaller spec for the headless crawler (`crawl.exe`)
 - GitHub Actions workflow: tests on Ubuntu (with offscreen Qt), Windows executable builds on tag push
 - Artifacts and GitHub Release attachments for both executables on `v*` tags

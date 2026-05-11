@@ -13,7 +13,7 @@ _engine = None
 _SessionFactory = None
 
 
-def init_db(db_path: str = "stl_database.db") -> None:
+def init_db(db_path: str = "stlLibrary.db") -> None:
     """Initialise the engine and create all tables if they don't exist."""
     from pathlib import Path
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)

@@ -1,5 +1,5 @@
 """
-STL Database — application entry point.
+stlLibrary — application entry point.
 """
 import sys
 from pathlib import Path
@@ -48,7 +48,7 @@ def _show_splash():
     title_font.setBold(True)
     p.setFont(title_font)
     p.setPen(QColor("#cdd6f4"))
-    p.drawText(QRect(0, title_y, W, 36), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter, "STL Database")
+    p.drawText(QRect(0, title_y, W, 36), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter, "stlLibrary")
 
     ver_font = QFont()
     ver_font.setPointSize(10)
@@ -120,7 +120,7 @@ def _check_db_on_startup(db_path: str, splash=None) -> str:
 def main() -> None:
     app = QApplication(sys.argv)
     app.setStyle("Fusion")  # flat base style — QSS overrides work fully on all platforms
-    app.setApplicationName("STL Database")
+    app.setApplicationName("stlLibrary")
     app.setApplicationVersion(__version__)
     app.setOrganizationName("MrIxolite")
 
@@ -143,7 +143,7 @@ def main() -> None:
 
     import logging
     logging.getLogger(__name__).info(
-        "STL Database %s starting up", __version__
+        "stlLibrary %s starting up", __version__
     )
 
     _update_splash(splash, "Opening database…")

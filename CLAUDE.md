@@ -1,8 +1,8 @@
-# STL Database — Developer Guide
+# stlLibrary — Developer Guide
 
 ## Overview
 
-STL Database is a PyQt6/SQLAlchemy desktop application for cataloguing and browsing local collections
+stlLibrary is a PyQt6/SQLAlchemy desktop application for cataloguing and browsing local collections
 of 3D-printable STL model archives. It scans folders of `.zip`, `.7z`, and `.rar` archives, extracts
 metadata and thumbnails, persists everything in SQLite + LMDB, and provides a full-featured browser UI.
 
@@ -138,5 +138,5 @@ Do not hoist these to module-level without first ensuring the import chain is sa
 |---|---|---|
 | SQLite | `<data_dir>/*.db` | All model metadata, relationships |
 | LMDB | `<data_dir>/thumbnails.lmdb/` | JPEG thumbnails, keyed by `Image.id` |
-| Log | `<data_dir>/stl_database.log` | Rotating compressed log |
+| Log | `<data_dir>/stlLibrary.log` | Rotating compressed log |
 | Sidecar | `<archive_folder>/METADATA.7z` | Per-folder snapshot for fast restore |

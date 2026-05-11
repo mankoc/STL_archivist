@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Generate resources/icon.ico, resources/icon.png, and resources/icon.svg —
-the application icon for STL Database.
+the application icon for stlLibrary.
 
 Design: icosahedron (20-face polyhedron) on a deep-navy rounded-rectangle
 background, evoking a 3D-printable geometric gem/crystal.

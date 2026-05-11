@@ -1,4 +1,4 @@
-# STL Database
+# stlLibrary
 
 A desktop application for cataloguing and browsing your local collection of 3D printable STL model archives. Built with PyQt6 and SQLAlchemy.
 
@@ -53,7 +53,7 @@ Grab the latest release from the [Releases](../../releases) page:
 
 | Executable | Description |
 |---|---|
-| `STLDatabase-<version>.exe` | Full GUI application |
+| `stlLibrary-<version>.exe` | Full GUI application |
 
 No Python installation required — self-contained single-file executable.
 
