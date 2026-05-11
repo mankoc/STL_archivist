@@ -32,6 +32,9 @@ class MainWindow(QMainWindow):
         self._browser = BrowserTab()
         self.setCentralWidget(self._browser)
         self._browser.model_count_changed.connect(self._update_status_bar)
+        self._browser.loading_started.connect(
+            lambda: self.statusBar().showMessage("Loading…")
+        )
         
         # Keep track of crawler state
         self._crawler_is_running = False
