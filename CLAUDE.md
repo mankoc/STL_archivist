@@ -12,9 +12,6 @@ metadata and thumbnails, persists everything in SQLite + LMDB, and provides a fu
 # GUI
 python main.py
 
-# Command-line crawler (no GUI)
-python crawl.py /path/to/stl/folder --pattern "{sculptor}/{release}/{title}"
-
 # Tests
 python -m pytest tests/ -v
 ```
@@ -24,7 +21,6 @@ python -m pytest tests/ -v
 ```
 stl_database/
 ├── main.py                  # GUI entry point
-├── crawl.py                 # CLI entry point (headless crawler)
 ├── create_icon.py           # Regenerate resources/icon.{ico,png,svg} (run manually)
 ├── app/
 │   ├── config.py            # CrawlerConfig dataclass (passed to crawler, not imported by UI layer)

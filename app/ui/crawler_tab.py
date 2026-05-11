@@ -133,6 +133,7 @@ class CrawlerTab(QWidget):
         self._progress = QProgressBar()
         self._progress.setValue(0)
         self._progress.setTextVisible(True)
+        self._progress.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         root.addWidget(self._progress)
 
         # --- Log output ---

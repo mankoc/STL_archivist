@@ -553,7 +553,6 @@ QProgressBar {
     border-radius: 4px;
     text-align: center;
     color: #e3e3e3;
-    min-height: 6px;
 }
 
 QProgressBar::chunk {
