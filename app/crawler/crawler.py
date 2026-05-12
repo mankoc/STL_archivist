@@ -47,10 +47,11 @@ class CrawlerWorker(QThread):
         finished(): Emitted when the crawl completes or is stopped by the user.
     """
 
-    progress      = pyqtSignal(int, int)
-    log           = pyqtSignal(str)
-    finished      = pyqtSignal()
-    counts_changed = pyqtSignal(int, int, int)  # new, updated, unchanged
+    progress       = pyqtSignal(int, int)
+    log            = pyqtSignal(str)
+    finished       = pyqtSignal()
+    counts_changed = pyqtSignal(int, int, int)   # new, updated, unchanged
+    archive_result = pyqtSignal(str, str)         # filename, "new"|"updated"
 
     def __init__(
         self,
@@ -358,8 +359,10 @@ class CrawlerWorker(QThread):
                     if _existing is None:
                         self._stats_new += 1
                         self._new_archive_paths.add(str(archive_path))
+                        self.archive_result.emit(archive_path.name, "new")
                     else:
                         self._stats_updated += 1
+                        self.archive_result.emit(archive_path.name, "updated")
                 else:
                     self._stats_unchanged += 1
                 self.counts_changed.emit(self._stats_new, self._stats_updated, self._stats_unchanged)
