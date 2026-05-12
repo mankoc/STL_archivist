@@ -2010,10 +2010,14 @@ class BrowserTab(QWidget):
             self._load_pair_colors = None
             stmt = stmt.order_by(STLModel.title)
 
-        # Tags GROUP_CONCAT query (one round-trip regardless of row count)
+        # Tags GROUP_CONCAT query — scoped to the same filtered model set as stmt.
+        _id_sub = sa_select(STLModel.id)
+        if stmt.whereclause is not None:
+            _id_sub = _id_sub.where(stmt.whereclause)
         tags_stmt = (
             sa_select(_mt_global.c.model_id, func.group_concat(Tag.name, ", "))
             .join(Tag, _mt_global.c.tag_id == Tag.id)
+            .where(_mt_global.c.model_id.in_(_id_sub))
             .group_by(_mt_global.c.model_id)
         )
 
@@ -2438,9 +2442,10 @@ class BrowserTab(QWidget):
                     if tag_exc:     q = q.where(~STLModel.tags.any(Tag.name.in_(tag_exc)))
                 if not skip_path:
                     _n = func.replace(STLModel.archive_path, "\\", "/")
-                    if path_inc:    q = q.where(or_(*(_n.like(p.rstrip("/") + "/%") for p in path_inc)))
+                    if path_inc:
+                        q = q.where(or_(*(_n.like(p.rstrip("/") + "/%") for p in _prune_ancestor_paths(path_inc))))
                     if path_exc:
-                        for p in path_exc:
+                        for p in _prune_ancestor_paths(path_exc):
                             q = q.where(~_n.like(p.rstrip("/") + "/%"))
                 if not skip_date:
                     def _dc(pairs):
@@ -2538,40 +2543,33 @@ class BrowserTab(QWidget):
         model_id = self._model.item(src_index.row(), COL_THUMB).data(MODEL_ID_ROLE)
         if model_id is not None:
             self._current_model_id = model_id
+            creator  = self._model.item(src_index.row(), COL_CREATOR).text()
+            tags_str = self._model.item(src_index.row(), COL_TAGS).text()
             self._show_thumbnails(model_id)
-            self._update_info_panel(model_id)
-            self._update_creator_panel(model_id)
+            self._update_info_panel(creator, tags_str)
+            self._update_creator_panel(creator)
 
-    def _update_info_panel(self, model_id: int) -> None:
-        """Refresh the creator/tag info labels below the filter tree."""
-        session = get_session()
-        try:
-            stl: STLModel = session.get(STLModel, model_id)
-            if stl is None:
-                return
-            if stl.creator:
-                self._info_author_lbl.setText(f"<b>Creator:</b> {stl.creator}")
-                self._info_author_lbl.setVisible(True)
-            else:
-                self._info_author_lbl.setVisible(False)
-            if stl.tags:
-                self._info_tags_lbl.setText("<b>Tags:</b> " + ", ".join(t.name for t in stl.tags))
-                self._info_tags_lbl.setVisible(True)
-            else:
-                self._info_tags_lbl.setVisible(False)
-        finally:
-            session.close()
+    def _update_info_panel(self, creator: str, tags_str: str) -> None:
+        """Refresh the creator/tag info labels below the filter tree from already-loaded row data."""
+        if creator:
+            self._info_author_lbl.setText(f"<b>Creator:</b> {creator}")
+            self._info_author_lbl.setVisible(True)
+        else:
+            self._info_author_lbl.setVisible(False)
+        if tags_str:
+            self._info_tags_lbl.setText(f"<b>Tags:</b> {tags_str}")
+            self._info_tags_lbl.setVisible(True)
+        else:
+            self._info_tags_lbl.setVisible(False)
 
-    def _update_creator_panel(self, model_id: int) -> None:
+    def _update_creator_panel(self, creator_name: str) -> None:
         """Load creator profile from DB and show it in the right-pane creator panel."""
+        if not creator_name:
+            self._creator_panel.setVisible(False)
+            return
         from app.database.models import Creator as CreatorModel
         session = get_session()
         try:
-            stl: STLModel = session.get(STLModel, model_id)
-            if stl is None or not stl.creator:
-                self._creator_panel.setVisible(False)
-                return
-            creator_name = stl.creator
             c = session.query(CreatorModel).filter_by(name=creator_name).first()
             self._creator_name_lbl.setText(creator_name)
             if c:
@@ -2597,9 +2595,7 @@ class BrowserTab(QWidget):
         from app.ui.creator_editor_dialog import CreatorEditorDialog
         dlg = CreatorEditorDialog(creator_name, parent=self)
         if dlg.exec():
-            ids = self._selected_model_ids()
-            if len(ids) == 1:
-                self._update_creator_panel(ids[0])
+            self._update_creator_panel(creator_name)
 
     def _open_author_editor(self) -> None:
         from app.ui.author_editor_dialog import AuthorEditorDialog

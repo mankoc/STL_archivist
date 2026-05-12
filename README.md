@@ -1,36 +1,40 @@
 # stlLibrary
 
-A desktop application for cataloguing and browsing your local collection of 3D printable STL model archives. Built with PyQt6 and SQLAlchemy.
+**stlLibrary** is a desktop application for managing local collections of 3D-printable model archives. It scans folders of `.zip`, `.7z`, and `.rar` files, extracts metadata and thumbnails, and stores everything in a local database so you can browse and search your collection without unpacking anything manually.
+
+Built with PyQt6 and SQLAlchemy.
 
 Version: 2026.19
 
 ## Features
 
-- **Crawler** — scans a folder of archives (`.zip`, `.7z`, `.rar`) and automatically imports model metadata into a local SQLite database; runs with parallel workers for fast processing
-- **Path pattern parsing** — extract sculptor, release name, model title, and more directly from your folder/file naming conventions; an optional toggle lets you disable pattern extraction without clearing the saved pattern
-- **Metadata overrides** — force a specific Creator or Type/Source value for every archive in a crawl, overriding whatever is auto-detected from the path or `info.json`
-- **Thumbnail generation** — extracts preview images from archives and stores them locally; configurable count and resolution
+- **Archive scanning** — crawls directories of compressed archives in parallel using CRC-based fingerprinting (no full decompression required)
+- **Metadata extraction** — pulls model info from embedded `info.json`, `.url` files, and folder path structure
+- **Path pattern parsing** — extract sculptor, release name, model title, and more from your folder/file naming conventions; an optional toggle lets you disable pattern extraction without clearing the saved pattern
+- **Metadata overrides** — force a specific Creator or Type/Source value for every archive in a crawl, overriding whatever is auto-detected
+- **Thumbnail browser** — stores JPEG previews in LMDB and displays them in a scrollable image pane; supports drag-and-drop to add new images
+- **Image grid** — scrollable grid of thumbnails for the currently filtered set of models, with a resizable thumbnail slider (60–300 px)
 - **Scale detection** — automatically detects miniature scale (e.g. `28mm`, `32mm`, `1/35`) from archive and file names
 - **Presupport detection** — identifies whether an archive contains Lychee, Chitubox, or presupported STL files
 - **Crawler warnings** — flags archives that contain presupported STLs, no images, no printable files (`.stl`/`.obj`/`.lys`/`.chitubox`), or nested archives
+- **Rich model catalog** — tracks sculptors, categories, subcategories, releases, scales, tags, and warnings per model
 - **Tagging** — add and manage tags per model for easy filtering
 - **Browser** — search, filter, and browse your collection with inline editing, tri-state filters (include / exclude / no filter), and a clear-filters button
-- **Filter panel** — each filter group header shows an icon and acts as a "has value / no value" toggle; individual values cycle through include (green **+**), exclude (red **−**), and off states; all 13 filter sections update dynamically (faceted / cascading filtering) when any other filter changes
-- **Image grid** — display a scrollable grid of thumbnails for the currently filtered set of models; resize thumbnails live with a slider (60–300 px)
+- **Filter panel** — faceted / cascading multi-value filters; group headers toggle "has value / no value"; individual values cycle through include (green **+**), exclude (red **−**), and off states
 - **Editor** — edit model metadata (title, author, sculptor, category, subcategory, release, scale, presupports, source, URL, date, sequence, tags)
 - **Mass editor** — apply bulk changes across multiple models at once, including category and subcategory
 - **Metadata sidecars** — export a `METADATA.7z` snapshot into every archive folder so the library can be restored on a new machine without re-crawling; optionally includes thumbnails
 - **Image pane toggle** — show or hide the right-hand thumbnail sidebar via a toolbar button or the View menu
 - **File sorting** — optionally move and rename archive files into a structured directory layout using a path pattern (enable in Configuration)
 - **File Size column** — browser table shows each archive's size on disk (B / KB / MB / GB), sortable numerically
-- **STL file list** — optionally records the name and uncompressed size of every `.stl` file inside each archive in a dedicated `stl_files` table (enable *Store STL file list* in Configuration); populated automatically during crawling and included in METADATA.7z sidecars
-- **Find Metadata Duplicates** — Tools menu dialog that finds models with identical or phonetically similar field values; supports exact match, Levenshtein (configurable distance), and Soundex; results can be sent directly to the browser table
-- **Find Archives by Content** — two-tab tool under the Tools menu: the *STL Files* tab flags archive pairs that share a configurable fraction of identical files (by name + size); the *Images* tab finds archives with perceptually similar thumbnails using a 64-bit dHash and a configurable Hamming distance threshold; hover any image-match row to see both thumbnails in a popup; right-click any result row to open a side-by-side **Archive Contents** comparison
-- **Archive content viewer** — right-click a single model and choose *Show Files…* to list every `.stl` file recorded in the `stl_files` table (filename, size, hash); or choose *Compare Archive Contents…* from the Find Archives by Content dialog to compare two archives side-by-side with configurable matching by filename, size, or hash
-- **Physical file deletion** — when *Allow file delete* is enabled in Configuration → File writing, a new right-click item *Delete archive file(s) from disk…* appears; optionally moves files to a configurable trash folder (with recovery info) instead of permanently deleting them
-- **Background crawl** — start a crawl then click *Run in Background* to dismiss the Crawler dialog without stopping the worker; a status indicator in the main-window status bar shows live progress and brings the dialog back when clicked
-- **Statistics** — column statistics and aggregated statistics dialogs for a quick numeric overview of any field; database maintenance dialog (vacuum, integrity check)
-- **Themes** — built-in color schemes: System Default, VS Code Dark+, Windows 11 Dark, Windows 11 Light, and nine Material Design themes (dark/light variants of Blue, Teal, Purple, Amber, Red, Orange) via qt-material
+- **STL file list** — optionally records the name and uncompressed size of every `.stl` file inside each archive (enable *Store STL file list* in Configuration); included in METADATA.7z sidecars
+- **Find Metadata Duplicates** — finds models with identical or phonetically similar field values; supports exact match, Levenshtein (configurable distance), and Soundex; results can be sent directly to the browser table
+- **Find Archives by Content** — two-tab tool: the *STL Files* tab flags archive pairs that share a configurable fraction of identical files; the *Images* tab finds archives with perceptually similar thumbnails using 64-bit dHash and configurable Hamming distance; hover any row to see thumbnails in a popup
+- **Archive content viewer** — list every `.stl` file in an archive, or compare two archives side-by-side with configurable matching by filename, size, or hash
+- **Physical file deletion** — optionally delete or trash archive files from disk via the right-click menu (enable in Configuration → File writing)
+- **Background crawl** — dismiss the Crawler dialog without stopping the worker; a status badge in the status bar shows live progress and brings the dialog back when clicked
+- **Statistics** — column and aggregated statistics dialogs for a quick numeric overview; database maintenance (vacuum, integrity check)
+- **Themes** — built-in color schemes: System Default, VS Code Dark+, Windows 11 Dark, Windows 11 Light, and nine Material Design themes via qt-material
 
 ## Requirements
 
