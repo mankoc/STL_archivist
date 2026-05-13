@@ -75,9 +75,9 @@ class StatsWorker(QThread):
                     STLModel.warning.isnot(None),
                 ).scalar() or 0
 
-                stats["no_images"] = s.query(func.count(STLModel.id)).filter(
-                    ~STLModel.images.any()
-                ).scalar() or 0
+                stats["no_images"] = s.query(func.count(STLModel.id)).outerjoin(
+                    Image, STLModel.id == Image.model_id
+                ).filter(Image.id.is_(None)).scalar() or 0
 
                 stats["with_url"] = s.query(func.count(STLModel.id)).filter(
                     STLModel.url.isnot(None),
