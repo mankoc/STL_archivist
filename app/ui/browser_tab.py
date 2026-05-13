@@ -1011,17 +1011,6 @@ class BrowserTab(QWidget):
         self._filter_tree.itemChanged.connect(self._on_filter_item_changed)
         left_layout.addWidget(self._filter_tree)
 
-        # ---- Info panel: author + tags of selected model ----
-        self._info_author_lbl = QLabel()
-        self._info_author_lbl.setWordWrap(True)
-        self._info_author_lbl.setVisible(False)
-        left_layout.addWidget(self._info_author_lbl)
-
-        self._info_tags_lbl = QLabel()
-        self._info_tags_lbl.setWordWrap(True)
-        self._info_tags_lbl.setVisible(False)
-        left_layout.addWidget(self._info_tags_lbl)
-
         splitter.addWidget(left)
 
         # ---- Centre: search bar + table ----
@@ -1115,28 +1104,24 @@ class BrowserTab(QWidget):
         img_layout.addWidget(self._thumb_scroll)
         right_vsplit.addWidget(img_widget)
 
-        # Bottom: creator info panel (hidden until a model with creator info is selected)
+        # Bottom: model info panel
         self._creator_panel = QFrame()
         self._creator_panel.setFrameShape(QFrame.Shape.StyledPanel)
         creator_layout = QVBoxLayout(self._creator_panel)
-        creator_layout.setContentsMargins(6, 6, 6, 6)
-        creator_layout.setSpacing(4)
-        self._creator_name_lbl = QLabel()
-        self._creator_name_lbl.setWordWrap(True)
-        _cfont = self._creator_name_lbl.font()
-        _cfont.setBold(True)
-        self._creator_name_lbl.setFont(_cfont)
-        creator_layout.addWidget(self._creator_name_lbl)
-        self._creator_details_lbl = QLabel()
-        self._creator_details_lbl.setWordWrap(True)
-        self._creator_details_lbl.setOpenExternalLinks(True)
-        self._creator_details_lbl.setTextFormat(Qt.TextFormat.RichText)
-        self._creator_details_lbl.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextBrowserInteraction
-        )
-        self._creator_details_lbl.setAlignment(Qt.AlignmentFlag.AlignTop)
-        creator_layout.addWidget(self._creator_details_lbl)
-        creator_layout.addStretch()
+        creator_layout.setContentsMargins(4, 4, 4, 4)
+        creator_layout.setSpacing(0)
+        self._info_scroll = QScrollArea()
+        self._info_scroll.setWidgetResizable(True)
+        self._info_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._info_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._info_lbl = QLabel()
+        self._info_lbl.setWordWrap(True)
+        self._info_lbl.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self._info_lbl.setTextFormat(Qt.TextFormat.RichText)
+        self._info_lbl.setOpenExternalLinks(True)
+        self._info_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        self._info_scroll.setWidget(self._info_lbl)
+        creator_layout.addWidget(self._info_scroll)
         self._creator_panel.setVisible(False)
         right_vsplit.addWidget(self._creator_panel)
 
@@ -2535,67 +2520,133 @@ class BrowserTab(QWidget):
         if not current.isValid():
             self._current_model_id = None
             self._clear_thumbnails()
-            self._info_author_lbl.setVisible(False)
-            self._info_tags_lbl.setVisible(False)
             self._creator_panel.setVisible(False)
             return
         src_index = self._proxy.mapToSource(current)
-        model_id = self._model.item(src_index.row(), COL_THUMB).data(MODEL_ID_ROLE)
+        r = src_index.row()
+        model_id = self._model.item(r, COL_THUMB).data(MODEL_ID_ROLE)
         if model_id is not None:
             self._current_model_id = model_id
-            creator  = self._model.item(src_index.row(), COL_CREATOR).text()
-            tags_str = self._model.item(src_index.row(), COL_TAGS).text()
             self._show_thumbnails(model_id)
-            self._update_info_panel(creator, tags_str)
-            self._update_creator_panel(creator)
+            row_data = {
+                "title":          self._model.item(r, COL_TITLE).text(),
+                "creator":        self._model.item(r, COL_CREATOR).text(),
+                "source":         self._model.item(r, COL_SOURCE).text(),
+                "date":           self._model.item(r, COL_DATE).text(),
+                "tags":           self._model.item(r, COL_TAGS).text(),
+                "sculptor":       self._model.item(r, COL_SCULPTOR).text(),
+                "collection":     self._model.item(r, COL_COLLECTION).text(),
+                "subcollection":  self._model.item(r, COL_SUBCOLLECTION).text(),
+                "category":       self._model.item(r, COL_CATEGORY).text(),
+                "release":        self._model.item(r, COL_RELEASE).text(),
+                "scale":          self._model.item(r, COL_SCALE).text(),
+                "presupports":    self._model.item(r, COL_PRESUPPORTED).text(),
+                "sequence":       self._model.item(r, COL_SEQUENCE).text(),
+                "path":           self._model.item(r, COL_PATH).text(),
+                "filesize":       self._model.item(r, COL_FILESIZE).text(),
+                "compression":    self._model.item(r, COL_COMPRESSION).text(),
+                "added":          self._model.item(r, COL_ADDED).text(),
+                "warning":        self._model.item(r, COL_WARNING).data(Qt.ItemDataRole.ToolTipRole) or "",
+            }
+            self._update_model_info_panel(model_id, row_data)
 
-    def _update_info_panel(self, creator: str, tags_str: str) -> None:
-        """Refresh the creator/tag info labels below the filter tree from already-loaded row data."""
-        if creator:
-            self._info_author_lbl.setText(f"<b>Creator:</b> {creator}")
-            self._info_author_lbl.setVisible(True)
-        else:
-            self._info_author_lbl.setVisible(False)
-        if tags_str:
-            self._info_tags_lbl.setText(f"<b>Tags:</b> {tags_str}")
-            self._info_tags_lbl.setVisible(True)
-        else:
-            self._info_tags_lbl.setVisible(False)
-
-    def _update_creator_panel(self, creator_name: str) -> None:
-        """Load creator profile from DB and show it in the right-pane creator panel."""
-        if not creator_name:
-            self._creator_panel.setVisible(False)
-            return
+    def _update_model_info_panel(self, model_id: int, row_data: dict) -> None:
+        """Build the HTML info panel from row data + a small DB fetch for url/description/creator profile."""
+        from html import escape
         from app.database.models import Creator as CreatorModel
+
         session = get_session()
         try:
-            c = session.query(CreatorModel).filter_by(name=creator_name).first()
-            self._creator_name_lbl.setText(creator_name)
-            if c:
-                lines: list[str] = []
-                if c.full_name:
-                    lines.append(f"<b>Full name:</b> {c.full_name}")
-                if c.patreon_url:
-                    lines.append(f'<b>Patreon:</b> <a href="{c.patreon_url}">{c.patreon_url}</a>')
-                if c.artstation_url:
-                    lines.append(f'<b>ArtStation:</b> <a href="{c.artstation_url}">{c.artstation_url}</a>')
-                if c.gumroad_url:
-                    lines.append(f'<b>Gumroad:</b> <a href="{c.gumroad_url}">{c.gumroad_url}</a>')
-                if c.myminifactory_url:
-                    lines.append(f'<b>MyMiniFactory:</b> <a href="{c.myminifactory_url}">{c.myminifactory_url}</a>')
-                self._creator_details_lbl.setText("<br>".join(lines))
-            else:
-                self._creator_details_lbl.setText("")
-            self._creator_panel.setVisible(True)
+            m = session.query(STLModel).filter_by(id=model_id).first()
+            url         = (m.url         or "") if m else ""
+            description = (m.description or "") if m else ""
+            creator_name = row_data["creator"]
+            creator_obj = (
+                session.query(CreatorModel).filter_by(name=creator_name).first()
+                if creator_name else None
+            )
         finally:
             session.close()
+
+        def _row(label: str, value: str, is_link: bool = False) -> str:
+            if not value:
+                return ""
+            val_html = (
+                f'<a href="{escape(value)}">{escape(value)}</a>' if is_link
+                else escape(value)
+            )
+            return f"<tr><td style='color:gray;white-space:nowrap;padding-right:6px'>{escape(label)}</td><td>{val_html}</td></tr>"
+
+        rows: list[str] = []
+        rows.append(_row("Title",         row_data["title"]))
+        rows.append(_row("Creator",       row_data["creator"]))
+        if creator_obj:
+            if creator_obj.full_name:
+                rows.append(_row("Full name",   creator_obj.full_name))
+            if creator_obj.patreon_url:
+                rows.append(_row("Patreon",     creator_obj.patreon_url, is_link=True))
+            if creator_obj.artstation_url:
+                rows.append(_row("ArtStation",  creator_obj.artstation_url, is_link=True))
+            if creator_obj.gumroad_url:
+                rows.append(_row("Gumroad",     creator_obj.gumroad_url, is_link=True))
+            if creator_obj.myminifactory_url:
+                rows.append(_row("MyMiniFactory", creator_obj.myminifactory_url, is_link=True))
+        rows.append(_row("Source",        row_data["source"]))
+        rows.append(_row("Date",          row_data["date"]))
+        rows.append(_row("Sculptor",      row_data["sculptor"]))
+        rows.append(_row("Collection",    row_data["collection"]))
+        rows.append(_row("Subcollection", row_data["subcollection"]))
+        rows.append(_row("Category",      row_data["category"]))
+        rows.append(_row("Release",       row_data["release"]))
+        rows.append(_row("Scale",         row_data["scale"]))
+        rows.append(_row("Presupported",  row_data["presupports"]))
+        rows.append(_row("Sequence",      row_data["sequence"]))
+        rows.append(_row("Tags",          row_data["tags"]))
+        rows.append(_row("URL",           url, is_link=bool(url)))
+        rows.append(_row("File size",     row_data["filesize"]))
+        rows.append(_row("Compression",   row_data["compression"]))
+        rows.append(_row("Added",         row_data["added"]))
+        rows.append(_row("Path",          row_data["path"]))
+        if row_data["warning"]:
+            rows.append(_row("Warning",   row_data["warning"]))
+        if description:
+            rows.append(_row("Description", description))
+
+        body = "".join(r for r in rows if r)
+        html = f"<table style='font-size:small'>{body}</table>"
+        self._info_lbl.setText(html)
+        self._creator_panel.setVisible(True)
 
     def _open_creator_editor(self, creator_name: str) -> None:
         from app.ui.creator_editor_dialog import CreatorEditorDialog
         dlg = CreatorEditorDialog(creator_name, parent=self)
-        if dlg.exec():
-            self._update_creator_panel(creator_name)
+        if dlg.exec() and self._current_model_id is not None:
+            src_index = self._proxy.mapToSource(
+                self._table.selectionModel().currentIndex()
+            )
+            r = src_index.row()
+            if r >= 0:
+                row_data = {
+                    "title":         self._model.item(r, COL_TITLE).text(),
+                    "creator":       self._model.item(r, COL_CREATOR).text(),
+                    "source":        self._model.item(r, COL_SOURCE).text(),
+                    "date":          self._model.item(r, COL_DATE).text(),
+                    "tags":          self._model.item(r, COL_TAGS).text(),
+                    "sculptor":      self._model.item(r, COL_SCULPTOR).text(),
+                    "collection":    self._model.item(r, COL_COLLECTION).text(),
+                    "subcollection": self._model.item(r, COL_SUBCOLLECTION).text(),
+                    "category":      self._model.item(r, COL_CATEGORY).text(),
+                    "release":       self._model.item(r, COL_RELEASE).text(),
+                    "scale":         self._model.item(r, COL_SCALE).text(),
+                    "presupports":   self._model.item(r, COL_PRESUPPORTED).text(),
+                    "sequence":      self._model.item(r, COL_SEQUENCE).text(),
+                    "path":          self._model.item(r, COL_PATH).text(),
+                    "filesize":      self._model.item(r, COL_FILESIZE).text(),
+                    "compression":   self._model.item(r, COL_COMPRESSION).text(),
+                    "added":         self._model.item(r, COL_ADDED).text(),
+                    "warning":       self._model.item(r, COL_WARNING).data(Qt.ItemDataRole.ToolTipRole) or "",
+                }
+                self._update_model_info_panel(self._current_model_id, row_data)
 
     def _open_author_editor(self) -> None:
         from app.ui.author_editor_dialog import AuthorEditorDialog

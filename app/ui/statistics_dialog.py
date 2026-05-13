@@ -89,13 +89,13 @@ class StatsWorker(QThread):
                     STLModel.source, func.count(STLModel.id)
                 ).group_by(STLModel.source).order_by(func.count(STLModel.id).desc()).all()
 
-                # --- By year (most recent 10, chronological for the chart) ---
+                # --- By year (top 10 by count) ---
                 stats["by_year"] = s.query(
                     STLModel.release_year, func.count(STLModel.id)
                 ).filter(
                     STLModel.release_year.isnot(None)
                 ).group_by(STLModel.release_year).order_by(
-                    STLModel.release_year.desc()
+                    func.count(STLModel.id).desc()
                 ).limit(10).all()
 
                 # --- Top sculptors ---
@@ -257,7 +257,7 @@ class StatisticsDialog(QDialog):
         # ── By year ──────────────────────────────────────────────────
         if s["by_year"]:
             layout.addWidget(self._bar_group(
-                "By Release Year (most recent 10)",
+                "By Release Year (top 10)",
                 [(str(yr), cnt) for yr, cnt in s["by_year"]],
                 total,
             ))

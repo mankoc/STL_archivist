@@ -973,6 +973,7 @@ class DbMaintenanceDialog(QDialog):
     def _remove_records(self, ids: list[int]) -> None:
         from app.database.db import session_scope
         from app.database.models import STLModel
+        from app.database.helpers import prune_unused_lookups
 
         try:
             with session_scope() as session:
@@ -980,6 +981,11 @@ class DbMaintenanceDialog(QDialog):
                     model = session.query(STLModel).filter(STLModel.id == model_id).first()
                     if model:
                         session.delete(model)
+                session.flush()
+                deleted = prune_unused_lookups(session)
+            if deleted:
+                summary = ", ".join(f"{n} {k}" for k, n in deleted.items())
+                self._log.appendPlainText(f"Pruned unused lookups: {summary}")
         except Exception as exc:
             self._log.appendPlainText(f"ERROR removing records: {exc}")
             logger.error("Failed to remove DB records: %s", exc, exc_info=True)
