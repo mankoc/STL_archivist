@@ -161,6 +161,10 @@ def _ensure_indexes(engine) -> None:
             "CREATE INDEX IF NOT EXISTS ix_models_release_date "
             "ON models (release_year, release_month)"
         ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_images_model_id "
+            "ON images (model_id)"
+        ))
 
 
 def get_session() -> Session:

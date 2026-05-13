@@ -450,7 +450,7 @@ class MainWindow(QMainWindow):
         """Show or hide the Debug menu and sidecar action based on current settings."""
         from app.ui.config_dialog import get_debug_menu_enabled, get_metadata_sidecar_enabled
         self._debug_menu.menuAction().setVisible(get_debug_menu_enabled())
-        self._act_gen_metadata.setEnabled(get_metadata_sidecar_enabled())
+        self._act_gen_metadata.setVisible(get_metadata_sidecar_enabled())
 
     def _clear_database(self) -> None:
         reply = QMessageBox.warning(

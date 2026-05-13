@@ -224,7 +224,7 @@ class Image(Base):
     __tablename__ = "images"
 
     id             = Column(Integer, primary_key=True, autoincrement=True)
-    model_id       = Column(Integer, ForeignKey("models.id", ondelete="CASCADE"), nullable=False)
+    model_id       = Column(Integer, ForeignKey("models.id", ondelete="CASCADE"), nullable=False, index=True)
     filename       = Column(String(512))
     thumbnail_path = Column(String(512), nullable=True)
     thumbnail      = Column(LargeBinary, nullable=True)   # legacy blob – NULL after migration to LMDB
