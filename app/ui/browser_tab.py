@@ -964,6 +964,7 @@ class BrowserTab(QWidget):
         self._load_pair_colors: list | None = None  # QColor list for dup-pair mode
         self._rescan_dialog: RescanProgressDialog | None = None
         self._current_model_id: int | None = None
+        self._info_pane_enabled: bool = False
         self._thumb_pixmaps: list[QPixmap] = []  # original (unscaled) pixmaps
         self._cached_path_dirs: frozenset[str] = frozenset()
         self._cached_sorted_dirs: list[str] = []
@@ -1146,6 +1147,24 @@ class BrowserTab(QWidget):
 
     def image_pane_visible(self) -> bool:
         return self._right_pane.isVisible()
+
+    def info_pane_visible(self) -> bool:
+        return self._info_pane_enabled
+
+    def toggle_info_pane(self) -> bool:
+        """Enable or disable the model info panel. Returns the new enabled state."""
+        self._info_pane_enabled = not self._info_pane_enabled
+        if not self._info_pane_enabled:
+            self._creator_panel.setVisible(False)
+        elif self._current_model_id is not None:
+            # Re-populate immediately if a model is already selected
+            src_index = self._proxy.mapToSource(
+                self._table.selectionModel().currentIndex()
+            )
+            r = src_index.row()
+            if r >= 0:
+                self._update_model_info_panel(self._current_model_id, self._row_data_at(r))
+        return self._info_pane_enabled
 
     def toggle_image_pane(self) -> bool:
         """Show or hide the right thumbnail pane. Returns the new visibility state."""
@@ -2516,6 +2535,29 @@ class BrowserTab(QWidget):
         self._load_table()
         self._populate_filter_tree()
 
+    def _row_data_at(self, r: int) -> dict:
+        """Extract all displayable fields from table row *r* into a flat dict."""
+        return {
+            "title":         self._model.item(r, COL_TITLE).text(),
+            "creator":       self._model.item(r, COL_CREATOR).text(),
+            "source":        self._model.item(r, COL_SOURCE).text(),
+            "date":          self._model.item(r, COL_DATE).text(),
+            "tags":          self._model.item(r, COL_TAGS).text(),
+            "sculptor":      self._model.item(r, COL_SCULPTOR).text(),
+            "collection":    self._model.item(r, COL_COLLECTION).text(),
+            "subcollection": self._model.item(r, COL_SUBCOLLECTION).text(),
+            "category":      self._model.item(r, COL_CATEGORY).text(),
+            "release":       self._model.item(r, COL_RELEASE).text(),
+            "scale":         self._model.item(r, COL_SCALE).text(),
+            "presupports":   self._model.item(r, COL_PRESUPPORTED).text(),
+            "sequence":      self._model.item(r, COL_SEQUENCE).text(),
+            "path":          self._model.item(r, COL_PATH).text(),
+            "filesize":      self._model.item(r, COL_FILESIZE).text(),
+            "compression":   self._model.item(r, COL_COMPRESSION).text(),
+            "added":         self._model.item(r, COL_ADDED).text(),
+            "warning":       self._model.item(r, COL_WARNING).data(Qt.ItemDataRole.ToolTipRole) or "",
+        }
+
     def _on_current_changed(self, current, previous) -> None:
         if not current.isValid():
             self._current_model_id = None
@@ -2528,27 +2570,8 @@ class BrowserTab(QWidget):
         if model_id is not None:
             self._current_model_id = model_id
             self._show_thumbnails(model_id)
-            row_data = {
-                "title":          self._model.item(r, COL_TITLE).text(),
-                "creator":        self._model.item(r, COL_CREATOR).text(),
-                "source":         self._model.item(r, COL_SOURCE).text(),
-                "date":           self._model.item(r, COL_DATE).text(),
-                "tags":           self._model.item(r, COL_TAGS).text(),
-                "sculptor":       self._model.item(r, COL_SCULPTOR).text(),
-                "collection":     self._model.item(r, COL_COLLECTION).text(),
-                "subcollection":  self._model.item(r, COL_SUBCOLLECTION).text(),
-                "category":       self._model.item(r, COL_CATEGORY).text(),
-                "release":        self._model.item(r, COL_RELEASE).text(),
-                "scale":          self._model.item(r, COL_SCALE).text(),
-                "presupports":    self._model.item(r, COL_PRESUPPORTED).text(),
-                "sequence":       self._model.item(r, COL_SEQUENCE).text(),
-                "path":           self._model.item(r, COL_PATH).text(),
-                "filesize":       self._model.item(r, COL_FILESIZE).text(),
-                "compression":    self._model.item(r, COL_COMPRESSION).text(),
-                "added":          self._model.item(r, COL_ADDED).text(),
-                "warning":        self._model.item(r, COL_WARNING).data(Qt.ItemDataRole.ToolTipRole) or "",
-            }
-            self._update_model_info_panel(model_id, row_data)
+            if self._info_pane_enabled:
+                self._update_model_info_panel(model_id, self._row_data_at(r))
 
     def _update_model_info_panel(self, model_id: int, row_data: dict) -> None:
         """Build the HTML info panel from row data + a small DB fetch for url/description/creator profile."""
@@ -2615,38 +2638,18 @@ class BrowserTab(QWidget):
         body = "".join(r for r in rows if r)
         html = f"<table style='font-size:small'>{body}</table>"
         self._info_lbl.setText(html)
-        self._creator_panel.setVisible(True)
+        self._creator_panel.setVisible(self._info_pane_enabled)
 
     def _open_creator_editor(self, creator_name: str) -> None:
         from app.ui.creator_editor_dialog import CreatorEditorDialog
         dlg = CreatorEditorDialog(creator_name, parent=self)
-        if dlg.exec() and self._current_model_id is not None:
+        if dlg.exec() and self._current_model_id is not None and self._info_pane_enabled:
             src_index = self._proxy.mapToSource(
                 self._table.selectionModel().currentIndex()
             )
             r = src_index.row()
             if r >= 0:
-                row_data = {
-                    "title":         self._model.item(r, COL_TITLE).text(),
-                    "creator":       self._model.item(r, COL_CREATOR).text(),
-                    "source":        self._model.item(r, COL_SOURCE).text(),
-                    "date":          self._model.item(r, COL_DATE).text(),
-                    "tags":          self._model.item(r, COL_TAGS).text(),
-                    "sculptor":      self._model.item(r, COL_SCULPTOR).text(),
-                    "collection":    self._model.item(r, COL_COLLECTION).text(),
-                    "subcollection": self._model.item(r, COL_SUBCOLLECTION).text(),
-                    "category":      self._model.item(r, COL_CATEGORY).text(),
-                    "release":       self._model.item(r, COL_RELEASE).text(),
-                    "scale":         self._model.item(r, COL_SCALE).text(),
-                    "presupports":   self._model.item(r, COL_PRESUPPORTED).text(),
-                    "sequence":      self._model.item(r, COL_SEQUENCE).text(),
-                    "path":          self._model.item(r, COL_PATH).text(),
-                    "filesize":      self._model.item(r, COL_FILESIZE).text(),
-                    "compression":   self._model.item(r, COL_COMPRESSION).text(),
-                    "added":         self._model.item(r, COL_ADDED).text(),
-                    "warning":       self._model.item(r, COL_WARNING).data(Qt.ItemDataRole.ToolTipRole) or "",
-                }
-                self._update_model_info_panel(self._current_model_id, row_data)
+                self._update_model_info_panel(self._current_model_id, self._row_data_at(r))
 
     def _open_author_editor(self) -> None:
         from app.ui.author_editor_dialog import AuthorEditorDialog

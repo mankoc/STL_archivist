@@ -84,6 +84,13 @@ class MainWindow(QMainWindow):
         self._act_toggle_images.setStatusTip("Show or hide the image preview pane")
         self._act_toggle_images.triggered.connect(self._toggle_image_pane)
 
+        self._act_toggle_info = QAction(
+            _icon("toggle_info"), "Info", self)
+        self._act_toggle_info.setCheckable(True)
+        self._act_toggle_info.setChecked(False)
+        self._act_toggle_info.setStatusTip("Show or hide the model info panel")
+        self._act_toggle_info.triggered.connect(self._toggle_info_pane)
+
         self._act_about = QAction(
             style.standardIcon(SP.SP_MessageBoxInformation), "About…", self)
         self._act_about.setStatusTip("About stlLibrary")
@@ -112,6 +119,7 @@ class MainWindow(QMainWindow):
 
         view_menu = mb.addMenu("&View")
         view_menu.addAction(self._act_toggle_images)
+        view_menu.addAction(self._act_toggle_info)
         view_menu.addAction(self._act_image_grid)
 
         tools_menu = mb.addMenu("&Tools")
@@ -239,6 +247,7 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
         toolbar.addAction(self._act_image_grid)
         toolbar.addAction(self._act_toggle_images)
+        toolbar.addAction(self._act_toggle_info)
 
         sb = QStatusBar()
         self.setStatusBar(sb)
@@ -488,6 +497,11 @@ class MainWindow(QMainWindow):
         """Toggle the image preview pane and sync the toolbar button state."""
         visible = self._browser.toggle_image_pane()
         self._act_toggle_images.setChecked(visible)
+
+    def _toggle_info_pane(self) -> None:
+        """Toggle the model info panel and sync the toolbar button state."""
+        visible = self._browser.toggle_info_pane()
+        self._act_toggle_info.setChecked(visible)
 
     def _show_help(self) -> None:
         """Open the help dialog."""
