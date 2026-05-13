@@ -25,6 +25,7 @@ from app.database.models import (
     Release,
     Scale,
     Sculptor,
+    STLModel,
     Subcollection,
     Tag,
 )
@@ -76,6 +77,65 @@ def get_or_create_release(session: Session, name: str) -> Release:
 def get_or_create_scale(session: Session, name: str) -> Scale:
     """Look up or create a ``Scale`` row by exact-case name."""
     return get_or_create(session, Scale, name=name)
+
+
+def prune_unused_lookups(session: Session) -> dict[str, int]:
+    """Delete lookup rows no longer referenced by any model.
+
+    Order matters: subcollections are pruned before collections so that a
+    collection whose only remaining children were orphan subcollections is also
+    removed in the same call.
+
+    Returns a mapping of ``{table_label: rows_deleted}`` for non-zero counts.
+    """
+    from sqlalchemy import select
+
+    deleted: dict[str, int] = {}
+
+    # 1. Orphan subcollections
+    used_sub = select(STLModel.subcollection_id).where(
+        STLModel.subcollection_id.isnot(None)
+    ).scalar_subquery()
+    orphan_subs = session.query(Subcollection).filter(
+        Subcollection.id.not_in(used_sub)
+    ).all()
+    for row in orphan_subs:
+        session.delete(row)
+    if orphan_subs:
+        deleted["subcollections"] = len(orphan_subs)
+        session.flush()
+
+    # 2. Orphan collections (no model reference AND no subcollections left)
+    used_col = select(STLModel.collection_id).where(
+        STLModel.collection_id.isnot(None)
+    ).scalar_subquery()
+    has_sub = select(Subcollection.collection_id).scalar_subquery()
+    orphan_cols = session.query(Collection).filter(
+        Collection.id.not_in(used_col),
+        Collection.id.not_in(has_sub),
+    ).all()
+    for row in orphan_cols:
+        session.delete(row)
+    if orphan_cols:
+        deleted["collections"] = len(orphan_cols)
+        session.flush()
+
+    # 3. Other simple FK lookup tables
+    for label, cls, fk_attr in [
+        ("sculptors",  Sculptor, STLModel.sculptor_id),
+        ("categories", Category, STLModel.category_id),
+        ("releases",   Release,  STLModel.release_id),
+        ("scales",     Scale,    STLModel.scale_id),
+    ]:
+        used = select(fk_attr).where(fk_attr.isnot(None)).scalar_subquery()
+        orphans = session.query(cls).filter(cls.id.not_in(used)).all()
+        for row in orphans:
+            session.delete(row)
+        if orphans:
+            deleted[label] = len(orphans)
+            session.flush()
+
+    return deleted
 
 
 def get_or_create_subcollection(

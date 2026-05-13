@@ -132,6 +132,17 @@ class CrawlerWorker(QThread):
 
         self._record_crawled_folder(total)
 
+        try:
+            from app.database.db import session_scope
+            from app.database.helpers import prune_unused_lookups
+            with session_scope() as _s:
+                _deleted = prune_unused_lookups(_s)
+            if _deleted:
+                summary = ", ".join(f"{n} {k}" for k, n in _deleted.items())
+                self.log.emit(f"Pruned unused lookups: {summary}")
+        except Exception as _exc:
+            logger.warning("Failed to prune unused lookups: %s", _exc)
+
         msg = "Crawl complete."
         self.log.emit(msg)
         logger.info(msg)
