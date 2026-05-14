@@ -7,7 +7,7 @@ from pathlib import Path
 
 from app.constants import ARCHIVE_SUFFIXES, IMAGE_SUFFIXES
 
-_PRINTABLE_SUFFIXES = frozenset({".stl", ".obj", ".lys", ".chitubox"})
+_PRINTABLE_SUFFIXES = frozenset({".stl", ".obj", ".lys", ".lyt", ".chitubox", ".ctp"})
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ def detect_presupport(names: list[str]) -> str:
     Rules are applied in priority order (first match wins):
 
     1. **Lychee** — archive contains a ``.lys`` or ``.lyt`` slicer file.
-    2. **Chitubox** — archive contains a ``.chitu`` or ``.chitubox`` slicer file.
+    2. **Chitubox** — archive contains a ``.chitu``, ``.chitubox``, or ``.ctp`` slicer file.
     3. **Presupported** — archive contains an ``.stl`` file whose stem matches
        ``[_ -]supported`` (e.g. ``body_supported.stl``, ``arm-supported.stl``).
     4. **No** — none of the above criteria matched.
@@ -78,10 +78,10 @@ def detect_presupport(names: list[str]) -> str:
         p      = Path(name.replace("\\", "/"))
         suffix = p.suffix.lower()
 
-        if suffix in (".lys", ".lyt"):        # rule 1 – Lychee (highest priority)
+        if suffix in (".lys", ".lyt"):              # rule 1 – Lychee (highest priority)
             logger.debug("  Presupport=Lychee (matched %r)", name)
             return "Lychee"
-        if suffix in (".chitu", ".chitubox"): # rule 2 – Chitubox
+        if suffix in (".chitu", ".chitubox", ".ctp"):  # rule 2 – Chitubox
             logger.debug("  Presupport candidate Chitubox (matched %r)", name)
             has_chitu = True
         if suffix == ".stl" and _PRESUPPORTED_RE.search(p.stem):  # rule 3

@@ -10,7 +10,7 @@ value everywhere.  Module-private values stay in their owning module.
 
 ARCHIVE_SUFFIXES: frozenset[str] = frozenset({".7z", ".zip", ".rar"})
 IMAGE_SUFFIXES:   frozenset[str] = frozenset({".jpg", ".jpeg", ".png", ".webp", ".bmp"})
-SLICER_SUFFIXES:  frozenset[str] = frozenset({".lys", ".chitu", ".ctb", ".photon"})
+SLICER_SUFFIXES:  frozenset[str] = frozenset({".lys", ".lyt", ".chitu", ".chitubox", ".ctp", ".ctb", ".photon"})
 
 METADATA_FILENAME = "METADATA.7z"
 
