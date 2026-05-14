@@ -334,7 +334,7 @@ def extract_archive_contents(
 
     When *stl_info_out* is a dict, it will be populated with
     ``{member_name: uncompressed_size_bytes}`` for every ``.stl``, ``.obj``,
-    ``.lys``, and ``.chitubox`` member found in the archive catalog. Size may
+    ``.lys``, ``.lyt``, ``.chitubox``, and ``.ctp`` member found in the archive catalog. Size may
     be ``None`` for formats where it is not available in the catalog header.
     """
     result: dict[str, bytes] = {}
@@ -352,7 +352,7 @@ def extract_archive_contents(
                 uncompressed_size_out.append(total)
 
             if stl_info_out is not None:
-                target_exts = {".stl", ".obj", ".lys", ".chitubox"}
+                target_exts = {".stl", ".obj", ".lys", ".lyt", ".chitubox", ".ctp"}
                 for m in all_members:
                     if Path(m.name.replace("\\", "/")).suffix.lower() in target_exts:
                         stl_info_out[m.name] = m.size
