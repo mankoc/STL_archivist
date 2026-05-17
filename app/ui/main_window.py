@@ -407,6 +407,28 @@ class MainWindow(QMainWindow):
         """Open the Update Crawled Folders dialog and refresh the browser when done."""
         from app.ui.update_crawled_folders_dialog import UpdateCrawledFoldersDialog
         dlg = UpdateCrawledFoldersDialog(parent=self)
+
+        # Wire status-bar label BEFORE exec() so it appears as soon as crawling starts.
+        _folder_ctx: list = [0, 0]  # [idx, total]
+
+        def _on_sb_started(idx: int, total: int) -> None:
+            _folder_ctx[0], _folder_ctx[1] = idx, total
+            self._update_folders_label.setText(f" Update [{idx}/{total}]: 0 / ? ")
+            self._update_folders_label.show()
+
+        def _on_sb_progress(current: int, total: int) -> None:
+            fi, ft = _folder_ctx
+            folder_part = f"[{fi}/{ft}] " if ft else ""
+            self._update_folders_label.setText(f" Update {folder_part}{current} / {total} ")
+            self._update_folders_label.show()
+
+        def _on_sb_done() -> None:
+            self._update_folders_label.hide()
+
+        dlg.crawl_started.connect(_on_sb_started)
+        dlg.crawl_progress.connect(_on_sb_progress)
+        dlg.crawl_finished.connect(_on_sb_done)
+
         dlg.exec()
 
         worker = dlg._background_worker
@@ -424,35 +446,14 @@ class MainWindow(QMainWindow):
             worker.file_deleted.connect(dlg._on_file_deleted)
             worker.all_finished.connect(dlg._on_finished)
 
-            # Track folder context so the progress label shows "F1/3: 12/50".
-            _folder_ctx: list = [0, 0]  # [idx, total]
-
-            def _on_folder_started(path: str, idx: int, total: int) -> None:
-                _folder_ctx[0], _folder_ctx[1] = idx, total
-                self._update_folders_label.setText(
-                    f" Update [{idx}/{total}]: 0 / ? "
-                )
-                self._update_folders_label.show()
-
-            def _on_progress(current: int, total: int) -> None:
-                fi, ft = _folder_ctx
-                folder_part = f"[{fi}/{ft}] " if ft else ""
-                self._update_folders_label.setText(
-                    f" Update {folder_part}{current} / {total} "
-                )
-                self._update_folders_label.show()
-
-            def _on_done() -> None:
-                self._update_folders_label.hide()
+            def _on_bg_done() -> None:
                 self._update_folders_worker = None
                 self._update_folders_dlg = None
                 self._browser.refresh()
 
-            worker.folder_started.connect(_on_folder_started)
-            worker.progress.connect(_on_progress)
-            worker.all_finished.connect(_on_done)
+            worker.all_finished.connect(_on_bg_done)
 
-            # Show current progress immediately using the dialog's last known values.
+            # Ensure the label is visible with the current progress value.
             cur = dlg._progress.value()
             tot = dlg._progress.maximum()
             if tot > 0:
