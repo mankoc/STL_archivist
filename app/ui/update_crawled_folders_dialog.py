@@ -373,7 +373,28 @@ class UpdateCrawledFoldersDialog(QDialog):
         The worker is reparented to None so it outlives the dialog.  The main
         window reads ``_background_worker`` after exec() returns and wires the
         remaining signals to the status bar.
+
+        NOTE: accept() only calls hide(), not closeEvent(), so worker detachment
+        must happen here rather than in closeEvent.
         """
+        if self._worker is None:
+            return
+        for sig, slot in (
+            (self._worker.folder_started, self._on_folder_started),
+            (self._worker.progress,       self._on_progress),
+            (self._worker.counts_changed, self._on_counts_changed),
+            (self._worker.archive_result, self._on_archive_result),
+            (self._worker.file_moved,     self._on_file_moved),
+            (self._worker.file_deleted,   self._on_file_deleted),
+            (self._worker.all_finished,   self._on_finished),
+        ):
+            try:
+                sig.disconnect(slot)
+            except RuntimeError:
+                pass
+        self._worker.setParent(None)
+        self._background_worker = self._worker
+        self._worker = None
         self._background_mode = True
         self.accept()
 
@@ -453,26 +474,6 @@ class UpdateCrawledFoldersDialog(QDialog):
 
     def closeEvent(self, event) -> None:
         if self._worker is not None:
-            if self._background_mode:
-                # Disconnect all UI-bound slots so destroyed dialog widgets are
-                # never touched after the window closes.
-                for sig, slot in (
-                    (self._worker.folder_started, self._on_folder_started),
-                    (self._worker.progress,       self._on_progress),
-                    (self._worker.counts_changed, self._on_counts_changed),
-                    (self._worker.archive_result, self._on_archive_result),
-                    (self._worker.file_moved,     self._on_file_moved),
-                    (self._worker.file_deleted,   self._on_file_deleted),
-                    (self._worker.all_finished,   self._on_finished),
-                ):
-                    try:
-                        sig.disconnect(slot)
-                    except RuntimeError:
-                        pass
-                self._worker.setParent(None)
-                self._background_worker = self._worker
-                self._worker = None
-            else:
-                self._worker.stop()
-                self._worker.wait()
+            self._worker.stop()
+            self._worker.wait()
         super().closeEvent(event)
