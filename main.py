@@ -1,6 +1,7 @@
 """
 stlLibrary — application entry point.
 """
+import shutil
 import sys
 from pathlib import Path
 
@@ -122,7 +123,7 @@ def _migrate_db_filename(new_db_path: str) -> None:
     new = Path(new_db_path)
     old = new.parent / "stl_database.db"
     if old.exists() and not new.exists():
-        old.rename(new)
+        shutil.move(str(old), str(new))
 
 
 def main() -> None:

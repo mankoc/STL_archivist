@@ -133,7 +133,6 @@ class CrawlerWorker(QThread):
         self._record_crawled_folder(total)
 
         try:
-            from app.database.db import session_scope
             from app.database.helpers import prune_unused_lookups
             with session_scope() as _s:
                 _deleted = prune_unused_lookups(_s)

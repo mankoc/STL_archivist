@@ -552,15 +552,6 @@ class SortFilesDialog(QDialog):
                 )
             return
 
-        # Phase 2b: remove any source directories that are now empty.
-        source_dirs: set[Path] = {src.parent for src, _dst, _mid in plan}
-        for directory in sorted(source_dirs, key=lambda p: len(p.parts), reverse=True):
-            try:
-                if directory.is_dir() and not any(directory.iterdir()):
-                    directory.rmdir()
-            except OSError:
-                pass
-
         # Phase 3: every move succeeded — write all DB updates in one
         # transaction so archive_path values are never partially updated.
         with session_scope() as session:
@@ -568,6 +559,17 @@ class SortFilesDialog(QDialog):
                 model: STLModel = session.get(STLModel, mid)
                 if model is not None:
                     model.archive_path = str(dst)
+
+        # Phase 3b: remove any source directories that are now empty.
+        # Done after the DB commit so the DB is never inconsistent with the
+        # filesystem if this cleanup step is skipped.
+        source_dirs: set[Path] = {src.parent for src, _dst, _mid in plan}
+        for directory in sorted(source_dirs, key=lambda p: len(p.parts), reverse=True):
+            try:
+                if directory.is_dir() and not any(directory.iterdir()):
+                    directory.rmdir()
+            except OSError:
+                pass
 
         _save_last_directory(self._dir_edit.text().strip())
         QMessageBox.information(

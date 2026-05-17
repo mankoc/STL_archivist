@@ -133,4 +133,7 @@ def _move_to_trash(file_path: Path, trash_dir: Path, model: STLModel) -> None:
         "deleted_at":    datetime.now(timezone.utc).isoformat(),
     }
     sidecar = dest.with_suffix(dest.suffix + ".json")
-    sidecar.write_text(json.dumps(info, indent=2), encoding="utf-8")
+    try:
+        sidecar.write_text(json.dumps(info, indent=2), encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Could not write recovery sidecar %s: %s", sidecar, exc)

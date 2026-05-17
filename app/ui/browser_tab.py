@@ -2973,7 +2973,8 @@ class BrowserTab(QWidget):
         if not archive_path:
             return
         folder = Path(archive_path).parent
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+        from app.ui.config_dialog import open_folder_with_file_manager
+        open_folder_with_file_manager(str(folder))
 
     def _recrawl_selection(self, model_ids: list[int]) -> None:
         """Run the crawler extraction for the selected model(s) and show a preview
