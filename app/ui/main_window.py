@@ -410,19 +410,42 @@ class MainWindow(QMainWindow):
         if worker is not None:
             # User clicked "Run in Background" — hook the orphaned worker to the status bar.
             self._update_folders_worker = worker
-            self._update_folders_label.setText(" Update: starting… ")
-            self._update_folders_label.show()
 
-            def _on_folder(path: str, idx: int, total: int) -> None:
-                self._update_folders_label.setText(f" Update: {idx} / {total} folders ")
+            # Track folder context so the progress label shows "F1/3: 12/50".
+            _folder_ctx: list = [0, 0]  # [idx, total]
+
+            def _on_folder_started(path: str, idx: int, total: int) -> None:
+                _folder_ctx[0], _folder_ctx[1] = idx, total
+                self._update_folders_label.setText(
+                    f" Update [{idx}/{total}]: 0 / ? "
+                )
+                self._update_folders_label.show()
+
+            def _on_progress(current: int, total: int) -> None:
+                fi, ft = _folder_ctx
+                folder_part = f"[{fi}/{ft}] " if ft else ""
+                self._update_folders_label.setText(
+                    f" Update {folder_part}{current} / {total} "
+                )
+                self._update_folders_label.show()
 
             def _on_done() -> None:
                 self._update_folders_label.hide()
                 self._update_folders_worker = None
                 self._browser.refresh()
 
-            worker.folder_started.connect(_on_folder)
+            worker.folder_started.connect(_on_folder_started)
+            worker.progress.connect(_on_progress)
             worker.all_finished.connect(_on_done)
+
+            # Show current progress immediately using the dialog's last known values.
+            cur = dlg._progress.value()
+            tot = dlg._progress.maximum()
+            if tot > 0:
+                self._update_folders_label.setText(f" Update {cur} / {tot} ")
+            else:
+                self._update_folders_label.setText(" Update: running… ")
+            self._update_folders_label.show()
         else:
             self._browser.refresh()
 
