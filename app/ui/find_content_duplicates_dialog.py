@@ -30,27 +30,31 @@ _TAB_IMGS = 1
 _S_ID_A    = 0   # hidden
 _S_TITLE_A = 1
 _S_PATH_A  = 2
-_S_FILES_A = 3
-_S_ID_B    = 4   # hidden
-_S_TITLE_B = 5
-_S_PATH_B  = 6
-_S_FILES_B = 7
-_S_MATCH   = 8
-_S_SIM     = 9
-_S_NCOLS   = 10
+_S_SIZE_A  = 3
+_S_FILES_A = 4
+_S_ID_B    = 5   # hidden
+_S_TITLE_B = 6
+_S_PATH_B  = 7
+_S_SIZE_B  = 8
+_S_FILES_B = 9
+_S_MATCH   = 10
+_S_SIM     = 11
+_S_NCOLS   = 12
 
 # ── Images tab column indices ─────────────────────────────────────────────────
 _I_ID_A    = 0   # hidden
 _I_TITLE_A = 1
 _I_PATH_A  = 2
-_I_IMGS_A  = 3
-_I_ID_B    = 4   # hidden
-_I_TITLE_B = 5
-_I_PATH_B  = 6
-_I_IMGS_B  = 7
-_I_PAIRS   = 8
-_I_DIST    = 9
-_I_NCOLS   = 10
+_I_SIZE_A  = 3
+_I_IMGS_A  = 4
+_I_ID_B    = 5   # hidden
+_I_TITLE_B = 6
+_I_PATH_B  = 7
+_I_SIZE_B  = 8
+_I_IMGS_B  = 9
+_I_PAIRS   = 10
+_I_DIST    = 11
+_I_NCOLS   = 12
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -66,6 +70,19 @@ def _item(text: str, user_data=None,
     if align is not None:
         it.setTextAlignment(align)
     return it
+
+
+def _fmt_size(path: str) -> str:
+    """Return a human-readable file size for *path*, or '?' if unreadable."""
+    try:
+        n = Path(path).stat().st_size
+    except OSError:
+        return "?"
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024:
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} TB"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -616,8 +633,8 @@ class FindContentDuplicatesDialog(QDialog):
         layout.addWidget(self._stl_status)
 
         self._stl_table = _make_table(
-            ["ID A", "Title A", "Path A", "Files A",
-             "ID B", "Title B", "Path B", "Files B",
+            ["ID A", "Title A", "Path A", "Size A", "Files A",
+             "ID B", "Title B", "Path B", "Size B", "Files B",
              "Matching", "Similarity"],
             hidden=[_S_ID_A, _S_ID_B],
             stretch=[_S_TITLE_A, _S_PATH_A, _S_TITLE_B, _S_PATH_B],
@@ -673,8 +690,8 @@ class FindContentDuplicatesDialog(QDialog):
         layout.addWidget(self._img_status)
 
         self._img_table = _make_table(
-            ["ID A", "Title A", "Path A", "Images A",
-             "ID B", "Title B", "Path B", "Images B",
+            ["ID A", "Title A", "Path A", "Size A", "Images A",
+             "ID B", "Title B", "Path B", "Size B", "Images B",
              "Matching Pairs", "Best Distance"],
             hidden=[_I_ID_A, _I_ID_B],
             stretch=[_I_TITLE_A, _I_PATH_A, _I_TITLE_B, _I_PATH_B],
@@ -732,10 +749,12 @@ class FindContentDuplicatesDialog(QDialog):
             self._stl_table.setItem(row_idx, _S_ID_A,    _item(str(r["id_a"]),    r["id_a"]))
             self._stl_table.setItem(row_idx, _S_TITLE_A, _item(r["title_a"]))
             self._stl_table.setItem(row_idx, _S_PATH_A,  _item(r["path_a"]))
+            self._stl_table.setItem(row_idx, _S_SIZE_A,  _item(_fmt_size(r["path_a"]), align=c))
             self._stl_table.setItem(row_idx, _S_FILES_A, _item(str(r["total_a"]), align=c))
             self._stl_table.setItem(row_idx, _S_ID_B,    _item(str(r["id_b"]),    r["id_b"]))
             self._stl_table.setItem(row_idx, _S_TITLE_B, _item(r["title_b"]))
             self._stl_table.setItem(row_idx, _S_PATH_B,  _item(r["path_b"]))
+            self._stl_table.setItem(row_idx, _S_SIZE_B,  _item(_fmt_size(r["path_b"]), align=c))
             self._stl_table.setItem(row_idx, _S_FILES_B, _item(str(r["total_b"]), align=c))
             self._stl_table.setItem(row_idx, _S_MATCH,   _item(str(r["overlap"]), align=c))
             self._stl_table.setItem(row_idx, _S_SIM,     _item(f"{r['sim']:.0%}", align=c))
@@ -871,10 +890,12 @@ class FindContentDuplicatesDialog(QDialog):
             self._img_table.setItem(row_idx, _I_ID_A,    _item(str(r["id_a"]),  r["id_a"]))
             self._img_table.setItem(row_idx, _I_TITLE_A, _item(r["title_a"]))
             self._img_table.setItem(row_idx, _I_PATH_A,  _item(r["path_a"]))
+            self._img_table.setItem(row_idx, _I_SIZE_A,  _item(_fmt_size(r["path_a"]), align=c))
             self._img_table.setItem(row_idx, _I_IMGS_A,  _item(str(r["imgs_a"]), align=c))
             self._img_table.setItem(row_idx, _I_ID_B,    _item(str(r["id_b"]),  r["id_b"]))
             self._img_table.setItem(row_idx, _I_TITLE_B, _item(r["title_b"]))
             self._img_table.setItem(row_idx, _I_PATH_B,  _item(r["path_b"]))
+            self._img_table.setItem(row_idx, _I_SIZE_B,  _item(_fmt_size(r["path_b"]), align=c))
             self._img_table.setItem(row_idx, _I_IMGS_B,  _item(str(r["imgs_b"]), align=c))
             self._img_table.setItem(row_idx, _I_PAIRS,   _item(str(r["pairs"]),  align=c))
             self._img_table.setItem(row_idx, _I_DIST,    _item(str(r["best"]),   align=c))

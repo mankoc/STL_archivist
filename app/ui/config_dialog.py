@@ -25,8 +25,9 @@ DATA_DIR_KEY           = "config/data_dir"
 UNRAR_TOOL_KEY         = "config/unrar_tool"
 
 # Defaults for per-library settings (non-platform-specific)
-MAX_THUMBS_DEFAULT     = 5
-MAX_THUMB_SIZE_DEFAULT = 512
+MAX_THUMBS_DEFAULT      = 5
+MAX_THUMB_SIZE_DEFAULT  = 512
+THUMB_PAGE_SIZE_DEFAULT = 200
 
 # ── File manager presets ──────────────────────────────────────────────────────
 FILE_MANAGER_SYSTEM           = "system"
@@ -441,6 +442,11 @@ def get_file_manager() -> str:
 def get_file_manager_path() -> str:
     """Return the configured executable path for non-system file manager presets."""
     return _load_library_settings().get("file_manager_path", "")
+
+
+def get_thumb_page_size() -> int:
+    """Return the max images shown per page in the image panel before pagination kicks in."""
+    return int(_load_library_settings().get("thumb_page_size", THUMB_PAGE_SIZE_DEFAULT))
 
 
 def open_folder_with_file_manager(folder: str) -> None:
@@ -969,6 +975,20 @@ class ConfigDialog(QDialog):
         fm_form.addRow("Executable:", self._file_manager_path_widget)
 
         layout.addWidget(fm_group)
+
+        img_group = QGroupBox("Image panel")
+        img_form = QFormLayout(img_group)
+
+        self._thumb_page_size_spin = QSpinBox()
+        self._thumb_page_size_spin.setRange(10, 10000)
+        self._thumb_page_size_spin.setSingleStep(50)
+        self._thumb_page_size_spin.setSuffix(" images")
+        self._thumb_page_size_spin.setToolTip(
+            "When a model has more images than this, the image panel paginates instead of showing them all at once."
+        )
+        img_form.addRow("Paginate above:", self._thumb_page_size_spin)
+
+        layout.addWidget(img_group)
         layout.addStretch()
         return page
 
@@ -1453,6 +1473,7 @@ class ConfigDialog(QDialog):
         self._file_manager_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self._file_manager_path_edit.setText(get_file_manager_path())
         self._update_file_manager_path_visibility()
+        self._thumb_page_size_spin.setValue(get_thumb_page_size())
 
         self._debug_menu_check.setChecked(get_debug_menu_enabled())
         self._logging_enabled_check.setChecked(get_logging_enabled())
@@ -1512,6 +1533,7 @@ class ConfigDialog(QDialog):
                 "font_size":          font_size,
                 "file_manager":       self._file_manager_combo.currentData(),
                 "file_manager_path":  self._file_manager_path_edit.text().strip(),
+                "thumb_page_size":    self._thumb_page_size_spin.value(),
             },
             data_dir=data_dir,
         )

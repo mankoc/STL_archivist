@@ -965,7 +965,10 @@ class BrowserTab(QWidget):
         self._rescan_dialog: RescanProgressDialog | None = None
         self._current_model_id: int | None = None
         self._info_pane_enabled: bool = False
-        self._thumb_pixmaps: list[QPixmap] = []  # original (unscaled) pixmaps
+        self._thumb_pixmaps: list[QPixmap] = []  # original (unscaled) pixmaps for current page
+        self._thumb_all_images: list = []         # all Image DB objects for current model
+        self._thumb_page: int = 0
+        self._thumb_show_all: bool = False
         self._cached_path_dirs: frozenset[str] = frozenset()
         self._cached_sorted_dirs: list[str] = []
         # Debounce rapid cell edits: keyed by (row, col) → QStandardItem
@@ -1103,6 +1106,29 @@ class BrowserTab(QWidget):
         self._thumb_scroll.setAcceptDrops(True)
         self._thumb_scroll.installEventFilter(self)
         img_layout.addWidget(self._thumb_scroll)
+
+        # Pagination controls (hidden unless images exceed the page size)
+        self._thumb_page_row = QWidget()
+        _pr_layout = QHBoxLayout(self._thumb_page_row)
+        _pr_layout.setContentsMargins(0, 2, 0, 0)
+        _pr_layout.setSpacing(4)
+        self._thumb_prev_btn = QPushButton("◀")
+        self._thumb_prev_btn.setFixedWidth(28)
+        self._thumb_prev_btn.clicked.connect(self._thumb_prev_page)
+        self._thumb_page_label = QLabel()
+        self._thumb_page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._thumb_next_btn = QPushButton("▶")
+        self._thumb_next_btn.setFixedWidth(28)
+        self._thumb_next_btn.clicked.connect(self._thumb_next_page)
+        self._thumb_show_all_btn = QPushButton("Show All")
+        self._thumb_show_all_btn.clicked.connect(self._thumb_toggle_show_all)
+        _pr_layout.addWidget(self._thumb_prev_btn)
+        _pr_layout.addWidget(self._thumb_page_label, 1)
+        _pr_layout.addWidget(self._thumb_next_btn)
+        _pr_layout.addWidget(self._thumb_show_all_btn)
+        self._thumb_page_row.setVisible(False)
+        img_layout.addWidget(self._thumb_page_row)
+
         right_vsplit.addWidget(img_widget)
 
         # Bottom: model info panel
@@ -3254,33 +3280,97 @@ class BrowserTab(QWidget):
     def _clear_thumbnails(self) -> None:
         """Remove all thumbnail widgets from the sidebar and drop the pixmap cache."""
         self._thumb_pixmaps.clear()
+        self._thumb_all_images.clear()
+        self._thumb_page = 0
+        self._thumb_show_all = False
         while self._thumb_vlayout.count():
             item = self._thumb_vlayout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+        self._thumb_page_row.setVisible(False)
         self._creator_panel.setVisible(False)
 
     def _show_thumbnails(self, model_id: int) -> None:
-        """Load and display thumbnails for the model with *model_id* in the sidebar."""
+        """Load image records for *model_id* and display the first page."""
         self._clear_thumbnails()
         session = get_session()
         try:
             stl: STLModel = session.get(STLModel, model_id)
             if stl is None:
                 return
-
-            for img in stl.images:
-                px = pixmap_from_path(img.thumbnail_path)
-                self._thumb_pixmaps.append(px)
-                lbl = ClickableLabel()
-                lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                lbl.setFrameShape(QFrame.Shape.StyledPanel)
-                lbl.setCursor(Qt.CursorShape.PointingHandCursor)
-                lbl.clicked.connect(lambda _px=px: ImageViewerDialog(_px, self).exec())
-                self._thumb_vlayout.addWidget(lbl)
+            self._thumb_all_images = list(stl.images)
         finally:
             session.close()
+        self._render_thumb_page()
+
+    def _render_thumb_page(self) -> None:
+        """Populate the thumbnail panel for the current page (or all images)."""
+        from app.ui.config_dialog import get_thumb_page_size
+        page_size = get_thumb_page_size()
+        total = len(self._thumb_all_images)
+
+        if self._thumb_show_all or total <= page_size:
+            images_to_show = self._thumb_all_images
+        else:
+            start = self._thumb_page * page_size
+            images_to_show = self._thumb_all_images[start : start + page_size]
+
+        # Clear existing widgets without resetting all_images / page state
+        self._thumb_pixmaps.clear()
+        while self._thumb_vlayout.count():
+            item = self._thumb_vlayout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        for img in images_to_show:
+            px = pixmap_from_path(img.thumbnail_path)
+            self._thumb_pixmaps.append(px)
+            lbl = ClickableLabel()
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setFrameShape(QFrame.Shape.StyledPanel)
+            lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+            lbl.clicked.connect(lambda _px=px: ImageViewerDialog(_px, self).exec())
+            self._thumb_vlayout.addWidget(lbl)
+
+        # Update / show pagination controls
+        if total > page_size:
+            if self._thumb_show_all:
+                self._thumb_page_label.setText(f"All {total} images")
+                self._thumb_prev_btn.setEnabled(False)
+                self._thumb_next_btn.setEnabled(False)
+                self._thumb_show_all_btn.setText("Paginate")
+            else:
+                num_pages = (total + page_size - 1) // page_size
+                self._thumb_page_label.setText(f"Page {self._thumb_page + 1} / {num_pages}")
+                self._thumb_prev_btn.setEnabled(self._thumb_page > 0)
+                self._thumb_next_btn.setEnabled(self._thumb_page < num_pages - 1)
+                self._thumb_show_all_btn.setText("Show All")
+            self._thumb_page_row.setVisible(True)
+        else:
+            self._thumb_page_row.setVisible(False)
+
         self._rescale_thumbnails(force=True)
+
+    def _thumb_prev_page(self) -> None:
+        if self._thumb_page > 0:
+            self._thumb_page -= 1
+            self._render_thumb_page()
+            self._thumb_scroll.verticalScrollBar().setValue(0)
+
+    def _thumb_next_page(self) -> None:
+        from app.ui.config_dialog import get_thumb_page_size
+        page_size = get_thumb_page_size()
+        num_pages = (len(self._thumb_all_images) + page_size - 1) // page_size
+        if self._thumb_page < num_pages - 1:
+            self._thumb_page += 1
+            self._render_thumb_page()
+            self._thumb_scroll.verticalScrollBar().setValue(0)
+
+    def _thumb_toggle_show_all(self) -> None:
+        self._thumb_show_all = not self._thumb_show_all
+        self._thumb_page = 0
+        self._render_thumb_page()
+        self._thumb_scroll.verticalScrollBar().setValue(0)
 
     def _rescale_thumbnails(self, force: bool = False) -> None:
         """Scale all sidebar thumbnails to fit the current scroll-area width."""

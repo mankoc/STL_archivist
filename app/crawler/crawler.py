@@ -52,6 +52,8 @@ class CrawlerWorker(QThread):
     finished       = pyqtSignal()
     counts_changed = pyqtSignal(int, int, int)   # new, updated, unchanged
     archive_result = pyqtSignal(str, str)         # filename, "new"|"updated"
+    file_moved     = pyqtSignal(str, str)         # old_path, new_path
+    file_deleted   = pyqtSignal(str)              # path
 
     def __init__(
         self,
@@ -555,6 +557,7 @@ class CrawlerWorker(QThread):
                 msg = f"Moved: {rec['filename']} → {new_archive_path}"
                 self.log.emit(msg)
                 logger.info("File moved: %s → %s", rec["path"], new_archive_path)
+                self.file_moved.emit(rec["path"], new_archive_path)
 
         if matched_ids:
             self.log.emit(f"Matched {len(matched_ids)} moved file(s).")
@@ -574,6 +577,7 @@ class CrawlerWorker(QThread):
                     msg = f"Removing missing: {rec['path']}"
                     self.log.emit(msg)
                     logger.info(msg)
+                    self.file_deleted.emit(rec["path"])
                     for image in model.images:
                         if image.thumbnail_path:
                             delete_thumbnail(image.thumbnail_path)

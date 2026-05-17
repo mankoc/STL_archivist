@@ -38,6 +38,7 @@ class MainWindow(QMainWindow):
         
         # Keep track of crawler state
         self._crawler_is_running = False
+        self._update_folders_worker: object | None = None  # background _UpdateAllWorker
 
         # ---- Actions ----
         from app.ui.config_dialog import get_color_scheme as _get_cs
@@ -296,6 +297,21 @@ class MainWindow(QMainWindow):
         self._browser.rescan_progress.connect(self._on_rescan_progress)
         self._browser.rescan_finished.connect(self._on_rescan_finished)
 
+        # Status label for Update Crawled Folders running in background
+        from PyQt6.QtWidgets import QLabel
+        self._update_folders_label = QLabel()
+        self._update_folders_label.setStyleSheet(
+            "QLabel { "
+            "background-color: palette(highlight); "
+            "color: palette(highlighted-text); "
+            "padding: 2px 6px; "
+            "border-radius: 4px; "
+            "font-weight: bold; "
+            "}"
+        )
+        self._update_folders_label.hide()
+        sb.addPermanentWidget(self._update_folders_label)
+
         self._apply_debug_menu_visibility()
 
     # ------------------------------------------------------------------
@@ -387,8 +403,28 @@ class MainWindow(QMainWindow):
     def _update_crawled_folders(self) -> None:
         """Open the Update Crawled Folders dialog and refresh the browser when done."""
         from app.ui.update_crawled_folders_dialog import UpdateCrawledFoldersDialog
-        UpdateCrawledFoldersDialog(parent=self).exec()
-        self._browser.refresh()
+        dlg = UpdateCrawledFoldersDialog(parent=self)
+        dlg.exec()
+
+        worker = dlg._background_worker
+        if worker is not None:
+            # User clicked "Run in Background" — hook the orphaned worker to the status bar.
+            self._update_folders_worker = worker
+            self._update_folders_label.setText(" Update: starting… ")
+            self._update_folders_label.show()
+
+            def _on_folder(path: str, idx: int, total: int) -> None:
+                self._update_folders_label.setText(f" Update: {idx} / {total} folders ")
+
+            def _on_done() -> None:
+                self._update_folders_label.hide()
+                self._update_folders_worker = None
+                self._browser.refresh()
+
+            worker.folder_started.connect(_on_folder)
+            worker.all_finished.connect(_on_done)
+        else:
+            self._browser.refresh()
 
     def _open_config(self) -> None:
         """Open the configuration dialog and re-apply debug menu visibility."""

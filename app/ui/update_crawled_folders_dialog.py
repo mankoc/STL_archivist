@@ -27,6 +27,8 @@ class _UpdateAllWorker(QThread):
     progress       = pyqtSignal(int, int)         # current archive, total archives
     counts_changed = pyqtSignal(int, int, int)    # new, updated, unchanged (accumulated)
     archive_result = pyqtSignal(str, str, str)    # folder_path, filename, "new"|"updated"
+    file_moved     = pyqtSignal(str, str)         # old_path, new_path
+    file_deleted   = pyqtSignal(str)              # path
     all_finished   = pyqtSignal()
 
     def __init__(self, folders: list[tuple[str, str | None]], config, parent=None):
@@ -69,6 +71,8 @@ class _UpdateAllWorker(QThread):
                     self.archive_result.emit(fp, fname, status),
                 Qt.ConnectionType.DirectConnection,
             )
+            worker.file_moved.connect(self.file_moved, Qt.ConnectionType.DirectConnection)
+            worker.file_deleted.connect(self.file_deleted, Qt.ConnectionType.DirectConnection)
 
             worker.start()
             worker.wait()
@@ -89,8 +93,12 @@ class UpdateCrawledFoldersDialog(QDialog):
         self.setWindowTitle("Update Crawled Folders")
         self.resize(700, 660)
         self._worker: _UpdateAllWorker | None = None
+        self._background_worker: _UpdateAllWorker | None = None  # set when user runs in bg
         self._all_folders: list[tuple[str, str | None]] = []
         self._result_rows: list[tuple[str, str, str]] = []  # (folder, filename, status)
+        self._moved_rows: list[tuple[str, str]] = []         # (old_path, new_path)
+        self._deleted_rows: list[str] = []                   # path
+        self._background_mode = False
         self._build_ui()
         self._load_folders()
 
@@ -173,6 +181,12 @@ class UpdateCrawledFoldersDialog(QDialog):
         btn_row.addWidget(self._stop_btn)
 
         btn_row.addStretch()
+
+        self._bg_btn = QPushButton(style.standardIcon(SP.SP_TitleBarMinButton), "Run in Background")
+        self._bg_btn.setEnabled(False)
+        self._bg_btn.setToolTip("Close this dialog and continue the update in the background.\nProgress will be shown in the status bar.")
+        self._bg_btn.clicked.connect(self._run_in_background)
+        btn_row.addWidget(self._bg_btn)
 
         self._close_btn = QPushButton(style.standardIcon(SP.SP_DialogCloseButton), "Close")
         self._close_btn.clicked.connect(self.reject)
@@ -284,8 +298,11 @@ class UpdateCrawledFoldersDialog(QDialog):
         self._progress.setValue(0)
         self._counts_label.setText("New: 0  |  Updated: 0  |  Unchanged: 0")
         self._result_rows.clear()
+        self._moved_rows.clear()
+        self._deleted_rows.clear()
         self._start_btn.setEnabled(False)
         self._stop_btn.setEnabled(True)
+        self._bg_btn.setEnabled(True)
         self._close_btn.setEnabled(False)
         self._folder_list.setEnabled(False)
         self._add_btn.setEnabled(False)
@@ -302,6 +319,8 @@ class UpdateCrawledFoldersDialog(QDialog):
         self._worker.progress.connect(self._on_progress)
         self._worker.counts_changed.connect(self._on_counts_changed)
         self._worker.archive_result.connect(self._on_archive_result)
+        self._worker.file_moved.connect(self._on_file_moved)
+        self._worker.file_deleted.connect(self._on_file_deleted)
         self._worker.all_finished.connect(self._on_finished)
         self._worker.start()
 
@@ -309,6 +328,16 @@ class UpdateCrawledFoldersDialog(QDialog):
         if self._worker is not None:
             self._worker.stop()
         self._stop_btn.setEnabled(False)
+
+    def _run_in_background(self) -> None:
+        """Detach the running worker from this dialog and close it.
+
+        The worker is reparented to None so it outlives the dialog.  The main
+        window reads ``_background_worker`` after exec() returns and wires the
+        remaining signals to the status bar.
+        """
+        self._background_mode = True
+        self.accept()
 
     # ------------------------------------------------------------------
     # Worker signal handlers
@@ -336,6 +365,12 @@ class UpdateCrawledFoldersDialog(QDialog):
     def _on_archive_result(self, folder: str, filename: str, status: str) -> None:
         self._result_rows.append((folder, filename, status))
 
+    def _on_file_moved(self, old_path: str, new_path: str) -> None:
+        self._moved_rows.append((old_path, new_path))
+
+    def _on_file_deleted(self, path: str) -> None:
+        self._deleted_rows.append(path)
+
     def _on_finished(self) -> None:
         n = self._folder_list.count()
         self._status_label.setText(
@@ -347,6 +382,7 @@ class UpdateCrawledFoldersDialog(QDialog):
         self._progress.setFormat("done")
         self._start_btn.setEnabled(True)
         self._stop_btn.setEnabled(False)
+        self._bg_btn.setEnabled(False)
         self._close_btn.setEnabled(True)
         self._folder_list.setEnabled(True)
         self._add_btn.setEnabled(True)
@@ -355,35 +391,78 @@ class UpdateCrawledFoldersDialog(QDialog):
         self._append_summary_table()
 
     def _append_summary_table(self) -> None:
-        rows = self._result_rows
+        from collections import OrderedDict
+
+        rows         = self._result_rows
         new_rows     = [(f, n) for f, n, s in rows if s == "new"]
         updated_rows = [(f, n) for f, n, s in rows if s == "updated"]
+        moved_rows   = self._moved_rows
+        deleted_rows = self._deleted_rows
 
         W = 68
         lines: list[str] = ["", "=" * W]
-        lines.append(f"  Summary — {len(new_rows)} new  |  {len(updated_rows)} updated")
+        lines.append(
+            f"  Summary — {len(new_rows)} new  |  {len(updated_rows)} updated"
+            f"  |  {len(moved_rows)} moved  |  {len(deleted_rows)} deleted"
+        )
         lines.append("=" * W)
 
-        if not rows:
-            lines.append("  (no new or updated archives)")
-        else:
-            # Group rows by folder, preserving insertion order.
-            from collections import OrderedDict
+        # ── New / updated archives grouped by folder ──────────────────────────
+        if rows:
             grouped: dict[str, list[tuple[str, str]]] = OrderedDict()
             for folder, fname, status in rows:
                 grouped.setdefault(folder, []).append((fname, status))
-
             for folder, entries in grouped.items():
                 lines.append(f"  {folder}")
                 for fname, status in entries:
                     tag = "NEW    " if status == "new" else "UPDATED"
                     lines.append(f"    {tag}  {fname}")
+        else:
+            lines.append("  (no new or updated archives)")
+
+        # ── Moved archives ────────────────────────────────────────────────────
+        if moved_rows:
+            lines.append("")
+            lines.append(f"  Moved ({len(moved_rows)})")
+            lines.append("  " + "-" * (W - 2))
+            for old_path, new_path in moved_rows:
+                lines.append(f"    FROM  {old_path}")
+                lines.append(f"    TO    {new_path}")
+
+        # ── Deleted DB records ────────────────────────────────────────────────
+        if deleted_rows:
+            lines.append("")
+            lines.append(f"  Deleted from database ({len(deleted_rows)})")
+            lines.append("  " + "-" * (W - 2))
+            for path in deleted_rows:
+                lines.append(f"    {path}")
 
         lines.append("=" * W)
         self._log.appendPlainText("\n".join(lines))
 
     def closeEvent(self, event) -> None:
         if self._worker is not None:
-            self._worker.stop()
-            self._worker.wait()
+            if self._background_mode:
+                # Disconnect all UI-bound slots so destroyed dialog widgets are
+                # never touched after the window closes.
+                for sig, slot in (
+                    (self._worker.log,            self._on_log),
+                    (self._worker.folder_started, self._on_folder_started),
+                    (self._worker.progress,       self._on_progress),
+                    (self._worker.counts_changed, self._on_counts_changed),
+                    (self._worker.archive_result, self._on_archive_result),
+                    (self._worker.file_moved,     self._on_file_moved),
+                    (self._worker.file_deleted,   self._on_file_deleted),
+                    (self._worker.all_finished,   self._on_finished),
+                ):
+                    try:
+                        sig.disconnect(slot)
+                    except RuntimeError:
+                        pass
+                self._worker.setParent(None)
+                self._background_worker = self._worker
+                self._worker = None
+            else:
+                self._worker.stop()
+                self._worker.wait()
         super().closeEvent(event)
