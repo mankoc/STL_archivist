@@ -115,6 +115,11 @@ class _UpdateAllWorker(QThread):
 class UpdateCrawledFoldersDialog(QDialog):
     """Shows a folder checklist and crawl progress for re-crawling stored CrawledFolder entries."""
 
+    # Forwarding signals so the main window can track progress before exec() returns.
+    crawl_started  = pyqtSignal(int, int)  # folder_idx, folder_total
+    crawl_progress = pyqtSignal(int, int)  # current_archive, total_archives
+    crawl_finished = pyqtSignal()
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Update Crawled Folders")
@@ -378,6 +383,8 @@ class UpdateCrawledFoldersDialog(QDialog):
         must happen here rather than in closeEvent.
         """
         if self._worker is None:
+            if self._background_mode:
+                self.hide()
             return
         for sig, slot in (
             (self._worker.folder_started, self._on_folder_started),
@@ -427,11 +434,13 @@ class UpdateCrawledFoldersDialog(QDialog):
         self._folder_label.setText(path)
         self._progress.setMaximum(0)
         self._progress.setValue(0)
+        self.crawl_started.emit(idx, total)
 
     def _on_progress(self, current: int, total: int) -> None:
         self._progress.setMaximum(total)
         self._progress.setValue(current)
         self._progress.setFormat(f"{current} / {total}")
+        self.crawl_progress.emit(current, total)
 
     def _on_counts_changed(self, new: int, updated: int, unchanged: int) -> None:
         self._cnt_new, self._cnt_updated, self._cnt_unchanged = new, updated, unchanged
@@ -472,6 +481,7 @@ class UpdateCrawledFoldersDialog(QDialog):
         self._remove_btn.setEnabled(True)
         self._worker = None
         self._background_mode = False  # allow normal close once the run is done
+        self.crawl_finished.emit()
 
     def closeEvent(self, event) -> None:
         if self._worker is not None:
