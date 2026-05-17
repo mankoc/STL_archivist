@@ -39,6 +39,7 @@ class MainWindow(QMainWindow):
         # Keep track of crawler state
         self._crawler_is_running = False
         self._update_folders_worker: object | None = None  # background _UpdateAllWorker
+        self._update_folders_dlg: object | None = None    # kept alive while running in bg
 
         # ---- Actions ----
         from app.ui.config_dialog import get_color_scheme as _get_cs
@@ -309,6 +310,8 @@ class MainWindow(QMainWindow):
             "font-weight: bold; "
             "}"
         )
+        self._update_folders_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._update_folders_label.mousePressEvent = lambda _e: self._reopen_update_folders_dialog()
         self._update_folders_label.hide()
         sb.addPermanentWidget(self._update_folders_label)
 
@@ -408,8 +411,18 @@ class MainWindow(QMainWindow):
 
         worker = dlg._background_worker
         if worker is not None:
-            # User clicked "Run in Background" — hook the orphaned worker to the status bar.
+            # User clicked "Run in Background" — keep dialog alive so the status-bar
+            # label can reopen it, and reconnect the worker's signals to its slots.
             self._update_folders_worker = worker
+            self._update_folders_dlg = dlg
+
+            worker.folder_started.connect(dlg._on_folder_started)
+            worker.progress.connect(dlg._on_progress)
+            worker.counts_changed.connect(dlg._on_counts_changed)
+            worker.archive_result.connect(dlg._on_archive_result)
+            worker.file_moved.connect(dlg._on_file_moved)
+            worker.file_deleted.connect(dlg._on_file_deleted)
+            worker.all_finished.connect(dlg._on_finished)
 
             # Track folder context so the progress label shows "F1/3: 12/50".
             _folder_ctx: list = [0, 0]  # [idx, total]
@@ -432,6 +445,7 @@ class MainWindow(QMainWindow):
             def _on_done() -> None:
                 self._update_folders_label.hide()
                 self._update_folders_worker = None
+                self._update_folders_dlg = None
                 self._browser.refresh()
 
             worker.folder_started.connect(_on_folder_started)
@@ -447,7 +461,16 @@ class MainWindow(QMainWindow):
                 self._update_folders_label.setText(" Update: running… ")
             self._update_folders_label.show()
         else:
+            self._update_folders_dlg = None
             self._browser.refresh()
+
+    def _reopen_update_folders_dialog(self) -> None:
+        """Bring the Update Crawled Folders dialog back to the foreground."""
+        dlg = self._update_folders_dlg
+        if dlg is not None:
+            dlg.show()
+            dlg.raise_()
+            dlg.activateWindow()
 
     def _open_config(self) -> None:
         """Open the configuration dialog and re-apply debug menu visibility."""
