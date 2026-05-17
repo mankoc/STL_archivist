@@ -582,6 +582,11 @@ class FindContentDuplicatesDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Find Duplicate Archives by Content")
+        self.setWindowFlags(
+            self.windowFlags()
+            | Qt.WindowType.WindowMinimizeButtonHint
+            | Qt.WindowType.WindowMaximizeButtonHint
+        )
         self.resize(1050, 720)
         self._stl_worker: Optional[_ContentDupWorker] = None
         self._img_worker: Optional[_ImageDupWorker]   = None

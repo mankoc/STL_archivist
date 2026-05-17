@@ -64,6 +64,8 @@ class StatsWorker(QThread):
                 stats["total_releases"]    = s.query(func.count(Release.id)).scalar() or 0
                 stats["total_scales"]      = s.query(func.count(Scale.id)).scalar() or 0
                 stats["total_tags"]        = s.query(func.count(Tag.id)).scalar() or 0
+                stats["total_archive_size"] = s.query(func.sum(STLModel.archive_size)).scalar() or 0
+                stats["total_file_size"]    = s.query(func.sum(STLModel.file_size)).scalar() or 0
 
                 # --- Content quality ---
                 stats["presupported"] = s.query(func.count(STLModel.id)).filter(
@@ -229,6 +231,8 @@ class StatisticsDialog(QDialog):
         self._row(ov, "Releases",           f"{s['total_releases']:,}")
         self._row(ov, "Scales",             f"{s['total_scales']:,}")
         self._row(ov, "Tags",               f"{s['total_tags']:,}")
+        self._row(ov, "Total size (compressed)",   _fmt_size(s["total_archive_size"]))
+        self._row(ov, "Total size (uncompressed)", _fmt_size(s["total_file_size"]))
         layout.addWidget(ov)
 
         # ── Storage ──────────────────────────────────────────────────
