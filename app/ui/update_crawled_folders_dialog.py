@@ -7,16 +7,43 @@ folders, or remove existing ones from the tracked list.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QBrush, QColor
 from PyQt6.QtWidgets import (
-    QApplication, QDialog, QFileDialog, QHBoxLayout, QLabel, QListWidget,
-    QListWidgetItem, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
-    QSizePolicy, QVBoxLayout,
+    QApplication, QDialog, QFileDialog, QHBoxLayout, QHeaderView, QLabel,
+    QListWidget, QListWidgetItem, QMessageBox, QProgressBar, QPushButton,
+    QSizePolicy, QTableWidget, QTableWidgetItem, QVBoxLayout,
 )
 
 from app.crawler.crawler import CrawlerWorker
 from app.database.db import session_scope
 from app.database.models import CrawledFolder
+
+# ── Change-type colours ───────────────────────────────────────────────────────
+_COLOUR: dict[str, QColor] = {
+    "New":     QColor("#2e7d32"),   # dark green
+    "Updated": QColor("#1565c0"),   # dark blue
+    "Deleted": QColor("#c62828"),   # dark red
+    "Moved":   QColor("#e65100"),   # dark orange
+}
+
+_COL_FILENAME = 0
+_COL_CHANGE   = 1
+_COL_FOLDER   = 2
+_NCOLS        = 3
+
+
+def _tbl_item(text: str, colour: QColor | None = None,
+              tooltip: str = "") -> QTableWidgetItem:
+    it = QTableWidgetItem(text)
+    it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsEditable)
+    if colour is not None:
+        it.setForeground(QBrush(colour))
+    if tooltip:
+        it.setToolTip(tooltip)
+    return it
 
 
 class _UpdateAllWorker(QThread):
@@ -91,14 +118,14 @@ class UpdateCrawledFoldersDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Update Crawled Folders")
-        self.resize(700, 660)
+        self.resize(760, 680)
         self._worker: _UpdateAllWorker | None = None
         self._background_worker: _UpdateAllWorker | None = None  # set when user runs in bg
         self._all_folders: list[tuple[str, str | None]] = []
-        self._result_rows: list[tuple[str, str, str]] = []  # (folder, filename, status)
-        self._moved_rows: list[tuple[str, str]] = []         # (old_path, new_path)
-        self._deleted_rows: list[str] = []                   # path
         self._background_mode = False
+        # Running counters for the counts label
+        self._cnt_new = self._cnt_updated = self._cnt_unchanged = 0
+        self._cnt_moved = self._cnt_deleted = 0
         self._build_ui()
         self._load_folders()
 
@@ -111,7 +138,7 @@ class UpdateCrawledFoldersDialog(QDialog):
 
         self._folder_list = QListWidget()
         self._folder_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self._folder_list.setMinimumHeight(160)
+        self._folder_list.setMinimumHeight(140)
         layout.addWidget(self._folder_list)
 
         sel_row = QHBoxLayout()
@@ -150,13 +177,21 @@ class UpdateCrawledFoldersDialog(QDialog):
         self._progress.setTextVisible(True)
         layout.addWidget(self._progress)
 
-        layout.addWidget(QLabel("Log:"))
-        self._log = QPlainTextEdit()
-        self._log.setReadOnly(True)
-        self._log.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        layout.addWidget(self._log)
+        # --- Results table ---
+        layout.addWidget(QLabel("Changes:"))
+        self._table = QTableWidget(0, _NCOLS)
+        self._table.setHorizontalHeaderLabels(["Filename", "Change", "Folder"])
+        self._table.horizontalHeader().setSectionResizeMode(_COL_FILENAME, QHeaderView.ResizeMode.ResizeToContents)
+        self._table.horizontalHeader().setSectionResizeMode(_COL_CHANGE,   QHeaderView.ResizeMode.ResizeToContents)
+        self._table.horizontalHeader().setSectionResizeMode(_COL_FOLDER,   QHeaderView.ResizeMode.Stretch)
+        self._table.verticalHeader().setVisible(False)
+        self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._table.setSortingEnabled(True)
+        self._table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        layout.addWidget(self._table)
 
-        self._counts_label = QLabel("New: 0  |  Updated: 0  |  Unchanged: 0")
+        self._counts_label = QLabel("New: 0  |  Updated: 0  |  Unchanged: 0  |  Moved: 0  |  Deleted: 0")
         self._counts_label.setStyleSheet(
             "QLabel { "
             "background-color: palette(window); "
@@ -184,7 +219,10 @@ class UpdateCrawledFoldersDialog(QDialog):
 
         self._bg_btn = QPushButton(style.standardIcon(SP.SP_TitleBarMinButton), "Run in Background")
         self._bg_btn.setEnabled(False)
-        self._bg_btn.setToolTip("Close this dialog and continue the update in the background.\nProgress will be shown in the status bar.")
+        self._bg_btn.setToolTip(
+            "Close this dialog and continue the update in the background.\n"
+            "Progress will be shown in the status bar."
+        )
         self._bg_btn.clicked.connect(self._run_in_background)
         btn_row.addWidget(self._bg_btn)
 
@@ -294,12 +332,13 @@ class UpdateCrawledFoldersDialog(QDialog):
             self._status_label.setText("No folders selected — tick at least one folder to re-crawl.")
             return
 
-        self._log.clear()
+        self._table.setSortingEnabled(False)
+        self._table.setRowCount(0)
+        self._table.setSortingEnabled(True)
         self._progress.setValue(0)
-        self._counts_label.setText("New: 0  |  Updated: 0  |  Unchanged: 0")
-        self._result_rows.clear()
-        self._moved_rows.clear()
-        self._deleted_rows.clear()
+        self._cnt_new = self._cnt_updated = self._cnt_unchanged = 0
+        self._cnt_moved = self._cnt_deleted = 0
+        self._counts_label.setText("New: 0  |  Updated: 0  |  Unchanged: 0  |  Moved: 0  |  Deleted: 0")
         self._start_btn.setEnabled(False)
         self._stop_btn.setEnabled(True)
         self._bg_btn.setEnabled(True)
@@ -314,7 +353,6 @@ class UpdateCrawledFoldersDialog(QDialog):
         config = build_crawler_config(max_thumbnails=get_max_thumbnails())
         config.log_unchanged = False
         self._worker = _UpdateAllWorker(folders, config=config, parent=self)
-        self._worker.log.connect(self._on_log)
         self._worker.folder_started.connect(self._on_folder_started)
         self._worker.progress.connect(self._on_progress)
         self._worker.counts_changed.connect(self._on_counts_changed)
@@ -340,11 +378,28 @@ class UpdateCrawledFoldersDialog(QDialog):
         self.accept()
 
     # ------------------------------------------------------------------
-    # Worker signal handlers
+    # Table helpers
     # ------------------------------------------------------------------
 
-    def _on_log(self, msg: str) -> None:
-        self._log.appendPlainText(msg)
+    def _add_table_row(self, filename: str, change: str, folder: str,
+                       tooltip: str = "") -> None:
+        colour = _COLOUR.get(change)
+        row = self._table.rowCount()
+        self._table.insertRow(row)
+        self._table.setItem(row, _COL_FILENAME, _tbl_item(filename, colour, tooltip))
+        self._table.setItem(row, _COL_CHANGE,   _tbl_item(change,   colour, tooltip))
+        self._table.setItem(row, _COL_FOLDER,   _tbl_item(folder,   colour, tooltip))
+
+    def _refresh_counts_label(self) -> None:
+        self._counts_label.setText(
+            f"New: {self._cnt_new}  |  Updated: {self._cnt_updated}"
+            f"  |  Unchanged: {self._cnt_unchanged}"
+            f"  |  Moved: {self._cnt_moved}  |  Deleted: {self._cnt_deleted}"
+        )
+
+    # ------------------------------------------------------------------
+    # Worker signal handlers
+    # ------------------------------------------------------------------
 
     def _on_folder_started(self, path: str, idx: int, total: int) -> None:
         self._status_label.setText(f"Folder {idx} / {total}")
@@ -358,18 +413,25 @@ class UpdateCrawledFoldersDialog(QDialog):
         self._progress.setFormat(f"{current} / {total}")
 
     def _on_counts_changed(self, new: int, updated: int, unchanged: int) -> None:
-        self._counts_label.setText(
-            f"New: {new}  |  Updated: {updated}  |  Unchanged: {unchanged}"
-        )
+        self._cnt_new, self._cnt_updated, self._cnt_unchanged = new, updated, unchanged
+        self._refresh_counts_label()
 
     def _on_archive_result(self, folder: str, filename: str, status: str) -> None:
-        self._result_rows.append((folder, filename, status))
+        change = "New" if status == "new" else "Updated"
+        self._add_table_row(filename, change, folder)
 
     def _on_file_moved(self, old_path: str, new_path: str) -> None:
-        self._moved_rows.append((old_path, new_path))
+        filename = Path(old_path).name
+        tooltip = f"From: {old_path}\nTo:   {new_path}"
+        self._add_table_row(filename, "Moved", str(Path(new_path).parent), tooltip)
+        self._cnt_moved += 1
+        self._refresh_counts_label()
 
     def _on_file_deleted(self, path: str) -> None:
-        self._deleted_rows.append(path)
+        p = Path(path)
+        self._add_table_row(p.name, "Deleted", str(p.parent))
+        self._cnt_deleted += 1
+        self._refresh_counts_label()
 
     def _on_finished(self) -> None:
         n = self._folder_list.count()
@@ -388,57 +450,6 @@ class UpdateCrawledFoldersDialog(QDialog):
         self._add_btn.setEnabled(True)
         self._remove_btn.setEnabled(True)
         self._worker = None
-        self._append_summary_table()
-
-    def _append_summary_table(self) -> None:
-        from collections import OrderedDict
-
-        rows         = self._result_rows
-        new_rows     = [(f, n) for f, n, s in rows if s == "new"]
-        updated_rows = [(f, n) for f, n, s in rows if s == "updated"]
-        moved_rows   = self._moved_rows
-        deleted_rows = self._deleted_rows
-
-        W = 68
-        lines: list[str] = ["", "=" * W]
-        lines.append(
-            f"  Summary — {len(new_rows)} new  |  {len(updated_rows)} updated"
-            f"  |  {len(moved_rows)} moved  |  {len(deleted_rows)} deleted"
-        )
-        lines.append("=" * W)
-
-        # ── New / updated archives grouped by folder ──────────────────────────
-        if rows:
-            grouped: dict[str, list[tuple[str, str]]] = OrderedDict()
-            for folder, fname, status in rows:
-                grouped.setdefault(folder, []).append((fname, status))
-            for folder, entries in grouped.items():
-                lines.append(f"  {folder}")
-                for fname, status in entries:
-                    tag = "NEW    " if status == "new" else "UPDATED"
-                    lines.append(f"    {tag}  {fname}")
-        else:
-            lines.append("  (no new or updated archives)")
-
-        # ── Moved archives ────────────────────────────────────────────────────
-        if moved_rows:
-            lines.append("")
-            lines.append(f"  Moved ({len(moved_rows)})")
-            lines.append("  " + "-" * (W - 2))
-            for old_path, new_path in moved_rows:
-                lines.append(f"    FROM  {old_path}")
-                lines.append(f"    TO    {new_path}")
-
-        # ── Deleted DB records ────────────────────────────────────────────────
-        if deleted_rows:
-            lines.append("")
-            lines.append(f"  Deleted from database ({len(deleted_rows)})")
-            lines.append("  " + "-" * (W - 2))
-            for path in deleted_rows:
-                lines.append(f"    {path}")
-
-        lines.append("=" * W)
-        self._log.appendPlainText("\n".join(lines))
 
     def closeEvent(self, event) -> None:
         if self._worker is not None:
@@ -446,7 +457,6 @@ class UpdateCrawledFoldersDialog(QDialog):
                 # Disconnect all UI-bound slots so destroyed dialog widgets are
                 # never touched after the window closes.
                 for sig, slot in (
-                    (self._worker.log,            self._on_log),
                     (self._worker.folder_started, self._on_folder_started),
                     (self._worker.progress,       self._on_progress),
                     (self._worker.counts_changed, self._on_counts_changed),
