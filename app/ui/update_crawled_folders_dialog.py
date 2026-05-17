@@ -471,9 +471,15 @@ class UpdateCrawledFoldersDialog(QDialog):
         self._add_btn.setEnabled(True)
         self._remove_btn.setEnabled(True)
         self._worker = None
+        self._background_mode = False  # allow normal close once the run is done
 
     def closeEvent(self, event) -> None:
         if self._worker is not None:
             self._worker.stop()
             self._worker.wait()
+        elif self._background_mode:
+            # Worker is owned by the main window — just hide so it can be re-shown.
+            event.ignore()
+            self.hide()
+            return
         super().closeEvent(event)
