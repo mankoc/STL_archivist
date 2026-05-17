@@ -28,6 +28,26 @@ UNRAR_TOOL_KEY         = "config/unrar_tool"
 MAX_THUMBS_DEFAULT     = 5
 MAX_THUMB_SIZE_DEFAULT = 512
 
+# ── File manager presets ──────────────────────────────────────────────────────
+FILE_MANAGER_SYSTEM           = "system"
+FILE_MANAGER_DOUBLE_COMMANDER = "double_commander"
+FILE_MANAGER_CUSTOM           = "custom"
+
+_FILE_MANAGER_DISPLAY: dict[str, str] = {
+    FILE_MANAGER_SYSTEM:           "System Default",
+    FILE_MANAGER_DOUBLE_COMMANDER: "Double Commander",
+    FILE_MANAGER_CUSTOM:           "Custom…",
+}
+
+# Default executable paths per preset per platform (used as placeholder / fallback)
+_FILE_MANAGER_DEFAULTS: dict[str, dict[str, str]] = {
+    FILE_MANAGER_DOUBLE_COMMANDER: {
+        "win32":  r"C:\Program Files\Double Commander\doublecmd.exe",
+        "linux":  "doublecmd",
+        "darwin": "/Applications/Double Commander.app/Contents/MacOS/doublecmd",
+    },
+}
+
 
 def _platform_defaults() -> dict:
     """Return a dict of default values that differ by operating system.
@@ -411,6 +431,47 @@ def get_filter_alpha_enabled() -> bool:
 def get_filter_alpha_threshold() -> int:
     """Min number of items in a filter section before alphabetical grouping kicks in."""
     return int(_load_library_settings().get("filter_alpha_threshold", 50))
+
+
+def get_file_manager() -> str:
+    """Return the configured file manager preset key."""
+    return _load_library_settings().get("file_manager", FILE_MANAGER_SYSTEM)
+
+
+def get_file_manager_path() -> str:
+    """Return the configured executable path for non-system file manager presets."""
+    return _load_library_settings().get("file_manager_path", "")
+
+
+def open_folder_with_file_manager(folder: str) -> None:
+    """Open *folder* in the configured file manager."""
+    from PyQt6.QtWidgets import QMessageBox
+    manager = get_file_manager()
+    if manager == FILE_MANAGER_SYSTEM:
+        from PyQt6.QtCore import QUrl
+        from PyQt6.QtGui import QDesktopServices
+        QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
+        return
+
+    exe = get_file_manager_path()
+    if not exe and manager in _FILE_MANAGER_DEFAULTS:
+        plat = sys.platform if sys.platform in ("win32", "darwin") else "linux"
+        exe = _FILE_MANAGER_DEFAULTS[manager].get(plat, "")
+
+    if not exe:
+        QMessageBox.warning(None, "Open Folder", "No file manager executable configured.")
+        return
+
+    import subprocess
+    try:
+        subprocess.Popen([exe, folder])
+    except FileNotFoundError:
+        QMessageBox.warning(
+            None, "Open Folder",
+            f"Executable not found:\n{exe}\n\nCheck the path in Settings → Browser.",
+        )
+    except Exception as exc:
+        QMessageBox.warning(None, "Open Folder", f"Failed to open folder:\n{exc}")
 
 
 _ICONS_DIR = Path(__file__).parent.parent.parent / "resources" / "icons"
@@ -887,11 +948,51 @@ class ConfigDialog(QDialog):
         form.addRow("Split above:", self._filter_alpha_threshold_spin)
 
         layout.addWidget(group)
+
+        fm_group = QGroupBox("File Manager")
+        fm_form = QFormLayout(fm_group)
+
+        self._file_manager_combo = QComboBox()
+        for key, display in _FILE_MANAGER_DISPLAY.items():
+            self._file_manager_combo.addItem(display, key)
+        self._file_manager_combo.currentIndexChanged.connect(self._update_file_manager_path_visibility)
+        fm_form.addRow("Open folder with:", self._file_manager_combo)
+
+        fm_path_row = QHBoxLayout()
+        self._file_manager_path_edit = QLineEdit()
+        fm_path_row.addWidget(self._file_manager_path_edit)
+        fm_path_browse_btn = QPushButton("Browse…")
+        fm_path_browse_btn.clicked.connect(self._browse_file_manager)
+        fm_path_row.addWidget(fm_path_browse_btn)
+        self._file_manager_path_widget = QWidget()
+        self._file_manager_path_widget.setLayout(fm_path_row)
+        fm_form.addRow("Executable:", self._file_manager_path_widget)
+
+        layout.addWidget(fm_group)
         layout.addStretch()
         return page
 
     def _update_alpha_threshold_enabled(self, enabled: bool) -> None:
         self._filter_alpha_threshold_spin.setEnabled(enabled)
+
+    def _update_file_manager_path_visibility(self) -> None:
+        key = self._file_manager_combo.currentData()
+        show = key != FILE_MANAGER_SYSTEM
+        self._file_manager_path_widget.setVisible(show)
+        if show:
+            plat = sys.platform if sys.platform in ("win32", "darwin") else "linux"
+            default = _FILE_MANAGER_DEFAULTS.get(key, {}).get(plat, "")
+            self._file_manager_path_edit.setPlaceholderText(default or "Path to executable…")
+
+    def _browse_file_manager(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select file manager executable",
+            self._file_manager_path_edit.text() or "",
+            "Executables (*.exe);;All files (*)" if sys.platform == "win32" else "All files (*)",
+        )
+        if path:
+            self._file_manager_path_edit.setText(path)
 
     def _build_file_writing_page(self) -> QWidget:
         page = QWidget()
@@ -1347,6 +1448,12 @@ class ConfigDialog(QDialog):
         size = int(settings.get("font_size", 0))
         self._font_size_spin.setValue(size)
 
+        manager = get_file_manager()
+        idx = self._file_manager_combo.findData(manager)
+        self._file_manager_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self._file_manager_path_edit.setText(get_file_manager_path())
+        self._update_file_manager_path_visibility()
+
         self._debug_menu_check.setChecked(get_debug_menu_enabled())
         self._logging_enabled_check.setChecked(get_logging_enabled())
 
@@ -1401,8 +1508,10 @@ class ConfigDialog(QDialog):
                 "allow_file_delete": self._allow_file_delete_check.isChecked(),
                 "use_trash_folder": self._use_trash_folder_check.isChecked(),
                 "trash_folder_path": self._trash_folder_edit.text().strip(),
-                "font_family": font_family,
-                "font_size":   font_size,
+                "font_family":        font_family,
+                "font_size":          font_size,
+                "file_manager":       self._file_manager_combo.currentData(),
+                "file_manager_path":  self._file_manager_path_edit.text().strip(),
             },
             data_dir=data_dir,
         )

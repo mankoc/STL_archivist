@@ -4,7 +4,7 @@
 
 Built with PyQt6 and SQLAlchemy.
 
-Version: 2026.19
+Version: 2026.20
 
 ## Features
 
@@ -29,9 +29,10 @@ Version: 2026.19
 - **File Size column** — browser table shows each archive's size on disk (B / KB / MB / GB), sortable numerically
 - **STL file list** — optionally records the name and uncompressed size of every `.stl` file inside each archive (enable *Store STL file list* in Configuration); included in METADATA.7z sidecars
 - **Find Metadata Duplicates** — finds models with identical or phonetically similar field values; supports exact match, Levenshtein (configurable distance), and Soundex; results can be sent directly to the browser table
-- **Find Archives by Content** — two-tab tool: the *STL Files* tab flags archive pairs that share a configurable fraction of identical files; the *Images* tab finds archives with perceptually similar thumbnails using 64-bit dHash and configurable Hamming distance; hover any row to see thumbnails in a popup
+- **Find Archives by Content** — two-tab tool: the *STL Files* tab flags archive pairs that share a configurable fraction of identical files; the *Images* tab finds archives with perceptually similar thumbnails using 64-bit dHash and configurable Hamming distance; hover any row to see thumbnails in a popup; right-click any result row to open the archive's folder in the configured file manager, compare archive contents, or delete the archive from disk
 - **Archive content viewer** — list every `.stl` file in an archive, or compare two archives side-by-side with configurable matching by filename, size, or hash
-- **Physical file deletion** — optionally delete or trash archive files from disk via the right-click menu (enable in Configuration → File writing)
+- **Physical file deletion** — optionally delete or trash archive files from disk via the right-click menu in the browser table or the duplicate-finder results (enable in Configuration → File writing)
+- **Configurable file manager** — choose which program opens archive folders from right-click menus: System Default, Double Commander, or a custom executable (Configuration → Browser)
 - **Background crawl** — dismiss the Crawler dialog without stopping the worker; a status badge in the status bar shows live progress and brings the dialog back when clicked
 - **Statistics** — column and aggregated statistics dialogs for a quick numeric overview; database maintenance (vacuum, integrity check)
 - **Themes** — built-in color schemes: System Default, VS Code Dark+, Windows 11 Dark, Windows 11 Light, and nine Material Design themes via qt-material
@@ -95,6 +96,7 @@ On first launch, go to **File → Configuration…** and set up:
 - **Crawler** — max thumbnails per model, max image size in pixels, path to `unrar` executable, and which crawler warnings to enable (pre-supported STL, no images, no printable files, nested archives, support files)
 - **File writing** — enable *Sort files into directory* (adds a right-click menu entry); optionally enable *Allow file delete* (with a confirmation guard) to physically delete or trash archive files from the right-click menu; configure a *Trash folder* to move deleted files there instead of permanently removing them
 - **File writing → Sidecar** — enable *Metadata sidecar* to write `METADATA.7z` per folder during crawl; optionally include thumbnails
+- **Browser** — configure the filter pane (model counts, alphabetical letter bins) and the **File Manager** used when opening archive folders: System Default, Double Commander, or a custom executable path
 - **Appearance** — select a color scheme (preview is applied immediately; Cancel reverts)
 
 ### 2. Crawl your archive folder

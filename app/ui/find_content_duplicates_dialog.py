@@ -16,7 +16,7 @@ from typing import Optional
 from PyQt6.QtCore import QEvent, QObject, QPoint, QThread, pyqtSignal, Qt
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
-    QApplication, QDialog, QFrame, QMenu, QVBoxLayout, QHBoxLayout, QLabel,
+    QApplication, QDialog, QFrame, QMenu, QMessageBox, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QHeaderView,
     QProgressBar, QGroupBox, QFormLayout, QTabWidget, QWidget,
 )
@@ -758,33 +758,70 @@ class FindContentDuplicatesDialog(QDialog):
         table: QTableWidget,
         id_col_a: int,
         id_col_b: int,
+        path_col_a: int,
+        path_col_b: int,
         pos: QPoint,
     ) -> None:
-        """Show a 'Compare Archive Contents…' context menu for the clicked row.
-
-        Extracts model IDs from *id_col_a* / *id_col_b* of the clicked row and
-        opens :class:`~app.ui.file_list_dialog.FileComparisonDialog`.
-        """
+        """Show context menu for the clicked row with compare and open-folder actions."""
         item = table.itemAt(pos)
         if not item:
             return
-        row  = item.row()
-        id_a = table.item(row, id_col_a).data(Qt.ItemDataRole.UserRole)
-        id_b = table.item(row, id_col_b).data(Qt.ItemDataRole.UserRole)
+        row    = item.row()
+        id_a   = table.item(row, id_col_a).data(Qt.ItemDataRole.UserRole)
+        id_b   = table.item(row, id_col_b).data(Qt.ItemDataRole.UserRole)
+        path_a = (table.item(row, path_col_a).text()
+                  if table.item(row, path_col_a) else "")
+        path_b = (table.item(row, path_col_b).text()
+                  if table.item(row, path_col_b) else "")
 
+        style       = QApplication.style()
         menu        = QMenu(self)
         compare_act = menu.addAction(
-            QApplication.style().standardIcon(
-                QApplication.style().StandardPixmap.SP_FileDialogContentsView
-            ),
+            style.standardIcon(style.StandardPixmap.SP_FileDialogContentsView),
             "Compare Archive Contents…",
         )
-        if menu.exec(table.viewport().mapToGlobal(pos)) == compare_act:
+        menu.addSeparator()
+        open_a_act = menu.addAction(
+            style.standardIcon(style.StandardPixmap.SP_DirOpenIcon),
+            "Open Folder of Archive A in Explorer",
+        )
+        open_a_act.setEnabled(bool(path_a))
+        open_b_act = menu.addAction(
+            style.standardIcon(style.StandardPixmap.SP_DirOpenIcon),
+            "Open Folder of Archive B in Explorer",
+        )
+        open_b_act.setEnabled(bool(path_b))
+
+        delete_a_act = delete_b_act = None
+        from app.ui.config_dialog import get_allow_file_delete
+        if get_allow_file_delete():
+            menu.addSeparator()
+            delete_a_act = menu.addAction(
+                style.standardIcon(style.StandardPixmap.SP_TrashIcon),
+                "Delete Archive A from Disk…",
+            )
+            delete_b_act = menu.addAction(
+                style.standardIcon(style.StandardPixmap.SP_TrashIcon),
+                "Delete Archive B from Disk…",
+            )
+
+        action = menu.exec(table.viewport().mapToGlobal(pos))
+        if action == compare_act:
             from app.ui.file_list_dialog import FileComparisonDialog
             FileComparisonDialog(id_a, id_b, parent=self).exec()
+        elif action == open_a_act and path_a:
+            from app.ui.config_dialog import open_folder_with_file_manager
+            open_folder_with_file_manager(str(Path(path_a).parent))
+        elif action == open_b_act and path_b:
+            from app.ui.config_dialog import open_folder_with_file_manager
+            open_folder_with_file_manager(str(Path(path_b).parent))
+        elif delete_a_act and action == delete_a_act:
+            self._delete_archive_from_disk(id_a, table, row)
+        elif delete_b_act and action == delete_b_act:
+            self._delete_archive_from_disk(id_b, table, row)
 
     def _stl_context_menu(self, pos: QPoint) -> None:
-        self._show_compare_menu(self._stl_table, _S_ID_A, _S_ID_B, pos)
+        self._show_compare_menu(self._stl_table, _S_ID_A, _S_ID_B, _S_PATH_A, _S_PATH_B, pos)
 
     # ── Image search ──────────────────────────────────────────────────────────
 
@@ -858,7 +895,42 @@ class FindContentDuplicatesDialog(QDialog):
             self._refresh_bottom_buttons()
 
     def _img_context_menu(self, pos: QPoint) -> None:
-        self._show_compare_menu(self._img_table, _I_ID_A, _I_ID_B, pos)
+        self._show_compare_menu(self._img_table, _I_ID_A, _I_ID_B, _I_PATH_A, _I_PATH_B, pos)
+
+    def _delete_archive_from_disk(
+        self, model_id: int, table: QTableWidget, row: int
+    ) -> None:
+        from app.database.db import session_scope
+        from app.services.file_deletion import delete_archives
+        from app.ui.config_dialog import get_trash_folder_path, get_use_trash_folder
+
+        use_trash  = get_use_trash_folder()
+        trash_path = get_trash_folder_path()
+        verb       = "Move to trash" if use_trash else "Permanently delete"
+
+        reply = QMessageBox.warning(
+            self,
+            f"{verb} archive",
+            f"Are you sure you want to <b>{verb.lower()}</b> this archive file "
+            f"from disk?<br><br>This will also remove it from the database.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        with session_scope() as session:
+            report = delete_archives(session, [model_id], use_trash, trash_path)
+
+        if report.failed:
+            QMessageBox.warning(
+                self,
+                "Delete Archive",
+                f"Failed to delete the archive:\n{report.failed[0][1]}",
+            )
+        else:
+            table.removeRow(row)
+            self._refresh_bottom_buttons()
 
     # ── Thumbnail helpers ─────────────────────────────────────────────────────
 

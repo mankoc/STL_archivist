@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026.20 — 2026-05-17
+
+### UI — Find Duplicate Archives by Content
+
+- **Open folder in file manager** — right-clicking any row in the STL Files or Images results
+  tables now shows **Open Folder of Archive A in Explorer** and **Open Folder of Archive B in
+  Explorer**; both actions open the parent directory of the respective archive in the configured
+  file manager
+- **Delete archive from disk** — two additional right-click actions, **Delete Archive A from
+  Disk…** and **Delete Archive B from Disk…**, appear when *Allow file delete* is enabled in
+  Configuration; they follow the same trash / permanent-delete logic as the main browser's delete
+  action (DB record removed, LMDB thumbnails purged, file moved to trash or permanently deleted);
+  the row is removed from the results table on success
+
+### Configuration — Browser
+
+- **File Manager** — new *File Manager* group in **Configuration → Browser** lets you choose
+  which program is used to open archive folders from right-click menus:
+  - **System Default** — delegates to `QDesktopServices` (OS-native file manager)
+  - **Double Commander** — launches Double Commander with the target folder; the executable
+    path is pre-filled with the platform default
+    (`C:\Program Files\Double Commander\doublecmd.exe` on Windows, `doublecmd` on Linux)
+  - **Custom…** — specify any executable; path field and Browse button become visible when
+    a non-system option is selected
+
+---
+
 ## 2026.19 — 2026-05-10
 
 ### UI — Crawler
