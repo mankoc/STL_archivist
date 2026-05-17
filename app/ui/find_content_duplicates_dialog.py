@@ -72,17 +72,43 @@ def _item(text: str, user_data=None,
     return it
 
 
-def _fmt_size(path: str) -> str:
-    """Return a human-readable file size for *path*, or '?' if unreadable."""
-    try:
-        n = Path(path).stat().st_size
-    except OSError:
-        return "?"
+class _NumericItem(QTableWidgetItem):
+    """QTableWidgetItem that sorts by a numeric UserRole value instead of text."""
+
+    def __lt__(self, other: QTableWidgetItem) -> bool:
+        a = self.data(Qt.ItemDataRole.UserRole)
+        b = other.data(Qt.ItemDataRole.UserRole)
+        try:
+            return float(a) < float(b)
+        except (TypeError, ValueError):
+            return super().__lt__(other)
+
+
+def _fmt_size(n: int) -> str:
+    """Return a human-readable string for *n* bytes."""
     for unit in ("B", "KB", "MB", "GB"):
         if n < 1024:
             return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
         n /= 1024
     return f"{n:.1f} TB"
+
+
+def _size_item(path: str) -> QTableWidgetItem:
+    """Return a centre-aligned, numerically sortable size cell for *path*."""
+    c = Qt.AlignmentFlag.AlignCenter
+    try:
+        n = Path(path).stat().st_size
+    except OSError:
+        it = _NumericItem("?")
+        it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        it.setData(Qt.ItemDataRole.UserRole, -1)
+        it.setTextAlignment(c)
+        return it
+    it = _NumericItem(_fmt_size(n))
+    it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsEditable)
+    it.setData(Qt.ItemDataRole.UserRole, n)
+    it.setTextAlignment(c)
+    return it
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -749,12 +775,12 @@ class FindContentDuplicatesDialog(QDialog):
             self._stl_table.setItem(row_idx, _S_ID_A,    _item(str(r["id_a"]),    r["id_a"]))
             self._stl_table.setItem(row_idx, _S_TITLE_A, _item(r["title_a"]))
             self._stl_table.setItem(row_idx, _S_PATH_A,  _item(r["path_a"]))
-            self._stl_table.setItem(row_idx, _S_SIZE_A,  _item(_fmt_size(r["path_a"]), align=c))
+            self._stl_table.setItem(row_idx, _S_SIZE_A,  _size_item(r["path_a"]))
             self._stl_table.setItem(row_idx, _S_FILES_A, _item(str(r["total_a"]), align=c))
             self._stl_table.setItem(row_idx, _S_ID_B,    _item(str(r["id_b"]),    r["id_b"]))
             self._stl_table.setItem(row_idx, _S_TITLE_B, _item(r["title_b"]))
             self._stl_table.setItem(row_idx, _S_PATH_B,  _item(r["path_b"]))
-            self._stl_table.setItem(row_idx, _S_SIZE_B,  _item(_fmt_size(r["path_b"]), align=c))
+            self._stl_table.setItem(row_idx, _S_SIZE_B,  _size_item(r["path_b"]))
             self._stl_table.setItem(row_idx, _S_FILES_B, _item(str(r["total_b"]), align=c))
             self._stl_table.setItem(row_idx, _S_MATCH,   _item(str(r["overlap"]), align=c))
             self._stl_table.setItem(row_idx, _S_SIM,     _item(f"{r['sim']:.0%}", align=c))
@@ -890,12 +916,12 @@ class FindContentDuplicatesDialog(QDialog):
             self._img_table.setItem(row_idx, _I_ID_A,    _item(str(r["id_a"]),  r["id_a"]))
             self._img_table.setItem(row_idx, _I_TITLE_A, _item(r["title_a"]))
             self._img_table.setItem(row_idx, _I_PATH_A,  _item(r["path_a"]))
-            self._img_table.setItem(row_idx, _I_SIZE_A,  _item(_fmt_size(r["path_a"]), align=c))
+            self._img_table.setItem(row_idx, _I_SIZE_A,  _size_item(r["path_a"]))
             self._img_table.setItem(row_idx, _I_IMGS_A,  _item(str(r["imgs_a"]), align=c))
             self._img_table.setItem(row_idx, _I_ID_B,    _item(str(r["id_b"]),  r["id_b"]))
             self._img_table.setItem(row_idx, _I_TITLE_B, _item(r["title_b"]))
             self._img_table.setItem(row_idx, _I_PATH_B,  _item(r["path_b"]))
-            self._img_table.setItem(row_idx, _I_SIZE_B,  _item(_fmt_size(r["path_b"]), align=c))
+            self._img_table.setItem(row_idx, _I_SIZE_B,  _size_item(r["path_b"]))
             self._img_table.setItem(row_idx, _I_IMGS_B,  _item(str(r["imgs_b"]), align=c))
             self._img_table.setItem(row_idx, _I_PAIRS,   _item(str(r["pairs"]),  align=c))
             self._img_table.setItem(row_idx, _I_DIST,    _item(str(r["best"]),   align=c))
