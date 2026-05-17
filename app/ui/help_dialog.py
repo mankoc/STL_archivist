@@ -838,6 +838,34 @@ Add, edit, or remove patterns as needed for your naming conventions.</p>
 </table>
 
 
+<h2>Browser</h2>
+<table>
+  <tr><th>Setting</th><th>Description</th></tr>
+  <tr><td>Show model counts in filter pane</td>
+      <td>When enabled, each filter panel item shows the number of matching models in
+          parentheses (e.g. <code>Jane Doe (42)</code>). Path-tree nodes show cumulative
+          counts. Disable for a less cluttered panel or on very large collections.</td></tr>
+  <tr><td>Group large sections into letter bins</td>
+      <td>Splits filter sections that exceed the <em>Split above</em> threshold into
+          alphabetical sub-groups (A, B, C&hellip;) to reduce scrolling.</td></tr>
+  <tr><td>Split above (items)</td>
+      <td>Minimum number of items in a filter section before alphabetical grouping activates.
+          Only editable when letter bins are enabled.</td></tr>
+  <tr><td>Open folder with</td>
+      <td>Program used when <b>Open Folder in Explorer</b> is chosen from a right-click menu.
+          <ul>
+            <li><b>System Default</b> &mdash; delegates to the OS (Explorer on Windows,
+                Nautilus / Dolphin on Linux, Finder on macOS).</li>
+            <li><b>Double Commander</b> &mdash; launches Double Commander with the target
+                folder; the executable path pre-fills with the platform default
+                (<code>doublecmd.exe</code> on Windows, <code>doublecmd</code> on Linux).</li>
+            <li><b>Custom&hellip;</b> &mdash; enter any executable path; use
+                <b>Browse&hellip;</b> to pick the file.</li>
+          </ul>
+          The <b>Executable</b> path field and Browse button are hidden when <em>System
+          Default</em> is selected.</td></tr>
+</table>
+
 <h2>Appearance</h2>
 <table>
   <tr><th>Setting</th><th>Description</th></tr>
@@ -971,12 +999,27 @@ archives&rsquo; first thumbnails, making it easy to judge whether the match is g
       any result row.</li>
 </ul>
 
-<h3>Comparing archive contents</h3>
-<p>Right-click any row in the <b>STL Files</b> or <b>Images</b> results tables and choose
-<b>Compare Archive Contents&hellip;</b> to open a side-by-side comparison of the two archives&rsquo;
-STL file lists.  Use the <b>Match by</b> dropdown to pair files by <em>Filename</em>,
-<em>Size</em>, or <em>Hash</em>.  Matched pairs are highlighted with a green <code>==</code>
-marker; unmatched files appear in the remaining rows.</p>
+<h3>Right-click context menu</h3>
+<p>Right-clicking any row in either results table shows the following actions:</p>
+<table>
+  <tr><th>Action</th><th>Description</th></tr>
+  <tr><td><b>Compare Archive Contents&hellip;</b></td>
+      <td>Opens a side-by-side comparison of the two archives&rsquo; STL file lists.
+          Use the <b>Match by</b> dropdown to pair files by <em>Filename</em>,
+          <em>Size</em>, or <em>Hash</em>.  Matched pairs are highlighted with a green
+          <code>==</code> marker; unmatched files appear in the remaining rows.</td></tr>
+  <tr><td><b>Open Folder of Archive A/B in Explorer</b></td>
+      <td>Opens the parent folder of the respective archive in the file manager configured
+          in {_link(PAGE_CONFIG, "Configuration &rarr; Browser")}.  Disabled when the
+          archive path is empty.</td></tr>
+  <tr><td><b>Delete Archive A/B from Disk&hellip;</b></td>
+      <td>Visible only when <em>Allow file delete</em> is enabled in
+          {_link(PAGE_CONFIG, "Configuration &rarr; File writing")}.
+          Asks for confirmation, then physically removes the archive (or moves it to the
+          trash folder) and deletes its database record &mdash; the same logic used by the
+          main browser&rsquo;s delete action.  The row is removed from the results table
+          on success.</td></tr>
+</table>
 
 <h2>Tools &mdash; Database Maintenance&hellip;</h2>
 <p>Open via <b>Tools &rarr; Database Maintenance&hellip;</b></p>
