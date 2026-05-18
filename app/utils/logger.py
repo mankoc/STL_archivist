@@ -78,6 +78,9 @@ def setup_logging(data_dir: Path | str | None = None) -> None:
     stderr.setFormatter(fmt)
     root.addHandler(stderr)
 
+    # urllib3 is chatty at DEBUG; dku.utils re-emits those as INFO
+    logging.getLogger("urllib3.connectionpool").setLevel(logging.WARNING)
+
     logging.getLogger(__name__).info(
         "Logging initialised → %s (max %d MB, %d backups)",
         log_path, MAX_LOG_SIZE // (1024 * 1024), BACKUP_COUNT,
