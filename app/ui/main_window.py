@@ -59,12 +59,13 @@ class MainWindow(QMainWindow):
 
         self._act_open_crawler = QAction(
             _icon("open_crawler"), "Open Crawler…", self)
-        self._act_open_crawler.setShortcut(QKeySequence.StandardKey.Open)
+        self._act_open_crawler.setShortcut(QKeySequence(_hk["open_crawler"]))
         self._act_open_crawler.setStatusTip("Open the Crawler window")
         self._act_open_crawler.triggered.connect(self._open_crawler)
 
         self._act_update_folders = QAction(
             style.standardIcon(SP.SP_BrowserReload), "Update Crawled Folders…", self)
+        self._act_update_folders.setShortcut(QKeySequence(_hk["update_folders"]))
         self._act_update_folders.setStatusTip(
             "Re-crawl all stored folders to pick up new and modified archives"
         )
@@ -78,11 +79,13 @@ class MainWindow(QMainWindow):
 
         self._act_image_grid = QAction(
             _icon("image_grid"), "Image Grid", self)
+        self._act_image_grid.setShortcut(QKeySequence(_hk["image_grid"]))
         self._act_image_grid.setStatusTip("Show a grid of images for the current table")
         self._act_image_grid.triggered.connect(self._browser.show_image_grid)
 
         self._act_toggle_images = QAction(
             _icon("toggle_images"), "Images", self)
+        self._act_toggle_images.setShortcut(QKeySequence(_hk["toggle_images"]))
         self._act_toggle_images.setCheckable(True)
         self._act_toggle_images.setChecked(True)
         self._act_toggle_images.setStatusTip("Show or hide the image preview pane")
@@ -156,6 +159,7 @@ class MainWindow(QMainWindow):
             "Find Metadata Duplicates…",
             self,
         )
+        self._act_find_dupes.setShortcut(QKeySequence(_hk["find_duplicates"]))
         self._act_find_dupes.setStatusTip(
             "Find models with identical or phonetically similar field values"
         )
