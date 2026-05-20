@@ -34,6 +34,7 @@ _STATUS_FLAGGED        = "Flagged Missing"
 _STATUS_FOUND          = "Relocated"
 _STATUS_MODIFIED       = "Modified"
 _STATUS_MOVED_DB       = "Moved (in DB)"
+_STATUS_DUPLICATE      = "Duplicate"
 
 _COL_ID       = 0
 _COL_TITLE    = 1
@@ -54,6 +55,9 @@ def _color_modified() -> QColor:
 
 def _color_flagged() -> QColor:
     return QColor(140, 60, 180)   # purple — flagged by crawler, not yet confirmed absent
+
+def _color_duplicate() -> QColor:
+    return QColor(180, 120, 0)   # amber — duplicate record in the database
 
 def _color_moved_db() -> QColor:
     return QColor(30, 100, 180)
@@ -371,6 +375,100 @@ class DHashWorker(QThread):
         self.finished.emit(computed, skipped)
 
 
+class FindDuplicateEntriesWorker(QThread):
+    """Find DB records that share the same archive content (hash) or the same
+    filename + file size, indicating the same physical file has been catalogued
+    more than once.
+
+    Matching rules (applied in order, most reliable first):
+    1. Identical ``archive_hash`` — definitive content duplicate.
+    2. Identical ``(filename, archive_size)`` — likely duplicate; only used
+       when the hash is a fallback fingerprint or absent.
+
+    Each record in a duplicate group is emitted as a result row; the
+    ``match_path`` field shows the path of the *first* record in the group so
+    the pair relationship is immediately visible.
+
+    Signals:
+        progress(current, total)
+        log(message)
+        finished(results): list of result dicts, same schema as VerifyWorker.
+    """
+
+    progress = pyqtSignal(int, int)
+    log      = pyqtSignal(str)
+    finished = pyqtSignal(list)
+
+    def run(self) -> None:
+        from collections import defaultdict
+        from app.database.db import session_scope
+        from app.database.models import STLModel
+
+        self.log.emit("Scanning for duplicate entries…")
+
+        with session_scope() as session:
+            rows = session.query(
+                STLModel.id,
+                STLModel.title,
+                STLModel.archive_path,
+                STLModel.archive_hash,
+                STLModel.archive_size,
+            ).all()
+
+        total = len(rows)
+        self.progress.emit(0, total)
+
+        # Group by hash (skip fallback fingerprints for the hash bucket)
+        hash_groups:     dict[str, list]  = defaultdict(list)
+        namesize_groups: dict[tuple, list] = defaultdict(list)
+
+        for idx, (mid, title, path, ahash, asize) in enumerate(rows, 1):
+            self.progress.emit(idx, total)
+            rec = {
+                "id":       mid,
+                "title":    title or "",
+                "path":     path or "",
+                "hash":     ahash or "",
+                "size":     asize,
+                "status":   _STATUS_DUPLICATE,
+                "match_path": "",
+            }
+            if ahash and not ahash.startswith("fallback:"):
+                hash_groups[ahash].append(rec)
+            elif path and asize is not None:
+                namesize_groups[(Path(path).name, asize)].append(rec)
+
+        results: list[dict] = []
+
+        for group in hash_groups.values():
+            if len(group) < 2:
+                continue
+            first_path = group[0]["path"]
+            for rec in group:
+                rec["match_path"] = first_path if rec["path"] != first_path else group[1]["path"]
+                results.append(rec)
+
+        for group in namesize_groups.values():
+            if len(group) < 2:
+                continue
+            # Avoid re-reporting records already caught by the hash bucket
+            already = {r["id"] for r in results}
+            group = [r for r in group if r["id"] not in already]
+            if len(group) < 2:
+                continue
+            first_path = group[0]["path"]
+            for rec in group:
+                rec["match_path"] = first_path if rec["path"] != first_path else group[1]["path"]
+                results.append(rec)
+
+        n = len(results)
+        if n:
+            self.log.emit(f"Found {n} record(s) in {n // 2 + n % 2} duplicate group(s).")
+        else:
+            self.log.emit("No duplicate entries found.")
+        self.finished.emit(results)
+
+
 class MovedInDbWorker(QThread):
     """Search the DB for records whose content matches a missing archive at a different path.
 
@@ -463,10 +561,11 @@ class DbMaintenanceDialog(QDialog):
         self.setWindowTitle("Database Maintenance")
         self.resize(900, 620)
         self.setModal(True)
-        self._verify_worker:   VerifyWorker      | None = None
-        self._search_worker:   SearchWorker      | None = None
-        self._dhash_worker:    DHashWorker        | None = None
-        self._moved_db_worker: MovedInDbWorker   | None = None
+        self._verify_worker:    VerifyWorker                 | None = None
+        self._search_worker:    SearchWorker                 | None = None
+        self._dhash_worker:     DHashWorker                  | None = None
+        self._moved_db_worker:  MovedInDbWorker              | None = None
+        self._dup_entry_worker: FindDuplicateEntriesWorker   | None = None
         self._results: list[dict] = []
         self._build_ui()
 
@@ -517,6 +616,16 @@ class DbMaintenanceDialog(QDialog):
         self._find_moved_btn.setEnabled(False)
         self._find_moved_btn.clicked.connect(self._start_find_moved_in_db)
         btn_row.addWidget(self._find_moved_btn)
+
+        self._find_dup_entries_btn = QPushButton(
+            style.standardIcon(SP.SP_FileDialogDetailedView), "Find Duplicate Entries…"
+        )
+        self._find_dup_entries_btn.setToolTip(
+            "Find records that share the same archive content hash or the same "
+            "filename + file size, indicating the same file is catalogued more than once"
+        )
+        self._find_dup_entries_btn.clicked.connect(self._start_find_duplicate_entries)
+        btn_row.addWidget(self._find_dup_entries_btn)
 
         self._merge_moved_btn = QPushButton(
             style.standardIcon(SP.SP_ArrowRight), "Merge Moved"
@@ -605,6 +714,7 @@ class DbMaintenanceDialog(QDialog):
         self._stop_btn.setEnabled(busy)
         self._search_btn.setEnabled(False)
         self._find_moved_btn.setEnabled(False)
+        self._find_dup_entries_btn.setEnabled(not busy)
         self._merge_moved_btn.setEnabled(False)
         self._remove_sel_btn.setEnabled(False)
         self._remove_all_btn.setEnabled(False)
@@ -620,6 +730,7 @@ class DbMaintenanceDialog(QDialog):
         self._stop_btn.setEnabled(False)
         self._search_btn.setEnabled(has_missing or has_flagged)
         self._find_moved_btn.setEnabled(has_missing or has_flagged)
+        self._find_dup_entries_btn.setEnabled(True)
         self._merge_moved_btn.setEnabled(has_moved_db)
         self._remove_sel_btn.setEnabled(has_any)
         self._remove_all_btn.setEnabled(has_missing)
@@ -633,6 +744,7 @@ class DbMaintenanceDialog(QDialog):
         ):
             if worker and worker.isRunning():
                 worker.stop()
+        # FindDuplicateEntriesWorker has no stop() — it finishes quickly
         self._stop_btn.setEnabled(False)
 
     # ------------------------------------------------------------------
@@ -698,6 +810,8 @@ class DbMaintenanceDialog(QDialog):
                 self._color_row(items, _color_modified())
             elif status == _STATUS_MOVED_DB:
                 self._color_row(items, _color_moved_db())
+            elif status == _STATUS_DUPLICATE:
+                self._color_row(items, _color_duplicate())
 
             for col, item in enumerate(items):
                 self._table.setItem(r, col, item)
@@ -713,9 +827,9 @@ class DbMaintenanceDialog(QDialog):
                 continue
             hide = only_problems and status_item.text() in _OK_STATUSES
             self._table.setRowHidden(row, hide)
-        # Hide match-path column when no moved-in-DB rows are present
-        has_moved = any(r.get("status") == _STATUS_MOVED_DB for r in self._results)
-        self._table.setColumnHidden(_COL_MATCH, not has_moved)
+        # Show match-path column when moved-in-DB or duplicate rows are present
+        has_match = any(r.get("status") in (_STATUS_MOVED_DB, _STATUS_DUPLICATE) for r in self._results)
+        self._table.setColumnHidden(_COL_MATCH, not has_match)
 
     @staticmethod
     def _color_row(items: list[QTableWidgetItem], bg: QColor) -> None:
@@ -991,6 +1105,25 @@ class DbMaintenanceDialog(QDialog):
         self._log.appendPlainText(f"Removed {count} missing record(s) from the database.")
         self._refresh_action_buttons()
 
+    def _start_find_duplicate_entries(self) -> None:
+        self._log.clear()
+        self._progress.setValue(0)
+        self._table.setRowCount(0)
+        self._results.clear()
+        self._set_busy(True)
+
+        self._dup_entry_worker = FindDuplicateEntriesWorker()
+        self._dup_entry_worker.log.connect(self._on_log)
+        self._dup_entry_worker.progress.connect(self._on_progress)
+        self._dup_entry_worker.finished.connect(self._on_dup_entries_finished)
+        self._dup_entry_worker.start()
+
+    def _on_dup_entries_finished(self, results: list) -> None:
+        self._results = results
+        self._populate_table(results)
+        self._dup_entry_worker = None
+        self._set_idle()
+
     def _remove_flagged_missing(self) -> None:
         flagged = [r for r in self._results if r["status"] == _STATUS_FLAGGED]
         if not flagged:
@@ -1042,6 +1175,7 @@ class DbMaintenanceDialog(QDialog):
         has_moved_db = any(r["status"] == _STATUS_MOVED_DB for r in self._results)
         self._search_btn.setEnabled(has_missing or has_flagged)
         self._find_moved_btn.setEnabled(has_missing or has_flagged)
+        self._find_dup_entries_btn.setEnabled(True)
         self._merge_moved_btn.setEnabled(has_moved_db)
         self._remove_all_btn.setEnabled(has_missing)
         self._remove_flagged_btn.setEnabled(has_flagged)
@@ -1065,4 +1199,6 @@ class DbMaintenanceDialog(QDialog):
             if worker and worker.isRunning():
                 worker.stop()
                 worker.wait(3000)
+        if self._dup_entry_worker and self._dup_entry_worker.isRunning():
+            self._dup_entry_worker.wait(3000)
         super().closeEvent(event)
