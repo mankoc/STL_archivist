@@ -1077,10 +1077,14 @@ class BrowserTab(QWidget):
         self._table.clicked.connect(self._on_table_click)
         from app.ui.config_dialog import get_hotkeys as _get_hotkeys
         _hk = _get_hotkeys()
-        QShortcut(QKeySequence.StandardKey.SelectAll, self._table, self._table.selectAll)
-        QShortcut(QKeySequence(_hk["edit_model"]),    self._table, self._edit_selected)
-        QShortcut(QKeySequence(_hk["mass_edit"]),     self._table, self._mass_edit_selected)
-        QShortcut(QKeySequence(_hk["apply_filter"]),  self, self._apply_checked_filters)
+        QShortcut(QKeySequence.StandardKey.SelectAll,      self._table, self._table.selectAll)
+        QShortcut(QKeySequence(_hk["edit_model"]),         self._table, self._edit_selected)
+        QShortcut(QKeySequence(_hk["mass_edit"]),          self._table, self._mass_edit_selected)
+        QShortcut(QKeySequence(_hk["apply_filter"]),       self,         self._apply_checked_filters)
+        QShortcut(QKeySequence(_hk["delete_from_db"]),     self._table, self._delete_selected_kb)
+        QShortcut(QKeySequence(_hk["open_folder"]),        self._table, self._open_folder_selected_kb)
+        QShortcut(QKeySequence(_hk["show_files"]),         self._table, self._show_files_kb)
+        QShortcut(QKeySequence(_hk["image_grid"]),         self._table, self.show_image_grid)
         centre_layout.addWidget(self._table)
 
         splitter.addWidget(centre)
@@ -2808,6 +2812,23 @@ class BrowserTab(QWidget):
         ids = self._selected_model_ids()
         if ids:
             self._open_mass_editor(ids)
+
+    def _delete_selected_kb(self) -> None:
+        ids = self._selected_model_ids()
+        if ids:
+            self._delete_models(ids)
+
+    def _open_folder_selected_kb(self) -> None:
+        indexes = self._table.selectedIndexes()
+        if not indexes:
+            return
+        src_row = self._proxy.mapToSource(indexes[0]).row()
+        self._open_containing_folder(src_row)
+
+    def _show_files_kb(self) -> None:
+        ids = self._selected_model_ids()
+        if len(ids) == 1:
+            self._show_files(ids[0])
 
     def _selected_model_ids(self) -> list[int]:
         rows = {self._proxy.mapToSource(idx).row()

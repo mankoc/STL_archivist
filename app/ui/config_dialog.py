@@ -451,17 +451,33 @@ def get_thumb_page_size() -> int:
 
 # Hotkey action IDs, display labels, and defaults
 HOTKEY_DEFAULTS: dict[str, str] = {
-    "edit_model":   "E",
-    "mass_edit":    "Ctrl+M",
-    "refresh":      "F5",
-    "apply_filter": "Return",
+    "edit_model":      "E",
+    "mass_edit":       "Ctrl+M",
+    "refresh":         "F5",
+    "apply_filter":    "Return",
+    "delete_from_db":  "Delete",
+    "open_folder":     "Ctrl+Return",
+    "show_files":      "Ctrl+Shift+F",
+    "image_grid":      "Ctrl+G",
+    "toggle_images":   "Ctrl+I",
+    "open_crawler":    "Ctrl+O",
+    "update_folders":  "Ctrl+Shift+R",
+    "find_duplicates": "Ctrl+D",
 }
 
 HOTKEY_LABELS: dict[str, str] = {
-    "edit_model":   "Edit model",
-    "mass_edit":    "Mass edit selected",
-    "refresh":      "Refresh table",
-    "apply_filter": "Apply filter",
+    "edit_model":      "Edit model",
+    "mass_edit":       "Mass edit selected",
+    "refresh":         "Refresh table",
+    "apply_filter":    "Apply filter",
+    "delete_from_db":  "Delete from DB",
+    "open_folder":     "Open containing folder",
+    "show_files":      "Show archive files",
+    "image_grid":      "Image grid",
+    "toggle_images":   "Toggle image pane",
+    "open_crawler":    "Open Crawler",
+    "update_folders":  "Update crawled folders",
+    "find_duplicates": "Find metadata duplicates",
 }
 
 
