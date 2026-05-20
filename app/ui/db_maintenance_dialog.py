@@ -435,8 +435,6 @@ class DbMaintenanceDialog(QDialog):
       - Relocate: search a user-selected folder tree for missing archives by content hash.
       - Remove Selected: delete chosen records from the database.
       - Remove All Missing: delete every record whose archive file no longer exists.
-    Compute dHashes fills the dhash column for any images that are missing it,
-    enabling the Find by Image feature.
     """
 
     def __init__(self, parent=None) -> None:
@@ -477,18 +475,6 @@ class DbMaintenanceDialog(QDialog):
         self._stop_btn.setEnabled(False)
         self._stop_btn.clicked.connect(self._stop)
         btn_row.addWidget(self._stop_btn)
-
-        btn_row.addStretch()
-
-        self._dhash_btn = QPushButton(
-            style.standardIcon(SP.SP_BrowserReload), "Compute dHashes"
-        )
-        self._dhash_btn.setToolTip(
-            "Compute perceptual dHash values for all images that don't have one yet.\n"
-            "Required for the Find by Image feature."
-        )
-        self._dhash_btn.clicked.connect(self._start_dhash)
-        btn_row.addWidget(self._dhash_btn)
 
         btn_row.addStretch()
 
@@ -585,7 +571,6 @@ class DbMaintenanceDialog(QDialog):
     # ------------------------------------------------------------------
     def _set_busy(self, busy: bool) -> None:
         self._verify_btn.setEnabled(not busy)
-        self._dhash_btn.setEnabled(not busy)
         self._stop_btn.setEnabled(busy)
         self._search_btn.setEnabled(False)
         self._find_moved_btn.setEnabled(False)
@@ -599,7 +584,6 @@ class DbMaintenanceDialog(QDialog):
         has_moved_db = any(r["status"] == _STATUS_MOVED_DB for r in self._results)
         has_any      = bool(self._results)
         self._verify_btn.setEnabled(True)
-        self._dhash_btn.setEnabled(True)
         self._stop_btn.setEnabled(False)
         self._search_btn.setEnabled(has_missing)
         self._find_moved_btn.setEnabled(has_missing)

@@ -195,6 +195,17 @@ class MainWindow(QMainWindow):
         act_db_maintenance.triggered.connect(self._open_db_maintenance_dialog)
         tools_menu.addAction(act_db_maintenance)
 
+        act_backup_restore = QAction(
+            style.standardIcon(SP.SP_DialogSaveButton),
+            "Backup / Restore Library…",
+            self,
+        )
+        act_backup_restore.setStatusTip(
+            "Back up or restore the database, thumbnails, and settings"
+        )
+        act_backup_restore.triggered.connect(self._open_backup_restore_dialog)
+        tools_menu.addAction(act_backup_restore)
+
         stats_menu = mb.addMenu("&Statistics")
         act_statistics = QAction(
             style.standardIcon(SP.SP_FileDialogInfoView),
@@ -527,6 +538,11 @@ class MainWindow(QMainWindow):
         dialog = DbMaintenanceDialog(parent=self)
         dialog.exec()
         self._browser.refresh()
+
+    def _open_backup_restore_dialog(self) -> None:
+        """Open the backup / restore dialog."""
+        from app.ui.backup_restore_dialog import BackupRestoreDialog
+        BackupRestoreDialog(parent=self).exec()
 
     def _open_statistics_dialog(self) -> None:
         """Open the database statistics dialog."""
