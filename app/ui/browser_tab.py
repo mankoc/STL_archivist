@@ -1969,8 +1969,8 @@ class BrowserTab(QWidget):
             stmt = stmt.where(STLModel.id.notin_(_tag_sub.where(Tag.name.in_(tag_exc_filters))))
         if path_exc_filters:
             _norm = func.replace(STLModel.archive_path, "\\", "/")
-            for p in path_exc_filters:
-                stmt = stmt.where(~_norm.like(p.rstrip("/") + "/%"))
+            _pruned_exc = _prune_ancestor_paths(path_exc_filters)
+            stmt = stmt.where(~or_(*(_norm.like(p.rstrip("/") + "/%") for p in _pruned_exc)))
         if date_exc_filters:
             stmt = stmt.where(~or_(*_date_clauses(date_exc_filters)))
         if sculptor_exc_filters:
@@ -2475,8 +2475,7 @@ class BrowserTab(QWidget):
                     if path_inc:
                         q = q.where(or_(*(_n.like(p.rstrip("/") + "/%") for p in _prune_ancestor_paths(path_inc))))
                     if path_exc:
-                        for p in _prune_ancestor_paths(path_exc):
-                            q = q.where(~_n.like(p.rstrip("/") + "/%"))
+                        q = q.where(~or_(*(_n.like(p.rstrip("/") + "/%") for p in _prune_ancestor_paths(path_exc))))
                 if not skip_date:
                     def _dc(pairs):
                         return [and_(STLModel.release_year == y, STLModel.release_month == mo) if mo is not None else (STLModel.release_year == y) for y, mo in pairs]
