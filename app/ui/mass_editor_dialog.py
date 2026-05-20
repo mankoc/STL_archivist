@@ -142,6 +142,13 @@ class MassEditorDialog(QDialog):
         self._parse_status.setStyleSheet("color: gray; font-style: italic;")
         path_layout.addWidget(self._parse_status)
 
+        self._overwrite_cb = QCheckBox("Overwrite existing field values with parsed values")
+        self._overwrite_cb.setToolTip(
+            "When checked, parsed values replace any existing field values.\n"
+            "When unchecked, parsed values are only written to fields that are currently empty."
+        )
+        path_layout.addWidget(self._overwrite_cb)
+
         root.addWidget(path_group)
 
         # ---- Manual override group ----
@@ -618,7 +625,10 @@ class MassEditorDialog(QDialog):
                     continue
 
                 path_extracted = self._path_results.get(mid, {})
-                apply_extracted_to_model(session, model, path_extracted)
+                apply_extracted_to_model(
+                    session, model, path_extracted,
+                    overwrite=self._overwrite_cb.isChecked(),
+                )
 
                 ctx = self._token_context(model, path_extracted)
                 for attr, value in manual.items():

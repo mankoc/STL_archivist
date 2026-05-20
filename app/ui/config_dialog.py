@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox, QFileDialog, QMessageBox, QSpinBox, QDoubleSpinBox,
     QComboBox, QCheckBox, QApplication, QColorDialog, QInputDialog,
     QListWidget, QListWidgetItem, QStackedWidget, QSplitter, QWidget, QStyle,
-    QTreeWidget, QTreeWidgetItem, QScrollArea, QFontComboBox,
+    QTreeWidget, QTreeWidgetItem, QScrollArea, QFontComboBox, QKeySequenceEdit,
 )
 
 DATA_DIR_KEY           = "config/data_dir"
@@ -449,6 +449,28 @@ def get_thumb_page_size() -> int:
     return int(_load_library_settings().get("thumb_page_size", THUMB_PAGE_SIZE_DEFAULT))
 
 
+# Hotkey action IDs, display labels, and defaults
+HOTKEY_DEFAULTS: dict[str, str] = {
+    "edit_model":   "E",
+    "mass_edit":    "Ctrl+M",
+    "refresh":      "F5",
+    "apply_filter": "Return",
+}
+
+HOTKEY_LABELS: dict[str, str] = {
+    "edit_model":   "Edit model",
+    "mass_edit":    "Mass edit selected",
+    "refresh":      "Refresh table",
+    "apply_filter": "Apply filter",
+}
+
+
+def get_hotkeys() -> dict[str, str]:
+    """Return the configured hotkeys dict (action_id → key sequence string)."""
+    stored = _load_library_settings().get("hotkeys", {})
+    return {k: stored.get(k, v) for k, v in HOTKEY_DEFAULTS.items()}
+
+
 def open_folder_with_file_manager(folder: str) -> None:
     """Open *folder* in the configured file manager."""
     from PyQt6.QtWidgets import QMessageBox
@@ -575,7 +597,7 @@ class ConfigDialog(QDialog):
         # Left: section tree
         # Page indices must match the order pages are added to self._stack below.
         # 0=Database  1=Crawler  2=Warnings(child)  3=File writing  4=Appearance
-        # 5=Sidecar(child)  6=Debug  7=Browser
+        # 5=Sidecar(child)  6=Debug  7=Browser  8=Hotkeys
         self._section_tree = QTreeWidget()
         self._section_tree.setFixedWidth(155)
         self._section_tree.setHeaderHidden(True)
@@ -598,6 +620,7 @@ class ConfigDialog(QDialog):
         _item(fw_item,                 "Sidecar",  sp.SP_DialogSaveButton,         5)
         _item(self._section_tree, "Browser",      sp.SP_FileDialogListView,        7)
         _item(self._section_tree, "Appearance",   sp.SP_TitleBarNormalButton,      4)
+        _item(self._section_tree, "Hotkeys",      sp.SP_MediaVolumeMuted,          8)
         _item(self._section_tree, "Debug",        sp.SP_MessageBoxCritical,        6)
 
         crawler_item.setExpanded(True)
@@ -621,6 +644,7 @@ class ConfigDialog(QDialog):
         self._stack.addWidget(self._build_sidecar_page())         # 5
         self._stack.addWidget(self._build_debug_page())           # 6
         self._stack.addWidget(self._build_browser_config_page())  # 7
+        self._stack.addWidget(self._build_hotkeys_page())         # 8
 
         self._section_tree.setCurrentItem(
             self._section_tree.topLevelItem(0)
@@ -930,6 +954,42 @@ class ConfigDialog(QDialog):
         layout.addWidget(group)
         layout.addStretch()
         return page
+
+    def _build_hotkeys_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        group = QGroupBox("Keyboard shortcuts")
+        form = QFormLayout(group)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+
+        self._hotkey_edits: dict[str, QKeySequenceEdit] = {}
+        for action_id, label in HOTKEY_LABELS.items():
+            editor = QKeySequenceEdit()
+            editor.setToolTip(f"Press the key combination you want to use for "{label}"")
+            self._hotkey_edits[action_id] = editor
+            form.addRow(label + ":", editor)
+
+        reset_btn = QPushButton("Reset to defaults")
+        reset_btn.setFlat(True)
+        reset_btn.clicked.connect(self._reset_hotkeys)
+        form.addRow("", reset_btn)
+
+        layout.addWidget(group)
+        layout.addWidget(
+            QLabel(
+                "<small>Changes take effect after clicking OK. "
+                "Restart the application if shortcuts do not update immediately.</small>"
+            )
+        )
+        layout.addStretch()
+        return page
+
+    def _reset_hotkeys(self) -> None:
+        for action_id, default in HOTKEY_DEFAULTS.items():
+            editor = self._hotkey_edits.get(action_id)
+            if editor:
+                from PyQt6.QtGui import QKeySequence
+                editor.setKeySequence(QKeySequence(default))
 
     def _build_browser_config_page(self) -> QWidget:
         page = QWidget()
@@ -1478,6 +1538,12 @@ class ConfigDialog(QDialog):
         self._debug_menu_check.setChecked(get_debug_menu_enabled())
         self._logging_enabled_check.setChecked(get_logging_enabled())
 
+        # Load hotkeys
+        from PyQt6.QtGui import QKeySequence
+        stored_hotkeys = get_hotkeys()
+        for action_id, editor in self._hotkey_edits.items():
+            editor.setKeySequence(QKeySequence(stored_hotkeys.get(action_id, HOTKEY_DEFAULTS.get(action_id, ""))))
+
     def _save(self) -> None:
         """Persist all form values to QSettings and the library settings JSON."""
         data_dir = self._data_dir_edit.text().strip() or DATA_DIR_DEFAULT
@@ -1534,6 +1600,10 @@ class ConfigDialog(QDialog):
                 "file_manager":       self._file_manager_combo.currentData(),
                 "file_manager_path":  self._file_manager_path_edit.text().strip(),
                 "thumb_page_size":    self._thumb_page_size_spin.value(),
+                "hotkeys": {
+                    action_id: editor.keySequence().toString()
+                    for action_id, editor in self._hotkey_edits.items()
+                },
             },
             data_dir=data_dir,
         )

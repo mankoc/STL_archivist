@@ -49,9 +49,11 @@ class MainWindow(QMainWindow):
             p = _ICONS_DIR / f"{name}_{_v}.svg"
             return QIcon(str(p)) if p.exists() else QIcon()
 
+        from app.ui.config_dialog import get_hotkeys as _get_hotkeys
+        _hk = _get_hotkeys()
         self._act_refresh = QAction(
             style.standardIcon(SP.SP_BrowserReload), "Refresh", self)
-        self._act_refresh.setShortcut(QKeySequence("F5"))
+        self._act_refresh.setShortcut(QKeySequence(_hk["refresh"]))
         self._act_refresh.setStatusTip("Reload data from the database")
         self._act_refresh.triggered.connect(self._browser.refresh)
 
