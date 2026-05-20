@@ -1,5 +1,56 @@
 # Changelog
 
+## 2026.21 — 2026-05-20
+
+### Crawler — Move tracking improvements
+
+- **Deferred deletion of missing records** — archives that go missing during a crawl are no
+  longer immediately deleted from the database; they are flagged `is_missing = True` so a
+  future crawl of any folder can still attempt to reconcile the move
+- **Cross-session reconciliation** — `is_missing` records are included in every subsequent
+  crawl's missing candidate pool, meaning a file moved to a folder not covered by the current
+  crawl session can still be matched in a later run
+- **Collision guards in move matching** — ambiguous matches are now skipped rather than
+  resolved arbitrarily:
+  - If two new archives share the same content hash (rare fallback-fingerprint collision),
+    neither is used for hash-based matching
+  - If two new archives share the same filename + file size, the name+size fallback is
+    suppressed for that key
+  - If two missing records share the same content hash (content duplicates), hash matching
+    is skipped for both
+
+### Tools — Database Maintenance
+
+- **Flagged Missing status** — Verify now distinguishes records flagged `is_missing` by the
+  crawler (shown in purple as *Flagged Missing*) from records that are newly found absent
+  (*Missing*); if a flagged file reappears on disk the flag is cleared automatically
+- **Remove Flagged Missing button** — new button removes only crawler-flagged records that
+  are still absent, separate from *Remove All Missing* which targets newly-detected absences
+- **Search / Find Moved include flagged records** — *Search in Folder…* and *Find Moved in
+  DB…* now include *Flagged Missing* rows as candidates alongside *Missing* ones
+- **Compute dHashes removed from UI** — the *Compute dHashes* button has been removed from
+  the toolbar; the worker remains available programmatically
+
+### Tools — Backup / Restore
+
+- **New Backup / Restore Library… dialog** — accessible from **Tools → Backup / Restore
+  Library…**; packs `stlLibrary.db`, `thumbnails.lmdb/`, and `settings.json` into a
+  single `.7z` archive; restore extracts back into the data directory after a confirmation
+  prompt; both operations run in a background thread with a progress bar and log panel
+
+### Logging
+
+- **urllib3 connection-pool messages suppressed** — `urllib3.connectionpool` is now set to
+  `WARNING` level at startup, removing verbose HTTP debug lines forwarded by `dku.utils`
+
+### Crawler — Results log
+
+- **Unchanged archives hidden by default** — the crawler log no longer prints a line for
+  each unchanged archive (`log_unchanged` defaults to `False`); only new, updated, and
+  errored archives appear in the results
+
+---
+
 ## 2026.20 — 2026-05-17
 
 ### UI — Find Duplicate Archives by Content

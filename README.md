@@ -4,7 +4,7 @@
 
 Built with PyQt6 and SQLAlchemy.
 
-Version: 2026.20
+Version: 2026.21
 
 ## Features
 
@@ -34,6 +34,8 @@ Version: 2026.20
 - **Physical file deletion** — optionally delete or trash archive files from disk via the right-click menu in the browser table or the duplicate-finder results (enable in Configuration → File writing)
 - **Configurable file manager** — choose which program opens archive folders from right-click menus: System Default, Double Commander, or a custom executable (Configuration → Browser)
 - **Background crawl** — dismiss the Crawler dialog without stopping the worker; a status badge in the status bar shows live progress and brings the dialog back when clicked
+- **Move tracking** — missing archives are flagged rather than deleted so cross-session and cross-folder move detection works across multiple crawl runs; collision guards prevent ambiguous name+size or hash matches from mis-attributing metadata
+- **Backup / Restore** — pack the database, thumbnails, and settings into a single `.7z` archive via **Tools → Backup / Restore Library…**; restore extracts back into the data directory after confirmation
 - **Statistics** — column and aggregated statistics dialogs for a quick numeric overview; database maintenance (vacuum, integrity check)
 - **Themes** — built-in color schemes: System Default, VS Code Dark+, Windows 11 Dark, Windows 11 Light, and nine Material Design themes via qt-material
 
