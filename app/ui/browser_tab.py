@@ -1075,8 +1075,12 @@ class BrowserTab(QWidget):
         self._table.selectionModel().currentChanged.connect(self._on_current_changed)
         self._table.doubleClicked.connect(self._on_double_click)
         self._table.clicked.connect(self._on_table_click)
+        from app.ui.config_dialog import get_hotkeys as _get_hotkeys
+        _hk = _get_hotkeys()
         QShortcut(QKeySequence.StandardKey.SelectAll, self._table, self._table.selectAll)
-        QShortcut(QKeySequence("E"), self._table, self._edit_selected)
+        QShortcut(QKeySequence(_hk["edit_model"]),    self._table, self._edit_selected)
+        QShortcut(QKeySequence(_hk["mass_edit"]),     self._table, self._mass_edit_selected)
+        QShortcut(QKeySequence(_hk["apply_filter"]),  self, self._apply_checked_filters)
         centre_layout.addWidget(self._table)
 
         splitter.addWidget(centre)
@@ -2797,6 +2801,12 @@ class BrowserTab(QWidget):
         if len(ids) == 1:
             self._open_editor(ids[0])
         elif len(ids) > 1:
+            self._open_mass_editor(ids)
+
+    def _mass_edit_selected(self) -> None:
+        """Open the mass editor for all currently selected models (Ctrl+M)."""
+        ids = self._selected_model_ids()
+        if ids:
             self._open_mass_editor(ids)
 
     def _selected_model_ids(self) -> list[int]:
