@@ -965,7 +965,7 @@ class ConfigDialog(QDialog):
         self._hotkey_edits: dict[str, QKeySequenceEdit] = {}
         for action_id, label in HOTKEY_LABELS.items():
             editor = QKeySequenceEdit()
-            editor.setToolTip(f"Press the key combination you want to use for "{label}"")
+            editor.setToolTip(f'Press the key combination you want to use for "{label}"')
             self._hotkey_edits[action_id] = editor
             form.addRow(label + ":", editor)
 
