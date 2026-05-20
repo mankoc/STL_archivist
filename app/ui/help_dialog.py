@@ -1026,34 +1026,82 @@ archives&rsquo; first thumbnails, making it easy to judge whether the match is g
 <p>The maintenance dialog helps you keep the database consistent with the files on disk:</p>
 
 {_screenshot("db_mant.jpg")}
+<h3>Status colours</h3>
+<table>
+  <tr><th>Status</th><th>Meaning</th></tr>
+  <tr><td><b>OK</b></td><td>Archive exists on disk and size matches.</td></tr>
+  <tr><td><b style="color:#c62828">Missing</b></td>
+      <td>Archive path does not exist on disk (newly detected this Verify run).</td></tr>
+  <tr><td><b style="color:#8c3cb4">Flagged Missing</b></td>
+      <td>Flagged as missing by the crawler in a previous crawl session and still absent.
+          These records are kept in the database to allow future move-detection across
+          different crawl runs.</td></tr>
+  <tr><td><b style="color:#b46400">Modified</b></td>
+      <td>File exists but its size on disk differs from the stored value — the archive may
+          have been replaced or partially written.</td></tr>
+  <tr><td><b style="color:#1e64b4">Moved (in DB)</b></td>
+      <td>A matching archive was found elsewhere in the database (after running
+          <b>Find Moved in DB…</b>); the match path is shown in the <em>Match Path</em>
+          column.</td></tr>
+  <tr><td><b style="color:#2e7d32">Relocated</b></td>
+      <td>Archive was located in a different folder by <b>Search in Folder…</b> and the
+          path has been updated.</td></tr>
+</table>
+
+<h3>Buttons</h3>
 <table>
   <tr><th>Button</th><th>Action</th></tr>
   <tr><td><b>Verify</b></td>
-      <td>Checks every archive path in the database to see whether the file still exists on disk.
-          Results appear in the table: <span style="color:green">&#10003; OK</span> or
-          <span style="color:red">&#10007; Missing</span>.</td></tr>
+      <td>Checks every archive path in the database against the filesystem.
+          Also clears the <em>is_missing</em> flag for any record whose file has
+          reappeared on disk.</td></tr>
+  <tr><td><b>Search in Folder&hellip;</b></td>
+      <td>Recursively searches a chosen folder for archives matching any <em>Missing</em>
+          or <em>Flagged Missing</em> record by content hash (or filename + size as
+          fallback). Updates the path on a match.</td></tr>
   <tr><td><b>Find Moved in DB&hellip;</b></td>
-      <td>Scans all database records to detect archives that have been moved to another
-          path already present in the database. Matches by hash first, then by filename + size.
-          Matches are highlighted as <em>Moved (in DB)</em> with the matching path shown in
-          a <em>Match Path</em> column.</td></tr>
+      <td>Scans all database records to detect <em>Missing</em> and <em>Flagged Missing</em>
+          archives that appear to have been re-crawled at a different path. Matches by hash
+          first, then by filename + size. Matches are highlighted as <em>Moved (in DB)</em>.</td></tr>
   <tr><td><b>Merge Moved</b></td>
       <td>For every <em>Moved (in DB)</em> row, updates the original record to the new path
-          and removes the duplicate record, preserving all metadata and thumbnails.</td></tr>
-  <tr><td><b>Search folder</b></td>
-      <td>Recursively search a folder for archives whose filename matches a
-          <em>missing</em> record.  When a match is found, the database path is updated
-          to the new location (useful after moving / renaming folders).</td></tr>
-  <tr><td><b>Remove selected</b></td>
-      <td>Delete the selected rows from the database.</td></tr>
-  <tr><td><b>Remove all failed</b></td>
-      <td>Delete all records whose archive file was not found during the last Verify run.</td></tr>
-  <tr><td><b>Show only failed</b> checkbox</td>
-      <td>Hides the OK rows so you can focus on the records that need attention.</td></tr>
+          and removes the duplicate, preserving all metadata and thumbnails.</td></tr>
+  <tr><td><b>Remove Selected</b></td>
+      <td>Permanently deletes the selected rows from the database.</td></tr>
+  <tr><td><b>Remove All Missing</b></td>
+      <td>Permanently deletes every record with status <em>Missing</em> (newly detected
+          absences). Does not affect <em>Flagged Missing</em> records.</td></tr>
+  <tr><td><b>Remove Flagged Missing</b></td>
+      <td>Permanently deletes every record with status <em>Flagged Missing</em> — archives
+          that the crawler could not locate over multiple sessions. Use this to clean up
+          records for files you know have been permanently removed.</td></tr>
+  <tr><td><b>Show only problems</b> checkbox</td>
+      <td>Hides <em>OK</em> and <em>Relocated</em> rows so you can focus on records that
+          need attention.</td></tr>
 </table>
 
-<div class="warn">Removing records is permanent and cannot be undone. Run <b>Verify</b> first and
-review the list carefully before clicking <b>Remove all failed</b>.</div>
+<div class="warn">Removing records is permanent and cannot be undone. Run <b>Verify</b> first
+and review the list carefully before using any Remove action.</div>
+
+<h2>Tools &mdash; Backup / Restore Library&hellip;</h2>
+<p>Open via <b>Tools &rarr; Backup / Restore Library&hellip;</b></p>
+<p>Creates or restores a complete snapshot of the library data:</p>
+<table>
+  <tr><th>Button</th><th>Action</th></tr>
+  <tr><td><b>Backup&hellip;</b></td>
+      <td>Prompts for a destination file (default name includes a timestamp), then packs
+          <code>stlLibrary.db</code>, <code>thumbnails.lmdb/</code>, and
+          <code>settings.json</code> from the data directory into a single
+          <code>.7z</code> archive. A progress bar and log show the file count.</td></tr>
+  <tr><td><b>Restore&hellip;</b></td>
+      <td>Prompts for a previously created <code>.7z</code> backup file, asks for
+          confirmation, then extracts its contents into the current data directory,
+          overwriting existing files. <b>The application must be restarted after a
+          restore.</b></td></tr>
+</table>
+<div class="note">Both operations run in a background thread — the UI stays responsive
+and the Close button is disabled until the operation completes.</div>
+
 {_prev_next(PAGE_STATS_TOOLS)}"""
 
 

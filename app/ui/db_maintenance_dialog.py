@@ -28,11 +28,12 @@ from PyQt6.QtWidgets import (
 
 logger = logging.getLogger(__name__)
 
-_STATUS_OK       = "OK"
-_STATUS_MISSING  = "Missing"
-_STATUS_FOUND    = "Relocated"
-_STATUS_MODIFIED = "Modified"
-_STATUS_MOVED_DB = "Moved (in DB)"
+_STATUS_OK             = "OK"
+_STATUS_MISSING        = "Missing"
+_STATUS_FLAGGED        = "Flagged Missing"
+_STATUS_FOUND          = "Relocated"
+_STATUS_MODIFIED       = "Modified"
+_STATUS_MOVED_DB       = "Moved (in DB)"
 
 _COL_ID       = 0
 _COL_TITLE    = 1
@@ -50,6 +51,9 @@ def _color_found() -> QColor:
 
 def _color_modified() -> QColor:
     return QColor(180, 100, 0)
+
+def _color_flagged() -> QColor:
+    return QColor(140, 60, 180)   # purple — flagged by crawler, not yet confirmed absent
 
 def _color_moved_db() -> QColor:
     return QColor(30, 100, 180)
@@ -91,6 +95,7 @@ class VerifyWorker(QThread):
                 STLModel.archive_path,
                 STLModel.archive_hash,
                 STLModel.archive_size,
+                STLModel.is_missing,
             ).all()
 
         total = len(records)
@@ -100,22 +105,37 @@ class VerifyWorker(QThread):
             return
 
         self.log.emit(f"Verifying {total} archive(s)…")
-        missing = 0
-        modified = 0
-        for idx, (model_id, title, path, ahash, stored_size) in enumerate(records, 1):
+        n_missing = 0
+        n_flagged = 0
+        n_modified = 0
+        for idx, (model_id, title, path, ahash, stored_size, is_missing) in enumerate(records, 1):
             if self._stop_requested:
                 self.log.emit("Stopped by user.")
                 break
             self.progress.emit(idx, total)
             p = Path(path) if path else None
-            if p is None or not p.is_file():
+            if is_missing and (p is None or not p.is_file()):
+                # Previously flagged by the crawler and still absent on disk
+                status = _STATUS_FLAGGED
+                n_flagged += 1
+            elif p is None or not p.is_file():
                 status = _STATUS_MISSING
-                missing += 1
+                n_missing += 1
             elif stored_size is not None and p.stat().st_size != stored_size:
                 status = _STATUS_MODIFIED
-                modified += 1
+                n_modified += 1
             else:
                 status = _STATUS_OK
+                if is_missing:
+                    # File reappeared — clear the flag opportunistically
+                    from app.database.db import session_scope as _ss
+                    try:
+                        with _ss() as s:
+                            m = s.get(STLModel, model_id)
+                            if m:
+                                m.is_missing = False
+                    except Exception:
+                        pass
             results.append({
                 "id":         model_id,
                 "title":      title or "",
@@ -126,9 +146,10 @@ class VerifyWorker(QThread):
                 "match_path": "",
             })
 
-        ok_count = total - missing - modified
+        ok_count = total - n_missing - n_flagged - n_modified
         self.log.emit(
-            f"Done — {ok_count} OK, {modified} modified, {missing} missing "
+            f"Done — {ok_count} OK, {n_modified} modified, "
+            f"{n_missing} missing, {n_flagged} flagged missing "
             f"out of {total} archive(s)."
         )
         self.finished.emit(results)
@@ -523,6 +544,16 @@ class DbMaintenanceDialog(QDialog):
         self._remove_all_btn.clicked.connect(self._remove_all_missing)
         btn_row.addWidget(self._remove_all_btn)
 
+        self._remove_flagged_btn = QPushButton(
+            style.standardIcon(SP.SP_TrashIcon), "Remove Flagged Missing"
+        )
+        self._remove_flagged_btn.setToolTip(
+            "Remove records flagged as missing by the crawler that are still absent on disk"
+        )
+        self._remove_flagged_btn.setEnabled(False)
+        self._remove_flagged_btn.clicked.connect(self._remove_flagged_missing)
+        btn_row.addWidget(self._remove_flagged_btn)
+
         btn_row.addStretch()
 
         self._close_btn = QPushButton(
@@ -577,19 +608,22 @@ class DbMaintenanceDialog(QDialog):
         self._merge_moved_btn.setEnabled(False)
         self._remove_sel_btn.setEnabled(False)
         self._remove_all_btn.setEnabled(False)
+        self._remove_flagged_btn.setEnabled(False)
         self._close_btn.setEnabled(not busy)
 
     def _set_idle(self) -> None:
         has_missing  = any(r["status"] in (_STATUS_MISSING, _STATUS_MODIFIED) for r in self._results)
+        has_flagged  = any(r["status"] == _STATUS_FLAGGED for r in self._results)
         has_moved_db = any(r["status"] == _STATUS_MOVED_DB for r in self._results)
         has_any      = bool(self._results)
         self._verify_btn.setEnabled(True)
         self._stop_btn.setEnabled(False)
-        self._search_btn.setEnabled(has_missing)
-        self._find_moved_btn.setEnabled(has_missing)
+        self._search_btn.setEnabled(has_missing or has_flagged)
+        self._find_moved_btn.setEnabled(has_missing or has_flagged)
         self._merge_moved_btn.setEnabled(has_moved_db)
         self._remove_sel_btn.setEnabled(has_any)
         self._remove_all_btn.setEnabled(has_missing)
+        self._remove_flagged_btn.setEnabled(has_flagged)
         self._close_btn.setEnabled(True)
 
     def _stop(self) -> None:
@@ -656,6 +690,8 @@ class DbMaintenanceDialog(QDialog):
             status = row["status"]
             if status == _STATUS_MISSING:
                 self._color_row(items, _color_missing())
+            elif status == _STATUS_FLAGGED:
+                self._color_row(items, _color_flagged())
             elif status == _STATUS_FOUND:
                 self._color_row(items, _color_found())
             elif status == _STATUS_MODIFIED:
@@ -692,12 +728,13 @@ class DbMaintenanceDialog(QDialog):
     # ------------------------------------------------------------------
     def _start_search(self) -> None:
         selected_rows = {idx.row() for idx in self._table.selectedIndexes()}
+        _searchable = {_STATUS_MISSING, _STATUS_FLAGGED}
 
         if selected_rows:
             targets = {
                 self._results[r]["hash"]: self._results[r]["id"]
                 for r in selected_rows
-                if r < len(self._results) and self._results[r]["status"] == _STATUS_MISSING
+                if r < len(self._results) and self._results[r]["status"] in _searchable
             }
             if not targets:
                 QMessageBox.information(
@@ -709,7 +746,7 @@ class DbMaintenanceDialog(QDialog):
             targets = {
                 r["hash"]: r["id"]
                 for r in self._results
-                if r["status"] == _STATUS_MISSING
+                if r["status"] in _searchable
             }
 
         if not targets:
@@ -754,7 +791,7 @@ class DbMaintenanceDialog(QDialog):
 
     # ------------------------------------------------------------------
     def _start_find_moved_in_db(self) -> None:
-        missing = [r for r in self._results if r["status"] in (_STATUS_MISSING, _STATUS_MODIFIED)]
+        missing = [r for r in self._results if r["status"] in (_STATUS_MISSING, _STATUS_MODIFIED, _STATUS_FLAGGED)]
         if not missing:
             QMessageBox.information(self, "Find Moved", "No missing archives to check.")
             return
@@ -954,6 +991,31 @@ class DbMaintenanceDialog(QDialog):
         self._log.appendPlainText(f"Removed {count} missing record(s) from the database.")
         self._refresh_action_buttons()
 
+    def _remove_flagged_missing(self) -> None:
+        flagged = [r for r in self._results if r["status"] == _STATUS_FLAGGED]
+        if not flagged:
+            QMessageBox.information(self, "Remove Flagged", "No flagged-missing records to remove.")
+            return
+
+        count = len(flagged)
+        reply = QMessageBox.warning(
+            self,
+            "Remove Flagged Missing",
+            f"Permanently remove <b>{count}</b> record(s) flagged as missing by the crawler?<br><br>"
+            "These are archives that the crawler could not find on disk and could not match "
+            "to a new location. Removing them is permanent.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self._remove_records([r["id"] for r in flagged])
+        self._results = [r for r in self._results if r["status"] != _STATUS_FLAGGED]
+        self._populate_table(self._results)
+        self._log.appendPlainText(f"Removed {count} flagged-missing record(s) from the database.")
+        self._refresh_action_buttons()
+
     def _remove_records(self, ids: list[int]) -> None:
         from app.database.db import session_scope
         from app.database.models import STLModel
@@ -976,11 +1038,13 @@ class DbMaintenanceDialog(QDialog):
 
     def _refresh_action_buttons(self) -> None:
         has_missing  = any(r["status"] in (_STATUS_MISSING, _STATUS_MODIFIED) for r in self._results)
+        has_flagged  = any(r["status"] == _STATUS_FLAGGED for r in self._results)
         has_moved_db = any(r["status"] == _STATUS_MOVED_DB for r in self._results)
-        self._search_btn.setEnabled(has_missing)
-        self._find_moved_btn.setEnabled(has_missing)
+        self._search_btn.setEnabled(has_missing or has_flagged)
+        self._find_moved_btn.setEnabled(has_missing or has_flagged)
         self._merge_moved_btn.setEnabled(has_moved_db)
         self._remove_all_btn.setEnabled(has_missing)
+        self._remove_flagged_btn.setEnabled(has_flagged)
         self._remove_sel_btn.setEnabled(bool(self._results))
 
     # ------------------------------------------------------------------

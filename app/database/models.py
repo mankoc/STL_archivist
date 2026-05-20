@@ -6,7 +6,7 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 from sqlalchemy import (
-    Column, Index, Integer, Float, String, Text, LargeBinary, DateTime,
+    Boolean, Column, Index, Integer, Float, String, Text, LargeBinary, DateTime,
     ForeignKey, Table, UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -171,6 +171,7 @@ class STLModel(Base):
     presupports      = Column(String(32), nullable=True)            # No / Lychee / Chitubox / Presupported
     warning          = Column(Text, nullable=True)                  # newline-separated warning strings, NULL if none
     compression_rate = Column(Float, nullable=True)                 # archive_size / total_uncompressed_size (0‥1+)
+    is_missing       = Column(Boolean, default=False, nullable=False, server_default="0")
     created_at       = Column(DateTime, default=_utcnow)
     updated_at       = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 

@@ -74,7 +74,7 @@ class CrawlerConfig:
     recurse_subdirs: bool = True
 
     # When False, log lines for archives whose hash has not changed are suppressed.
-    log_unchanged: bool = True
+    log_unchanged: bool = False
 
     # Force re-extraction of all archives even when hash/size/mtime are unchanged.
     force_rescan: bool = False

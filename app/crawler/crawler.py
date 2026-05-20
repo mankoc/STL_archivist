@@ -443,24 +443,36 @@ class CrawlerWorker(QThread):
     def _collect_missing(self) -> list[dict]:
         """Return a snapshot of DB records whose archive file no longer exists on disk.
 
+        Includes both records newly found to be absent and records already flagged
+        ``is_missing=True`` from a previous crawl session, so that files moved to a
+        folder not covered by the current crawl still get another reconciliation
+        attempt on future crawls.
+
         Does NOT delete them — deletion (or metadata transfer for moved files)
         happens later in :meth:`_reconcile_moved_files`.
         """
         logger.debug("Collecting missing archive records from database…")
         missing: list[dict] = []
+        seen_ids: set[int] = set()
         with session_scope() as session:
-            for mid, ap, ah, asize in session.query(
+            for mid, ap, ah, asize, already_missing in session.query(
                 STLModel.id, STLModel.archive_path,
                 STLModel.archive_hash, STLModel.archive_size,
+                STLModel.is_missing,
             ).all():
-                if ap and not Path(ap).exists():
-                    missing.append({
-                        "id":       mid,
-                        "path":     ap,
-                        "hash":     ah or "",
-                        "filename": Path(ap).name,
-                        "size":     asize,
-                    })
+                if not ap:
+                    continue
+                absent = not Path(ap).exists()
+                if absent or already_missing:
+                    if mid not in seen_ids:
+                        seen_ids.add(mid)
+                        missing.append({
+                            "id":       mid,
+                            "path":     ap,
+                            "hash":     ah or "",
+                            "filename": Path(ap).name,
+                            "size":     asize,
+                        })
         if missing:
             msg = (f"Found {len(missing)} missing archive(s) — "
                    "will check for moved files after crawl.")
@@ -476,15 +488,26 @@ class CrawlerWorker(QThread):
         For each match, the old (missing) record's *archive_path* is updated to
         the new location so all user-edited metadata is preserved.  The freshly-
         created record at the new path is removed.  Unmatched missing records are
-        deleted as before.
+        flagged ``is_missing=True`` instead of being deleted, so a future crawl
+        of a different folder can still find them.
 
         Matching strategy (in order):
         1. Identical content hash → definitive match.
-        2. Same filename + same file size → likely moved.
+        2. Same filename + same file size → likely moved (skipped when ambiguous).
+
+        Collision guards:
+        - If two *new* archives share the same hash, neither is used for hash
+          matching (hash collisions among new files are vanishingly rare but
+          theoretically possible with fallback fingerprints).
+        - If two *new* archives share the same filename+size, the name+size
+          fallback is skipped entirely for that key to avoid mis-attribution.
+        - If two *missing* records share the same hash, hash matching is skipped
+          for both (they are content duplicates; the duplicate-finder should
+          handle them separately).
         """
         new_paths = self._new_archive_paths
         if not new_paths:
-            self._delete_missing_records(missing)
+            self._mark_records_missing(missing)
             return
 
         msg = (f"Reconciling {len(missing)} missing record(s) against "
@@ -502,21 +525,64 @@ class CrawlerWorker(QThread):
                     .all()
             }
 
-            hash_to_path:     dict[str, str] = {}
-            namesize_to_path: dict[tuple, str] = {}
+            # Build forward indexes, tracking collisions so ambiguous keys are
+            # excluded from matching rather than picking arbitrarily.
+            hash_to_path:       dict[str, str]   = {}
+            hash_collision:     set[str]          = set()
+            namesize_to_path:   dict[tuple, str]  = {}
+            namesize_collision: set[tuple]        = set()
+
             for path, m in new_models.items():
                 if m.archive_hash:
-                    hash_to_path.setdefault(m.archive_hash, path)
+                    h = m.archive_hash
+                    if h in hash_to_path:
+                        hash_collision.add(h)
+                    else:
+                        hash_to_path[h] = path
                 if m.archive_size is not None:
-                    namesize_to_path.setdefault((Path(path).name, m.archive_size), path)
+                    key = (Path(path).name, m.archive_size)
+                    if key in namesize_to_path:
+                        namesize_collision.add(key)
+                    else:
+                        namesize_to_path[key] = path
+
+            # Detect hash collisions among the missing records themselves.
+            missing_hash_collision: set[str] = set()
+            seen_missing_hashes:    dict[str, int] = {}
+            for rec in missing:
+                h = rec["hash"]
+                if not h:
+                    continue
+                if h in seen_missing_hashes:
+                    missing_hash_collision.add(h)
+                else:
+                    seen_missing_hashes[h] = rec["id"]
 
             used_new: set[str] = set()
 
             for rec in missing:
-                new_path = hash_to_path.get(rec["hash"])
+                # --- hash match ---
+                h = rec["hash"]
+                new_path: str | None = None
+                if h and h not in hash_collision and h not in missing_hash_collision:
+                    candidate = hash_to_path.get(h)
+                    if candidate and candidate not in used_new:
+                        new_path = candidate
+
+                # --- filename+size fallback ---
                 if new_path is None and rec["filename"] and rec["size"] is not None:
-                    new_path = namesize_to_path.get((rec["filename"], rec["size"]))
-                if new_path is None or new_path in used_new:
+                    key = (rec["filename"], rec["size"])
+                    if key not in namesize_collision:
+                        candidate = namesize_to_path.get(key)
+                        if candidate and candidate not in used_new:
+                            new_path = candidate
+                        elif key in namesize_collision:
+                            self.log.emit(
+                                f"  Skipped ambiguous name+size match for "
+                                f"{rec['filename']} — multiple candidates"
+                            )
+
+                if new_path is None:
                     continue
 
                 old_model = session.get(STLModel, rec["id"])
@@ -542,11 +608,12 @@ class CrawlerWorker(QThread):
                 session.delete(new_model)
                 session.flush()
 
-                # Redirect old record to new location
+                # Redirect old record to new location and clear missing flag
                 old_model.archive_path     = new_archive_path
                 old_model.archive_hash     = new_archive_hash
                 old_model.archive_size     = new_archive_size
                 old_model.archive_mtime_ns = new_archive_mtime
+                old_model.is_missing       = False
                 if new_compression is not None:
                     old_model.compression_rate = new_compression
                 session.flush()
@@ -563,28 +630,29 @@ class CrawlerWorker(QThread):
             self.log.emit(f"Matched {len(matched_ids)} moved file(s).")
 
         unmatched = [r for r in missing if r["id"] not in matched_ids]
-        self._delete_missing_records(unmatched)
+        self._mark_records_missing(unmatched)
 
-    def _delete_missing_records(self, missing: list[dict]) -> None:
-        """Delete DB records and their thumbnails for unmatched missing archives."""
+    def _mark_records_missing(self, missing: list[dict]) -> None:
+        """Flag unmatched missing records as ``is_missing=True`` in the database.
+
+        Records are *not* deleted here — they remain as candidates for future
+        crawl sessions and can be reviewed or removed via Database Maintenance.
+        """
         if not missing:
             return
         with session_scope() as session:
-            removed = 0
+            marked = 0
             for rec in missing:
                 model = session.get(STLModel, rec["id"])
-                if model is not None:
-                    msg = f"Removing missing: {rec['path']}"
+                if model is not None and not model.is_missing:
+                    model.is_missing = True
+                    marked += 1
+                    msg = f"Marked missing: {rec['path']}"
                     self.log.emit(msg)
                     logger.info(msg)
                     self.file_deleted.emit(rec["path"])
-                    for image in model.images:
-                        if image.thumbnail_path:
-                            delete_thumbnail(image.thumbnail_path)
-                    session.delete(model)
-                    removed += 1
-        if removed:
-            msg = f"Removed {removed} missing record(s) from database."
+        if marked:
+            msg = f"Marked {marked} record(s) as missing (not deleted — use DB Maintenance to remove)."
             self.log.emit(msg)
             logger.info(msg)
 
