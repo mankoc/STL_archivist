@@ -175,27 +175,49 @@ class MassEditorDialog(QDialog):
         session = get_session()
         try:
             _uniq = lambda col: sorted(filter(None, (v for (v,) in session.query(col).distinct())))
+
+            # SQLite caps IN-clause variables at ~999; for large selections we
+            # skip the scope filter and return all values from the full DB.
+            _CHUNK = 999
+            _ids = self._model_ids
+            _large = len(_ids) > _CHUNK
+
             sources        = _uniq(STLModel.source)
             creators       = _uniq(STLModel.creator)
-            dates          = sorted({
-                format_release_date(y, mo)
-                for (y, mo) in session.query(STLModel.release_year, STLModel.release_month)
-                                      .filter(STLModel.id.in_(self._model_ids))
-                                      .filter(STLModel.release_year.isnot(None)).distinct()
-            })
             titles         = _uniq(STLModel.title)
-            all_tags       = sorted(
-                t.name for t in session.query(Tag)
-                .join(model_tags, Tag.id == model_tags.c.tag_id)
-                .filter(model_tags.c.model_id.in_(self._model_ids))
-                .distinct().order_by(Tag.name).all()
-            )
-            def _fk_ids(fk_col):
-                return [
-                    cid for (cid,) in session.query(fk_col)
-                    .filter(STLModel.id.in_(self._model_ids))
-                    .filter(fk_col.isnot(None)).distinct()
-                ]
+
+            if _large:
+                dates = sorted({
+                    format_release_date(y, mo)
+                    for (y, mo) in session.query(STLModel.release_year, STLModel.release_month)
+                                          .filter(STLModel.release_year.isnot(None)).distinct()
+                })
+                all_tags = sorted(t.name for t in session.query(Tag).order_by(Tag.name).all())
+                def _fk_ids(fk_col):
+                    return [
+                        cid for (cid,) in session.query(fk_col)
+                        .filter(fk_col.isnot(None)).distinct()
+                    ]
+            else:
+                dates = sorted({
+                    format_release_date(y, mo)
+                    for (y, mo) in session.query(STLModel.release_year, STLModel.release_month)
+                                          .filter(STLModel.id.in_(_ids))
+                                          .filter(STLModel.release_year.isnot(None)).distinct()
+                })
+                all_tags = sorted(
+                    t.name for t in session.query(Tag)
+                    .join(model_tags, Tag.id == model_tags.c.tag_id)
+                    .filter(model_tags.c.model_id.in_(_ids))
+                    .distinct().order_by(Tag.name).all()
+                )
+                def _fk_ids(fk_col):
+                    return [
+                        cid for (cid,) in session.query(fk_col)
+                        .filter(STLModel.id.in_(_ids))
+                        .filter(fk_col.isnot(None)).distinct()
+                    ]
+
             _rel_ids = _fk_ids(STLModel.release_id)
             releases       = sorted(filter(None, (
                 r.name for r in session.query(Release)
