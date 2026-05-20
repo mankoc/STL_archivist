@@ -1003,6 +1003,10 @@ class BrowserTab(QWidget):
         filter_header = QHBoxLayout()
         filter_header.addWidget(QLabel("Filter"))
         filter_header.addStretch()
+        self._apply_filters_btn = QPushButton("Apply")
+        self._apply_filters_btn.setToolTip("Apply the selected filters to the table")
+        self._apply_filters_btn.clicked.connect(self._apply_checked_filters)
+        filter_header.addWidget(self._apply_filters_btn)
         self._clear_filters_btn = QPushButton("Clear")
         self._clear_filters_btn.setFlat(True)
         self._clear_filters_btn.setToolTip("Clear all active filters")
@@ -2342,7 +2346,7 @@ class BrowserTab(QWidget):
             self._propagate_state_to_children(item, item.checkState(0))
             self._filter_tree.blockSignals(False)
 
-        self._apply_checked_filters()
+        self._mark_filters_pending()
 
     @staticmethod
     def _propagate_state_to_children(item: QTreeWidgetItem, state: Qt.CheckState) -> None:
@@ -2353,8 +2357,23 @@ class BrowserTab(QWidget):
                 child.setCheckState(0, state)
             BrowserTab._propagate_state_to_children(child, state)
 
+    def _mark_filters_pending(self) -> None:
+        """Highlight the Apply button to indicate unapplied filter changes."""
+        self._apply_filters_btn.setProperty("pending", True)
+        self._apply_filters_btn.style().unpolish(self._apply_filters_btn)
+        self._apply_filters_btn.style().polish(self._apply_filters_btn)
+        self._apply_filters_btn.setStyleSheet(
+            "QPushButton { font-weight: bold; }"
+        )
+
+    def _clear_filters_pending(self) -> None:
+        """Remove the pending highlight from the Apply button."""
+        self._apply_filters_btn.setProperty("pending", False)
+        self._apply_filters_btn.setStyleSheet("")
+
     def _apply_checked_filters(self) -> None:
         """Collect include (Checked) and exclude (PartiallyChecked) filter items and reload."""
+        self._clear_filters_pending()
         author_inc:          list[str]   = []; author_exc:          list[str]   = []
         tag_inc:             list[str]   = []; tag_exc:             list[str]   = []
         type_inc:            list[str]   = []; type_exc:            list[str]   = []
@@ -2557,6 +2576,7 @@ class BrowserTab(QWidget):
         for i in range(root.childCount()):
             _uncheck(root.child(i))
         self._filter_tree.blockSignals(False)
+        self._clear_filters_pending()
         self._load_table()
         self._populate_filter_tree()
 
