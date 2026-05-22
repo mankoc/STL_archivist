@@ -2,6 +2,47 @@
 
 ## 2026.21 — 2026-05-22
 
+### Mass editor — LookupCache eliminates redundant FK lookups
+
+The mass editor's save loop issued up to 7 `SELECT` round-trips per model row
+(one per FK field: release, collection, subcollection, category, sculptor, scale,
+and one per tag name). Editing 500 models with 3 shared tags produced ~3,500
+redundant queries. A `LookupCache` dict (the same pattern used by the crawler
+since T2.8) is now created before the loop and passed to the `get_or_create_*`
+helpers — subsequent models in the batch get cache hits for all shared names.
+
+**File:** [app/ui/mass_editor_dialog.py](app/ui/mass_editor_dialog.py)
+
+---
+
+### Browse view — `models_view` SQL VIEW replaces inline outer-joins
+
+A `models_view` SQLite VIEW centralises the six FK lookup-table joins
+(sculptors, collections, subcollections, categories, releases, scales) that
+previously had to be spelled out in Python code on every `_load_table()` call.
+`_load_table()` now `SELECT FROM models_view` via a reflected SQLAlchemy `Table`
+object; all filter WHERE clauses use the view's FK ID columns unchanged.
+
+**File:** [app/database/db.py](app/database/db.py), [app/ui/browser_tab.py](app/ui/browser_tab.py)
+
+---
+
+### Filter pane — empty subquery elimination + presupports/source indexes
+
+Three follow-up query optimisations identified from profiler logs after the path-filter fix:
+
+- **Empty subquery skip:** `_run_id_subquery()` now returns `None` instead of
+  `SELECT id FROM models` (no WHERE clause) when no filter conditions apply to the
+  inner query.  Previously SQLite had to materialise all model IDs for queries like
+  `WHERE id IN (SELECT id FROM models)` — e.g. the source-list DISTINCT query was
+  taking 25–26 ms needlessly.
+- **`presupports` index:** new partial index `ix_models_presupports ON models (presupports) WHERE presupports IS NOT NULL` allows index-only GROUP BY / DISTINCT, cutting presupports section queries from 15–31 ms to < 1 ms.
+- **`source` index:** new `ix_models_source ON models (source)` covers source-only filter predicates that the composite `(creator, source)` index cannot serve, cutting source scoped-count queries from 10–14 ms to < 1 ms.
+
+**Files:** [app/ui/browser_tab.py](app/ui/browser_tab.py), [app/database/db.py](app/database/db.py)
+
+---
+
 ### Filter pane — path filter performance (~24× faster scoped counts)
 
 When a folder node is selected in the filter pane the browser rebuilds scoped

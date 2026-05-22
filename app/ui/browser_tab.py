@@ -26,7 +26,7 @@ from PyQt6.QtCore import QSettings
 from sqlalchemy import func, or_, and_, select as sa_select
 from sqlalchemy.orm import selectinload
 
-from app.database.db import get_session, session_scope
+from app.database.db import get_session, session_scope, get_models_view
 from app.database.models import STLModel, Tag, Sculptor, Collection, Subcollection, Category, Release, Scale, Image, model_tags as _mt_global
 from app.utils.thumbnailer import pixmap_from_path, save_thumbnail
 from app.utils.path_pattern import parse_release_date, format_release_date
@@ -1902,123 +1902,115 @@ class BrowserTab(QWidget):
         self.loading_started.emit()
         self._model.removeRows(0, self._model.rowCount())
 
-        def _date_clauses(pairs):
-            conds = []
-            for year, month in pairs:
-                if month is None:
-                    conds.append(STLModel.release_year == year)
-                else:
-                    conds.append(and_(STLModel.release_year == year,
-                                      STLModel.release_month == month))
-            return conds
-
         # ------------------------------------------------------------------
-        # Build flat SELECT with outerjoin — no ORM selectinload required.
-        # SAexpressions are thread-safe to construct here and execute in the
+        # Build flat SELECT from models_view — the view pre-joins the six FK
+        # lookup tables, so no outer-join construction is needed here.
+        # SA expressions are thread-safe to construct here and execute in the
         # worker's own session.
         # ------------------------------------------------------------------
-        stmt = (
-            sa_select(
-                STLModel.id, STLModel.title, STLModel.creator, STLModel.source,
-                STLModel.release_year, STLModel.release_month,
-                STLModel.archive_path, STLModel.presupports, STLModel.warning,
-                STLModel.archive_size, STLModel.compression_rate,
-                STLModel.sequence, STLModel.created_at,
-                Sculptor.name.label("sculptor_name"),
-                Collection.name.label("collection_name"),
-                Subcollection.name.label("subcollection_name"),
-                Category.name.label("category_name"),
-                Release.name.label("release_name"),
-                Scale.name.label("scale_name"),
-            )
-            .outerjoin(Sculptor,     STLModel.sculptor_id      == Sculptor.id)
-            .outerjoin(Collection,   STLModel.collection_id    == Collection.id)
-            .outerjoin(Subcollection,STLModel.subcollection_id == Subcollection.id)
-            .outerjoin(Category,     STLModel.category_id      == Category.id)
-            .outerjoin(Release,      STLModel.release_id       == Release.id)
-            .outerjoin(Scale,        STLModel.scale_id         == Scale.id)
-        )
+        mv = get_models_view()
+
+        def _date_clauses(pairs):
+            return [
+                (mv.c.release_year == y) if mo is None
+                else and_(mv.c.release_year == y, mv.c.release_month == mo)
+                for y, mo in pairs
+            ]
+
+        stmt = sa_select(
+            mv.c.id, mv.c.title, mv.c.creator, mv.c.source,
+            mv.c.release_year, mv.c.release_month,
+            mv.c.archive_path, mv.c.presupports, mv.c.warning,
+            mv.c.archive_size, mv.c.compression_rate,
+            mv.c.sequence, mv.c.created_at,
+            mv.c.sculptor_name,
+            mv.c.collection_name,
+            mv.c.subcollection_name,
+            mv.c.category_name,
+            mv.c.release_name,
+            mv.c.scale_name,
+        ).select_from(mv)
 
         _tag_sub = sa_select(_mt_global.c.model_id).join(Tag, _mt_global.c.tag_id == Tag.id)
 
         # --- explicit ID set ---
         if id_filters:
-            stmt = stmt.where(STLModel.id.in_(id_filters))
+            stmt = stmt.where(mv.c.id.in_(id_filters))
         # --- include filters ---
         if author_filters:
-            stmt = stmt.where(STLModel.creator.in_(author_filters))
+            stmt = stmt.where(mv.c.creator.in_(author_filters))
         if type_filters:
-            stmt = stmt.where(STLModel.source.in_(type_filters))
+            stmt = stmt.where(mv.c.source.in_(type_filters))
         if tag_filters:
-            stmt = stmt.where(STLModel.id.in_(_tag_sub.where(Tag.name.in_(tag_filters))))
+            stmt = stmt.where(mv.c.id.in_(_tag_sub.where(Tag.name.in_(tag_filters))))
         if path_filters:
-            _norm = func.replace(STLModel.archive_path, "\\", "/")
+            _norm = func.replace(mv.c.archive_path, "\\", "/")
             _pruned_paths = _prune_ancestor_paths(path_filters)
             stmt = stmt.where(or_(*(_norm.like(p.rstrip("/") + "/%") for p in _pruned_paths)))
         if date_filters:
             stmt = stmt.where(or_(*_date_clauses(date_filters)))
         if sculptor_filters:
-            stmt = stmt.where(STLModel.sculptor_id.in_(sculptor_filters))
+            stmt = stmt.where(mv.c.sculptor_id.in_(sculptor_filters))
         if collection_filters:
-            stmt = stmt.where(STLModel.collection_id.in_(collection_filters))
+            stmt = stmt.where(mv.c.collection_id.in_(collection_filters))
         if subcollection_filters:
-            stmt = stmt.where(STLModel.subcollection_id.in_(subcollection_filters))
+            stmt = stmt.where(mv.c.subcollection_id.in_(subcollection_filters))
         if category_filters:
-            stmt = stmt.where(STLModel.category_id.in_(category_filters))
+            stmt = stmt.where(mv.c.category_id.in_(category_filters))
         if release_filters:
-            stmt = stmt.where(STLModel.release_id.in_(release_filters))
+            stmt = stmt.where(mv.c.release_id.in_(release_filters))
         if scale_filters:
-            stmt = stmt.where(STLModel.scale_id.in_(scale_filters))
+            stmt = stmt.where(mv.c.scale_id.in_(scale_filters))
         if presupports_filters:
-            stmt = stmt.where(STLModel.presupports.in_(presupports_filters))
+            stmt = stmt.where(mv.c.presupports.in_(presupports_filters))
         if warning_filters:
-            stmt = stmt.where(or_(*(STLModel.warning.contains(w) for w in warning_filters)))
+            stmt = stmt.where(or_(*(mv.c.warning.contains(w) for w in warning_filters)))
         # --- exclude filters ---
         if author_exc_filters:
-            stmt = stmt.where(~STLModel.creator.in_(author_exc_filters))
+            stmt = stmt.where(~mv.c.creator.in_(author_exc_filters))
         if type_exc_filters:
-            stmt = stmt.where(~STLModel.source.in_(type_exc_filters))
+            stmt = stmt.where(~mv.c.source.in_(type_exc_filters))
         if tag_exc_filters:
-            stmt = stmt.where(STLModel.id.notin_(_tag_sub.where(Tag.name.in_(tag_exc_filters))))
+            stmt = stmt.where(mv.c.id.notin_(_tag_sub.where(Tag.name.in_(tag_exc_filters))))
         if path_exc_filters:
-            _norm = func.replace(STLModel.archive_path, "\\", "/")
+            _norm = func.replace(mv.c.archive_path, "\\", "/")
             _pruned_exc = _prune_ancestor_paths(path_exc_filters)
             stmt = stmt.where(~or_(*(_norm.like(p.rstrip("/") + "/%") for p in _pruned_exc)))
         if date_exc_filters:
             stmt = stmt.where(~or_(*_date_clauses(date_exc_filters)))
         if sculptor_exc_filters:
-            stmt = stmt.where(~STLModel.sculptor_id.in_(sculptor_exc_filters))
+            stmt = stmt.where(~mv.c.sculptor_id.in_(sculptor_exc_filters))
         if collection_exc_filters:
-            stmt = stmt.where(~STLModel.collection_id.in_(collection_exc_filters))
+            stmt = stmt.where(~mv.c.collection_id.in_(collection_exc_filters))
         if subcollection_exc_filters:
-            stmt = stmt.where(~STLModel.subcollection_id.in_(subcollection_exc_filters))
+            stmt = stmt.where(~mv.c.subcollection_id.in_(subcollection_exc_filters))
         if category_exc_filters:
-            stmt = stmt.where(~STLModel.category_id.in_(category_exc_filters))
+            stmt = stmt.where(~mv.c.category_id.in_(category_exc_filters))
         if release_exc_filters:
-            stmt = stmt.where(~STLModel.release_id.in_(release_exc_filters))
+            stmt = stmt.where(~mv.c.release_id.in_(release_exc_filters))
         if scale_exc_filters:
-            stmt = stmt.where(~STLModel.scale_id.in_(scale_exc_filters))
+            stmt = stmt.where(~mv.c.scale_id.in_(scale_exc_filters))
         if presupports_exc_filters:
-            stmt = stmt.where(~STLModel.presupports.in_(presupports_exc_filters))
+            stmt = stmt.where(~mv.c.presupports.in_(presupports_exc_filters))
         if warning_exc_filters:
-            stmt = stmt.where(and_(*(~STLModel.warning.contains(w) for w in warning_exc_filters)))
+            stmt = stmt.where(and_(*(~mv.c.warning.contains(w) for w in warning_exc_filters)))
 
         # --- group-level has/no-value filters ---
         _has_tag_sub = sa_select(_mt_global.c.model_id).distinct()
         _group_has_value = {
-            "creator":       lambda: and_(STLModel.creator.isnot(None),      STLModel.creator != ""),
-            "tag":           lambda: STLModel.id.in_(_has_tag_sub),
-            "source":        lambda: and_(STLModel.source.isnot(None),        STLModel.source != ""),
-            "date":          lambda: STLModel.release_year.isnot(None),
-            "sculptor":      lambda: STLModel.sculptor_id.isnot(None),
-            "collection":    lambda: STLModel.collection_id.isnot(None),
-            "subcollection": lambda: STLModel.subcollection_id.isnot(None),
-            "category":      lambda: STLModel.category_id.isnot(None),
-            "release":       lambda: STLModel.release_id.isnot(None),
-            "scale":         lambda: STLModel.scale_id.isnot(None),
-            "presupports":   lambda: and_(STLModel.presupports.isnot(None),  STLModel.presupports != ""),
-            "warning":       lambda: and_(STLModel.warning.isnot(None),      STLModel.warning != ""),
-            "path":          lambda: and_(STLModel.archive_path.isnot(None), STLModel.archive_path != ""),
+            "creator":       lambda: and_(mv.c.creator.isnot(None),       mv.c.creator != ""),
+            "tag":           lambda: mv.c.id.in_(_has_tag_sub),
+            "source":        lambda: and_(mv.c.source.isnot(None),         mv.c.source != ""),
+            "date":          lambda: mv.c.release_year.isnot(None),
+            "sculptor":      lambda: mv.c.sculptor_id.isnot(None),
+            "collection":    lambda: mv.c.collection_id.isnot(None),
+            "subcollection": lambda: mv.c.subcollection_id.isnot(None),
+            "category":      lambda: mv.c.category_id.isnot(None),
+            "release":       lambda: mv.c.release_id.isnot(None),
+            "scale":         lambda: mv.c.scale_id.isnot(None),
+            "presupports":   lambda: and_(mv.c.presupports.isnot(None),   mv.c.presupports != ""),
+            "warning":       lambda: and_(mv.c.warning.isnot(None),       mv.c.warning != ""),
+            "path":          lambda: and_(mv.c.archive_path.isnot(None),  mv.c.archive_path != ""),
         }
         if has_value_groups:
             for _key in has_value_groups:
@@ -2051,10 +2043,10 @@ class BrowserTab(QWidget):
                         pair_for_id[_pid] = _pi
         else:
             self._load_pair_colors = None
-            stmt = stmt.order_by(STLModel.title)
+            stmt = stmt.order_by(mv.c.title)
 
         # Tags GROUP_CONCAT query — scoped to the same filtered model set as stmt.
-        _id_sub = sa_select(STLModel.id)
+        _id_sub = sa_select(mv.c.id).select_from(mv)
         if stmt.whereclause is not None:
             _id_sub = _id_sub.where(stmt.whereclause)
         tags_stmt = (
@@ -2505,53 +2497,58 @@ class BrowserTab(QWidget):
                 skip_warning=False,
             ):
                 q = sa_select(STLModel.id)
+                _has_condition = False
+                def _w(cond):
+                    nonlocal q, _has_condition
+                    q = q.where(cond)
+                    _has_condition = True
                 if not skip_creator:
-                    if author_inc:  q = q.where(STLModel.creator.in_(author_inc))
-                    if author_exc:  q = q.where(~STLModel.creator.in_(author_exc))
+                    if author_inc:  _w(STLModel.creator.in_(author_inc))
+                    if author_exc:  _w(~STLModel.creator.in_(author_exc))
                 if not skip_type:
-                    if type_inc:    q = q.where(STLModel.source.in_(type_inc))
-                    if type_exc:    q = q.where(~STLModel.source.in_(type_exc))
+                    if type_inc:    _w(STLModel.source.in_(type_inc))
+                    if type_exc:    _w(~STLModel.source.in_(type_exc))
                 if not skip_tag:
-                    if tag_inc:     q = q.where(STLModel.tags.any(Tag.name.in_(tag_inc)))
-                    if tag_exc:     q = q.where(~STLModel.tags.any(Tag.name.in_(tag_exc)))
+                    if tag_inc:     _w(STLModel.tags.any(Tag.name.in_(tag_inc)))
+                    if tag_exc:     _w(~STLModel.tags.any(Tag.name.in_(tag_exc)))
                 if not skip_path:
                     if _path_ids_mat is not None:
-                        q = q.where(STLModel.id.in_(_path_ids_mat))
+                        _w(STLModel.id.in_(_path_ids_mat))
                     else:
                         _n = func.replace(STLModel.archive_path, "\\", "/")
                         if path_inc:
-                            q = q.where(or_(*(_n.like(p.rstrip("/") + "/%") for p in _prune_ancestor_paths(path_inc))))
+                            _w(or_(*(_n.like(p.rstrip("/") + "/%") for p in _prune_ancestor_paths(path_inc))))
                         if path_exc:
-                            q = q.where(~or_(*(_n.like(p.rstrip("/") + "/%") for p in _prune_ancestor_paths(path_exc))))
+                            _w(~or_(*(_n.like(p.rstrip("/") + "/%") for p in _prune_ancestor_paths(path_exc))))
                 if not skip_date:
                     def _dc(pairs):
                         return [and_(STLModel.release_year == y, STLModel.release_month == mo) if mo is not None else (STLModel.release_year == y) for y, mo in pairs]
-                    if date_inc:    q = q.where(or_(*_dc(date_inc)))
-                    if date_exc:    q = q.where(~or_(*_dc(date_exc)))
+                    if date_inc:    _w(or_(*_dc(date_inc)))
+                    if date_exc:    _w(~or_(*_dc(date_exc)))
                 if not skip_sculptor:
-                    if sculptor_inc: q = q.where(STLModel.sculptor_id.in_(sculptor_inc))
-                    if sculptor_exc: q = q.where(~STLModel.sculptor_id.in_(sculptor_exc))
+                    if sculptor_inc: _w(STLModel.sculptor_id.in_(sculptor_inc))
+                    if sculptor_exc: _w(~STLModel.sculptor_id.in_(sculptor_exc))
                 if not skip_col:
-                    if collection_inc:    q = q.where(STLModel.collection_id.in_(collection_inc))
-                    if collection_exc:    q = q.where(~STLModel.collection_id.in_(collection_exc))
+                    if collection_inc:    _w(STLModel.collection_id.in_(collection_inc))
+                    if collection_exc:    _w(~STLModel.collection_id.in_(collection_exc))
                 if not skip_sub:
-                    if subcollection_inc: q = q.where(STLModel.subcollection_id.in_(subcollection_inc))
-                    if subcollection_exc: q = q.where(~STLModel.subcollection_id.in_(subcollection_exc))
+                    if subcollection_inc: _w(STLModel.subcollection_id.in_(subcollection_inc))
+                    if subcollection_exc: _w(~STLModel.subcollection_id.in_(subcollection_exc))
                 if not skip_category:
-                    if category_inc: q = q.where(STLModel.category_id.in_(category_inc))
-                    if category_exc: q = q.where(~STLModel.category_id.in_(category_exc))
+                    if category_inc: _w(STLModel.category_id.in_(category_inc))
+                    if category_exc: _w(~STLModel.category_id.in_(category_exc))
                 if not skip_rel:
-                    if release_inc:  q = q.where(STLModel.release_id.in_(release_inc))
-                    if release_exc:  q = q.where(~STLModel.release_id.in_(release_exc))
+                    if release_inc:  _w(STLModel.release_id.in_(release_inc))
+                    if release_exc:  _w(~STLModel.release_id.in_(release_exc))
                 if not skip_scale:
-                    if scale_inc:    q = q.where(STLModel.scale_id.in_(scale_inc))
-                    if scale_exc:    q = q.where(~STLModel.scale_id.in_(scale_exc))
+                    if scale_inc:    _w(STLModel.scale_id.in_(scale_inc))
+                    if scale_exc:    _w(~STLModel.scale_id.in_(scale_exc))
                 if not skip_presupports:
-                    if presupports_inc: q = q.where(STLModel.presupports.in_(presupports_inc))
-                    if presupports_exc: q = q.where(~STLModel.presupports.in_(presupports_exc))
+                    if presupports_inc: _w(STLModel.presupports.in_(presupports_inc))
+                    if presupports_exc: _w(~STLModel.presupports.in_(presupports_exc))
                 if not skip_warning:
-                    if warning_inc:  q = q.where(or_(*(STLModel.warning.contains(w) for w in warning_inc)))
-                    if warning_exc:  q = q.where(and_(*(~STLModel.warning.contains(w) for w in warning_exc)))
+                    if warning_inc:  _w(or_(*(STLModel.warning.contains(w) for w in warning_inc)))
+                    if warning_exc:  _w(and_(*(~STLModel.warning.contains(w) for w in warning_exc)))
                 _group_conds = {
                     "creator":       lambda: and_(STLModel.creator.isnot(None),      STLModel.creator != ""),
                     "tag":           lambda: STLModel.tags.any(),
@@ -2568,11 +2565,11 @@ class BrowserTab(QWidget):
                 }
                 for _k in has_value_groups:
                     _c2 = _group_conds.get(_k)
-                    if _c2: q = q.where(_c2())
+                    if _c2: _w(_c2())
                 for _k in no_value_groups:
                     _c2 = _group_conds.get(_k)
-                    if _c2: q = q.where(~_c2())
-                return q.subquery()
+                    if _c2: _w(~_c2())
+                return q.subquery() if _has_condition else None
 
             scope_by_section = {
                 "creator":       _run_id_subquery(skip_creator=True),
