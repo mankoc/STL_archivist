@@ -256,22 +256,35 @@ class CrawlerWorker(QThread):
             if ex is None:
                 to_extract.append(p)
                 logger.debug("  NEW: %s", p.name)
-            elif force or ex.archive_hash != hashes[p]:
-                reason = "FORCE" if force else "CHANGED"
+            elif force:
                 to_extract.append(p)
-                if not force:
-                    logger.debug("  %s: %s (old=%s… new=%s…)",
-                                 reason, p.name, ex.archive_hash[:8], hashes[p][:8])
-                    try:
-                        st = p.stat()
-                        ex.archive_size = int(st.st_size)
-                        ex.archive_mtime_ns = int(st.st_mtime_ns)
-                        session.add(ex)
-                        session.flush()
-                    except Exception:
-                        pass
-                else:
-                    logger.debug("  %s: %s", reason, p.name)
+                logger.debug("  FORCE: %s", p.name)
+            elif not ex.archive_hash:
+                # Hash was never stored (record pre-dates the archive_hash column).
+                # Backfill the fingerprint from Phase 1 without re-extracting content;
+                # the user hasn't changed anything, so don't classify this as "updated".
+                ex.archive_hash = hashes[p]
+                try:
+                    st = p.stat()
+                    ex.archive_size = int(st.st_size)
+                    ex.archive_mtime_ns = int(st.st_mtime_ns)
+                    session.add(ex)
+                    session.flush()
+                except Exception:
+                    pass
+                logger.debug("  HASH BACKFILLED: %s", p.name)
+            elif ex.archive_hash != hashes[p]:
+                to_extract.append(p)
+                logger.debug("  CHANGED: %s (old=%s… new=%s…)",
+                             p.name, ex.archive_hash[:8], hashes[p][:8])
+                try:
+                    st = p.stat()
+                    ex.archive_size = int(st.st_size)
+                    ex.archive_mtime_ns = int(st.st_mtime_ns)
+                    session.add(ex)
+                    session.flush()
+                except Exception:
+                    pass
             elif store_stl and not ex.stl_files:
                 to_extract.append(p)
                 logger.debug("  MISSING STL LIST: %s", p.name)
@@ -397,10 +410,10 @@ class CrawlerWorker(QThread):
                     else:
                         self._stats_updated += 1
                         self.archive_result.emit(archive_path.name, "updated")
+                    modified_folders.add(archive_path.parent)
                 else:
                     self._stats_unchanged += 1
                 self.counts_changed.emit(self._stats_new, self._stats_updated, self._stats_unchanged)
-                modified_folders.add(archive_path.parent)
                 self._consecutive_failures = 0
                 logger.debug("  Upsert committed: %s", archive_path.name)
             except Exception as exc:
