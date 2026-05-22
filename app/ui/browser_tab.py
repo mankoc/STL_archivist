@@ -1348,73 +1348,74 @@ class BrowserTab(QWidget):
             _path_counts: dict[str, int] | None = None  # folder → model count (cumulative)
 
             if show_counts:
-                from sqlalchemy import func as _func, select as _select
+                from sqlalchemy import func as _func
                 from app.database.models import model_tags as _mt
 
-                # One scan across all scalar columns; build per-value counts in Python
-                _scan = session.execute(
-                    _select(
-                        STLModel.creator, STLModel.source,
-                        STLModel.release_year, STLModel.release_month,
-                        STLModel.sculptor_id, STLModel.collection_id,
-                        STLModel.subcollection_id, STLModel.category_id,
-                        STLModel.release_id, STLModel.scale_id,
-                        STLModel.presupports, STLModel.warning, STLModel.archive_path,
-                    )
-                ).all()
-
-                _year_cnt: dict[int, int] = {}
-                _direct: dict[str, int] = {}
-                _all_warnings: list[str] = []
+                # Per-column GROUP BY queries — each uses the relevant index and
+                # runs entirely inside SQLite (no Python loop over every row).
+                # The old implementation pulled all 13 columns × N rows into
+                # Python and bucketed in a loop; on a 50k-row library that's
+                # 650k value-allocations per filter rebuild.
                 _grp: dict[str, int] = {}
 
-                for (creator, source, yr, mo, sculptor_id, collection_id,
-                     subcollection_id, category_id, release_id, scale_id,
-                     presupports, warning, ap) in _scan:
-                    if creator is not None:
-                        _counts[("creator", creator)] = _counts.get(("creator", creator), 0) + 1
-                        _grp["creator"] = _grp.get("creator", 0) + 1
-                    if source is not None:
-                        _counts[("source", source)] = _counts.get(("source", source), 0) + 1
-                        _grp["source"] = _grp.get("source", 0) + 1
-                    if yr is not None:
-                        _counts[("date_month", (yr, mo))] = _counts.get(("date_month", (yr, mo)), 0) + 1
-                        _year_cnt[yr] = _year_cnt.get(yr, 0) + 1
-                        _grp["date"] = _grp.get("date", 0) + 1
-                    if sculptor_id is not None:
-                        _counts[("sculptor_id", sculptor_id)] = _counts.get(("sculptor_id", sculptor_id), 0) + 1
-                        _grp["sculptor"] = _grp.get("sculptor", 0) + 1
-                    if collection_id is not None:
-                        _counts[("collection_id", collection_id)] = _counts.get(("collection_id", collection_id), 0) + 1
-                        _grp["collection"] = _grp.get("collection", 0) + 1
-                    if subcollection_id is not None:
-                        _counts[("subcollection_id", subcollection_id)] = _counts.get(("subcollection_id", subcollection_id), 0) + 1
-                        _grp["subcollection"] = _grp.get("subcollection", 0) + 1
-                    if category_id is not None:
-                        _counts[("category_id", category_id)] = _counts.get(("category_id", category_id), 0) + 1
-                        _grp["category"] = _grp.get("category", 0) + 1
-                    if release_id is not None:
-                        _counts[("release_id", release_id)] = _counts.get(("release_id", release_id), 0) + 1
-                        _grp["release"] = _grp.get("release", 0) + 1
-                    if scale_id is not None:
-                        _counts[("scale_id", scale_id)] = _counts.get(("scale_id", scale_id), 0) + 1
-                        _grp["scale"] = _grp.get("scale", 0) + 1
-                    if presupports is not None:
-                        _counts[("presupports", presupports)] = _counts.get(("presupports", presupports), 0) + 1
-                        _grp["presupports"] = _grp.get("presupports", 0) + 1
-                    if warning is not None:
-                        _all_warnings.append(warning)
-                    if ap is not None:
-                        _folder = FSPath(ap).parent.as_posix()
-                        _direct[_folder] = _direct.get(_folder, 0) + 1
+                def _count_col(col, kind: str, *, none_filter=True):
+                    """Run GROUP BY on *col* and write {(kind, value): count} into _counts."""
+                    q = session.query(col, _func.count(STLModel.id))
+                    if none_filter:
+                        q = q.filter(col.isnot(None))
+                    q = q.group_by(col)
+                    total = 0
+                    for v, c in q.all():
+                        _counts[(kind, v)] = c
+                        total += c
+                    _grp[kind] = total
 
+                _count_col(STLModel.creator,          "creator")
+                _count_col(STLModel.source,           "source")
+                _count_col(STLModel.sculptor_id,      "sculptor_id")
+                _count_col(STLModel.collection_id,    "collection_id")
+                _count_col(STLModel.subcollection_id, "subcollection_id")
+                _count_col(STLModel.category_id,      "category_id")
+                _count_col(STLModel.release_id,       "release_id")
+                _count_col(STLModel.scale_id,         "scale_id")
+                _count_col(STLModel.presupports,      "presupports")
+
+                # Date is a (year, month) composite — GROUP BY both, then derive year totals.
+                _year_cnt: dict[int, int] = {}
+                _date_total = 0
+                for yr, mo, c in (
+                    session.query(STLModel.release_year, STLModel.release_month, _func.count(STLModel.id))
+                    .filter(STLModel.release_year.isnot(None))
+                    .group_by(STLModel.release_year, STLModel.release_month)
+                    .all()
+                ):
+                    _counts[("date_month", (yr, mo))] = c
+                    _year_cnt[yr] = _year_cnt.get(yr, 0) + c
+                    _date_total += c
                 for yr, c in _year_cnt.items():
                     _counts[("date_year", yr)] = c
+                _grp["date"] = _date_total
+
+                # Warnings — newline-separated text column; we need substring matching.
+                # Pull only the non-null warning column (small subset) and tally in Python.
+                _all_warnings = [
+                    w for (w,) in session.query(STLModel.warning)
+                    .filter(STLModel.warning.isnot(None)).all()
+                ]
                 for _wt in ("Models with presupported stl", "Archive without images",
                             "Nested archives", "Archive with supports",
                             "Archive without printable files"):
                     _counts[("warning", _wt)] = sum(1 for w in _all_warnings if _wt in w)
                 _grp["warning"] = sum(1 for w in _all_warnings if w)
+
+                # Path counts — derived from archive_path; needs Python folder splitting.
+                _direct: dict[str, int] = {}
+                for (ap,) in session.query(STLModel.archive_path).filter(
+                    STLModel.archive_path.isnot(None)
+                ).all():
+                    _folder = FSPath(ap).parent.as_posix()
+                    _direct[_folder] = _direct.get(_folder, 0) + 1
+
                 for k, v in _grp.items():
                     _counts[("group", k)] = v
 

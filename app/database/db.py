@@ -2,12 +2,16 @@
 Database session factory.
 Swap the DB URL in get_engine() to migrate away from SQLite in the future.
 """
+import logging
+import time
 from contextlib import contextmanager
 
 from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import sessionmaker, Session
 
 from app.database.models import Base
+
+logger = logging.getLogger(__name__)
 
 _engine = None
 _SessionFactory = None
@@ -22,7 +26,7 @@ def init_db(db_path: str = "stlLibrary.db") -> None:
     url = f"sqlite:///{db_path}"
     _engine = create_engine(url, connect_args={"check_same_thread": False})
 
-    # Enable WAL mode and foreign keys for SQLite.
+    # Enable WAL mode, foreign keys, and performance pragmas for SQLite.
     # The connect event passes the raw DBAPI connection, so we need an explicit
     # cursor — conn.execute() on a sqlite3.Connection silently no-ops for pragmas.
     @event.listens_for(_engine, "connect")
@@ -31,12 +35,25 @@ def init_db(db_path: str = "stlLibrary.db") -> None:
         try:
             cursor.execute("PRAGMA journal_mode=WAL")
             cursor.execute("PRAGMA foreign_keys=ON")
+            # Safe with WAL; fsyncs only at checkpoint, not every commit (2-5x faster writes).
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            # 64 MB page cache (negative = KiB). Default is ~2 MB.
+            cursor.execute("PRAGMA cache_size=-65536")
+            # Sort buffers / temp tables held in RAM instead of /tmp.
+            cursor.execute("PRAGMA temp_store=MEMORY")
+            # 256 MB memory-mapped I/O window for read-heavy scans.
+            cursor.execute("PRAGMA mmap_size=268435456")
+            # Wait up to 5 s for a held lock before raising OperationalError.
+            cursor.execute("PRAGMA busy_timeout=5000")
+            # Auto-checkpoint when the WAL grows past ~1000 pages (~4 MB).
+            cursor.execute("PRAGMA wal_autocheckpoint=1000")
         finally:
             cursor.close()
 
     _migrate_schema(_engine)
     Base.metadata.create_all(_engine)
     _ensure_columns(_engine)
+    _attach_query_profiler(_engine)
 
     # Initialise LMDB thumbnail store alongside the database
     from app.utils.thumbnailer import init_thumbnail_store
@@ -165,6 +182,80 @@ def _ensure_indexes(engine) -> None:
             "CREATE INDEX IF NOT EXISTS ix_images_model_id "
             "ON images (model_id)"
         ))
+        # Composite indexes covering the browser's hot filter combinations.
+        # SQLite will pick the prefix that matches the WHERE clause, so a single
+        # index on (creator, source) also accelerates plain creator-only filters.
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_models_creator_source "
+            "ON models (creator, source)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_models_sculptor_collection "
+            "ON models (sculptor_id, collection_id)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_models_collection_subcollection "
+            "ON models (collection_id, subcollection_id)"
+        ))
+        # Partial index for the missing-files reconciliation path — only the
+        # tiny minority of rows where is_missing=1 are indexed.
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_models_is_missing "
+            "ON models (is_missing) WHERE is_missing = 1"
+        ))
+        # Helps Image.dhash duplicate scans (find_content_duplicates_dialog).
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_images_dhash "
+            "ON images (dhash) WHERE dhash IS NOT NULL"
+        ))
+        # ANALYZE updates SQLite's stats once after adding indexes so the
+        # planner picks the new ones on the very first query.
+        try:
+            conn.execute(text("ANALYZE"))
+        except Exception:
+            pass
+
+
+def _query_profiling_enabled() -> bool:
+    """Read the SQL profiling toggle from QSettings, default off.
+
+    Imported lazily because QSettings depends on QCoreApplication being created,
+    which may not be true during early init or tests.
+    """
+    try:
+        from PyQt6.QtCore import QSettings
+        return bool(QSettings().value("debug/sql_profiling", False, type=bool))
+    except Exception:
+        return False
+
+
+def _attach_query_profiler(engine) -> None:
+    """Install before/after_cursor_execute hooks that time each statement.
+
+    When the ``debug/sql_profiling`` QSetting is on, every SQL statement is
+    logged at INFO level with its wall-clock duration. Statements taking longer
+    than 100 ms are also logged at WARNING level for easy grep.
+    The check happens per-statement so the flag can be toggled at runtime
+    without restarting the engine.
+    """
+    @event.listens_for(engine, "before_cursor_execute")
+    def _before(_conn, _cursor, _statement, _params, context, _executemany):
+        if _query_profiling_enabled():
+            context._stl_query_start = time.perf_counter()
+
+    @event.listens_for(engine, "after_cursor_execute")
+    def _after(_conn, _cursor, statement, _params, context, _executemany):
+        start = getattr(context, "_stl_query_start", None)
+        if start is None:
+            return
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        # First line of the statement only — full SQL goes to DEBUG.
+        snippet = statement.strip().split("\n", 1)[0][:200]
+        if elapsed_ms >= 100:
+            logger.warning("SQL %7.1f ms  %s", elapsed_ms, snippet)
+        else:
+            logger.info("SQL %7.1f ms  %s", elapsed_ms, snippet)
+        logger.debug("SQL full statement:\n%s", statement)
 
 
 def get_session() -> Session:
