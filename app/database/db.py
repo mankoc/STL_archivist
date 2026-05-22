@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 _engine = None
 _SessionFactory = None
+_models_view = None  # reflected Table for models_view, set by init_db()
 
 
 def init_db(db_path: str = "stlLibrary.db") -> None:
@@ -53,7 +54,12 @@ def init_db(db_path: str = "stlLibrary.db") -> None:
     _migrate_schema(_engine)
     Base.metadata.create_all(_engine)
     _ensure_columns(_engine)
+    _ensure_views(_engine)
     _attach_query_profiler(_engine)
+
+    global _models_view
+    from sqlalchemy import Table, MetaData
+    _models_view = Table("models_view", MetaData(), autoload_with=_engine)
 
     # Initialise LMDB thumbnail store alongside the database
     from app.utils.thumbnailer import init_thumbnail_store
@@ -185,9 +191,16 @@ def _ensure_indexes(engine) -> None:
         # Composite indexes covering the browser's hot filter combinations.
         # SQLite will pick the prefix that matches the WHERE clause, so a single
         # index on (creator, source) also accelerates plain creator-only filters.
+        # A separate ix_models_source covers source-only filter pane scoped counts
+        # because source is the second column of the composite and SQLite won't
+        # use that index for a source-only predicate.
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_models_creator_source "
             "ON models (creator, source)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_models_source "
+            "ON models (source)"
         ))
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_models_sculptor_collection "
@@ -208,12 +221,74 @@ def _ensure_indexes(engine) -> None:
             "CREATE INDEX IF NOT EXISTS ix_images_dhash "
             "ON images (dhash) WHERE dhash IS NOT NULL"
         ))
+        # Covering index for presupports GROUP BY / DISTINCT — avoids full table
+        # scan for the filter pane's presupports section.
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_models_presupports "
+            "ON models (presupports) WHERE presupports IS NOT NULL"
+        ))
         # ANALYZE updates SQLite's stats once after adding indexes so the
         # planner picks the new ones on the very first query.
         try:
             conn.execute(text("ANALYZE"))
         except Exception:
             pass
+
+
+def _ensure_views(engine) -> None:
+    """Create the models_view denormalised view if it doesn't exist.
+
+    The view pre-joins the six FK lookup tables so callers can SELECT from a
+    single relation without spelling out the outer-joins each time.  SQLite
+    inlines views at query time, so there is no storage overhead.
+
+    If the view definition ever changes (new columns, renamed tables) it must
+    be dropped and recreated; bump this function to handle that migration.
+    """
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE VIEW IF NOT EXISTS models_view AS
+            SELECT
+                m.id, m.title, m.creator, m.source,
+                m.release_year, m.release_month,
+                m.archive_path, m.presupports, m.warning,
+                m.archive_size, m.compression_rate,
+                m.sequence, m.created_at,
+                m.sculptor_id, m.collection_id, m.subcollection_id,
+                m.category_id, m.release_id, m.scale_id,
+                m.is_missing, m.archive_hash,
+                scu.name AS sculptor_name,
+                col.name AS collection_name,
+                sub.name AS subcollection_name,
+                cat.name AS category_name,
+                rel.name AS release_name,
+                scl.name AS scale_name
+            FROM models m
+            LEFT JOIN sculptors      scu ON m.sculptor_id      = scu.id
+            LEFT JOIN collections    col ON m.collection_id    = col.id
+            LEFT JOIN subcollections sub ON m.subcollection_id = sub.id
+            LEFT JOIN categories     cat ON m.category_id      = cat.id
+            LEFT JOIN releases       rel ON m.release_id       = rel.id
+            LEFT JOIN scales         scl ON m.scale_id         = scl.id
+        """))
+
+
+def get_models_view():
+    """Return the reflected ``models_view`` Table object.
+
+    The Table is built once in :func:`init_db` and cached at module level.
+    Use its ``.c`` accessor to build SQLAlchemy SELECT/WHERE expressions::
+
+        mv = get_models_view()
+        stmt = sa_select(mv.c.id, mv.c.title, mv.c.sculptor_name)
+               .where(mv.c.sculptor_id.in_([1, 2, 3]))
+
+    Raises:
+        RuntimeError: If ``init_db()`` has not been called yet.
+    """
+    if _models_view is None:
+        raise RuntimeError("Database not initialised. Call init_db() first.")
+    return _models_view
 
 
 def _query_profiling_enabled() -> bool:

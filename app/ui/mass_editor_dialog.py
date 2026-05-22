@@ -16,6 +16,16 @@ from PyQt6.QtGui import QCursor
 
 from app.database.db import session_scope, get_session
 from app.database.models import STLModel, Tag, Release, Collection, Subcollection, Category, Scale, Sculptor, model_tags
+from app.database.helpers import (
+    LookupCache,
+    get_or_create_category,
+    get_or_create_collection,
+    get_or_create_release,
+    get_or_create_scale,
+    get_or_create_sculptor,
+    get_or_create_subcollection,
+    get_or_create_tag,
+)
 import re
 
 from app.utils.path_pattern import (
@@ -618,6 +628,7 @@ class MassEditorDialog(QDialog):
         tags_tmpl  = self._tags_edit.text()
         apply_tags = "tags" in clearing or bool(tags_tmpl.strip())
 
+        _cache: LookupCache = {}
         with session_scope() as session:
             for mid in self._model_ids:
                 model: STLModel = session.get(STLModel, mid)
@@ -652,65 +663,36 @@ class MassEditorDialog(QDialog):
                 elif release_tmpl:
                     release_name = self._resolve_tokens(release_tmpl, ctx)
                     if release_name:
-                        release_obj = session.query(Release).filter_by(name=release_name).first()
-                        if release_obj is None:
-                            release_obj = Release(name=release_name)
-                            session.add(release_obj)
-                            session.flush()
-                        model.release = release_obj
+                        model.release = get_or_create_release(session, release_name, cache=_cache)
 
                 if "collection" in clearing:
                     model.collection    = None
                     model.subcollection = None
                 elif collection_name:
-                    col = session.query(Collection).filter_by(name=collection_name).first()
-                    if col is None:
-                        col = Collection(name=collection_name)
-                        session.add(col)
-                        session.flush()
+                    col = get_or_create_collection(session, collection_name, cache=_cache)
                     model.collection = col
 
                     if "subcollection" in clearing:
                         model.subcollection = None
                     elif subcollection_name:
-                        sub = session.query(Subcollection).filter_by(
-                            name=subcollection_name, collection_id=col.id
-                        ).first()
-                        if sub is None:
-                            sub = Subcollection(name=subcollection_name, collection_id=col.id)
-                            session.add(sub)
-                            session.flush()
-                        model.subcollection = sub
+                        model.subcollection = get_or_create_subcollection(
+                            session, subcollection_name, col.id, cache=_cache
+                        )
 
                 if "category" in clearing:
                     model.category = None
                 elif category_name:
-                    cat = session.query(Category).filter_by(name=category_name).first()
-                    if cat is None:
-                        cat = Category(name=category_name)
-                        session.add(cat)
-                        session.flush()
-                    model.category = cat
+                    model.category = get_or_create_category(session, category_name, cache=_cache)
 
                 sculptor_name = self._sculptor_edit.currentText().strip()
                 if "sculptor" in clearing:
                     model.sculptor = None
                 elif sculptor_name:
-                    sc = session.query(Sculptor).filter_by(name=sculptor_name).first()
-                    if sc is None:
-                        sc = Sculptor(name=sculptor_name)
-                        session.add(sc)
-                        session.flush()
-                    model.sculptor = sc
+                    model.sculptor = get_or_create_sculptor(session, sculptor_name, cache=_cache)
 
                 if apply_scale:
                     if scale_value:
-                        sc = session.query(Scale).filter_by(name=scale_value).first()
-                        if sc is None:
-                            sc = Scale(name=scale_value)
-                            session.add(sc)
-                            session.flush()
-                        model.scale = sc
+                        model.scale = get_or_create_scale(session, scale_value, cache=_cache)
                     else:
                         model.scale = None
 
@@ -722,15 +704,10 @@ class MassEditorDialog(QDialog):
                         model.tags.clear()
                     else:
                         resolved_tags = self._resolve_tokens(tags_tmpl, ctx)
-                        tag_names = [t.strip().lower() for t in resolved_tags.split(",") if t.strip()]
+                        tag_names = [t.strip() for t in resolved_tags.split(",") if t.strip()]
                         model.tags.clear()
                         for name in tag_names:
-                            tag = session.query(Tag).filter_by(name=name).first()
-                            if tag is None:
-                                tag = Tag(name=name)
-                                session.add(tag)
-                                session.flush()
-                            model.tags.append(tag)
+                            model.tags.append(get_or_create_tag(session, name, cache=_cache))
 
         find_str = self._find_edit.text()
         target_fields = [f for f, cb in self._fnr_fields.items() if cb.isChecked()]
@@ -747,6 +724,7 @@ class MassEditorDialog(QDialog):
             simple_fields = [f for f in target_fields if f not in ("collection", "subcollection")]
             do_collection    = "collection"    in target_fields
             do_subcollection = "subcollection" in target_fields
+            _fnr_cache: LookupCache = {}
             with session_scope() as session:
                 for mid in self._model_ids:
                     model = session.get(STLModel, mid)
@@ -762,24 +740,16 @@ class MassEditorDialog(QDialog):
                     if do_collection and model.collection:
                         new_name = pattern.sub(replace_str, model.collection.name)
                         if new_name and new_name != model.collection.name:
-                            col = session.query(Collection).filter_by(name=new_name).first()
-                            if col is None:
-                                col = Collection(name=new_name)
-                                session.add(col)
-                                session.flush()
-                            model.collection = col
+                            model.collection = get_or_create_collection(
+                                session, new_name, cache=_fnr_cache
+                            )
                     if do_subcollection and model.subcollection:
                         new_name = pattern.sub(replace_str, model.subcollection.name)
                         if new_name and new_name != model.subcollection.name:
                             parent_id = model.collection.id if model.collection else None
-                            sub = session.query(Subcollection).filter_by(
-                                name=new_name, collection_id=parent_id
-                            ).first()
-                            if sub is None and parent_id is not None:
-                                sub = Subcollection(name=new_name, collection_id=parent_id)
-                                session.add(sub)
-                                session.flush()
-                            if sub:
-                                model.subcollection = sub
+                            if parent_id is not None:
+                                model.subcollection = get_or_create_subcollection(
+                                    session, new_name, parent_id, cache=_fnr_cache
+                                )
 
         self.accept()
