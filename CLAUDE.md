@@ -124,6 +124,9 @@ from app.ui.config_dialog import get_warn_presupported_stl
 
 Do not hoist these to module-level without first ensuring the import chain is safe.
 
+## Documentation
+Always update the readme, help and changelog with the changes that are made.
+
 ## Test Conventions
 
 - Framework: `pytest`

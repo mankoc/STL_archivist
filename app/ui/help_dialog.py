@@ -464,16 +464,29 @@ Crawler dialog back.</p>
 
 <table>
   <tr><th>Token</th><th>Extracted into</th></tr>
-  <tr><td><code>&#123;name&#125;</code></td><td>Model title</td></tr>
-  <tr><td><code>&#123;author&#125;</code></td><td>Author</td></tr>
   <tr><td><code>&#123;source&#125;</code></td><td>Source platform</td></tr>
-  <tr><td><code>&#123;sculptor&#125;</code></td><td>Sculptor</td></tr>
-  <tr><td><code>&#123;category&#125;</code></td><td>Category</td></tr>
-  <tr><td><code>&#123;subcategory&#125;</code></td><td>Subcategory</td></tr>
-  <tr><td><code>&#123;release&#125;</code></td><td>Release name</td></tr>
-  <tr><td><code>&#123;date&#125;</code></td><td>Release date</td></tr>
+  <tr><td><code>&#123;creator&#125;</code> / <code>&#123;author&#125;</code></td><td>Creator / designer name</td></tr>
+  <tr><td><code>&#123;title&#125;</code> / <code>&#123;name&#125;</code></td><td>Model title</td></tr>
+  <tr><td><code>&#123;date&#125;</code> / <code>&#123;month&#125;</code></td><td>Release date (<code>YYYY-MM</code> or <code>YYYY</code>)</td></tr>
+  <tr><td><code>&#123;sculptor&#125;</code></td><td>Sculptor (looked up or created)</td></tr>
+  <tr><td><code>&#123;collection&#125;</code> / <code>&#123;category&#125;</code></td><td>Collection</td></tr>
+  <tr><td><code>&#123;subcollection&#125;</code> / <code>&#123;subcategory&#125;</code></td><td>Subcollection / variant</td></tr>
+  <tr><td><code>&#123;release&#125;</code></td><td>Release / bundle name</td></tr>
+  <tr><td><code>&#123;sequence&#125;</code></td><td>Position in a series</td></tr>
+  <tr><td><code>&#123;url&#125;</code></td><td>Source URL</td></tr>
   <tr><td><code>*</code></td><td>(ignored segment)</td></tr>
 </table>
+
+<h3>Prefix modifier <code>{token:n}</code></h3>
+<p>Append <code>:n</code> to any token to use only the first <em>n</em> characters of its
+value when rendering a destination path (e.g. in the file-sort dialog).
+This is useful for creating initial-letter sub-folders:</p>
+<pre>
+&#123;creator:1&#125;/&#123;creator&#125;/&#123;title&#125;
+
+With creator &quot;Sanix&quot; → S/Sanix/&lt;title&gt;</pre>
+<div class="tip">The <code>:n</code> modifier applies to file-move output only.
+When parsing an existing path for metadata extraction the full segment is captured regardless.</div>
 
 <h3>Pattern Examples</h3>
 <pre>

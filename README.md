@@ -146,17 +146,31 @@ Scale values (e.g. `28mm`, `32mm`, `1/35`) are detected automatically during cra
 
 ## Path Patterns
 
-The crawler can parse structured folder/file paths to extract metadata automatically. Define a pattern using placeholders that match segments of the path relative to the crawl root.
+The crawler and the file-sort feature can parse and render structured folder/file paths using a pattern syntax. Define a pattern with `{token}` placeholders that match folder segments.
 
-| Placeholder | Maps to |
-|---|---|
-| `{sculptor}` | Sculptor name |
-| `{release}` | Release name |
-| `{title}` | Model title |
-| `{source}` | Source/distributor (e.g. Patreon, MyMiniFactory) |
-| `{subtype}` | Model subtype (e.g. Marvel, DC) |
-| `{sequence}` | Position in a series |
-| `*` | Ignored segment |
+| Placeholder | Aliases | Maps to |
+|---|---|---|
+| `{source}` | | Distribution / shop name |
+| `{creator}` | `{author}` | Creator / designer name |
+| `{title}` | `{name}` | Model title |
+| `{date}` | `{month}` | Release date (`YYYY-MM` or `YYYY`) |
+| `{sculptor}` | | Sculptor (looked up or created) |
+| `{collection}` | `{category}` | Collection |
+| `{subcollection}` | `{subcategory}` | Subcollection / variant |
+| `{release}` | | Release / bundle name |
+| `{sequence}` | | Position in a series |
+| `{url}` | | Source URL |
+| `*` | | Ignored segment (any value) |
+
+### Prefix modifier `{token:n}`
+
+Append `:<n>` to any token to use only the first *n* characters of its value. This is useful when sorting files into initial-letter buckets:
+
+```
+{creator:1}/{creator}/{title}
+```
+
+With creator `"Sanix"` this renders as `S/Sanix/<title>`.
 
 **Example** — if your archives are organised as:
 
