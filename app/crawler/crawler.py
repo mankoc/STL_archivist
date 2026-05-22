@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtCore import QThread, pyqtSignal
+from sqlalchemy import select as sa_select
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -117,11 +118,15 @@ class CrawlerWorker(QThread):
             with session_scope() as session:
                 to_extract, existing_map = self._phase_diff(batch, hashes, session)
                 contents_map, all_names_map, stl_info_map, uncompressed_map = self._phase_extract(to_extract)
+                # Fresh per-batch lookup cache so repeated sculptor/tag/scale
+                # references within the same batch skip redundant SELECTs.
+                self._lookup_cache: dict = {}
                 stopped = self._phase_upsert(
                     batch, batch_start, total, hashes,
                     existing_map, contents_map, all_names_map, stl_info_map, uncompressed_map,
                     session, modified_folders,
                 )
+                self._lookup_cache = {}
 
             if stopped or self._stop_requested:
                 break
@@ -178,28 +183,45 @@ class CrawlerWorker(QThread):
         # match the filesystem, assume unchanged and reuse the stored hash.
         hashes: dict[Path, str] = {}
         to_hash: list[Path] = []
-        with session_scope() as session:
-            for p in batch:
-                pstr = str(p)
-                m = session.query(STLModel).filter_by(archive_path=pstr).first()
-                try:
-                    st = p.stat()
-                    fs_size = int(st.st_size)
-                    fs_mtime = int(st.st_mtime_ns)
-                except Exception:
-                    fs_size = None
-                    fs_mtime = None
 
-                if (not self._config.force_rescan
-                        and m is not None
-                        and m.archive_size is not None
-                        and m.archive_mtime_ns is not None
-                        and fs_size == m.archive_size
-                        and fs_mtime == m.archive_mtime_ns):
-                    hashes[p] = m.archive_hash
-                    continue
-                # Otherwise schedule full hash
-                to_hash.append(p)
+        # Stat all files in parallel — N filesystem calls instead of N serial.
+        def _stat_one(p: Path) -> tuple[int | None, int | None]:
+            try:
+                st = p.stat()
+                return int(st.st_size), int(st.st_mtime_ns)
+            except Exception:
+                return None, None
+
+        stats: dict[Path, tuple[int | None, int | None]] = {}
+        if batch:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                for p, res in zip(batch, pool.map(_stat_one, batch)):
+                    stats[p] = res
+
+        # Single batched DB lookup instead of one query per archive (was N+1).
+        batch_strs = [str(p) for p in batch]
+        existing: dict[str, tuple[str, int | None, int | None]] = {}
+        with session_scope() as session:
+            for ap, ah, asize, amtime in session.execute(
+                sa_select(
+                    STLModel.archive_path, STLModel.archive_hash,
+                    STLModel.archive_size, STLModel.archive_mtime_ns,
+                ).where(STLModel.archive_path.in_(batch_strs))
+            ).all():
+                existing[ap] = (ah, asize, amtime)
+
+        for p in batch:
+            fs_size, fs_mtime = stats.get(p, (None, None))
+            row = existing.get(str(p))
+            if (not self._config.force_rescan
+                    and row is not None
+                    and row[1] is not None
+                    and row[2] is not None
+                    and fs_size == row[1]
+                    and fs_mtime == row[2]):
+                hashes[p] = row[0]
+                continue
+            to_hash.append(p)
 
         if to_hash:
             hash_fn = partial(archive_hash, unrar_path=self._config.unrar_path)
@@ -455,24 +477,38 @@ class CrawlerWorker(QThread):
         missing: list[dict] = []
         seen_ids: set[int] = set()
         with session_scope() as session:
-            for mid, ap, ah, asize, already_missing in session.query(
+            rows = session.query(
                 STLModel.id, STLModel.archive_path,
                 STLModel.archive_hash, STLModel.archive_size,
                 STLModel.is_missing,
-            ).all():
-                if not ap:
-                    continue
-                absent = not Path(ap).exists()
-                if absent or already_missing:
-                    if mid not in seen_ids:
-                        seen_ids.add(mid)
-                        missing.append({
-                            "id":       mid,
-                            "path":     ap,
-                            "hash":     ah or "",
-                            "filename": Path(ap).name,
-                            "size":     asize,
-                        })
+            ).all()
+
+        # Parallelise the filesystem existence check — was N serial syscalls.
+        # Rows already flagged is_missing skip the syscall entirely.
+        to_check = [(mid, ap) for mid, ap, _ah, _asize, im in rows if ap and not im]
+
+        absent_ids: set[int] = set()
+        if to_check:
+            workers = max(4, self._config.max_workers)
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                results = pool.map(lambda t: (t[0], not Path(t[1]).exists()), to_check)
+                for mid, is_absent in results:
+                    if is_absent:
+                        absent_ids.add(mid)
+
+        for mid, ap, ah, asize, already_missing in rows:
+            if not ap:
+                continue
+            if (mid in absent_ids) or already_missing:
+                if mid not in seen_ids:
+                    seen_ids.add(mid)
+                    missing.append({
+                        "id":       mid,
+                        "path":     ap,
+                        "hash":     ah or "",
+                        "filename": Path(ap).name,
+                        "size":     asize,
+                    })
         if missing:
             msg = (f"Found {len(missing)} missing archive(s) — "
                    "will check for moved files after crawl.")
@@ -753,20 +789,21 @@ class CrawlerWorker(QThread):
         self._assign_metadata(model, meta, session)
 
         cfg = self._config
+        cache = getattr(self, "_lookup_cache", None)
         if cfg.force_creator:
             model.creator = cfg.force_creator
         if cfg.force_source:
             model.source = cfg.force_source
         if cfg.force_sculptor:
-            model.sculptor = get_or_create_sculptor(session, cfg.force_sculptor)
+            model.sculptor = get_or_create_sculptor(session, cfg.force_sculptor, cache=cache)
         if cfg.force_category:
-            model.category = get_or_create_category(session, cfg.force_category)
+            model.category = get_or_create_category(session, cfg.force_category, cache=cache)
         if cfg.force_collection:
-            model.collection = get_or_create_collection(session, cfg.force_collection)
+            model.collection = get_or_create_collection(session, cfg.force_collection, cache=cache)
         if cfg.force_release:
-            model.release = get_or_create_release(session, cfg.force_release)
+            model.release = get_or_create_release(session, cfg.force_release, cache=cache)
         if cfg.force_scale:
-            model.scale = get_or_create_scale(session, cfg.force_scale)
+            model.scale = get_or_create_scale(session, cfg.force_scale, cache=cache)
         if cfg.force_date:
             _year, _month = parse_release_date(cfg.force_date)
             if _year:
@@ -793,7 +830,7 @@ class CrawlerWorker(QThread):
         model.tags.clear()
         for tag_name in meta.tags:
             if tag_name.strip():
-                model.tags.append(get_or_create_tag(session, tag_name))
+                model.tags.append(get_or_create_tag(session, tag_name, cache=cache))
         logger.debug("  Tags: %d → %d (%s)",
                      prev_tag_count, len(model.tags),
                      ", ".join(t.name for t in model.tags) or "none")
@@ -895,7 +932,8 @@ class CrawlerWorker(QThread):
         scales = detect_scale([archive_path.name] + all_names)
         logger.debug("  Scales detected: %s", scales or "none")
         if scales:
-            model.scale = get_or_create_scale(session, scales[0])
+            cache = getattr(self, "_lookup_cache", None)
+            model.scale = get_or_create_scale(session, scales[0], cache=cache)
 
     def _assign_metadata(
         self,
@@ -919,7 +957,8 @@ class CrawlerWorker(QThread):
         model.description   = meta.description
 
         if meta.release:
-            model.release = get_or_create_release(session, meta.release)
+            cache = getattr(self, "_lookup_cache", None)
+            model.release = get_or_create_release(session, meta.release, cache=cache)
 
     def _update_thumbnails(
         self,
