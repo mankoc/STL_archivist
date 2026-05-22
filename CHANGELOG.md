@@ -2,6 +2,23 @@
 
 ## 2026.21 — 2026-05-22
 
+### Filter pane — path filter performance (~24× faster scoped counts)
+
+When a folder node is selected in the filter pane the browser rebuilds scoped
+counts for all 13 filter sections.  Each scoped-count query previously embedded
+`replace(archive_path, '\\', '/') LIKE ?` inline; SQLite cannot index a function
+call on the column, so every query did a full table scan (~37 ms each, ×26
+queries ≈ ~960 ms total per rebuild).
+
+The fix materialises the matching model IDs in a single LIKE pass, then all
+subsequent queries use `WHERE id IN (…)` — a primary-key lookup.  Scoped
+filter-pane refresh with an active folder selection now costs ~40 ms instead
+of ~960 ms.
+
+**File:** [app/ui/browser_tab.py:2485-2525](app/ui/browser_tab.py#L2485-L2525)
+
+---
+
 ### Path Patterns — prefix modifier
 
 - **`{token:n}` modifier** — any path-pattern token can now be followed by `:<n>` to emit

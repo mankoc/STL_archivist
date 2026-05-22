@@ -2481,6 +2481,22 @@ class BrowserTab(QWidget):
             # section's own).  Using sa_select().subquery() means the DB sees
             # "WHERE id IN (SELECT id FROM models WHERE …)" — a proper SQL
             # subquery — instead of a huge IN (?, ?, …) parameter list.
+
+            # Materialise path-filter IDs once: replace(archive_path) LIKE can't
+            # use an index, so repeating the scan once per scoped-count query is
+            # expensive (~37 ms × 26 queries).  A single LIKE pass gives us a
+            # plain integer list; subsequent queries use the primary-key index.
+            _path_ids_mat: list[int] | None = None
+            if _has_path:
+                _norm_m = func.replace(STLModel.archive_path, "\\", "/")
+                _pq = sa_select(STLModel.id)
+                if path_inc:
+                    _pq = _pq.where(or_(*(_norm_m.like(p.rstrip("/") + "/%") for p in _prune_ancestor_paths(path_inc))))
+                if path_exc:
+                    _pq = _pq.where(~or_(*(_norm_m.like(p.rstrip("/") + "/%") for p in _prune_ancestor_paths(path_exc))))
+                with session_scope() as _ms:
+                    _path_ids_mat = [r[0] for r in _ms.execute(_pq).all()]
+
             def _run_id_subquery(
                 skip_creator=False, skip_type=False, skip_path=False,
                 skip_tag=False, skip_date=False, skip_sculptor=False,
@@ -2499,11 +2515,14 @@ class BrowserTab(QWidget):
                     if tag_inc:     q = q.where(STLModel.tags.any(Tag.name.in_(tag_inc)))
                     if tag_exc:     q = q.where(~STLModel.tags.any(Tag.name.in_(tag_exc)))
                 if not skip_path:
-                    _n = func.replace(STLModel.archive_path, "\\", "/")
-                    if path_inc:
-                        q = q.where(or_(*(_n.like(p.rstrip("/") + "/%") for p in _prune_ancestor_paths(path_inc))))
-                    if path_exc:
-                        q = q.where(~or_(*(_n.like(p.rstrip("/") + "/%") for p in _prune_ancestor_paths(path_exc))))
+                    if _path_ids_mat is not None:
+                        q = q.where(STLModel.id.in_(_path_ids_mat))
+                    else:
+                        _n = func.replace(STLModel.archive_path, "\\", "/")
+                        if path_inc:
+                            q = q.where(or_(*(_n.like(p.rstrip("/") + "/%") for p in _prune_ancestor_paths(path_inc))))
+                        if path_exc:
+                            q = q.where(~or_(*(_n.like(p.rstrip("/") + "/%") for p in _prune_ancestor_paths(path_exc))))
                 if not skip_date:
                     def _dc(pairs):
                         return [and_(STLModel.release_year == y, STLModel.release_month == mo) if mo is not None else (STLModel.release_year == y) for y, mo in pairs]
