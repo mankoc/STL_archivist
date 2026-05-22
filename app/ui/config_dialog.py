@@ -967,6 +967,17 @@ class ConfigDialog(QDialog):
             ),
         )
 
+        self._sql_profiling_check = QCheckBox("Log SQL statement timings")
+        form.addRow("", self._sql_profiling_check)
+        form.addRow(
+            "",
+            QLabel(
+                "<small>Logs the duration of every SQL statement. "
+                "Statements taking 100 ms or longer are also written at WARNING level "
+                "for easy <tt>grep</tt>. Takes effect immediately without restarting.</small>"
+            ),
+        )
+
         layout.addWidget(group)
         layout.addStretch()
         return page
@@ -1553,6 +1564,10 @@ class ConfigDialog(QDialog):
 
         self._debug_menu_check.setChecked(get_debug_menu_enabled())
         self._logging_enabled_check.setChecked(get_logging_enabled())
+        from PyQt6.QtCore import QSettings as _QSettings
+        self._sql_profiling_check.setChecked(
+            _QSettings().value("debug/sql_profiling", False, type=bool)
+        )
 
         # Load hotkeys
         from PyQt6.QtGui import QKeySequence
@@ -1626,6 +1641,10 @@ class ConfigDialog(QDialog):
 
         # Re-apply appearance so font/color changes take effect immediately
         apply_color_scheme(selected_scheme)
+
+        # SQL profiling is read per-statement by db.py from QSettings — write it there.
+        from PyQt6.QtCore import QSettings as _QSettings
+        _QSettings().setValue("debug/sql_profiling", self._sql_profiling_check.isChecked())
 
         # Apply logging toggle immediately so the change doesn't require a restart
         import logging as _logging
