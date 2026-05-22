@@ -297,3 +297,48 @@ def test_render_path_pattern_unknown_date():
     m = _StubModel(release_year=None, release_month=None, title="T")
     out = render_path_pattern("/{date}/{title}", m)
     assert "_unknown" in out
+
+
+# ---------------------------------------------------------------------------
+# render_path_pattern — :n prefix modifier
+# ---------------------------------------------------------------------------
+
+def test_render_path_pattern_prefix_modifier_single_char():
+    m = _StubModel(creator="Sanix", title="Model")
+    out = render_path_pattern("/{creator:1}/{creator}/{title}", m)
+    assert out == "/S/Sanix/Model"
+
+
+def test_render_path_pattern_prefix_modifier_multi_char():
+    m = _StubModel(creator="Sanix", title="Model")
+    out = render_path_pattern("/{creator:3}/{creator}", m)
+    assert out == "/San/Sanix"
+
+
+def test_render_path_pattern_prefix_modifier_longer_than_value():
+    # :n larger than the value length → full value used
+    m = _StubModel(creator="AB", title="T")
+    out = render_path_pattern("/{creator:10}/{creator}", m)
+    assert out == "/AB/AB"
+
+
+def test_render_path_pattern_prefix_modifier_unknown_field():
+    # _unknown truncated to 1 char
+    m = _StubModel(creator=None, title="T")
+    out = render_path_pattern("/{creator:1}/{title}", m)
+    assert out == "/_/T"
+
+
+def test_parse_path_with_prefix_modifier_token():
+    # :n is stripped when building the regex; the captured value is unrestricted
+    result = parse_path("/{creator:1}/{creator}", "/S/Sanix")
+    # First segment captured by {creator:1} regex group (1-char match)
+    # Second by {creator} — whichever wins, creator key must be present
+    assert "creator" in result
+
+
+def test_pattern_to_regex_with_prefix_modifier():
+    rx = pattern_to_regex("{creator:1}/{creator}")
+    assert rx is not None
+    m = rx.search("S/Sanix")
+    assert m is not None

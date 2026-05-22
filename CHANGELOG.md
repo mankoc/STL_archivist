@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026.21 — 2026-05-22
+
+### Path Patterns — prefix modifier
+
+- **`{token:n}` modifier** — any path-pattern token can now be followed by `:<n>` to emit
+  only the first *n* characters of the field's value when rendering a destination path.
+  This is useful for grouping files into initial-letter buckets without a separate tool:
+  ```
+  {creator:1}/{creator}/{title}
+  ```
+  With creator `"Sanix"` the above renders as `S/Sanix/<title>`.
+- The modifier applies to file-move output (`render_path_pattern`); when parsing an existing
+  path for metadata extraction the full segment is captured as usual.
+- `PATTERN_HELP` (the inline tooltip shown in the Sort Files and Crawler dialogs) updated
+  with an example.
+- README **Path Patterns** section updated with the full token table and modifier docs.
+- Help dialog token table updated with all current aliases; new *Prefix modifier* section added.
+
+---
+
 ## 2026.21 — 2026-05-20
 
 ### Crawler — Move tracking improvements

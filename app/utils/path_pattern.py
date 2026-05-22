@@ -107,6 +107,8 @@ PATTERN_HELP = (
     "<tr><td><code>{url}</code></td><td>&nbsp;–&nbsp;</td><td>source URL</td></tr>"
     "<tr><td><code>*</code></td><td>&nbsp;–&nbsp;</td><td>ignored segment (any value)</td></tr>"
     "</table><br>"
+    "<b>Prefix modifier:</b> <code>{token:n}</code> emits only the first <i>n</i> characters of the value.<br>"
+    "Example: <code>{creator:1}/{creator}</code> with creator <i>Sanix</i> → <code>S/Sanix</code><br><br>"
     "<b>Example:</b> <code>/{source}/{creator}/*/{name}</code>"
 )
 
@@ -120,12 +122,12 @@ def pattern_to_regex(pattern: str) -> re.Pattern | None:
     Duplicate token names get a numeric suffix so the regex stays valid.
     Returns None when the pattern contains no tokens or wildcards.
     """
-    has_placeholder = bool(re.search(r"\{(\w+)\}|\*", pattern))
+    has_placeholder = bool(re.search(r"\{(\w+(?::\d+)?)\}|\*", pattern))
     if not has_placeholder:
         return None
 
     seen: dict[str, int] = {}
-    parts = re.split(r"(\{\w+\}|\*)", pattern)
+    parts = re.split(r"(\{\w+(?::\d+)?\}|\*)", pattern)
     # Identify the last token placeholder so only it gets greedy matching;
     # earlier tokens use non-greedy to enforce left-to-right consumption.
     placeholder_indices = [
@@ -139,7 +141,8 @@ def pattern_to_regex(pattern: str) -> re.Pattern | None:
         if part == "*":
             regex_parts.append("[^/]+")
         elif part.startswith("{") and part.endswith("}"):
-            token = part[1:-1]
+            token_full = part[1:-1]
+            token = token_full.split(":")[0]  # strip :n modifier for group name
             count = seen.get(token, 0)
             seen[token] = count + 1
             group = token if count == 0 else f"{token}_{count}"
@@ -287,15 +290,19 @@ def render_path_pattern(pattern: str, model) -> str:
         "release":       _safe(model.release.name    if model.release     else None),
     }
 
-    # Replace each {token} with its value, sanitising directory-separator chars
+    # Replace each {token} or {token:n} with its value, sanitising directory-separator chars
     def _sub(m: re.Match) -> str:
-        token = m.group(1).lower()
+        raw_token = m.group(1)
+        token_parts = raw_token.split(":", 1)
+        token = token_parts[0].lower()
+        limit = int(token_parts[1]) if len(token_parts) > 1 else None
         raw = values.get(token, "_unknown")
-        # Strip characters unsafe in path components
+        if limit is not None:
+            raw = raw[:limit]
         safe = re.sub(r'[\\/:*?"<>|]', "_", raw)
         return safe
 
-    rendered = re.sub(r"\{(\w+)\}", _sub, pattern)
+    rendered = re.sub(r"\{(\w+(?::\d+)?)\}", _sub, pattern)
     return rendered
 
 
