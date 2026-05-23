@@ -1679,19 +1679,26 @@ class BrowserTab(QWidget):
                 _sub_scope = _scope("subcollection")
                 if _sub_scope is not None:
                     _scoped_sub_ids = {sid for (sid,) in session.query(STLModel.subcollection_id).filter(STLModel.id.in_(_sub_scope)).filter(STLModel.subcollection_id.isnot(None)).distinct()}
-                for col in session.query(Collection).order_by(Collection.name).all():
-                    subs = (session.query(Subcollection)
-                            .filter_by(collection_id=col.id)
-                            .order_by(Subcollection.name).all())
-                    if _scoped_sub_ids is not None:
-                        subs = [s for s in subs if s.id in _scoped_sub_ids]
-                    if not subs:
+                _col_subs: dict[int, list] = {}
+                _col_names: dict[int, str] = {}
+                for col_name, col_id, sub_name, sub_id in (
+                    session.query(Collection.name, Collection.id, Subcollection.name, Subcollection.id)
+                    .join(Subcollection, Subcollection.collection_id == Collection.id)
+                    .order_by(Collection.name, Subcollection.name)
+                    .all()
+                ):
+                    if _scoped_sub_ids is not None and sub_id not in _scoped_sub_ids:
                         continue
-                    col_node = QTreeWidgetItem([col.name])
+                    if col_id not in _col_subs:
+                        _col_subs[col_id] = []
+                        _col_names[col_id] = col_name
+                    _col_subs[col_id].append((sub_name, sub_id))
+                for col_id, subs in _col_subs.items():
+                    col_node = QTreeWidgetItem([_col_names[col_id]])
                     col_node.setFlags(Qt.ItemFlag.ItemIsEnabled)
                     subcol_section.addChild(col_node)
-                    for sub in subs:
-                        col_node.addChild(_make_leaf(sub.name, ("subcollection_id", sub.id), _c(("subcollection_id", sub.id))))
+                    for sub_name, sub_id in subs:
+                        col_node.addChild(_make_leaf(sub_name, ("subcollection_id", sub_id), _c(("subcollection_id", sub_id))))
 
             if show_category:
                 category_item = _make_leaf("Category", ("group", "category"), _c(("group", "category")))
