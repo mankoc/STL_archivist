@@ -163,6 +163,7 @@ class STLModel(Base):
     url              = Column(Text)
     description      = Column(Text)
     archive_path     = Column(Text, unique=True, nullable=False)
+    archive_folder   = Column(String(512), nullable=True, index=True)
     archive_hash     = Column(String(64), nullable=False, index=True)
     # Cached filesystem metadata to speed change detection without opening archives
     archive_size     = Column(Integer, nullable=True)

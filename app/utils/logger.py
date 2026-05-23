@@ -3,10 +3,15 @@ Logging setup — writes to a rotating, gzip-compressed log file in the same
 directory as the database.  Compression is applied automatically when the active
 log file exceeds MAX_LOG_SIZE bytes; up to BACKUP_COUNT compressed copies are
 kept.
+
+The file handler is wrapped in a QueueHandler + QueueListener so log calls on
+any thread (crawler, thumb loader, etc.) never block waiting for disk I/O.
 """
+import atexit
 import gzip
 import logging
 import logging.handlers
+import queue
 import shutil
 from pathlib import Path
 
@@ -52,24 +57,32 @@ def setup_logging(data_dir: Path | str | None = None) -> None:
     log_path = get_log_path(data_dir)
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
-    handler = logging.handlers.RotatingFileHandler(
+    file_handler = logging.handlers.RotatingFileHandler(
         str(log_path),
         maxBytes=MAX_LOG_SIZE,
         backupCount=BACKUP_COUNT,
         encoding="utf-8",
     )
-    handler.rotator = _rotator
-    handler.namer   = _namer
+    file_handler.rotator = _rotator
+    file_handler.namer   = _namer
 
     fmt = logging.Formatter(
         "%(asctime)s %(levelname)-8s %(name)-30s %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
-    handler.setFormatter(fmt)
+    file_handler.setFormatter(fmt)
+
+    # Wrap the file handler in a background-thread listener so log calls on
+    # the GUI or crawler threads never block on disk I/O.
+    log_queue: queue.Queue = queue.Queue(-1)
+    queue_handler = logging.handlers.QueueHandler(log_queue)
+    listener = logging.handlers.QueueListener(log_queue, file_handler, respect_handler_level=True)
+    listener.start()
+    atexit.register(listener.stop)
 
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
-    root.addHandler(handler)
+    root.addHandler(queue_handler)
 
     # Keep a minimal stderr handler at WARNING level so errors still surface
     # when running from a terminal.
