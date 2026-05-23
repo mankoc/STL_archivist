@@ -278,8 +278,13 @@ class CrawlerWorker(QThread):
                 logger.debug("  HASH BACKFILLED: %s", p.name)
             elif ex.archive_hash != hashes[p]:
                 to_extract.append(p)
-                logger.debug("  CHANGED: %s (old=%s… new=%s…)",
-                             p.name, ex.archive_hash[:8], hashes[p][:8])
+                _old = ex.archive_hash or ""
+                _new = hashes[p] or ""
+                logger.info(
+                    "  CHANGED: %s  old=%s  new=%s%s",
+                    p.name, _old, _new,
+                    "  [fallback fingerprint]" if _new.startswith("fallback:") else "",
+                )
                 try:
                     st = p.stat()
                     ex.archive_size = int(st.st_size)
@@ -288,7 +293,7 @@ class CrawlerWorker(QThread):
                     session.flush()
                 except Exception:
                     pass
-            elif store_stl and not ex.stl_files:
+            elif store_stl and not ex.stl_files and ex.stl_list_hash != hashes[p]:
                 to_extract.append(p)
                 logger.debug("  MISSING STL LIST: %s", p.name)
             else:
@@ -869,6 +874,7 @@ class CrawlerWorker(QThread):
                     file_size=fsize,
                     archive_hash=current_hash,
                 ))
+            model.stl_list_hash = current_hash
             logger.debug("  STL file list: %d entry/entries stored", len(stl_info))
 
     def _apply_pattern_to_unchanged(
