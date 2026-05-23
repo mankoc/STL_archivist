@@ -168,6 +168,9 @@ class STLModel(Base):
     # Cached filesystem metadata to speed change detection without opening archives
     archive_size     = Column(Integer, nullable=True)
     archive_mtime_ns = Column(Integer, nullable=True)
+    # Hash at which the STL/OBJ file list was last scanned; NULL = never scanned.
+    # Prevents infinite re-extraction for archives that genuinely have no STL files.
+    stl_list_hash    = Column(String(64), nullable=True)
     sequence         = Column(Integer, nullable=True)               # position in a series, e.g. 3
     presupports      = Column(String(32), nullable=True)            # No / Lychee / Chitubox / Presupported
     warning          = Column(Text, nullable=True)                  # newline-separated warning strings, NULL if none
