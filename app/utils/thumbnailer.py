@@ -181,6 +181,23 @@ def get_thumbnail_bytes(image_id: int) -> Optional[bytes]:
         return txn.get(_key(image_id))
 
 
+def get_thumbnail_bytes_many(image_ids) -> "dict[int, bytes]":
+    """Return a mapping of image_id → JPEG bytes for all *image_ids* in one LMDB txn.
+
+    Missing keys are omitted from the result.  Safe to call from any thread.
+    """
+    if _lmdb_env is None:
+        return {}
+    result: dict[int, bytes] = {}
+    with _lmdb_env.begin() as txn:
+        cursor = txn.cursor()
+        for image_id in image_ids:
+            data = cursor.get(_key(image_id))
+            if data is not None:
+                result[image_id] = data
+    return result
+
+
 def pixmap_from_path(path_or_id: Optional[str]):
     """Load a QPixmap for a stored thumbnail.
 

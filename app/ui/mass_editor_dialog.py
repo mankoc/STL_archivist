@@ -752,4 +752,6 @@ class MassEditorDialog(QDialog):
                                     session, new_name, parent_id, cache=_fnr_cache
                                 )
 
+        from app.ui import lookup_cache as _lookup_cache
+        _lookup_cache.invalidate()
         self.accept()

@@ -10,7 +10,7 @@ from pathlib import Path as FSPath, Path
 _ICONS_DIR = FSPath(__file__).parent.parent.parent / "resources" / "icons"
 
 from PyQt6.QtCore import Qt, QSortFilterProxyModel, QSize, QStringListModel, QEvent, pyqtSignal, QItemSelection, QTimer, QThread, QRect, QPointF, QRectF, QUrl
-from PyQt6.QtGui import QStandardItemModel, QStandardItem, QPixmap, QIcon, QKeySequence, QShortcut, QColor, QFont, QPainter, QPen, QDesktopServices
+from PyQt6.QtGui import QStandardItemModel, QStandardItem, QPixmap, QPixmapCache, QIcon, QKeySequence, QShortcut, QColor, QFont, QPainter, QPen, QDesktopServices
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
     QTreeWidget, QTreeWidgetItem, QTableView,
@@ -27,6 +27,8 @@ from sqlalchemy import func, or_, and_, select as sa_select
 from sqlalchemy.orm import selectinload
 
 from app.database.db import get_session, session_scope, get_models_view
+from app.ui import lookup_cache as _lookup_cache
+from app.ui.thumb_loader import ThumbnailLoaderWorker
 from app.database.models import STLModel, Tag, Sculptor, Collection, Subcollection, Category, Release, Scale, Image, model_tags as _mt_global
 from app.utils.thumbnailer import pixmap_from_path, save_thumbnail
 from app.utils.path_pattern import parse_release_date, format_release_date
@@ -358,81 +360,49 @@ class SourceDelegate(_ComboDelegate):
     """QComboBox of distinct source/distributor strings."""
 
     def _get_items(self) -> list[str]:
-        session = get_session()
-        try:
-            return sorted(filter(None, (
-                v for (v,) in session.query(STLModel.source).distinct().all()
-            )))
-        finally:
-            session.close()
+        return _lookup_cache.get("source")
 
 
 class SculptorDelegate(_ComboDelegate):
     """QComboBox of all sculptor names."""
 
     def _get_items(self) -> list[str]:
-        session = get_session()
-        try:
-            return sorted(s.name for s in session.query(Sculptor).order_by(Sculptor.name).all())
-        finally:
-            session.close()
+        return _lookup_cache.get("sculptor")
 
 
 class CollectionDelegate(_ComboDelegate):
     """QComboBox of all Collection names."""
 
     def _get_items(self) -> list[str]:
-        session = get_session()
-        try:
-            return sorted(c.name for c in session.query(Collection).order_by(Collection.name).all())
-        finally:
-            session.close()
+        return _lookup_cache.get("collection")
 
 
 class SubcollectionDelegate(_ComboDelegate):
     """QComboBox of all Subcollection names."""
 
     def _get_items(self) -> list[str]:
-        session = get_session()
-        try:
-            return sorted(
-                s.name for s in session.query(Subcollection).order_by(Subcollection.name).all()
-            )
-        finally:
-            session.close()
+        return _lookup_cache.get("subcollection")
 
 
 class CategoryDelegate(_ComboDelegate):
     """QComboBox of all Category names."""
 
     def _get_items(self) -> list[str]:
-        session = get_session()
-        try:
-            return sorted(c.name for c in session.query(Category).order_by(Category.name).all())
-        finally:
-            session.close()
+        return _lookup_cache.get("category")
 
 
 class ReleaseDelegate(_ComboDelegate):
     """QComboBox of all Release names."""
 
     def _get_items(self) -> list[str]:
-        session = get_session()
-        try:
-            return sorted(r.name for r in session.query(Release).order_by(Release.name).all())
-        finally:
-            session.close()
+        return _lookup_cache.get("release")
 
 
 class ScaleDelegate(_ComboDelegate):
     """QComboBox of all Scale names."""
 
     def _get_items(self) -> list[str]:
-        session = get_session()
-        try:
-            return sorted(s.name for s in session.query(Scale).order_by(Scale.name).all())
-        finally:
-            session.close()
+        return _lookup_cache.get("scale")
 
 
 _PRESUPPORTS_OPTIONS = ["", "No", "Lychee", "Chitubox", "Presupported"]
@@ -956,6 +926,10 @@ class BrowserTab(QWidget):
     rescan_progress = pyqtSignal(int, int)
     rescan_finished = pyqtSignal()
 
+    # Internal: requests the background loader to fetch bytes for a page of images.
+    # Connected to ThumbnailLoaderWorker.load via QueuedConnection.
+    _thumb_load_requested = pyqtSignal(int, list)
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._loading = False
@@ -965,12 +939,30 @@ class BrowserTab(QWidget):
         self._rescan_dialog: RescanProgressDialog | None = None
         self._current_model_id: int | None = None
         self._info_pane_enabled: bool = False
-        self._thumb_pixmaps: list[QPixmap] = []  # original (unscaled) pixmaps for current page
-        self._thumb_all_images: list = []         # all Image DB objects for current model
+        self._thumb_pixmaps: list[QPixmap] = []      # unscaled pixmaps for current page (by slot)
+        self._thumb_all_images: list = []             # list of (image_id, thumbnail_path) tuples
+        self._thumb_id_to_slot: dict[int, int] = {}  # image_id → slot index in current page
         self._thumb_page: int = 0
         self._thumb_show_all: bool = False
+
+        # --- Background thumbnail loader ---
+        QPixmapCache.setCacheLimit(64 * 1024)  # 64 MB Qt pixmap cache
+        self._thumb_worker = ThumbnailLoaderWorker()
+        self._thumb_thread = QThread(self)
+        self._thumb_worker.moveToThread(self._thumb_thread)
+        self._thumb_thread.finished.connect(self._thumb_worker.deleteLater)
+        self._thumb_load_requested.connect(
+            self._thumb_worker.load, Qt.ConnectionType.QueuedConnection
+        )
+        self._thumb_worker.bytes_ready.connect(self._on_thumb_bytes_ready)
+        self._thumb_thread.start()
+        app = QApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(self._shutdown_thumb_loader)
         self._cached_path_dirs: frozenset[str] = frozenset()
         self._cached_sorted_dirs: list[str] = []
+        # Cache for the info panel: model_id → dict with url, description, creator fields
+        self._panel_cache: dict[int, dict] = {}
         # Debounce rapid cell edits: keyed by (row, col) → QStandardItem
         self._pending_edits: dict[tuple[int, int], "QStandardItem"] = {}
         self._edit_timer = QTimer(self)
@@ -1179,6 +1171,8 @@ class BrowserTab(QWidget):
     # ------------------------------------------------------------------
     def refresh(self) -> None:
         """Reload all data from the database."""
+        _lookup_cache.invalidate()
+        self._panel_cache.clear()
         self._populate_filter_tree()
         self._apply_checked_filters()
         self._clear_thumbnails()
@@ -2651,22 +2645,40 @@ class BrowserTab(QWidget):
                 self._update_model_info_panel(model_id, self._row_data_at(r))
 
     def _update_model_info_panel(self, model_id: int, row_data: dict) -> None:
-        """Build the HTML info panel from row data + a small DB fetch for url/description/creator profile."""
+        """Build the HTML info panel from row data + cached url/description/creator profile."""
         from html import escape
-        from app.database.models import Creator as CreatorModel
 
-        session = get_session()
-        try:
-            m = session.query(STLModel).filter_by(id=model_id).first()
-            url         = (m.url         or "") if m else ""
-            description = (m.description or "") if m else ""
+        if model_id not in self._panel_cache:
+            from app.database.models import Creator as CreatorModel
             creator_name = row_data["creator"]
-            creator_obj = (
-                session.query(CreatorModel).filter_by(name=creator_name).first()
-                if creator_name else None
-            )
-        finally:
-            session.close()
+            with session_scope() as session:
+                m = session.query(STLModel.url, STLModel.description).filter_by(id=model_id).first()
+                c = (
+                    session.query(
+                        CreatorModel.full_name,
+                        CreatorModel.patreon_url,
+                        CreatorModel.artstation_url,
+                        CreatorModel.gumroad_url,
+                        CreatorModel.myminifactory_url,
+                    ).filter_by(name=creator_name).first()
+                    if creator_name else None
+                )
+            self._panel_cache[model_id] = {
+                "url":         (m.url         or "") if m else "",
+                "description": (m.description or "") if m else "",
+                "creator": {
+                    "full_name":         (c.full_name         or "") if c else "",
+                    "patreon_url":       (c.patreon_url       or "") if c else "",
+                    "artstation_url":    (c.artstation_url    or "") if c else "",
+                    "gumroad_url":       (c.gumroad_url       or "") if c else "",
+                    "myminifactory_url": (c.myminifactory_url or "") if c else "",
+                } if c else None,
+            }
+
+        cached = self._panel_cache[model_id]
+        url         = cached["url"]
+        description = cached["description"]
+        creator_info = cached["creator"]
 
         def _row(label: str, value: str, is_link: bool = False) -> str:
             if not value:
@@ -2680,17 +2692,17 @@ class BrowserTab(QWidget):
         rows: list[str] = []
         rows.append(_row("Title",         row_data["title"]))
         rows.append(_row("Creator",       row_data["creator"]))
-        if creator_obj:
-            if creator_obj.full_name:
-                rows.append(_row("Full name",   creator_obj.full_name))
-            if creator_obj.patreon_url:
-                rows.append(_row("Patreon",     creator_obj.patreon_url, is_link=True))
-            if creator_obj.artstation_url:
-                rows.append(_row("ArtStation",  creator_obj.artstation_url, is_link=True))
-            if creator_obj.gumroad_url:
-                rows.append(_row("Gumroad",     creator_obj.gumroad_url, is_link=True))
-            if creator_obj.myminifactory_url:
-                rows.append(_row("MyMiniFactory", creator_obj.myminifactory_url, is_link=True))
+        if creator_info:
+            if creator_info["full_name"]:
+                rows.append(_row("Full name",   creator_info["full_name"]))
+            if creator_info["patreon_url"]:
+                rows.append(_row("Patreon",     creator_info["patreon_url"], is_link=True))
+            if creator_info["artstation_url"]:
+                rows.append(_row("ArtStation",  creator_info["artstation_url"], is_link=True))
+            if creator_info["gumroad_url"]:
+                rows.append(_row("Gumroad",     creator_info["gumroad_url"], is_link=True))
+            if creator_info["myminifactory_url"]:
+                rows.append(_row("MyMiniFactory", creator_info["myminifactory_url"], is_link=True))
         rows.append(_row("Source",        row_data["source"]))
         rows.append(_row("Date",          row_data["date"]))
         rows.append(_row("Sculptor",      row_data["sculptor"]))
@@ -2721,6 +2733,7 @@ class BrowserTab(QWidget):
         from app.ui.creator_editor_dialog import CreatorEditorDialog
         dlg = CreatorEditorDialog(creator_name, parent=self)
         if dlg.exec() and self._current_model_id is not None and self._info_pane_enabled:
+            self._panel_cache.pop(self._current_model_id, None)
             src_index = self._proxy.mapToSource(
                 self._table.selectionModel().currentIndex()
             )
@@ -3355,6 +3368,7 @@ class BrowserTab(QWidget):
         """Remove all thumbnail widgets from the sidebar and drop the pixmap cache."""
         self._thumb_pixmaps.clear()
         self._thumb_all_images.clear()
+        self._thumb_id_to_slot.clear()
         self._thumb_page = 0
         self._thumb_show_all = False
         while self._thumb_vlayout.count():
@@ -3367,14 +3381,14 @@ class BrowserTab(QWidget):
     def _show_thumbnails(self, model_id: int) -> None:
         """Load image records for *model_id* and display the first page."""
         self._clear_thumbnails()
-        session = get_session()
-        try:
-            stl: STLModel = session.get(STLModel, model_id)
-            if stl is None:
-                return
-            self._thumb_all_images = list(stl.images)
-        finally:
-            session.close()
+        with session_scope() as session:
+            rows = (
+                session.query(Image.id, Image.thumbnail_path)
+                .filter(Image.model_id == model_id)
+                .order_by(Image.id)
+                .all()
+            )
+        self._thumb_all_images = list(rows)
         self._render_thumb_page()
 
     def _render_thumb_page(self) -> None:
@@ -3391,20 +3405,39 @@ class BrowserTab(QWidget):
 
         # Clear existing widgets without resetting all_images / page state
         self._thumb_pixmaps.clear()
+        self._thumb_id_to_slot.clear()
         while self._thumb_vlayout.count():
             item = self._thumb_vlayout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
-        for img in images_to_show:
-            px = pixmap_from_path(img.thumbnail_path)
+        need_async: list[int] = []
+
+        for slot, (image_id, thumbnail_path) in enumerate(images_to_show):
+            cache_key = f"thumb:{image_id}"
+            cached = QPixmapCache.find(cache_key) if thumbnail_path else None
+            px = cached if cached is not None else QPixmap()
+
             self._thumb_pixmaps.append(px)
+            self._thumb_id_to_slot[image_id] = slot
+
+            if cached is None and thumbnail_path:
+                need_async.append(image_id)
+
             lbl = ClickableLabel()
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setFrameShape(QFrame.Shape.StyledPanel)
             lbl.setCursor(Qt.CursorShape.PointingHandCursor)
-            lbl.clicked.connect(lambda _px=px: ImageViewerDialog(_px, self).exec())
+            lbl.clicked.connect(
+                lambda _slot=slot: (
+                    ImageViewerDialog(self._thumb_pixmaps[_slot], self).exec()
+                    if not self._thumb_pixmaps[_slot].isNull() else None
+                )
+            )
             self._thumb_vlayout.addWidget(lbl)
+
+        if need_async and self._current_model_id is not None:
+            self._thumb_load_requested.emit(self._current_model_id, need_async)
 
         # Update / show pagination controls
         if total > page_size:
@@ -3462,6 +3495,32 @@ class BrowserTab(QWidget):
             if item and item.widget():
                 scaled = px.scaledToWidth(w, Qt.TransformationMode.SmoothTransformation)
                 item.widget().setPixmap(scaled)
+
+    def _on_thumb_bytes_ready(self, model_id: int, image_id: int, jpeg_bytes: bytes) -> None:
+        """Receive JPEG bytes from the background loader and update the matching label."""
+        if model_id != self._current_model_id:
+            return
+        slot = self._thumb_id_to_slot.get(image_id)
+        if slot is None:
+            return
+
+        px = QPixmap()
+        if jpeg_bytes:
+            px.loadFromData(jpeg_bytes)
+            QPixmapCache.insert(f"thumb:{image_id}", px)
+
+        self._thumb_pixmaps[slot] = px
+
+        item = self._thumb_vlayout.itemAt(slot)
+        if item and item.widget():
+            w = max(self._thumb_scroll.width() - 36, 60)
+            scaled = px.scaledToWidth(w, Qt.TransformationMode.SmoothTransformation)
+            item.widget().setPixmap(scaled)
+
+    def _shutdown_thumb_loader(self) -> None:
+        """Stop the background thumbnail thread cleanly on app exit."""
+        self._thumb_thread.quit()
+        self._thumb_thread.wait(2000)
 
     def add_tag(self) -> None:
         """Prompt for a new tag name, create it in the DB, and rebuild the filter tree."""
