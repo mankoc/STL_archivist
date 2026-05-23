@@ -595,4 +595,6 @@ class EditorDialog(QDialog):
                     except Exception:
                         pass  # metadata export is best-effort; never block saving
 
+        from app.ui import lookup_cache as _lookup_cache
+        _lookup_cache.invalidate()
         self.accept()
