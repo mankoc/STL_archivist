@@ -123,6 +123,59 @@ def save_thumbnail(image_bytes: bytes, image_id: int,
     return str(image_id)
 
 
+def save_thumbnail_returning_bytes(
+    image_bytes: bytes,
+    image_id: int,
+    max_size: int = THUMB_SIZE_DEFAULT,
+) -> "Optional[tuple[str, bytes]]":
+    """Like :func:`save_thumbnail` but also returns the stored JPEG bytes.
+
+    Avoids the extra LMDB read that callers need when computing dHash
+    immediately after saving.
+
+    Returns:
+        ``(rel_path, jpeg_bytes)`` on success, or ``None`` on failure.
+    """
+    if _lmdb_env is None:
+        raise RuntimeError("Thumbnail store not initialised. Call init_thumbnail_store() first.")
+    thumb_bytes = make_thumbnail(image_bytes, max_size)
+    if thumb_bytes is None:
+        return None
+    with _lmdb_env.begin(write=True) as txn:
+        txn.put(_key(image_id), thumb_bytes)
+    return str(image_id), thumb_bytes
+
+
+def save_thumbnails_batch(
+    items: "list[tuple[int, bytes, int]]",
+) -> "list[tuple[int, Optional[str], Optional[bytes]]]":
+    """Resize and write multiple thumbnails in a single LMDB write transaction.
+
+    Args:
+        items: List of ``(image_id, raw_bytes, max_size)`` triples.
+
+    Returns:
+        List of ``(image_id, rel_path, jpeg_bytes)`` in the same order.
+        ``rel_path`` and ``jpeg_bytes`` are ``None`` when conversion failed.
+    """
+    if _lmdb_env is None:
+        raise RuntimeError("Thumbnail store not initialised. Call init_thumbnail_store() first.")
+    results: list[tuple[int, Optional[str], Optional[bytes]]] = []
+    prepared: list[tuple[int, bytes]] = []
+    for image_id, raw_bytes, max_size in items:
+        thumb = make_thumbnail(raw_bytes, max_size)
+        if thumb is None:
+            results.append((image_id, None, None))
+        else:
+            prepared.append((image_id, thumb))
+            results.append((image_id, str(image_id), thumb))
+    if prepared:
+        with _lmdb_env.begin(write=True) as txn:
+            for image_id, thumb in prepared:
+                txn.put(_key(image_id), thumb)
+    return results
+
+
 def write_raw_thumbnail(image_id: int, jpeg_bytes: bytes) -> Optional[str]:
     """Write already-processed JPEG bytes to LMDB without resizing.
 

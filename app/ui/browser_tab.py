@@ -9,7 +9,7 @@ from pathlib import Path as FSPath, Path
 
 _ICONS_DIR = FSPath(__file__).parent.parent.parent / "resources" / "icons"
 
-from PyQt6.QtCore import Qt, QSortFilterProxyModel, QSize, QStringListModel, QEvent, pyqtSignal, QItemSelection, QTimer, QThread, QRect, QPointF, QRectF, QUrl
+from PyQt6.QtCore import Qt, QSortFilterProxyModel, QSize, QStringListModel, QEvent, pyqtSignal, QItemSelection, QTimer, QThread, QThreadPool, QRunnable, QRect, QPointF, QRectF, QUrl, QObject
 from PyQt6.QtGui import QStandardItemModel, QStandardItem, QPixmap, QPixmapCache, QIcon, QKeySequence, QShortcut, QColor, QFont, QPainter, QPen, QDesktopServices
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
@@ -795,6 +795,459 @@ class FilterTreeWidget(QTreeWidget):
             self._clear_all(root.child(i))
 
 
+class _FilterTreeWorker(QRunnable):
+    """Runs all DB queries for the filter tree off the GUI thread.
+
+    Emits ``signals.ready(gen, payload)`` when done; the GUI thread slot
+    checks *gen* against the current generation counter and discards stale
+    results.  The *payload* dict contains only Python primitives (no ORM
+    objects or Qt types) so it is safe to pass across the thread boundary.
+    """
+
+    class _Signals(QObject):
+        ready = pyqtSignal(int, object)  # (gen, payload dict)
+
+    def __init__(self, gen: int, scope_by_section, show_flags: dict,
+                 show_counts: bool, alpha_enabled: bool, alpha_threshold: int,
+                 checked_data: set, excluded_data: set,
+                 expanded_sections: "set | None") -> None:
+        super().__init__()
+        self.signals = self._Signals()
+        self._gen = gen
+        self._scope = scope_by_section
+        self._show = show_flags
+        self._show_counts = show_counts
+        self._alpha_enabled = alpha_enabled
+        self._alpha_threshold = alpha_threshold
+        self._checked = checked_data
+        self._excluded = excluded_data
+        self._expanded = expanded_sections
+
+    def run(self) -> None:  # noqa: C901 (complexity is inherent; each section is independent)
+        from app.database.db import get_session
+        from app.database.models import (
+            STLModel, Tag, Sculptor, Collection, Subcollection,
+            Category, Release, Scale, model_tags as _mt,
+        )
+        from sqlalchemy import func as _func
+        from pathlib import Path as _P
+
+        scope = self._scope
+        show = self._show
+
+        def _s(section):
+            return scope.get(section) if scope else None
+
+        session = get_session()
+        try:
+            # ── Counts ─────────────────────────────────────────────────────────
+            _counts: dict = {}
+            _path_counts: "dict[str, int] | None" = None
+            _scoped_counts: dict = {}
+            _sc_path_counts: "dict[str, int] | None" = None
+
+            if self._show_counts:
+                _grp: dict = {}
+
+                def _count_col(col, kind: str, *, none_filter: bool = True) -> None:
+                    q = session.query(col, _func.count(STLModel.id))
+                    if none_filter:
+                        q = q.filter(col.isnot(None))
+                    total = 0
+                    for v, c in q.group_by(col).all():
+                        _counts[(kind, v)] = c
+                        total += c
+                    _grp[kind] = total
+
+                _count_col(STLModel.creator,          "creator")
+                _count_col(STLModel.source,           "source")
+                _count_col(STLModel.sculptor_id,      "sculptor_id")
+                _count_col(STLModel.collection_id,    "collection_id")
+                _count_col(STLModel.subcollection_id, "subcollection_id")
+                _count_col(STLModel.category_id,      "category_id")
+                _count_col(STLModel.release_id,       "release_id")
+                _count_col(STLModel.scale_id,         "scale_id")
+                _count_col(STLModel.presupports,      "presupports")
+
+                _year_cnt: dict = {}
+                _date_total = 0
+                for yr, mo, c in (
+                    session.query(STLModel.release_year, STLModel.release_month, _func.count(STLModel.id))
+                    .filter(STLModel.release_year.isnot(None))
+                    .group_by(STLModel.release_year, STLModel.release_month)
+                    .all()
+                ):
+                    _counts[("date_month", (yr, mo))] = c
+                    _year_cnt[yr] = _year_cnt.get(yr, 0) + c
+                    _date_total += c
+                for yr, c in _year_cnt.items():
+                    _counts[("date_year", yr)] = c
+                _grp["date"] = _date_total
+
+                _all_warnings = [
+                    w for (w,) in session.query(STLModel.warning)
+                    .filter(STLModel.warning.isnot(None)).all()
+                ]
+                for _wt in ("Models with presupported stl", "Archive without images",
+                            "Nested archives", "Archive with supports",
+                            "Archive without printable files"):
+                    _counts[("warning", _wt)] = sum(1 for w in _all_warnings if _wt in w)
+                _grp["warning"] = sum(1 for w in _all_warnings if w)
+
+                _direct: dict = {}
+                for (ap,) in session.query(STLModel.archive_path).filter(
+                    STLModel.archive_path.isnot(None)
+                ).all():
+                    folder = _P(ap).parent.as_posix()
+                    _direct[folder] = _direct.get(folder, 0) + 1
+
+                for k, v in _grp.items():
+                    _counts[("group", k)] = v
+
+                for tn, c in (
+                    session.query(Tag.name, _func.count(_mt.c.model_id))
+                    .join(_mt, Tag.id == _mt.c.tag_id)
+                    .group_by(Tag.name)
+                    .all()
+                ):
+                    _counts[("tag", tn)] = c
+                _counts[("group", "tag")] = (
+                    session.query(_func.count(_mt.c.model_id.distinct())).scalar() or 0
+                )
+
+                _path_counts = {}
+                for folder, _c in _direct.items():
+                    _path_counts[folder] = _path_counts.get(folder, 0) + _c
+                    _f = _P(folder)
+                    while True:
+                        _p = _f.parent
+                        if _p == _f:
+                            break
+                        _ps = _p.as_posix()
+                        _path_counts[_ps] = _path_counts.get(_ps, 0) + _c
+                        _f = _p
+                _counts[("group", "path")] = sum(_direct.values())
+
+                # Scoped counts
+                if scope is not None:
+                    from app.database.models import model_tags as _mt2
+
+                    def _sc_count_col(col, kind: str, sc_ids, *, none_filter=True) -> None:
+                        rows = (
+                            session.query(col, _func.count(STLModel.id))
+                            .filter(STLModel.id.in_(sc_ids))
+                        )
+                        if none_filter:
+                            rows = rows.filter(col.isnot(None))
+                        rows = rows.group_by(col).all()
+                        for v, c in rows:
+                            _scoped_counts[(kind, v)] = c
+                        _scoped_counts[("group", kind.rstrip("_id"))] = sum(c for _, c in rows)
+
+                    for section, col, kind in (
+                        ("creator",       STLModel.creator,          "creator"),
+                        ("source",        STLModel.source,           "source"),
+                        ("sculptor",      STLModel.sculptor_id,      "sculptor_id"),
+                        ("collection",    STLModel.collection_id,    "collection_id"),
+                        ("subcollection", STLModel.subcollection_id, "subcollection_id"),
+                        ("category",      STLModel.category_id,      "category_id"),
+                        ("release",       STLModel.release_id,       "release_id"),
+                        ("scale",         STLModel.scale_id,         "scale_id"),
+                        ("presupports",   STLModel.presupports,      "presupports"),
+                    ):
+                        sc_ids = _s(section)
+                        if sc_ids is not None:
+                            _sc_count_col(col, kind, sc_ids)
+
+                    _tag_sc = _s("tag")
+                    if _tag_sc is not None:
+                        for tn, c in (
+                            session.query(Tag.name, _func.count(_mt2.c.model_id))
+                            .join(_mt2, Tag.id == _mt2.c.tag_id)
+                            .filter(_mt2.c.model_id.in_(_tag_sc))
+                            .group_by(Tag.name)
+                            .all()
+                        ):
+                            _scoped_counts[("tag", tn)] = c
+                        _scoped_counts[("group", "tag")] = (
+                            session.query(_func.count(_mt2.c.model_id.distinct()))
+                            .filter(_mt2.c.model_id.in_(_tag_sc))
+                            .scalar() or 0
+                        )
+
+                    _date_sc = _s("date")
+                    if _date_sc is not None:
+                        _sc_year: dict = {}
+                        _drows = (
+                            session.query(STLModel.release_year, STLModel.release_month, _func.count(STLModel.id))
+                            .filter(STLModel.id.in_(_date_sc))
+                            .filter(STLModel.release_year.isnot(None))
+                            .group_by(STLModel.release_year, STLModel.release_month)
+                            .all()
+                        )
+                        for yr, mo, c in _drows:
+                            _scoped_counts[("date_month", (yr, mo))] = c
+                            _sc_year[yr] = _sc_year.get(yr, 0) + c
+                        for yr, c in _sc_year.items():
+                            _scoped_counts[("date_year", yr)] = c
+                        _scoped_counts[("group", "date")] = sum(c for _, _, c in _drows)
+
+                    _warn_sc = _s("warning")
+                    if _warn_sc is not None:
+                        _sc_warns = [
+                            w for (w,) in session.query(STLModel.warning)
+                            .filter(STLModel.id.in_(_warn_sc))
+                            .filter(STLModel.warning.isnot(None))
+                            .all()
+                        ]
+                        for _wt in ("Models with presupported stl", "Archive without images",
+                                    "Nested archives", "Archive with supports",
+                                    "Archive without printable files"):
+                            _scoped_counts[("warning", _wt)] = sum(1 for w in _sc_warns if _wt in w)
+                        _scoped_counts[("group", "warning")] = sum(1 for w in _sc_warns if w)
+
+                    _path_sc = _s("path")
+                    if _path_sc is not None:
+                        _sc_direct: dict = {}
+                        for (ap,) in (
+                            session.query(STLModel.archive_path)
+                            .filter(STLModel.id.in_(_path_sc))
+                            .filter(STLModel.archive_path.isnot(None))
+                            .all()
+                        ):
+                            folder = _P(ap).parent.as_posix()
+                            _sc_direct[folder] = _sc_direct.get(folder, 0) + 1
+                        _sc_path_counts = {}
+                        for folder, _c in _sc_direct.items():
+                            _sc_path_counts[folder] = _sc_path_counts.get(folder, 0) + _c
+                            _f = _P(folder)
+                            while True:
+                                _p = _f.parent
+                                if _p == _f:
+                                    break
+                                _ps = _p.as_posix()
+                                _sc_path_counts[_ps] = _sc_path_counts.get(_ps, 0) + _c
+                                _f = _p
+                        _scoped_counts[("group", "path")] = sum(_sc_direct.values())
+
+            # ── Distinct value lists for each visible section ───────────────────
+            def _scoped_ids(section: str):
+                return _s(section)
+
+            creators: list[str] = []
+            if show.get("author"):
+                _cs = _scoped_ids("creator")
+                q = session.query(STLModel.creator).distinct().order_by(STLModel.creator)
+                if _cs is not None:
+                    q = q.filter(STLModel.id.in_(_cs))
+                creators = [c for (c,) in q.all() if c]
+
+            tags: list[str] = []
+            if show.get("tags"):
+                _ts = _scoped_ids("tag")
+                q = session.query(Tag).order_by(Tag.name)
+                if _ts is not None:
+                    q = (
+                        q.join(_mt, Tag.id == _mt.c.tag_id)
+                        .filter(_mt.c.model_id.in_(_ts))
+                        .distinct()
+                    )
+                tags = [t.name for t in q.all()]
+
+            sources: list[str] = []
+            if show.get("source"):
+                _ss = _scoped_ids("source")
+                q = session.query(STLModel.source).distinct().order_by(STLModel.source)
+                if _ss is not None:
+                    q = q.filter(STLModel.id.in_(_ss))
+                sources = [s for (s,) in q.all() if s]
+
+            dates: list = []
+            if show.get("date"):
+                _ds = _scoped_ids("date")
+                q = (
+                    session.query(STLModel.release_year, STLModel.release_month)
+                    .filter(STLModel.release_year.isnot(None))
+                    .distinct()
+                    .order_by(STLModel.release_year.desc(), STLModel.release_month)
+                )
+                if _ds is not None:
+                    q = q.filter(STLModel.id.in_(_ds))
+                dates = list(q.all())
+
+            sculptors: list = []
+            if show.get("sculptor"):
+                _scs = _scoped_ids("sculptor")
+                q = session.query(Sculptor).order_by(Sculptor.name)
+                if _scs is not None:
+                    _sc_ids = {
+                        sid for (sid,) in
+                        session.query(STLModel.sculptor_id)
+                        .filter(STLModel.id.in_(_scs))
+                        .filter(STLModel.sculptor_id.isnot(None))
+                        .distinct()
+                    }
+                    q = q.filter(Sculptor.id.in_(_sc_ids))
+                sculptors = [(sc.name, sc.id) for sc in q.all()]
+
+            collections: list = []
+            if show.get("collection"):
+                _cos = _scoped_ids("collection")
+                q = session.query(Collection).order_by(Collection.name)
+                if _cos is not None:
+                    _col_ids = {
+                        cid for (cid,) in
+                        session.query(STLModel.collection_id)
+                        .filter(STLModel.id.in_(_cos))
+                        .filter(STLModel.collection_id.isnot(None))
+                        .distinct()
+                    }
+                    q = q.filter(Collection.id.in_(_col_ids))
+                collections = [(col.name, col.id) for col in q.all()]
+
+            sub_by_col: list = []  # list[(col_name, col_id, [(sub_name, sub_id)])]
+            if show.get("subcollection"):
+                _subs = _scoped_ids("subcollection")
+                _scoped_sub_ids = None
+                if _subs is not None:
+                    _scoped_sub_ids = {
+                        sid for (sid,) in
+                        session.query(STLModel.subcollection_id)
+                        .filter(STLModel.id.in_(_subs))
+                        .filter(STLModel.subcollection_id.isnot(None))
+                        .distinct()
+                    }
+                _col_map: dict = {}
+                for col_name, col_id, sub_name, sub_id in (
+                    session.query(Collection.name, Collection.id, Subcollection.name, Subcollection.id)
+                    .join(Subcollection, Subcollection.collection_id == Collection.id)
+                    .order_by(Collection.name, Subcollection.name)
+                    .all()
+                ):
+                    if _scoped_sub_ids is not None and sub_id not in _scoped_sub_ids:
+                        continue
+                    if col_id not in _col_map:
+                        _col_map[col_id] = (col_name, [])
+                    _col_map[col_id][1].append((sub_name, sub_id))
+                sub_by_col = [(name, col_id, subs) for col_id, (name, subs) in _col_map.items()]
+
+            categories: list = []
+            if show.get("category"):
+                _cas = _scoped_ids("category")
+                q = session.query(Category).order_by(Category.name)
+                if _cas is not None:
+                    _cat_ids = {
+                        cid for (cid,) in
+                        session.query(STLModel.category_id)
+                        .filter(STLModel.id.in_(_cas))
+                        .filter(STLModel.category_id.isnot(None))
+                        .distinct()
+                    }
+                    q = q.filter(Category.id.in_(_cat_ids))
+                categories = [(cat.name, cat.id) for cat in q.all()]
+
+            releases: list = []
+            if show.get("release"):
+                _rs = _scoped_ids("release")
+                q = session.query(Release).order_by(Release.name)
+                if _rs is not None:
+                    _rel_ids = {
+                        rid for (rid,) in
+                        session.query(STLModel.release_id)
+                        .filter(STLModel.id.in_(_rs))
+                        .filter(STLModel.release_id.isnot(None))
+                        .distinct()
+                    }
+                    q = q.filter(Release.id.in_(_rel_ids))
+                releases = [(r.name, r.id) for r in q.all()]
+
+            scales: list = []
+            if show.get("scale"):
+                _sls = _scoped_ids("scale")
+                q = session.query(Scale).order_by(Scale.name)
+                if _sls is not None:
+                    _scale_ids = {
+                        sid for (sid,) in
+                        session.query(STLModel.scale_id)
+                        .filter(STLModel.id.in_(_sls))
+                        .filter(STLModel.scale_id.isnot(None))
+                        .distinct()
+                    }
+                    q = q.filter(Scale.id.in_(_scale_ids))
+                scales = [(sc.name, sc.id) for sc in q.all()]
+
+            presupports: list[str] = []
+            if show.get("presupports"):
+                _ps2 = _scoped_ids("presupports")
+                q = (
+                    session.query(STLModel.presupports)
+                    .filter(STLModel.presupports.isnot(None))
+                    .distinct()
+                    .order_by(STLModel.presupports)
+                )
+                if _ps2 is not None:
+                    q = q.filter(STLModel.id.in_(_ps2))
+                presupports = [v for (v,) in q.all() if v]
+
+            # ── Path dirs ──────────────────────────────────────────────────────
+            sorted_dirs: list[str] = []
+            scoped_dirs: "list[str] | None" = None
+            new_dirs_frozen: "frozenset | None" = None
+            if show.get("path"):
+                _path_sc2 = _scoped_ids("path")
+                if _path_sc2 is not None:
+                    _sd: set[str] = set()
+                    for (ap,) in (
+                        session.query(STLModel.archive_path)
+                        .filter(STLModel.id.in_(_path_sc2))
+                        .filter(STLModel.archive_path.isnot(None))
+                        .distinct()
+                        .all()
+                    ):
+                        _sd.add(_P(ap).parent.as_posix())
+                    scoped_dirs = sorted(_sd)
+                else:
+                    _all_dirs: set[str] = set()
+                    for (ap,) in session.query(STLModel.archive_path).distinct().all():
+                        if ap:
+                            _all_dirs.add(_P(ap).parent.as_posix())
+                    new_dirs_frozen = frozenset(_all_dirs)
+                    sorted_dirs = sorted(_all_dirs)
+
+        finally:
+            session.close()
+
+        payload = {
+            "counts": _counts,
+            "path_counts": _path_counts,
+            "scoped_counts": _scoped_counts,
+            "sc_path_counts": _sc_path_counts,
+            "creators": creators,
+            "tags": tags,
+            "sources": sources,
+            "dates": dates,
+            "sculptors": sculptors,
+            "collections": collections,
+            "sub_by_col": sub_by_col,
+            "categories": categories,
+            "releases": releases,
+            "scales": scales,
+            "presupports": presupports,
+            "sorted_dirs": sorted_dirs,
+            "scoped_dirs": scoped_dirs,
+            "new_dirs_frozen": new_dirs_frozen,
+            "checked_data": self._checked,
+            "excluded_data": self._excluded,
+            "expanded_sections": self._expanded,
+            "show": self._show,
+            "show_counts": self._show_counts,
+            "alpha_enabled": self._alpha_enabled,
+            "alpha_threshold": self._alpha_threshold,
+            "scope_by_section": self._scope,
+        }
+        self.signals.ready.emit(self._gen, payload)
+
+
 class TableLoaderWorker(QThread):
     """Fetches table rows in a background thread and emits them in batches.
 
@@ -963,6 +1416,8 @@ class BrowserTab(QWidget):
         self._cached_sorted_dirs: list[str] = []
         # Cache for the info panel: model_id → dict with url, description, creator fields
         self._panel_cache: dict[int, dict] = {}
+        # Generation counter for async filter-tree rebuilds (discard stale results)
+        self._filter_gen: int = 0
         # Debounce rapid cell edits: keyed by (row, col) → QStandardItem
         self._pending_edits: dict[tuple[int, int], "QStandardItem"] = {}
         self._edit_timer = QTimer(self)
@@ -1218,23 +1673,16 @@ class BrowserTab(QWidget):
         self,
         scope_by_section: dict | None = None,
     ) -> None:
-        """Rebuild the left-panel filter tree from the current DB contents.
+        """Kick off a background worker to rebuild the filter tree.
 
-        *scope_by_section* is a dict keyed by section name (``"tag"``, ``"date"``,
-        ``"collection"``, ``"subcollection"``, ``"release"``).  When a section's
-        value is a non-None SQLAlchemy subquery, only values present in those
-        model IDs are shown for that section.  ``None`` or a missing key means
-        "show all".
+        All DB queries run in a QRunnable; the GUI thread slot
+        ``_on_filter_data_ready`` builds the Qt tree items when the data
+        arrives.
         """
-        def _scope(section: str):
-            if scope_by_section is None:
-                return None
-            return scope_by_section.get(section)
-        # Save checked items and expanded top-level sections so they survive the rebuild.
-        # expanded_sections is None on the very first call (tree is empty) → default collapsed.
+        # ── Capture UI state on the GUI thread before going async ──────────────
         checked_data:  set = set()
         excluded_data: set = set()
-        expanded_sections: set[str] | None = None
+        expanded_sections: "set[str] | None" = None
 
         root_item = self._filter_tree.invisibleRootItem()
         if root_item.childCount() > 0:
@@ -1254,8 +1702,73 @@ class BrowserTab(QWidget):
             for i in range(root_item.childCount()):
                 _collect_state(root_item.child(i))
 
+        # ── Read config and visibility flags on the GUI thread ─────────────────
+        from app.ui.config_dialog import (
+            get_color_scheme as _get_cs,
+            get_filter_show_counts as _get_fsc,
+            get_filter_alpha_enabled,
+            get_filter_alpha_threshold,
+        )
+        header = self._table.horizontalHeader()
+        show_flags = {
+            "author":        not header.isSectionHidden(COL_CREATOR),
+            "tags":          not header.isSectionHidden(COL_TAGS),
+            "source":        not header.isSectionHidden(COL_SOURCE),
+            "date":          not header.isSectionHidden(COL_DATE),
+            "sculptor":      not header.isSectionHidden(COL_SCULPTOR),
+            "collection":    not header.isSectionHidden(COL_COLLECTION),
+            "subcollection": not header.isSectionHidden(COL_SUBCOLLECTION),
+            "category":      not header.isSectionHidden(COL_CATEGORY),
+            "release":       not header.isSectionHidden(COL_RELEASE),
+            "scale":         not header.isSectionHidden(COL_SCALE),
+            "presupports":   not header.isSectionHidden(COL_PRESUPPORTED),
+            "warnings":      not header.isSectionHidden(COL_WARNING),
+            "path":          not header.isSectionHidden(COL_PATH),
+        }
+
+        # ── Bump generation; clear tree while worker runs ───────────────────────
+        self._filter_gen += 1
+        gen = self._filter_gen
         self._filter_tree.blockSignals(True)
         self._filter_tree.clear()
+
+        worker = _FilterTreeWorker(
+            gen=gen,
+            scope_by_section=scope_by_section,
+            show_flags=show_flags,
+            show_counts=_get_fsc(),
+            alpha_enabled=get_filter_alpha_enabled(),
+            alpha_threshold=get_filter_alpha_threshold(),
+            checked_data=checked_data,
+            excluded_data=excluded_data,
+            expanded_sections=expanded_sections,
+        )
+        worker.signals.ready.connect(self._on_filter_data_ready)
+        QThreadPool.globalInstance().start(worker)
+
+    def _on_filter_data_ready(self, gen: int, payload: dict) -> None:
+        """Build the filter tree from pre-fetched data (called on GUI thread)."""
+        if gen != self._filter_gen:
+            return  # superseded by a newer call
+
+        checked_data     = payload["checked_data"]
+        excluded_data    = payload["excluded_data"]
+        expanded_sections = payload["expanded_sections"]
+        _counts          = payload["counts"]
+        _path_counts     = payload["path_counts"]
+        _scoped_counts   = payload["scoped_counts"]
+        _sc_path_counts  = payload["sc_path_counts"]
+        show             = payload["show"]
+        show_counts      = payload["show_counts"]
+        alpha_enabled    = payload["alpha_enabled"]
+        alpha_threshold  = payload["alpha_threshold"]
+        scope_by_section = payload["scope_by_section"]
+
+        new_dirs_frozen  = payload.get("new_dirs_frozen")
+        if new_dirs_frozen is not None:
+            if new_dirs_frozen != self._cached_path_dirs:
+                self._cached_path_dirs    = new_dirs_frozen
+                self._cached_sorted_dirs  = payload["sorted_dirs"]
 
         from app.ui.config_dialog import get_color_scheme as _get_cs
         _v = "light" if "light" in _get_cs().lower() else "dark"
@@ -1279,7 +1792,29 @@ class BrowserTab(QWidget):
 
         _CHECKABLE = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable
 
-        def _make_leaf(label: str, data, count: int | None = None) -> QTreeWidgetItem:
+        _SCOPED_KINDS = (
+            "creator", "source", "tag", "date_month", "date_year",
+            "sculptor_id", "collection_id", "subcollection_id", "category_id",
+            "release_id", "scale_id", "presupports", "warning", "path", "group",
+        )
+        _SCOPED_GROUPS = (
+            "creator", "source", "tag", "date", "sculptor",
+            "collection", "subcollection", "category", "release",
+            "scale", "presupports", "warning", "path",
+        )
+
+        def _c(data) -> "int | None":
+            if scope_by_section is not None and data[0] in _SCOPED_KINDS and (
+                data[0] != "group" or data[1] in _SCOPED_GROUPS
+            ):
+                v = _scoped_counts.get(data)
+                if v is None:
+                    v = _counts.get(data)
+            else:
+                v = _counts.get(data)
+            return v if v else None
+
+        def _make_leaf(label: str, data, count: "int | None" = None) -> QTreeWidgetItem:
             display = f"{label} ({count})" if count is not None else label
             item = QTreeWidgetItem([display])
             item.setData(0, Qt.ItemDataRole.UserRole, data)
@@ -1293,13 +1828,9 @@ class BrowserTab(QWidget):
             item.setCheckState(0, state)
             return item
 
-        from app.ui.config_dialog import get_filter_alpha_enabled, get_filter_alpha_threshold
-        _ALPHA_ENABLED   = get_filter_alpha_enabled()
-        _ALPHA_THRESHOLD = get_filter_alpha_threshold()
-
         def _add_children(parent: QTreeWidgetItem,
-                          entries: list[tuple[str, object, "int | None"]]) -> None:
-            if not _ALPHA_ENABLED or len(entries) <= _ALPHA_THRESHOLD:
+                          entries: "list[tuple[str, object, int | None]]") -> None:
+            if not alpha_enabled or len(entries) <= alpha_threshold:
                 for label, data, count in entries:
                     parent.addChild(_make_leaf(label, data, count))
                 return
@@ -1315,495 +1846,162 @@ class BrowserTab(QWidget):
                     letter_nodes[first] = ln
                 letter_nodes[first].addChild(_make_leaf(label, data, count))
 
-        header = self._table.horizontalHeader()
-        show_author       = not header.isSectionHidden(COL_CREATOR)
-        show_tags         = not header.isSectionHidden(COL_TAGS)
-        show_source       = not header.isSectionHidden(COL_SOURCE)
-        show_date         = not header.isSectionHidden(COL_DATE)
-        show_sculptor     = not header.isSectionHidden(COL_SCULPTOR)
-        show_collection   = not header.isSectionHidden(COL_COLLECTION)
-        show_subcollection = not header.isSectionHidden(COL_SUBCOLLECTION)
-        show_category     = not header.isSectionHidden(COL_CATEGORY)
-        show_release      = not header.isSectionHidden(COL_RELEASE)
-        show_scale        = not header.isSectionHidden(COL_SCALE)
-        show_presupports  = not header.isSectionHidden(COL_PRESUPPORTED)
-        show_warnings     = not header.isSectionHidden(COL_WARNING)
-        show_path         = not header.isSectionHidden(COL_PATH)
+        # ── Build tree items from pre-fetched data ──────────────────────────────
+        if show.get("author"):
+            authors_item = _make_leaf("Creators", ("group", "creator"), _c(("group", "creator")))
+            authors_item.setIcon(0, _icon_author)
+            self._filter_tree.addTopLevelItem(authors_item)
+            _add_children(authors_item, [
+                (c, ("creator", c), _c(("creator", c)))
+                for c in payload["creators"]
+            ])
 
-        from app.ui.config_dialog import get_filter_show_counts as _get_fsc
-        show_counts = _get_fsc()
+        if show.get("tags"):
+            tags_item = _make_leaf("Tags", ("group", "tag"), _c(("group", "tag")))
+            tags_item.setIcon(0, _icon_tag)
+            self._filter_tree.addTopLevelItem(tags_item)
+            _add_children(tags_item, [
+                (name, ("tag", name), _c(("tag", name)))
+                for name in payload["tags"]
+            ])
 
-        session = get_session()
-        try:
-            # ------------------------------------------------------------------
-            # Build count lookup when enabled (one pass, all fields)
-            # ------------------------------------------------------------------
-            _counts: dict = {}
-            _path_counts: dict[str, int] | None = None  # folder → model count (cumulative)
+        if show.get("source"):
+            types_item = _make_leaf("Type", ("group", "source"), _c(("group", "source")))
+            types_item.setIcon(0, _icon_type)
+            self._filter_tree.addTopLevelItem(types_item)
+            _add_children(types_item, [
+                (t, ("source", t), _c(("source", t)))
+                for t in payload["sources"]
+            ])
 
-            if show_counts:
-                from sqlalchemy import func as _func
-                from app.database.models import model_tags as _mt
+        if show.get("date"):
+            _MONTH_NAMES = [
+                "", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+            ]
+            dates_item = _make_leaf("Date", ("group", "date"), _c(("group", "date")))
+            dates_item.setIcon(0, _icon_date)
+            self._filter_tree.addTopLevelItem(dates_item)
+            year_items: dict[int, QTreeWidgetItem] = {}
+            for year, month in payload["dates"]:
+                if year not in year_items:
+                    yi = _make_leaf(str(year), ("date_year", year), _c(("date_year", year)))
+                    dates_item.addChild(yi)
+                    year_items[year] = yi
+                if month is not None:
+                    label = _MONTH_NAMES[month] if 1 <= month <= 12 else str(month)
+                    year_items[year].addChild(
+                        _make_leaf(label, ("date_month", (year, month)),
+                                   _c(("date_month", (year, month))))
+                    )
 
-                # Per-column GROUP BY queries — each uses the relevant index and
-                # runs entirely inside SQLite (no Python loop over every row).
-                # The old implementation pulled all 13 columns × N rows into
-                # Python and bucketed in a loop; on a 50k-row library that's
-                # 650k value-allocations per filter rebuild.
-                _grp: dict[str, int] = {}
+        if show.get("sculptor"):
+            sculptor_item = _make_leaf("Sculptor", ("group", "sculptor"), _c(("group", "sculptor")))
+            sculptor_item.setIcon(0, _icon_sculptor)
+            self._filter_tree.addTopLevelItem(sculptor_item)
+            _add_children(sculptor_item, [
+                (name, ("sculptor_id", sid), _c(("sculptor_id", sid)))
+                for name, sid in payload["sculptors"]
+            ])
 
-                def _count_col(col, kind: str, *, none_filter=True):
-                    """Run GROUP BY on *col* and write {(kind, value): count} into _counts."""
-                    q = session.query(col, _func.count(STLModel.id))
-                    if none_filter:
-                        q = q.filter(col.isnot(None))
-                    q = q.group_by(col)
-                    total = 0
-                    for v, c in q.all():
-                        _counts[(kind, v)] = c
-                        total += c
-                    _grp[kind] = total
+        if show.get("collection"):
+            collection_item = _make_leaf("Collection", ("group", "collection"),
+                                         _c(("group", "collection")))
+            collection_item.setIcon(0, _icon_category)
+            self._filter_tree.addTopLevelItem(collection_item)
+            _add_children(collection_item, [
+                (name, ("collection_id", cid), _c(("collection_id", cid)))
+                for name, cid in payload["collections"]
+            ])
 
-                _count_col(STLModel.creator,          "creator")
-                _count_col(STLModel.source,           "source")
-                _count_col(STLModel.sculptor_id,      "sculptor_id")
-                _count_col(STLModel.collection_id,    "collection_id")
-                _count_col(STLModel.subcollection_id, "subcollection_id")
-                _count_col(STLModel.category_id,      "category_id")
-                _count_col(STLModel.release_id,       "release_id")
-                _count_col(STLModel.scale_id,         "scale_id")
-                _count_col(STLModel.presupports,      "presupports")
+        if show.get("subcollection"):
+            subcol_section = _make_leaf("Subcollection", ("group", "subcollection"),
+                                        _c(("group", "subcollection")))
+            subcol_section.setIcon(0, _icon_subcategory)
+            self._filter_tree.addTopLevelItem(subcol_section)
+            for col_name, col_id, subs in payload["sub_by_col"]:
+                col_node = QTreeWidgetItem([col_name])
+                col_node.setFlags(Qt.ItemFlag.ItemIsEnabled)
+                subcol_section.addChild(col_node)
+                for sub_name, sub_id in subs:
+                    col_node.addChild(
+                        _make_leaf(sub_name, ("subcollection_id", sub_id),
+                                   _c(("subcollection_id", sub_id)))
+                    )
 
-                # Date is a (year, month) composite — GROUP BY both, then derive year totals.
-                _year_cnt: dict[int, int] = {}
-                _date_total = 0
-                for yr, mo, c in (
-                    session.query(STLModel.release_year, STLModel.release_month, _func.count(STLModel.id))
-                    .filter(STLModel.release_year.isnot(None))
-                    .group_by(STLModel.release_year, STLModel.release_month)
-                    .all()
-                ):
-                    _counts[("date_month", (yr, mo))] = c
-                    _year_cnt[yr] = _year_cnt.get(yr, 0) + c
-                    _date_total += c
-                for yr, c in _year_cnt.items():
-                    _counts[("date_year", yr)] = c
-                _grp["date"] = _date_total
+        if show.get("category"):
+            category_item = _make_leaf("Category", ("group", "category"), _c(("group", "category")))
+            category_item.setIcon(0, _icon_category)
+            self._filter_tree.addTopLevelItem(category_item)
+            _add_children(category_item, [
+                (name, ("category_id", cid), _c(("category_id", cid)))
+                for name, cid in payload["categories"]
+            ])
 
-                # Warnings — newline-separated text column; we need substring matching.
-                # Pull only the non-null warning column (small subset) and tally in Python.
-                _all_warnings = [
-                    w for (w,) in session.query(STLModel.warning)
-                    .filter(STLModel.warning.isnot(None)).all()
-                ]
-                for _wt in ("Models with presupported stl", "Archive without images",
-                            "Nested archives", "Archive with supports",
-                            "Archive without printable files"):
-                    _counts[("warning", _wt)] = sum(1 for w in _all_warnings if _wt in w)
-                _grp["warning"] = sum(1 for w in _all_warnings if w)
+        if show.get("release"):
+            release_item = _make_leaf("Release", ("group", "release"), _c(("group", "release")))
+            release_item.setIcon(0, _icon_release)
+            self._filter_tree.addTopLevelItem(release_item)
+            _add_children(release_item, [
+                (name, ("release_id", rid), _c(("release_id", rid)))
+                for name, rid in payload["releases"]
+            ])
 
-                # Path counts — derived from archive_path; needs Python folder splitting.
-                _direct: dict[str, int] = {}
-                for (ap,) in session.query(STLModel.archive_path).filter(
-                    STLModel.archive_path.isnot(None)
-                ).all():
-                    _folder = FSPath(ap).parent.as_posix()
-                    _direct[_folder] = _direct.get(_folder, 0) + 1
+        if show.get("scale"):
+            scale_item = _make_leaf("Scale", ("group", "scale"), _c(("group", "scale")))
+            scale_item.setIcon(0, _icon_scale)
+            self._filter_tree.addTopLevelItem(scale_item)
+            _add_children(scale_item, [
+                (name, ("scale_id", sid), _c(("scale_id", sid)))
+                for name, sid in payload["scales"]
+            ])
 
-                for k, v in _grp.items():
-                    _counts[("group", k)] = v
+        if show.get("presupports"):
+            presup_item = _make_leaf("Presupports", ("group", "presupports"),
+                                     _c(("group", "presupports")))
+            presup_item.setIcon(0, _icon_presupports)
+            self._filter_tree.addTopLevelItem(presup_item)
+            for val in payload["presupports"]:
+                presup_item.addChild(_make_leaf(val, ("presupports", val), _c(("presupports", val))))
 
-                # Tags — join query (many-to-many, unavoidable separate query)
-                for tn, c in session.query(Tag.name, _func.count(_mt.c.model_id)).join(_mt, Tag.id == _mt.c.tag_id).group_by(Tag.name).all():
-                    _counts[("tag", tn)] = c
-                _counts[("group", "tag")] = session.query(_func.count(_mt.c.model_id.distinct())).scalar() or 0
+        if show.get("warnings"):
+            _WARNING_TYPES = [
+                "Models with presupported stl",
+                "Archive without images",
+                "Nested archives",
+                "Archive with supports",
+                "Archive without printable files",
+            ]
+            warn_item = _make_leaf("Warnings", ("group", "warning"), _c(("group", "warning")))
+            warn_item.setIcon(0, _icon_warnings)
+            self._filter_tree.addTopLevelItem(warn_item)
+            for wtype in _WARNING_TYPES:
+                warn_item.addChild(_make_leaf(wtype, ("warning", wtype), _c(("warning", wtype))))
 
-                # Path counts — cumulative (directory = sum of all models in its subtree)
-                _path_counts = {}
-                for _folder, _c in _direct.items():
-                    _path_counts[_folder] = _path_counts.get(_folder, 0) + _c
-                    _f = FSPath(_folder)
-                    while True:
-                        _p = _f.parent
-                        if _p == _f:
-                            break
-                        _ps = _p.as_posix()
-                        _path_counts[_ps] = _path_counts.get(_ps, 0) + _c
-                        _f = _p
-                _counts[("group", "path")] = sum(_direct.values())
-
-            # Scoped counts for all sections (each section scoped by all other active filters)
-            _scoped_counts: dict = {}
-            _sc_path_counts: dict[str, int] | None = None
-            if show_counts and scope_by_section is not None:
-                from app.database.models import model_tags as _mt2
-                # Creator
-                _creator_sc_ids = _scope("creator")
-                if _creator_sc_ids is not None:
-                    _cr_rows = session.query(STLModel.creator, _func.count(STLModel.id)).filter(STLModel.id.in_(_creator_sc_ids)).filter(STLModel.creator.isnot(None)).group_by(STLModel.creator).all()
-                    for v, c in _cr_rows:
-                        _scoped_counts[("creator", v)] = c
-                    _scoped_counts[("group", "creator")] = sum(c for _, c in _cr_rows)
-                # Source/Type
-                _source_sc_ids = _scope("source")
-                if _source_sc_ids is not None:
-                    _src_rows = session.query(STLModel.source, _func.count(STLModel.id)).filter(STLModel.id.in_(_source_sc_ids)).filter(STLModel.source.isnot(None)).group_by(STLModel.source).all()
-                    for v, c in _src_rows:
-                        _scoped_counts[("source", v)] = c
-                    _scoped_counts[("group", "source")] = sum(c for _, c in _src_rows)
-                # Tags
-                _tag_ids = _scope("tag")
-                if _tag_ids is not None:
-                    for tn, c in session.query(Tag.name, _func.count(_mt2.c.model_id)).join(_mt2, Tag.id == _mt2.c.tag_id).filter(_mt2.c.model_id.in_(_tag_ids)).group_by(Tag.name).all():
-                        _scoped_counts[("tag", tn)] = c
-                    _scoped_counts[("group", "tag")] = session.query(_func.count(_mt2.c.model_id.distinct())).filter(_mt2.c.model_id.in_(_tag_ids)).scalar() or 0
-                # Date
-                _date_ids = _scope("date")
-                if _date_ids is not None:
-                    _sc_year: dict[int, int] = {}
-                    _date_rows = session.query(STLModel.release_year, STLModel.release_month, _func.count(STLModel.id)).filter(STLModel.id.in_(_date_ids)).filter(STLModel.release_year.isnot(None)).group_by(STLModel.release_year, STLModel.release_month).all()
-                    for yr, mo, c in _date_rows:
-                        _scoped_counts[("date_month", (yr, mo))] = c
-                        _sc_year[yr] = _sc_year.get(yr, 0) + c
-                    for yr, c in _sc_year.items():
-                        _scoped_counts[("date_year", yr)] = c
-                    _scoped_counts[("group", "date")] = sum(c for _, _, c in _date_rows)
-                # Sculptor
-                _sculptor_sc_ids = _scope("sculptor")
-                if _sculptor_sc_ids is not None:
-                    _sc_rows = session.query(STLModel.sculptor_id, _func.count(STLModel.id)).filter(STLModel.id.in_(_sculptor_sc_ids)).filter(STLModel.sculptor_id.isnot(None)).group_by(STLModel.sculptor_id).all()
-                    for sid, c in _sc_rows:
-                        _scoped_counts[("sculptor_id", sid)] = c
-                    _scoped_counts[("group", "sculptor")] = sum(c for _, c in _sc_rows)
-                # Collection
-                _col_sc_ids = _scope("collection")
-                if _col_sc_ids is not None:
-                    _col_rows = session.query(STLModel.collection_id, _func.count(STLModel.id)).filter(STLModel.id.in_(_col_sc_ids)).filter(STLModel.collection_id.isnot(None)).group_by(STLModel.collection_id).all()
-                    for cid, c in _col_rows:
-                        _scoped_counts[("collection_id", cid)] = c
-                    _scoped_counts[("group", "collection")] = sum(c for _, c in _col_rows)
-                # Subcollection
-                _sub_sc_ids = _scope("subcollection")
-                if _sub_sc_ids is not None:
-                    _sub_rows = session.query(STLModel.subcollection_id, _func.count(STLModel.id)).filter(STLModel.id.in_(_sub_sc_ids)).filter(STLModel.subcollection_id.isnot(None)).group_by(STLModel.subcollection_id).all()
-                    for sid, c in _sub_rows:
-                        _scoped_counts[("subcollection_id", sid)] = c
-                    _scoped_counts[("group", "subcollection")] = sum(c for _, c in _sub_rows)
-                # Category
-                _category_sc_ids = _scope("category")
-                if _category_sc_ids is not None:
-                    _cat_rows = session.query(STLModel.category_id, _func.count(STLModel.id)).filter(STLModel.id.in_(_category_sc_ids)).filter(STLModel.category_id.isnot(None)).group_by(STLModel.category_id).all()
-                    for cid, c in _cat_rows:
-                        _scoped_counts[("category_id", cid)] = c
-                    _scoped_counts[("group", "category")] = sum(c for _, c in _cat_rows)
-                # Release
-                _rel_sc_ids = _scope("release")
-                if _rel_sc_ids is not None:
-                    _rel_rows = session.query(STLModel.release_id, _func.count(STLModel.id)).filter(STLModel.id.in_(_rel_sc_ids)).filter(STLModel.release_id.isnot(None)).group_by(STLModel.release_id).all()
-                    for rid, c in _rel_rows:
-                        _scoped_counts[("release_id", rid)] = c
-                    _scoped_counts[("group", "release")] = sum(c for _, c in _rel_rows)
-                # Scale
-                _scale_sc_ids = _scope("scale")
-                if _scale_sc_ids is not None:
-                    _scl_rows = session.query(STLModel.scale_id, _func.count(STLModel.id)).filter(STLModel.id.in_(_scale_sc_ids)).filter(STLModel.scale_id.isnot(None)).group_by(STLModel.scale_id).all()
-                    for sid, c in _scl_rows:
-                        _scoped_counts[("scale_id", sid)] = c
-                    _scoped_counts[("group", "scale")] = sum(c for _, c in _scl_rows)
-                # Presupports
-                _presup_sc_ids = _scope("presupports")
-                if _presup_sc_ids is not None:
-                    _psp_rows = session.query(STLModel.presupports, _func.count(STLModel.id)).filter(STLModel.id.in_(_presup_sc_ids)).filter(STLModel.presupports.isnot(None)).group_by(STLModel.presupports).all()
-                    for v, c in _psp_rows:
-                        _scoped_counts[("presupports", v)] = c
-                    _scoped_counts[("group", "presupports")] = sum(c for _, c in _psp_rows)
-                # Warning
-                _warn_sc_ids = _scope("warning")
-                if _warn_sc_ids is not None:
-                    _sc_all_warnings = [w for (w,) in session.query(STLModel.warning).filter(STLModel.id.in_(_warn_sc_ids)).filter(STLModel.warning.isnot(None)).all()]
-                    for _wt in ("Models with presupported stl", "Archive without images",
-                                "Nested archives", "Archive with supports",
-                                "Archive without printable files"):
-                        _scoped_counts[("warning", _wt)] = sum(1 for w in _sc_all_warnings if _wt in w)
-                    _scoped_counts[("group", "warning")] = sum(1 for w in _sc_all_warnings if w)
-                # Path counts (cumulative, scoped)
-                _path_sc_ids = _scope("path")
-                if _path_sc_ids is not None:
-                    _sc_direct: dict[str, int] = {}
-                    for (ap,) in session.query(STLModel.archive_path).filter(STLModel.id.in_(_path_sc_ids)).filter(STLModel.archive_path.isnot(None)).all():
-                        _folder = FSPath(ap).parent.as_posix()
-                        _sc_direct[_folder] = _sc_direct.get(_folder, 0) + 1
-                    _sc_path_counts: dict[str, int] = {}
-                    for _folder, _c in _sc_direct.items():
-                        _sc_path_counts[_folder] = _sc_path_counts.get(_folder, 0) + _c
-                        _f = FSPath(_folder)
-                        while True:
-                            _p = _f.parent
-                            if _p == _f:
-                                break
-                            _ps = _p.as_posix()
-                            _sc_path_counts[_ps] = _sc_path_counts.get(_ps, 0) + _c
-                            _f = _p
-                    _scoped_counts[("group", "path")] = sum(_sc_direct.values())
-
-            _SCOPED_KINDS = (
-                "creator", "source", "tag", "date_month", "date_year",
-                "sculptor_id", "collection_id", "subcollection_id", "category_id",
-                "release_id", "scale_id", "presupports", "warning", "path", "group",
-            )
-            _SCOPED_GROUPS = (
-                "creator", "source", "tag", "date", "sculptor",
-                "collection", "subcollection", "category", "release",
-                "scale", "presupports", "warning", "path",
-            )
-
-            def _c(data) -> int | None:
-                if scope_by_section is not None and data[0] in _SCOPED_KINDS and (data[0] != "group" or data[1] in _SCOPED_GROUPS):
-                    v = _scoped_counts.get(data)
-                    if v is None:
-                        v = _counts.get(data)  # fall back to full count if section not scoped
-                else:
-                    v = _counts.get(data)
-                return v if v else None
-
-            # ------------------------------------------------------------------
-            if show_author:
-                authors_item = _make_leaf("Creators", ("group", "creator"), _c(("group", "creator")))
-                authors_item.setIcon(0, _icon_author)
-                self._filter_tree.addTopLevelItem(authors_item)
-                _author_q = session.query(STLModel.creator).distinct().order_by(STLModel.creator)
-                _author_scope = _scope("creator")
-                if _author_scope is not None:
-                    _author_q = _author_q.filter(STLModel.id.in_(_author_scope))
-                _add_children(authors_item, [
-                    (c, ("creator", c), _c(("creator", c)))
-                    for (c,) in _author_q.all() if c
-                ])
-
-            if show_tags:
-                tags_item = _make_leaf("Tags", ("group", "tag"), _c(("group", "tag")))
-                tags_item.setIcon(0, _icon_tag)
-                self._filter_tree.addTopLevelItem(tags_item)
-                _tag_q = session.query(Tag).order_by(Tag.name)
-                _tag_scope = _scope("tag")
-                if _tag_scope is not None:
-                    from app.database.models import model_tags as _mt3
-                    _tag_q = _tag_q.join(_mt3, Tag.id == _mt3.c.tag_id).filter(_mt3.c.model_id.in_(_tag_scope)).distinct()
-                _add_children(tags_item, [
-                    (tag.name, ("tag", tag.name), _c(("tag", tag.name)))
-                    for tag in _tag_q.all()
-                ])
-
-            if show_source:
-                types_item = _make_leaf("Type", ("group", "source"), _c(("group", "source")))
-                types_item.setIcon(0, _icon_type)
-                self._filter_tree.addTopLevelItem(types_item)
-                _source_q = session.query(STLModel.source).distinct().order_by(STLModel.source)
-                _source_scope = _scope("source")
-                if _source_scope is not None:
-                    _source_q = _source_q.filter(STLModel.id.in_(_source_scope))
-                _add_children(types_item, [
-                    (t, ("source", t), _c(("source", t)))
-                    for (t,) in _source_q.all() if t
-                ])
-
-            if show_date:
-                _MONTH_NAMES = [
-                    "", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-                ]
-                dates_item = _make_leaf("Date", ("group", "date"), _c(("group", "date")))
-                dates_item.setIcon(0, _icon_date)
-                self._filter_tree.addTopLevelItem(dates_item)
-                _date_q = (
-                    session.query(STLModel.release_year, STLModel.release_month)
-                    .filter(STLModel.release_year.isnot(None))
-                    .distinct()
-                    .order_by(STLModel.release_year.desc(), STLModel.release_month)
-                )
-                _date_scope = _scope("date")
-                if _date_scope is not None:
-                    _date_q = _date_q.filter(STLModel.id.in_(_date_scope))
-                rows = _date_q.all()
-                year_items: dict[int, QTreeWidgetItem] = {}
-                for year, month in rows:
-                    if year not in year_items:
-                        yi = _make_leaf(str(year), ("date_year", year), _c(("date_year", year)))
-                        dates_item.addChild(yi)
-                        year_items[year] = yi
-                    if month is not None:
-                        label = _MONTH_NAMES[month] if 1 <= month <= 12 else str(month)
-                        year_items[year].addChild(
-                            _make_leaf(label, ("date_month", (year, month)), _c(("date_month", (year, month))))
-                        )
-
-            if show_sculptor:
-                sculptor_item = _make_leaf("Sculptor", ("group", "sculptor"), _c(("group", "sculptor")))
-                sculptor_item.setIcon(0, _icon_sculptor)
-                self._filter_tree.addTopLevelItem(sculptor_item)
-                _sculptor_q = session.query(Sculptor).order_by(Sculptor.name)
-                _sculptor_scope = _scope("sculptor")
-                if _sculptor_scope is not None:
-                    _scoped_sculptor_ids = {sid for (sid,) in session.query(STLModel.sculptor_id).filter(STLModel.id.in_(_sculptor_scope)).filter(STLModel.sculptor_id.isnot(None)).distinct()}
-                    _sculptor_q = _sculptor_q.filter(Sculptor.id.in_(_scoped_sculptor_ids))
-                _add_children(sculptor_item, [
-                    (sc.name, ("sculptor_id", sc.id), _c(("sculptor_id", sc.id)))
-                    for sc in _sculptor_q.all()
-                ])
-
-            if show_collection:
-                collection_item = _make_leaf("Collection", ("group", "collection"), _c(("group", "collection")))
-                collection_item.setIcon(0, _icon_category)
-                self._filter_tree.addTopLevelItem(collection_item)
-                _col_q = session.query(Collection).order_by(Collection.name)
-                _col_scope = _scope("collection")
-                if _col_scope is not None:
-                    _scoped_col_ids = {cid for (cid,) in session.query(STLModel.collection_id).filter(STLModel.id.in_(_col_scope)).filter(STLModel.collection_id.isnot(None)).distinct()}
-                    _col_q = _col_q.filter(Collection.id.in_(_scoped_col_ids))
-                _add_children(collection_item, [
-                    (col.name, ("collection_id", col.id), _c(("collection_id", col.id)))
-                    for col in _col_q.all()
-                ])
-
-            if show_subcollection:
-                subcol_section = _make_leaf("Subcollection", ("group", "subcollection"), _c(("group", "subcollection")))
-                subcol_section.setIcon(0, _icon_subcategory)
-                self._filter_tree.addTopLevelItem(subcol_section)
-                _scoped_sub_ids: set[int] | None = None
-                _sub_scope = _scope("subcollection")
-                if _sub_scope is not None:
-                    _scoped_sub_ids = {sid for (sid,) in session.query(STLModel.subcollection_id).filter(STLModel.id.in_(_sub_scope)).filter(STLModel.subcollection_id.isnot(None)).distinct()}
-                _col_subs: dict[int, list] = {}
-                _col_names: dict[int, str] = {}
-                for col_name, col_id, sub_name, sub_id in (
-                    session.query(Collection.name, Collection.id, Subcollection.name, Subcollection.id)
-                    .join(Subcollection, Subcollection.collection_id == Collection.id)
-                    .order_by(Collection.name, Subcollection.name)
-                    .all()
-                ):
-                    if _scoped_sub_ids is not None and sub_id not in _scoped_sub_ids:
-                        continue
-                    if col_id not in _col_subs:
-                        _col_subs[col_id] = []
-                        _col_names[col_id] = col_name
-                    _col_subs[col_id].append((sub_name, sub_id))
-                for col_id, subs in _col_subs.items():
-                    col_node = QTreeWidgetItem([_col_names[col_id]])
-                    col_node.setFlags(Qt.ItemFlag.ItemIsEnabled)
-                    subcol_section.addChild(col_node)
-                    for sub_name, sub_id in subs:
-                        col_node.addChild(_make_leaf(sub_name, ("subcollection_id", sub_id), _c(("subcollection_id", sub_id))))
-
-            if show_category:
-                category_item = _make_leaf("Category", ("group", "category"), _c(("group", "category")))
-                category_item.setIcon(0, _icon_category)
-                self._filter_tree.addTopLevelItem(category_item)
-                _category_q = session.query(Category).order_by(Category.name)
-                _category_scope = _scope("category")
-                if _category_scope is not None:
-                    _scoped_cat_ids = {cid for (cid,) in session.query(STLModel.category_id).filter(STLModel.id.in_(_category_scope)).filter(STLModel.category_id.isnot(None)).distinct()}
-                    _category_q = _category_q.filter(Category.id.in_(_scoped_cat_ids))
-                _add_children(category_item, [
-                    (cat.name, ("category_id", cat.id), _c(("category_id", cat.id)))
-                    for cat in _category_q.all()
-                ])
-
-            if show_release:
-                release_item = _make_leaf("Release", ("group", "release"), _c(("group", "release")))
-                release_item.setIcon(0, _icon_release)
-                self._filter_tree.addTopLevelItem(release_item)
-                _rel_q = session.query(Release).order_by(Release.name)
-                _rel_scope = _scope("release")
-                if _rel_scope is not None:
-                    _scoped_rel_ids = {rid for (rid,) in session.query(STLModel.release_id).filter(STLModel.id.in_(_rel_scope)).filter(STLModel.release_id.isnot(None)).distinct()}
-                    _rel_q = _rel_q.filter(Release.id.in_(_scoped_rel_ids))
-                _add_children(release_item, [
-                    (rel.name, ("release_id", rel.id), _c(("release_id", rel.id)))
-                    for rel in _rel_q.all()
-                ])
-
-            if show_scale:
-                scale_item = _make_leaf("Scale", ("group", "scale"), _c(("group", "scale")))
-                scale_item.setIcon(0, _icon_scale)
-                self._filter_tree.addTopLevelItem(scale_item)
-                _scale_q = session.query(Scale).order_by(Scale.name)
-                _scale_scope = _scope("scale")
-                if _scale_scope is not None:
-                    _scoped_scale_ids = {sid for (sid,) in session.query(STLModel.scale_id).filter(STLModel.id.in_(_scale_scope)).filter(STLModel.scale_id.isnot(None)).distinct()}
-                    _scale_q = _scale_q.filter(Scale.id.in_(_scoped_scale_ids))
-                _add_children(scale_item, [
-                    (sc.name, ("scale_id", sc.id), _c(("scale_id", sc.id)))
-                    for sc in _scale_q.all()
-                ])
-
-            if show_presupports:
-                presup_item = _make_leaf("Presupports", ("group", "presupports"), _c(("group", "presupports")))
-                presup_item.setIcon(0, _icon_presupports)
-                self._filter_tree.addTopLevelItem(presup_item)
-                _presup_q = (session.query(STLModel.presupports)
-                             .filter(STLModel.presupports.isnot(None))
-                             .distinct().order_by(STLModel.presupports))
-                _presup_scope = _scope("presupports")
-                if _presup_scope is not None:
-                    _presup_q = _presup_q.filter(STLModel.id.in_(_presup_scope))
-                for (val,) in _presup_q.all():
-                    if val:
-                        presup_item.addChild(_make_leaf(val, ("presupports", val), _c(("presupports", val))))
-
-            if show_warnings:
-                _WARNING_TYPES = [
-                    "Models with presupported stl",
-                    "Archive without images",
-                    "Nested archives",
-                    "Archive with supports",
-                    "Archive without printable files",
-                ]
-                warn_item = _make_leaf("Warnings", ("group", "warning"), _c(("group", "warning")))
-                warn_item.setIcon(0, _icon_warnings)
-                self._filter_tree.addTopLevelItem(warn_item)
-                for wtype in _WARNING_TYPES:
-                    warn_item.addChild(_make_leaf(wtype, ("warning", wtype), _c(("warning", wtype))))
-
-            if show_path:
-                paths_item = _make_leaf("Path", ("group", "path"), _c(("group", "path")))
-                paths_item.setIcon(0, _icon_path)
-                self._filter_tree.addTopLevelItem(paths_item)
-                _path_scope = _scope("path")
-                if _path_scope is not None:
-                    # Scoped: compute dirs from filtered models only, bypass the unscoped cache.
-                    _scoped_dirs: set[str] = set()
-                    for (ap,) in session.query(STLModel.archive_path).filter(STLModel.id.in_(_path_scope)).filter(STLModel.archive_path.isnot(None)).distinct().all():
-                        _scoped_dirs.add(FSPath(ap).parent.as_posix())
-                    self._build_path_tree(paths_item, sorted(_scoped_dirs), checked_data, excluded_data,
-                                          path_counts=_sc_path_counts)
-                else:
-                    dirs: set[str] = set()
-                    for (ap,) in session.query(STLModel.archive_path).distinct().all():
-                        if ap:
-                            # Use as_posix() so the filter tree always uses forward slashes,
-                            # regardless of OS — the LIKE query normalises the DB column too.
-                            dirs.add(FSPath(ap).parent.as_posix())
-                    new_dirs = frozenset(dirs)
-                    if new_dirs != self._cached_path_dirs:
-                        self._cached_path_dirs = new_dirs
-                        self._cached_sorted_dirs = sorted(dirs)
-                    self._build_path_tree(paths_item, self._cached_sorted_dirs, checked_data, excluded_data,
-                                          path_counts=_path_counts)
-        finally:
-            session.close()
+        if show.get("path"):
+            paths_item = _make_leaf("Path", ("group", "path"), _c(("group", "path")))
+            paths_item.setIcon(0, _icon_path)
+            self._filter_tree.addTopLevelItem(paths_item)
+            scoped_dirs = payload.get("scoped_dirs")
+            if scoped_dirs is not None:
+                self._build_path_tree(paths_item, scoped_dirs, checked_data, excluded_data,
+                                      path_counts=_sc_path_counts)
+            else:
+                self._build_path_tree(paths_item, self._cached_sorted_dirs,
+                                      checked_data, excluded_data,
+                                      path_counts=_path_counts)
 
         self._filter_tree.blockSignals(False)
 
-        # Restore expansion: first run → all collapsed; subsequent runs → restore state.
         if expanded_sections is not None:
             def _restore_expansion(item: QTreeWidgetItem) -> None:
                 d = item.data(0, Qt.ItemDataRole.UserRole)
                 item.setExpanded((d if d else item.text(0)) in expanded_sections)
                 for i in range(item.childCount()):
                     _restore_expansion(item.child(i))
-            root_item = self._filter_tree.invisibleRootItem()
-            for i in range(root_item.childCount()):
-                _restore_expansion(root_item.child(i))
+            root = self._filter_tree.invisibleRootItem()
+            for i in range(root.childCount()):
+                _restore_expansion(root.child(i))
 
     @staticmethod
     def _build_path_tree(root_item: QTreeWidgetItem, dirs: list[str],
