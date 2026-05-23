@@ -34,7 +34,10 @@ from app.database.helpers import (
     get_or_create_tag,
 )
 from app.database.models import STLModel, Image, STLFile, CrawledFolder
-from app.utils.thumbnailer import save_thumbnail, delete_thumbnail, get_thumbnail_base_dir, get_thumbnail_bytes
+from app.utils.thumbnailer import (
+    save_thumbnail, delete_thumbnail, get_thumbnail_base_dir,
+    get_thumbnail_bytes, save_thumbnails_batch,
+)
 from app.ui.find_content_duplicates_dialog import compute_dhash_from_jpeg
 from app.utils.path_pattern import parse_path, apply_extracted_to_model, parse_release_date
 
@@ -413,7 +416,6 @@ class CrawlerWorker(QThread):
                     modified_folders.add(archive_path.parent)
                 else:
                     self._stats_unchanged += 1
-                self.counts_changed.emit(self._stats_new, self._stats_updated, self._stats_unchanged)
                 self._consecutive_failures = 0
                 logger.debug("  Upsert committed: %s", archive_path.name)
             except Exception as exc:
@@ -432,6 +434,8 @@ class CrawlerWorker(QThread):
                     return True
             self.progress.emit(idx, total)
 
+        # Emit once per batch instead of per archive to reduce UI repaints.
+        self.counts_changed.emit(self._stats_new, self._stats_updated, self._stats_unchanged)
         return False
 
     def _post_export_metadata(self, modified_folders: set[Path], thumb_base: Path) -> None:
@@ -1011,40 +1015,45 @@ class CrawlerWorker(QThread):
                 session.delete(old_img)
 
         if not existing or hash_changed:
-            count = 0
-            for filename in image_names:
-                if count >= max_thumbs:
-                    logger.debug("  Thumbnail limit (%d) reached, skipping remaining images",
-                                 max_thumbs)
-                    break
-                raw_bytes = contents[filename]
+            # Flush Image records first so each gets a PK before LMDB writes.
+            candidates = image_names[:max_thumbs]
+            if len(image_names) > max_thumbs:
+                logger.debug("  Thumbnail limit (%d) reached, skipping remaining images",
+                             max_thumbs)
+            img_records: list[Image] = []
+            for filename in candidates:
                 img = Image(model=model, filename=filename)
                 session.add(img)
-                session.flush()  # get img.id before writing to LMDB
-                rel_path = save_thumbnail(raw_bytes, img.id, max_size=max_thumb_size)
+                img_records.append(img)
+            session.flush()
+
+            # Batch-write all thumbnails in a single LMDB transaction.
+            batch_items = [
+                (img.id, contents[img.filename], max_thumb_size)
+                for img in img_records
+            ]
+            batch_results = save_thumbnails_batch(batch_items)
+
+            count = 0
+            for img, (_iid, rel_path, jpeg_bytes) in zip(img_records, batch_results):
                 if rel_path:
                     img.thumbnail_path = rel_path
-                    # Compute and persist perceptual dHash for the stored thumbnail
                     try:
-                        jpeg = get_thumbnail_bytes(img.id)
-                        if jpeg:
-                            h = compute_dhash_from_jpeg(jpeg)
+                        if jpeg_bytes:
+                            h = compute_dhash_from_jpeg(jpeg_bytes)
                             if h is not None:
-                                # Store dHash as a 16-character hex string (lowercase,
-                                # zero-padded) to avoid integer range issues in SQLite.
                                 hval = int(h) & ((1 << 64) - 1)
                                 img.dhash = f"{hval:016x}"
                     except Exception:
-                        # Protect crawl from any hashing errors
                         logger.debug("  Failed to compute dHash for image id %s", img.id)
                     count += 1
-                    logger.debug("  Thumbnail saved: %s → %s", filename, rel_path)
+                    logger.debug("  Thumbnail saved: %s → %s", img.filename, rel_path)
                 else:
                     session.delete(img)
-                    msg = f"  WARNING: thumbnail conversion failed for {filename}"
+                    msg = f"  WARNING: thumbnail conversion failed for {img.filename}"
                     self.log.emit(msg)
                     logger.warning("Thumbnail conversion failed: %s in %s",
-                                   filename, archive_path.name)
+                                   img.filename, archive_path.name)
             self.log.emit(f"  {count} thumbnail(s) stored")
             logger.debug("  %d thumbnail(s) stored for %s", count, archive_path.name)
 
