@@ -87,18 +87,38 @@ def _prune_ancestor_paths(paths: list[str]) -> list[str]:
 class _BrowserProxyModel(QSortFilterProxyModel):
     """Proxy model that sorts the File Size column numerically via UserRole data."""
 
-    def lessThan(self, left, right):
-        # Numeric sort for File Size and Compression (stored under UserRole)
-        if left.column() in (COL_FILESIZE, COL_COMPRESSION):
-            return (left.data(Qt.ItemDataRole.UserRole) or -1) < (right.data(Qt.ItemDataRole.UserRole) or -1)
-        # Numeric sort for Sequence column — use the numeric value stored under UserRole
-        if left.column() == COL_SEQUENCE:
-            def _to_int(v):
+    _NUMERIC_COLS: "frozenset[int]"  # populated after COL_* constants are defined
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._sort_cache: dict[tuple[int, int], object] = {}
+
+    def setSourceModel(self, model) -> None:
+        super().setSourceModel(model)
+        self._sort_cache.clear()
+        if model is not None:
+            model.modelReset.connect(self._sort_cache.clear)
+
+    def _sort_key(self, index) -> object:
+        col = index.column()
+        row = index.row()
+        key = (col, row)
+        if key not in self._sort_cache:
+            v = index.data(Qt.ItemDataRole.UserRole)
+            if col == COL_SEQUENCE:
                 try:
-                    return int(v) if v is not None else -1
+                    v = int(v) if v is not None else -1
                 except Exception:
-                    return -1
-            return _to_int(left.data(Qt.ItemDataRole.UserRole)) < _to_int(right.data(Qt.ItemDataRole.UserRole))
+                    v = -1
+            else:
+                v = v if v is not None else -1
+            self._sort_cache[key] = v
+        return self._sort_cache[key]
+
+    def lessThan(self, left, right):
+        col = left.column()
+        if col in (COL_FILESIZE, COL_COMPRESSION, COL_SEQUENCE):
+            return self._sort_key(left) < self._sort_key(right)
         return super().lessThan(left, right)
 
 MODEL_ID_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -427,12 +447,8 @@ class TagDelegate(QStyledItemDelegate):
     """QLineEdit that autocompletes each comma-separated token from the tag pool."""
 
     def createEditor(self, parent, option, index) -> "_TagLineEdit":
-        session = get_session()
-        try:
+        with session_scope() as session:
             all_tags = [t.name for t in session.query(Tag).order_by(Tag.name).all()]
-        finally:
-            session.close()
-
         edit = _TagLineEdit(all_tags, parent)
         return edit
 
@@ -894,9 +910,19 @@ class _FilterTreeWorker(QRunnable):
                     _counts[("warning", _wt)] = sum(1 for w in _all_warnings if _wt in w)
                 _grp["warning"] = sum(1 for w in _all_warnings if w)
 
+                # Use pre-computed archive_folder when available (SQL GROUP BY),
+                # falling back to Python path parsing for older rows where it is NULL.
                 _direct: dict = {}
+                for (folder, cnt) in (
+                    session.query(STLModel.archive_folder, _func.count(STLModel.id))
+                    .filter(STLModel.archive_folder.isnot(None))
+                    .group_by(STLModel.archive_folder)
+                    .all()
+                ):
+                    _direct[folder] = _direct.get(folder, 0) + cnt
                 for (ap,) in session.query(STLModel.archive_path).filter(
-                    STLModel.archive_path.isnot(None)
+                    STLModel.archive_folder.is_(None),
+                    STLModel.archive_path.isnot(None),
                 ).all():
                     folder = _P(ap).parent.as_posix()
                     _direct[folder] = _direct.get(folder, 0) + 1
@@ -1009,9 +1035,18 @@ class _FilterTreeWorker(QRunnable):
                     _path_sc = _s("path")
                     if _path_sc is not None:
                         _sc_direct: dict = {}
+                        for (folder, cnt) in (
+                            session.query(STLModel.archive_folder, _func.count(STLModel.id))
+                            .filter(STLModel.id.in_(_path_sc))
+                            .filter(STLModel.archive_folder.isnot(None))
+                            .group_by(STLModel.archive_folder)
+                            .all()
+                        ):
+                            _sc_direct[folder] = _sc_direct.get(folder, 0) + cnt
                         for (ap,) in (
                             session.query(STLModel.archive_path)
                             .filter(STLModel.id.in_(_path_sc))
+                            .filter(STLModel.archive_folder.is_(None))
                             .filter(STLModel.archive_path.isnot(None))
                             .all()
                         ):
@@ -1197,9 +1232,19 @@ class _FilterTreeWorker(QRunnable):
                 _path_sc2 = _scoped_ids("path")
                 if _path_sc2 is not None:
                     _sd: set[str] = set()
+                    for (folder,) in (
+                        session.query(STLModel.archive_folder)
+                        .filter(STLModel.id.in_(_path_sc2))
+                        .filter(STLModel.archive_folder.isnot(None))
+                        .distinct()
+                        .all()
+                    ):
+                        _sd.add(folder)
+                    # fallback for rows without archive_folder
                     for (ap,) in (
                         session.query(STLModel.archive_path)
                         .filter(STLModel.id.in_(_path_sc2))
+                        .filter(STLModel.archive_folder.is_(None))
                         .filter(STLModel.archive_path.isnot(None))
                         .distinct()
                         .all()
@@ -1208,7 +1253,20 @@ class _FilterTreeWorker(QRunnable):
                     scoped_dirs = sorted(_sd)
                 else:
                     _all_dirs: set[str] = set()
-                    for (ap,) in session.query(STLModel.archive_path).distinct().all():
+                    for (folder,) in (
+                        session.query(STLModel.archive_folder)
+                        .filter(STLModel.archive_folder.isnot(None))
+                        .distinct()
+                        .all()
+                    ):
+                        _all_dirs.add(folder)
+                    # fallback for rows without archive_folder
+                    for (ap,) in (
+                        session.query(STLModel.archive_path)
+                        .filter(STLModel.archive_folder.is_(None))
+                        .distinct()
+                        .all()
+                    ):
                         if ap:
                             _all_dirs.add(_P(ap).parent.as_posix())
                     new_dirs_frozen = frozenset(_all_dirs)

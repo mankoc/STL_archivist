@@ -775,6 +775,7 @@ class CrawlerWorker(QThread):
             logger.debug("  %s — inserting new record", archive_path.name)
 
         model.archive_hash = current_hash
+        model.archive_folder = archive_path.parent.as_posix()
         # Update cached filesystem metadata
         try:
             st = archive_path.stat()

@@ -181,6 +181,10 @@ def _ensure_indexes(engine) -> None:
             "ON models (archive_hash)"
         ))
         conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_models_archive_folder "
+            "ON models (archive_folder)"
+        ))
+        conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_models_release_date "
             "ON models (release_year, release_month)"
         ))
@@ -379,3 +383,27 @@ def session_scope():
         raise
     finally:
         session.close()
+
+
+def backfill_archive_folder() -> int:
+    """Populate ``STLModel.archive_folder`` for rows where it is NULL.
+
+    Runs at most once per app session (a no-op when all rows already have the
+    column populated).  Returns the number of rows updated.
+    """
+    from app.database.models import STLModel
+    from pathlib import PurePosixPath
+    with session_scope() as session:
+        rows = (
+            session.query(STLModel.id, STLModel.archive_path)
+            .filter(STLModel.archive_folder.is_(None))
+            .all()
+        )
+        if not rows:
+            return 0
+        for model_id, ap in rows:
+            folder = PurePosixPath(ap.replace("\\", "/")).parent.as_posix()
+            session.query(STLModel).filter(STLModel.id == model_id).update(
+                {STLModel.archive_folder: folder}, synchronize_session=False
+            )
+        return len(rows)

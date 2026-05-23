@@ -20,7 +20,7 @@ def _resource(relative: str) -> Path:
     return base / relative
 
 from app import __version__
-from app.database.db import init_db
+from app.database.db import init_db, backfill_archive_folder
 from app.ui.main_window import MainWindow
 
 
@@ -160,6 +160,7 @@ def main() -> None:
     _migrate_db_filename(db_path)
     db_path = _check_db_on_startup(db_path, splash)
     init_db(db_path)
+    backfill_archive_folder()
 
     _update_splash(splash, "Applying theme…")
     apply_color_scheme(get_color_scheme())

@@ -73,6 +73,12 @@ and metadata management.
 - Drop handling lives in `eventFilter` (already filtering the scroll area for resize events) and
   `_handle_image_drop`. The selected model is tracked in `self._current_model_id`.
 
+**UI work budget.** No method invoked on the GUI thread may perform DB, LMDB, archive, or
+file I/O beyond a single cheap row lookup. Anything heavier must be dispatched to a
+`QThread`, `QRunnable`, or coalesced via `QTimer`. New widgets that need data should
+request it from the existing loader/cache layers (`ThumbnailLoaderWorker`, `_FilterTreeWorker`,
+`TableLoaderWorker`, `lookup_cache`), not query directly.
+
 ### `app/utils/`
 
 - **`thumbnailer.py`** — LMDB key-value store for JPEG thumbnails (keyed by `Image.id`).
