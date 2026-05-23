@@ -412,11 +412,16 @@ class UpdateCrawledFoldersDialog(QDialog):
     def _add_table_row(self, filename: str, change: str, folder: str,
                        tooltip: str = "") -> None:
         colour = _COLOUR.get(change)
+        # Disable sorting while populating all three cells; otherwise Qt re-sorts
+        # after the first setItem call, moving the new row to a different index,
+        # and the remaining setItem calls land on the wrong row (empty cells).
+        self._table.setSortingEnabled(False)
         row = self._table.rowCount()
         self._table.insertRow(row)
         self._table.setItem(row, _COL_FILENAME, _tbl_item(filename, colour, tooltip))
         self._table.setItem(row, _COL_CHANGE,   _tbl_item(change,   colour, tooltip))
         self._table.setItem(row, _COL_FOLDER,   _tbl_item(folder,   colour, tooltip))
+        self._table.setSortingEnabled(True)
 
     def _refresh_counts_label(self) -> None:
         self._counts_label.setText(
@@ -447,6 +452,8 @@ class UpdateCrawledFoldersDialog(QDialog):
         self._refresh_counts_label()
 
     def _on_archive_result(self, folder: str, filename: str, status: str) -> None:
+        if status not in ("new", "updated"):
+            return
         change = "New" if status == "new" else "Updated"
         self._add_table_row(filename, change, folder)
 
