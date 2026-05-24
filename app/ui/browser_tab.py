@@ -1461,6 +1461,7 @@ class BrowserTab(QWidget):
     # Emitted while a rescan runs in background (current, total)
     rescan_progress = pyqtSignal(int, int)
     rescan_finished = pyqtSignal()
+    crawl_path_requested = pyqtSignal(str)
 
     # Internal: requests the background loader to fetch bytes for a page of images.
     # Connected to ThumbnailLoaderWorker.load via QueuedConnection.
@@ -1547,6 +1548,8 @@ class BrowserTab(QWidget):
         self._filter_tree = FilterTreeWidget()
         self._filter_tree.setHeaderHidden(True)
         self._filter_tree.itemChanged.connect(self._on_filter_item_changed)
+        self._filter_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._filter_tree.customContextMenuRequested.connect(self._filter_tree_context_menu)
         left_layout.addWidget(self._filter_tree)
 
         splitter.addWidget(left)
@@ -2087,6 +2090,20 @@ class BrowserTab(QWidget):
             root = self._filter_tree.invisibleRootItem()
             for i in range(root.childCount()):
                 _restore_expansion(root.child(i))
+
+    def _filter_tree_context_menu(self, pos) -> None:
+        from PyQt6.QtWidgets import QMenu
+        item = self._filter_tree.itemAt(pos)
+        if item is None:
+            return
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(data, tuple) or data[0] != "path":
+            return
+        path = data[1]
+        menu = QMenu(self._filter_tree)
+        act = menu.addAction(f"Run Crawler on: {path}")
+        if menu.exec(self._filter_tree.viewport().mapToGlobal(pos)) == act:
+            self.crawl_path_requested.emit(path)
 
     @staticmethod
     def _build_path_tree(root_item: QTreeWidgetItem, dirs: list[str],

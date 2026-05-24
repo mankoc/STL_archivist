@@ -315,6 +315,7 @@ class MainWindow(QMainWindow):
         sb.addPermanentWidget(self._rescan_status_label)
         self._browser.rescan_progress.connect(self._on_rescan_progress)
         self._browser.rescan_finished.connect(self._on_rescan_finished)
+        self._browser.crawl_path_requested.connect(self._crawl_path)
 
         # Status label for Update Crawled Folders running in background
         from PyQt6.QtWidgets import QLabel
@@ -420,6 +421,11 @@ class MainWindow(QMainWindow):
         tab.progress_updated.connect(on_progress)
         tab.crawl_finished.connect(on_finished)
         self._crawler_dialog.rejected.connect(on_dialog_closed)
+
+    def _crawl_path(self, path: str) -> None:
+        """Open the crawler dialog and immediately crawl the folder containing *path*."""
+        self._open_crawler()
+        self._crawler_dialog._crawler_tab.crawl_single_path(path)
 
     def _update_crawled_folders(self) -> None:
         """Open the Update Crawled Folders dialog and refresh the browser when done."""
