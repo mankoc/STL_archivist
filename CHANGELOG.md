@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026.21 — 2026-05-24
+
+### Crawler — merged with Update Crawled Folders
+
+The standalone Crawler and Update Crawled Folders workflows have been unified
+into a single **Crawler** dialog:
+
+- **Multi-folder list** replaces the single-folder picker. Folders are loaded
+  from `CrawledFolder` DB records and displayed as a checkbox list. "Add Folder…"
+  registers a new folder; "Remove Selected" unregisters it (existing DB records
+  are kept). Select All / Deselect All buttons allow batch-selecting.
+- **Crawl logic now mirrors Update Crawled Folders**: all selected folders are
+  crawled sequentially; a cross-folder reconciliation pass then matches
+  `is_missing` records against new archives found in other folders (hash-based
+  move detection); any remaining in-scope missing records are deleted.
+- **Results table** replaces the plain log. Columns: Filename | Path | Change.
+  Rows are colour-coded: New (green), Updated (blue), Deleted (red), Moved
+  (orange). A counts bar shows running totals.
+- The global path pattern (if set) is applied as an override to all folders;
+  otherwise each folder's stored pattern is used.
+- "Update Crawler Folders" menu item and toolbar button hidden; action renamed
+  to **"Crawler"**.
+
+**Files:** [app/ui/crawler_tab.py](app/ui/crawler_tab.py),
+[app/ui/crawler_dialog.py](app/ui/crawler_dialog.py),
+[app/ui/main_window.py](app/ui/main_window.py)
+
+---
+
 ## 2026.21 — 2026-05-22
 
 ### Mass editor — LookupCache eliminates redundant FK lookups
