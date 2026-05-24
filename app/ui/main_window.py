@@ -58,7 +58,7 @@ class MainWindow(QMainWindow):
         self._act_refresh.triggered.connect(self._browser.refresh)
 
         self._act_open_crawler = QAction(
-            _icon("open_crawler"), "Open Crawler…", self)
+            _icon("open_crawler"), "Crawler", self)
         self._act_open_crawler.setShortcut(QKeySequence(_hk["open_crawler"]))
         self._act_open_crawler.setStatusTip("Open the Crawler window")
         self._act_open_crawler.triggered.connect(self._open_crawler)
@@ -70,6 +70,7 @@ class MainWindow(QMainWindow):
             "Re-crawl all stored folders to pick up new and modified archives"
         )
         self._act_update_folders.triggered.connect(self._update_crawled_folders)
+        self._act_update_folders.setVisible(False)
 
         self._act_exit = QAction(
             style.standardIcon(SP.SP_DialogCloseButton), "Exit", self)
@@ -259,7 +260,6 @@ class MainWindow(QMainWindow):
         self.addToolBar(toolbar)
 
         toolbar.addAction(self._act_open_crawler)
-        toolbar.addAction(self._act_update_folders)
         toolbar.addSeparator()
         toolbar.addAction(self._act_find_dupes)
         toolbar.addAction(self._act_find_content_dupes)

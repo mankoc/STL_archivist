@@ -1,76 +1,117 @@
 """
-Tab 1 – Crawler controls: folder picker, start/stop, progress bar, log.
+Crawler controls: folder list, path-pattern editor, start/stop, progress, results table.
 """
+from __future__ import annotations
+
+from pathlib import Path
+
 from PyQt6.QtCore import Qt, QSettings, pyqtSignal
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout, QGroupBox,
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QFileDialog,
-    QProgressBar, QPlainTextEdit, QSizePolicy,
-    QComboBox, QInputDialog, QMessageBox, QApplication, QToolButton, QToolTip,
-    QCheckBox,
+    QProgressBar, QSizePolicy,
+    QComboBox, QInputDialog, QMessageBox, QToolButton, QToolTip,
+    QCheckBox, QListWidget, QListWidgetItem,
+    QTableWidget, QTableWidgetItem, QHeaderView,
 )
-from PyQt6.QtGui import QIcon, QCursor, QColor, QTextCharFormat, QTextCursor
+from PyQt6.QtGui import QIcon, QCursor, QBrush, QColor
 from pathlib import Path as _Path
 
 _ICONS_DIR = _Path(__file__).parent.parent.parent / "resources" / "icons"
 
-from app.crawler.crawler import CrawlerWorker
 from app.ui.config_dialog import get_max_thumbnails
 from app.ui.settings_loader import build_crawler_config
 from app.utils.path_pattern import parse_path, PATTERN_HELP, ATTR_LABEL
+from app.database.db import session_scope
+from app.database.models import CrawledFolder
 
 _SAVED_PATTERNS_KEY      = "crawler/saved_patterns"
 _LAST_PATTERN_KEY        = "crawler/last_pattern"
-_LAST_FOLDER_KEY         = "crawler/last_folder"
 _GENERATE_THUMBNAILS_KEY = "crawler/generate_thumbnails"
 _SEP = ":::"
 
+_COLOUR: dict[str, QColor] = {
+    "New":     QColor("#2e7d32"),
+    "Updated": QColor("#1565c0"),
+    "Deleted": QColor("#c62828"),
+    "Moved":   QColor("#e65100"),
+}
+_COL_FILENAME = 0
+_COL_PATH     = 1
+_COL_CHANGE   = 2
+_NCOLS        = 3
+
+
+def _tbl_item(text: str, colour: QColor | None = None, tooltip: str = "") -> QTableWidgetItem:
+    it = QTableWidgetItem(text)
+    it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsEditable)
+    if colour is not None:
+        it.setForeground(QBrush(colour))
+    if tooltip:
+        it.setToolTip(tooltip)
+    return it
+
 
 class CrawlerTab(QWidget):
-    """Crawler control panel: folder picker, path-pattern editor, progress, and log.
+    """Crawler control panel: folder list, path-pattern editor, progress, results table.
 
     Signals:
-        close_requested: Emitted when the user clicks the Close button, so the
-            parent dialog (if any) can dismiss itself.
+        close_requested: Emitted when the user clicks Close or Run in Background.
         progress_updated: Emitted with (current, total) when progress changes.
         crawl_finished: Emitted when the crawl completes.
     """
 
-    close_requested = pyqtSignal()
+    close_requested  = pyqtSignal()
     progress_updated = pyqtSignal(int, int)
-    crawl_finished = pyqtSignal()
+    crawl_finished   = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self._worker: CrawlerWorker | None = None
+        self._worker = None
+        self._all_folders: list[tuple[str, str | None]] = []
+        self._cnt_new = self._cnt_updated = self._cnt_unchanged = 0
+        self._cnt_moved = self._cnt_deleted = 0
         self._build_ui()
+        self._load_folders()
         self._load_settings()
 
     # ------------------------------------------------------------------
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setSpacing(10)
+        root.setSpacing(8)
 
-        # --- Folder picker row ---
-        folder_row = QHBoxLayout()
-        folder_row.addWidget(QLabel("Source folder:"))
+        # --- Folder list ---
+        root.addWidget(QLabel("Folders to crawl:"))
 
-        self._folder_edit = QLineEdit()
-        self._folder_edit.setPlaceholderText("/mnt/f/STL")
-        self._folder_edit.textChanged.connect(self._update_preview)
-        folder_row.addWidget(self._folder_edit, stretch=1)
+        self._folder_list = QListWidget()
+        self._folder_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._folder_list.setMinimumHeight(100)
+        self._folder_list.setMaximumHeight(150)
+        root.addWidget(self._folder_list)
 
-        browse_btn = QPushButton("Browse…")
-        browse_btn.clicked.connect(self._browse_folder)
-        folder_row.addWidget(browse_btn)
+        sel_row = QHBoxLayout()
+        select_all_btn = QPushButton("Select All")
+        select_all_btn.clicked.connect(self._select_all)
+        sel_row.addWidget(select_all_btn)
+        deselect_all_btn = QPushButton("Deselect All")
+        deselect_all_btn.clicked.connect(self._deselect_all)
+        sel_row.addWidget(deselect_all_btn)
+        sel_row.addStretch()
+        self._add_btn = QPushButton("Add Folder…")
+        self._add_btn.clicked.connect(self._add_folder)
+        sel_row.addWidget(self._add_btn)
+        self._remove_btn = QPushButton("Remove Selected")
+        self._remove_btn.clicked.connect(self._remove_folder)
+        sel_row.addWidget(self._remove_btn)
+        root.addLayout(sel_row)
 
-        root.addLayout(folder_row)
+        self._folder_status_label = QLabel()
+        root.addWidget(self._folder_status_label)
 
         # --- Path pattern group ---
         pattern_group = QGroupBox("Parse metadata from path (optional)")
         pattern_layout = QVBoxLayout(pattern_group)
 
-        # Saved-patterns row
         saved_row = QHBoxLayout()
         saved_row.addWidget(QLabel("Saved:"))
         self._saved_combo = QComboBox()
@@ -94,7 +135,6 @@ class CrawlerTab(QWidget):
         saved_row.addWidget(help_btn)
         pattern_layout.addLayout(saved_row)
 
-        # Pattern input
         pattern_row = QHBoxLayout()
         self._pattern_edit = QLineEdit()
         self._pattern_edit.setPlaceholderText("/{source}/{author}/{month}/{name}")
@@ -102,7 +142,6 @@ class CrawlerTab(QWidget):
         pattern_row.addWidget(self._pattern_edit)
         pattern_layout.addLayout(pattern_row)
 
-        # Random file for pattern preview
         file_pick_row = QHBoxLayout()
         file_pick_row.addWidget(QLabel("Test file:"))
         self._example_file_edit = QLineEdit()
@@ -115,7 +154,6 @@ class CrawlerTab(QWidget):
         file_pick_row.addWidget(random_file_btn)
         pattern_layout.addLayout(file_pick_row)
 
-        # Live preview
         self._preview_label = QLabel("")
         self._preview_label.setTextFormat(Qt.TextFormat.RichText)
         self._preview_label.setWordWrap(True)
@@ -131,20 +169,6 @@ class CrawlerTab(QWidget):
         pattern_layout.addWidget(self._use_pattern_check)
 
         root.addWidget(pattern_group)
-
-        # --- Progress bar ---
-        self._progress = QProgressBar()
-        self._progress.setValue(0)
-        self._progress.setTextVisible(True)
-        self._progress.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        root.addWidget(self._progress)
-
-        # --- Log output ---
-        root.addWidget(QLabel("Log:"))
-        self._log = QPlainTextEdit()
-        self._log.setReadOnly(True)
-        self._log.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        root.addWidget(self._log)
 
         # --- Crawl options ---
         self._generate_thumbs_check = QCheckBox("Generate thumbnails")
@@ -191,6 +215,46 @@ class CrawlerTab(QWidget):
 
         root.addWidget(overrides_group)
 
+        # --- Status / progress ---
+        self._status_label = QLabel()
+        root.addWidget(self._status_label)
+
+        self._current_folder_label = QLabel()
+        self._current_folder_label.setWordWrap(True)
+        self._current_folder_label.setStyleSheet("color: #555; font-style: italic;")
+        root.addWidget(self._current_folder_label)
+
+        self._progress = QProgressBar()
+        self._progress.setValue(0)
+        self._progress.setTextVisible(True)
+        self._progress.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        root.addWidget(self._progress)
+
+        # --- Results table ---
+        root.addWidget(QLabel("Changes:"))
+        self._table = QTableWidget(0, _NCOLS)
+        self._table.setHorizontalHeaderLabels(["Filename", "Path", "Change"])
+        self._table.horizontalHeader().setSectionResizeMode(_COL_FILENAME, QHeaderView.ResizeMode.ResizeToContents)
+        self._table.horizontalHeader().setSectionResizeMode(_COL_PATH,     QHeaderView.ResizeMode.Stretch)
+        self._table.horizontalHeader().setSectionResizeMode(_COL_CHANGE,   QHeaderView.ResizeMode.ResizeToContents)
+        self._table.verticalHeader().setVisible(False)
+        self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._table.setSortingEnabled(True)
+        self._table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        root.addWidget(self._table)
+
+        self._counts_label = QLabel("New: 0  |  Updated: 0  |  Unchanged: 0  |  Moved: 0  |  Deleted: 0")
+        self._counts_label.setStyleSheet(
+            "QLabel { "
+            "background-color: palette(window); "
+            "border-top: 1px solid palette(mid); "
+            "padding: 4px 6px; "
+            "font-family: monospace; "
+            "}"
+        )
+        root.addWidget(self._counts_label)
+
         # --- Control buttons ---
         from app.ui.config_dialog import get_color_scheme as _get_cs
         _v = "light" if "light" in _get_cs().lower() else "dark"
@@ -225,29 +289,128 @@ class CrawlerTab(QWidget):
         self._refresh_saved_combo()
 
     # ------------------------------------------------------------------
+    # Folder list management
+    # ------------------------------------------------------------------
+
+    def _load_folders(self) -> None:
+        try:
+            with session_scope() as session:
+                rows = (
+                    session.query(CrawledFolder)
+                    .order_by(CrawledFolder.path)
+                    .all()
+                )
+                self._all_folders = [(r.path, r.pattern) for r in rows]
+        except Exception:
+            self._all_folders = []
+
+        self._folder_list.clear()
+        for path, _pattern in self._all_folders:
+            self._append_folder_item(path)
+        self._refresh_folder_status()
+
+    def _append_folder_item(self, path: str) -> None:
+        item = QListWidgetItem(path)
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        item.setCheckState(Qt.CheckState.Checked)
+        self._folder_list.addItem(item)
+
+    def _refresh_folder_status(self) -> None:
+        n = len(self._all_folders)
+        if n == 0:
+            self._folder_status_label.setText(
+                "No folders yet. Use 'Add Folder…' to add a folder to crawl."
+            )
+            self._start_btn.setEnabled(False)
+        else:
+            self._folder_status_label.setText(f"{n} folder{'s' if n != 1 else ''} configured.")
+            self._start_btn.setEnabled(True)
+
+    def _add_folder(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, "Add Folder to Crawl")
+        if not path:
+            return
+        if any(p == path for p, _ in self._all_folders):
+            QMessageBox.information(self, "Already Listed", f"{path}\nis already in the list.")
+            return
+        try:
+            with session_scope() as session:
+                existing = session.query(CrawledFolder).filter_by(path=path).first()
+                if not existing:
+                    session.add(CrawledFolder(path=path, pattern=None))
+        except Exception:
+            pass
+        self._all_folders.append((path, None))
+        self._append_folder_item(path)
+        self._refresh_folder_status()
+
+    def _remove_folder(self) -> None:
+        row = self._folder_list.currentRow()
+        if row < 0:
+            QMessageBox.information(self, "No Selection", "Select a folder in the list first.")
+            return
+        path, _ = self._all_folders[row]
+        reply = QMessageBox.question(
+            self,
+            "Remove Folder",
+            f"Remove this folder from the tracked list?\n\n{path}\n\n"
+            "Existing models in the database will not be deleted.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            with session_scope() as session:
+                record = session.query(CrawledFolder).filter_by(path=path).first()
+                if record:
+                    session.delete(record)
+        except Exception:
+            pass
+        del self._all_folders[row]
+        self._folder_list.takeItem(row)
+        self._refresh_folder_status()
+
+    def _select_all(self) -> None:
+        for i in range(self._folder_list.count()):
+            self._folder_list.item(i).setCheckState(Qt.CheckState.Checked)
+
+    def _deselect_all(self) -> None:
+        for i in range(self._folder_list.count()):
+            self._folder_list.item(i).setCheckState(Qt.CheckState.Unchecked)
+
+    def _selected_folders(self) -> list[tuple[str, str | None]]:
+        global_pattern = self._pattern_edit.text().strip()
+        use_global = bool(global_pattern) and self._use_pattern_check.isChecked()
+        checked = []
+        for i in range(self._folder_list.count()):
+            item = self._folder_list.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                path, stored_pattern = self._all_folders[i]
+                pattern = global_pattern if use_global else stored_pattern
+                checked.append((path, pattern))
+        return checked
+
+    # ------------------------------------------------------------------
     # Settings
     # ------------------------------------------------------------------
+
     def _load_settings(self) -> None:
-        """Restore last-used folder, pattern, and thumbnail flag from QSettings."""
         s = QSettings()
-        self._folder_edit.setText(s.value(_LAST_FOLDER_KEY, ""))
         self._pattern_edit.setText(s.value(_LAST_PATTERN_KEY, ""))
         self._generate_thumbs_check.setChecked(
             s.value(_GENERATE_THUMBNAILS_KEY, True, type=bool)
         )
 
     def _save_settings(self) -> None:
-        """Persist the current folder, pattern, and thumbnail flag to QSettings."""
         s = QSettings()
-        s.setValue(_LAST_FOLDER_KEY, self._folder_edit.text().strip())
         s.setValue(_LAST_PATTERN_KEY, self._pattern_edit.text().strip())
         s.setValue(_GENERATE_THUMBNAILS_KEY, self._generate_thumbs_check.isChecked())
 
     # ------------------------------------------------------------------
     # Saved-pattern helpers
     # ------------------------------------------------------------------
+
     def _saved_patterns(self) -> list[tuple[str, str]]:
-        """Return all saved patterns as ``(name, pattern)`` pairs from QSettings."""
         raw = QSettings().value(_SAVED_PATTERNS_KEY, [])
         if isinstance(raw, str):
             raw = [raw]
@@ -300,12 +463,17 @@ class CrawlerTab(QWidget):
     # ------------------------------------------------------------------
     # Live preview
     # ------------------------------------------------------------------
+
     def _pick_random_file(self) -> None:
         import random
-        folder = self._folder_edit.text().strip()
+        folder = None
+        for i in range(self._folder_list.count()):
+            item = self._folder_list.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                folder = self._all_folders[i][0]
+                break
         if not folder:
             return
-        from pathlib import Path
         from app.crawler.archive import is_archive
         files = [str(p) for p in Path(folder).rglob("*") if is_archive(p)]
         if files:
@@ -313,13 +481,18 @@ class CrawlerTab(QWidget):
 
     def _update_preview(self) -> None:
         pattern = self._pattern_edit.text().strip()
-        source = self._folder_edit.text().strip()
-        example = self._example_file_edit.text().strip() or source
+        example = self._example_file_edit.text().strip()
         if not pattern or not example:
             self._preview_label.clear()
             return
 
-        # Match pattern against path relative to the source folder
+        source = None
+        for i in range(self._folder_list.count()):
+            item = self._folder_list.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                source = self._all_folders[i][0]
+                break
+
         if source and example.startswith(source):
             rel = example[len(source):]
             if not rel.startswith("/"):
@@ -340,52 +513,63 @@ class CrawlerTab(QWidget):
         self._preview_label.setText("&nbsp;&nbsp;→&nbsp;&nbsp;".join(parts))
 
     # ------------------------------------------------------------------
-    def _browse_folder(self) -> None:
-        """Open a directory picker and populate the source folder field."""
-        start = self._folder_edit.text().strip() or "/"
-        path = QFileDialog.getExistingDirectory(self, "Select STL folder", start)
-        if path:
-            self._folder_edit.setText(path)
-            self._autofill_pattern(path)
+    # Results table helpers
+    # ------------------------------------------------------------------
 
-    def _autofill_pattern(self, folder_path: str) -> None:
-        """Populate the pattern field from the stored CrawledFolder record, if empty."""
-        if self._pattern_edit.text().strip():
-            return
-        try:
-            from app.database.db import get_session
-            from app.database.models import CrawledFolder
-            session = get_session()
-            try:
-                record = session.query(CrawledFolder).filter_by(path=folder_path).first()
-                if record and record.pattern:
-                    self._pattern_edit.setText(record.pattern)
-            finally:
-                session.close()
-        except Exception:
-            pass
+    def _add_table_row(self, filename: str, path: str, change: str, tooltip: str = "") -> None:
+        colour = _COLOUR.get(change)
+        self._table.setSortingEnabled(False)
+        row = self._table.rowCount()
+        self._table.insertRow(row)
+        self._table.setItem(row, _COL_FILENAME, _tbl_item(filename, colour, tooltip))
+        self._table.setItem(row, _COL_PATH,     _tbl_item(path,     colour, tooltip))
+        self._table.setItem(row, _COL_CHANGE,   _tbl_item(change,   colour, tooltip))
+        self._table.setSortingEnabled(True)
+
+    def _refresh_counts_label(self) -> None:
+        self._counts_label.setText(
+            f"New: {self._cnt_new}  |  Updated: {self._cnt_updated}"
+            f"  |  Unchanged: {self._cnt_unchanged}"
+            f"  |  Moved: {self._cnt_moved}  |  Deleted: {self._cnt_deleted}"
+        )
+
+    # ------------------------------------------------------------------
+    # Crawl control
+    # ------------------------------------------------------------------
 
     def _start_crawl(self) -> None:
-        source = self._folder_edit.text().strip()
-        if not source:
-            self._log.appendPlainText("Please select a source folder first.")
+        from app.ui.update_crawled_folders_dialog import _UpdateAllWorker
+
+        folders = self._selected_folders()
+        if not folders:
+            self._status_label.setText("No folders selected — tick at least one folder.")
             return
 
         self._save_settings()
-        self._log.clear()
+        self._table.setSortingEnabled(False)
+        self._table.setRowCount(0)
+        self._table.setSortingEnabled(True)
         self._progress.setValue(0)
+        self._cnt_new = self._cnt_updated = self._cnt_unchanged = 0
+        self._cnt_moved = self._cnt_deleted = 0
+        self._refresh_counts_label()
+
         self._start_btn.setEnabled(False)
         self._stop_btn.setEnabled(True)
         self._bg_btn.setEnabled(True)
+        self._folder_list.setEnabled(False)
+        self._add_btn.setEnabled(False)
+        self._remove_btn.setEnabled(False)
 
-        pattern = self._pattern_edit.text().strip()
-        if not self._use_pattern_check.isChecked():
-            pattern = ""
+        n = len(folders)
+        self._status_label.setText(f"Crawling {n} folder{'s' if n != 1 else ''}…")
+
         max_thumbs = get_max_thumbnails() if self._generate_thumbs_check.isChecked() else 0
         config = build_crawler_config(
             max_thumbnails=max_thumbs,
             force_rescan=self._force_rescan_check.isChecked(),
         )
+        config.log_unchanged    = False
         config.force_creator    = self._force_creator_edit.text().strip()
         config.force_source     = self._force_source_edit.text().strip()
         config.force_sculptor   = self._force_sculptor_edit.text().strip()
@@ -394,46 +578,75 @@ class CrawlerTab(QWidget):
         config.force_collection = self._force_collection_edit.text().strip()
         config.force_release    = self._force_release_edit.text().strip()
         config.force_date       = self._force_date_edit.text().strip()
-        self._worker = CrawlerWorker(source, pattern=pattern, config=config)
-        self._worker.log.connect(self._on_log)
-        self._worker.warning.connect(self._on_warning)
+
+        self._worker = _UpdateAllWorker(folders, config=config, parent=self)
+        self._worker.folder_started.connect(self._on_folder_started)
         self._worker.progress.connect(self._on_progress)
-        self._worker.finished.connect(self._on_finished)
+        self._worker.counts_changed.connect(self._on_counts_changed)
+        self._worker.archive_result.connect(self._on_archive_result)
+        self._worker.file_moved.connect(self._on_file_moved)
+        self._worker.file_deleted.connect(self._on_file_deleted)
+        self._worker.all_finished.connect(self._on_finished)
         self._worker.start()
 
     def _stop_crawl(self) -> None:
-        """Request the running crawler to stop after the current archive."""
         if self._worker:
             self._worker.stop()
         self._stop_btn.setEnabled(False)
 
     # ------------------------------------------------------------------
-    def _on_log(self, msg: str) -> None:
-        """Append a crawler log message to the log panel."""
-        self._log.appendPlainText(msg)
+    # Worker signal handlers
+    # ------------------------------------------------------------------
 
-    def _on_warning(self, msg: str) -> None:
-        """Append a warning message in amber to the log panel."""
-        fmt = QTextCharFormat()
-        fmt.setForeground(QColor("#E6A817"))
-        cursor = self._log.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        cursor.insertText(msg + "\n", fmt)
-        self._log.setTextCursor(cursor)
-        self._log.ensureCursorVisible()
+    def _on_folder_started(self, path: str, idx: int, total: int) -> None:
+        self._status_label.setText(f"Folder {idx} / {total}")
+        self._current_folder_label.setText(path)
+        self._progress.setMaximum(0)
+        self._progress.setValue(0)
 
     def _on_progress(self, current: int, total: int) -> None:
-        """Update the progress bar with the current archive index and total."""
         self._progress.setMaximum(total)
         self._progress.setValue(current)
         self._progress.setFormat(f"{current} / {total}")
         self.progress_updated.emit(current, total)
 
+    def _on_counts_changed(self, new: int, updated: int, unchanged: int) -> None:
+        self._cnt_new, self._cnt_updated, self._cnt_unchanged = new, updated, unchanged
+        self._refresh_counts_label()
+
+    def _on_archive_result(self, folder: str, filename: str, status: str) -> None:
+        if status not in ("new", "updated"):
+            return
+        change = "New" if status == "new" else "Updated"
+        self._add_table_row(filename, folder, change)
+
+    def _on_file_moved(self, old_path: str, new_path: str) -> None:
+        filename = Path(old_path).name
+        tooltip = f"From: {old_path}\nTo:   {new_path}"
+        self._add_table_row(filename, str(Path(new_path).parent), "Moved", tooltip)
+        self._cnt_moved += 1
+        self._refresh_counts_label()
+
+    def _on_file_deleted(self, path: str) -> None:
+        p = Path(path)
+        self._add_table_row(p.name, str(p.parent), "Deleted")
+        self._cnt_deleted += 1
+        self._refresh_counts_label()
+
     def _on_finished(self) -> None:
-        """Re-enable the Start button and clear the worker reference when done."""
+        n = self._folder_list.count()
+        self._status_label.setText(
+            f"Complete — {n} folder{'s' if n != 1 else ''} processed."
+        )
+        self._current_folder_label.clear()
+        self._progress.setMaximum(1)
+        self._progress.setValue(1)
+        self._progress.setFormat("done")
         self._start_btn.setEnabled(True)
         self._stop_btn.setEnabled(False)
         self._bg_btn.setEnabled(False)
+        self._folder_list.setEnabled(True)
+        self._add_btn.setEnabled(True)
+        self._remove_btn.setEnabled(True)
         self._worker = None
         self.crawl_finished.emit()
-        self.close_requested.emit()
