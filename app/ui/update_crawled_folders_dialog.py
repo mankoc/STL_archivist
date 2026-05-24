@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
 
 from app.crawler.crawler import CrawlerWorker
 from app.database.db import session_scope
-from app.database.models import CrawledFolder
+from app.database.models import CrawledFolder, STLModel
 
 # ── Change-type colours ───────────────────────────────────────────────────────
 _COLOUR: dict[str, QColor] = {
@@ -47,7 +47,13 @@ def _tbl_item(text: str, colour: QColor | None = None,
 
 
 class _UpdateAllWorker(QThread):
-    """Runs one CrawlerWorker per folder sequentially, waiting for each to finish."""
+    """Runs one CrawlerWorker per folder sequentially, waiting for each to finish.
+
+    After all per-folder crawls complete, a cross-folder reconciliation pass
+    matches ``is_missing=True`` records against new archives discovered in other
+    folders during this run, treating hash matches as file moves.  Any remaining
+    in-scope ``is_missing`` records are then deleted.
+    """
 
     log            = pyqtSignal(str)
     folder_started = pyqtSignal(str, int, int)   # path, index, total
@@ -71,7 +77,15 @@ class _UpdateAllWorker(QThread):
             self._current_worker.stop()
 
     def run(self) -> None:
+        # Enable deferred deletion so that in-scope missing records are only
+        # marked is_missing=True during each per-folder crawl.  This lets the
+        # cross-folder reconciliation pass (below) detect moves between folders
+        # before committing to deletion.
+        self._config.defer_missing_deletion = True
+
         total_new = total_updated = total_unchanged = 0
+        all_new_paths: set[str] = set()
+        crawled_folder_paths: list[str] = []
         total = len(self._folders)
         for idx, (path, pattern) in enumerate(self._folders, start=1):
             if self._stop_requested:
@@ -79,6 +93,7 @@ class _UpdateAllWorker(QThread):
             self.folder_started.emit(path, idx, total)
             worker = CrawlerWorker(path, pattern=pattern or "", config=self._config)
             self._current_worker = worker
+            crawled_folder_paths.append(path)
 
             # Capture offsets so lambdas close over the right values.
             _off_n, _off_u, _off_unc = total_new, total_updated, total_unchanged
@@ -104,12 +119,184 @@ class _UpdateAllWorker(QThread):
             worker.start()
             worker.wait()
 
+            # Accumulate new archive paths from this worker for cross-folder matching.
+            all_new_paths.update(worker._new_archive_paths)
+
             total_new       += worker._stats_new
             total_updated   += worker._stats_updated
             total_unchanged += worker._stats_unchanged
             self._current_worker = None
 
+        if not self._stop_requested and len(crawled_folder_paths) > 1:
+            self._cross_folder_reconcile(all_new_paths)
+            self._cleanup_deferred_deletions(crawled_folder_paths)
+
         self.all_finished.emit()
+
+    def _cross_folder_reconcile(self, all_new_paths: set[str]) -> None:
+        """Match is_missing records against new archives from other crawled folders.
+
+        Uses the same strategy as CrawlerWorker._reconcile_moved_files: redirect
+        the old (missing) record's path to the new location so all user-edited
+        metadata is preserved, then delete the freshly-created (shallow) record.
+        Hash collisions on either side are excluded to avoid mis-attribution.
+        """
+        from app.utils.thumbnailer import delete_thumbnail
+
+        if not all_new_paths:
+            return
+
+        with session_scope() as session:
+            missing_rows = session.query(
+                STLModel.id,
+                STLModel.archive_path,
+                STLModel.archive_hash,
+            ).filter(STLModel.is_missing == True).all()  # noqa: E712
+
+            if not missing_rows:
+                return
+
+            # Build hash → missing-id index, tracking collisions.
+            hash_to_missing_id: dict[str, int]  = {}
+            missing_hash_collision: set[str]    = set()
+            for mid, _mpath, mhash in missing_rows:
+                if not mhash:
+                    continue
+                if mhash in hash_to_missing_id:
+                    missing_hash_collision.add(mhash)
+                else:
+                    hash_to_missing_id[mhash] = mid
+
+            candidate_hashes = [
+                h for h in hash_to_missing_id if h not in missing_hash_collision
+            ]
+            if not candidate_hashes:
+                return
+
+            new_models = {
+                m.archive_path: m
+                for m in session.query(STLModel)
+                    .filter(STLModel.archive_path.in_(list(all_new_paths)))
+                    .all()
+            }
+
+            # Build hash → new-path index, tracking collisions.
+            hash_to_new_path: dict[str, str] = {}
+            new_hash_collision: set[str]     = set()
+            for npath, nm in new_models.items():
+                h = nm.archive_hash
+                if not h:
+                    continue
+                if h in hash_to_new_path:
+                    new_hash_collision.add(h)
+                else:
+                    hash_to_new_path[h] = npath
+
+            used_new: set[str] = set()
+            matched = 0
+
+            for h, missing_id in hash_to_missing_id.items():
+                if h in missing_hash_collision or h in new_hash_collision:
+                    continue
+                new_path = hash_to_new_path.get(h)
+                if new_path is None or new_path in used_new:
+                    continue
+
+                old_model = session.get(STLModel, missing_id)
+                new_model = new_models.get(new_path)
+                if old_model is None or new_model is None:
+                    continue
+
+                old_path = old_model.archive_path
+
+                # Capture filesystem metadata from the new record before deletion.
+                new_archive_path  = new_model.archive_path
+                new_archive_hash  = new_model.archive_hash
+                new_archive_size  = new_model.archive_size
+                new_archive_mtime = new_model.archive_mtime_ns
+                new_compression   = new_model.compression_rate
+
+                # Delete new model's thumbnails; old record keeps its existing ones.
+                for img in list(new_model.images):
+                    if img.thumbnail_path:
+                        delete_thumbnail(img.thumbnail_path)
+                    session.delete(img)
+                session.flush()
+                for stl in list(new_model.stl_files):
+                    session.delete(stl)
+                session.flush()
+                session.delete(new_model)
+                session.flush()
+
+                # Redirect old record to new location.
+                old_model.archive_path     = new_archive_path
+                old_model.archive_hash     = new_archive_hash
+                old_model.archive_size     = new_archive_size
+                old_model.archive_mtime_ns = new_archive_mtime
+                old_model.archive_folder   = str(Path(new_archive_path).parent)
+                old_model.is_missing       = False
+                if new_compression is not None:
+                    old_model.compression_rate = new_compression
+                session.flush()
+
+                matched += 1
+                used_new.add(new_path)
+
+                filename = Path(old_path).name
+                self.log.emit(f"Cross-folder move: {filename}")
+                self.file_moved.emit(old_path, new_archive_path)
+
+            if matched:
+                self.log.emit(f"Detected {matched} cross-folder move(s).")
+
+    def _cleanup_deferred_deletions(self, crawled_folder_paths: list[str]) -> None:
+        """Delete in-scope is_missing records that were not matched as moves.
+
+        These are archives that were genuinely deleted (not moved) from one of
+        the crawled folders during this update run.
+        """
+        from app.utils.thumbnailer import delete_thumbnail
+
+        folder_roots = [Path(p) for p in crawled_folder_paths]
+
+        with session_scope() as session:
+            missing_models = (
+                session.query(STLModel)
+                .filter(STLModel.is_missing == True)  # noqa: E712
+                .all()
+            )
+
+            deleted = 0
+            for model in missing_models:
+                if not model.archive_path:
+                    continue
+                try:
+                    in_scope = any(
+                        Path(model.archive_path).is_relative_to(root)
+                        for root in folder_roots
+                    )
+                except ValueError:
+                    in_scope = False
+                if not in_scope:
+                    continue
+
+                old_path = model.archive_path
+                for img in list(model.images):
+                    if img.thumbnail_path:
+                        delete_thumbnail(img.thumbnail_path)
+                    session.delete(img)
+                session.flush()
+                for stl in list(model.stl_files):
+                    session.delete(stl)
+                session.flush()
+                session.delete(model)
+                deleted += 1
+                self.file_deleted.emit(old_path)
+
+            if deleted:
+                self.log.emit(
+                    f"Deleted {deleted} record(s) removed from crawled folders."
+                )
 
 
 class UpdateCrawledFoldersDialog(QDialog):
@@ -124,6 +311,11 @@ class UpdateCrawledFoldersDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Update Crawled Folders")
         self.resize(760, 680)
+        self.setWindowFlags(
+            self.windowFlags()
+            | Qt.WindowType.WindowMinimizeButtonHint
+            | Qt.WindowType.WindowMaximizeButtonHint
+        )
         self._worker: _UpdateAllWorker | None = None
         self._background_worker: _UpdateAllWorker | None = None  # set when user runs in bg
         self._all_folders: list[tuple[str, str | None]] = []
@@ -489,6 +681,16 @@ class UpdateCrawledFoldersDialog(QDialog):
         self._worker = None
         self._background_mode = False  # allow normal close once the run is done
         self.crawl_finished.emit()
+
+    def changeEvent(self, event) -> None:
+        from PyQt6.QtCore import QEvent
+        if (event.type() == QEvent.Type.WindowStateChange
+                and bool(self.windowState() & Qt.WindowState.WindowMinimized)
+                and self._bg_btn.isEnabled()):
+            self.setWindowState(Qt.WindowState.WindowNoState)
+            self._run_in_background()
+            return
+        super().changeEvent(event)
 
     def closeEvent(self, event) -> None:
         if self._worker is not None:

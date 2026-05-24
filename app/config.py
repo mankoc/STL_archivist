@@ -83,6 +83,11 @@ class CrawlerConfig:
     warn_low_compression: bool = False
     low_compression_threshold: float = 0.95
 
+    # When True, _mark_records_missing does not immediately delete in-scope
+    # missing records.  The caller is responsible for running a cross-folder
+    # reconciliation pass and then deleting any unmatched deferred records.
+    defer_missing_deletion: bool = False
+
     # Per-crawl metadata overrides (empty string = do not override).
     force_creator:    str = ""
     force_source:     str = ""

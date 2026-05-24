@@ -851,6 +851,25 @@ class _FilterTreeWorker(QRunnable):
         scope = self._scope
         show = self._show
 
+        # ── Serve from cache for unscoped (no active filters) requests ─────────
+        if scope is None:
+            from app.database.filter_cache import load_filter_cache
+            cached = load_filter_cache()
+            if cached is not None:
+                payload = {
+                    **cached,
+                    "checked_data":     self._checked,
+                    "excluded_data":    self._excluded,
+                    "expanded_sections": self._expanded,
+                    "show":             self._show,
+                    "show_counts":      self._show_counts,
+                    "alpha_enabled":    self._alpha_enabled,
+                    "alpha_threshold":  self._alpha_threshold,
+                    "scope_by_section": self._scope,
+                }
+                self.signals.ready.emit(self._gen, payload)
+                return
+
         def _s(section):
             return scope.get(section) if scope else None
 
@@ -1303,6 +1322,12 @@ class _FilterTreeWorker(QRunnable):
             "alpha_threshold": self._alpha_threshold,
             "scope_by_section": self._scope,
         }
+
+        # Persist unscoped results so subsequent loads skip the DB queries.
+        if scope is None:
+            from app.database.filter_cache import save_filter_cache
+            save_filter_cache(payload)
+
         self.signals.ready.emit(self._gen, payload)
 
 
@@ -1684,6 +1709,8 @@ class BrowserTab(QWidget):
     # ------------------------------------------------------------------
     def refresh(self) -> None:
         """Reload all data from the database."""
+        from app.database.filter_cache import invalidate_filter_cache
+        invalidate_filter_cache()
         _lookup_cache.invalidate()
         self._panel_cache.clear()
         self._populate_filter_tree()

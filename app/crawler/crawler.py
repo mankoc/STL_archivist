@@ -699,6 +699,7 @@ class CrawlerWorker(QThread):
                 old_model.archive_hash     = new_archive_hash
                 old_model.archive_size     = new_archive_size
                 old_model.archive_mtime_ns = new_archive_mtime
+                old_model.archive_folder   = str(Path(new_archive_path).parent)
                 old_model.is_missing       = False
                 if new_compression is not None:
                     old_model.compression_rate = new_compression
@@ -726,12 +727,19 @@ class CrawlerWorker(QThread):
         contents.  Records outside the crawled scope are flagged
         ``is_missing=True`` so a future crawl of the other folder can still
         attempt reconciliation.
+
+        When ``config.defer_missing_deletion`` is True, in-scope records are
+        also only flagged ``is_missing=True`` (without emitting *file_deleted*)
+        so the caller can attempt cross-folder reconciliation before committing
+        to deletion.
         """
         if not missing:
             return
         source = Path(self.source_dir)
-        deleted = 0
-        marked  = 0
+        defer = self._config.defer_missing_deletion
+        deleted  = 0
+        marked   = 0
+        deferred = 0
         with session_scope() as session:
             for rec in missing:
                 model = session.get(STLModel, rec["id"])
@@ -743,20 +751,29 @@ class CrawlerWorker(QThread):
                     in_scope = False
 
                 if in_scope:
-                    for img in list(model.images):
-                        if img.thumbnail_path:
-                            delete_thumbnail(img.thumbnail_path)
-                        session.delete(img)
-                    session.flush()
-                    for stl in list(model.stl_files):
-                        session.delete(stl)
-                    session.flush()
-                    session.delete(model)
-                    deleted += 1
-                    msg = f"Deleted: {rec['path']}"
-                    self.log.emit(msg)
-                    logger.info(msg)
-                    self.file_deleted.emit(rec["path"])
+                    if defer:
+                        # Defer: mark as missing without deleting or notifying UI.
+                        # Cross-folder reconciliation will either match it as a move
+                        # or delete it in the cleanup pass.
+                        if not model.is_missing:
+                            model.is_missing = True
+                        deferred += 1
+                        logger.info("Deferred deletion: %s", rec["path"])
+                    else:
+                        for img in list(model.images):
+                            if img.thumbnail_path:
+                                delete_thumbnail(img.thumbnail_path)
+                            session.delete(img)
+                        session.flush()
+                        for stl in list(model.stl_files):
+                            session.delete(stl)
+                        session.flush()
+                        session.delete(model)
+                        deleted += 1
+                        msg = f"Deleted: {rec['path']}"
+                        self.log.emit(msg)
+                        logger.info(msg)
+                        self.file_deleted.emit(rec["path"])
                 elif not model.is_missing:
                     model.is_missing = True
                     marked += 1
@@ -769,6 +786,8 @@ class CrawlerWorker(QThread):
             msg = f"Deleted {deleted} record(s) removed from the crawled folder."
             self.log.emit(msg)
             logger.info(msg)
+        if deferred:
+            logger.info("Deferred %d in-scope deletion(s) for cross-folder reconciliation.", deferred)
         if marked:
             msg = f"Marked {marked} record(s) as missing (outside crawled folder — use DB Maintenance to remove)."
             self.log.emit(msg)

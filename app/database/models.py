@@ -277,3 +277,24 @@ class CrawledFolder(Base):
 
     def __repr__(self) -> str:
         return f"<CrawledFolder {self.path!r}>"
+
+
+class FilterCache(Base):
+    """Pre-computed filter-tree payload cached after each crawl.
+
+    A single row (id=1) stores all unfiltered counts and value lists as a
+    JSON blob so the filter pane can be populated instantly on startup and
+    after navigation without re-running the expensive GROUP BY queries.
+
+    Invalidated (row deleted) by ``BrowserTab.refresh()`` and rebuilt lazily
+    the next time the unscoped filter tree is requested.
+    """
+
+    __tablename__ = "filter_cache"
+
+    id         = Column(Integer, primary_key=True, default=1)
+    payload    = Column(Text, nullable=False)
+    updated_at = Column(DateTime, nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<FilterCache updated_at={self.updated_at}>"
