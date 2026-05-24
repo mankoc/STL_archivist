@@ -54,9 +54,10 @@ class CrawlerWorker(QThread):
     progress       = pyqtSignal(int, int)
     log            = pyqtSignal(str)
     warning        = pyqtSignal(str)              # corrupted/unreadable archive
+    phase          = pyqtSignal(str)              # high-level step description
     finished       = pyqtSignal()
     counts_changed = pyqtSignal(int, int, int)   # new, updated, unchanged
-    archive_result = pyqtSignal(str, str)         # filename, "new"|"updated"
+    archive_result = pyqtSignal(str, str)         # full archive path, "new"|"updated"
     file_moved     = pyqtSignal(str, str)         # old_path, new_path
     file_deleted   = pyqtSignal(str)              # path
 
@@ -90,8 +91,10 @@ class CrawlerWorker(QThread):
         self._new_archive_paths: set[str] = set()
         logger.info("Crawl started — source: %s, pattern: %r, workers: %d",
                     self.source_dir, self._pattern, self._config.max_workers)
+        self.phase.emit("Scanning for deleted files…")
         missing_records = self._collect_missing()
 
+        self.phase.emit("Retrieving file list…")
         logger.debug("Scanning source directory for archives: %s (recurse=%s)", self.source_dir, self._config.recurse_subdirs)
         if self._config.recurse_subdirs:
             archives = sorted(iter_archives(self.source_dir))
@@ -102,6 +105,7 @@ class CrawlerWorker(QThread):
         msg      = f"Found {total} archives in {self.source_dir}"
         self.log.emit(msg)
         logger.info(msg)
+        self.phase.emit(msg)
 
         thumb_base = get_thumbnail_base_dir()
         if thumb_base is not None and self._config.metadata_sidecar_enabled:
@@ -109,6 +113,9 @@ class CrawlerWorker(QThread):
 
         num_batches      = (total + self.BATCH_SIZE - 1) // self.BATCH_SIZE
         modified_folders: set[Path] = set()
+
+        if total:
+            self.phase.emit(f"Computing hashes for {total} archive(s)…")
 
         for batch_start in range(0, total, self.BATCH_SIZE):
             if self._stop_requested:
@@ -120,7 +127,11 @@ class CrawlerWorker(QThread):
             hashes = self._phase_hash(batch)
 
             with session_scope() as session:
+                if batch_start == 0:
+                    self.phase.emit("Checking database for changes…")
                 to_extract, stl_backfill, existing_map = self._phase_diff(batch, hashes, session)
+                if to_extract and batch_start == 0:
+                    self.phase.emit(f"Extracting new/changed archives…")
                 contents_map, all_names_map, stl_info_map, uncompressed_map = self._phase_extract(to_extract, stl_backfill)
                 # Fresh per-batch lookup cache so repeated sculptor/tag/scale
                 # references within the same batch skip redundant SELECTs.
@@ -139,6 +150,7 @@ class CrawlerWorker(QThread):
             self._post_export_metadata(modified_folders, thumb_base)
 
         if missing_records:
+            self.phase.emit(f"Finding moved files ({len(missing_records)} candidate(s))…")
             self._reconcile_moved_files(missing_records)
 
         self._record_crawled_folder(total)
@@ -442,10 +454,10 @@ class CrawlerWorker(QThread):
                     if _existing is None:
                         self._stats_new += 1
                         self._new_archive_paths.add(str(archive_path))
-                        self.archive_result.emit(archive_path.name, "new")
+                        self.archive_result.emit(str(archive_path), "new")
                     else:
                         self._stats_updated += 1
-                        self.archive_result.emit(archive_path.name, "updated")
+                        self.archive_result.emit(str(archive_path), "updated")
                     modified_folders.add(archive_path.parent)
                 else:
                     self._stats_unchanged += 1

@@ -224,6 +224,11 @@ class CrawlerTab(QWidget):
         self._current_folder_label.setStyleSheet("color: #555; font-style: italic;")
         root.addWidget(self._current_folder_label)
 
+        self._phase_label = QLabel()
+        self._phase_label.setWordWrap(True)
+        self._phase_label.setStyleSheet("color: #888; font-style: italic;")
+        root.addWidget(self._phase_label)
+
         self._progress = QProgressBar()
         self._progress.setValue(0)
         self._progress.setTextVisible(True)
@@ -581,6 +586,7 @@ class CrawlerTab(QWidget):
 
         self._worker = _UpdateAllWorker(folders, config=config, parent=self)
         self._worker.folder_started.connect(self._on_folder_started)
+        self._worker.phase.connect(self._on_phase)
         self._worker.progress.connect(self._on_progress)
         self._worker.counts_changed.connect(self._on_counts_changed)
         self._worker.archive_result.connect(self._on_archive_result)
@@ -598,6 +604,9 @@ class CrawlerTab(QWidget):
     # Worker signal handlers
     # ------------------------------------------------------------------
 
+    def _on_phase(self, message: str) -> None:
+        self._phase_label.setText(message)
+
     def _on_folder_started(self, path: str, idx: int, total: int) -> None:
         self._status_label.setText(f"Folder {idx} / {total}")
         self._current_folder_label.setText(path)
@@ -614,11 +623,11 @@ class CrawlerTab(QWidget):
         self._cnt_new, self._cnt_updated, self._cnt_unchanged = new, updated, unchanged
         self._refresh_counts_label()
 
-    def _on_archive_result(self, folder: str, filename: str, status: str) -> None:
+    def _on_archive_result(self, folder: str, archive_path: str, status: str) -> None:
         if status not in ("new", "updated"):
             return
         change = "New" if status == "new" else "Updated"
-        self._add_table_row(filename, str(Path(folder) / filename), change)
+        self._add_table_row(Path(archive_path).name, archive_path, change)
 
     def _on_file_moved(self, old_path: str, new_path: str) -> None:
         filename = Path(old_path).name
@@ -638,6 +647,7 @@ class CrawlerTab(QWidget):
             f"Complete — {n} folder{'s' if n != 1 else ''} processed."
         )
         self._current_folder_label.clear()
+        self._phase_label.clear()
         self._progress.setMaximum(1)
         self._progress.setValue(1)
         self._progress.setFormat("done")

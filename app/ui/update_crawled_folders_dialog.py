@@ -56,10 +56,11 @@ class _UpdateAllWorker(QThread):
     """
 
     log            = pyqtSignal(str)
+    phase          = pyqtSignal(str)              # high-level step description
     folder_started = pyqtSignal(str, int, int)   # path, index, total
     progress       = pyqtSignal(int, int)         # current archive, total archives
     counts_changed = pyqtSignal(int, int, int)    # new, updated, unchanged (accumulated)
-    archive_result = pyqtSignal(str, str, str)    # folder_path, filename, "new"|"updated"
+    archive_result = pyqtSignal(str, str, str)    # folder_path, full archive path, "new"|"updated"
     file_moved     = pyqtSignal(str, str)         # old_path, new_path
     file_deleted   = pyqtSignal(str)              # path
     all_finished   = pyqtSignal()
@@ -102,6 +103,7 @@ class _UpdateAllWorker(QThread):
             # DirectConnection bypasses _UpdateAllWorker's blocked event loop
             # so signals from the nested worker reach the main thread directly.
             worker.log.connect(self.log, Qt.ConnectionType.DirectConnection)
+            worker.phase.connect(self.phase, Qt.ConnectionType.DirectConnection)
             worker.progress.connect(self.progress, Qt.ConnectionType.DirectConnection)
             worker.counts_changed.connect(
                 lambda n, u, unc, on=_off_n, ou=_off_u, ounc=_off_unc:
@@ -128,7 +130,9 @@ class _UpdateAllWorker(QThread):
             self._current_worker = None
 
         if not self._stop_requested and len(crawled_folder_paths) > 1:
+            self.phase.emit("Cross-folder move detection…")
             self._cross_folder_reconcile(all_new_paths)
+            self.phase.emit("Cleaning up deleted files…")
             self._cleanup_deferred_deletions(crawled_folder_paths)
 
         self.all_finished.emit()
@@ -643,11 +647,12 @@ class UpdateCrawledFoldersDialog(QDialog):
         self._cnt_new, self._cnt_updated, self._cnt_unchanged = new, updated, unchanged
         self._refresh_counts_label()
 
-    def _on_archive_result(self, folder: str, filename: str, status: str) -> None:
+    def _on_archive_result(self, folder: str, archive_path: str, status: str) -> None:
         if status not in ("new", "updated"):
             return
         change = "New" if status == "new" else "Updated"
-        self._add_table_row(filename, change, folder)
+        p = Path(archive_path)
+        self._add_table_row(p.name, change, str(p.parent))
 
     def _on_file_moved(self, old_path: str, new_path: str) -> None:
         filename = Path(old_path).name
