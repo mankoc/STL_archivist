@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 from app.config import CrawlerConfig
-from app.crawler.archive import iter_archives, extract_archive_contents, archive_hash, list_contents, IMAGE_SUFFIXES
+from app.crawler.archive import iter_archives, extract_archive_contents, archive_hash, list_contents, list_stl_members, IMAGE_SUFFIXES
 from app.crawler.folder_metadata import (
     export_folder_metadata,
     import_folder_metadata,
@@ -119,8 +119,8 @@ class CrawlerWorker(QThread):
             hashes = self._phase_hash(batch)
 
             with session_scope() as session:
-                to_extract, existing_map = self._phase_diff(batch, hashes, session)
-                contents_map, all_names_map, stl_info_map, uncompressed_map = self._phase_extract(to_extract)
+                to_extract, stl_backfill, existing_map = self._phase_diff(batch, hashes, session)
+                contents_map, all_names_map, stl_info_map, uncompressed_map = self._phase_extract(to_extract, stl_backfill)
                 # Fresh per-batch lookup cache so repeated sculptor/tag/scale
                 # references within the same batch skip redundant SELECTs.
                 self._lookup_cache: dict = {}
@@ -239,7 +239,7 @@ class CrawlerWorker(QThread):
         batch: list[Path],
         hashes: dict[Path, str],
         session: Session,
-    ) -> tuple[list[Path], dict[str, STLModel]]:
+    ) -> tuple[list[Path], list[Path], dict[str, STLModel]]:
         """Phase 2: query the DB to decide which archives need (re-)extraction."""
         logger.debug("Phase 2: querying database for %d existing records", len(batch))
         batch_strs = [str(p) for p in batch]
@@ -252,6 +252,7 @@ class CrawlerWorker(QThread):
         logger.debug("Phase 2 complete — %d existing record(s) found", len(existing_map))
 
         to_extract: list[Path] = []
+        stl_backfill: list[Path] = []
         store_stl = self._config.store_stl_file_list
         force = self._config.force_rescan
         for p in batch:
@@ -294,31 +295,41 @@ class CrawlerWorker(QThread):
                 except Exception:
                     pass
             elif store_stl and not ex.stl_files and ex.stl_list_hash != hashes[p]:
-                to_extract.append(p)
+                # Archive content unchanged but STL list was never recorded.
+                # Use a lightweight listing pass — don't re-extract images/metadata
+                # so this doesn't show as "updated" in the UI.
+                stl_backfill.append(p)
                 logger.debug("  MISSING STL LIST: %s", p.name)
             else:
                 logger.debug("  UNCHANGED: %s", p.name)
 
-        logger.debug("Extraction needed: %d, unchanged: %d",
-                     len(to_extract), len(batch) - len(to_extract))
-        return to_extract, existing_map
+        logger.debug("Extraction needed: %d, stl_backfill: %d, unchanged: %d",
+                     len(to_extract), len(stl_backfill),
+                     len(batch) - len(to_extract) - len(stl_backfill))
+        return to_extract, stl_backfill, existing_map
 
     def _phase_extract(
         self,
         to_extract: list[Path],
+        stl_backfill: list[Path],
     ) -> tuple[
         dict[Path, dict[str, bytes]],
         dict[Path, list[str]],
         dict[Path, dict[str, int | None]],
         dict[Path, int | None],
     ]:
-        """Phase 3: parallel archive decompression for new/changed archives."""
+        """Phase 3: parallel archive decompression for new/changed archives.
+
+        Archives in *stl_backfill* only need their STL member list populated —
+        they are listed without content extraction and appear as unchanged in
+        the UI (contents_map is not populated for them).
+        """
         contents_map:      dict[Path, dict[str, bytes]]       = {}
         all_names_map:     dict[Path, list[str]]              = {}
         stl_info_map:      dict[Path, dict[str, int | None]]  = {}
         uncompressed_map:  dict[Path, int | None]             = {}
 
-        if not to_extract:
+        if not to_extract and not stl_backfill:
             logger.debug("Phase 3 skipped — no archives need extraction")
             return contents_map, all_names_map, stl_info_map, uncompressed_map
 
@@ -339,29 +350,39 @@ class CrawlerWorker(QThread):
             return data, names, stl_info, uncompressed
 
         workers = self._config.max_workers
-        logger.debug("Phase 3: extracting %d archive(s) in parallel", len(to_extract))
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {pool.submit(_extract_one, p): p for p in to_extract}
-            for future in as_completed(futures):
-                p = futures[future]
-                try:
-                    data, names, stl_info, uncompressed = future.result()
-                    contents_map[p]     = data
-                    all_names_map[p]    = names
-                    stl_info_map[p]     = stl_info
-                    uncompressed_map[p] = uncompressed
-                    logger.debug("  extracted %s → %d file(s), %d member(s), %d stl(s)",
-                                 p.name, len(data), len(names), len(stl_info))
-                except Exception as exc:
-                    msg = f"  ERROR extracting {p.name}: {exc}"
-                    self.log.emit(msg)
-                    logger.error("Extraction failed for %s: %s", p.name, exc, exc_info=True)
-                    contents_map[p]     = {}
-                    all_names_map[p]    = []
-                    stl_info_map[p]     = {}
-                    uncompressed_map[p] = None
+        if to_extract:
+            logger.debug("Phase 3: extracting %d archive(s) in parallel", len(to_extract))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = {pool.submit(_extract_one, p): p for p in to_extract}
+                for future in as_completed(futures):
+                    p = futures[future]
+                    try:
+                        data, names, stl_info, uncompressed = future.result()
+                        contents_map[p]     = data
+                        all_names_map[p]    = names
+                        stl_info_map[p]     = stl_info
+                        uncompressed_map[p] = uncompressed
+                        logger.debug("  extracted %s → %d file(s), %d member(s), %d stl(s)",
+                                     p.name, len(data), len(names), len(stl_info))
+                    except Exception as exc:
+                        msg = f"  ERROR extracting {p.name}: {exc}"
+                        self.log.emit(msg)
+                        logger.error("Extraction failed for %s: %s", p.name, exc, exc_info=True)
+                        contents_map[p]     = {}
+                        all_names_map[p]    = []
+                        stl_info_map[p]     = {}
+                        uncompressed_map[p] = None
 
-        logger.debug("Phase 3 complete — %d archive(s) extracted", len(contents_map))
+        if stl_backfill:
+            logger.debug("Phase 3: lightweight STL listing for %d archive(s)", len(stl_backfill))
+            _list_fn = partial(list_stl_members, unrar_path=self._config.unrar_path)
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                for p, stl_info in zip(stl_backfill, pool.map(_list_fn, stl_backfill)):
+                    stl_info_map[p] = stl_info
+                    logger.debug("  stl-listed %s → %d stl(s)", p.name, len(stl_info))
+
+        logger.debug("Phase 3 complete — %d extracted, %d stl-listed",
+                     len(contents_map), len(stl_backfill))
         return contents_map, all_names_map, stl_info_map, uncompressed_map
 
     def _phase_upsert(
