@@ -76,6 +76,24 @@ def get_thumbnail_base_dir() -> Optional[Path]:
     return _lmdb_dir
 
 
+def pdf_first_page_to_image_bytes(pdf_bytes: bytes) -> Optional[bytes]:
+    """Render the first page of a PDF to raw PNG bytes using PyMuPDF.
+
+    Returns ``None`` when PyMuPDF is unavailable or the PDF cannot be opened.
+    """
+    try:
+        import fitz  # pymupdf
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        if doc.page_count == 0:
+            return None
+        page = doc.load_page(0)
+        mat = fitz.Matrix(2.0, 2.0)  # 2× zoom for a crisp thumbnail source
+        pix = page.get_pixmap(matrix=mat, alpha=False)
+        return pix.tobytes("png")
+    except Exception:
+        return None
+
+
 def make_thumbnail(image_bytes: bytes, max_size: int = THUMB_SIZE_DEFAULT) -> Optional[bytes]:
     """Convert raw image bytes to resized JPEG bytes.
 

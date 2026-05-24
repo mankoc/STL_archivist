@@ -213,10 +213,11 @@ def _member_size_limit(name: str) -> int:
 
     Caps are applied as a safety guard against accidentally extracting very large
     STL binary files that happen to share an image extension, or malformed/malicious
-    archives with inflated member sizes.  Images get a generous 50 MB budget;
-    metadata files (``info.json``, ``.url``) get 1 MB.
+    archives with inflated member sizes.  Images and PDFs get a generous 50 MB
+    budget; metadata files (``info.json``, ``.url``) get 1 MB.
     """
-    if Path(name.replace("\\", "/")).suffix.lower() in IMAGE_SUFFIXES:
+    suffix = Path(name.replace("\\", "/")).suffix.lower()
+    if suffix in IMAGE_SUFFIXES or suffix == ".pdf":
         return _SIZE_LIMIT_IMAGE
     return _SIZE_LIMIT_META
 
@@ -329,9 +330,11 @@ def _image_suffix(name: str) -> str:
 def _is_wanted(name: str) -> bool:
     """True for the only file types we ever extract from an archive."""
     p = Path(name.replace("\\", "/"))
+    suffix = p.suffix.lower()
     return (
-        p.suffix.lower() in IMAGE_SUFFIXES
-        or p.suffix.lower() == ".url"
+        suffix in IMAGE_SUFFIXES
+        or suffix == ".pdf"
+        or suffix == ".url"
         or p.name.lower() == "info.json"
     )
 

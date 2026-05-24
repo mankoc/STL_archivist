@@ -849,6 +849,7 @@ class CrawlerWorker(QThread):
         image_names = [
             n for n in contents
             if Path(n.replace("\\", "/")).suffix.lower() in IMAGE_SUFFIXES
+            or Path(n.replace("\\", "/")).suffix.lower() == ".pdf"
         ]
         msg = (f"  {len(contents)} relevant file(s) extracted "
                f"({len(image_names)} image(s))")
@@ -1125,10 +1126,25 @@ class CrawlerWorker(QThread):
                 img_records.append(img)
             session.flush()
 
+            # Resolve raw bytes for each candidate; convert PDF pages to raster.
+            from app.utils.thumbnailer import pdf_first_page_to_image_bytes
+            resolved: list[tuple[Image, bytes]] = []
+            for img in img_records:
+                raw = contents[img.filename]
+                if Path(img.filename.replace("\\", "/")).suffix.lower() == ".pdf":
+                    raw = pdf_first_page_to_image_bytes(raw)
+                    if raw is None:
+                        session.delete(img)
+                        logger.warning("PDF render failed: %s in %s",
+                                       img.filename, archive_path.name)
+                        continue
+                resolved.append((img, raw))
+            img_records = [img for img, _ in resolved]
+
             # Batch-write all thumbnails in a single LMDB transaction.
             batch_items = [
-                (img.id, contents[img.filename], max_thumb_size)
-                for img in img_records
+                (img.id, raw, max_thumb_size)
+                for img, raw in resolved
             ]
             batch_results = save_thumbnails_batch(batch_items)
 
