@@ -233,7 +233,7 @@ class CrawlerTab(QWidget):
         # --- Results table ---
         root.addWidget(QLabel("Changes:"))
         self._table = QTableWidget(0, _NCOLS)
-        self._table.setHorizontalHeaderLabels(["Filename", "Path", "Change"])
+        self._table.setHorizontalHeaderLabels(["Filename", "File Path", "Change"])
         self._table.horizontalHeader().setSectionResizeMode(_COL_FILENAME, QHeaderView.ResizeMode.ResizeToContents)
         self._table.horizontalHeader().setSectionResizeMode(_COL_PATH,     QHeaderView.ResizeMode.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(_COL_CHANGE,   QHeaderView.ResizeMode.ResizeToContents)
@@ -618,18 +618,17 @@ class CrawlerTab(QWidget):
         if status not in ("new", "updated"):
             return
         change = "New" if status == "new" else "Updated"
-        self._add_table_row(filename, folder, change)
+        self._add_table_row(filename, str(Path(folder) / filename), change)
 
     def _on_file_moved(self, old_path: str, new_path: str) -> None:
         filename = Path(old_path).name
         tooltip = f"From: {old_path}\nTo:   {new_path}"
-        self._add_table_row(filename, str(Path(new_path).parent), "Moved", tooltip)
+        self._add_table_row(filename, new_path, "Moved", tooltip)
         self._cnt_moved += 1
         self._refresh_counts_label()
 
     def _on_file_deleted(self, path: str) -> None:
-        p = Path(path)
-        self._add_table_row(p.name, str(p.parent), "Deleted")
+        self._add_table_row(Path(path).name, path, "Deleted")
         self._cnt_deleted += 1
         self._refresh_counts_label()
 
