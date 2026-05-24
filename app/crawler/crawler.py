@@ -53,6 +53,7 @@ class CrawlerWorker(QThread):
 
     progress       = pyqtSignal(int, int)
     log            = pyqtSignal(str)
+    warning        = pyqtSignal(str)              # corrupted/unreadable archive
     finished       = pyqtSignal()
     counts_changed = pyqtSignal(int, int, int)   # new, updated, unchanged
     archive_result = pyqtSignal(str, str)         # filename, "new"|"updated"
@@ -256,6 +257,12 @@ class CrawlerWorker(QThread):
         store_stl = self._config.store_stl_file_list
         force = self._config.force_rescan
         for p in batch:
+            h = hashes[p]
+            if h.startswith("fallback:"):
+                msg = f"WARNING: Cannot open archive (possibly corrupted): {p.name}"
+                self.warning.emit(msg)
+                logger.warning("Corrupted or unreadable archive: %s (%s)", p, h)
+
             ex = existing_map.get(str(p))
             if ex is None:
                 to_extract.append(p)
@@ -267,7 +274,7 @@ class CrawlerWorker(QThread):
                 # Hash was never stored (record pre-dates the archive_hash column).
                 # Backfill the fingerprint from Phase 1 without re-extracting content;
                 # the user hasn't changed anything, so don't classify this as "updated".
-                ex.archive_hash = hashes[p]
+                ex.archive_hash = h
                 try:
                     st = p.stat()
                     ex.archive_size = int(st.st_size)
@@ -277,10 +284,10 @@ class CrawlerWorker(QThread):
                 except Exception:
                     pass
                 logger.debug("  HASH BACKFILLED: %s", p.name)
-            elif ex.archive_hash != hashes[p]:
+            elif ex.archive_hash != h:
                 to_extract.append(p)
                 _old = ex.archive_hash or ""
-                _new = hashes[p] or ""
+                _new = h or ""
                 logger.info(
                     "  CHANGED: %s  old=%s  new=%s%s",
                     p.name, _old, _new,
@@ -294,7 +301,7 @@ class CrawlerWorker(QThread):
                     session.flush()
                 except Exception:
                     pass
-            elif store_stl and not ex.stl_files and ex.stl_list_hash != hashes[p]:
+            elif store_stl and not ex.stl_files and ex.stl_list_hash != h:
                 # Archive content unchanged but STL list was never recorded.
                 # Use a lightweight listing pass — don't re-extract images/metadata
                 # so this doesn't show as "updated" in the UI.
@@ -365,8 +372,8 @@ class CrawlerWorker(QThread):
                         logger.debug("  extracted %s → %d file(s), %d member(s), %d stl(s)",
                                      p.name, len(data), len(names), len(stl_info))
                     except Exception as exc:
-                        msg = f"  ERROR extracting {p.name}: {exc}"
-                        self.log.emit(msg)
+                        warn = f"WARNING: Failed to extract {p.name} — file may be corrupted: {exc}"
+                        self.warning.emit(warn)
                         logger.error("Extraction failed for %s: %s", p.name, exc, exc_info=True)
                         contents_map[p]     = {}
                         all_names_map[p]    = []
