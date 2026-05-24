@@ -291,6 +291,27 @@ def list_contents(archive_path: Path, unrar_path: str = "") -> list[str]:
         return []
 
 
+_STL_EXTS = {".stl", ".obj", ".lys", ".lyt", ".chitubox", ".ctp"}
+
+
+def list_stl_members(archive_path: Path, unrar_path: str = "") -> dict[str, int | None]:
+    """Return {member_name: uncompressed_size} for all printable-file members.
+
+    Opens the archive catalog only — no member data is decompressed.
+    Returns an empty dict on any error so the caller can persist a sentinel.
+    """
+    result: dict[str, int | None] = {}
+    try:
+        with open_archive(archive_path, unrar_path) as ar:
+            for m in ar.iter_members():
+                if Path(m.name.replace("\\", "/")).suffix.lower() in _STL_EXTS:
+                    result[m.name] = m.size
+        logger.debug("  %d printable member(s) in %s", len(result), archive_path.name)
+    except _ARCHIVE_ERRORS as exc:
+        logger.warning("Could not list STL members in %s: %s", archive_path.name, exc)
+    return result
+
+
 def read_file(archive_path: Path, member_name: str, unrar_path: str = "") -> Optional[bytes]:
     """Read a single member from the archive and return its bytes."""
     try:
