@@ -224,7 +224,9 @@ class _ContentDupWorker(QThread):
                 self.progress.emit("Loading STL file records…")
                 rows = (
                     session.query(STLFile.model_id, STLFile.filename, STLFile.file_size)
+                    .join(STLModel, STLModel.id == STLFile.model_id)
                     .filter(STLFile.file_size.isnot(None))
+                    .filter(STLModel.is_missing.isnot(True))
                     .all()
                 )
                 if not rows:
@@ -344,7 +346,9 @@ class _ImageDupWorker(QThread):
                 self.progress.emit("Loading image records…")
                 image_rows = (
                     session.query(Image.id, Image.model_id)
+                    .join(STLModel, STLModel.id == Image.model_id)
                     .filter(Image.thumbnail_path.isnot(None))
+                    .filter(STLModel.is_missing.isnot(True))
                     .all()
                 )
                 if not image_rows:

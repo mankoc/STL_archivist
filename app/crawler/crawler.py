@@ -719,26 +719,58 @@ class CrawlerWorker(QThread):
         self._mark_records_missing(unmatched)
 
     def _mark_records_missing(self, missing: list[dict]) -> None:
-        """Flag unmatched missing records as ``is_missing=True`` in the database.
+        """Handle unmatched missing records.
 
-        Records are *not* deleted here — they remain as candidates for future
-        crawl sessions and can be reviewed or removed via Database Maintenance.
+        Records whose archive path falls under the currently crawled folder are
+        deleted immediately — the crawler is authoritative for that folder's
+        contents.  Records outside the crawled scope are flagged
+        ``is_missing=True`` so a future crawl of the other folder can still
+        attempt reconciliation.
         """
         if not missing:
             return
+        source = Path(self.source_dir)
+        deleted = 0
+        marked  = 0
         with session_scope() as session:
-            marked = 0
             for rec in missing:
                 model = session.get(STLModel, rec["id"])
-                if model is not None and not model.is_missing:
+                if model is None:
+                    continue
+                try:
+                    in_scope = Path(rec["path"]).is_relative_to(source)
+                except ValueError:
+                    in_scope = False
+
+                if in_scope:
+                    for img in list(model.images):
+                        if img.thumbnail_path:
+                            delete_thumbnail(img.thumbnail_path)
+                        session.delete(img)
+                    session.flush()
+                    for stl in list(model.stl_files):
+                        session.delete(stl)
+                    session.flush()
+                    session.delete(model)
+                    deleted += 1
+                    msg = f"Deleted: {rec['path']}"
+                    self.log.emit(msg)
+                    logger.info(msg)
+                    self.file_deleted.emit(rec["path"])
+                elif not model.is_missing:
                     model.is_missing = True
                     marked += 1
                     msg = f"Marked missing: {rec['path']}"
                     self.log.emit(msg)
                     logger.info(msg)
                     self.file_deleted.emit(rec["path"])
+
+        if deleted:
+            msg = f"Deleted {deleted} record(s) removed from the crawled folder."
+            self.log.emit(msg)
+            logger.info(msg)
         if marked:
-            msg = f"Marked {marked} record(s) as missing (not deleted — use DB Maintenance to remove)."
+            msg = f"Marked {marked} record(s) as missing (outside crawled folder — use DB Maintenance to remove)."
             self.log.emit(msg)
             logger.info(msg)
 
