@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QComboBox, QInputDialog, QMessageBox, QApplication, QToolButton, QToolTip,
     QCheckBox,
 )
-from PyQt6.QtGui import QIcon, QCursor
+from PyQt6.QtGui import QIcon, QCursor, QColor, QTextCharFormat, QTextCursor
 from pathlib import Path as _Path
 
 _ICONS_DIR = _Path(__file__).parent.parent.parent / "resources" / "icons"
@@ -396,6 +396,7 @@ class CrawlerTab(QWidget):
         config.force_date       = self._force_date_edit.text().strip()
         self._worker = CrawlerWorker(source, pattern=pattern, config=config)
         self._worker.log.connect(self._on_log)
+        self._worker.warning.connect(self._on_warning)
         self._worker.progress.connect(self._on_progress)
         self._worker.finished.connect(self._on_finished)
         self._worker.start()
@@ -410,6 +411,16 @@ class CrawlerTab(QWidget):
     def _on_log(self, msg: str) -> None:
         """Append a crawler log message to the log panel."""
         self._log.appendPlainText(msg)
+
+    def _on_warning(self, msg: str) -> None:
+        """Append a warning message in amber to the log panel."""
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor("#E6A817"))
+        cursor = self._log.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        cursor.insertText(msg + "\n", fmt)
+        self._log.setTextCursor(cursor)
+        self._log.ensureCursorVisible()
 
     def _on_progress(self, current: int, total: int) -> None:
         """Update the progress bar with the current archive index and total."""
