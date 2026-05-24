@@ -595,6 +595,30 @@ class CrawlerTab(QWidget):
         self._worker.all_finished.connect(self._on_finished)
         self._worker.start()
 
+    def crawl_single_path(self, path: str) -> None:
+        """Select the registered crawled folder that contains *path* and start crawling."""
+        if self._worker is not None:
+            QMessageBox.information(self, "Crawler Running",
+                "A crawl is already in progress. Wait for it to finish before starting another.")
+            return
+        self._load_folders()
+        best_idx = -1
+        best_len = -1
+        for i, (folder_path, _) in enumerate(self._all_folders):
+            if path == folder_path or path.startswith(folder_path + "/"):
+                if len(folder_path) > best_len:
+                    best_len = len(folder_path)
+                    best_idx = i
+        if best_idx == -1:
+            QMessageBox.information(self, "Crawler",
+                f"No registered crawled folder contains:\n{path}\n\n"
+                "Add it via the Crawler window first.")
+            return
+        for i in range(self._folder_list.count()):
+            state = Qt.CheckState.Checked if i == best_idx else Qt.CheckState.Unchecked
+            self._folder_list.item(i).setCheckState(state)
+        self._start_crawl()
+
     def _stop_crawl(self) -> None:
         if self._worker:
             self._worker.stop()
