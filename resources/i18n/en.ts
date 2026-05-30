@@ -1936,76 +1936,93 @@ Run 'Find Moved in DB' first, then select rows to merge.</translation>
 </context><context>
     <name>FindContentDuplicatesDialog</name>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="588" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="635" />
         <source>Find Duplicate Archives by Content</source>
         <translation>Find Duplicate Archives by Content</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="609" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="657" />
         <source>STL Files</source>
         <translation>STL Files</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="610" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="658" />
         <source>Images</source>
         <translation>Images</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="615" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="663" />
         <source>Show Pair in Main Table</source>
         <translation>Show Pair in Main Table</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="618" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="666" />
         <source>Show All Duplicates in Main Table</source>
         <translation>Show All Duplicates in Main Table</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="621" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="669" />
         <source>Close</source>
         <translation>Close</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="687" />
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="633" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="766" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="681" />
         <source>Search Parameters</source>
         <translation>Search Parameters</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="640" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="688" />
         <source>Minimum fraction of files (relative to the larger archive) that must be identical for a pair to be flagged.</source>
         <translation>Minimum fraction of files (relative to the larger archive) that must be identical for a pair to be flagged.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="643" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="691" />
         <source>Similarity threshold:</source>
         <translation>Similarity threshold:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="645" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="693" />
         <source>&lt;small&gt;Two archives are flagged when at least this fraction of the &lt;i&gt;larger&lt;/i&gt; archive's STL files appear in both (matched by filename and size). Requires &lt;b&gt;Store STL file list&lt;/b&gt; to be enabled in Settings and archives to have been crawled.&lt;/small&gt;</source>
         <translation>&lt;small&gt;Two archives are flagged when at least this fraction of the &lt;i&gt;larger&lt;/i&gt; archive's STL files appear in both (matched by filename and size). Requires &lt;b&gt;Store STL file list&lt;/b&gt; to be enabled in Settings and archives to have been crawled.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="711" />
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="653" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="790" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="701" />
         <source>Find Duplicates</source>
         <translation>Find Duplicates</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="713" />
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="656" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="792" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="704" />
         <source>Stop</source>
         <translation>Stop</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="724" />
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="667" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="803" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="715" />
         <source>Ready.</source>
         <translation>Ready.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="693" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="730" />
+        <source>Images in selected pair</source>
+        <translation>Images in selected pair</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="895" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="735" />
+        <source>Archive A</source>
+        <translation>Archive A</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="896" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="742" />
+        <source>Archive B</source>
+        <translation>Archive B</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="772" />
         <source>Maximum Hamming distance between 64-bit dHash fingerprints.
 0 = bit-for-bit identical pixels
 ≤3 = very similar (different resolution / minor JPEG artefacts)
@@ -2018,59 +2035,79 @@ Run 'Find Moved in DB' first, then select rows to merge.</translation>
 ≤15 = loosely similar (use with caution — many false positives)</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="699" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="778" />
         <source>Max hash distance:</source>
         <translation>Max hash distance:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="701" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="780" />
         <source>&lt;small&gt;Preview thumbnails are compared with a perceptual difference hash (dHash). Two thumbnails are considered similar when their 64-bit hashes differ in at most this many bits. A distance of 0 catches only near-identical images; 5 typically catches the same render at different resolutions or with slight colour shifts. Higher values increase recall but also false positives.&lt;/small&gt;</source>
         <translation>&lt;small&gt;Preview thumbnails are compared with a perceptual difference hash (dHash). Two thumbnails are considered similar when their 64-bit hashes differ in at most this many bits. A distance of 0 catches only near-identical images; 5 typically catches the same render at different resolutions or with slight colour shifts. Higher values increase recall but also false positives.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="890" />
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="754" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1019" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="834" />
         <source>Searching…</source>
         <translation>Searching…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="912" />
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="771" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1041" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="851" />
         <source>Search stopped.</source>
         <translation>Search stopped.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="835" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="897" />
+        <source>Select a result to preview its images.</source>
+        <translation>Select a result to preview its images.</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="909" />
+        <source>Archive A: %s</source>
+        <translation>Archive A: %s</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="910" />
+        <source>Archive B: %s</source>
+        <translation>Archive B: %s</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="911" />
+        <source>No images in this archive.</source>
+        <translation>No images in this archive.</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="964" />
         <source>Compare Archive Contents…</source>
         <translation>Compare Archive Contents…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="840" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="969" />
         <source>Open Folder of Archive A in Explorer</source>
         <translation>Open Folder of Archive A in Explorer</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="845" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="974" />
         <source>Open Folder of Archive B in Explorer</source>
         <translation>Open Folder of Archive B in Explorer</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="855" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="984" />
         <source>Delete Archive A from Disk…</source>
         <translation>Delete Archive A from Disk…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="859" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="988" />
         <source>Delete Archive B from Disk…</source>
         <translation>Delete Archive B from Disk…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="984" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1113" />
         <source>Delete Archive</source>
         <translation>Delete Archive</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1021" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1150" />
         <source>Failed to load model thumbnails for popup: %s</source>
         <translation>Failed to load model thumbnails for popup: %s</translation>
     </message>
@@ -2204,17 +2241,17 @@ Run 'Find Moved in DB' first, then select rows to merge.</translation>
 </context><context>
     <name>HelpDialog</name>
     <message>
-        <location filename="../../app/ui/help_dialog.py" line="1234" />
+        <location filename="../../app/ui/help_dialog.py" line="1245" />
         <source>stlLibrary — Help</source>
         <translation>stlLibrary — Help</translation>
     </message>
     <message>
-        <location filename="../../app/ui/help_dialog.py" line="1269" />
+        <location filename="../../app/ui/help_dialog.py" line="1280" />
         <source>← Back</source>
         <translation>← Back</translation>
     </message>
     <message>
-        <location filename="../../app/ui/help_dialog.py" line="1273" />
+        <location filename="../../app/ui/help_dialog.py" line="1284" />
         <source>Forward →</source>
         <translation>Forward →</translation>
     </message>

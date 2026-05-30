@@ -2,6 +2,7 @@
 
 ## 2026.22 — 2026-05-30
 
+- Find Duplicate Archives by Content (STL Files tab): selecting a result now previews the thumbnails of both archives side by side.
 - Localization: translatable UI via Qt Linguist `.ts` files in `resources/i18n/` (English and Spanish built-in, more drop-in), with a language picker in Configuration; untranslated strings fall back to English.
 - Configuration: Language moved to its own sidebar section; Appearance colour pickers grouped into a collapsible, width-scaling 3-column "Custom Colors" section; sidebar labels now translatable.
 - Crawler tab: resizeable folder list (splitter), the path-pattern checkbox doubles as the editor show/hide toggle, and Override metadata is now collapsible.

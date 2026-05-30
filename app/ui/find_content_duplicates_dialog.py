@@ -18,7 +18,7 @@ from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QApplication, QDialog, QFrame, QMenu, QMessageBox, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QHeaderView,
-    QProgressBar, QGroupBox, QFormLayout, QTabWidget, QWidget,
+    QProgressBar, QGroupBox, QFormLayout, QTabWidget, QWidget, QScrollArea, QSplitter,
 )
 
 logger = logging.getLogger(__name__)
@@ -521,6 +521,53 @@ class _ThumbnailPopup(QFrame):
         lbl.setText(f"No image ({side})")
 
 
+class _ThumbStrip(QScrollArea):
+    """Horizontally-scrolling strip of thumbnails for one archive."""
+
+    _THUMB = 110
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setWidgetResizable(True)
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setFixedHeight(self._THUMB + 30)
+        host = QWidget()
+        self._row = QHBoxLayout(host)
+        self._row.setContentsMargins(4, 4, 4, 4)
+        self._row.setSpacing(4)
+        self._row.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.setWidget(host)
+
+    def set_thumbs(self, blobs: list[bytes], empty_text: str = "") -> None:
+        while self._row.count():
+            item = self._row.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        if not blobs:
+            placeholder = QLabel(empty_text)
+            placeholder.setEnabled(False)
+            placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._row.addWidget(placeholder)
+            return
+        for data in blobs:
+            px = QPixmap()
+            if not px.loadFromData(data):
+                continue
+            px = px.scaled(
+                self._THUMB, self._THUMB,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            lbl = QLabel()
+            lbl.setPixmap(px)
+            lbl.setFixedSize(self._THUMB, self._THUMB)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._row.addWidget(lbl)
+
+
 class _ImgHoverFilter(QObject):
     """Viewport event filter that shows a thumbnail popup when hovering image result rows."""
 
@@ -597,6 +644,7 @@ class FindContentDuplicatesDialog(QDialog):
         self._stl_results: list[dict] = []
         self._img_results: list[dict] = []
         self._img_model_thumb: dict[int, Optional[bytes]] = {}
+        self._stl_thumb_cache: dict[int, list[bytes]] = {}
         self._img_popup = _ThumbnailPopup(parent=self)
         self._build_ui()
 
@@ -677,7 +725,38 @@ class FindContentDuplicatesDialog(QDialog):
         self._stl_table.itemSelectionChanged.connect(self._on_stl_selection)
         self._stl_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._stl_table.customContextMenuRequested.connect(self._stl_context_menu)
-        layout.addWidget(self._stl_table)
+
+        # ── Image preview: thumbnails of both archives in the selected pair ──
+        self._stl_preview = QGroupBox(self.tr("Images in selected pair"))
+        prev_cols = QHBoxLayout(self._stl_preview)
+        prev_cols.setSpacing(10)
+
+        col_a = QVBoxLayout()
+        self._stl_prev_title_a = QLabel(self.tr("Archive A"))
+        self._stl_prev_title_a.setTextFormat(Qt.TextFormat.PlainText)
+        self._stl_strip_a = _ThumbStrip()
+        col_a.addWidget(self._stl_prev_title_a)
+        col_a.addWidget(self._stl_strip_a)
+
+        col_b = QVBoxLayout()
+        self._stl_prev_title_b = QLabel(self.tr("Archive B"))
+        self._stl_prev_title_b.setTextFormat(Qt.TextFormat.PlainText)
+        self._stl_strip_b = _ThumbStrip()
+        col_b.addWidget(self._stl_prev_title_b)
+        col_b.addWidget(self._stl_strip_b)
+
+        prev_cols.addLayout(col_a, 1)
+        prev_cols.addLayout(col_b, 1)
+
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.setChildrenCollapsible(False)
+        splitter.addWidget(self._stl_table)
+        splitter.addWidget(self._stl_preview)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 1)
+        layout.addWidget(splitter, stretch=1)
+
+        self._update_stl_preview()
         return page
 
     def _build_images_tab(self) -> QWidget:
@@ -747,6 +826,7 @@ class FindContentDuplicatesDialog(QDialog):
     def _start_stl_search(self) -> None:
         self._stl_table.setRowCount(0)
         self._stl_results = []
+        self._stl_thumb_cache.clear()
         self._stl_find_btn.setEnabled(False)
         self._stl_stop_btn.setEnabled(True)
         self._stl_progress.setRange(0, 0)
@@ -806,6 +886,55 @@ class FindContentDuplicatesDialog(QDialog):
     def _on_stl_selection(self) -> None:
         if self._tabs.currentIndex() == _TAB_STL:
             self._refresh_bottom_buttons()
+        self._update_stl_preview()
+
+    def _update_stl_preview(self) -> None:
+        """Show thumbnails of both archives in the singly-selected result row."""
+        rows = {i.row() for i in self._stl_table.selectedIndexes()}
+        if len(rows) != 1:
+            self._stl_prev_title_a.setText(self.tr("Archive A"))
+            self._stl_prev_title_b.setText(self.tr("Archive B"))
+            empty = self.tr("Select a result to preview its images.")
+            self._stl_strip_a.set_thumbs([], empty)
+            self._stl_strip_b.set_thumbs([], empty)
+            return
+
+        row = next(iter(rows))
+        id_a = self._stl_table.item(row, _S_ID_A).data(Qt.ItemDataRole.UserRole)
+        id_b = self._stl_table.item(row, _S_ID_B).data(Qt.ItemDataRole.UserRole)
+        title_a = self._stl_table.item(row, _S_TITLE_A).text()
+        title_b = self._stl_table.item(row, _S_TITLE_B).text()
+        thumbs_a = self._archive_thumbs(id_a)
+        thumbs_b = self._archive_thumbs(id_b)
+        self._stl_prev_title_a.setText(self.tr("Archive A: %s") % title_a)
+        self._stl_prev_title_b.setText(self.tr("Archive B: %s") % title_b)
+        no_img = self.tr("No images in this archive.")
+        self._stl_strip_a.set_thumbs(thumbs_a, no_img)
+        self._stl_strip_b.set_thumbs(thumbs_b, no_img)
+
+    def _archive_thumbs(self, model_id: int, limit: int = 24) -> list[bytes]:
+        """Return up to *limit* thumbnail JPEGs for *model_id* (cached)."""
+        if model_id in self._stl_thumb_cache:
+            return self._stl_thumb_cache[model_id]
+        blobs: list[bytes] = []
+        try:
+            from app.database.db import session_scope
+            from app.database.models import Image
+            from app.utils.thumbnailer import get_thumbnail_bytes_many
+            with session_scope() as session:
+                ids = [
+                    iid for (iid,) in session.query(Image.id)
+                    .filter(Image.model_id == model_id, Image.thumbnail_path.isnot(None))
+                    .order_by(Image.id)
+                    .limit(limit)
+                    .all()
+                ]
+            data = get_thumbnail_bytes_many(ids)
+            blobs = [data[i] for i in ids if i in data]
+        except Exception as exc:
+            logger.warning("Failed to load archive thumbnails: %s", exc)
+        self._stl_thumb_cache[model_id] = blobs
+        return blobs
 
     def _show_compare_menu(
         self,
