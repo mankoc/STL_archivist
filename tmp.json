@@ -1,0 +1,149 @@
+[
+  {
+    "url": "https://www.esn.com",
+    "domain": "esn.com",
+    "search_terms": [
+      "Muscle gain support buy"
+    ],
+    "is_shop": true,
+    "platform": "Shopify",
+    "justification": "URL structure (/products, /collections, /pages, /policies) consistent with Shopify stores."
+  },
+  {
+    "url": "https://www.sportsresearch.com",
+    "domain": "sportsresearch.com",
+    "search_terms": [
+      "Strength and power output best"
+    ],
+    "is_shop": true,
+    "platform": "Shopify",
+    "justification": "cdn.shopify.com references and Shopify client-side redirects found in site JSON/__NEXT_DATA__."
+  },
+  {
+    "url": "https://www.tailwindnutrition.com",
+    "domain": "tailwindnutrition.com",
+    "search_terms": [
+      "Endurance fueling capacity best"
+    ],
+    "is_shop": true,
+    "platform": "Shopify",
+    "justification": "GET /products.json returned Shopify products JSON and cdn.shopify.com asset URLs present."
+  },
+  {
+    "url": "https://formula369.com",
+    "domain": "formula369.com",
+    "search_terms": [
+      "Endurance fueling capacity buy"
+    ],
+    "is_shop": true,
+    "platform": "Shopify",
+    "justification": "Powered by Shopify link and Shopify-style /products and /collections URLs present."
+  },
+  {
+    "url": "https://www.precisionhydration.com",
+    "domain": "precisionhydration.com",
+    "search_terms": [
+      "Hydration and cramp control best"
+    ],
+    "is_shop": true,
+    "platform": "Shopify",
+    "justification": "Head includes preconnect links to precisionhydration.myshopify.com (Shopify myshopify domain)."
+  },
+  {
+    "url": "https://www.firstendurance.com",
+    "domain": "firstendurance.com",
+    "search_terms": [
+      "Endurance fueling capacity shop"
+    ],
+    "is_shop": true,
+    "platform": "Shopify",
+    "justification": "Footer 'Powered by Shopify' detected on site."
+  },
+  {
+    "url": "https://www.metagenics.com",
+    "domain": "metagenics.com",
+    "search_terms": [
+      "Recovery and sleep quality buy"
+    ],
+    "is_shop": true,
+    "justification": "Cart link (/en-us/cart) found; no platform-specific fingerprints detected."
+  },
+  {
+    "url": "https://seed.com",
+    "domain": "seed.com",
+    "search_terms": [
+      "Gut and digestive health buy"
+    ],
+    "is_shop": true,
+    "platform": "Shopify",
+    "justification": "cdn.shopify.com shopify-consent-tracking script referenced in page __NEXT_DATA__."
+  },
+  {
+    "url": "https://magicmind.com",
+    "domain": "magicmind.com",
+    "search_terms": [
+      "Focus and mental energy best"
+    ],
+    "is_shop": true,
+    "platform": "Shopify",
+    "justification": "product URLs include selling_plan parameter (Shopify subscriptions)"
+  },
+  {
+    "url": "https://brainmd.com",
+    "domain": "brainmd.com",
+    "search_terms": [
+      "Focus and mental energy buy"
+    ],
+    "is_shop": true,
+    "platform": "Shopify",
+    "justification": "/products.json returned JSON with products array and cdn.shopify.com URLs"
+  },
+  {
+    "url": "https://dreamrecovery.io",
+    "domain": "dreamrecovery.io",
+    "search_terms": [
+      "Recovery and sleep quality natural"
+    ],
+    "is_shop": true,
+    "platform": "Shopify",
+    "justification": "GET /products.json returned valid JSON with a products array (Shopify fingerprint)."
+  },
+  {
+    "url": "https://gmb.io",
+    "domain": "gmb.io",
+    "search_terms": [
+      "Joint and tendon resilience how to"
+    ],
+    "is_shop": true,
+    "justification": "Secure checkout pages found at /checkout/* (site contains 'Secure Checkout' pages)."
+  },
+  {
+    "url": "https://www.therascience.com",
+    "domain": "therascience.com",
+    "search_terms": [
+      "Joint and tendon resilience buy"
+    ],
+    "is_shop": true,
+    "justification": "Multiple product pages and /checkout/cart present — site includes cart and product listings."
+  },
+  {
+    "url": "https://nduranz.com",
+    "domain": "nduranz.com",
+    "search_terms": [
+      "Endurance fueling capacity natural"
+    ],
+    "is_shop": true,
+    "platform": "Shopify",
+    "justification": "products.json returned a products array; cdn.shopify.com image URLs present."
+  },
+  {
+    "url": "https://getrawnutrition.com",
+    "domain": "getrawnutrition.com",
+    "search_terms": [
+      "Endurance fueling capacity buy"
+    ],
+    "is_shop": true,
+    "platform": "Shopify",
+    "justification": "GET /products.json returned a valid products array — Shopify storefront API."
+  }
+]

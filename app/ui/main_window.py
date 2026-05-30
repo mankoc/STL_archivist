@@ -20,7 +20,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("stlLibrary")
+        self.setWindowTitle(self.tr("stlLibrary"))
         self.resize(1280, 860)
         self._build_ui()
 
@@ -52,62 +52,62 @@ class MainWindow(QMainWindow):
         from app.ui.config_dialog import get_hotkeys as _get_hotkeys
         _hk = _get_hotkeys()
         self._act_refresh = QAction(
-            style.standardIcon(SP.SP_BrowserReload), "Refresh", self)
+            style.standardIcon(SP.SP_BrowserReload), self.tr("Refresh"), self)
         self._act_refresh.setShortcut(QKeySequence(_hk["refresh"]))
-        self._act_refresh.setStatusTip("Reload data from the database")
+        self._act_refresh.setStatusTip(self.tr("Reload data from the database"))
         self._act_refresh.triggered.connect(self._browser.refresh)
 
         self._act_open_crawler = QAction(
-            _icon("open_crawler"), "Crawler", self)
+            _icon("open_crawler"), self.tr("Crawler"), self)
         self._act_open_crawler.setShortcut(QKeySequence(_hk["open_crawler"]))
-        self._act_open_crawler.setStatusTip("Open the Crawler window")
+        self._act_open_crawler.setStatusTip(self.tr("Open the Crawler window"))
         self._act_open_crawler.triggered.connect(self._open_crawler)
 
         self._act_update_folders = QAction(
-            _icon("update_folders"), "Update Folders…", self)
+            _icon("update_folders"), self.tr("Update Folders…"), self)
         self._act_update_folders.setShortcut(QKeySequence(_hk["update_folders"]))
         self._act_update_folders.setStatusTip(
-            "Re-crawl all stored folders to pick up new and modified archives"
+            self.tr("Re-crawl all stored folders to pick up new and modified archives")
         )
         self._act_update_folders.triggered.connect(self._update_crawled_folders)
         self._act_update_folders.setVisible(False)
 
         self._act_exit = QAction(
-            style.standardIcon(SP.SP_DialogCloseButton), "Exit", self)
+            style.standardIcon(SP.SP_DialogCloseButton), self.tr("Exit"), self)
         self._act_exit.setShortcut(QKeySequence.StandardKey.Quit)
-        self._act_exit.setStatusTip("Quit stlLibrary")
+        self._act_exit.setStatusTip(self.tr("Quit stlLibrary"))
         self._act_exit.triggered.connect(QApplication.quit)
 
         self._act_image_grid = QAction(
-            _icon("image_grid"), "Image Grid", self)
+            _icon("image_grid"), self.tr("Image Grid"), self)
         self._act_image_grid.setShortcut(QKeySequence(_hk["image_grid"]))
-        self._act_image_grid.setStatusTip("Show a grid of images for the current table")
+        self._act_image_grid.setStatusTip(self.tr("Show a grid of images for the current table"))
         self._act_image_grid.triggered.connect(self._browser.show_image_grid)
 
         self._act_toggle_images = QAction(
-            _icon("toggle_images"), "Images", self)
+            _icon("toggle_images"), self.tr("Images"), self)
         self._act_toggle_images.setShortcut(QKeySequence(_hk["toggle_images"]))
         self._act_toggle_images.setCheckable(True)
         self._act_toggle_images.setChecked(True)
-        self._act_toggle_images.setStatusTip("Show or hide the image preview pane")
+        self._act_toggle_images.setStatusTip(self.tr("Show or hide the image preview pane"))
         self._act_toggle_images.triggered.connect(self._toggle_image_pane)
 
         self._act_toggle_info = QAction(
-            _icon("toggle_info"), "Info", self)
+            _icon("toggle_info"), self.tr("Info"), self)
         self._act_toggle_info.setCheckable(True)
         self._act_toggle_info.setChecked(False)
-        self._act_toggle_info.setStatusTip("Show or hide the model info panel")
+        self._act_toggle_info.setStatusTip(self.tr("Show or hide the model info panel"))
         self._act_toggle_info.triggered.connect(self._toggle_info_pane)
 
         self._act_about = QAction(
-            style.standardIcon(SP.SP_MessageBoxInformation), "About…", self)
-        self._act_about.setStatusTip("About stlLibrary")
+            style.standardIcon(SP.SP_MessageBoxInformation), self.tr("About…"), self)
+        self._act_about.setStatusTip(self.tr("About stlLibrary"))
         self._act_about.triggered.connect(self._show_about)
 
         self._act_help = QAction(
-            style.standardIcon(SP.SP_DialogHelpButton), "Help…", self)
+            style.standardIcon(SP.SP_DialogHelpButton), self.tr("Help…"), self)
         self._act_help.setShortcut(QKeySequence.StandardKey.HelpContents)
-        self._act_help.setStatusTip("Open the help page")
+        self._act_help.setStatusTip(self.tr("Open the help page"))
         self._act_help.triggered.connect(self._show_help)
 
         # ---- Menu bar ----
@@ -118,8 +118,8 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self._act_update_folders)
         file_menu.addSeparator()
         act_config = QAction(
-            style.standardIcon(SP.SP_FileDialogDetailedView), "Configuration…", self)
-        act_config.setStatusTip("Open application configuration")
+            style.standardIcon(SP.SP_FileDialogDetailedView), self.tr("Configuration…"), self)
+        act_config.setStatusTip(self.tr("Open application configuration"))
         act_config.triggered.connect(self._open_config)
         file_menu.addAction(act_config)
         file_menu.addSeparator()
@@ -133,22 +133,22 @@ class MainWindow(QMainWindow):
         tools_menu = mb.addMenu("&Tools")
         self._act_gen_metadata = QAction(
             style.standardIcon(SP.SP_FileDialogDetailedView),
-            "Generate / Update Metadata Sidecars…",
+            self.tr("Generate / Update Metadata Sidecars…"),
             self,
         )
         self._act_gen_metadata.setStatusTip(
-            "Write or refresh METADATA.7z sidecar files for all folders in the database"
+            self.tr("Write or refresh METADATA.7z sidecar files for all folders in the database")
         )
         self._act_gen_metadata.triggered.connect(self._open_metadata_sidecar_dialog)
         tools_menu.addAction(self._act_gen_metadata)
 
         act_gen_thumbs = QAction(
             style.standardIcon(SP.SP_BrowserReload),
-            "Generate Thumbnails for Selected…",
+            self.tr("Generate Thumbnails for Selected…"),
             self,
         )
         act_gen_thumbs.setStatusTip(
-            "Generate thumbnails for the models currently selected in the table"
+            self.tr("Generate thumbnails for the models currently selected in the table")
         )
         act_gen_thumbs.triggered.connect(self._browser.generate_thumbnails_for_selected)
         tools_menu.addAction(act_gen_thumbs)
@@ -157,34 +157,34 @@ class MainWindow(QMainWindow):
 
         self._act_find_dupes = QAction(
             _icon("find_dupes"),
-            "Find Metadata Duplicates…",
+            self.tr("Find Metadata Duplicates…"),
             self,
         )
         self._act_find_dupes.setShortcut(QKeySequence(_hk["find_duplicates"]))
         self._act_find_dupes.setStatusTip(
-            "Find models with identical or phonetically similar field values"
+            self.tr("Find models with identical or phonetically similar field values")
         )
         self._act_find_dupes.triggered.connect(self._open_find_duplicates_dialog)
         tools_menu.addAction(self._act_find_dupes)
 
         self._act_find_content_dupes = QAction(
             _icon("find_content_dupes"),
-            "Find Duplicate Archives by Content…",
+            self.tr("Find Duplicate Archives by Content…"),
             self,
         )
         self._act_find_content_dupes.setStatusTip(
-            "Find archives that share a large fraction of identical STL files"
+            self.tr("Find archives that share a large fraction of identical STL files")
         )
         self._act_find_content_dupes.triggered.connect(self._open_find_content_duplicates_dialog)
         tools_menu.addAction(self._act_find_content_dupes)
 
         self._act_find_by_image = QAction(
             _icon("find_by_image"),
-            "Find by Image…",
+            self.tr("Find by Image…"),
             self,
         )
         self._act_find_by_image.setStatusTip(
-            "Find models with images perceptually similar to a file on disk"
+            self.tr("Find models with images perceptually similar to a file on disk")
         )
         self._act_find_by_image.triggered.connect(self._open_find_by_image_dialog)
         tools_menu.addAction(self._act_find_by_image)
@@ -193,22 +193,22 @@ class MainWindow(QMainWindow):
 
         act_db_maintenance = QAction(
             style.standardIcon(SP.SP_FileDialogDetailedView),
-            "Database Maintenance…",
+            self.tr("Database Maintenance…"),
             self,
         )
         act_db_maintenance.setStatusTip(
-            "Verify archive files exist, relocate moved archives, or remove stale records"
+            self.tr("Verify archive files exist, relocate moved archives, or remove stale records")
         )
         act_db_maintenance.triggered.connect(self._open_db_maintenance_dialog)
         tools_menu.addAction(act_db_maintenance)
 
         act_backup_restore = QAction(
             style.standardIcon(SP.SP_DialogSaveButton),
-            "Backup / Restore Library…",
+            self.tr("Backup / Restore Library…"),
             self,
         )
         act_backup_restore.setStatusTip(
-            "Back up or restore the database, thumbnails, and settings"
+            self.tr("Back up or restore the database, thumbnails, and settings")
         )
         act_backup_restore.triggered.connect(self._open_backup_restore_dialog)
         tools_menu.addAction(act_backup_restore)
@@ -216,34 +216,34 @@ class MainWindow(QMainWindow):
         stats_menu = mb.addMenu("&Statistics")
         act_statistics = QAction(
             style.standardIcon(SP.SP_FileDialogInfoView),
-            "Show Statistics…",
+            self.tr("Show Statistics…"),
             self,
         )
-        act_statistics.setStatusTip("Show aggregated statistics about the database")
+        act_statistics.setStatusTip(self.tr("Show aggregated statistics about the database"))
         act_statistics.triggered.connect(self._open_statistics_dialog)
         stats_menu.addAction(act_statistics)
 
         act_col_stats = QAction(
             style.standardIcon(SP.SP_FileDialogListView),
-            "Column Distribution…",
+            self.tr("Column Distribution…"),
             self,
         )
         act_col_stats.setStatusTip(
-            "Show a bar chart of how models are distributed across any column"
+            self.tr("Show a bar chart of how models are distributed across any column")
         )
         act_col_stats.triggered.connect(self._open_column_stats_dialog)
         stats_menu.addAction(act_col_stats)
 
         self._debug_menu = mb.addMenu("&Debug")
         act_clear_db = QAction(
-            style.standardIcon(SP.SP_TrashIcon), "Delete Database…", self)
-        act_clear_db.setStatusTip("Permanently delete all records from the database")
+            style.standardIcon(SP.SP_TrashIcon), self.tr("Delete Database…"), self)
+        act_clear_db.setStatusTip(self.tr("Permanently delete all records from the database"))
         act_clear_db.triggered.connect(self._clear_database)
         self._debug_menu.addAction(act_clear_db)
 
         act_delete_logs = QAction(
-            style.standardIcon(SP.SP_TrashIcon), "Delete Logs…", self)
-        act_delete_logs.setStatusTip("Delete all log files from the data directory")
+            style.standardIcon(SP.SP_TrashIcon), self.tr("Delete Logs…"), self)
+        act_delete_logs.setStatusTip(self.tr("Delete all log files from the data directory"))
         act_delete_logs.triggered.connect(self._delete_logs)
         self._debug_menu.addAction(act_delete_logs)
 
@@ -483,7 +483,7 @@ class MainWindow(QMainWindow):
             if tot > 0:
                 self._update_folders_label.setText(f" Update {cur} / {tot} ")
             else:
-                self._update_folders_label.setText(" Update: running… ")
+                self._update_folders_label.setText(self.tr(" Update: running… "))
             self._update_folders_label.show()
         else:
             self._update_folders_dlg = None
@@ -576,9 +576,9 @@ class MainWindow(QMainWindow):
     def _clear_database(self) -> None:
         reply = QMessageBox.warning(
             self,
-            "Delete Database",
-            "This will permanently delete <b>all models, tags and images</b> "
-            "from the database.<br><br>Are you sure?",
+            self.tr("Delete Database"),
+            self.tr("This will permanently delete <b>all models, tags and images</b> "
+            "from the database.<br><br>Are you sure?"),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
         )
@@ -586,14 +586,14 @@ class MainWindow(QMainWindow):
             from app.database.db import clear_db
             clear_db()
             self._browser.refresh()
-            QMessageBox.information(self, "Delete Database", "Database cleared.")
+            QMessageBox.information(self, self.tr("Delete Database"), self.tr("Database cleared."))
 
     def _delete_logs(self) -> None:
         reply = QMessageBox.warning(
             self,
-            "Delete Logs",
-            "This will permanently delete <b>all log files</b> "
-            "(active log and compressed backups).<br><br>Are you sure?",
+            self.tr("Delete Logs"),
+            self.tr("This will permanently delete <b>all log files</b> "
+            "(active log and compressed backups).<br><br>Are you sure?"),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
         )
@@ -601,7 +601,7 @@ class MainWindow(QMainWindow):
             from app.utils.logger import delete_logs
             count = delete_logs()
             QMessageBox.information(
-                self, "Delete Logs",
+                self, self.tr("Delete Logs"),
                 f"Deleted {count} log file{'s' if count != 1 else ''}."
             )
 

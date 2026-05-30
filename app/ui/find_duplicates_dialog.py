@@ -187,7 +187,7 @@ class FindDuplicatesDialog(QDialog):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Find Metadata Duplicates")
+        self.setWindowTitle(self.tr("Find Metadata Duplicates"))
         self.resize(1000, 680)
         self._worker: _SearchWorker | None = None
         self._groups: list[dict] = []
@@ -198,7 +198,7 @@ class FindDuplicatesDialog(QDialog):
         root = QVBoxLayout(self)
 
         # ---- Column selection ----
-        col_box = QGroupBox("Columns to check")
+        col_box = QGroupBox(self.tr("Columns to check"))
         col_row = QHBoxLayout(col_box)
         self._col_checks: dict[str, QCheckBox] = {}
         for disp, _ in _COLUMNS:
@@ -210,13 +210,13 @@ class FindDuplicatesDialog(QDialog):
         root.addWidget(col_box)
 
         # ---- Match method ----
-        method_box = QGroupBox("Match method")
+        method_box = QGroupBox(self.tr("Match method"))
         method_row = QHBoxLayout(method_box)
-        self._rb_exact = QRadioButton("Exact match")
-        self._rb_lev   = QRadioButton("Levenshtein")
-        self._rb_sdx   = QRadioButton("Soundex (phonetic)")
+        self._rb_exact = QRadioButton(self.tr("Exact match"))
+        self._rb_lev   = QRadioButton(self.tr("Levenshtein"))
+        self._rb_sdx   = QRadioButton(self.tr("Soundex (phonetic)"))
         self._rb_exact.setChecked(True)
-        self._lev_label = QLabel("Max distance:")
+        self._lev_label = QLabel(self.tr("Max distance:"))
         self._lev_spin  = QSpinBox()
         self._lev_spin.setRange(1, 20)
         self._lev_spin.setValue(3)
@@ -232,10 +232,10 @@ class FindDuplicatesDialog(QDialog):
 
         # ---- Controls row ----
         ctrl = QHBoxLayout()
-        self._find_btn = QPushButton("Find Duplicates")
+        self._find_btn = QPushButton(self.tr("Find Duplicates"))
         self._find_btn.clicked.connect(self._run_search)
         ctrl.addWidget(self._find_btn)
-        self._stop_btn = QPushButton("Stop")
+        self._stop_btn = QPushButton(self.tr("Stop"))
         self._stop_btn.setEnabled(False)
         self._stop_btn.clicked.connect(self._stop_search)
         ctrl.addWidget(self._stop_btn)
@@ -251,7 +251,7 @@ class FindDuplicatesDialog(QDialog):
         # ---- Results table ----
         self._table = QTableWidget(0, 6)
         self._table.setHorizontalHeaderLabels(
-            ["Group", "Column", "ID", "Title", "Value", "Match"]
+            [self.tr("Group"), self.tr("Column"), self.tr("ID"), self.tr("Title"), self.tr("Value"), self.tr("Match")]
         )
         hh = self._table.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
@@ -268,20 +268,20 @@ class FindDuplicatesDialog(QDialog):
 
         # ---- Bottom row: show buttons + close ----
         bottom = QHBoxLayout()
-        self._show_btn = QPushButton("Show Group in Main Table")
+        self._show_btn = QPushButton(self.tr("Show Group in Main Table"))
         self._show_btn.setEnabled(False)
         self._show_btn.setToolTip(
-            "Select one or more rows from the same group, then click to view those models in the main table"
+            self.tr("Select one or more rows from the same group, then click to view those models in the main table")
         )
         self._show_btn.clicked.connect(self._show_in_table)
         bottom.addWidget(self._show_btn)
-        self._show_all_btn = QPushButton("Show All Groups in Main Table")
+        self._show_all_btn = QPushButton(self.tr("Show All Groups in Main Table"))
         self._show_all_btn.setEnabled(False)
-        self._show_all_btn.setToolTip("Show all models that appear in any duplicate group")
+        self._show_all_btn.setToolTip(self.tr("Show all models that appear in any duplicate group"))
         self._show_all_btn.clicked.connect(self._show_all_in_table)
         bottom.addWidget(self._show_all_btn)
         bottom.addStretch()
-        close_btn = QPushButton("Close")
+        close_btn = QPushButton(self.tr("Close"))
         close_btn.clicked.connect(self.close)
         bottom.addWidget(close_btn)
         root.addLayout(bottom)
@@ -302,7 +302,7 @@ class FindDuplicatesDialog(QDialog):
             if self._col_checks[disp].isChecked()
         ]
         if not selected:
-            QMessageBox.information(self, "No columns", "Please select at least one column.")
+            QMessageBox.information(self, self.tr("No columns"), self.tr("Please select at least one column."))
             return
 
         if self._rb_exact.isChecked():
@@ -318,7 +318,7 @@ class FindDuplicatesDialog(QDialog):
         self._progress.setVisible(True)
         self._progress.setRange(0, len(selected))
         self._progress.setValue(0)
-        self._status.setText("Searching…")
+        self._status.setText(self.tr("Searching…"))
         self._table.setSortingEnabled(False)
         self._table.setRowCount(0)
         self._groups = []
@@ -332,7 +332,7 @@ class FindDuplicatesDialog(QDialog):
         if self._worker:
             self._worker.stop()
         self._stop_btn.setEnabled(False)
-        self._status.setText("Stopping…")
+        self._status.setText(self.tr("Stopping…"))
 
     # ------------------------------------------------------------------
     def _on_progress(self, current: int, total: int) -> None:
@@ -346,7 +346,7 @@ class FindDuplicatesDialog(QDialog):
 
         if not groups:
             self._show_all_btn.setEnabled(False)
-            self._status.setText("No duplicates found.")
+            self._status.setText(self.tr("No duplicates found."))
             return
 
         self._show_all_btn.setEnabled(True)

@@ -68,7 +68,7 @@ class _ResultCell(QFrame):
                           Qt.TransformationMode.SmoothTransformation)
             )
         else:
-            thumb.setText("(no image)")
+            thumb.setText(self.tr("(no image)"))
         layout.addWidget(thumb)
 
         dist_lbl = QLabel(f"Distance: {distance}")
@@ -100,7 +100,7 @@ class FindByImageDialog(QDialog):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Find by Image")
+        self.setWindowTitle(self.tr("Find by Image"))
         self.setWindowFlag(Qt.WindowType.Window)
         self.resize(940, 640)
         self._query_hash: Optional[int] = None
@@ -115,27 +115,27 @@ class FindByImageDialog(QDialog):
         # ── Control bar ───────────────────────────────────────────────────────
         ctrl = QHBoxLayout()
         ctrl.setSpacing(6)
-        ctrl.addWidget(QLabel("Image:"))
+        ctrl.addWidget(QLabel(self.tr("Image:")))
 
         self._path_edit = QLineEdit()
         self._path_edit.setReadOnly(True)
-        self._path_edit.setPlaceholderText("No image selected")
+        self._path_edit.setPlaceholderText(self.tr("No image selected"))
         ctrl.addWidget(self._path_edit, 1)
 
-        browse_btn = QPushButton("Browse…")
+        browse_btn = QPushButton(self.tr("Browse…"))
         browse_btn.clicked.connect(self._browse)
         ctrl.addWidget(browse_btn)
 
-        ctrl.addWidget(QLabel("Max distance:"))
+        ctrl.addWidget(QLabel(self.tr("Max distance:")))
         self._dist_spin = QSpinBox()
         self._dist_spin.setRange(0, 32)
         self._dist_spin.setValue(_MAX_DIST_DEFAULT)
         self._dist_spin.setToolTip(
-            "Hamming distance threshold (0 = exact match, 32 = very loose)"
+            self.tr("Hamming distance threshold (0 = exact match, 32 = very loose)")
         )
         ctrl.addWidget(self._dist_spin)
 
-        self._search_btn = QPushButton("Search")
+        self._search_btn = QPushButton(self.tr("Search"))
         self._search_btn.setEnabled(False)
         self._search_btn.setDefault(True)
         self._search_btn.clicked.connect(self._run_search)
@@ -152,11 +152,11 @@ class FindByImageDialog(QDialog):
         q_layout.setContentsMargins(4, 4, 4, 4)
         q_layout.setSpacing(6)
 
-        hdr = QLabel("<b>Query Image</b>")
+        hdr = QLabel(self.tr("<b>Query Image</b>"))
         hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
         q_layout.addWidget(hdr)
 
-        self._query_img = QLabel("No image loaded")
+        self._query_img = QLabel(self.tr("No image loaded"))
         self._query_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._query_img.setFixedSize(_THUMB_SIZE, _THUMB_SIZE)
         self._query_img.setStyleSheet(
@@ -179,7 +179,7 @@ class FindByImageDialog(QDialog):
         r_layout.setContentsMargins(4, 4, 4, 4)
         r_layout.setSpacing(4)
 
-        self._status_lbl = QLabel("Load an image and click Search.")
+        self._status_lbl = QLabel(self.tr("Load an image and click Search."))
         r_layout.addWidget(self._status_lbl)
 
         self._scroll = QScrollArea()
@@ -198,8 +198,8 @@ class FindByImageDialog(QDialog):
     # ------------------------------------------------------------------
     def _browse(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select Image", str(Path.home()),
-            "Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.tif *.tiff)",
+            self, self.tr("Select Image"), str(Path.home()),
+            self.tr("Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.tif *.tiff)"),
         )
         if path:
             self._load_image(Path(path))
@@ -217,11 +217,11 @@ class FindByImageDialog(QDialog):
         h = compute_dhash_from_jpeg(raw)
         if h is None:
             self._status_lbl.setText(
-                "Could not compute hash — unsupported image format."
+                self.tr("Could not compute hash — unsupported image format.")
             )
             self._query_hash = None
             self._search_btn.setEnabled(False)
-            self._query_img.setText("Cannot decode image")
+            self._query_img.setText(self.tr("Cannot decode image"))
             self._hash_lbl.clear()
             return
 
@@ -240,7 +240,7 @@ class FindByImageDialog(QDialog):
 
         self._hash_lbl.setText(f"dHash: {h:016x}")
         self._search_btn.setEnabled(True)
-        self._status_lbl.setText("Image loaded. Click Search to find matches.")
+        self._status_lbl.setText(self.tr("Image loaded. Click Search to find matches."))
 
     # ------------------------------------------------------------------
     def _run_search(self) -> None:

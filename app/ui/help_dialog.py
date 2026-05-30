@@ -521,21 +521,24 @@ The <b>Preview</b> line updates in real time as you type, showing what a randoml
 chosen file path would extract.</p>
 
 <h2>Apply Path Pattern Toggle</h2>
-<p>The <b>Apply path pattern to metadata extraction</b> checkbox (below the pattern input)
-controls whether the pattern is actually used during the crawl. It is enabled only when
-the pattern field contains text.</p>
+<p>The <b>Apply path pattern to metadata extraction</b> checkbox sits <em>above</em> the
+<em>Parse metadata from path</em> section and acts as both the on/off switch and the
+expander for the whole pattern editor. The checkbox is enabled only when the
+pattern field contains text.</p>
 <ul>
-  <li><b>Checked</b> — pattern extraction is active; field values are inferred from the
-      folder structure.</li>
-  <li><b>Unchecked</b> — the pattern is saved for future use but <em>not</em> applied;
-      only automatic inference and <code>info.json</code> are used.</li>
+  <li><b>Checked</b> — the pattern editor is shown and pattern extraction is active;
+      field values are inferred from the folder structure.</li>
+  <li><b>Unchecked</b> — the pattern editor is hidden and the pattern is <em>not</em>
+      applied; only automatic inference and <code>info.json</code> are used. The pattern
+      text itself is preserved.</li>
 </ul>
 <div class="tip">Tip: untick the checkbox when you want to try a crawl without pattern
 extraction but don&rsquo;t want to lose the pattern text you typed.</div>
 
 <h2>Override Metadata</h2>
-<p>Expand the <b>Override metadata (leave blank to auto-detect)</b> group to force specific
-field values across every archive in the current crawl:</p>
+<p>Click the <b>Override metadata (leave blank to auto-detect)</b> header to expand the
+collapsible section (collapsed by default) and force specific field values across every
+archive in the current crawl:</p>
 <table>
   <tr><th>Field</th><th>Effect</th></tr>
   <tr><td><b>Creator</b></td>
@@ -882,6 +885,12 @@ Add, edit, or remove patterns as needed for your naming conventions.</p>
 <h2>Appearance</h2>
 <table>
   <tr><th>Setting</th><th>Description</th></tr>
+  <tr><td>Language</td>
+      <td>Interface language. <b>English</b> and <b>Spanish</b> ship built-in;
+          any additional <code>&lt;code&gt;.ts</code> language definition placed in
+          <code>resources/i18n/</code> appears here automatically. Strings with
+          no translation fall back to English.
+          <b>Restart the application for the change to fully take effect.</b></td></tr>
   <tr><td>Color scheme</td>
       <td>Choose between <b>System</b> (default OS theme), <b>Win11 Light</b>,
           <b>Win11 Dark</b>, or <b>VS Code Dark</b>.
@@ -1222,7 +1231,7 @@ class HelpDialog(QDialog):
 
     def __init__(self, parent=None, start_page: str = PAGE_OVERVIEW) -> None:
         super().__init__(parent)
-        self.setWindowTitle("stlLibrary — Help")
+        self.setWindowTitle(self.tr("stlLibrary — Help"))
         self.resize(960, 720)
 
         self._history: list[str] = []
@@ -1257,11 +1266,11 @@ class HelpDialog(QDialog):
         right_layout.setSpacing(2)
 
         btn_bar = QHBoxLayout()
-        self._back_btn = QPushButton("← Back")
+        self._back_btn = QPushButton(self.tr("← Back"))
         self._back_btn.setFixedWidth(80)
         self._back_btn.setEnabled(False)
         self._back_btn.clicked.connect(self._go_back)
-        self._fwd_btn = QPushButton("Forward →")
+        self._fwd_btn = QPushButton(self.tr("Forward →"))
         self._fwd_btn.setFixedWidth(90)
         self._fwd_btn.setEnabled(False)
         self._fwd_btn.clicked.connect(self._go_forward)

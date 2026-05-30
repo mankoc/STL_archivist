@@ -38,6 +38,7 @@ Version: 2026.21
 - **Backup / Restore** — pack the database, thumbnails, and settings into a single `.7z` archive via **Tools → Backup / Restore Library…**; restore extracts back into the data directory after confirmation
 - **Statistics** — column and aggregated statistics dialogs for a quick numeric overview; database maintenance (vacuum, integrity check)
 - **Themes** — built-in color schemes: System Default, VS Code Dark+, Windows 11 Dark, Windows 11 Light, and nine Material Design themes via qt-material
+- **Localization** — translatable user interface; **English** and **Spanish** ship built-in, and additional language definitions can be added as Qt Linguist `.ts` files in `resources/i18n/`. Pick the language in **Configuration → Appearance**
 
 ## Requirements
 
@@ -99,7 +100,7 @@ On first launch, go to **File → Configuration…** and set up:
 - **File writing** — enable *Sort files into directory* (adds a right-click menu entry); optionally enable *Allow file delete* (with a confirmation guard) to physically delete or trash archive files from the right-click menu; configure a *Trash folder* to move deleted files there instead of permanently removing them
 - **File writing → Sidecar** — enable *Metadata sidecar* to write `METADATA.7z` per folder during crawl; optionally include thumbnails
 - **Browser** — configure the filter pane (model counts, alphabetical letter bins) and the **File Manager** used when opening archive folders: System Default, Double Commander, or a custom executable path
-- **Appearance** — select a color scheme (preview is applied immediately; Cancel reverts)
+- **Appearance** — select the interface **Language**, a color scheme (preview is applied immediately; Cancel reverts), highlight colors, and fonts
 
 ### 2. Crawl your archive folder
 
@@ -107,8 +108,8 @@ On first launch, go to **File → Configuration…** and set up:
 
 1. Click **Open Crawler** (toolbar icon or `Ctrl+O`).
 2. Select the root folder that contains your STL archives.
-3. Optionally set a **path pattern** to auto-populate metadata fields from your folder/file naming convention (see [Path Patterns](#path-patterns) below). Tick or untick **Apply path pattern to metadata extraction** to toggle pattern extraction without losing the saved pattern text.
-4. Optionally expand **Override metadata** to force a specific Creator or Type/Source value for every archive in this crawl.
+3. Optionally set a **path pattern** to auto-populate metadata fields from your folder/file naming convention (see [Path Patterns](#path-patterns) below). The **Apply path pattern to metadata extraction** checkbox sits above the *Parse metadata from path* section and both shows/hides the pattern editor and toggles pattern extraction without losing the saved pattern text.
+4. Optionally click the collapsible **Override metadata** header to expand it and force a specific Creator or Type/Source value for every archive in this crawl.
 5. Click **Start**. The crawler will walk the directory recursively, hash each archive, detect scale and presupport information, extract preview images, and upsert records into the database.
 
 ### 3. Browse and edit
@@ -193,6 +194,7 @@ stl_database/
 ├── resources/
 │   ├── style.qss            # Application stylesheet
 │   ├── icons/               # SVG icons (light/dark variants)
+│   ├── i18n/                # Qt Linguist .ts language definitions (en.ts ships built-in)
 │   └── themes/              # QSS color schemes (VS Code, Win11); Material themes loaded via qt-material
 ├── app/
 │   ├── config.py            # CrawlerConfig dataclass
@@ -229,9 +231,33 @@ stl_database/
 │       ├── thumbnailer.py   # LMDB thumbnail store (save/load/delete)
 │       ├── path_pattern.py  # Path pattern parser and renderer
 │       ├── string_utils.py  # Levenshtein distance, Soundex
+│       ├── i18n.py          # Translation loader (.ts parser + QTranslator)
 │       └── logger.py        # Rotating gzip-compressed file logger
 └── tests/
 ```
+
+## Localization
+
+The interface is translatable via Qt's standard mechanism. User-facing strings
+are wrapped in `self.tr(...)` (inside widgets/dialogs) or
+`QCoreApplication.translate(...)` (in free functions), and translations live as
+Qt Linguist `.ts` files in `resources/i18n/`. English (`en.ts`) ships built-in;
+untranslated strings fall back to the English source.
+
+**Add a new language** (e.g. German):
+
+```bash
+# 1. Regenerate the English template from the current sources
+pylupdate6 main.py app/ui/*.py -ts resources/i18n/en.ts
+
+# 2. Copy it and translate the <translation> values
+cp resources/i18n/en.ts resources/i18n/de.ts   # then edit de.ts (Qt Linguist works too)
+```
+
+`de.ts` then appears automatically in **Configuration → Appearance → Language**.
+At runtime [app/utils/i18n.py](app/utils/i18n.py) parses the chosen `.ts` file
+directly through a custom `QTranslator`, so no `lrelease`/`.qm` compilation step
+is needed.
 
 ## License
 

@@ -9,7 +9,7 @@ from PyQt6.QtCore import Qt, QSettings, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QFileDialog,
-    QProgressBar, QSizePolicy,
+    QProgressBar, QSizePolicy, QSplitter,
     QComboBox, QInputDialog, QMessageBox, QToolButton, QToolTip,
     QCheckBox, QListWidget, QListWidgetItem,
     QTableWidget, QTableWidgetItem, QHeaderView,
@@ -40,6 +40,47 @@ _COL_FILENAME = 0
 _COL_PATH     = 1
 _COL_CHANGE   = 2
 _NCOLS        = 3
+
+
+class _CollapsibleSection(QWidget):
+    """Section with an arrow-toggle header and a hideable content area."""
+
+    toggled = pyqtSignal(bool)
+
+    def __init__(self, title: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._toggle = QToolButton()
+        self._toggle.setStyleSheet("QToolButton { border: none; font-weight: bold; }")
+        self._toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self._toggle.setArrowType(Qt.ArrowType.RightArrow)
+        self._toggle.setText(title)
+        self._toggle.setCheckable(True)
+        self._toggle.toggled.connect(self._on_toggled)
+        self._toggle.toggled.connect(self.toggled)
+
+        self._content = QWidget()
+        self._content.setVisible(False)
+        self.content_layout = QVBoxLayout(self._content)
+        self.content_layout.setContentsMargins(18, 4, 4, 4)
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(self._toggle)
+        lay.addWidget(self._content)
+
+    def _on_toggled(self, on: bool) -> None:
+        self._toggle.setArrowType(Qt.ArrowType.DownArrow if on else Qt.ArrowType.RightArrow)
+        self._content.setVisible(on)
+
+    def set_expanded(self, on: bool) -> None:
+        self._toggle.setChecked(on)
+
+    def add_layout(self, layout) -> None:
+        self.content_layout.addLayout(layout)
+
+    def add_widget(self, widget: QWidget) -> None:
+        self.content_layout.addWidget(widget)
 
 
 def _tbl_item(text: str, colour: QColor | None = None, tooltip: str = "") -> QTableWidgetItem:
@@ -80,48 +121,73 @@ class CrawlerTab(QWidget):
         root = QVBoxLayout(self)
         root.setSpacing(8)
 
-        # --- Folder list ---
-        root.addWidget(QLabel("Folders to crawl:"))
+        # --- Folder list (capped at 5 visible rows, scroll past that) ---
+        self._splitter = QSplitter(Qt.Orientation.Vertical)
+        self._splitter.setChildrenCollapsible(False)
+        root.addWidget(self._splitter, stretch=1)
+
+        top_widget = QWidget()
+        top_layout = QVBoxLayout(top_widget)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        top_layout.setSpacing(4)
+
+        top_layout.addWidget(QLabel(self.tr("Folders to crawl:")))
 
         self._folder_list = QListWidget()
-        self._folder_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self._folder_list.setMinimumHeight(100)
-        self._folder_list.setMaximumHeight(150)
-        root.addWidget(self._folder_list)
+        self._folder_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._folder_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        top_layout.addWidget(self._folder_list, stretch=1)
 
         sel_row = QHBoxLayout()
-        select_all_btn = QPushButton("Select All")
+        select_all_btn = QPushButton(self.tr("Select All"))
         select_all_btn.clicked.connect(self._select_all)
         sel_row.addWidget(select_all_btn)
-        deselect_all_btn = QPushButton("Deselect All")
+        deselect_all_btn = QPushButton(self.tr("Deselect All"))
         deselect_all_btn.clicked.connect(self._deselect_all)
         sel_row.addWidget(deselect_all_btn)
         sel_row.addStretch()
-        self._add_btn = QPushButton("Add Folder…")
+        self._add_btn = QPushButton(self.tr("Add Folder…"))
         self._add_btn.clicked.connect(self._add_folder)
         sel_row.addWidget(self._add_btn)
-        self._remove_btn = QPushButton("Remove Selected")
+        self._remove_btn = QPushButton(self.tr("Remove Selected"))
         self._remove_btn.clicked.connect(self._remove_folder)
         sel_row.addWidget(self._remove_btn)
-        root.addLayout(sel_row)
+        top_layout.addLayout(sel_row)
 
         self._folder_status_label = QLabel()
-        root.addWidget(self._folder_status_label)
+        top_layout.addWidget(self._folder_status_label)
 
-        # --- Path pattern group ---
-        pattern_group = QGroupBox("Parse metadata from path (optional)")
+        self._splitter.addWidget(top_widget)
+
+        bottom_widget = QSplitter(Qt.Orientation.Vertical)
+        bottom_widget.setChildrenCollapsible(False)
+
+        upper_widget = QWidget()
+        bottom_layout = QVBoxLayout(upper_widget)
+        bottom_layout.setContentsMargins(0, 8, 0, 0)
+        bottom_layout.setSpacing(8)
+
+        # --- Path pattern section (collapsible; header is the apply toggle) ---
+        self._use_pattern_check = QCheckBox(self.tr("Apply path pattern to metadata extraction"))
+        self._use_pattern_check.setChecked(True)
+        bottom_layout.addWidget(self._use_pattern_check)
+
+        pattern_group = QWidget()
+        pattern_group.setVisible(True)
+        self._use_pattern_check.toggled.connect(pattern_group.setVisible)
         pattern_layout = QVBoxLayout(pattern_group)
+        pattern_layout.setContentsMargins(18, 0, 0, 0)
 
         saved_row = QHBoxLayout()
-        saved_row.addWidget(QLabel("Saved:"))
+        saved_row.addWidget(QLabel(self.tr("Saved:")))
         self._saved_combo = QComboBox()
-        self._saved_combo.setPlaceholderText("— load a saved pattern —")
+        self._saved_combo.setPlaceholderText(self.tr("— load a saved pattern —"))
         self._saved_combo.activated.connect(self._load_saved_pattern)
         saved_row.addWidget(self._saved_combo, stretch=1)
-        save_btn = QPushButton("Save…")
+        save_btn = QPushButton(self.tr("Save…"))
         save_btn.clicked.connect(self._save_pattern)
         saved_row.addWidget(save_btn)
-        delete_btn = QPushButton("Delete")
+        delete_btn = QPushButton(self.tr("Delete"))
         delete_btn.clicked.connect(self._delete_pattern)
         saved_row.addWidget(delete_btn)
         help_btn = QToolButton()
@@ -137,19 +203,19 @@ class CrawlerTab(QWidget):
 
         pattern_row = QHBoxLayout()
         self._pattern_edit = QLineEdit()
-        self._pattern_edit.setPlaceholderText("/{source}/{author}/{month}/{name}")
+        self._pattern_edit.setPlaceholderText(self.tr("/{source}/{author}/{month}/{name}"))
         self._pattern_edit.textChanged.connect(self._update_preview)
         pattern_row.addWidget(self._pattern_edit)
         pattern_layout.addLayout(pattern_row)
 
         file_pick_row = QHBoxLayout()
-        file_pick_row.addWidget(QLabel("Test file:"))
+        file_pick_row.addWidget(QLabel(self.tr("Test file:")))
         self._example_file_edit = QLineEdit()
         self._example_file_edit.setReadOnly(True)
-        self._example_file_edit.setPlaceholderText("click 'Random' to test against a file…")
+        self._example_file_edit.setPlaceholderText(self.tr("click 'Random' to test against a file…"))
         self._example_file_edit.textChanged.connect(self._update_preview)
         file_pick_row.addWidget(self._example_file_edit, stretch=1)
-        random_file_btn = QPushButton("Random")
+        random_file_btn = QPushButton(self.tr("Random"))
         random_file_btn.clicked.connect(self._pick_random_file)
         file_pick_row.addWidget(random_file_btn)
         pattern_layout.addLayout(file_pick_row)
@@ -160,27 +226,21 @@ class CrawlerTab(QWidget):
         self._preview_label.setStyleSheet("color: #555; font-style: italic;")
         pattern_layout.addWidget(self._preview_label)
 
-        self._use_pattern_check = QCheckBox("Apply path pattern to metadata extraction")
-        self._use_pattern_check.setChecked(True)
-        self._use_pattern_check.setEnabled(False)
-        self._pattern_edit.textChanged.connect(
-            lambda t: self._use_pattern_check.setEnabled(bool(t.strip()))
-        )
-        pattern_layout.addWidget(self._use_pattern_check)
-
-        root.addWidget(pattern_group)
+        bottom_layout.addWidget(pattern_group)
 
         # --- Crawl options ---
-        self._generate_thumbs_check = QCheckBox("Generate thumbnails")
+        self._generate_thumbs_check = QCheckBox(self.tr("Generate thumbnails"))
         self._generate_thumbs_check.setChecked(True)
-        root.addWidget(self._generate_thumbs_check)
+        bottom_layout.addWidget(self._generate_thumbs_check)
 
-        self._force_rescan_check = QCheckBox("Force rescan (re-extract all archives regardless of hash)")
-        root.addWidget(self._force_rescan_check)
+        self._force_rescan_check = QCheckBox(self.tr("Force rescan (re-extract all archives regardless of hash)"))
+        bottom_layout.addWidget(self._force_rescan_check)
 
-        # --- Metadata overrides ---
-        overrides_group = QGroupBox("Override metadata (leave blank to auto-detect)")
-        grid = QGridLayout(overrides_group)
+        # --- Metadata overrides (collapsible) ---
+        overrides_section = _CollapsibleSection("Override metadata (leave blank to auto-detect)")
+        overrides_inner = QWidget()
+        grid = QGridLayout(overrides_inner)
+        grid.setContentsMargins(0, 0, 0, 0)
         grid.setColumnStretch(1, 1)
         grid.setColumnStretch(3, 1)
         grid.setHorizontalSpacing(6)
@@ -213,32 +273,42 @@ class CrawlerTab(QWidget):
         _add_row(3, 0, "Release:",    self._force_release_edit)
         _add_row(3, 1, "Date:",       self._force_date_edit)
 
-        root.addWidget(overrides_group)
+        overrides_section.add_widget(overrides_inner)
+        bottom_layout.addWidget(overrides_section)
 
         # --- Status / progress ---
         self._status_label = QLabel()
-        root.addWidget(self._status_label)
+        bottom_layout.addWidget(self._status_label)
 
         self._current_folder_label = QLabel()
         self._current_folder_label.setWordWrap(True)
         self._current_folder_label.setStyleSheet("color: #555; font-style: italic;")
-        root.addWidget(self._current_folder_label)
+        bottom_layout.addWidget(self._current_folder_label)
 
         self._phase_label = QLabel()
         self._phase_label.setWordWrap(True)
         self._phase_label.setStyleSheet("color: #888; font-style: italic;")
-        root.addWidget(self._phase_label)
+        bottom_layout.addWidget(self._phase_label)
 
         self._progress = QProgressBar()
         self._progress.setValue(0)
         self._progress.setTextVisible(True)
         self._progress.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        root.addWidget(self._progress)
+        bottom_layout.addWidget(self._progress)
 
-        # --- Results table ---
-        root.addWidget(QLabel("Changes:"))
+        # --- Results table (in collapsible section, below an inner splitter) ---
+        self._changes_section = _CollapsibleSection("Changes")
+        self._changes_section.set_expanded(True)
+        self._changes_prev_height = 0
+        self._changes_section.toggled.connect(self._on_changes_toggled)
+        changes_section = self._changes_section
+        changes_inner = QWidget()
+        changes_v = QVBoxLayout(changes_inner)
+        changes_v.setContentsMargins(0, 0, 0, 0)
+        changes_v.setSpacing(4)
+
         self._table = QTableWidget(0, _NCOLS)
-        self._table.setHorizontalHeaderLabels(["Filename", "File Path", "Change"])
+        self._table.setHorizontalHeaderLabels([self.tr("Filename"), self.tr("File Path"), self.tr("Change")])
         self._table.horizontalHeader().setSectionResizeMode(_COL_FILENAME, QHeaderView.ResizeMode.ResizeToContents)
         self._table.horizontalHeader().setSectionResizeMode(_COL_PATH,     QHeaderView.ResizeMode.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(_COL_CHANGE,   QHeaderView.ResizeMode.ResizeToContents)
@@ -247,9 +317,9 @@ class CrawlerTab(QWidget):
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table.setSortingEnabled(True)
         self._table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        root.addWidget(self._table)
+        changes_v.addWidget(self._table, stretch=1)
 
-        self._counts_label = QLabel("New: 0  |  Updated: 0  |  Unchanged: 0  |  Moved: 0  |  Deleted: 0")
+        self._counts_label = QLabel(self.tr("New: 0  |  Updated: 0  |  Unchanged: 0  |  Moved: 0  |  Deleted: 0"))
         self._counts_label.setStyleSheet(
             "QLabel { "
             "background-color: palette(window); "
@@ -258,7 +328,24 @@ class CrawlerTab(QWidget):
             "font-family: monospace; "
             "}"
         )
-        root.addWidget(self._counts_label)
+        changes_v.addWidget(self._counts_label)
+        changes_section.add_widget(changes_inner)
+
+        lower_widget = QWidget()
+        lower_layout = QVBoxLayout(lower_widget)
+        lower_layout.setContentsMargins(0, 0, 0, 0)
+        lower_layout.addWidget(changes_section)
+
+        bottom_widget.addWidget(upper_widget)
+        bottom_widget.addWidget(lower_widget)
+        bottom_widget.setStretchFactor(0, 0)
+        bottom_widget.setStretchFactor(1, 1)
+        self._bottom_splitter = bottom_widget
+        self._changes_lower = lower_widget
+
+        self._splitter.addWidget(bottom_widget)
+        self._splitter.setStretchFactor(0, 0)
+        self._splitter.setStretchFactor(1, 1)
 
         # --- Control buttons ---
         from app.ui.config_dialog import get_color_scheme as _get_cs
@@ -269,23 +356,23 @@ class CrawlerTab(QWidget):
             return QIcon(str(p)) if p.exists() else QIcon()
 
         btn_row = QHBoxLayout()
-        self._start_btn = QPushButton(_icon("crawler_start"), "Start Crawl")
+        self._start_btn = QPushButton(_icon("crawler_start"), self.tr("Start Crawl"))
         self._start_btn.clicked.connect(self._start_crawl)
         btn_row.addWidget(self._start_btn)
 
-        self._stop_btn = QPushButton(_icon("crawler_stop"), "Stop")
+        self._stop_btn = QPushButton(_icon("crawler_stop"), self.tr("Stop"))
         self._stop_btn.setEnabled(False)
         self._stop_btn.clicked.connect(self._stop_crawl)
         btn_row.addWidget(self._stop_btn)
 
         btn_row.addStretch()
 
-        self._bg_btn = QPushButton(_icon("crawler_bg"), "Run in Background")
+        self._bg_btn = QPushButton(_icon("crawler_bg"), self.tr("Run in Background"))
         self._bg_btn.setEnabled(False)
         self._bg_btn.clicked.connect(self.close_requested)
         btn_row.addWidget(self._bg_btn)
 
-        self._close_btn = QPushButton(_icon("crawler_close"), "Close")
+        self._close_btn = QPushButton(_icon("crawler_close"), self.tr("Close"))
         self._close_btn.clicked.connect(self.close_requested)
         btn_row.addWidget(self._close_btn)
 
@@ -313,6 +400,44 @@ class CrawlerTab(QWidget):
         for path, _pattern in self._all_folders:
             self._append_folder_item(path)
         self._refresh_folder_status()
+        self._resize_folder_section()
+
+    def _on_changes_toggled(self, expanded: bool) -> None:
+        sizes = self._bottom_splitter.sizes()
+        if len(sizes) != 2:
+            return
+        total = sum(sizes)
+        header_h = self._changes_section._toggle.sizeHint().height() + 4
+        if expanded:
+            self._changes_lower.setMaximumHeight(16777215)
+            restore = self._changes_prev_height or max(total // 2, 200)
+            lower = min(restore, max(total - 50, header_h))
+        else:
+            self._changes_prev_height = sizes[1]
+            self._changes_lower.setMaximumHeight(header_h)
+            lower = header_h
+        self._bottom_splitter.setSizes([max(0, total - lower), lower])
+
+    def _resize_folder_section(self) -> None:
+        """Size the splitter top so the folder list fits min(N, 5) rows."""
+        rows = max(1, min(len(self._all_folders), 5))
+        row_h = self._folder_list.sizeHintForRow(0) if self._folder_list.count() else (
+            self._folder_list.fontMetrics().height() + 6
+        )
+        list_h = rows * row_h + 2 * self._folder_list.frameWidth() + 4
+
+        top_w = self._splitter.widget(0)
+        lay = top_w.layout()
+        extras = 0
+        for i in range(lay.count()):
+            item = lay.itemAt(i)
+            if item.widget() is self._folder_list:
+                continue
+            extras += item.sizeHint().height() + lay.spacing()
+        top_h = list_h + extras + lay.contentsMargins().top() + lay.contentsMargins().bottom()
+
+        total = max(self._splitter.height(), top_h + 200)
+        self._splitter.setSizes([top_h, max(200, total - top_h)])
 
     def _append_folder_item(self, path: str) -> None:
         item = QListWidgetItem(path)
@@ -324,7 +449,7 @@ class CrawlerTab(QWidget):
         n = len(self._all_folders)
         if n == 0:
             self._folder_status_label.setText(
-                "No folders yet. Use 'Add Folder…' to add a folder to crawl."
+                self.tr("No folders yet. Use 'Add Folder…' to add a folder to crawl.")
             )
             self._start_btn.setEnabled(False)
         else:
@@ -332,11 +457,11 @@ class CrawlerTab(QWidget):
             self._start_btn.setEnabled(True)
 
     def _add_folder(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "Add Folder to Crawl")
+        path = QFileDialog.getExistingDirectory(self, self.tr("Add Folder to Crawl"))
         if not path:
             return
         if any(p == path for p, _ in self._all_folders):
-            QMessageBox.information(self, "Already Listed", f"{path}\nis already in the list.")
+            QMessageBox.information(self, self.tr("Already Listed"), f"{path}\nis already in the list.")
             return
         try:
             with session_scope() as session:
@@ -348,16 +473,17 @@ class CrawlerTab(QWidget):
         self._all_folders.append((path, None))
         self._append_folder_item(path)
         self._refresh_folder_status()
+        self._resize_folder_section()
 
     def _remove_folder(self) -> None:
         row = self._folder_list.currentRow()
         if row < 0:
-            QMessageBox.information(self, "No Selection", "Select a folder in the list first.")
+            QMessageBox.information(self, self.tr("No Selection"), self.tr("Select a folder in the list first."))
             return
         path, _ = self._all_folders[row]
         reply = QMessageBox.question(
             self,
-            "Remove Folder",
+            self.tr("Remove Folder"),
             f"Remove this folder from the tracked list?\n\n{path}\n\n"
             "Existing models in the database will not be deleted.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
@@ -374,6 +500,7 @@ class CrawlerTab(QWidget):
         del self._all_folders[row]
         self._folder_list.takeItem(row)
         self._refresh_folder_status()
+        self._resize_folder_section()
 
     def _select_all(self) -> None:
         for i in range(self._folder_list.count()):
@@ -443,9 +570,9 @@ class CrawlerTab(QWidget):
     def _save_pattern(self) -> None:
         pattern = self._pattern_edit.text().strip()
         if not pattern:
-            QMessageBox.information(self, "Save Pattern", "Enter a pattern first.")
+            QMessageBox.information(self, self.tr("Save Pattern"), self.tr("Enter a pattern first."))
             return
-        name, ok = QInputDialog.getText(self, "Save Pattern", "Pattern name:")
+        name, ok = QInputDialog.getText(self, self.tr("Save Pattern"), self.tr("Pattern name:"))
         if not ok or not name.strip():
             return
         name = name.strip()
@@ -508,7 +635,7 @@ class CrawlerTab(QWidget):
 
         extracted = parse_path(pattern, match_path)
         if not extracted:
-            self._preview_label.setText("<i>no match</i>")
+            self._preview_label.setText(self.tr("<i>no match</i>"))
             return
 
         parts = [
@@ -547,7 +674,7 @@ class CrawlerTab(QWidget):
 
         folders = self._selected_folders()
         if not folders:
-            self._status_label.setText("No folders selected — tick at least one folder.")
+            self._status_label.setText(self.tr("No folders selected — tick at least one folder."))
             return
 
         self._save_settings()
@@ -598,8 +725,8 @@ class CrawlerTab(QWidget):
     def crawl_single_path(self, path: str) -> None:
         """Select the registered crawled folder that contains *path* and start crawling."""
         if self._worker is not None:
-            QMessageBox.information(self, "Crawler Running",
-                "A crawl is already in progress. Wait for it to finish before starting another.")
+            QMessageBox.information(self, self.tr("Crawler Running"),
+                self.tr("A crawl is already in progress. Wait for it to finish before starting another."))
             return
         self._load_folders()
         best_idx = -1
@@ -610,7 +737,7 @@ class CrawlerTab(QWidget):
                     best_len = len(folder_path)
                     best_idx = i
         if best_idx == -1:
-            QMessageBox.information(self, "Crawler",
+            QMessageBox.information(self, self.tr("Crawler"),
                 f"No registered crawled folder contains:\n{path}\n\n"
                 "Add it via the Crawler window first.")
             return

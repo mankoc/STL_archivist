@@ -170,7 +170,7 @@ class ColumnStatsDialog(QDialog):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Column Distribution")
+        self.setWindowTitle(self.tr("Column Distribution"))
         self.resize(700, 560)
         self.setModal(True)
         self._worker: ColumnStatsWorker | None = None
@@ -185,29 +185,29 @@ class ColumnStatsDialog(QDialog):
         # ── Options row ──────────────────────────────────────────────
         opt_row = QHBoxLayout()
 
-        opt_row.addWidget(QLabel("Column:"))
+        opt_row.addWidget(QLabel(self.tr("Column:")))
         self._col_combo = QComboBox()
         for label, _ in COLUMN_CHOICES:
             self._col_combo.addItem(label)
         opt_row.addWidget(self._col_combo)
 
         opt_row.addSpacing(16)
-        opt_row.addWidget(QLabel("Top N:"))
+        opt_row.addWidget(QLabel(self.tr("Top N:")))
         self._top_n_spin = QSpinBox()
         self._top_n_spin.setRange(1, 99999)
         self._top_n_spin.setValue(20)
-        self._top_n_spin.setSuffix(" entries")
+        self._top_n_spin.setSuffix(self.tr(" entries"))
         self._top_n_spin.setKeyboardTracking(False)
         opt_row.addWidget(self._top_n_spin)
 
-        self._show_all_cb = QCheckBox("Show all")
+        self._show_all_cb = QCheckBox(self.tr("Show all"))
         self._show_all_cb.toggled.connect(self._top_n_spin.setDisabled)
         opt_row.addWidget(self._show_all_cb)
 
         opt_row.addSpacing(16)
         style = QApplication.style()
         SP = style.StandardPixmap
-        self._show_btn = QPushButton(style.standardIcon(SP.SP_BrowserReload), "Show")
+        self._show_btn = QPushButton(style.standardIcon(SP.SP_BrowserReload), self.tr("Show"))
         self._show_btn.clicked.connect(self._run)
         opt_row.addWidget(self._show_btn)
 
@@ -234,7 +234,7 @@ class ColumnStatsDialog(QDialog):
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        close_btn = QPushButton(style.standardIcon(SP.SP_DialogCloseButton), "Close")
+        close_btn = QPushButton(style.standardIcon(SP.SP_DialogCloseButton), self.tr("Close"))
         close_btn.clicked.connect(self.reject)
         btn_row.addWidget(close_btn)
         root.addLayout(btn_row)
@@ -263,7 +263,7 @@ class ColumnStatsDialog(QDialog):
         self._show_btn.setEnabled(True)
 
         if not data:
-            self._status_lbl.setText("No data found for this column.")
+            self._status_lbl.setText(self.tr("No data found for this column."))
             return
 
         self._status_lbl.setText("")

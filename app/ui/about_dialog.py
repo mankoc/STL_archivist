@@ -40,7 +40,7 @@ class AboutDialog(QDialog):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("About stlLibrary")
+        self.setWindowTitle(self.tr("About stlLibrary"))
         self.resize(540, 420)
         self._build_ui()
 

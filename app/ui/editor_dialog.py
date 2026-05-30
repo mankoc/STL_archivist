@@ -28,7 +28,7 @@ class TagEdit(QLineEdit):
 
     def __init__(self, all_tags: list[str], parent=None) -> None:
         super().__init__(parent)
-        self.setPlaceholderText("tag1, tag2, tag3…")
+        self.setPlaceholderText(self.tr("tag1, tag2, tag3…"))
         self.setClearButtonEnabled(True)
         self._all_tags = all_tags
 
@@ -93,7 +93,7 @@ class EditorDialog(QDialog):
     def __init__(self, model_id: int, parent=None) -> None:
         super().__init__(parent)
         self.model_id = model_id
-        self.setWindowTitle("Edit Model")
+        self.setWindowTitle(self.tr("Edit Model"))
         self.resize(860, 560)
         self._build_ui()
         self._load_model()
@@ -170,42 +170,42 @@ class EditorDialog(QDialog):
 
         _c0 = lambda combo: (lambda: combo.setCurrentIndex(0))
 
-        form.addRow("Archive Path:",  self._path_edit)
-        form.addRow("Title:",         self._title_edit)
-        form.addRow("Creator:",       self._creator_edit)
-        form.addRow("Source:",        self._with_clear_btn(self._source_edit,       _c0(self._source_edit)))
-        form.addRow("Date:",          self._date_edit)
-        form.addRow("Release:",       self._with_clear_btn(self._release_edit,      _c0(self._release_edit)))
-        form.addRow("Sculptor:",      self._with_clear_btn(self._sculptor_edit,     _c0(self._sculptor_edit)))
-        form.addRow("Collection:",    self._with_clear_btn(self._collection_edit,   _c0(self._collection_edit)))
-        form.addRow("Subcollection:", self._with_clear_btn(self._subcollection_edit,_c0(self._subcollection_edit)))
-        form.addRow("Category:",      self._with_clear_btn(self._category_edit,     _c0(self._category_edit)))
-        form.addRow("Sequence:",      self._with_clear_btn(
+        form.addRow(self.tr("Archive Path:"),  self._path_edit)
+        form.addRow(self.tr("Title:"),         self._title_edit)
+        form.addRow(self.tr("Creator:"),       self._creator_edit)
+        form.addRow(self.tr("Source:"),        self._with_clear_btn(self._source_edit,       _c0(self._source_edit)))
+        form.addRow(self.tr("Date:"),          self._date_edit)
+        form.addRow(self.tr("Release:"),       self._with_clear_btn(self._release_edit,      _c0(self._release_edit)))
+        form.addRow(self.tr("Sculptor:"),      self._with_clear_btn(self._sculptor_edit,     _c0(self._sculptor_edit)))
+        form.addRow(self.tr("Collection:"),    self._with_clear_btn(self._collection_edit,   _c0(self._collection_edit)))
+        form.addRow(self.tr("Subcollection:"), self._with_clear_btn(self._subcollection_edit,_c0(self._subcollection_edit)))
+        form.addRow(self.tr("Category:"),      self._with_clear_btn(self._category_edit,     _c0(self._category_edit)))
+        form.addRow(self.tr("Sequence:"),      self._with_clear_btn(
             self._sequence_spin, lambda: self._sequence_spin.setValue(0)
         ))
-        form.addRow("Scale:",         self._with_clear_btn(self._scale_edit,        _c0(self._scale_edit)))
-        form.addRow("Presupports:",   self._with_clear_btn(self._presupports_edit,  _c0(self._presupports_edit)))
-        form.addRow("URL:",           self._url_edit)
-        form.addRow("Description:",   self._with_clear_btn(
+        form.addRow(self.tr("Scale:"),         self._with_clear_btn(self._scale_edit,        _c0(self._scale_edit)))
+        form.addRow(self.tr("Presupports:"),   self._with_clear_btn(self._presupports_edit,  _c0(self._presupports_edit)))
+        form.addRow(self.tr("URL:"),           self._url_edit)
+        form.addRow(self.tr("Description:"),   self._with_clear_btn(
             self._desc_edit, self._desc_edit.clear
         ))
-        form.addRow("Tags:",          self._tags_edit)
+        form.addRow(self.tr("Tags:"),          self._tags_edit)
         left_layout.addLayout(form)
 
         # ---- Pattern inference group ----
-        pat_group = QGroupBox("Infer from path pattern")
+        pat_group = QGroupBox(self.tr("Infer from path pattern"))
         pat_layout = QVBoxLayout(pat_group)
 
         saved_row = QHBoxLayout()
-        saved_row.addWidget(QLabel("Saved:"))
+        saved_row.addWidget(QLabel(self.tr("Saved:")))
         self._pat_saved_combo = QComboBox()
-        self._pat_saved_combo.setPlaceholderText("— load a saved pattern —")
+        self._pat_saved_combo.setPlaceholderText(self.tr("— load a saved pattern —"))
         self._pat_saved_combo.activated.connect(self._pat_load_saved)
         saved_row.addWidget(self._pat_saved_combo, stretch=1)
-        pat_save_btn = QPushButton("Save…")
+        pat_save_btn = QPushButton(self.tr("Save…"))
         pat_save_btn.clicked.connect(self._pat_save)
         saved_row.addWidget(pat_save_btn)
-        pat_del_btn = QPushButton("Delete")
+        pat_del_btn = QPushButton(self.tr("Delete"))
         pat_del_btn.clicked.connect(self._pat_delete)
         saved_row.addWidget(pat_del_btn)
         help_btn = QToolButton()
@@ -221,10 +221,10 @@ class EditorDialog(QDialog):
 
         pat_input_row = QHBoxLayout()
         self._pattern_edit = QLineEdit()
-        self._pattern_edit.setPlaceholderText("/mnt/f/{source}/{creator}/*/{name}")
+        self._pattern_edit.setPlaceholderText(self.tr("/mnt/f/{source}/{creator}/*/{name}"))
         self._pattern_edit.textChanged.connect(self._pat_update_preview)
         pat_input_row.addWidget(self._pattern_edit)
-        apply_btn = QPushButton("Apply")
+        apply_btn = QPushButton(self.tr("Apply"))
         apply_btn.clicked.connect(self._pat_apply)
         pat_input_row.addWidget(apply_btn)
         pat_layout.addLayout(pat_input_row)
@@ -247,7 +247,7 @@ class EditorDialog(QDialog):
         right.setMinimumWidth(180)
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.addWidget(QLabel("Images"))
+        right_layout.addWidget(QLabel(self.tr("Images")))
 
         self._thumb_content = QWidget()
         self._thumb_vlayout = QVBoxLayout(self._thumb_content)
@@ -418,9 +418,9 @@ class EditorDialog(QDialog):
     def _pat_save(self) -> None:
         pattern = self._pattern_edit.text().strip()
         if not pattern:
-            QMessageBox.information(self, "Save Pattern", "Enter a pattern first.")
+            QMessageBox.information(self, self.tr("Save Pattern"), self.tr("Enter a pattern first."))
             return
-        name, ok = QInputDialog.getText(self, "Save Pattern", "Pattern name:")
+        name, ok = QInputDialog.getText(self, self.tr("Save Pattern"), self.tr("Pattern name:"))
         if not ok or not name.strip():
             return
         name = name.strip()
@@ -446,7 +446,7 @@ class EditorDialog(QDialog):
             return
         extracted = parse_path(pattern.strip(), archive_path)
         if not extracted:
-            self._pat_preview.setText("<i>no match</i>")
+            self._pat_preview.setText(self.tr("<i>no match</i>"))
             return
         parts = [
             f"<b>{ATTR_LABEL.get(attr, attr)}:</b>&nbsp;{val}"

@@ -241,7 +241,7 @@ class MetadataSidecarDialog(QDialog):
         self._progress.setTextVisible(True)
         root.addWidget(self._progress)
 
-        root.addWidget(QLabel("Log:"))
+        root.addWidget(QLabel(self.tr("Log:")))
         self._log = QPlainTextEdit()
         self._log.setReadOnly(True)
         self._log.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -251,20 +251,20 @@ class MetadataSidecarDialog(QDialog):
         btn_row = QHBoxLayout()
 
         self._start_btn = QPushButton(
-            style.standardIcon(style.StandardPixmap.SP_MediaPlay), "Start"
+            style.standardIcon(style.StandardPixmap.SP_MediaPlay), self.tr("Start")
         )
         self._start_btn.clicked.connect(self._start)
         btn_row.addWidget(self._start_btn)
 
         self._stop_btn = QPushButton(
-            style.standardIcon(style.StandardPixmap.SP_MediaStop), "Stop"
+            style.standardIcon(style.StandardPixmap.SP_MediaStop), self.tr("Stop")
         )
         self._stop_btn.setEnabled(False)
         self._stop_btn.clicked.connect(self._stop)
         btn_row.addWidget(self._stop_btn)
 
         self._remove_btn = QPushButton(
-            style.standardIcon(style.StandardPixmap.SP_TrashIcon), "Remove all sidecars"
+            style.standardIcon(style.StandardPixmap.SP_TrashIcon), self.tr("Remove all sidecars")
         )
         self._remove_btn.clicked.connect(self._remove)
         btn_row.addWidget(self._remove_btn)
@@ -272,7 +272,7 @@ class MetadataSidecarDialog(QDialog):
         btn_row.addStretch()
 
         self._close_btn = QPushButton(
-            style.standardIcon(style.StandardPixmap.SP_DialogCloseButton), "Close"
+            style.standardIcon(style.StandardPixmap.SP_DialogCloseButton), self.tr("Close")
         )
         self._close_btn.clicked.connect(self.reject)
         btn_row.addWidget(self._close_btn)
@@ -310,10 +310,10 @@ class MetadataSidecarDialog(QDialog):
         """Confirm and then delete every METADATA.7z file found in DB folders."""
         answer = QMessageBox.question(
             self,
-            "Remove all sidecars",
-            "This will permanently delete every <b>METADATA.7z</b> sidecar file "
+            self.tr("Remove all sidecars"),
+            self.tr("This will permanently delete every <b>METADATA.7z</b> sidecar file "
             "found in the folders that have database records.<br><br>"
-            "Are you sure you want to continue?",
+            "Are you sure you want to continue?"),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )

@@ -19,10 +19,10 @@ class RecrawlPreviewDialog(QDialog):
         root = QVBoxLayout(self)
 
         if not changes:
-            root.addWidget(QLabel("No changes detected."))
+            root.addWidget(QLabel(self.tr("No changes detected.")))
         else:
             t = QTableWidget(0, 3)
-            t.setHorizontalHeaderLabels(["Field", "Current", "New"])
+            t.setHorizontalHeaderLabels([self.tr("Field"), self.tr("Current"), self.tr("New")])
             t.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
             t.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
             t.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
@@ -37,8 +37,8 @@ class RecrawlPreviewDialog(QDialog):
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        self._accept_btn = QPushButton("Accept")
-        self._cancel_btn = QPushButton("Cancel")
+        self._accept_btn = QPushButton(self.tr("Accept"))
+        self._cancel_btn = QPushButton(self.tr("Cancel"))
         btn_row.addWidget(self._accept_btn)
         btn_row.addWidget(self._cancel_btn)
         root.addLayout(btn_row)

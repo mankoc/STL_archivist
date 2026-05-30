@@ -23,7 +23,7 @@ class AuthorEditorDialog(QDialog):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Author Editor")
+        self.setWindowTitle(self.tr("Author Editor"))
         self.resize(480, 540)
         self._build_ui()
         self._load()
@@ -33,7 +33,7 @@ class AuthorEditorDialog(QDialog):
         root = QVBoxLayout(self)
 
         self._table = QTableWidget(0, 2)
-        self._table.setHorizontalHeaderLabels(["Author", "Models"])
+        self._table.setHorizontalHeaderLabels([self.tr("Author"), self.tr("Models")])
         self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -44,19 +44,19 @@ class AuthorEditorDialog(QDialog):
 
         btn_row = QHBoxLayout()
 
-        rename_btn = QPushButton("Rename…")
+        rename_btn = QPushButton(self.tr("Rename…"))
         rename_btn.clicked.connect(self._rename_author)
         btn_row.addWidget(rename_btn)
 
-        delete_btn = QPushButton("Delete")
+        delete_btn = QPushButton(self.tr("Delete"))
         delete_btn.clicked.connect(self._delete_author)
         btn_row.addWidget(delete_btn)
 
-        merge_btn = QPushButton("Merge…")
+        merge_btn = QPushButton(self.tr("Merge…"))
         merge_btn.clicked.connect(self._merge_selected_pair)
         btn_row.addWidget(merge_btn)
 
-        merge_similar_btn = QPushButton("Merge Similar…")
+        merge_similar_btn = QPushButton(self.tr("Merge Similar…"))
         merge_similar_btn.clicked.connect(self._merge_similar)
         btn_row.addWidget(merge_similar_btn)
 
@@ -117,10 +117,10 @@ class AuthorEditorDialog(QDialog):
     def _rename_author(self) -> None:
         old_name = self._selected_name()
         if old_name is None:
-            QMessageBox.information(self, "Rename", "Select exactly one author to rename.")
+            QMessageBox.information(self, self.tr("Rename"), self.tr("Select exactly one author to rename."))
             return
 
-        new_name, ok = QInputDialog.getText(self, "Rename Author", "New name:", text=old_name)
+        new_name, ok = QInputDialog.getText(self, self.tr("Rename Author"), self.tr("New name:"), text=old_name)
         if not ok or not new_name.strip():
             return
         new_name = new_name.strip()
@@ -135,7 +135,7 @@ class AuthorEditorDialog(QDialog):
             )
             if existing:
                 reply = QMessageBox.question(
-                    self, "Name Conflict",
+                    self, self.tr("Name Conflict"),
                     f"'{new_name}' already exists. Merge both authors under that name?",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
                     QMessageBox.StandardButton.Cancel,
@@ -162,7 +162,7 @@ class AuthorEditorDialog(QDialog):
     def _delete_author(self) -> None:
         name = self._selected_name()
         if name is None:
-            QMessageBox.information(self, "Delete", "Select exactly one author to delete.")
+            QMessageBox.information(self, self.tr("Delete"), self.tr("Select exactly one author to delete."))
             return
 
         session = get_session()
@@ -176,7 +176,7 @@ class AuthorEditorDialog(QDialog):
             session.close()
 
         reply = QMessageBox.question(
-            self, "Delete Author",
+            self, self.tr("Delete Author"),
             f"Clear the creator field on {count} model(s) currently attributed to '{name}'?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
@@ -198,8 +198,8 @@ class AuthorEditorDialog(QDialog):
         names = self._selected_names()
         if len(names) != 2:
             QMessageBox.information(
-                self, "Merge",
-                "Select exactly two authors to merge (hold Ctrl to multi-select).",
+                self, self.tr("Merge"),
+                self.tr("Select exactly two authors to merge (hold Ctrl to multi-select)."),
             )
             return
         self._do_merge(names[0], names[1])
@@ -212,7 +212,7 @@ class AuthorEditorDialog(QDialog):
     # ------------------------------------------------------------------
     def _do_merge(self, name_a: str, name_b: str) -> None:
         chosen, ok = QInputDialog.getItem(
-            self, "Merge Authors",
+            self, self.tr("Merge Authors"),
             f"Merging '{name_a}' and '{name_b}'.\nWhich name to keep?",
             [name_a, name_b], 0, False,
         )
@@ -235,7 +235,7 @@ class _MergeSimilarAuthorsDialog(QDialog):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Merge Similar Authors")
+        self.setWindowTitle(self.tr("Merge Similar Authors"))
         self.resize(560, 440)
         self._build_ui()
         self._scan()
@@ -244,25 +244,25 @@ class _MergeSimilarAuthorsDialog(QDialog):
         root = QVBoxLayout(self)
 
         thresh_row = QHBoxLayout()
-        thresh_row.addWidget(QLabel("Method:"))
+        thresh_row.addWidget(QLabel(self.tr("Method:")))
         self._method_combo = QComboBox()
         self._method_combo.addItems(["Levenshtein", "Soundex"])
         self._method_combo.currentIndexChanged.connect(self._on_method_changed)
         thresh_row.addWidget(self._method_combo)
-        self._thresh_label = QLabel("Max distance:")
+        self._thresh_label = QLabel(self.tr("Max distance:"))
         thresh_row.addWidget(self._thresh_label)
         self._thresh_spin = QSpinBox()
         self._thresh_spin.setRange(1, 5)
         self._thresh_spin.setValue(2)
         thresh_row.addWidget(self._thresh_spin)
-        scan_btn = QPushButton("Scan")
+        scan_btn = QPushButton(self.tr("Scan"))
         scan_btn.clicked.connect(self._scan)
         thresh_row.addWidget(scan_btn)
         thresh_row.addStretch()
         root.addLayout(thresh_row)
 
         self._table = QTableWidget(0, 3)
-        self._table.setHorizontalHeaderLabels(["Author A", "Author B", "Distance"])
+        self._table.setHorizontalHeaderLabels([self.tr("Author A"), self.tr("Author B"), self.tr("Distance")])
         self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
@@ -272,7 +272,7 @@ class _MergeSimilarAuthorsDialog(QDialog):
         root.addWidget(self._table)
 
         btn_row = QHBoxLayout()
-        merge_btn = QPushButton("Merge Selected…")
+        merge_btn = QPushButton(self.tr("Merge Selected…"))
         merge_btn.clicked.connect(self._merge_selected)
         btn_row.addWidget(merge_btn)
         btn_row.addStretch()
@@ -348,14 +348,14 @@ class _MergeSimilarAuthorsDialog(QDialog):
     def _merge_selected(self) -> None:
         rows = {idx.row() for idx in self._table.selectedIndexes()}
         if len(rows) != 1:
-            QMessageBox.information(self, "Merge", "Select exactly one pair to merge.")
+            QMessageBox.information(self, self.tr("Merge"), self.tr("Select exactly one pair to merge."))
             return
         row = list(rows)[0]
         name_a = self._table.item(row, 0).data(Qt.ItemDataRole.UserRole)
         name_b = self._table.item(row, 1).data(Qt.ItemDataRole.UserRole)
 
         chosen, ok = QInputDialog.getItem(
-            self, "Merge Authors",
+            self, self.tr("Merge Authors"),
             f"Merging '{name_a}' and '{name_b}'.\nWhich name to keep?",
             [name_a, name_b], 0, False,
         )

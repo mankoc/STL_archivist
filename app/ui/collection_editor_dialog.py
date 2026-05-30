@@ -19,7 +19,7 @@ class CollectionEditorDialog(QDialog):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Collection Editor")
+        self.setWindowTitle(self.tr("Collection Editor"))
         self.resize(420, 520)
         self._build_ui()
         self._load()
@@ -29,7 +29,7 @@ class CollectionEditorDialog(QDialog):
         root = QVBoxLayout(self)
 
         self._table = QTableWidget(0, 2)
-        self._table.setHorizontalHeaderLabels(["Collection", "Models"])
+        self._table.setHorizontalHeaderLabels([self.tr("Collection"), self.tr("Models")])
         self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -40,19 +40,19 @@ class CollectionEditorDialog(QDialog):
 
         btn_row = QHBoxLayout()
 
-        add_btn = QPushButton("Add…")
+        add_btn = QPushButton(self.tr("Add…"))
         add_btn.clicked.connect(self._add)
         btn_row.addWidget(add_btn)
 
-        rename_btn = QPushButton("Rename…")
+        rename_btn = QPushButton(self.tr("Rename…"))
         rename_btn.clicked.connect(self._rename)
         btn_row.addWidget(rename_btn)
 
-        delete_btn = QPushButton("Delete")
+        delete_btn = QPushButton(self.tr("Delete"))
         delete_btn.clicked.connect(self._delete)
         btn_row.addWidget(delete_btn)
 
-        merge_btn = QPushButton("Merge Duplicates…")
+        merge_btn = QPushButton(self.tr("Merge Duplicates…"))
         merge_btn.clicked.connect(self._merge_duplicates)
         btn_row.addWidget(merge_btn)
 
@@ -94,13 +94,13 @@ class CollectionEditorDialog(QDialog):
 
     # ------------------------------------------------------------------
     def _add(self) -> None:
-        name, ok = QInputDialog.getText(self, "Add Collection", "Collection name:")
+        name, ok = QInputDialog.getText(self, self.tr("Add Collection"), self.tr("Collection name:"))
         if not ok or not name.strip():
             return
         name = name.strip()
         with session_scope() as session:
             if session.query(Collection).filter_by(name=name).first():
-                QMessageBox.warning(self, "Add Collection", f"Collection '{name}' already exists.")
+                QMessageBox.warning(self, self.tr("Add Collection"), f"Collection '{name}' already exists.")
                 return
             session.add(Collection(name=name))
         self._load()
@@ -108,7 +108,7 @@ class CollectionEditorDialog(QDialog):
     def _rename(self, *_) -> None:
         col_id = self._selected_id()
         if col_id is None:
-            QMessageBox.information(self, "Rename", "Select exactly one collection to rename.")
+            QMessageBox.information(self, self.tr("Rename"), self.tr("Select exactly one collection to rename."))
             return
 
         session = get_session()
@@ -117,7 +117,7 @@ class CollectionEditorDialog(QDialog):
         finally:
             session.close()
 
-        new_name, ok = QInputDialog.getText(self, "Rename Collection", "New name:", text=old_name)
+        new_name, ok = QInputDialog.getText(self, self.tr("Rename Collection"), self.tr("New name:"), text=old_name)
         if not ok or not new_name.strip():
             return
         new_name = new_name.strip()
@@ -126,7 +126,7 @@ class CollectionEditorDialog(QDialog):
 
         with session_scope() as session:
             if session.query(Collection).filter_by(name=new_name).first():
-                QMessageBox.warning(self, "Rename Collection", f"Collection '{new_name}' already exists.")
+                QMessageBox.warning(self, self.tr("Rename Collection"), f"Collection '{new_name}' already exists.")
                 return
             session.get(Collection, col_id).name = new_name
         self._load()
@@ -134,7 +134,7 @@ class CollectionEditorDialog(QDialog):
     def _delete(self) -> None:
         col_id = self._selected_id()
         if col_id is None:
-            QMessageBox.information(self, "Delete", "Select exactly one collection to delete.")
+            QMessageBox.information(self, self.tr("Delete"), self.tr("Select exactly one collection to delete."))
             return
 
         session = get_session()
@@ -152,7 +152,7 @@ class CollectionEditorDialog(QDialog):
         if sub_count:
             msg += f"\nDeleting it will also remove its {sub_count} subcollection(s)."
         reply = QMessageBox.question(
-            self, "Delete Collection", msg,
+            self, self.tr("Delete Collection"), msg,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
         )
@@ -174,7 +174,7 @@ class _MergeCollectionsDialog(QDialog):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Merge Duplicate Collections")
+        self.setWindowTitle(self.tr("Merge Duplicate Collections"))
         self.resize(520, 420)
         self._build_ui()
         self._scan()
@@ -183,25 +183,25 @@ class _MergeCollectionsDialog(QDialog):
         root = QVBoxLayout(self)
 
         thresh_row = QHBoxLayout()
-        thresh_row.addWidget(QLabel("Method:"))
+        thresh_row.addWidget(QLabel(self.tr("Method:")))
         self._method_combo = QComboBox()
         self._method_combo.addItems(["Levenshtein", "Soundex"])
         self._method_combo.currentIndexChanged.connect(self._on_method_changed)
         thresh_row.addWidget(self._method_combo)
-        self._thresh_label = QLabel("Max distance:")
+        self._thresh_label = QLabel(self.tr("Max distance:"))
         thresh_row.addWidget(self._thresh_label)
         self._thresh_spin = QSpinBox()
         self._thresh_spin.setRange(1, 5)
         self._thresh_spin.setValue(2)
         thresh_row.addWidget(self._thresh_spin)
-        scan_btn = QPushButton("Scan")
+        scan_btn = QPushButton(self.tr("Scan"))
         scan_btn.clicked.connect(self._scan)
         thresh_row.addWidget(scan_btn)
         thresh_row.addStretch()
         root.addLayout(thresh_row)
 
         self._table = QTableWidget(0, 3)
-        self._table.setHorizontalHeaderLabels(["Collection A", "Collection B", "Distance"])
+        self._table.setHorizontalHeaderLabels([self.tr("Collection A"), self.tr("Collection B"), self.tr("Distance")])
         self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
@@ -211,7 +211,7 @@ class _MergeCollectionsDialog(QDialog):
         root.addWidget(self._table)
 
         btn_row = QHBoxLayout()
-        merge_btn = QPushButton("Merge Selected…")
+        merge_btn = QPushButton(self.tr("Merge Selected…"))
         merge_btn.clicked.connect(self._merge_selected)
         btn_row.addWidget(merge_btn)
         btn_row.addStretch()
@@ -279,7 +279,7 @@ class _MergeCollectionsDialog(QDialog):
     def _merge_selected(self):
         rows = {idx.row() for idx in self._table.selectedIndexes()}
         if len(rows) != 1:
-            QMessageBox.information(self, "Merge", "Select exactly one pair to merge.")
+            QMessageBox.information(self, self.tr("Merge"), self.tr("Select exactly one pair to merge."))
             return
         row = list(rows)[0]
         item_a = self._table.item(row, 0)
@@ -290,7 +290,7 @@ class _MergeCollectionsDialog(QDialog):
         id_b = item_b.data(Qt.ItemDataRole.UserRole)
 
         chosen, ok = QInputDialog.getItem(
-            self, "Merge Collections",
+            self, self.tr("Merge Collections"),
             f"Merging '{name_a}' and '{name_b}'.\nWhich name to keep?",
             [name_a, name_b], 0, False,
         )

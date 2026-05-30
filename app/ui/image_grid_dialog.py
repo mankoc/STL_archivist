@@ -143,7 +143,7 @@ class _GridImageViewer(QDialog):
 
         # ── Navigation row ────────────────────────────────────────────────────
         nav_row = QHBoxLayout()
-        self._prev_btn = QPushButton("← Prev")
+        self._prev_btn = QPushButton(self.tr("← Prev"))
         self._prev_btn.clicked.connect(self._go_prev)
         nav_row.addWidget(self._prev_btn)
 
@@ -151,7 +151,7 @@ class _GridImageViewer(QDialog):
         self._counter_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         nav_row.addWidget(self._counter_lbl, 1)
 
-        self._next_btn = QPushButton("Next →")
+        self._next_btn = QPushButton(self.tr("Next →"))
         self._next_btn.clicked.connect(self._go_next)
         nav_row.addWidget(self._next_btn)
         outer.addLayout(nav_row)
@@ -231,7 +231,7 @@ class _GridImageViewer(QDialog):
             _row("Size",    _format_size(cd.sort_size))
         _row("Description", cd.description)
         if cd.url:
-            lbl = QLabel("<b>URL</b>")
+            lbl = QLabel(self.tr("<b>URL</b>"))
             lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
             url_lbl = QLabel(f'<a href="{cd.url}">{cd.url}</a>')
             url_lbl.setOpenExternalLinks(True)
@@ -279,7 +279,7 @@ class ImageGridDialog(QDialog):
         # ── Toolbar ──────────────────────────────────────────────────────────
         toolbar = QHBoxLayout()
 
-        toolbar.addWidget(QLabel("Size:"))
+        toolbar.addWidget(QLabel(self.tr("Size:")))
         from app.ui.config_dialog import get_max_thumb_size
         self._slider = QSlider(Qt.Orientation.Horizontal)
         self._slider.setRange(THUMB_SIZE_MIN, get_max_thumb_size())
@@ -294,7 +294,7 @@ class ImageGridDialog(QDialog):
         toolbar.addWidget(self._size_lbl)
 
         toolbar.addSpacing(16)
-        toolbar.addWidget(QLabel("Sort:"))
+        toolbar.addWidget(QLabel(self.tr("Sort:")))
 
         self._sort_combo = QComboBox()
         for label, _ in _SORT_OPTIONS:
@@ -305,19 +305,19 @@ class ImageGridDialog(QDialog):
 
         self._sort_dir_btn = QToolButton()
         self._sort_dir_btn.setText("▲")
-        self._sort_dir_btn.setToolTip("Ascending")
+        self._sort_dir_btn.setToolTip(self.tr("Ascending"))
         self._sort_dir_btn.setCheckable(True)
         self._sort_dir_btn.toggled.connect(self._on_sort_dir_toggled)
         toolbar.addWidget(self._sort_dir_btn)
 
         toolbar.addSpacing(16)
 
-        sel_all_btn = QPushButton("Select All")
+        sel_all_btn = QPushButton(self.tr("Select All"))
         sel_all_btn.setFixedWidth(80)
         sel_all_btn.clicked.connect(self._select_all)
         toolbar.addWidget(sel_all_btn)
 
-        sel_none_btn = QPushButton("Deselect All")
+        sel_none_btn = QPushButton(self.tr("Deselect All"))
         sel_none_btn.setFixedWidth(90)
         sel_none_btn.clicked.connect(self._deselect_all)
         toolbar.addWidget(sel_none_btn)
@@ -412,13 +412,13 @@ class ImageGridDialog(QDialog):
         self._scroll.setWidget(container)
 
         bottom = QHBoxLayout()
-        self._show_btn = QPushButton("Show selected in main window")
+        self._show_btn = QPushButton(self.tr("Show selected in main window"))
         self._show_btn.setEnabled(False)
-        self._show_btn.setToolTip("Filter the main browser to show only selected models")
+        self._show_btn.setToolTip(self.tr("Filter the main browser to show only selected models"))
         self._show_btn.clicked.connect(self._on_show_selected)
         bottom.addWidget(self._show_btn)
         bottom.addStretch()
-        close_btn = QPushButton("Close")
+        close_btn = QPushButton(self.tr("Close"))
         close_btn.setDefault(True)
         close_btn.clicked.connect(self.reject)
         bottom.addWidget(close_btn)
@@ -447,7 +447,7 @@ class ImageGridDialog(QDialog):
             thumb.setCursor(Qt.CursorShape.PointingHandCursor)
             thumb.mousePressEvent = lambda e, i=entry_index: self._on_thumb_press(i, e)
         else:
-            thumb.setText("No image")
+            thumb.setText(self.tr("No image"))
             thumb.mousePressEvent = lambda e, i=entry_index: self._on_thumb_press(i, e)
 
         title_lbl = QLabel(title)
