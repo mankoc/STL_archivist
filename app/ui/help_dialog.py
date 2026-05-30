@@ -1001,6 +1001,8 @@ sharing content &mdash; either the same STL files or visually similar thumbnail 
 <p>Compares every pair of archives by the fraction of <code>.stl</code> files they share
 (matched by filename and uncompressed size).  A pair is flagged when at least
 <em>Similarity threshold %</em> of the <b>larger</b> archive&rsquo;s files appear in the other.</p>
+<p>Selecting a result row shows a preview pane with the thumbnails of <b>both</b> archives
+side by side, so you can confirm visually that the two are the same model before acting on them.</p>
 <table>
   <tr><th>Parameter</th><th>Description</th></tr>
   <tr><td>Similarity threshold</td>
