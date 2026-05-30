@@ -477,7 +477,7 @@ Crawler dialog back.</p>
   <tr><td><code>*</code></td><td>(ignored segment)</td></tr>
 </table>
 
-<h3>Prefix modifier <code>{token:n}</code></h3>
+<h3>Prefix modifier <code>{{token:n}}</code></h3>
 <p>Append <code>:n</code> to any token to use only the first <em>n</em> characters of its
 value when rendering a destination path (e.g. in the file-sort dialog).
 This is useful for creating initial-letter sub-folders:</p>
@@ -768,6 +768,17 @@ The dialog is divided into sections shown in a tree on the left.</p>
           <code>.rar</code> archives.  Leave blank if you have no RAR files.</td></tr>
 </table>
 
+<h2>Language</h2>
+<table>
+  <tr><th>Setting</th><th>Description</th></tr>
+  <tr><td>Language</td>
+      <td>Interface language. <b>English</b> and <b>Spanish</b> ship built-in;
+          any additional <code>&lt;code&gt;.ts</code> language definition placed in
+          <code>resources/i18n/</code> appears here automatically. Strings with no
+          translation fall back to English.
+          <b>Restart the application for the change to fully take effect.</b></td></tr>
+</table>
+
 <h2>Crawler</h2>
 <table>
   <tr><th>Setting</th><th>Description</th></tr>
@@ -885,16 +896,16 @@ Add, edit, or remove patterns as needed for your naming conventions.</p>
 <h2>Appearance</h2>
 <table>
   <tr><th>Setting</th><th>Description</th></tr>
-  <tr><td>Language</td>
-      <td>Interface language. <b>English</b> and <b>Spanish</b> ship built-in;
-          any additional <code>&lt;code&gt;.ts</code> language definition placed in
-          <code>resources/i18n/</code> appears here automatically. Strings with
-          no translation fall back to English.
-          <b>Restart the application for the change to fully take effect.</b></td></tr>
   <tr><td>Color scheme</td>
-      <td>Choose between <b>System</b> (default OS theme), <b>Win11 Light</b>,
-          <b>Win11 Dark</b>, or <b>VS Code Dark</b>.
-          A live preview is shown as you click each option.</td></tr>
+      <td>Choose a built-in theme (System, Win11 Light/Dark, VS Code Dark, or a
+          Material variant). A live preview is shown as you select each option.</td></tr>
+  <tr><td>Custom Colors</td>
+      <td>Collapsible section (3-column grid) of per-element colour overrides:
+          duplicate-highlight, status indicators, warning rows, maintenance view,
+          highlights, and window background/text. Includes <em>Reset all to theme
+          defaults</em> and <em>Save as color scheme…</em>.</td></tr>
+  <tr><td>Typography</td>
+      <td>Override the application font family and size (0 = theme default).</td></tr>
 </table>
 
 <div class="note">Changes to the Data Directory take effect only after restarting the application.</div>
