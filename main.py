@@ -5,9 +5,9 @@ import shutil
 import sys
 from pathlib import Path
 
-from PyQt6.QtGui import QIcon
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QIcon, QPalette
+from PyQt6.QtWidgets import QApplication, QSplashScreen
+from PyQt6.QtCore import QCoreApplication, Qt
 
 
 def _resource(relative: str) -> Path:
@@ -25,7 +25,6 @@ from app.ui.main_window import MainWindow
 
 
 def _show_splash():
-    from PyQt6.QtWidgets import QSplashScreen
     from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont
     from PyQt6.QtCore import QRect
 
@@ -97,16 +96,16 @@ def _check_db_on_startup(db_path: str, splash=None) -> str:
 
     from PyQt6.QtWidgets import QMessageBox
     msg = QMessageBox()
-    msg.setWindowTitle("No Database Found")
+    msg.setWindowTitle(QCoreApplication.translate("main", "No Database Found"))
     msg.setIcon(QMessageBox.Icon.Warning)
-    msg.setText("No database was found at the configured location.")
+    msg.setText(QCoreApplication.translate("main", "No database was found at the configured location."))
     msg.setInformativeText(
         f"<b>{db_path}</b><br><br>"
         "A new empty database will be created there when you continue, "
         "or configure a different data directory to open an existing library."
     )
-    ok_btn     = msg.addButton("Continue",             QMessageBox.ButtonRole.AcceptRole)
-    config_btn = msg.addButton("Configure Library…",   QMessageBox.ButtonRole.ActionRole)
+    ok_btn     = msg.addButton(QCoreApplication.translate("main", "Continue"),             QMessageBox.ButtonRole.AcceptRole)
+    config_btn = msg.addButton(QCoreApplication.translate("main", "Configure Library…"),   QMessageBox.ButtonRole.ActionRole)
     msg.setDefaultButton(ok_btn)
     msg.exec()
 
@@ -141,7 +140,10 @@ def main() -> None:
     app.processEvents()
 
     _update_splash(splash, "Loading configuration…")
-    from app.ui.config_dialog import get_db_path, get_color_scheme, apply_color_scheme
+    from app.ui.config_dialog import get_db_path, get_color_scheme, apply_color_scheme, get_language
+
+    from app.utils import i18n
+    i18n.install_language(get_language())
 
     _update_splash(splash, "Initialising logging…")
     from app.utils.logger import setup_logging, setup_excepthook
@@ -164,6 +166,23 @@ def main() -> None:
 
     _update_splash(splash, "Applying theme…")
     apply_color_scheme(get_color_scheme())
+
+    hl = app.palette().color(QPalette.ColorRole.Highlight).name()
+    splitter_h_svg = _resource("resources/icons/splitter_h.svg").as_posix()
+    splitter_v_svg = _resource("resources/icons/splitter_v.svg").as_posix()
+    app.setStyleSheet(
+        (app.styleSheet() or "")
+        + (
+            f"\nQSplitter::handle:horizontal {{"
+            f" width: 16px; background-color: {hl};"
+            f" image: url({splitter_h_svg}); }}"
+        )
+        + (
+            f"\nQSplitter::handle:vertical {{"
+            f" height: 16px; background-color: {hl};"
+            f" image: url({splitter_v_svg}); }}"
+        )
+    )
 
     _update_splash(splash, "Starting up…")
     window = MainWindow()
