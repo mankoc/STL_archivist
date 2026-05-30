@@ -19,7 +19,7 @@ class SubcategoryEditorDialog(QDialog):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Subcategory Editor")
+        self.setWindowTitle(self.tr("Subcategory Editor"))
         self.resize(520, 520)
         self._build_ui()
         self._load()
@@ -29,7 +29,7 @@ class SubcategoryEditorDialog(QDialog):
         root = QVBoxLayout(self)
 
         self._table = QTableWidget(0, 3)
-        self._table.setHorizontalHeaderLabels(["Subcategory", "Category", "Models"])
+        self._table.setHorizontalHeaderLabels([self.tr("Subcategory"), self.tr("Category"), self.tr("Models")])
         self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
@@ -41,19 +41,19 @@ class SubcategoryEditorDialog(QDialog):
 
         btn_row = QHBoxLayout()
 
-        add_btn = QPushButton("Add…")
+        add_btn = QPushButton(self.tr("Add…"))
         add_btn.clicked.connect(self._add)
         btn_row.addWidget(add_btn)
 
-        rename_btn = QPushButton("Rename…")
+        rename_btn = QPushButton(self.tr("Rename…"))
         rename_btn.clicked.connect(self._rename)
         btn_row.addWidget(rename_btn)
 
-        delete_btn = QPushButton("Delete")
+        delete_btn = QPushButton(self.tr("Delete"))
         delete_btn.clicked.connect(self._delete)
         btn_row.addWidget(delete_btn)
 
-        merge_btn = QPushButton("Merge Duplicates…")
+        merge_btn = QPushButton(self.tr("Merge Duplicates…"))
         merge_btn.clicked.connect(self._merge_duplicates)
         btn_row.addWidget(merge_btn)
 
@@ -113,8 +113,8 @@ class SubcategoryEditorDialog(QDialog):
         """Prompt for a parent category and new subcategory name, then insert into DB."""
         category_names = self._category_names()
         if not category_names:
-            QMessageBox.warning(self, "Add Subcategory",
-                                "No categories exist. Add a category first.")
+            QMessageBox.warning(self, self.tr("Add Subcategory"),
+                                self.tr("No categories exist. Add a category first."))
             return
 
         # Pre-select the category of the currently selected row
@@ -127,12 +127,12 @@ class SubcategoryEditorDialog(QDialog):
                 preselect = category_names.index(cat_name)
 
         parent_name, ok = QInputDialog.getItem(
-            self, "Add Subcategory", "Parent category:", category_names, preselect, False)
+            self, self.tr("Add Subcategory"), self.tr("Parent category:"), category_names, preselect, False)
         if not ok:
             return
 
         name, ok = QInputDialog.getText(
-            self, "Add Subcategory", f"Subcategory name under '{parent_name}':")
+            self, self.tr("Add Subcategory"), f"Subcategory name under '{parent_name}':")
         if not ok or not name.strip():
             return
         name = name.strip()
@@ -144,7 +144,7 @@ class SubcategoryEditorDialog(QDialog):
             if session.query(Subcategory).filter_by(
                     name=name, category_id=cat.id).first():
                 QMessageBox.warning(
-                    self, "Add Subcategory",
+                    self, self.tr("Add Subcategory"),
                     f"Subcategory '{name}' already exists under '{parent_name}'.")
                 return
             session.add(Subcategory(name=name, category_id=cat.id))
@@ -154,8 +154,8 @@ class SubcategoryEditorDialog(QDialog):
         """Rename the selected subcategory, checking for duplicates within its parent."""
         sc_id = self._selected_id()
         if sc_id is None:
-            QMessageBox.information(self, "Rename",
-                                    "Select exactly one subcategory to rename.")
+            QMessageBox.information(self, self.tr("Rename"),
+                                    self.tr("Select exactly one subcategory to rename."))
             return
 
         session = get_session()
@@ -167,7 +167,7 @@ class SubcategoryEditorDialog(QDialog):
             session.close()
 
         new_name, ok = QInputDialog.getText(
-            self, "Rename Subcategory", "New name:", text=old_name)
+            self, self.tr("Rename Subcategory"), self.tr("New name:"), text=old_name)
         if not ok or not new_name.strip():
             return
         new_name = new_name.strip()
@@ -178,7 +178,7 @@ class SubcategoryEditorDialog(QDialog):
             if session.query(Subcategory).filter_by(
                     name=new_name, category_id=category_id).first():
                 QMessageBox.warning(
-                    self, "Rename Subcategory",
+                    self, self.tr("Rename Subcategory"),
                     f"Subcategory '{new_name}' already exists under this category.")
                 return
             session.get(Subcategory, sc_id).name = new_name
@@ -188,8 +188,8 @@ class SubcategoryEditorDialog(QDialog):
         """Delete the selected subcategory after user confirmation."""
         sc_id = self._selected_id()
         if sc_id is None:
-            QMessageBox.information(self, "Delete",
-                                    "Select exactly one subcategory to delete.")
+            QMessageBox.information(self, self.tr("Delete"),
+                                    self.tr("Select exactly one subcategory to delete."))
             return
 
         session = get_session()
@@ -204,7 +204,7 @@ class SubcategoryEditorDialog(QDialog):
         if count:
             msg += f"\n\nIt is currently used by {count} model(s)."
         reply = QMessageBox.question(
-            self, "Delete Subcategory", msg,
+            self, self.tr("Delete Subcategory"), msg,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
         )
@@ -227,7 +227,7 @@ class _MergeSubcategoriesDialog(QDialog):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Merge Duplicate Subcategories")
+        self.setWindowTitle(self.tr("Merge Duplicate Subcategories"))
         self.resize(580, 420)
         self._build_ui()
         self._scan()
@@ -236,18 +236,18 @@ class _MergeSubcategoriesDialog(QDialog):
         root = QVBoxLayout(self)
 
         thresh_row = QHBoxLayout()
-        thresh_row.addWidget(QLabel("Method:"))
+        thresh_row.addWidget(QLabel(self.tr("Method:")))
         self._method_combo = QComboBox()
         self._method_combo.addItems(["Levenshtein", "Soundex"])
         self._method_combo.currentIndexChanged.connect(self._on_method_changed)
         thresh_row.addWidget(self._method_combo)
-        self._thresh_label = QLabel("Max distance:")
+        self._thresh_label = QLabel(self.tr("Max distance:"))
         thresh_row.addWidget(self._thresh_label)
         self._thresh_spin = QSpinBox()
         self._thresh_spin.setRange(1, 5)
         self._thresh_spin.setValue(2)
         thresh_row.addWidget(self._thresh_spin)
-        scan_btn = QPushButton("Scan")
+        scan_btn = QPushButton(self.tr("Scan"))
         scan_btn.clicked.connect(self._scan)
         thresh_row.addWidget(scan_btn)
         thresh_row.addStretch()
@@ -255,7 +255,7 @@ class _MergeSubcategoriesDialog(QDialog):
 
         self._table = QTableWidget(0, 4)
         self._table.setHorizontalHeaderLabels(
-            ["Subcategory A", "Subcategory B", "Category", "Distance"])
+            [self.tr("Subcategory A"), self.tr("Subcategory B"), self.tr("Category"), self.tr("Distance")])
         self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
@@ -266,7 +266,7 @@ class _MergeSubcategoriesDialog(QDialog):
         root.addWidget(self._table)
 
         btn_row = QHBoxLayout()
-        merge_btn = QPushButton("Merge Selected…")
+        merge_btn = QPushButton(self.tr("Merge Selected…"))
         merge_btn.clicked.connect(self._merge_selected)
         btn_row.addWidget(merge_btn)
         btn_row.addStretch()
@@ -347,8 +347,8 @@ class _MergeSubcategoriesDialog(QDialog):
     def _merge_selected(self):
         rows = {idx.row() for idx in self._table.selectedIndexes()}
         if len(rows) != 1:
-            QMessageBox.information(self, "Merge",
-                                    "Select exactly one pair to merge.")
+            QMessageBox.information(self, self.tr("Merge"),
+                                    self.tr("Select exactly one pair to merge."))
             return
         row = list(rows)[0]
         item_a = self._table.item(row, 0)
@@ -359,7 +359,7 @@ class _MergeSubcategoriesDialog(QDialog):
         id_b = item_b.data(Qt.ItemDataRole.UserRole)
 
         chosen, ok = QInputDialog.getItem(
-            self, "Merge Subcategories",
+            self, self.tr("Merge Subcategories"),
             f"Merging '{name_a}' and '{name_b}'.\nWhich name to keep?",
             [name_a, name_b], 0, False,
         )

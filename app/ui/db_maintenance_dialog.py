@@ -558,7 +558,7 @@ class DbMaintenanceDialog(QDialog):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Database Maintenance")
+        self.setWindowTitle(self.tr("Database Maintenance"))
         self.resize(900, 620)
         self.setModal(True)
         self._verify_worker:    VerifyWorker                 | None = None
@@ -575,9 +575,9 @@ class DbMaintenanceDialog(QDialog):
         root.setSpacing(8)
 
         desc = QLabel(
-            "Verify that every archive catalogued in the database still exists on disk. "
+            self.tr("Verify that every archive catalogued in the database still exists on disk. "
             "Missing archives can be relocated by searching a folder recursively, "
-            "or removed from the database."
+            "or removed from the database.")
         )
         desc.setWordWrap(True)
         root.addWidget(desc)
@@ -586,78 +586,78 @@ class DbMaintenanceDialog(QDialog):
         SP = style.StandardPixmap
         btn_row = QHBoxLayout()
 
-        self._verify_btn = QPushButton(style.standardIcon(SP.SP_BrowserReload), "Verify")
-        self._verify_btn.setToolTip("Check all archive paths for existence on disk")
+        self._verify_btn = QPushButton(style.standardIcon(SP.SP_BrowserReload), self.tr("Verify"))
+        self._verify_btn.setToolTip(self.tr("Check all archive paths for existence on disk"))
         self._verify_btn.clicked.connect(self._start_verify)
         btn_row.addWidget(self._verify_btn)
 
-        self._stop_btn = QPushButton(style.standardIcon(SP.SP_MediaStop), "Stop")
+        self._stop_btn = QPushButton(style.standardIcon(SP.SP_MediaStop), self.tr("Stop"))
         self._stop_btn.setEnabled(False)
         self._stop_btn.clicked.connect(self._stop)
         btn_row.addWidget(self._stop_btn)
 
         btn_row.addStretch()
 
-        self._search_btn = QPushButton(style.standardIcon(SP.SP_DirOpenIcon), "Search in Folder…")
+        self._search_btn = QPushButton(style.standardIcon(SP.SP_DirOpenIcon), self.tr("Search in Folder…"))
         self._search_btn.setToolTip(
-            "Pick a folder to search recursively for selected (or all) missing archives"
+            self.tr("Pick a folder to search recursively for selected (or all) missing archives")
         )
         self._search_btn.setEnabled(False)
         self._search_btn.clicked.connect(self._start_search)
         btn_row.addWidget(self._search_btn)
 
         self._find_moved_btn = QPushButton(
-            style.standardIcon(SP.SP_FileDialogContentsView), "Find Moved in DB…"
+            style.standardIcon(SP.SP_FileDialogContentsView), self.tr("Find Moved in DB…")
         )
         self._find_moved_btn.setToolTip(
-            "Check whether missing archives have been re-crawled at a different location "
-            "and offer to transfer their metadata"
+            self.tr("Check whether missing archives have been re-crawled at a different location "
+            "and offer to transfer their metadata")
         )
         self._find_moved_btn.setEnabled(False)
         self._find_moved_btn.clicked.connect(self._start_find_moved_in_db)
         btn_row.addWidget(self._find_moved_btn)
 
         self._find_dup_entries_btn = QPushButton(
-            style.standardIcon(SP.SP_FileDialogDetailedView), "Find Duplicate Entries…"
+            style.standardIcon(SP.SP_FileDialogDetailedView), self.tr("Find Duplicate Entries…")
         )
         self._find_dup_entries_btn.setToolTip(
-            "Find records that share the same archive content hash or the same "
-            "filename + file size, indicating the same file is catalogued more than once"
+            self.tr("Find records that share the same archive content hash or the same "
+            "filename + file size, indicating the same file is catalogued more than once")
         )
         self._find_dup_entries_btn.clicked.connect(self._start_find_duplicate_entries)
         btn_row.addWidget(self._find_dup_entries_btn)
 
         self._merge_moved_btn = QPushButton(
-            style.standardIcon(SP.SP_ArrowRight), "Merge Moved"
+            style.standardIcon(SP.SP_ArrowRight), self.tr("Merge Moved")
         )
         self._merge_moved_btn.setToolTip(
-            "Transfer metadata from selected 'Moved (in DB)' records to their new locations"
+            self.tr("Transfer metadata from selected 'Moved (in DB)' records to their new locations")
         )
         self._merge_moved_btn.setEnabled(False)
         self._merge_moved_btn.clicked.connect(self._merge_moved_records)
         btn_row.addWidget(self._merge_moved_btn)
 
-        self._remove_sel_btn = QPushButton(style.standardIcon(SP.SP_TrashIcon), "Remove Selected")
-        self._remove_sel_btn.setToolTip("Remove the selected records from the database")
+        self._remove_sel_btn = QPushButton(style.standardIcon(SP.SP_TrashIcon), self.tr("Remove Selected"))
+        self._remove_sel_btn.setToolTip(self.tr("Remove the selected records from the database"))
         self._remove_sel_btn.setEnabled(False)
         self._remove_sel_btn.clicked.connect(self._remove_selected)
         btn_row.addWidget(self._remove_sel_btn)
 
         self._remove_all_btn = QPushButton(
-            style.standardIcon(SP.SP_TrashIcon), "Remove All Missing"
+            style.standardIcon(SP.SP_TrashIcon), self.tr("Remove All Missing")
         )
         self._remove_all_btn.setToolTip(
-            "Remove every record whose archive no longer exists on disk"
+            self.tr("Remove every record whose archive no longer exists on disk")
         )
         self._remove_all_btn.setEnabled(False)
         self._remove_all_btn.clicked.connect(self._remove_all_missing)
         btn_row.addWidget(self._remove_all_btn)
 
         self._remove_flagged_btn = QPushButton(
-            style.standardIcon(SP.SP_TrashIcon), "Remove Flagged Missing"
+            style.standardIcon(SP.SP_TrashIcon), self.tr("Remove Flagged Missing")
         )
         self._remove_flagged_btn.setToolTip(
-            "Remove records flagged as missing by the crawler that are still absent on disk"
+            self.tr("Remove records flagged as missing by the crawler that are still absent on disk")
         )
         self._remove_flagged_btn.setEnabled(False)
         self._remove_flagged_btn.clicked.connect(self._remove_flagged_missing)
@@ -666,7 +666,7 @@ class DbMaintenanceDialog(QDialog):
         btn_row.addStretch()
 
         self._close_btn = QPushButton(
-            style.standardIcon(SP.SP_DialogCloseButton), "Close"
+            style.standardIcon(SP.SP_DialogCloseButton), self.tr("Close")
         )
         self._close_btn.clicked.connect(self.reject)
         btn_row.addWidget(self._close_btn)
@@ -679,7 +679,7 @@ class DbMaintenanceDialog(QDialog):
         root.addWidget(self._progress)
 
         filter_row = QHBoxLayout()
-        self._only_failed_cb = QCheckBox("Show only problems (missing / modified)")
+        self._only_failed_cb = QCheckBox(self.tr("Show only problems (missing / modified)"))
         self._only_failed_cb.toggled.connect(self._apply_filter)
         filter_row.addWidget(self._only_failed_cb)
         filter_row.addStretch()
@@ -687,7 +687,7 @@ class DbMaintenanceDialog(QDialog):
 
         self._table = QTableWidget(0, 5)
         self._table.setHorizontalHeaderLabels(
-            ["ID", "Title", "Archive Path", "Status", "Match Path"]
+            [self.tr("ID"), self.tr("Title"), self.tr("Archive Path"), self.tr("Status"), self.tr("Match Path")]
         )
         hh = self._table.horizontalHeader()
         hh.setSectionResizeMode(_COL_ID,     QHeaderView.ResizeMode.ResizeToContents)
@@ -701,7 +701,7 @@ class DbMaintenanceDialog(QDialog):
         self._table.setAlternatingRowColors(True)
         root.addWidget(self._table)
 
-        root.addWidget(QLabel("Log:"))
+        root.addWidget(QLabel(self.tr("Log:")))
         self._log = QPlainTextEdit()
         self._log.setReadOnly(True)
         self._log.setMaximumHeight(120)
@@ -852,8 +852,8 @@ class DbMaintenanceDialog(QDialog):
             }
             if not targets:
                 QMessageBox.information(
-                    self, "Search",
-                    "None of the selected rows are missing — nothing to search for."
+                    self, self.tr("Search"),
+                    self.tr("None of the selected rows are missing — nothing to search for.")
                 )
                 return
         else:
@@ -864,11 +864,11 @@ class DbMaintenanceDialog(QDialog):
             }
 
         if not targets:
-            QMessageBox.information(self, "Search", "No missing archives to search for.")
+            QMessageBox.information(self, self.tr("Search"), self.tr("No missing archives to search for."))
             return
 
         folder = QFileDialog.getExistingDirectory(
-            self, "Select Folder to Search", "",
+            self, self.tr("Select Folder to Search"), "",
             QFileDialog.Option.ShowDirsOnly,
         )
         if not folder:
@@ -907,7 +907,7 @@ class DbMaintenanceDialog(QDialog):
     def _start_find_moved_in_db(self) -> None:
         missing = [r for r in self._results if r["status"] in (_STATUS_MISSING, _STATUS_MODIFIED, _STATUS_FLAGGED)]
         if not missing:
-            QMessageBox.information(self, "Find Moved", "No missing archives to check.")
+            QMessageBox.information(self, self.tr("Find Moved"), self.tr("No missing archives to check."))
             return
 
         self._set_busy(True)
@@ -958,14 +958,14 @@ class DbMaintenanceDialog(QDialog):
 
         if not to_merge:
             QMessageBox.information(
-                self, "Merge Moved",
-                "No 'Moved (in DB)' records selected (or none found).\n\n"
-                "Run 'Find Moved in DB' first, then select rows to merge.",
+                self, self.tr("Merge Moved"),
+                self.tr("No 'Moved (in DB)' records selected (or none found).\n\n"
+                "Run 'Find Moved in DB' first, then select rows to merge."),
             )
             return
 
         reply = QMessageBox.question(
-            self, "Merge Moved Records",
+            self, self.tr("Merge Moved Records"),
             f"Transfer metadata from <b>{len(to_merge)}</b> missing record(s) to their "
             f"matched locations?\n\n"
             "• The missing record's manually-edited metadata will be kept.\n"
@@ -1055,13 +1055,13 @@ class DbMaintenanceDialog(QDialog):
             {idx.row() for idx in self._table.selectedIndexes()}, reverse=True
         )
         if not selected_rows:
-            QMessageBox.information(self, "Remove", "No rows selected.")
+            QMessageBox.information(self, self.tr("Remove"), self.tr("No rows selected."))
             return
 
         count = len(selected_rows)
         reply = QMessageBox.warning(
             self,
-            "Remove Records",
+            self.tr("Remove Records"),
             f"Permanently remove <b>{count}</b> record(s) from the database?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
@@ -1085,13 +1085,13 @@ class DbMaintenanceDialog(QDialog):
     def _remove_all_missing(self) -> None:
         missing = [r for r in self._results if r["status"] == _STATUS_MISSING]
         if not missing:
-            QMessageBox.information(self, "Remove", "No missing archives to remove.")
+            QMessageBox.information(self, self.tr("Remove"), self.tr("No missing archives to remove."))
             return
 
         count = len(missing)
         reply = QMessageBox.warning(
             self,
-            "Remove All Missing",
+            self.tr("Remove All Missing"),
             f"Permanently remove <b>{count}</b> missing archive record(s) from the database?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
@@ -1127,13 +1127,13 @@ class DbMaintenanceDialog(QDialog):
     def _remove_flagged_missing(self) -> None:
         flagged = [r for r in self._results if r["status"] == _STATUS_FLAGGED]
         if not flagged:
-            QMessageBox.information(self, "Remove Flagged", "No flagged-missing records to remove.")
+            QMessageBox.information(self, self.tr("Remove Flagged"), self.tr("No flagged-missing records to remove."))
             return
 
         count = len(flagged)
         reply = QMessageBox.warning(
             self,
-            "Remove Flagged Missing",
+            self.tr("Remove Flagged Missing"),
             f"Permanently remove <b>{count}</b> record(s) flagged as missing by the crawler?<br><br>"
             "These are archives that the crawler could not find on disk and could not match "
             "to a new location. Removing them is permanent.",

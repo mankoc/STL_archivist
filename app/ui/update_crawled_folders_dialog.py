@@ -313,7 +313,7 @@ class UpdateCrawledFoldersDialog(QDialog):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Update Crawled Folders")
+        self.setWindowTitle(self.tr("Update Crawled Folders"))
         self.resize(760, 680)
         self.setWindowFlags(
             self.windowFlags()
@@ -335,7 +335,7 @@ class UpdateCrawledFoldersDialog(QDialog):
         layout.setSpacing(8)
 
         # --- Folder selection list ---
-        layout.addWidget(QLabel("Select folders to re-crawl:"))
+        layout.addWidget(QLabel(self.tr("Select folders to re-crawl:")))
 
         self._folder_list = QListWidget()
         self._folder_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -344,21 +344,21 @@ class UpdateCrawledFoldersDialog(QDialog):
 
         sel_row = QHBoxLayout()
 
-        select_all_btn = QPushButton("Select All")
+        select_all_btn = QPushButton(self.tr("Select All"))
         select_all_btn.clicked.connect(self._select_all)
         sel_row.addWidget(select_all_btn)
 
-        deselect_all_btn = QPushButton("Deselect All")
+        deselect_all_btn = QPushButton(self.tr("Deselect All"))
         deselect_all_btn.clicked.connect(self._deselect_all)
         sel_row.addWidget(deselect_all_btn)
 
         sel_row.addStretch()
 
-        self._add_btn = QPushButton("Add Folder…")
+        self._add_btn = QPushButton(self.tr("Add Folder…"))
         self._add_btn.clicked.connect(self._add_folder)
         sel_row.addWidget(self._add_btn)
 
-        self._remove_btn = QPushButton("Remove Selected")
+        self._remove_btn = QPushButton(self.tr("Remove Selected"))
         self._remove_btn.clicked.connect(self._remove_folder)
         sel_row.addWidget(self._remove_btn)
 
@@ -379,9 +379,9 @@ class UpdateCrawledFoldersDialog(QDialog):
         layout.addWidget(self._progress)
 
         # --- Results table ---
-        layout.addWidget(QLabel("Changes:"))
+        layout.addWidget(QLabel(self.tr("Changes:")))
         self._table = QTableWidget(0, _NCOLS)
-        self._table.setHorizontalHeaderLabels(["Filename", "Change", "Folder"])
+        self._table.setHorizontalHeaderLabels([self.tr("Filename"), self.tr("Change"), self.tr("Folder")])
         self._table.horizontalHeader().setSectionResizeMode(_COL_FILENAME, QHeaderView.ResizeMode.ResizeToContents)
         self._table.horizontalHeader().setSectionResizeMode(_COL_CHANGE,   QHeaderView.ResizeMode.ResizeToContents)
         self._table.horizontalHeader().setSectionResizeMode(_COL_FOLDER,   QHeaderView.ResizeMode.Stretch)
@@ -392,7 +392,7 @@ class UpdateCrawledFoldersDialog(QDialog):
         self._table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         layout.addWidget(self._table)
 
-        self._counts_label = QLabel("New: 0  |  Updated: 0  |  Unchanged: 0  |  Moved: 0  |  Deleted: 0")
+        self._counts_label = QLabel(self.tr("New: 0  |  Updated: 0  |  Unchanged: 0  |  Moved: 0  |  Deleted: 0"))
         self._counts_label.setStyleSheet(
             "QLabel { "
             "background-color: palette(window); "
@@ -407,27 +407,27 @@ class UpdateCrawledFoldersDialog(QDialog):
         SP = style.StandardPixmap
         btn_row = QHBoxLayout()
 
-        self._start_btn = QPushButton(style.standardIcon(SP.SP_MediaPlay), "Start")
+        self._start_btn = QPushButton(style.standardIcon(SP.SP_MediaPlay), self.tr("Start"))
         self._start_btn.clicked.connect(self._start)
         btn_row.addWidget(self._start_btn)
 
-        self._stop_btn = QPushButton(style.standardIcon(SP.SP_MediaStop), "Stop")
+        self._stop_btn = QPushButton(style.standardIcon(SP.SP_MediaStop), self.tr("Stop"))
         self._stop_btn.setEnabled(False)
         self._stop_btn.clicked.connect(self._stop)
         btn_row.addWidget(self._stop_btn)
 
         btn_row.addStretch()
 
-        self._bg_btn = QPushButton(style.standardIcon(SP.SP_TitleBarMinButton), "Run in Background")
+        self._bg_btn = QPushButton(style.standardIcon(SP.SP_TitleBarMinButton), self.tr("Run in Background"))
         self._bg_btn.setEnabled(False)
         self._bg_btn.setToolTip(
-            "Close this dialog and continue the update in the background.\n"
-            "Progress will be shown in the status bar."
+            self.tr("Close this dialog and continue the update in the background.\n"
+            "Progress will be shown in the status bar.")
         )
         self._bg_btn.clicked.connect(self._run_in_background)
         btn_row.addWidget(self._bg_btn)
 
-        self._close_btn = QPushButton(style.standardIcon(SP.SP_DialogCloseButton), "Close")
+        self._close_btn = QPushButton(style.standardIcon(SP.SP_DialogCloseButton), self.tr("Close"))
         self._close_btn.clicked.connect(self.reject)
         btn_row.addWidget(self._close_btn)
 
@@ -462,8 +462,8 @@ class UpdateCrawledFoldersDialog(QDialog):
         n = len(self._all_folders)
         if n == 0:
             self._status_label.setText(
-                "No crawled folders stored yet. "
-                "Run the Crawler on a folder first to register it, or use Add Folder…"
+                self.tr("No crawled folders stored yet. "
+                "Run the Crawler on a folder first to register it, or use Add Folder…")
             )
             self._start_btn.setEnabled(False)
         else:
@@ -471,11 +471,11 @@ class UpdateCrawledFoldersDialog(QDialog):
             self._start_btn.setEnabled(True)
 
     def _add_folder(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "Add Folder to Re-crawl List")
+        path = QFileDialog.getExistingDirectory(self, self.tr("Add Folder to Re-crawl List"))
         if not path:
             return
         if any(p == path for p, _ in self._all_folders):
-            QMessageBox.information(self, "Already Listed", f"{path}\nis already in the list.")
+            QMessageBox.information(self, self.tr("Already Listed"), f"{path}\nis already in the list.")
             return
         self._all_folders.append((path, None))
         self._append_list_item(path)
@@ -484,12 +484,12 @@ class UpdateCrawledFoldersDialog(QDialog):
     def _remove_folder(self) -> None:
         row = self._folder_list.currentRow()
         if row < 0:
-            QMessageBox.information(self, "No Selection", "Select a folder in the list first.")
+            QMessageBox.information(self, self.tr("No Selection"), self.tr("Select a folder in the list first."))
             return
         path, _ = self._all_folders[row]
         reply = QMessageBox.question(
             self,
-            "Remove Folder",
+            self.tr("Remove Folder"),
             f"Remove this folder from the tracked list?\n\n{path}\n\n"
             "Existing models in the database will not be deleted.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
@@ -530,7 +530,7 @@ class UpdateCrawledFoldersDialog(QDialog):
 
         folders = self._selected_folders()
         if not folders:
-            self._status_label.setText("No folders selected — tick at least one folder to re-crawl.")
+            self._status_label.setText(self.tr("No folders selected — tick at least one folder to re-crawl."))
             return
 
         self._table.setSortingEnabled(False)
@@ -539,7 +539,7 @@ class UpdateCrawledFoldersDialog(QDialog):
         self._progress.setValue(0)
         self._cnt_new = self._cnt_updated = self._cnt_unchanged = 0
         self._cnt_moved = self._cnt_deleted = 0
-        self._counts_label.setText("New: 0  |  Updated: 0  |  Unchanged: 0  |  Moved: 0  |  Deleted: 0")
+        self._counts_label.setText(self.tr("New: 0  |  Updated: 0  |  Unchanged: 0  |  Moved: 0  |  Deleted: 0"))
         self._start_btn.setEnabled(False)
         self._stop_btn.setEnabled(True)
         self._bg_btn.setEnabled(True)

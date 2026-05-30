@@ -1,5 +1,71 @@
 # Changelog
 
+## 2026.22 — 2026-05-30
+
+### Localization (i18n)
+
+The user interface can now be translated. All user-facing strings in the UI
+layer are marked the standard Qt way (`self.tr(...)` /
+`QCoreApplication.translate(...)`), and a new **Language** selector appears in
+**Configuration → Appearance**.
+
+- **Language definitions** live as Qt Linguist `.ts` files in
+  [resources/i18n/](resources/i18n/). English ([resources/i18n/en.ts](resources/i18n/en.ts))
+  and Spanish ([resources/i18n/es.ts](resources/i18n/es.ts)) ship built-in; drop
+  in any additional `<code>.ts` file (e.g. `de.ts`) and it appears in the
+  Language dropdown automatically. Untranslated strings fall back to English.
+- **Runtime loading** is handled by [app/utils/i18n.py](app/utils/i18n.py),
+  which parses the selected `.ts` file directly via a custom `QTranslator`
+  (no `lrelease`/`.qm` compile step required). The chosen language is stored
+  per-library in `settings.json` and applied at startup; changing it prompts for
+  a restart to fully retranslate already-open windows.
+- **Regenerating the template** after adding or changing UI strings:
+  `pylupdate6 main.py app/ui/*.py -ts resources/i18n/en.ts` (then translate the
+  `<translation>` values in a copy for each new language).
+
+**Files:** [app/utils/i18n.py](app/utils/i18n.py),
+[app/ui/config_dialog.py](app/ui/config_dialog.py), [main.py](main.py),
+[resources/i18n/en.ts](resources/i18n/en.ts), and `tr()` wrapping across the
+`app/ui/` widgets and dialogs.
+
+---
+
+### Configuration — Language section and tidier Appearance page
+
+- **Language** is now its own top-level section in the Configuration sidebar
+  (previously it lived inside Appearance).
+- On the **Appearance** page, the per-element colour pickers (Duplicate
+  Highlight, Status Indicators, Warning Rows, Maintenance View, Highlights,
+  Window Colors) are grouped into a single **Custom Colors** section that is
+  *collapsible* (collapsed by default) and laid out in a **3-column grid**,
+  with the *Reset all* / *Save as colour scheme* actions inside it. The Color
+  Scheme selector and Typography remain at the top level of the page. The three
+  columns scale with the dialog width (long descriptions now wrap).
+- The Configuration sidebar section labels (Database, Language, Crawler,
+  Appearance, …) are now translatable along with the rest of the UI.
+
+**Files:** [app/ui/config_dialog.py](app/ui/config_dialog.py)
+
+---
+
+### Crawler — collapsible sections and resizeable folder list
+
+The Crawler tab layout has been reorganised for less vertical clutter:
+
+- **Folders to crawl** is now embedded in a vertical `QSplitter` together with
+  the rest of the controls, so the user can drag the divider to give the
+  folder list more or less space (replaces the previous fixed 100–150 px cap).
+- **Parse metadata from path** is no longer a `QGroupBox`. The
+  *Apply path pattern to metadata extraction* checkbox has been moved above
+  the section and now also acts as the show/hide toggle for the
+  pattern editor, saved-pattern selector, and preview. The checkbox is
+  disabled while the pattern field is empty.
+- **Override metadata** is now a collapsible section (collapsed by default).
+
+**Files:** [app/ui/crawler_tab.py](app/ui/crawler_tab.py)
+
+---
+
 ## 2026.21 — 2026-05-24
 
 ### Crawler — merged with Update Crawled Folders

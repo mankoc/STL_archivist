@@ -95,7 +95,7 @@ class MassEditorDialog(QDialog):
         root = QVBoxLayout(self)
 
         # ---- Path pattern group ----
-        path_group = QGroupBox("Parse fields from archive path (optional)")
+        path_group = QGroupBox(self.tr("Parse fields from archive path (optional)"))
         path_layout = QVBoxLayout(path_group)
 
         # Example path
@@ -107,15 +107,15 @@ class MassEditorDialog(QDialog):
 
         # Saved-patterns row
         saved_row = QHBoxLayout()
-        saved_row.addWidget(QLabel("Saved:"))
+        saved_row.addWidget(QLabel(self.tr("Saved:")))
         self._saved_combo = QComboBox()
-        self._saved_combo.setPlaceholderText("— load a saved pattern —")
+        self._saved_combo.setPlaceholderText(self.tr("— load a saved pattern —"))
         self._saved_combo.activated.connect(self._load_saved_pattern)
         saved_row.addWidget(self._saved_combo, stretch=1)
-        save_btn = QPushButton("Save…")
+        save_btn = QPushButton(self.tr("Save…"))
         save_btn.clicked.connect(self._save_pattern)
         saved_row.addWidget(save_btn)
-        delete_btn = QPushButton("Delete")
+        delete_btn = QPushButton(self.tr("Delete"))
         delete_btn.clicked.connect(self._delete_pattern)
         saved_row.addWidget(delete_btn)
         help_btn = QToolButton()
@@ -132,10 +132,10 @@ class MassEditorDialog(QDialog):
         # Pattern input + Parse button
         pattern_row = QHBoxLayout()
         self._pattern_edit = QLineEdit()
-        self._pattern_edit.setPlaceholderText("/mnt/f/{source}/{creator}/{month}/{name}")
+        self._pattern_edit.setPlaceholderText(self.tr("/mnt/f/{source}/{creator}/{month}/{name}"))
         self._pattern_edit.textChanged.connect(self._update_preview)
         pattern_row.addWidget(self._pattern_edit)
-        parse_btn = QPushButton("Parse all paths")
+        parse_btn = QPushButton(self.tr("Parse all paths"))
         parse_btn.clicked.connect(self._parse_paths)
         pattern_row.addWidget(parse_btn)
         path_layout.addLayout(pattern_row)
@@ -152,10 +152,10 @@ class MassEditorDialog(QDialog):
         self._parse_status.setStyleSheet("color: gray; font-style: italic;")
         path_layout.addWidget(self._parse_status)
 
-        self._overwrite_cb = QCheckBox("Overwrite existing field values with parsed values")
+        self._overwrite_cb = QCheckBox(self.tr("Overwrite existing field values with parsed values"))
         self._overwrite_cb.setToolTip(
-            "When checked, parsed values replace any existing field values.\n"
-            "When unchecked, parsed values are only written to fields that are currently empty."
+            self.tr("When checked, parsed values replace any existing field values.\n"
+            "When unchecked, parsed values are only written to fields that are currently empty.")
         )
         path_layout.addWidget(self._overwrite_cb)
 
@@ -163,7 +163,7 @@ class MassEditorDialog(QDialog):
 
         # ---- Manual override group ----
         manual_group = QGroupBox(
-            "Manual overrides — fill a field to apply the same value to all selected models"
+            self.tr("Manual overrides — fill a field to apply the same value to all selected models")
         )
         manual_vbox = QVBoxLayout(manual_group)
 
@@ -292,7 +292,7 @@ class MassEditorDialog(QDialog):
             ("sculptor",       self._sculptor_edit),
         ]
         for field_name, widget in _clearable_fields:
-            cb = QCheckBox("clear")
+            cb = QCheckBox(self.tr("clear"))
             cb.setToolTip(f"When checked, {field_name} will be set to blank on all selected models")
             cb.setStyleSheet("QCheckBox { color: gray; font-size: 10px; }")
             cb.toggled.connect(widget.setDisabled)
@@ -324,7 +324,7 @@ class MassEditorDialog(QDialog):
         _cell(5, 1, "Presupports:",  "presupports",   self._presupports_combo)
 
         # Tags spans the full width
-        tags_lbl = QLabel("Tags:")
+        tags_lbl = QLabel(self.tr("Tags:"))
         tags_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         tags_container = QWidget()
         tags_lay = QHBoxLayout(tags_container)
@@ -338,19 +338,19 @@ class MassEditorDialog(QDialog):
         root.addWidget(manual_group)
 
         # ---- Find & Replace group ----
-        fnr_group = QGroupBox("Find & Replace")
+        fnr_group = QGroupBox(self.tr("Find & Replace"))
         fnr_layout = QFormLayout(fnr_group)
         fnr_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
         self._find_edit = QLineEdit()
-        self._find_edit.setPlaceholderText("substring to find")
+        self._find_edit.setPlaceholderText(self.tr("substring to find"))
         self._find_edit.setClearButtonEnabled(True)
-        fnr_layout.addRow("Find:", self._find_edit)
+        fnr_layout.addRow(self.tr("Find:"), self._find_edit)
 
         self._replace_edit = QLineEdit()
-        self._replace_edit.setPlaceholderText("replacement (leave empty to delete)")
+        self._replace_edit.setPlaceholderText(self.tr("replacement (leave empty to delete)"))
         self._replace_edit.setClearButtonEnabled(True)
-        fnr_layout.addRow("Replace with:", self._replace_edit)
+        fnr_layout.addRow(self.tr("Replace with:"), self._replace_edit)
 
         # Field selection — which string columns to apply F&R to
         self._fnr_fields: dict[str, QCheckBox] = {}
@@ -370,17 +370,17 @@ class MassEditorDialog(QDialog):
             self._fnr_fields[field_name] = cb
             fields_lay.addWidget(cb)
         fields_lay.addStretch()
-        fnr_layout.addRow("Apply to:", fields_row)
+        fnr_layout.addRow(self.tr("Apply to:"), fields_row)
 
         options_row = QWidget()
         options_lay = QHBoxLayout(options_row)
         options_lay.setContentsMargins(0, 0, 0, 0)
         options_lay.setSpacing(16)
-        self._fnr_case_check = QCheckBox("Case-sensitive")
-        self._fnr_regex_check = QCheckBox("Use regex")
+        self._fnr_case_check = QCheckBox(self.tr("Case-sensitive"))
+        self._fnr_regex_check = QCheckBox(self.tr("Use regex"))
         self._fnr_regex_check.setToolTip(
-            "When checked, the Find field is treated as a Python regular expression.\n"
-            "Use capture groups in Replace with: \\1, \\2, …"
+            self.tr("When checked, the Find field is treated as a Python regular expression.\n"
+            "Use capture groups in Replace with: \\1, \\2, …")
         )
         options_lay.addWidget(self._fnr_case_check)
         options_lay.addWidget(self._fnr_regex_check)
@@ -514,9 +514,9 @@ class MassEditorDialog(QDialog):
     def _save_pattern(self) -> None:
         pattern = self._pattern_edit.text().strip()
         if not pattern:
-            QMessageBox.information(self, "Save Pattern", "Enter a pattern first.")
+            QMessageBox.information(self, self.tr("Save Pattern"), self.tr("Enter a pattern first."))
             return
-        name, ok = QInputDialog.getText(self, "Save Pattern", "Pattern name:")
+        name, ok = QInputDialog.getText(self, self.tr("Save Pattern"), self.tr("Pattern name:"))
         if not ok or not name.strip():
             return
         name = name.strip()
@@ -548,7 +548,7 @@ class MassEditorDialog(QDialog):
 
         extracted = _parse_path(pattern.strip(), self._example_path)
         if not extracted:
-            self._preview_label.setText("<i>no match</i>")
+            self._preview_label.setText(self.tr("<i>no match</i>"))
             return
 
         parts = [
@@ -563,7 +563,7 @@ class MassEditorDialog(QDialog):
     def _parse_paths(self) -> None:
         pattern = self._pattern_edit.text().strip()
         if not pattern:
-            self._parse_status.setText("Enter a pattern first.")
+            self._parse_status.setText(self.tr("Enter a pattern first."))
             return
 
         self._path_results.clear()
@@ -719,7 +719,7 @@ class MassEditorDialog(QDialog):
                 pattern = re.compile(raw, flags)
             except re.error as exc:
                 from PyQt6.QtWidgets import QMessageBox
-                QMessageBox.warning(self, "Invalid Regex", f"The pattern is not valid:\n{exc}")
+                QMessageBox.warning(self, self.tr("Invalid Regex"), f"The pattern is not valid:\n{exc}")
                 return
             simple_fields = [f for f in target_fields if f not in ("collection", "subcollection")]
             do_collection    = "collection"    in target_fields

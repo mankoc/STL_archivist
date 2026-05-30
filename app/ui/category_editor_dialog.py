@@ -19,7 +19,7 @@ class CategoryEditorDialog(QDialog):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Category Editor")
+        self.setWindowTitle(self.tr("Category Editor"))
         self.resize(420, 520)
         self._build_ui()
         self._load()
@@ -29,7 +29,7 @@ class CategoryEditorDialog(QDialog):
         root = QVBoxLayout(self)
 
         self._table = QTableWidget(0, 2)
-        self._table.setHorizontalHeaderLabels(["Category", "Models"])
+        self._table.setHorizontalHeaderLabels([self.tr("Category"), self.tr("Models")])
         self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -40,19 +40,19 @@ class CategoryEditorDialog(QDialog):
 
         btn_row = QHBoxLayout()
 
-        add_btn = QPushButton("Add…")
+        add_btn = QPushButton(self.tr("Add…"))
         add_btn.clicked.connect(self._add)
         btn_row.addWidget(add_btn)
 
-        rename_btn = QPushButton("Rename…")
+        rename_btn = QPushButton(self.tr("Rename…"))
         rename_btn.clicked.connect(self._rename)
         btn_row.addWidget(rename_btn)
 
-        delete_btn = QPushButton("Delete")
+        delete_btn = QPushButton(self.tr("Delete"))
         delete_btn.clicked.connect(self._delete)
         btn_row.addWidget(delete_btn)
 
-        merge_btn = QPushButton("Merge Duplicates…")
+        merge_btn = QPushButton(self.tr("Merge Duplicates…"))
         merge_btn.clicked.connect(self._merge_duplicates)
         btn_row.addWidget(merge_btn)
 
@@ -95,13 +95,13 @@ class CategoryEditorDialog(QDialog):
     # ------------------------------------------------------------------
     def _add(self) -> None:
         """Prompt for a new category name and insert it into the DB."""
-        name, ok = QInputDialog.getText(self, "Add Category", "Category name:")
+        name, ok = QInputDialog.getText(self, self.tr("Add Category"), self.tr("Category name:"))
         if not ok or not name.strip():
             return
         name = name.strip()
         with session_scope() as session:
             if session.query(Category).filter_by(name=name).first():
-                QMessageBox.warning(self, "Add Category", f"Category '{name}' already exists.")
+                QMessageBox.warning(self, self.tr("Add Category"), f"Category '{name}' already exists.")
                 return
             session.add(Category(name=name))
         self._load()
@@ -110,7 +110,7 @@ class CategoryEditorDialog(QDialog):
         """Rename the selected category, rejecting duplicates."""
         cat_id = self._selected_id()
         if cat_id is None:
-            QMessageBox.information(self, "Rename", "Select exactly one category to rename.")
+            QMessageBox.information(self, self.tr("Rename"), self.tr("Select exactly one category to rename."))
             return
 
         session = get_session()
@@ -119,7 +119,7 @@ class CategoryEditorDialog(QDialog):
         finally:
             session.close()
 
-        new_name, ok = QInputDialog.getText(self, "Rename Category", "New name:", text=old_name)
+        new_name, ok = QInputDialog.getText(self, self.tr("Rename Category"), self.tr("New name:"), text=old_name)
         if not ok or not new_name.strip():
             return
         new_name = new_name.strip()
@@ -128,7 +128,7 @@ class CategoryEditorDialog(QDialog):
 
         with session_scope() as session:
             if session.query(Category).filter_by(name=new_name).first():
-                QMessageBox.warning(self, "Rename Category", f"Category '{new_name}' already exists.")
+                QMessageBox.warning(self, self.tr("Rename Category"), f"Category '{new_name}' already exists.")
                 return
             session.get(Category, cat_id).name = new_name
         self._load()
@@ -137,7 +137,7 @@ class CategoryEditorDialog(QDialog):
         """Delete the selected category after user confirmation."""
         cat_id = self._selected_id()
         if cat_id is None:
-            QMessageBox.information(self, "Delete", "Select exactly one category to delete.")
+            QMessageBox.information(self, self.tr("Delete"), self.tr("Select exactly one category to delete."))
             return
 
         session = get_session()
@@ -152,7 +152,7 @@ class CategoryEditorDialog(QDialog):
         if count:
             msg += f"\n\nIt is currently used by {count} model(s)."
         reply = QMessageBox.question(
-            self, "Delete Category", msg,
+            self, self.tr("Delete Category"), msg,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
         )
@@ -179,7 +179,7 @@ class _MergeCategoriesDialog(QDialog):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Merge Duplicate Categories")
+        self.setWindowTitle(self.tr("Merge Duplicate Categories"))
         self.resize(520, 420)
         self._build_ui()
         self._scan()
@@ -188,25 +188,25 @@ class _MergeCategoriesDialog(QDialog):
         root = QVBoxLayout(self)
 
         thresh_row = QHBoxLayout()
-        thresh_row.addWidget(QLabel("Method:"))
+        thresh_row.addWidget(QLabel(self.tr("Method:")))
         self._method_combo = QComboBox()
         self._method_combo.addItems(["Levenshtein", "Soundex"])
         self._method_combo.currentIndexChanged.connect(self._on_method_changed)
         thresh_row.addWidget(self._method_combo)
-        self._thresh_label = QLabel("Max distance:")
+        self._thresh_label = QLabel(self.tr("Max distance:"))
         thresh_row.addWidget(self._thresh_label)
         self._thresh_spin = QSpinBox()
         self._thresh_spin.setRange(1, 5)
         self._thresh_spin.setValue(2)
         thresh_row.addWidget(self._thresh_spin)
-        scan_btn = QPushButton("Scan")
+        scan_btn = QPushButton(self.tr("Scan"))
         scan_btn.clicked.connect(self._scan)
         thresh_row.addWidget(scan_btn)
         thresh_row.addStretch()
         root.addLayout(thresh_row)
 
         self._table = QTableWidget(0, 3)
-        self._table.setHorizontalHeaderLabels(["Category A", "Category B", "Distance"])
+        self._table.setHorizontalHeaderLabels([self.tr("Category A"), self.tr("Category B"), self.tr("Distance")])
         self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
@@ -216,7 +216,7 @@ class _MergeCategoriesDialog(QDialog):
         root.addWidget(self._table)
 
         btn_row = QHBoxLayout()
-        merge_btn = QPushButton("Merge Selected…")
+        merge_btn = QPushButton(self.tr("Merge Selected…"))
         merge_btn.clicked.connect(self._merge_selected)
         btn_row.addWidget(merge_btn)
         btn_row.addStretch()
@@ -284,7 +284,7 @@ class _MergeCategoriesDialog(QDialog):
     def _merge_selected(self):
         rows = {idx.row() for idx in self._table.selectedIndexes()}
         if len(rows) != 1:
-            QMessageBox.information(self, "Merge", "Select exactly one pair to merge.")
+            QMessageBox.information(self, self.tr("Merge"), self.tr("Select exactly one pair to merge."))
             return
         row = list(rows)[0]
         item_a = self._table.item(row, 0)
@@ -295,7 +295,7 @@ class _MergeCategoriesDialog(QDialog):
         id_b = item_b.data(Qt.ItemDataRole.UserRole)
 
         chosen, ok = QInputDialog.getItem(
-            self, "Merge Categories",
+            self, self.tr("Merge Categories"),
             f"Merging '{name_a}' and '{name_b}'.\nWhich name to keep?",
             [name_a, name_b], 0, False,
         )

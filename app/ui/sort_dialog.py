@@ -156,7 +156,7 @@ class _ConfirmMoveDialog(QDialog):
 
     def __init__(self, preview_data: list[tuple[str, str, int]], parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Confirm file move")
+        self.setWindowTitle(self.tr("Confirm file move"))
         self.setMinimumSize(720, 400)
 
         layout = QVBoxLayout(self)
@@ -165,7 +165,7 @@ class _ConfirmMoveDialog(QDialog):
         layout.addWidget(lbl)
 
         table = QTableWidget(0, 2)
-        table.setHorizontalHeaderLabels(["From", "To"])
+        table.setHorizontalHeaderLabels([self.tr("From"), self.tr("To")])
         hdr = table.horizontalHeader()
         hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -186,7 +186,7 @@ class _ConfirmMoveDialog(QDialog):
         btn_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
-        btn_box.button(QDialogButtonBox.StandardButton.Ok).setText("Move Files")
+        btn_box.button(QDialogButtonBox.StandardButton.Ok).setText(self.tr("Move Files"))
         btn_box.accepted.connect(self.accept)
         btn_box.rejected.connect(self.reject)
         layout.addWidget(btn_box)
@@ -226,7 +226,7 @@ class SortFilesDialog(QDialog):
         layout = QVBoxLayout(self)
 
         # ---- Options form ----
-        form_box = QGroupBox("Move options")
+        form_box = QGroupBox(self.tr("Move options"))
         form = QFormLayout(form_box)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
 
@@ -234,59 +234,59 @@ class SortFilesDialog(QDialog):
         dir_row = QHBoxLayout()
         self._dir_edit = QLineEdit()
         self._dir_edit.setText(_load_last_directory())
-        self._dir_edit.setPlaceholderText("Select or type the base destination directory…")
+        self._dir_edit.setPlaceholderText(self.tr("Select or type the base destination directory…"))
         self._dir_edit.textChanged.connect(self._refresh_preview)
         dir_row.addWidget(self._dir_edit)
-        browse_btn = QPushButton("Browse…")
+        browse_btn = QPushButton(self.tr("Browse…"))
         browse_btn.setFixedWidth(90)
         browse_btn.clicked.connect(self._browse_dir)
         dir_row.addWidget(browse_btn)
-        form.addRow("Target directory:", dir_row)
+        form.addRow(self.tr("Target directory:"), dir_row)
 
         # Pattern row
         pat_row = QHBoxLayout()
         self._pat_edit = QLineEdit()
-        self._pat_edit.setPlaceholderText("{category}/{author}/{title}")
+        self._pat_edit.setPlaceholderText(self.tr("{category}/{author}/{title}"))
         self._pat_edit.textChanged.connect(self._refresh_preview)
         pat_row.addWidget(self._pat_edit)
 
         help_btn = QToolButton()
         help_btn.setText("?")
-        help_btn.setToolTip("Hover for pattern syntax help")
+        help_btn.setToolTip(self.tr("Hover for pattern syntax help"))
         help_btn.setMouseTracking(True)
         help_btn.installEventFilter(self)
         self._help_btn_ref = help_btn
         pat_row.addWidget(help_btn)
 
-        form.addRow("Path pattern:", pat_row)
+        form.addRow(self.tr("Path pattern:"), pat_row)
 
         # Saved patterns row
         saved_row = QHBoxLayout()
         self._saved_combo = QComboBox()
-        self._saved_combo.setPlaceholderText("— select a saved pattern —")
+        self._saved_combo.setPlaceholderText(self.tr("— select a saved pattern —"))
         self._saved_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self._saved_combo.setMinimumWidth(200)
         self._saved_combo.activated.connect(self._load_selected_pattern)
         saved_row.addWidget(self._saved_combo, 1)
 
-        save_btn = QPushButton("Save")
+        save_btn = QPushButton(self.tr("Save"))
         save_btn.setFixedWidth(60)
-        save_btn.setToolTip("Save current pattern for later use")
+        save_btn.setToolTip(self.tr("Save current pattern for later use"))
         save_btn.clicked.connect(self._save_current_pattern)
         saved_row.addWidget(save_btn)
 
-        del_btn = QPushButton("Delete")
+        del_btn = QPushButton(self.tr("Delete"))
         del_btn.setFixedWidth(60)
-        del_btn.setToolTip("Remove the selected saved pattern")
+        del_btn.setToolTip(self.tr("Remove the selected saved pattern"))
         del_btn.clicked.connect(self._delete_selected_pattern)
         saved_row.addWidget(del_btn)
 
-        form.addRow("Saved patterns:", saved_row)
+        form.addRow(self.tr("Saved patterns:"), saved_row)
 
         layout.addWidget(form_box)
 
         # ---- Preview ----
-        preview_box = QGroupBox("Preview")
+        preview_box = QGroupBox(self.tr("Preview"))
         preview_layout = QVBoxLayout(preview_box)
 
         self._preview_status = QLabel("")
@@ -294,7 +294,7 @@ class SortFilesDialog(QDialog):
         preview_layout.addWidget(self._preview_status)
 
         self._preview_table = QTableWidget(0, 3)
-        self._preview_table.setHorizontalHeaderLabels(["Status", "From", "To"])
+        self._preview_table.setHorizontalHeaderLabels([self.tr("Status"), self.tr("From"), self.tr("To")])
         hdr = self._preview_table.horizontalHeader()
         hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -309,12 +309,12 @@ class SortFilesDialog(QDialog):
         # ---- Buttons ----
         self._btn_box = QDialogButtonBox()
         self._dry_run_btn = self._btn_box.addButton(
-            "Dry Run", QDialogButtonBox.ButtonRole.ActionRole
+            self.tr("Dry Run"), QDialogButtonBox.ButtonRole.ActionRole
         )
-        self._dry_run_btn.setToolTip("Preview where files would be moved without moving them")
+        self._dry_run_btn.setToolTip(self.tr("Preview where files would be moved without moving them"))
         self._dry_run_btn.clicked.connect(self._refresh_preview)
         self._move_btn = self._btn_box.addButton(
-            "Move Files", QDialogButtonBox.ButtonRole.AcceptRole
+            self.tr("Move Files"), QDialogButtonBox.ButtonRole.AcceptRole
         )
         self._move_btn.setEnabled(False)
         self._btn_box.addButton(QDialogButtonBox.StandardButton.Cancel)
@@ -365,11 +365,11 @@ class SortFilesDialog(QDialog):
     def _save_current_pattern(self) -> None:
         pattern = self._pat_edit.text().strip()
         if not pattern:
-            QMessageBox.warning(self, "Save pattern", "Enter a pattern before saving.")
+            QMessageBox.warning(self, self.tr("Save pattern"), self.tr("Enter a pattern before saving."))
             return
         patterns = _load_saved_patterns()
         if pattern in patterns:
-            QMessageBox.information(self, "Save pattern", "Pattern is already saved.")
+            QMessageBox.information(self, self.tr("Save pattern"), self.tr("Pattern is already saved."))
             return
         patterns.insert(0, pattern)
         _save_patterns(patterns)
@@ -389,7 +389,7 @@ class SortFilesDialog(QDialog):
     # ------------------------------------------------------------------
     def _browse_dir(self) -> None:
         d = QFileDialog.getExistingDirectory(
-            self, "Select target directory", self._dir_edit.text() or ""
+            self, self.tr("Select target directory"), self._dir_edit.text() or ""
         )
         if d:
             self._dir_edit.setText(d)
@@ -405,11 +405,11 @@ class SortFilesDialog(QDialog):
         pattern = self._pat_edit.text().strip()
 
         if not base_text:
-            self._preview_status.setText("← Set a target directory to see preview.")
+            self._preview_status.setText(self.tr("← Set a target directory to see preview."))
             self._preview_status.setVisible(True)
             return
         if not pattern:
-            self._preview_status.setText("← Set a path pattern to see preview.")
+            self._preview_status.setText(self.tr("← Set a path pattern to see preview."))
             self._preview_status.setVisible(True)
             return
 
@@ -493,7 +493,7 @@ class SortFilesDialog(QDialog):
             if not src.exists():
                 QMessageBox.warning(
                     self,
-                    "Sort — aborted",
+                    self.tr("Sort — aborted"),
                     f"Source file no longer exists:\n{src}\n\n"
                     "No files were moved.",
                 )
@@ -535,7 +535,7 @@ class SortFilesDialog(QDialog):
             if rollback_errors:
                 QMessageBox.critical(
                     self,
-                    "Sort — failed (partial rollback)",
+                    self.tr("Sort — failed (partial rollback)"),
                     f"An error occurred:\n{move_error}\n\n"
                     "Some files could not be rolled back:\n"
                     + "\n".join(rollback_errors)
@@ -545,7 +545,7 @@ class SortFilesDialog(QDialog):
             else:
                 QMessageBox.warning(
                     self,
-                    "Sort — aborted",
+                    self.tr("Sort — aborted"),
                     f"Move failed:\n{move_error}\n\n"
                     "All moves have been rolled back. "
                     "No files were moved and the database was not changed.",
@@ -574,7 +574,7 @@ class SortFilesDialog(QDialog):
         _save_last_directory(self._dir_edit.text().strip())
         QMessageBox.information(
             self,
-            "Sort complete",
+            self.tr("Sort complete"),
             f"Successfully moved {len(plan)} file(s).",
         )
         self.accept()

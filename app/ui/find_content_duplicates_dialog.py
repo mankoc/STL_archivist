@@ -585,7 +585,7 @@ class FindContentDuplicatesDialog(QDialog):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Find Duplicate Archives by Content")
+        self.setWindowTitle(self.tr("Find Duplicate Archives by Content"))
         self.setWindowFlags(
             self.windowFlags()
             | Qt.WindowType.WindowMinimizeButtonHint
@@ -606,19 +606,19 @@ class FindContentDuplicatesDialog(QDialog):
         root = QVBoxLayout(self)
 
         self._tabs = QTabWidget()
-        self._tabs.addTab(self._build_stl_tab(),    "STL Files")
-        self._tabs.addTab(self._build_images_tab(), "Images")
+        self._tabs.addTab(self._build_stl_tab(),    self.tr("STL Files"))
+        self._tabs.addTab(self._build_images_tab(), self.tr("Images"))
         self._tabs.currentChanged.connect(self._on_tab_changed)
         root.addWidget(self._tabs)
 
         btn_row = QHBoxLayout()
-        self._show_pair_btn = QPushButton("Show Pair in Main Table")
+        self._show_pair_btn = QPushButton(self.tr("Show Pair in Main Table"))
         self._show_pair_btn.setEnabled(False)
         self._show_pair_btn.clicked.connect(self._show_pair)
-        self._show_all_btn = QPushButton("Show All Duplicates in Main Table")
+        self._show_all_btn = QPushButton(self.tr("Show All Duplicates in Main Table"))
         self._show_all_btn.setEnabled(False)
         self._show_all_btn.clicked.connect(self._show_all)
-        close_btn = QPushButton("Close")
+        close_btn = QPushButton(self.tr("Close"))
         close_btn.clicked.connect(self.close)
         btn_row.addWidget(self._show_pair_btn)
         btn_row.addWidget(self._show_all_btn)
@@ -630,30 +630,30 @@ class FindContentDuplicatesDialog(QDialog):
         page   = QWidget()
         layout = QVBoxLayout(page)
 
-        grp  = QGroupBox("Search Parameters")
+        grp  = QGroupBox(self.tr("Search Parameters"))
         form = QFormLayout(grp)
         self._stl_thresh_spin = QSpinBox()
         self._stl_thresh_spin.setRange(1, 100)
         self._stl_thresh_spin.setValue(80)
         self._stl_thresh_spin.setSuffix(" %")
         self._stl_thresh_spin.setToolTip(
-            "Minimum fraction of files (relative to the larger archive) "
-            "that must be identical for a pair to be flagged."
+            self.tr("Minimum fraction of files (relative to the larger archive) "
+            "that must be identical for a pair to be flagged.")
         )
-        form.addRow("Similarity threshold:", self._stl_thresh_spin)
+        form.addRow(self.tr("Similarity threshold:"), self._stl_thresh_spin)
         form.addRow("", QLabel(
-            "<small>Two archives are flagged when at least this fraction of the "
+            self.tr("<small>Two archives are flagged when at least this fraction of the "
             "<i>larger</i> archive's STL files appear in both (matched by filename "
             "and size). Requires <b>Store STL file list</b> to be enabled in "
-            "Settings and archives to have been crawled.</small>"
+            "Settings and archives to have been crawled.</small>")
         ))
         layout.addWidget(grp)
 
         ctrl = QHBoxLayout()
-        self._stl_find_btn = QPushButton("Find Duplicates")
+        self._stl_find_btn = QPushButton(self.tr("Find Duplicates"))
         self._stl_find_btn.setDefault(True)
         self._stl_find_btn.clicked.connect(self._start_stl_search)
-        self._stl_stop_btn = QPushButton("Stop")
+        self._stl_stop_btn = QPushButton(self.tr("Stop"))
         self._stl_stop_btn.setEnabled(False)
         self._stl_stop_btn.clicked.connect(self._stop_stl_search)
         self._stl_progress = QProgressBar()
@@ -664,7 +664,7 @@ class FindContentDuplicatesDialog(QDialog):
         ctrl.addWidget(self._stl_progress, stretch=1)
         layout.addLayout(ctrl)
 
-        self._stl_status = QLabel("Ready.")
+        self._stl_status = QLabel(self.tr("Ready."))
         layout.addWidget(self._stl_status)
 
         self._stl_table = _make_table(
@@ -684,33 +684,33 @@ class FindContentDuplicatesDialog(QDialog):
         page   = QWidget()
         layout = QVBoxLayout(page)
 
-        grp  = QGroupBox("Search Parameters")
+        grp  = QGroupBox(self.tr("Search Parameters"))
         form = QFormLayout(grp)
         self._img_dist_spin = QSpinBox()
         self._img_dist_spin.setRange(0, 15)
         self._img_dist_spin.setValue(5)
         self._img_dist_spin.setToolTip(
-            "Maximum Hamming distance between 64-bit dHash fingerprints.\n"
+            self.tr("Maximum Hamming distance between 64-bit dHash fingerprints.\n"
             "0 = bit-for-bit identical pixels\n"
             "≤3 = very similar (different resolution / minor JPEG artefacts)\n"
             "≤8 = noticeably similar (recolour, slight crop)\n"
-            "≤15 = loosely similar (use with caution — many false positives)"
+            "≤15 = loosely similar (use with caution — many false positives)")
         )
-        form.addRow("Max hash distance:", self._img_dist_spin)
+        form.addRow(self.tr("Max hash distance:"), self._img_dist_spin)
         form.addRow("", QLabel(
-            "<small>Preview thumbnails are compared with a perceptual difference "
+            self.tr("<small>Preview thumbnails are compared with a perceptual difference "
             "hash (dHash). Two thumbnails are considered similar when their "
             "64-bit hashes differ in at most this many bits. A distance of 0 "
             "catches only near-identical images; 5 typically catches the same "
             "render at different resolutions or with slight colour shifts. "
-            "Higher values increase recall but also false positives.</small>"
+            "Higher values increase recall but also false positives.</small>")
         ))
         layout.addWidget(grp)
 
         ctrl = QHBoxLayout()
-        self._img_find_btn = QPushButton("Find Duplicates")
+        self._img_find_btn = QPushButton(self.tr("Find Duplicates"))
         self._img_find_btn.clicked.connect(self._start_img_search)
-        self._img_stop_btn = QPushButton("Stop")
+        self._img_stop_btn = QPushButton(self.tr("Stop"))
         self._img_stop_btn.setEnabled(False)
         self._img_stop_btn.clicked.connect(self._stop_img_search)
         self._img_progress = QProgressBar()
@@ -721,7 +721,7 @@ class FindContentDuplicatesDialog(QDialog):
         ctrl.addWidget(self._img_progress, stretch=1)
         layout.addLayout(ctrl)
 
-        self._img_status = QLabel("Ready.")
+        self._img_status = QLabel(self.tr("Ready."))
         layout.addWidget(self._img_status)
 
         self._img_table = _make_table(
@@ -751,7 +751,7 @@ class FindContentDuplicatesDialog(QDialog):
         self._stl_stop_btn.setEnabled(True)
         self._stl_progress.setRange(0, 0)
         self._stl_progress.setVisible(True)
-        self._stl_status.setText("Searching…")
+        self._stl_status.setText(self.tr("Searching…"))
         self._refresh_bottom_buttons()
 
         self._stl_worker = _ContentDupWorker(
@@ -768,7 +768,7 @@ class FindContentDuplicatesDialog(QDialog):
         self._stl_find_btn.setEnabled(True)
         self._stl_stop_btn.setEnabled(False)
         self._stl_progress.setVisible(False)
-        self._stl_status.setText("Search stopped.")
+        self._stl_status.setText(self.tr("Search stopped."))
 
     def _on_stl_finished(self, results: list) -> None:
         self._stl_results = results
@@ -832,17 +832,17 @@ class FindContentDuplicatesDialog(QDialog):
         menu        = QMenu(self)
         compare_act = menu.addAction(
             style.standardIcon(style.StandardPixmap.SP_FileDialogContentsView),
-            "Compare Archive Contents…",
+            self.tr("Compare Archive Contents…"),
         )
         menu.addSeparator()
         open_a_act = menu.addAction(
             style.standardIcon(style.StandardPixmap.SP_DirOpenIcon),
-            "Open Folder of Archive A in Explorer",
+            self.tr("Open Folder of Archive A in Explorer"),
         )
         open_a_act.setEnabled(bool(path_a))
         open_b_act = menu.addAction(
             style.standardIcon(style.StandardPixmap.SP_DirOpenIcon),
-            "Open Folder of Archive B in Explorer",
+            self.tr("Open Folder of Archive B in Explorer"),
         )
         open_b_act.setEnabled(bool(path_b))
 
@@ -852,11 +852,11 @@ class FindContentDuplicatesDialog(QDialog):
             menu.addSeparator()
             delete_a_act = menu.addAction(
                 style.standardIcon(style.StandardPixmap.SP_TrashIcon),
-                "Delete Archive A from Disk…",
+                self.tr("Delete Archive A from Disk…"),
             )
             delete_b_act = menu.addAction(
                 style.standardIcon(style.StandardPixmap.SP_TrashIcon),
-                "Delete Archive B from Disk…",
+                self.tr("Delete Archive B from Disk…"),
             )
 
         action = menu.exec(table.viewport().mapToGlobal(pos))
@@ -887,7 +887,7 @@ class FindContentDuplicatesDialog(QDialog):
         self._img_progress.setRange(0, 1)
         self._img_progress.setValue(0)
         self._img_progress.setVisible(True)
-        self._img_status.setText("Searching…")
+        self._img_status.setText(self.tr("Searching…"))
         self._refresh_bottom_buttons()
 
         self._img_worker = _ImageDupWorker(
@@ -909,7 +909,7 @@ class FindContentDuplicatesDialog(QDialog):
         self._img_find_btn.setEnabled(True)
         self._img_stop_btn.setEnabled(False)
         self._img_progress.setVisible(False)
-        self._img_status.setText("Search stopped.")
+        self._img_status.setText(self.tr("Search stopped."))
 
     def _on_img_finished(self, results: list) -> None:
         self._img_results = results
@@ -981,7 +981,7 @@ class FindContentDuplicatesDialog(QDialog):
         if report.failed:
             QMessageBox.warning(
                 self,
-                "Delete Archive",
+                self.tr("Delete Archive"),
                 f"Failed to delete the archive:\n{report.failed[0][1]}",
             )
         else:
@@ -1018,7 +1018,7 @@ class FindContentDuplicatesDialog(QDialog):
             for model_id, img_id in first_img.items():
                 result[model_id] = get_thumbnail_bytes(img_id)
         except Exception as exc:
-            logger.warning("Failed to load model thumbnails for popup: %s", exc)
+            logger.warning(self.tr("Failed to load model thumbnails for popup: %s"), exc)
         return result
 
     # ── Shared bottom buttons ─────────────────────────────────────────────────

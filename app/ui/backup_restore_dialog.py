@@ -117,7 +117,7 @@ class BackupRestoreDialog(QDialog):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Backup / Restore Library")
+        self.setWindowTitle(self.tr("Backup / Restore Library"))
         self.setMinimumWidth(520)
         self._worker: QThread | None = None
         self._build_ui()
@@ -138,8 +138,8 @@ class BackupRestoreDialog(QDialog):
         layout.addWidget(info)
 
         btn_row = QHBoxLayout()
-        self._btn_backup  = QPushButton("Backup…")
-        self._btn_restore = QPushButton("Restore…")
+        self._btn_backup  = QPushButton(self.tr("Backup…"))
+        self._btn_restore = QPushButton(self.tr("Restore…"))
         self._btn_backup.clicked.connect(self._start_backup)
         self._btn_restore.clicked.connect(self._start_restore)
         btn_row.addWidget(self._btn_backup)
@@ -176,9 +176,9 @@ class BackupRestoreDialog(QDialog):
         self._close_btn.setEnabled(True)
         self._worker = None
         if success:
-            QMessageBox.information(self, "Done", msg)
+            QMessageBox.information(self, self.tr("Done"), msg)
         else:
-            QMessageBox.critical(self, "Error", msg)
+            QMessageBox.critical(self, self.tr("Error"), msg)
 
     def _lock_ui(self) -> None:
         self._btn_backup.setEnabled(False)
@@ -193,9 +193,9 @@ class BackupRestoreDialog(QDialog):
         default_name = f"stlLibrary_backup_{timestamp}.7z"
         dest, _ = QFileDialog.getSaveFileName(
             self,
-            "Save Backup As",
+            self.tr("Save Backup As"),
             str(Path.home() / default_name),
-            "7-Zip Archives (*.7z)",
+            self.tr("7-Zip Archives (*.7z)"),
         )
         if not dest:
             return
@@ -212,20 +212,20 @@ class BackupRestoreDialog(QDialog):
     def _start_restore(self) -> None:
         src, _ = QFileDialog.getOpenFileName(
             self,
-            "Select Backup File",
+            self.tr("Select Backup File"),
             str(Path.home()),
-            "7-Zip Archives (*.7z)",
+            self.tr("7-Zip Archives (*.7z)"),
         )
         if not src:
             return
 
         reply = QMessageBox.warning(
             self,
-            "Confirm Restore",
-            "This will <b>overwrite</b> your current database, thumbnails, and settings "
+            self.tr("Confirm Restore"),
+            self.tr("This will <b>overwrite</b> your current database, thumbnails, and settings "
             "with the contents of the selected backup.<br><br>"
             "The application must be restarted afterwards.<br><br>"
-            "Are you sure?",
+            "Are you sure?"),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
         )

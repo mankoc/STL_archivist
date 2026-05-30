@@ -12,7 +12,7 @@ class CrawlerDialog(QDialog):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Crawler")
+        self.setWindowTitle(self.tr("Crawler"))
         self.resize(780, 900)
         self.setModal(True)
         self.setWindowFlags(

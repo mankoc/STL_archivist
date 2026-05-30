@@ -140,7 +140,7 @@ class StatisticsDialog(QDialog):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Database Statistics")
+        self.setWindowTitle(self.tr("Database Statistics"))
         self.resize(680, 720)
         self.setModal(True)
         self._worker: StatsWorker | None = None
@@ -161,7 +161,7 @@ class StatisticsDialog(QDialog):
         scroll.setWidget(self._container)
         root.addWidget(scroll)
 
-        self._status_lbl = QLabel("Loading statistics…")
+        self._status_lbl = QLabel(self.tr("Loading statistics…"))
         self._status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         root.addWidget(self._status_lbl)
 
@@ -169,12 +169,12 @@ class StatisticsDialog(QDialog):
         SP = style.StandardPixmap
         btn_row = QHBoxLayout()
 
-        self._refresh_btn = QPushButton(style.standardIcon(SP.SP_BrowserReload), "Refresh")
+        self._refresh_btn = QPushButton(style.standardIcon(SP.SP_BrowserReload), self.tr("Refresh"))
         self._refresh_btn.clicked.connect(self._load)
         btn_row.addWidget(self._refresh_btn)
         btn_row.addStretch()
 
-        close_btn = QPushButton(style.standardIcon(SP.SP_DialogCloseButton), "Close")
+        close_btn = QPushButton(style.standardIcon(SP.SP_DialogCloseButton), self.tr("Close"))
         close_btn.clicked.connect(self.reject)
         btn_row.addWidget(close_btn)
 
@@ -187,7 +187,7 @@ class StatisticsDialog(QDialog):
     # ------------------------------------------------------------------
     def _load(self) -> None:
         self._refresh_btn.setEnabled(False)
-        self._status_lbl.setText("Loading statistics…")
+        self._status_lbl.setText(self.tr("Loading statistics…"))
         self._status_lbl.setVisible(True)
         self._clear_content()
 

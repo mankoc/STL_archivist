@@ -32,12 +32,12 @@ class CreatorEditorDialog(QDialog):
         self._mmf_edit         = QLineEdit()
         for edit in (self._patreon_edit, self._artstation_edit,
                      self._gumroad_edit, self._mmf_edit):
-            edit.setPlaceholderText("https://…")
-        form.addRow("Full name:",         self._full_name_edit)
-        form.addRow("Patreon URL:",       self._patreon_edit)
-        form.addRow("ArtStation URL:",    self._artstation_edit)
-        form.addRow("Gumroad URL:",       self._gumroad_edit)
-        form.addRow("MyMiniFactory URL:", self._mmf_edit)
+            edit.setPlaceholderText(self.tr("https://…"))
+        form.addRow(self.tr("Full name:"),         self._full_name_edit)
+        form.addRow(self.tr("Patreon URL:"),       self._patreon_edit)
+        form.addRow(self.tr("ArtStation URL:"),    self._artstation_edit)
+        form.addRow(self.tr("Gumroad URL:"),       self._gumroad_edit)
+        form.addRow(self.tr("MyMiniFactory URL:"), self._mmf_edit)
         root.addLayout(form)
 
         buttons = QDialogButtonBox(

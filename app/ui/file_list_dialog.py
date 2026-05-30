@@ -26,7 +26,7 @@ def format_size(size_bytes: int) -> str:
 class FileListDialog(QDialog):
     def __init__(self, model_id: int, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Archive Contents")
+        self.setWindowTitle(self.tr("Archive Contents"))
         self.resize(800, 600)
         self.model_id = model_id
         
@@ -39,7 +39,7 @@ class FileListDialog(QDialog):
                 layout.addWidget(QLabel(f"<b>Archive:</b> {title}"))
         
         self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["Filename", "Size", "Hash"])
+        self.table.setHorizontalHeaderLabels([self.tr("Filename"), self.tr("Size"), self.tr("Hash")])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -49,7 +49,7 @@ class FileListDialog(QDialog):
         
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-        close_btn = QPushButton("Close")
+        close_btn = QPushButton(self.tr("Close"))
         close_btn.clicked.connect(self.accept)
         btn_layout.addWidget(close_btn)
         layout.addLayout(btn_layout)
@@ -71,7 +71,7 @@ class FileListDialog(QDialog):
 class FileComparisonDialog(QDialog):
     def __init__(self, model_id_a: int, model_id_b: int, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Compare Archive Contents")
+        self.setWindowTitle(self.tr("Compare Archive Contents"))
         self.resize(1200, 700)
         self.model_id_a = model_id_a
         self.model_id_b = model_id_b
@@ -90,7 +90,7 @@ class FileComparisonDialog(QDialog):
         layout.addLayout(header_layout)
         
         ctrl_layout = QHBoxLayout()
-        ctrl_layout.addWidget(QLabel("Match by:"))
+        ctrl_layout.addWidget(QLabel(self.tr("Match by:")))
         self.match_combo = QComboBox()
         self.match_combo.addItems(["Filename", "Size", "Hash"])
         self.match_combo.currentIndexChanged.connect(self.rebuild_table)
@@ -99,7 +99,7 @@ class FileComparisonDialog(QDialog):
         layout.addLayout(ctrl_layout)
         
         self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["Filename A", "Size A", "Match", "Filename B", "Size B"])
+        self.table.setHorizontalHeaderLabels([self.tr("Filename A"), self.tr("Size A"), self.tr("Match"), self.tr("Filename B"), self.tr("Size B")])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -109,7 +109,7 @@ class FileComparisonDialog(QDialog):
         
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-        close_btn = QPushButton("Close")
+        close_btn = QPushButton(self.tr("Close"))
         close_btn.clicked.connect(self.accept)
         btn_layout.addWidget(close_btn)
         layout.addLayout(btn_layout)

@@ -10,10 +10,10 @@ import re
 import sys
 from pathlib import Path
 
-from PyQt6.QtCore import QSettings, QSize, Qt
+from PyQt6.QtCore import QCoreApplication, QSettings, QSize, Qt, QT_TRANSLATE_NOOP
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QFormLayout, QGroupBox,
+    QDialog, QVBoxLayout, QFormLayout, QGridLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QHBoxLayout,
     QDialogButtonBox, QFileDialog, QMessageBox, QSpinBox, QDoubleSpinBox,
     QComboBox, QCheckBox, QApplication, QColorDialog, QInputDialog,
@@ -34,10 +34,12 @@ FILE_MANAGER_SYSTEM           = "system"
 FILE_MANAGER_DOUBLE_COMMANDER = "double_commander"
 FILE_MANAGER_CUSTOM           = "custom"
 
+# Values are marked with QT_TRANSLATE_NOOP so pylupdate6 extracts them; they are
+# translated at the point of use (see _build_browser_config_page).
 _FILE_MANAGER_DISPLAY: dict[str, str] = {
-    FILE_MANAGER_SYSTEM:           "System Default",
-    FILE_MANAGER_DOUBLE_COMMANDER: "Double Commander",
-    FILE_MANAGER_CUSTOM:           "Custom…",
+    FILE_MANAGER_SYSTEM:           QT_TRANSLATE_NOOP("config_dialog", "System Default"),
+    FILE_MANAGER_DOUBLE_COMMANDER: QT_TRANSLATE_NOOP("config_dialog", "Double Commander"),
+    FILE_MANAGER_CUSTOM:           QT_TRANSLATE_NOOP("config_dialog", "Custom…"),
 }
 
 # Default executable paths per preset per platform (used as placeholder / fallback)
@@ -162,6 +164,12 @@ def get_max_thumb_size() -> int:
 
 def get_color_scheme() -> str:
     return _load_library_settings().get("color_scheme", COLOR_SCHEME_DEFAULT)
+
+
+def get_language() -> str:
+    """Return the configured UI language code (e.g. ``"en"``, ``"de"``)."""
+    from app.utils.i18n import DEFAULT_LANGUAGE
+    return str(_load_library_settings().get("language", DEFAULT_LANGUAGE))
 
 
 def _parse_qss_token(qss_text: str, token: str) -> str | None:
@@ -465,19 +473,21 @@ HOTKEY_DEFAULTS: dict[str, str] = {
     "find_duplicates": "Ctrl+D",
 }
 
+# Values are marked with QT_TRANSLATE_NOOP so pylupdate6 extracts them; they are
+# translated at the point of use (see _build_hotkeys_page).
 HOTKEY_LABELS: dict[str, str] = {
-    "edit_model":      "Edit model",
-    "mass_edit":       "Mass edit selected",
-    "refresh":         "Refresh table",
-    "apply_filter":    "Apply filter",
-    "delete_from_db":  "Delete from DB",
-    "open_folder":     "Open containing folder",
-    "show_files":      "Show archive files",
-    "image_grid":      "Image grid",
-    "toggle_images":   "Toggle image pane",
-    "open_crawler":    "Open Crawler",
-    "update_folders":  "Update crawled folders",
-    "find_duplicates": "Find metadata duplicates",
+    "edit_model":      QT_TRANSLATE_NOOP("config_dialog", "Edit model"),
+    "mass_edit":       QT_TRANSLATE_NOOP("config_dialog", "Mass edit selected"),
+    "refresh":         QT_TRANSLATE_NOOP("config_dialog", "Refresh table"),
+    "apply_filter":    QT_TRANSLATE_NOOP("config_dialog", "Apply filter"),
+    "delete_from_db":  QT_TRANSLATE_NOOP("config_dialog", "Delete from DB"),
+    "open_folder":     QT_TRANSLATE_NOOP("config_dialog", "Open containing folder"),
+    "show_files":      QT_TRANSLATE_NOOP("config_dialog", "Show archive files"),
+    "image_grid":      QT_TRANSLATE_NOOP("config_dialog", "Image grid"),
+    "toggle_images":   QT_TRANSLATE_NOOP("config_dialog", "Toggle image pane"),
+    "open_crawler":    QT_TRANSLATE_NOOP("config_dialog", "Open Crawler"),
+    "update_folders":  QT_TRANSLATE_NOOP("config_dialog", "Update crawled folders"),
+    "find_duplicates": QT_TRANSLATE_NOOP("config_dialog", "Find metadata duplicates"),
 }
 
 
@@ -503,7 +513,7 @@ def open_folder_with_file_manager(folder: str) -> None:
         exe = _FILE_MANAGER_DEFAULTS[manager].get(plat, "")
 
     if not exe:
-        QMessageBox.warning(None, "Open Folder", "No file manager executable configured.")
+        QMessageBox.warning(None, QCoreApplication.translate("config_dialog", "Open Folder"), QCoreApplication.translate("config_dialog", "No file manager executable configured."))
         return
 
     import subprocess
@@ -511,11 +521,11 @@ def open_folder_with_file_manager(folder: str) -> None:
         subprocess.Popen([exe, folder])
     except FileNotFoundError:
         QMessageBox.warning(
-            None, "Open Folder",
+            None, QCoreApplication.translate("config_dialog", "Open Folder"),
             f"Executable not found:\n{exe}\n\nCheck the path in Settings → Browser.",
         )
     except Exception as exc:
-        QMessageBox.warning(None, "Open Folder", f"Failed to open folder:\n{exc}")
+        QMessageBox.warning(None, QCoreApplication.translate("config_dialog", "Open Folder"), f"Failed to open folder:\n{exc}")
 
 
 _ICONS_DIR = Path(__file__).parent.parent.parent / "resources" / "icons"
@@ -591,7 +601,7 @@ class ConfigDialog(QDialog):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Configuration")
+        self.setWindowTitle(self.tr("Configuration"))
         self.setMinimumWidth(580)
         self.setMinimumHeight(300)
         self._original_scheme: str = get_color_scheme()
@@ -613,7 +623,7 @@ class ConfigDialog(QDialog):
         # Left: section tree
         # Page indices must match the order pages are added to self._stack below.
         # 0=Database  1=Crawler  2=Warnings(child)  3=File writing  4=Appearance
-        # 5=Sidecar(child)  6=Debug  7=Browser  8=Hotkeys
+        # 5=Sidecar(child)  6=Debug  7=Browser  8=Hotkeys  9=Language
         self._section_tree = QTreeWidget()
         self._section_tree.setFixedWidth(155)
         self._section_tree.setHeaderHidden(True)
@@ -629,15 +639,16 @@ class ConfigDialog(QDialog):
             item.setData(0, Qt.ItemDataRole.UserRole, page_idx)
             return item
 
-        _item(self._section_tree, "Database",     sp.SP_DriveHDIcon,              0)
-        crawler_item = _item(self._section_tree, "Crawler", sp.SP_FileDialogDetailedView, 1)
-        _item(crawler_item,            "Warnings", sp.SP_MessageBoxWarning,        2)
-        fw_item = _item(self._section_tree, "File writing", sp.SP_DesktopIcon,     3)
-        _item(fw_item,                 "Sidecar",  sp.SP_DialogSaveButton,         5)
-        _item(self._section_tree, "Browser",      sp.SP_FileDialogListView,        7)
-        _item(self._section_tree, "Appearance",   sp.SP_TitleBarNormalButton,      4)
-        _item(self._section_tree, "Hotkeys",      sp.SP_MediaVolumeMuted,          8)
-        _item(self._section_tree, "Debug",        sp.SP_MessageBoxCritical,        6)
+        _item(self._section_tree, self.tr("Database"),     sp.SP_DriveHDIcon,            0)
+        _item(self._section_tree, self.tr("Language"),     sp.SP_DialogHelpButton,       9)
+        crawler_item = _item(self._section_tree, self.tr("Crawler"), sp.SP_FileDialogDetailedView, 1)
+        _item(crawler_item,            self.tr("Warnings"), sp.SP_MessageBoxWarning,      2)
+        fw_item = _item(self._section_tree, self.tr("File writing"), sp.SP_DesktopIcon,   3)
+        _item(fw_item,                 self.tr("Sidecar"),  sp.SP_DialogSaveButton,       5)
+        _item(self._section_tree, self.tr("Browser"),      sp.SP_FileDialogListView,      7)
+        _item(self._section_tree, self.tr("Appearance"),   sp.SP_TitleBarNormalButton,    4)
+        _item(self._section_tree, self.tr("Hotkeys"),      sp.SP_MediaVolumeMuted,        8)
+        _item(self._section_tree, self.tr("Debug"),        sp.SP_MessageBoxCritical,      6)
 
         crawler_item.setExpanded(True)
         fw_item.setExpanded(True)
@@ -661,6 +672,7 @@ class ConfigDialog(QDialog):
         self._stack.addWidget(self._build_debug_page())           # 6
         self._stack.addWidget(self._build_browser_config_page())  # 7
         self._stack.addWidget(self._build_hotkeys_page())         # 8
+        self._stack.addWidget(self._build_language_page())        # 9
 
         self._section_tree.setCurrentItem(
             self._section_tree.topLevelItem(0)
@@ -686,7 +698,7 @@ class ConfigDialog(QDialog):
     def _build_database_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        group = QGroupBox("Database")
+        group = QGroupBox(self.tr("Database"))
         form = QFormLayout(group)
 
         path_row = QHBoxLayout()
@@ -694,16 +706,16 @@ class ConfigDialog(QDialog):
         self._data_dir_edit.setPlaceholderText(DATA_DIR_DEFAULT)
         path_row.addWidget(self._data_dir_edit)
 
-        browse_btn = QPushButton("Browse…")
+        browse_btn = QPushButton(self.tr("Browse…"))
         browse_btn.clicked.connect(self._browse_data_dir)
         path_row.addWidget(browse_btn)
 
-        form.addRow("Data directory:", path_row)
+        form.addRow(self.tr("Data directory:"), path_row)
         form.addRow(
             "",
             QLabel(
-                "<small>All database files are stored in this directory. "
-                "A restart is required for changes to take effect.</small>"
+                self.tr("<small>All database files are stored in this directory. "
+                "A restart is required for changes to take effect.</small>")
             ),
         )
 
@@ -714,32 +726,32 @@ class ConfigDialog(QDialog):
     def _build_crawler_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        group = QGroupBox("Crawler")
+        group = QGroupBox(self.tr("Crawler"))
         form = QFormLayout(group)
 
         self._max_thumbs_spin = QSpinBox()
         self._max_thumbs_spin.setRange(0, 50)
-        self._max_thumbs_spin.setSuffix(" image(s)")
-        form.addRow("Max thumbnails per model:", self._max_thumbs_spin)
+        self._max_thumbs_spin.setSuffix(self.tr(" image(s)"))
+        form.addRow(self.tr("Max thumbnails per model:"), self._max_thumbs_spin)
         form.addRow(
             "",
-            QLabel("<small>Maximum number of preview images extracted from each archive.</small>"),
+            QLabel(self.tr("<small>Maximum number of preview images extracted from each archive.</small>")),
         )
 
         self._max_thumb_size_spin = QSpinBox()
         self._max_thumb_size_spin.setRange(64, 4096)
         self._max_thumb_size_spin.setSingleStep(64)
-        self._max_thumb_size_spin.setSuffix(" px")
-        form.addRow("Max image size:", self._max_thumb_size_spin)
+        self._max_thumb_size_spin.setSuffix(self.tr(" px"))
+        form.addRow(self.tr("Max image size:"), self._max_thumb_size_spin)
         form.addRow(
             "",
-            QLabel("<small>Longest side in pixels when storing images (width & height capped at this value).</small>"),
+            QLabel(self.tr("<small>Longest side in pixels when storing images (width & height capped at this value).</small>")),
         )
 
         self._max_workers_spin = QSpinBox()
         self._max_workers_spin.setRange(1, 32)
-        self._max_workers_spin.setSuffix(" thread(s)")
-        form.addRow("Parallel workers:", self._max_workers_spin)
+        self._max_workers_spin.setSuffix(self.tr(" thread(s)"))
+        form.addRow(self.tr("Parallel workers:"), self._max_workers_spin)
         form.addRow(
             "",
             QLabel(
@@ -754,48 +766,48 @@ class ConfigDialog(QDialog):
         self._unrar_edit.setPlaceholderText(_PLATFORM["unrar_hint"])
         unrar_row.addWidget(self._unrar_edit)
 
-        unrar_browse_btn = QPushButton("Browse…")
+        unrar_browse_btn = QPushButton(self.tr("Browse…"))
         unrar_browse_btn.clicked.connect(self._browse_unrar)
         unrar_row.addWidget(unrar_browse_btn)
 
-        form.addRow("RAR tool:", unrar_row)
+        form.addRow(self.tr("RAR tool:"), unrar_row)
         form.addRow(
             "",
             QLabel(
-                "<small>Path to <b>unrar.exe</b> or <b>rar.exe</b> used to extract .rar archives. "
-                "Leave blank to use the one on your PATH.</small>"
+                self.tr("<small>Path to <b>unrar.exe</b> or <b>rar.exe</b> used to extract .rar archives. "
+                "Leave blank to use the one on your PATH.</small>")
             ),
         )
 
         layout.addWidget(group)
 
         # Recurse option
-        recurse_group = QGroupBox("Crawl Scope")
+        recurse_group = QGroupBox(self.tr("Crawl Scope"))
         recurse_form = QFormLayout(recurse_group)
-        self._recurse_subdirs_check = QCheckBox("Recurse subdirectories")
-        recurse_form.addRow("Recurse subdirs:", self._recurse_subdirs_check)
+        self._recurse_subdirs_check = QCheckBox(self.tr("Recurse subdirectories"))
+        recurse_form.addRow(self.tr("Recurse subdirs:"), self._recurse_subdirs_check)
         recurse_form.addRow(
             "",
             QLabel(
-                "<small>When enabled, the crawler will search the selected folder and all its subfolders. "
-                "When disabled, only archives directly inside the selected folder are processed.</small>"
+                self.tr("<small>When enabled, the crawler will search the selected folder and all its subfolders. "
+                "When disabled, only archives directly inside the selected folder are processed.</small>")
             ),
         )
         layout.addWidget(recurse_group)
 
-        file_info_group = QGroupBox("Full File Info")
+        file_info_group = QGroupBox(self.tr("Full File Info"))
         file_info_form = QFormLayout(file_info_group)
 
-        self._store_stl_list_check = QCheckBox("Store STL, OBJ, LYS, and Chitubox file list")
+        self._store_stl_list_check = QCheckBox(self.tr("Store STL, OBJ, LYS, and Chitubox file list"))
         file_info_form.addRow("", self._store_stl_list_check)
         file_info_form.addRow(
             "",
             QLabel(
-                "<small>When enabled, the crawler records the name and uncompressed "
+                self.tr("<small>When enabled, the crawler records the name and uncompressed "
                 "size of every <b>.stl</b> file found inside each archive. "
                 "Stored in the <b>stl_files</b> database table. "
                 "Archives already in the database that are missing file information "
-                "will be automatically re-crawled to populate the missing entries.</small>"
+                "will be automatically re-crawled to populate the missing entries.</small>")
             ),
         )
 
@@ -806,17 +818,17 @@ class ConfigDialog(QDialog):
     def _build_warnings_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        group = QGroupBox("Crawler Warnings")
+        group = QGroupBox(self.tr("Crawler Warnings"))
         form  = QFormLayout(group)
 
-        self._warn_presupported_check = QCheckBox("Archive contains supported STLs")
+        self._warn_presupported_check = QCheckBox(self.tr("Archive contains supported STLs"))
         form.addRow("", self._warn_presupported_check)
         form.addRow(
             "",
             QLabel(
-                "<small>Warn when an archive contains STL files matching any of the "
+                self.tr("<small>Warn when an archive contains STL files matching any of the "
                 "patterns below. Each pattern is a Python regex applied "
-                "(case-insensitively) to every archive member filename.</small>"
+                "(case-insensitively) to every archive member filename.</small>")
             ),
         )
 
@@ -830,9 +842,9 @@ class ConfigDialog(QDialog):
         pp_layout.addWidget(self._presupport_patterns_list)
 
         pp_btn_row = QHBoxLayout()
-        pp_add_btn = QPushButton("Add pattern")
+        pp_add_btn = QPushButton(self.tr("Add pattern"))
         pp_add_btn.clicked.connect(self._add_presupport_pattern)
-        pp_rm_btn = QPushButton("Remove selected")
+        pp_rm_btn = QPushButton(self.tr("Remove selected"))
         pp_rm_btn.clicked.connect(self._remove_presupport_pattern)
         pp_btn_row.addWidget(pp_add_btn)
         pp_btn_row.addWidget(pp_rm_btn)
@@ -842,41 +854,41 @@ class ConfigDialog(QDialog):
         form.addRow("", self._presupport_patterns_widget)
         self._warn_presupported_check.toggled.connect(self._presupport_patterns_widget.setEnabled)
 
-        self._warn_no_images_check = QCheckBox("Archive contains images")
+        self._warn_no_images_check = QCheckBox(self.tr("Archive contains images"))
         form.addRow("", self._warn_no_images_check)
         form.addRow(
             "",
             QLabel(
-                "<small>Warn when an archive contains no image files "
-                "(.jpg, .png, .webp, …).</small>"
+                self.tr("<small>Warn when an archive contains no image files "
+                "(.jpg, .png, .webp, …).</small>")
             ),
         )
 
-        self._warn_nested_archive_check = QCheckBox("Nested archives")
+        self._warn_nested_archive_check = QCheckBox(self.tr("Nested archives"))
         form.addRow("", self._warn_nested_archive_check)
         form.addRow(
             "",
             QLabel(
-                "<small>Warn when an archive contains another compressed archive "
-                "(.zip, .rar, .7z).</small>"
+                self.tr("<small>Warn when an archive contains another compressed archive "
+                "(.zip, .rar, .7z).</small>")
             ),
         )
 
-        self._warn_no_printable_check = QCheckBox("Archive without printable files")
+        self._warn_no_printable_check = QCheckBox(self.tr("Archive without printable files"))
         form.addRow("", self._warn_no_printable_check)
         form.addRow(
             "",
             QLabel(
-                "<small>Warn when an archive contains no printable model files "
-                "(.stl, .obj, .lys, .chitubox).</small>"
+                self.tr("<small>Warn when an archive contains no printable model files "
+                "(.stl, .obj, .lys, .chitubox).</small>")
             ),
         )
 
-        self._warn_low_compression_check = QCheckBox("Archive with low compression rate")
+        self._warn_low_compression_check = QCheckBox(self.tr("Archive with low compression rate"))
         form.addRow("", self._warn_low_compression_check)
 
         threshold_row = QHBoxLayout()
-        threshold_row.addWidget(QLabel("Threshold (compressed/uncompressed ratio):"))
+        threshold_row.addWidget(QLabel(self.tr("Threshold (compressed/uncompressed ratio):")))
         self._low_compression_threshold_spin = QDoubleSpinBox()
         self._low_compression_threshold_spin.setRange(0.50, 1.00)
         self._low_compression_threshold_spin.setSingleStep(0.01)
@@ -889,8 +901,8 @@ class ConfigDialog(QDialog):
         form.addRow(
             "",
             QLabel(
-                "<small>Warn when compressed size ÷ uncompressed size exceeds this value "
-                "(e.g. 0.95 = 95 %). Values near 1.0 indicate little or no compression.</small>"
+                self.tr("<small>Warn when compressed size ÷ uncompressed size exceeds this value "
+                "(e.g. 0.95 = 95 %). Values near 1.0 indicate little or no compression.</small>")
             ),
         )
         self._warn_low_compression_check.toggled.connect(
@@ -906,30 +918,30 @@ class ConfigDialog(QDialog):
         layout = QVBoxLayout(page)
         
         # We now group sidecar inside "File writing" logical section, but it is its own page.
-        group = QGroupBox("Metadata Sidecar (METADATA.7z)")
+        group = QGroupBox(self.tr("Metadata Sidecar (METADATA.7z)"))
         form  = QFormLayout(group)
 
-        self._metadata_sidecar_check = QCheckBox("Enable metadata sidecar")
+        self._metadata_sidecar_check = QCheckBox(self.tr("Enable metadata sidecar"))
         form.addRow("", self._metadata_sidecar_check)
         form.addRow(
             "",
             QLabel(
-                "<small>When enabled, a <b>METADATA.7z</b> sidecar file is created "
+                self.tr("<small>When enabled, a <b>METADATA.7z</b> sidecar file is created "
                 "in each folder after crawling. This allows the library to be "
                 "restored on a new machine without re-crawling every archive. "
-                "Disable to prevent any METADATA.7z files from being written.</small>"
+                "Disable to prevent any METADATA.7z files from being written.</small>")
             ),
         )
 
-        self._metadata_thumbnails_check = QCheckBox("Include thumbnails")
+        self._metadata_thumbnails_check = QCheckBox(self.tr("Include thumbnails"))
         form.addRow("", self._metadata_thumbnails_check)
         form.addRow(
             "",
             QLabel(
-                "<small>When enabled, each folder's <b>METADATA.7z</b> sidecar will "
+                self.tr("<small>When enabled, each folder's <b>METADATA.7z</b> sidecar will "
                 "contain thumbnail images alongside the metadata JSON. "
                 "Disable to save disk space; thumbnails will be omitted from the "
-                "sidecar and not restored when importing on a new machine.</small>"
+                "sidecar and not restored when importing on a new machine.</small>")
             ),
         )
 
@@ -942,39 +954,39 @@ class ConfigDialog(QDialog):
     def _build_debug_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        group = QGroupBox("Debug")
+        group = QGroupBox(self.tr("Debug"))
         form = QFormLayout(group)
 
-        self._debug_menu_check = QCheckBox("Show Debug menu")
+        self._debug_menu_check = QCheckBox(self.tr("Show Debug menu"))
         form.addRow("", self._debug_menu_check)
         form.addRow(
             "",
             QLabel(
-                "<small>Shows the <b>Debug</b> menu in the menu bar, which gives "
+                self.tr("<small>Shows the <b>Debug</b> menu in the menu bar, which gives "
                 "access to destructive operations such as deleting the database "
-                "and log files.</small>"
+                "and log files.</small>")
             ),
         )
 
-        self._logging_enabled_check = QCheckBox("Enable logging")
+        self._logging_enabled_check = QCheckBox(self.tr("Enable logging"))
         form.addRow("", self._logging_enabled_check)
         form.addRow(
             "",
             QLabel(
-                "<small>Write application events and errors to the log file. "
+                self.tr("<small>Write application events and errors to the log file. "
                 "Uncheck to silence all log output. "
-                "Uncaught exceptions are always captured regardless of this setting.</small>"
+                "Uncaught exceptions are always captured regardless of this setting.</small>")
             ),
         )
 
-        self._sql_profiling_check = QCheckBox("Log SQL statement timings")
+        self._sql_profiling_check = QCheckBox(self.tr("Log SQL statement timings"))
         form.addRow("", self._sql_profiling_check)
         form.addRow(
             "",
             QLabel(
-                "<small>Logs the duration of every SQL statement. "
+                self.tr("<small>Logs the duration of every SQL statement. "
                 "Statements taking 100 ms or longer are also written at WARNING level "
-                "for easy <tt>grep</tt>. Takes effect immediately without restarting.</small>"
+                "for easy <tt>grep</tt>. Takes effect immediately without restarting.</small>")
             ),
         )
 
@@ -985,18 +997,19 @@ class ConfigDialog(QDialog):
     def _build_hotkeys_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        group = QGroupBox("Keyboard shortcuts")
+        group = QGroupBox(self.tr("Keyboard shortcuts"))
         form = QFormLayout(group)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
         self._hotkey_edits: dict[str, QKeySequenceEdit] = {}
         for action_id, label in HOTKEY_LABELS.items():
+            label = QCoreApplication.translate("config_dialog", label)
             editor = QKeySequenceEdit()
-            editor.setToolTip(f'Press the key combination you want to use for "{label}"')
+            editor.setToolTip(self.tr('Press the key combination you want to use for "%s"') % label)
             self._hotkey_edits[action_id] = editor
             form.addRow(label + ":", editor)
 
-        reset_btn = QPushButton("Reset to defaults")
+        reset_btn = QPushButton(self.tr("Reset to defaults"))
         reset_btn.setFlat(True)
         reset_btn.clicked.connect(self._reset_hotkeys)
         form.addRow("", reset_btn)
@@ -1004,8 +1017,8 @@ class ConfigDialog(QDialog):
         layout.addWidget(group)
         layout.addWidget(
             QLabel(
-                "<small>Changes take effect after clicking OK. "
-                "Restart the application if shortcuts do not update immediately.</small>"
+                self.tr("<small>Changes take effect after clicking OK. "
+                "Restart the application if shortcuts do not update immediately.</small>")
             )
         )
         layout.addStretch()
@@ -1021,59 +1034,59 @@ class ConfigDialog(QDialog):
     def _build_browser_config_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        group = QGroupBox("Filter pane")
+        group = QGroupBox(self.tr("Filter pane"))
         form = QFormLayout(group)
 
-        self._filter_show_counts_check = QCheckBox("Show model counts in filter pane")
-        form.addRow("Counts:", self._filter_show_counts_check)
+        self._filter_show_counts_check = QCheckBox(self.tr("Show model counts in filter pane"))
+        form.addRow(self.tr("Counts:"), self._filter_show_counts_check)
 
-        self._filter_alpha_enabled_check = QCheckBox("Group large sections into letter bins (A, B, C, …)")
+        self._filter_alpha_enabled_check = QCheckBox(self.tr("Group large sections into letter bins (A, B, C, …)"))
         self._filter_alpha_enabled_check.toggled.connect(self._update_alpha_threshold_enabled)
-        form.addRow("Letter bins:", self._filter_alpha_enabled_check)
+        form.addRow(self.tr("Letter bins:"), self._filter_alpha_enabled_check)
 
         self._filter_alpha_threshold_spin = QSpinBox()
         self._filter_alpha_threshold_spin.setRange(5, 10000)
         self._filter_alpha_threshold_spin.setSingleStep(5)
-        self._filter_alpha_threshold_spin.setSuffix(" items")
+        self._filter_alpha_threshold_spin.setSuffix(self.tr(" items"))
         self._filter_alpha_threshold_spin.setToolTip(
-            "Split a filter section into A/B/C… groups when it has more than this many entries."
+            self.tr("Split a filter section into A/B/C… groups when it has more than this many entries.")
         )
-        form.addRow("Split above:", self._filter_alpha_threshold_spin)
+        form.addRow(self.tr("Split above:"), self._filter_alpha_threshold_spin)
 
         layout.addWidget(group)
 
-        fm_group = QGroupBox("File Manager")
+        fm_group = QGroupBox(self.tr("File Manager"))
         fm_form = QFormLayout(fm_group)
 
         self._file_manager_combo = QComboBox()
         for key, display in _FILE_MANAGER_DISPLAY.items():
-            self._file_manager_combo.addItem(display, key)
+            self._file_manager_combo.addItem(QCoreApplication.translate("config_dialog", display), key)
         self._file_manager_combo.currentIndexChanged.connect(self._update_file_manager_path_visibility)
-        fm_form.addRow("Open folder with:", self._file_manager_combo)
+        fm_form.addRow(self.tr("Open folder with:"), self._file_manager_combo)
 
         fm_path_row = QHBoxLayout()
         self._file_manager_path_edit = QLineEdit()
         fm_path_row.addWidget(self._file_manager_path_edit)
-        fm_path_browse_btn = QPushButton("Browse…")
+        fm_path_browse_btn = QPushButton(self.tr("Browse…"))
         fm_path_browse_btn.clicked.connect(self._browse_file_manager)
         fm_path_row.addWidget(fm_path_browse_btn)
         self._file_manager_path_widget = QWidget()
         self._file_manager_path_widget.setLayout(fm_path_row)
-        fm_form.addRow("Executable:", self._file_manager_path_widget)
+        fm_form.addRow(self.tr("Executable:"), self._file_manager_path_widget)
 
         layout.addWidget(fm_group)
 
-        img_group = QGroupBox("Image panel")
+        img_group = QGroupBox(self.tr("Image panel"))
         img_form = QFormLayout(img_group)
 
         self._thumb_page_size_spin = QSpinBox()
         self._thumb_page_size_spin.setRange(10, 10000)
         self._thumb_page_size_spin.setSingleStep(50)
-        self._thumb_page_size_spin.setSuffix(" images")
+        self._thumb_page_size_spin.setSuffix(self.tr(" images"))
         self._thumb_page_size_spin.setToolTip(
-            "When a model has more images than this, the image panel paginates instead of showing them all at once."
+            self.tr("When a model has more images than this, the image panel paginates instead of showing them all at once.")
         )
-        img_form.addRow("Paginate above:", self._thumb_page_size_spin)
+        img_form.addRow(self.tr("Paginate above:"), self._thumb_page_size_spin)
 
         layout.addWidget(img_group)
         layout.addStretch()
@@ -1094,7 +1107,7 @@ class ConfigDialog(QDialog):
     def _browse_file_manager(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "Select file manager executable",
+            self.tr("Select file manager executable"),
             self._file_manager_path_edit.text() or "",
             "Executables (*.exe);;All files (*)" if sys.platform == "win32" else "All files (*)",
         )
@@ -1104,41 +1117,41 @@ class ConfigDialog(QDialog):
     def _build_file_writing_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        group = QGroupBox("File writing")
+        group = QGroupBox(self.tr("File writing"))
         form = QFormLayout(group)
 
-        self._file_sorting_check = QCheckBox("Enable file sorting")
-        form.addRow("File sorting:", self._file_sorting_check)
+        self._file_sorting_check = QCheckBox(self.tr("Enable file sorting"))
+        form.addRow(self.tr("File sorting:"), self._file_sorting_check)
         form.addRow(
             "",
             QLabel(
-                "<small>When enabled, a <b>Sort files into directory…</b> option "
+                self.tr("<small>When enabled, a <b>Sort files into directory…</b> option "
                 "appears in the table right-click menu, allowing selected archive "
-                "files to be moved and renamed using a path pattern.</small>"
+                "files to be moved and renamed using a path pattern.</small>")
             ),
         )
 
-        self._allow_file_delete_check = QCheckBox("Allow file delete")
+        self._allow_file_delete_check = QCheckBox(self.tr("Allow file delete"))
         self._allow_file_delete_check.setStyleSheet("color: red; font-weight: bold;")
         self._allow_file_delete_check.clicked.connect(self._on_allow_delete_clicked)
-        form.addRow("Delete:", self._allow_file_delete_check)
+        form.addRow(self.tr("Delete:"), self._allow_file_delete_check)
         form.addRow(
             "",
             QLabel(
-                "<small>When enabled, a <b>Delete Archive File from Disk…</b> option "
-                "appears in the table right-click menu. This deletes the physical file.</small>"
+                self.tr("<small>When enabled, a <b>Delete Archive File from Disk…</b> option "
+                "appears in the table right-click menu. This deletes the physical file.</small>")
             ),
         )
 
-        self._use_trash_folder_check = QCheckBox("Use trash folder")
-        form.addRow("Trash:", self._use_trash_folder_check)
+        self._use_trash_folder_check = QCheckBox(self.tr("Use trash folder"))
+        form.addRow(self.tr("Trash:"), self._use_trash_folder_check)
 
         trash_row = QHBoxLayout()
         self._trash_folder_edit = QLineEdit()
-        self._trash_folder_edit.setPlaceholderText("/path/to/trash")
+        self._trash_folder_edit.setPlaceholderText(self.tr("/path/to/trash"))
         trash_row.addWidget(self._trash_folder_edit)
 
-        trash_browse_btn = QPushButton("Browse…")
+        trash_browse_btn = QPushButton(self.tr("Browse…"))
         trash_browse_btn.clicked.connect(self._browse_trash_folder)
         trash_row.addWidget(trash_browse_btn)
 
@@ -1146,8 +1159,8 @@ class ConfigDialog(QDialog):
         form.addRow(
             "",
             QLabel(
-                "<small>If enabled, files are moved here instead of being permanently "
-                "deleted. A sidecar file with recovery info is created alongside.</small>"
+                self.tr("<small>If enabled, files are moved here instead of being permanently "
+                "deleted. A sidecar file with recovery info is created alongside.</small>")
             ),
         )
         
@@ -1170,7 +1183,7 @@ class ConfigDialog(QDialog):
         
         # Build custom warning dialog with a checkbox
         dlg = QDialog(self)
-        dlg.setWindowTitle("DANGER: File Deletion")
+        dlg.setWindowTitle(self.tr("DANGER: File Deletion"))
         
         l = QVBoxLayout(dlg)
         icon_lbl = QLabel()
@@ -1178,8 +1191,8 @@ class ConfigDialog(QDialog):
         icon_lbl.setPixmap(style.standardPixmap(style.StandardPixmap.SP_MessageBoxCritical))
         
         text_lbl = QLabel(
-            "<span style='color: #d32f2f; font-weight: bold;'>Enabling this option allows the application to physically DELETE your archive files from the disk.</span><br><br>"
-            "This could lead to permanent loss of data. Use with extreme caution!"
+            self.tr("<span style='color: #d32f2f; font-weight: bold;'>Enabling this option allows the application to physically DELETE your archive files from the disk.</span><br><br>"
+            "This could lead to permanent loss of data. Use with extreme caution!")
         )
         text_lbl.setWordWrap(True)
         
@@ -1188,7 +1201,7 @@ class ConfigDialog(QDialog):
         h.addWidget(text_lbl, stretch=1)
         l.addLayout(h)
         
-        confirm_cb = QCheckBox("I understand this and want to continue")
+        confirm_cb = QCheckBox(self.tr("I understand this and want to continue"))
         confirm_cb.setChecked(False)
         l.addWidget(confirm_cb)
         
@@ -1204,9 +1217,30 @@ class ConfigDialog(QDialog):
             self._allow_file_delete_check.setChecked(True)
 
     def _browse_trash_folder(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "Choose trash directory", self._trash_folder_edit.text() or "")
+        path = QFileDialog.getExistingDirectory(self, self.tr("Choose trash directory"), self._trash_folder_edit.text() or "")
         if path:
             self._trash_folder_edit.setText(path)
+
+    def _build_language_page(self) -> QWidget:
+        from app.utils import i18n
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        group = QGroupBox(self.tr("Language"))
+        form = QFormLayout(group)
+
+        self._language_combo = QComboBox()
+        for code, display in i18n.available_languages():
+            self._language_combo.addItem(display, code)
+        form.addRow(self.tr("Language:"), self._language_combo)
+        form.addRow(
+            "",
+            QLabel(self.tr("<small>Choose the interface language. Restart the application "
+                           "for the change to fully take effect.</small>")),
+        )
+
+        layout.addWidget(group)
+        layout.addStretch()
+        return page
 
     def _build_appearance_page(self) -> QWidget:
         # Outer page widget holds only the scroll area (no extra margins)
@@ -1223,66 +1257,62 @@ class ConfigDialog(QDialog):
         layout.setContentsMargins(4, 4, 4, 4)
 
         # ---- Color Scheme ------------------------------------------------
-        theme_group = QGroupBox("Color Scheme")
+        theme_group = QGroupBox(self.tr("Color Scheme"))
         form = QFormLayout(theme_group)
         self._theme_combo = QComboBox()
         for name in THEMES:
             self._theme_combo.addItem(name)
         self._theme_combo.currentTextChanged.connect(self._preview_theme)
-        form.addRow("Scheme:", self._theme_combo)
+        form.addRow(self.tr("Scheme:"), self._theme_combo)
         form.addRow(
             "",
-            QLabel("<small>Preview is applied immediately. Cancel reverts to the previous scheme.</small>"),
+            QLabel(self.tr("<small>Preview is applied immediately. Cancel reverts to the previous scheme.</small>")),
         )
         layout.addWidget(theme_group)
 
         # ---- Duplicate Highlight Colors ----------------------------------
-        pair_group = QGroupBox("Duplicate Highlight Colors")
+        pair_group = QGroupBox(self.tr("Duplicate Highlight Colors"))
         pair_form = QFormLayout(pair_group)
         self._add_color_row(pair_form, "pair_a", "Pair A:")
         self._add_color_row(pair_form, "pair_b", "Pair B:")
         pair_form.addRow(
             "",
-            QLabel("<small>Row highlight colors used in the duplicate finder.</small>"),
+            QLabel(self.tr("<small>Row highlight colors used in the duplicate finder.</small>")),
         )
-        layout.addWidget(pair_group)
 
         # ---- Status Indicator Colors -------------------------------------
-        status_group = QGroupBox("Status Indicators")
+        status_group = QGroupBox(self.tr("Status Indicators"))
         status_form = QFormLayout(status_group)
         self._add_color_row(status_form, "status_neutral", "Neutral:")
         self._add_color_row(status_form, "status_ok",      "OK:")
         self._add_color_row(status_form, "status_warn",    "Warning:")
         status_form.addRow(
             "",
-            QLabel("<small>Circle indicators drawn on group items in the browser tree.</small>"),
+            QLabel(self.tr("<small>Circle indicators drawn on group items in the browser tree.</small>")),
         )
-        layout.addWidget(status_group)
 
         # ---- Warning Row Colors ------------------------------------------
-        warn_group = QGroupBox("Warning Rows")
+        warn_group = QGroupBox(self.tr("Warning Rows"))
         warn_form = QFormLayout(warn_group)
         self._add_color_row(warn_form, "warn_row_bg", "Background:")
         self._add_color_row(warn_form, "warn_row_fg", "Text:")
         warn_form.addRow(
             "",
-            QLabel("<small>Row colors for archive entries flagged with a warning in the browser.</small>"),
+            QLabel(self.tr("<small>Row colors for archive entries flagged with a warning in the browser.</small>")),
         )
-        layout.addWidget(warn_group)
 
         # ---- Maintenance View Colors -------------------------------------
-        maint_group = QGroupBox("Maintenance View")
+        maint_group = QGroupBox(self.tr("Maintenance View"))
         maint_form = QFormLayout(maint_group)
         self._add_color_row(maint_form, "missing_file", "Missing file:")
         self._add_color_row(maint_form, "found_file",   "Found file:")
         maint_form.addRow(
             "",
-            QLabel("<small>Row colors in the database maintenance / verification table.</small>"),
+            QLabel(self.tr("<small>Row colors in the database maintenance / verification table.</small>")),
         )
-        layout.addWidget(maint_group)
 
         # ---- Highlight Colors --------------------------------------------
-        hl_group = QGroupBox("Highlights")
+        hl_group = QGroupBox(self.tr("Highlights"))
         hl_form = QFormLayout(hl_group)
         self._add_color_row(hl_form, "match_highlight",   "File match:")
         self._add_color_row(hl_form, "selection_border",  "Selection border:")
@@ -1290,62 +1320,84 @@ class ConfigDialog(QDialog):
         hl_form.addRow(
             "",
             QLabel(
-                "<small>File match: translucent tint on matched rows in the file-comparison table. "
-                "Selection: thumbnail selection in the image grid.</small>"
+                self.tr("<small>File match: translucent tint on matched rows in the file-comparison table. "
+                "Selection: thumbnail selection in the image grid.</small>")
             ),
         )
-        layout.addWidget(hl_group)
 
         # ---- Window Colors ----------------------------------------------
-        wc_group = QGroupBox("Window Colors")
+        wc_group = QGroupBox(self.tr("Window Colors"))
         wc_form = QFormLayout(wc_group)
         self._add_color_row(wc_form, "window_bg",   "Background:")
         self._add_color_row(wc_form, "window_text", "Text:")
         wc_form.addRow(
             "",
-            QLabel("<small>Override the background and text color for all windows. "
-                   "Leave blank to use the active theme's colors.</small>"),
+            QLabel(self.tr("<small>Override the background and text color for all windows. "
+                   "Leave blank to use the active theme's colors.</small>")),
         )
-        layout.addWidget(wc_group)
+
+        # ---- Custom colors: collapsible section, 3-column grid -----------
+        from app.ui.crawler_tab import _CollapsibleSection
+        colors_section = _CollapsibleSection(self.tr("Custom Colors"))
+        color_grid = QGridLayout()
+        color_grid.setContentsMargins(0, 0, 0, 0)
+        color_groups = (pair_group, status_group, warn_group,
+                        maint_group, hl_group, wc_group)
+        for grp in color_groups:
+            # Let the long description labels wrap so each group's size hint
+            # doesn't force the page wider than the window; with equal column
+            # stretch the three columns then scale with the window width.
+            for lbl in grp.findChildren(QLabel):
+                lbl.setWordWrap(True)
+            grp.setMinimumWidth(0)
+        for idx, grp in enumerate(color_groups):
+            color_grid.addWidget(grp, idx // 3, idx % 3,
+                                 Qt.AlignmentFlag.AlignTop)
+        for col in range(3):
+            color_grid.setColumnStretch(col, 1)
+        colors_section.add_layout(color_grid)
+
+        # Reset / save actions apply to the custom colors above
+        action_row = QHBoxLayout()
+        reset_btn = QPushButton(self.tr("Reset all to theme defaults"))
+        reset_btn.clicked.connect(self._reset_all_colors)
+        save_scheme_btn = QPushButton(self.tr("Save as color scheme…"))
+        save_scheme_btn.clicked.connect(self._save_as_color_scheme)
+        action_row.addWidget(reset_btn)
+        action_row.addWidget(save_scheme_btn)
+        action_row.addStretch()
+        colors_section.add_layout(action_row)
+
+        layout.addWidget(colors_section)
 
         # ---- Typography -------------------------------------------------
-        font_group = QGroupBox("Typography")
+        font_group = QGroupBox(self.tr("Typography"))
         font_form = QFormLayout(font_group)
 
         self._font_family_combo = QFontComboBox()
         self._font_family_combo.setEditable(True)
         self._font_family_combo.setCurrentFont(QApplication.font())
-        font_form.addRow("Font family:", self._font_family_combo)
+        font_form.addRow(self.tr("Font family:"), self._font_family_combo)
 
         self._font_size_spin = QSpinBox()
         self._font_size_spin.setRange(6, 48)
         self._font_size_spin.setValue(QApplication.font().pointSize())
-        self._font_size_spin.setSuffix(" pt")
-        self._font_size_spin.setSpecialValueText("(theme default)")
+        self._font_size_spin.setSuffix(self.tr(" pt"))
+        self._font_size_spin.setSpecialValueText(self.tr("(theme default)"))
         self._font_size_spin.setMinimum(0)
-        font_form.addRow("Font size:", self._font_size_spin)
+        font_form.addRow(self.tr("Font size:"), self._font_size_spin)
 
-        font_reset_btn = QPushButton("Reset to theme font")
+        font_reset_btn = QPushButton(self.tr("Reset to theme font"))
         font_reset_btn.clicked.connect(self._reset_font)
         font_form.addRow("", font_reset_btn)
 
         font_form.addRow(
             "",
-            QLabel("<small>Changes take effect after clicking OK. "
-                   "Set size to 0 to use the theme default.</small>"),
+            QLabel(self.tr("<small>Changes take effect after clicking OK. "
+                   "Set size to 0 to use the theme default.</small>")),
         )
         layout.addWidget(font_group)
 
-        # ---- Global actions ---------------------------------------------
-        action_row = QHBoxLayout()
-        reset_btn = QPushButton("Reset all to theme defaults")
-        reset_btn.clicked.connect(self._reset_all_colors)
-        save_scheme_btn = QPushButton("Save as color scheme…")
-        save_scheme_btn.clicked.connect(self._save_as_color_scheme)
-        action_row.addWidget(reset_btn)
-        action_row.addWidget(save_scheme_btn)
-        action_row.addStretch()
-        layout.addLayout(action_row)
         layout.addStretch()
 
         scroll.setWidget(inner)
@@ -1368,7 +1420,7 @@ class ConfigDialog(QDialog):
         """Open a directory picker and set the data-directory field."""
         path = QFileDialog.getExistingDirectory(
             self,
-            "Choose data directory",
+            self.tr("Choose data directory"),
             self._data_dir_edit.text() or DATA_DIR_DEFAULT,
         )
         if path:
@@ -1378,9 +1430,9 @@ class ConfigDialog(QDialog):
         """Open a file picker to locate the unrar/rar executable."""
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "Select unrar or rar executable",
+            self.tr("Select unrar or rar executable"),
             self._unrar_edit.text() or "",
-            "Executables (*.exe);;All files (*)",
+            self.tr("Executables (*.exe);;All files (*)"),
         )
         if path:
             self._unrar_edit.setText(path)
@@ -1447,13 +1499,13 @@ class ConfigDialog(QDialog):
             self._refresh_all_ui_color_btns()
 
     def _save_as_color_scheme(self) -> None:
-        name, ok = QInputDialog.getText(self, "Save Color Scheme", "Scheme name:")
+        name, ok = QInputDialog.getText(self, self.tr("Save Color Scheme"), self.tr("Scheme name:"))
         if not ok or not name.strip():
             return
         name = name.strip()
         if name in THEMES:
             QMessageBox.warning(
-                self, "Save Color Scheme",
+                self, self.tr("Save Color Scheme"),
                 f"'{name}' is a built-in scheme and cannot be overwritten.",
             )
             return
@@ -1480,6 +1532,8 @@ class ConfigDialog(QDialog):
     def _load(self) -> None:
         """Populate all form fields from current QSettings / library settings."""
         self._data_dir_edit.setText(get_data_dir())
+        lang_idx = self._language_combo.findData(get_language())
+        self._language_combo.setCurrentIndex(lang_idx if lang_idx >= 0 else 0)
         self._max_thumbs_spin.setValue(get_max_thumbnails())
         self._max_thumb_size_spin.setValue(get_max_thumb_size())
 
@@ -1579,6 +1633,8 @@ class ConfigDialog(QDialog):
         """Persist all form values to QSettings and the library settings JSON."""
         data_dir = self._data_dir_edit.text().strip() or DATA_DIR_DEFAULT
         old_dir = get_data_dir()
+        old_language = get_language()
+        new_language = self._language_combo.currentData() or "en"
 
         # Save the data-directory pointer and global tool paths
         QSettings().setValue(DATA_DIR_KEY, data_dir)
@@ -1599,6 +1655,7 @@ class ConfigDialog(QDialog):
                 "max_thumbnails":    self._max_thumbs_spin.value(),
                 "max_thumb_size":    self._max_thumb_size_spin.value(),
                 "max_workers":       self._max_workers_spin.value(),
+                "language":          new_language,
                 "color_scheme":      selected_scheme,
                 "ui_color_overrides": self._ui_color_overrides,
                 "custom_color_schemes": custom_color_schemes,
@@ -1657,11 +1714,23 @@ class ConfigDialog(QDialog):
 
         self._original_scheme = selected_scheme
 
+        # Install the chosen language now so newly opened dialogs pick it up;
+        # already-built widgets need a restart to retranslate fully.
+        if new_language != old_language:
+            from app.utils import i18n
+            i18n.install_language(new_language)
+
         if data_dir != old_dir:
             QMessageBox.information(
                 self,
-                "Configuration",
-                "Data directory updated. Please restart the application for the change to take effect.",
+                self.tr("Configuration"),
+                self.tr("Data directory updated. Please restart the application for the change to take effect."),
+            )
+        elif new_language != old_language:
+            QMessageBox.information(
+                self,
+                self.tr("Configuration"),
+                self.tr("Language updated. Please restart the application for the change to fully take effect."),
             )
         self.accept()
 

@@ -140,7 +140,7 @@ class ImageViewerDialog(QDialog):
 
     def __init__(self, pixmap: QPixmap, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Image")
+        self.setWindowTitle(self.tr("Image"))
         self.setModal(True)
         self._pixmap = pixmap
 
@@ -297,7 +297,7 @@ class RescanProgressDialog(QDialog):
 
     def __init__(self, worker: RescanWorker, total: int, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Rescan Files")
+        self.setWindowTitle(self.tr("Rescan Files"))
         self.setMinimumWidth(440)
         self.setModal(True)
         self._worker = worker
@@ -317,8 +317,8 @@ class RescanProgressDialog(QDialog):
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        self._bg_btn     = QPushButton("Send to Background")
-        self._cancel_btn = QPushButton("Cancel")
+        self._bg_btn     = QPushButton(self.tr("Send to Background"))
+        self._cancel_btn = QPushButton(self.tr("Cancel"))
         btn_row.addWidget(self._bg_btn)
         btn_row.addWidget(self._cancel_btn)
         layout.addLayout(btn_row)
@@ -1532,15 +1532,15 @@ class BrowserTab(QWidget):
         left_layout.setContentsMargins(0, 0, 0, 0)
 
         filter_header = QHBoxLayout()
-        filter_header.addWidget(QLabel("Filter"))
+        filter_header.addWidget(QLabel(self.tr("Filter")))
         filter_header.addStretch()
-        self._apply_filters_btn = QPushButton("Apply")
-        self._apply_filters_btn.setToolTip("Apply the selected filters to the table")
+        self._apply_filters_btn = QPushButton(self.tr("Apply"))
+        self._apply_filters_btn.setToolTip(self.tr("Apply the selected filters to the table"))
         self._apply_filters_btn.clicked.connect(self._apply_checked_filters)
         filter_header.addWidget(self._apply_filters_btn)
-        self._clear_filters_btn = QPushButton("Clear")
+        self._clear_filters_btn = QPushButton(self.tr("Clear"))
         self._clear_filters_btn.setFlat(True)
-        self._clear_filters_btn.setToolTip("Clear all active filters")
+        self._clear_filters_btn.setToolTip(self.tr("Clear all active filters"))
         self._clear_filters_btn.clicked.connect(self._clear_filters)
         filter_header.addWidget(self._clear_filters_btn)
         left_layout.addLayout(filter_header)
@@ -1560,9 +1560,9 @@ class BrowserTab(QWidget):
         centre_layout.setContentsMargins(0, 0, 0, 0)
 
         search_row = QHBoxLayout()
-        search_row.addWidget(QLabel("Search:"))
+        search_row.addWidget(QLabel(self.tr("Search:")))
         self._search_edit = QLineEdit()
-        self._search_edit.setPlaceholderText("Title, creator or tag…")
+        self._search_edit.setPlaceholderText(self.tr("Title, creator or tag…"))
         self._search_edit.textChanged.connect(lambda _: self._search_timer.start())
         search_row.addWidget(self._search_edit)
         centre_layout.addLayout(search_row)
@@ -1637,7 +1637,7 @@ class BrowserTab(QWidget):
         img_widget = QWidget()
         img_layout = QVBoxLayout(img_widget)
         img_layout.setContentsMargins(0, 0, 0, 0)
-        img_layout.addWidget(QLabel("Images"))
+        img_layout.addWidget(QLabel(self.tr("Images")))
 
         self._thumb_content = QWidget()
         self._thumb_vlayout = QVBoxLayout(self._thumb_content)
@@ -1665,7 +1665,7 @@ class BrowserTab(QWidget):
         self._thumb_next_btn = QPushButton("▶")
         self._thumb_next_btn.setFixedWidth(28)
         self._thumb_next_btn.clicked.connect(self._thumb_next_page)
-        self._thumb_show_all_btn = QPushButton("Show All")
+        self._thumb_show_all_btn = QPushButton(self.tr("Show All"))
         self._thumb_show_all_btn.clicked.connect(self._thumb_toggle_show_all)
         _pr_layout.addWidget(self._thumb_prev_btn)
         _pr_layout.addWidget(self._thumb_page_label, 1)
@@ -3102,7 +3102,7 @@ class BrowserTab(QWidget):
                 sections.append((w, []))
 
         dlg = QDialog(self)
-        dlg.setWindowTitle("Warning Details")
+        dlg.setWindowTitle(self.tr("Warning Details"))
         dlg.setMinimumSize(480, 300)
         layout = QVBoxLayout(dlg)
 
@@ -3243,13 +3243,13 @@ class BrowserTab(QWidget):
         SP = style.StandardPixmap
         menu = QMenu(self)
         
-        show_files_act = menu.addAction(style.standardIcon(SP.SP_FileDialogContentsView), "Show Files…")
+        show_files_act = menu.addAction(style.standardIcon(SP.SP_FileDialogContentsView), self.tr("Show Files…"))
         show_files_act.setVisible(len(selected_ids) == 1)
-        open_folder_act = menu.addAction(style.standardIcon(SP.SP_DirOpenIcon), "Open Containing Folder")
+        open_folder_act = menu.addAction(style.standardIcon(SP.SP_DirOpenIcon), self.tr("Open Containing Folder"))
         open_folder_act.setVisible(len(selected_ids) == 1)
         menu.addSeparator()
 
-        edit_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), "Edit Model…")
+        edit_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), self.tr("Edit Model…"))
         edit_act.setVisible(len(selected_ids) == 1)
         mass_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), f"Mass Edit {len(selected_ids)} model(s)…")
         mass_act.setVisible(len(selected_ids) > 1)
@@ -3282,28 +3282,28 @@ class BrowserTab(QWidget):
             menu.addSeparator()
             edit_creator_act = menu.addAction(
                 style.standardIcon(SP.SP_FileDialogDetailedView),
-                "Edit Creator Information…",
+                self.tr("Edit Creator Information…"),
             )
             edit_authors_act = menu.addAction(
                 style.standardIcon(SP.SP_FileDialogDetailedView),
-                "Edit Authors…",
+                self.tr("Edit Authors…"),
             )
         elif src_col == COL_TAGS:
             menu.addSeparator()
-            add_tag_act = menu.addAction(style.standardIcon(SP.SP_FileDialogNewFolder), "Add Tag…")
-            edit_tags_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), "Edit Tags…")
+            add_tag_act = menu.addAction(style.standardIcon(SP.SP_FileDialogNewFolder), self.tr("Add Tag…"))
+            edit_tags_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), self.tr("Edit Tags…"))
         elif src_col == COL_COLLECTION:
             menu.addSeparator()
-            edit_collections_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), "Edit Collections…")
+            edit_collections_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), self.tr("Edit Collections…"))
         elif src_col == COL_SUBCOLLECTION:
             menu.addSeparator()
-            edit_subcollections_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), "Edit Subcollections…")
+            edit_subcollections_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), self.tr("Edit Subcollections…"))
         elif src_col == COL_CATEGORY:
             menu.addSeparator()
-            edit_categories_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), "Edit Categories…")
+            edit_categories_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), self.tr("Edit Categories…"))
         elif src_col == COL_SCALE:
             menu.addSeparator()
-            edit_scales_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), "Edit Scales…")
+            edit_scales_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), self.tr("Edit Scales…"))
 
         from app.ui.config_dialog import get_file_sorting_enabled
         sort_act = None
@@ -3488,10 +3488,10 @@ class BrowserTab(QWidget):
                     session.commit()
                 except Exception as exc:
                     session.rollback()
-                    QMessageBox.warning(self, "Recrawl failed", f"Failed to recrawl {archive_path}: {exc}")
+                    QMessageBox.warning(self, self.tr("Recrawl failed"), f"Failed to recrawl {archive_path}: {exc}")
                     continue
 
-        QMessageBox.information(self, "Recrawl complete", f"Recrawl applied for {len(model_ids)} model(s).")
+        QMessageBox.information(self, self.tr("Recrawl complete"), f"Recrawl applied for {len(model_ids)} model(s).")
 
     def _rescan_files(self, model_ids: list[int]) -> None:
         """Re-extract metadata for the selected files in a background thread.
@@ -3520,13 +3520,13 @@ class BrowserTab(QWidget):
                     sb.showMessage(f"Rescan complete: {updated} model(s) updated.", 5000)
             else:
                 QMessageBox.information(
-                    self, "Rescan complete",
+                    self, self.tr("Rescan complete"),
                     f"Rescan applied for {updated} model(s).",
                 )
             self.refresh()
 
         def _on_error(filename: str, err: str) -> None:
-            QMessageBox.warning(self, "Rescan failed", f"Failed to rescan {filename}:\n{err}")
+            QMessageBox.warning(self, self.tr("Rescan failed"), f"Failed to rescan {filename}:\n{err}")
 
         worker.finished_ok.connect(_on_done)
         worker.file_error.connect(_on_error)
@@ -3570,7 +3570,7 @@ class BrowserTab(QWidget):
         if report.failed:
             QMessageBox.warning(
                 self,
-                "Delete Files",
+                self.tr("Delete Files"),
                 f"Successfully processed {report.deleted} file(s). "
                 f"Failed to process {len(report.failed)} file(s).",
             )
@@ -3580,7 +3580,7 @@ class BrowserTab(QWidget):
         count = len(model_ids)
         reply = QMessageBox.warning(
             self,
-            "Delete Model",
+            self.tr("Delete Model"),
             f"Permanently delete <b>{count} model{'s' if count != 1 else ''}</b> "
             f"and their thumbnail files from the database?<br><br>This cannot be undone.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
@@ -3660,7 +3660,7 @@ class BrowserTab(QWidget):
             self._show_thumbnails(self._current_model_id)
         if errors:
             QMessageBox.warning(
-                self, "Image import",
+                self, self.tr("Image import"),
                 "Could not import:\n" + "\n".join(errors),
             )
 
@@ -3745,13 +3745,13 @@ class BrowserTab(QWidget):
                 self._thumb_page_label.setText(f"All {total} images")
                 self._thumb_prev_btn.setEnabled(False)
                 self._thumb_next_btn.setEnabled(False)
-                self._thumb_show_all_btn.setText("Paginate")
+                self._thumb_show_all_btn.setText(self.tr("Paginate"))
             else:
                 num_pages = (total + page_size - 1) // page_size
                 self._thumb_page_label.setText(f"Page {self._thumb_page + 1} / {num_pages}")
                 self._thumb_prev_btn.setEnabled(self._thumb_page > 0)
                 self._thumb_next_btn.setEnabled(self._thumb_page < num_pages - 1)
-                self._thumb_show_all_btn.setText("Show All")
+                self._thumb_show_all_btn.setText(self.tr("Show All"))
             self._thumb_page_row.setVisible(True)
         else:
             self._thumb_page_row.setVisible(False)
@@ -3824,13 +3824,13 @@ class BrowserTab(QWidget):
 
     def add_tag(self) -> None:
         """Prompt for a new tag name, create it in the DB, and rebuild the filter tree."""
-        name, ok = QInputDialog.getText(self, "Add Tag", "Tag name:")
+        name, ok = QInputDialog.getText(self, self.tr("Add Tag"), self.tr("Tag name:"))
         if not ok or not name.strip():
             return
         name = name.strip().lower()
         with session_scope() as session:
             if session.query(Tag).filter_by(name=name).first():
-                QMessageBox.information(self, "Add Tag", f"Tag '{name}' already exists.")
+                QMessageBox.information(self, self.tr("Add Tag"), f"Tag '{name}' already exists.")
                 return
             session.add(Tag(name=name))
         self._populate_filter_tree()
@@ -3883,8 +3883,8 @@ class BrowserTab(QWidget):
 
         count, ok = QInputDialog.getInt(
             self,
-            "Generate Thumbnails",
-            "Number of thumbnails to generate per model:",
+            self.tr("Generate Thumbnails"),
+            self.tr("Number of thumbnails to generate per model:"),
             get_max_thumbnails(),
             1,
             100,
@@ -3897,10 +3897,10 @@ class BrowserTab(QWidget):
         from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar
 
         dlg = QDialog(self)
-        dlg.setWindowTitle("Generate Thumbnails")
+        dlg.setWindowTitle(self.tr("Generate Thumbnails"))
         dlg.setModal(True)
         vlay = QVBoxLayout(dlg)
-        label = QLabel("Generating thumbnails…")
+        label = QLabel(self.tr("Generating thumbnails…"))
         vlay.addWidget(label)
         progress_bar = QProgressBar()
         progress_bar.setRange(0, len(model_ids))
@@ -3908,8 +3908,8 @@ class BrowserTab(QWidget):
         vlay.addWidget(progress_bar)
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        send_bg_btn = QPushButton("Send to background")
-        cancel_btn = QPushButton("Cancel")
+        send_bg_btn = QPushButton(self.tr("Send to background"))
+        cancel_btn = QPushButton(self.tr("Cancel"))
         btn_row.addWidget(send_bg_btn)
         btn_row.addWidget(cancel_btn)
         vlay.addLayout(btn_row)
@@ -3919,7 +3919,7 @@ class BrowserTab(QWidget):
         # Prevent starting if another background job is active
         from app.utils.background_jobs import start_job, active_job
         if not start_job("thumbnails"):
-            QMessageBox.warning(self, "Generate Thumbnails", "Another background job is already running. Try again later.")
+            QMessageBox.warning(self, self.tr("Generate Thumbnails"), self.tr("Another background job is already running. Try again later."))
             return
 
         def _on_progress(current, total):
@@ -3977,8 +3977,8 @@ class BrowserTab(QWidget):
             from PyQt6.QtWidgets import QMessageBox
             QMessageBox.information(
                 self,
-                "Generate Thumbnails",
-                "Select one or more models in the table first.",
+                self.tr("Generate Thumbnails"),
+                self.tr("Select one or more models in the table first."),
             )
             return
         self._generate_thumbnails(ids)
@@ -3997,7 +3997,7 @@ class BrowserTab(QWidget):
 
         folders = {Path(r.archive_path).parent for r in rows if r.archive_path}
         if not folders:
-            QMessageBox.warning(self, "Create Sidecar", "No valid file paths found for the selected models.")
+            QMessageBox.warning(self, self.tr("Create Sidecar"), self.tr("No valid file paths found for the selected models."))
             return
 
         dlg = MetadataSidecarDialog(folders=folders, parent=self)
