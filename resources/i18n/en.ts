@@ -1426,176 +1426,186 @@
 </context><context>
     <name>DbMaintenanceDialog</name>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="561" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="563" />
         <source>Database Maintenance</source>
         <translation>Database Maintenance</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="578" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="580" />
         <source>Verify that every archive catalogued in the database still exists on disk. Missing archives can be relocated by searching a folder recursively, or removed from the database.</source>
         <translation>Verify that every archive catalogued in the database still exists on disk. Missing archives can be relocated by searching a folder recursively, or removed from the database.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="589" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="591" />
         <source>Verify</source>
         <translation>Verify</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="590" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="592" />
         <source>Check all archive paths for existence on disk</source>
         <translation>Check all archive paths for existence on disk</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="594" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="596" />
         <source>Stop</source>
         <translation>Stop</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="601" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="603" />
         <source>Search in Folder…</source>
         <translation>Search in Folder…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="603" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="605" />
         <source>Pick a folder to search recursively for selected (or all) missing archives</source>
         <translation>Pick a folder to search recursively for selected (or all) missing archives</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="610" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="612" />
         <source>Find Moved in DB…</source>
         <translation>Find Moved in DB…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="613" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="615" />
         <source>Check whether missing archives have been re-crawled at a different location and offer to transfer their metadata</source>
         <translation>Check whether missing archives have been re-crawled at a different location and offer to transfer their metadata</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="621" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="623" />
         <source>Find Duplicate Entries…</source>
         <translation>Find Duplicate Entries…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="624" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="626" />
         <source>Find records that share the same archive content hash or the same filename + file size, indicating the same file is catalogued more than once</source>
         <translation>Find records that share the same archive content hash or the same filename + file size, indicating the same file is catalogued more than once</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="961" />
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="631" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="633" />
+        <source>Recompute Image Hashes</source>
+        <translation>Recompute Image Hashes</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="636" />
+        <source>Recompute the perceptual hash (dHash) of every thumbnail. Run this after upgrading so image-similarity searches use the current 128-bit algorithm.</source>
+        <translation>Recompute the perceptual hash (dHash) of every thumbnail. Run this after upgrading so image-similarity searches use the current 128-bit algorithm.</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="976" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="644" />
         <source>Merge Moved</source>
         <translation>Merge Moved</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="634" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="647" />
         <source>Transfer metadata from selected 'Moved (in DB)' records to their new locations</source>
         <translation>Transfer metadata from selected 'Moved (in DB)' records to their new locations</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="640" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="653" />
         <source>Remove Selected</source>
         <translation>Remove Selected</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="641" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="654" />
         <source>Remove the selected records from the database</source>
         <translation>Remove the selected records from the database</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="1094" />
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="647" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="1109" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="660" />
         <source>Remove All Missing</source>
         <translation>Remove All Missing</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="650" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="663" />
         <source>Remove every record whose archive no longer exists on disk</source>
         <translation>Remove every record whose archive no longer exists on disk</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="1136" />
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="657" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="1151" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="670" />
         <source>Remove Flagged Missing</source>
         <translation>Remove Flagged Missing</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="660" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="673" />
         <source>Remove records flagged as missing by the crawler that are still absent on disk</source>
         <translation>Remove records flagged as missing by the crawler that are still absent on disk</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="669" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="682" />
         <source>Close</source>
         <translation>Close</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="682" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="695" />
         <source>Show only problems (missing / modified)</source>
         <translation>Show only problems (missing / modified)</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="690" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="703" />
         <source>ID</source>
         <translation>ID</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="690" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="703" />
         <source>Title</source>
         <translation>Title</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="690" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="703" />
         <source>Archive Path</source>
         <translation>Archive Path</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="690" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="703" />
         <source>Status</source>
         <translation>Status</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="690" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="703" />
         <source>Match Path</source>
         <translation>Match Path</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="704" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="717" />
         <source>Log:</source>
         <translation>Log:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="867" />
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="855" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="882" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="870" />
         <source>Search</source>
         <translation>Search</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="856" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="871" />
         <source>None of the selected rows are missing — nothing to search for.</source>
         <translation>None of the selected rows are missing — nothing to search for.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="867" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="882" />
         <source>No missing archives to search for.</source>
         <translation>No missing archives to search for.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="871" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="886" />
         <source>Select Folder to Search</source>
         <translation>Select Folder to Search</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="910" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="925" />
         <source>Find Moved</source>
         <translation>Find Moved</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="910" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="925" />
         <source>No missing archives to check.</source>
         <translation>No missing archives to check.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="962" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="977" />
         <source>No 'Moved (in DB)' records selected (or none found).
 
 Run 'Find Moved in DB' first, then select rows to merge.</source>
@@ -1604,38 +1614,38 @@ Run 'Find Moved in DB' first, then select rows to merge.</source>
 Run 'Find Moved in DB' first, then select rows to merge.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="968" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="983" />
         <source>Merge Moved Records</source>
         <translation>Merge Moved Records</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="1088" />
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="1058" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="1103" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="1073" />
         <source>Remove</source>
         <translation>Remove</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="1058" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="1073" />
         <source>No rows selected.</source>
         <translation>No rows selected.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="1064" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="1079" />
         <source>Remove Records</source>
         <translation>Remove Records</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="1088" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="1103" />
         <source>No missing archives to remove.</source>
         <translation>No missing archives to remove.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="1130" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="1145" />
         <source>Remove Flagged</source>
         <translation>Remove Flagged</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="1130" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="1145" />
         <source>No flagged-missing records to remove.</source>
         <translation>No flagged-missing records to remove.</translation>
     </message>
@@ -1885,8 +1895,8 @@ Run 'Find Moved in DB' first, then select rows to merge.</translation>
     </message>
     <message>
         <location filename="../../app/ui/find_by_image_dialog.py" line="134" />
-        <source>Hamming distance threshold (0 = exact match, 32 = very loose)</source>
-        <translation>Hamming distance threshold (0 = exact match, 32 = very loose)</translation>
+        <source>Hamming distance threshold (0 = exact match, 64 = very loose)</source>
+        <translation>Hamming distance threshold (0 = exact match, 64 = very loose)</translation>
     </message>
     <message>
         <location filename="../../app/ui/find_by_image_dialog.py" line="138" />
@@ -1936,178 +1946,178 @@ Run 'Find Moved in DB' first, then select rows to merge.</translation>
 </context><context>
     <name>FindContentDuplicatesDialog</name>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="635" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="666" />
         <source>Find Duplicate Archives by Content</source>
         <translation>Find Duplicate Archives by Content</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="657" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="688" />
         <source>STL Files</source>
         <translation>STL Files</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="658" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="689" />
         <source>Images</source>
         <translation>Images</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="663" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="694" />
         <source>Show Pair in Main Table</source>
         <translation>Show Pair in Main Table</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="666" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="697" />
         <source>Show All Duplicates in Main Table</source>
         <translation>Show All Duplicates in Main Table</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="669" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="700" />
         <source>Close</source>
         <translation>Close</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="766" />
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="681" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="797" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="712" />
         <source>Search Parameters</source>
         <translation>Search Parameters</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="688" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="719" />
         <source>Minimum fraction of files (relative to the larger archive) that must be identical for a pair to be flagged.</source>
         <translation>Minimum fraction of files (relative to the larger archive) that must be identical for a pair to be flagged.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="691" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="722" />
         <source>Similarity threshold:</source>
         <translation>Similarity threshold:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="693" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="724" />
         <source>&lt;small&gt;Two archives are flagged when at least this fraction of the &lt;i&gt;larger&lt;/i&gt; archive's STL files appear in both (matched by filename and size). Requires &lt;b&gt;Store STL file list&lt;/b&gt; to be enabled in Settings and archives to have been crawled.&lt;/small&gt;</source>
         <translation>&lt;small&gt;Two archives are flagged when at least this fraction of the &lt;i&gt;larger&lt;/i&gt; archive's STL files appear in both (matched by filename and size). Requires &lt;b&gt;Store STL file list&lt;/b&gt; to be enabled in Settings and archives to have been crawled.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="790" />
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="701" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="821" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="732" />
         <source>Find Duplicates</source>
         <translation>Find Duplicates</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="792" />
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="704" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="823" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="735" />
         <source>Stop</source>
         <translation>Stop</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="803" />
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="715" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="834" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="746" />
         <source>Ready.</source>
         <translation>Ready.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="730" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="761" />
         <source>Images in selected pair</source>
         <translation>Images in selected pair</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="895" />
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="735" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="926" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="766" />
         <source>Archive A</source>
         <translation>Archive A</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="896" />
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="742" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="927" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="773" />
         <source>Archive B</source>
         <translation>Archive B</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="772" />
-        <source>Maximum Hamming distance between 64-bit dHash fingerprints.
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="803" />
+        <source>Maximum Hamming distance between 128-bit dHash fingerprints.
 0 = bit-for-bit identical pixels
-≤3 = very similar (different resolution / minor JPEG artefacts)
-≤8 = noticeably similar (recolour, slight crop)
-≤15 = loosely similar (use with caution — many false positives)</source>
-        <translation>Maximum Hamming distance between 64-bit dHash fingerprints.
+≤6 = very similar (different resolution / minor JPEG artefacts)
+≤16 = noticeably similar (recolour, slight crop)
+≤30 = loosely similar (use with caution — many false positives)</source>
+        <translation>Maximum Hamming distance between 128-bit dHash fingerprints.
 0 = bit-for-bit identical pixels
-≤3 = very similar (different resolution / minor JPEG artefacts)
-≤8 = noticeably similar (recolour, slight crop)
-≤15 = loosely similar (use with caution — many false positives)</translation>
+≤6 = very similar (different resolution / minor JPEG artefacts)
+≤16 = noticeably similar (recolour, slight crop)
+≤30 = loosely similar (use with caution — many false positives)</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="778" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="809" />
         <source>Max hash distance:</source>
         <translation>Max hash distance:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="780" />
-        <source>&lt;small&gt;Preview thumbnails are compared with a perceptual difference hash (dHash). Two thumbnails are considered similar when their 64-bit hashes differ in at most this many bits. A distance of 0 catches only near-identical images; 5 typically catches the same render at different resolutions or with slight colour shifts. Higher values increase recall but also false positives.&lt;/small&gt;</source>
-        <translation>&lt;small&gt;Preview thumbnails are compared with a perceptual difference hash (dHash). Two thumbnails are considered similar when their 64-bit hashes differ in at most this many bits. A distance of 0 catches only near-identical images; 5 typically catches the same render at different resolutions or with slight colour shifts. Higher values increase recall but also false positives.&lt;/small&gt;</translation>
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="811" />
+        <source>&lt;small&gt;Preview thumbnails are compared with a perceptual difference hash (dHash). Two thumbnails are considered similar when their 128-bit hashes differ in at most this many bits. A distance of 0 catches only near-identical images; 10 typically catches the same render at different resolutions or with slight colour shifts. Higher values increase recall but also false positives.&lt;/small&gt;</source>
+        <translation>&lt;small&gt;Preview thumbnails are compared with a perceptual difference hash (dHash). Two thumbnails are considered similar when their 128-bit hashes differ in at most this many bits. A distance of 0 catches only near-identical images; 10 typically catches the same render at different resolutions or with slight colour shifts. Higher values increase recall but also false positives.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1019" />
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="834" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1050" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="865" />
         <source>Searching…</source>
         <translation>Searching…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1041" />
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="851" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1072" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="882" />
         <source>Search stopped.</source>
         <translation>Search stopped.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="897" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="928" />
         <source>Select a result to preview its images.</source>
         <translation>Select a result to preview its images.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="909" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="940" />
         <source>Archive A: %s</source>
         <translation>Archive A: %s</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="910" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="941" />
         <source>Archive B: %s</source>
         <translation>Archive B: %s</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="911" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="942" />
         <source>No images in this archive.</source>
         <translation>No images in this archive.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="964" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="995" />
         <source>Compare Archive Contents…</source>
         <translation>Compare Archive Contents…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="969" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1000" />
         <source>Open Folder of Archive A in Explorer</source>
         <translation>Open Folder of Archive A in Explorer</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="974" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1005" />
         <source>Open Folder of Archive B in Explorer</source>
         <translation>Open Folder of Archive B in Explorer</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="984" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1015" />
         <source>Delete Archive A from Disk…</source>
         <translation>Delete Archive A from Disk…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="988" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1019" />
         <source>Delete Archive B from Disk…</source>
         <translation>Delete Archive B from Disk…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1113" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1144" />
         <source>Delete Archive</source>
         <translation>Delete Archive</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1150" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1181" />
         <source>Failed to load model thumbnails for popup: %s</source>
         <translation>Failed to load model thumbnails for popup: %s</translation>
     </message>
@@ -2241,17 +2251,17 @@ Run 'Find Moved in DB' first, then select rows to merge.</translation>
 </context><context>
     <name>HelpDialog</name>
     <message>
-        <location filename="../../app/ui/help_dialog.py" line="1245" />
+        <location filename="../../app/ui/help_dialog.py" line="1251" />
         <source>stlLibrary — Help</source>
         <translation>stlLibrary — Help</translation>
     </message>
     <message>
-        <location filename="../../app/ui/help_dialog.py" line="1280" />
+        <location filename="../../app/ui/help_dialog.py" line="1286" />
         <source>← Back</source>
         <translation>← Back</translation>
     </message>
     <message>
-        <location filename="../../app/ui/help_dialog.py" line="1284" />
+        <location filename="../../app/ui/help_dialog.py" line="1290" />
         <source>Forward →</source>
         <translation>Forward →</translation>
     </message>

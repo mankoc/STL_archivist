@@ -17,14 +17,14 @@ from PyQt6.QtWidgets import (
 from app.database.db import session_scope
 from app.database.models import Image as DBImage, STLModel
 from app.utils.thumbnailer import pixmap_from_path
-from app.ui.find_content_duplicates_dialog import compute_dhash_from_jpeg
+from app.ui.find_content_duplicates_dialog import compute_dhash_from_jpeg, format_dhash, parse_dhash
 
 logger = logging.getLogger(__name__)
 
 _THUMB_SIZE       = 130
 _CELL_WIDTH       = 156   # thumb + padding
 _COLS             = 4
-_MAX_DIST_DEFAULT = 10
+_MAX_DIST_DEFAULT = 16
 
 
 def _hamming(a: int, b: int) -> int:
@@ -128,10 +128,10 @@ class FindByImageDialog(QDialog):
 
         ctrl.addWidget(QLabel(self.tr("Max distance:")))
         self._dist_spin = QSpinBox()
-        self._dist_spin.setRange(0, 32)
+        self._dist_spin.setRange(0, 64)
         self._dist_spin.setValue(_MAX_DIST_DEFAULT)
         self._dist_spin.setToolTip(
-            self.tr("Hamming distance threshold (0 = exact match, 32 = very loose)")
+            self.tr("Hamming distance threshold (0 = exact match, 64 = very loose)")
         )
         ctrl.addWidget(self._dist_spin)
 
@@ -238,7 +238,7 @@ class FindByImageDialog(QDialog):
         else:
             self._query_img.setText(path.name)
 
-        self._hash_lbl.setText(f"dHash: {h:016x}")
+        self._hash_lbl.setText(f"dHash: {format_dhash(h)}")
         self._search_btn.setEnabled(True)
         self._status_lbl.setText(self.tr("Image loaded. Click Search to find matches."))
 
@@ -312,9 +312,10 @@ class FindByImageDialog(QDialog):
             )
 
         for model_id, dhash_hex, thumb_path, title, archive_path in rows:
-            try:
-                h = int(dhash_hex, 16)
-            except (ValueError, TypeError):
+            h = parse_dhash(dhash_hex)
+            if h is None:
+                # Stored with an older/narrower algorithm — skip until recomputed
+                # (Database Maintenance → Recompute Image Hashes).
                 continue
             dist = _hamming(query_hash, h)
             if dist <= max_dist:

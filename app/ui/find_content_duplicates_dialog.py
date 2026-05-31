@@ -115,26 +115,41 @@ def _size_item(path: str) -> QTableWidgetItem:
 # Perceptual hashing — pure Pillow, no extra dependencies
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _dhash(jpeg_bytes: bytes, hash_size: int = 8) -> Optional[int]:
-    """Compute a 64-bit difference hash (dHash) from raw JPEG bytes.
+DHASH_SIZE    = 8                          # grid size per gradient direction
+DHASH_BITS    = 2 * DHASH_SIZE * DHASH_SIZE  # 128 (horizontal + vertical)
+DHASH_HEX_LEN = DHASH_BITS // 4              # 32 hex chars
+
+
+def _dhash(jpeg_bytes: bytes, hash_size: int = DHASH_SIZE) -> Optional[int]:
+    """Compute a 128-bit difference hash (horizontal + vertical) from JPEG bytes.
 
     The image is converted to greyscale and resized to
-    (hash_size+1) × hash_size pixels.  For each row, each pixel is
-    compared to the one immediately to its right; the result is a
-    hash_size² -bit integer.
+    (hash_size+1) × (hash_size+1) pixels.  Two ``hash_size²``-bit hashes are
+    computed and concatenated: one comparing each pixel to its right neighbour
+    (horizontal gradient) and one comparing each pixel to the one below it
+    (vertical gradient).  Capturing both directions discriminates better than
+    a horizontal-only hash, reducing false matches between images that share a
+    horizontal gradient but differ vertically.
 
     Returns None if the image cannot be decoded.
     """
     try:
         from PIL import Image
         img = Image.open(io.BytesIO(jpeg_bytes)).convert("L")
-        img = img.resize((hash_size + 1, hash_size), Image.LANCZOS)
+        img = img.resize((hash_size + 1, hash_size + 1), Image.LANCZOS)
         px  = img.load()
         result = 0
         bit = 0
+        # Horizontal gradient: compare each pixel to the one to its right.
         for row in range(hash_size):
             for col in range(hash_size):
                 if px[col, row] > px[col + 1, row]:
+                    result |= 1 << bit
+                bit += 1
+        # Vertical gradient: compare each pixel to the one below it.
+        for row in range(hash_size):
+            for col in range(hash_size):
+                if px[col, row] > px[col, row + 1]:
                     result |= 1 << bit
                 bit += 1
         return result
@@ -145,6 +160,29 @@ def _dhash(jpeg_bytes: bytes, hash_size: int = 8) -> Optional[int]:
 def compute_dhash_from_jpeg(jpeg_bytes: bytes) -> Optional[int]:
     """Public wrapper used by other modules to compute dHash from JPEG bytes."""
     return _dhash(jpeg_bytes)
+
+
+def format_dhash(value: int) -> str:
+    """Format a dHash integer as a fixed-width, zero-padded hex string.
+
+    The fixed width (:data:`DHASH_HEX_LEN`) lets readers recognise hashes made
+    by an older/narrower algorithm by their differing length and recompute them.
+    """
+    return f"{value:0{DHASH_HEX_LEN}x}"
+
+
+def parse_dhash(stored) -> Optional[int]:
+    """Parse a stored dHash, accepting only the current algorithm's bit width.
+
+    Older 64-bit hashes (16 hex chars), integers, and malformed values return
+    ``None`` so callers recompute rather than compare incompatible fingerprints.
+    """
+    if not isinstance(stored, str) or len(stored) != DHASH_HEX_LEN:
+        return None
+    try:
+        return int(stored, 16)
+    except ValueError:
+        return None
 
 
 def _hamming(a: int, b: int) -> int:
@@ -179,7 +217,7 @@ def _find_candidates(
         return out
 
     num_seg  = max_dist + 1
-    seg_bits = 64 // num_seg
+    seg_bits = DHASH_BITS // num_seg
     seg_mask = (1 << seg_bits) - 1
 
     index: dict[tuple[int, int], list[int]] = defaultdict(list)
@@ -380,23 +418,16 @@ class _ImageDupWorker(QThread):
                         dh = row[0] if row is not None else None
                     finally:
                         s.close()
-                    if dh is not None:
-                        # dh may be stored as a hex string (preferred) or an int
-                        # from older DBs. Normalize to an int for in-memory hashing.
-                        try:
-                            h_int = int(dh, 16) if isinstance(dh, str) else int(dh)
-                        except Exception:
-                            # Fallback: skip this stored value
-                            h_int = None
-                        if h_int is not None:
-                            hashes.append((img_id, model_id, h_int))
-                    else:
+                    # Accept the stored hash only if it matches the current algorithm;
+                    # otherwise (missing or an older/narrower hash) recompute it.
+                    h_int = parse_dhash(dh)
+                    if h_int is None:
                         jpeg = get_thumbnail_bytes(img_id)
                         if jpeg:
-                            h = _dhash(jpeg)
-                            if h is not None:
-                                hashes.append((img_id, model_id, h))
-                            model_img_count[model_id] += 1
+                            h_int = _dhash(jpeg)
+                    if h_int is not None:
+                        hashes.append((img_id, model_id, h_int))
+                        model_img_count[model_id] += 1
                     if (n + 1) % 50 == 0:
                         self.prog_val.emit(n + 1, total)
 
@@ -766,21 +797,21 @@ class FindContentDuplicatesDialog(QDialog):
         grp  = QGroupBox(self.tr("Search Parameters"))
         form = QFormLayout(grp)
         self._img_dist_spin = QSpinBox()
-        self._img_dist_spin.setRange(0, 15)
-        self._img_dist_spin.setValue(5)
+        self._img_dist_spin.setRange(0, 32)
+        self._img_dist_spin.setValue(10)
         self._img_dist_spin.setToolTip(
-            self.tr("Maximum Hamming distance between 64-bit dHash fingerprints.\n"
+            self.tr("Maximum Hamming distance between 128-bit dHash fingerprints.\n"
             "0 = bit-for-bit identical pixels\n"
-            "≤3 = very similar (different resolution / minor JPEG artefacts)\n"
-            "≤8 = noticeably similar (recolour, slight crop)\n"
-            "≤15 = loosely similar (use with caution — many false positives)")
+            "≤6 = very similar (different resolution / minor JPEG artefacts)\n"
+            "≤16 = noticeably similar (recolour, slight crop)\n"
+            "≤30 = loosely similar (use with caution — many false positives)")
         )
         form.addRow(self.tr("Max hash distance:"), self._img_dist_spin)
         form.addRow("", QLabel(
             self.tr("<small>Preview thumbnails are compared with a perceptual difference "
             "hash (dHash). Two thumbnails are considered similar when their "
-            "64-bit hashes differ in at most this many bits. A distance of 0 "
-            "catches only near-identical images; 5 typically catches the same "
+            "128-bit hashes differ in at most this many bits. A distance of 0 "
+            "catches only near-identical images; 10 typically catches the same "
             "render at different resolutions or with slight colour shifts. "
             "Higher values increase recall but also false positives.</small>")
         ))

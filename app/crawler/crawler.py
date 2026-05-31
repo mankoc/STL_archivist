@@ -38,7 +38,7 @@ from app.utils.thumbnailer import (
     save_thumbnail, delete_thumbnail, get_thumbnail_base_dir,
     get_thumbnail_bytes, save_thumbnails_batch,
 )
-from app.ui.find_content_duplicates_dialog import compute_dhash_from_jpeg
+from app.ui.find_content_duplicates_dialog import compute_dhash_from_jpeg, format_dhash
 from app.utils.path_pattern import parse_path, apply_extracted_to_model, parse_release_date
 
 
@@ -1156,8 +1156,7 @@ class CrawlerWorker(QThread):
                         if jpeg_bytes:
                             h = compute_dhash_from_jpeg(jpeg_bytes)
                             if h is not None:
-                                hval = int(h) & ((1 << 64) - 1)
-                                img.dhash = f"{hval:016x}"
+                                img.dhash = format_dhash(h)
                     except Exception:
                         logger.debug("  Failed to compute dHash for image id %s", img.id)
                     count += 1
@@ -1221,8 +1220,7 @@ class CrawlerWorker(QThread):
                         if jpeg:
                             h = compute_dhash_from_jpeg(jpeg)
                             if h is not None:
-                                hval = int(h) & ((1 << 64) - 1)
-                                img.dhash = f"{hval:016x}"
+                                img.dhash = format_dhash(h)
                     except Exception:
                         pass
                     count += 1

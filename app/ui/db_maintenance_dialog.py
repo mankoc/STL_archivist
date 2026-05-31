@@ -299,9 +299,10 @@ class DHashWorker(QThread):
 
     _BATCH = 200
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, recompute_all: bool = False, parent=None) -> None:
         super().__init__(parent)
         self._stop_requested = False
+        self._recompute_all = recompute_all
 
     def stop(self) -> None:
         self._stop_requested = True
@@ -310,18 +311,18 @@ class DHashWorker(QThread):
         from app.database.db import session_scope
         from app.database.models import Image as DBImage
         from app.utils.thumbnailer import get_thumbnail_bytes
-        from app.ui.find_content_duplicates_dialog import compute_dhash_from_jpeg
+        from app.ui.find_content_duplicates_dialog import compute_dhash_from_jpeg, format_dhash
 
         self._stop_requested = False
         computed = 0
         skipped  = 0
 
         with session_scope() as session:
-            rows = (
-                session.query(DBImage.id, DBImage.thumbnail)
-                .filter(DBImage.dhash.is_(None))
-                .all()
-            )
+            query = session.query(DBImage.id, DBImage.thumbnail)
+            if not self._recompute_all:
+                # Only fill in images that have no hash yet.
+                query = query.filter(DBImage.dhash.is_(None))
+            rows = query.all()
 
         total = len(rows)
         if total == 0:
@@ -329,7 +330,8 @@ class DHashWorker(QThread):
             self.finished.emit(0, 0)
             return
 
-        self.log.emit(f"Computing dHash for {total} image(s)…")
+        verb = "Recomputing" if self._recompute_all else "Computing"
+        self.log.emit(f"{verb} dHash for {total} image(s)…")
 
         pending: list[tuple[int, str]] = []   # (image_id, dhash_hex)
 
@@ -360,7 +362,7 @@ class DHashWorker(QThread):
                 skipped += 1
                 continue
 
-            pending.append((image_id, format(h, "016x")))
+            pending.append((image_id, format_dhash(h)))
             computed += 1
 
             if len(pending) >= self._BATCH:
@@ -627,6 +629,17 @@ class DbMaintenanceDialog(QDialog):
         self._find_dup_entries_btn.clicked.connect(self._start_find_duplicate_entries)
         btn_row.addWidget(self._find_dup_entries_btn)
 
+        self._recompute_dhash_btn = QPushButton(
+            style.standardIcon(SP.SP_BrowserReload), self.tr("Recompute Image Hashes")
+        )
+        self._recompute_dhash_btn.setToolTip(
+            self.tr("Recompute the perceptual hash (dHash) of every thumbnail. "
+            "Run this after upgrading so image-similarity searches use the current "
+            "128-bit algorithm.")
+        )
+        self._recompute_dhash_btn.clicked.connect(lambda: self._start_dhash(recompute_all=True))
+        btn_row.addWidget(self._recompute_dhash_btn)
+
         self._merge_moved_btn = QPushButton(
             style.standardIcon(SP.SP_ArrowRight), self.tr("Merge Moved")
         )
@@ -715,6 +728,7 @@ class DbMaintenanceDialog(QDialog):
         self._search_btn.setEnabled(False)
         self._find_moved_btn.setEnabled(False)
         self._find_dup_entries_btn.setEnabled(not busy)
+        self._recompute_dhash_btn.setEnabled(not busy)
         self._merge_moved_btn.setEnabled(False)
         self._remove_sel_btn.setEnabled(False)
         self._remove_all_btn.setEnabled(False)
@@ -731,6 +745,7 @@ class DbMaintenanceDialog(QDialog):
         self._search_btn.setEnabled(has_missing or has_flagged)
         self._find_moved_btn.setEnabled(has_missing or has_flagged)
         self._find_dup_entries_btn.setEnabled(True)
+        self._recompute_dhash_btn.setEnabled(True)
         self._merge_moved_btn.setEnabled(has_moved_db)
         self._remove_sel_btn.setEnabled(has_any)
         self._remove_all_btn.setEnabled(has_missing)
@@ -768,12 +783,12 @@ class DbMaintenanceDialog(QDialog):
         self._set_idle()
 
     # ------------------------------------------------------------------
-    def _start_dhash(self) -> None:
+    def _start_dhash(self, recompute_all: bool = False) -> None:
         self._log.clear()
         self._progress.setValue(0)
         self._set_busy(True)
 
-        self._dhash_worker = DHashWorker()
+        self._dhash_worker = DHashWorker(recompute_all=recompute_all)
         self._dhash_worker.log.connect(self._on_log)
         self._dhash_worker.progress.connect(self._on_progress)
         self._dhash_worker.finished.connect(self._on_dhash_finished)
@@ -1176,6 +1191,7 @@ class DbMaintenanceDialog(QDialog):
         self._search_btn.setEnabled(has_missing or has_flagged)
         self._find_moved_btn.setEnabled(has_missing or has_flagged)
         self._find_dup_entries_btn.setEnabled(True)
+        self._recompute_dhash_btn.setEnabled(True)
         self._merge_moved_btn.setEnabled(has_moved_db)
         self._remove_all_btn.setEnabled(has_missing)
         self._remove_flagged_btn.setEnabled(has_flagged)

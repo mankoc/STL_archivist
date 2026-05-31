@@ -2,6 +2,8 @@
 
 ## 2026.22 — 2026-05-30
 
+- Fixed: the browser's active filters were silently dropped after a mass edit (and any other refresh); the table now stays filtered and the filter-pane selections are preserved.
+- Image similarity: perceptual hash upgraded from 64-bit to **128-bit** (horizontal + vertical dHash) for fewer false matches; old hashes are recomputed on the fly, and **Database Maintenance → Recompute Image Hashes** re-hashes the whole library. Still dependency-free (pure Pillow).
 - Find Duplicate Archives by Content (STL Files tab): selecting a result now previews the thumbnails of both archives side by side.
 - Localization: translatable UI via Qt Linguist `.ts` files in `resources/i18n/` (English and Spanish built-in, more drop-in), with a language picker in Configuration; untranslated strings fall back to English.
 - Configuration: Language moved to its own sidebar section; Appearance colour pickers grouped into a collapsible, width-scaling 3-column "Custom Colors" section; sidebar labels now translatable.
