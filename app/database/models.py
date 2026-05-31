@@ -233,9 +233,11 @@ class Image(Base):
     filename       = Column(String(512))
     thumbnail_path = Column(String(512), nullable=True)
     thumbnail      = Column(LargeBinary, nullable=True)   # legacy blob – NULL after migration to LMDB
-    # Store dHash as a 16-char hex string (zero-padded) to avoid integer
-    # range issues when persisting unsigned 64-bit values in SQLite.
-    dhash          = Column(String(16), nullable=True)      # 64-bit perceptual hash (hex)
+    # Store dHash as a zero-padded hex string (32 chars for the 128-bit
+    # horizontal+vertical hash) to avoid integer range issues in SQLite.
+    # Older databases may still hold 16-char (64-bit) hashes; those are treated
+    # as stale and recomputed (Database Maintenance → Recompute Image Hashes).
+    dhash          = Column(String(32), nullable=True)      # 128-bit perceptual hash (hex)
 
     model = relationship("STLModel", back_populates="images")
 

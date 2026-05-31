@@ -1012,17 +1012,21 @@ side by side, so you can confirm visually that the two are the same model before
 {_link(PAGE_CONFIG, "Configuration")} and archives to have been crawled with that option on.</div>
 
 <h3>Images tab</h3>
-<p>Computes a 64-bit perceptual difference hash (dHash) for every stored thumbnail and
-reports archive pairs that contain at least one pair of visually similar images.  The
-comparison is resolution-independent, so the same render at different sizes is caught.</p>
+<p>Computes a 128-bit perceptual difference hash (dHash &mdash; horizontal and vertical
+gradients) for every stored thumbnail and reports archive pairs that contain at least one
+pair of visually similar images.  The comparison is resolution-independent, so the same
+render at different sizes is caught.</p>
 <table>
   <tr><th>Parameter</th><th>Description</th></tr>
   <tr><td>Max hash distance</td>
-      <td>0&ndash;15 (default 5).  The maximum number of bits allowed to differ between
+      <td>0&ndash;32 (default 10).  The maximum number of bits allowed to differ between
           two thumbnail hashes.  0 = bit-for-bit identical pixels after downscaling;
-          &le;3 = very similar (different resolution or minor JPEG artefacts);
-          &le;8 = noticeably similar; higher values increase recall but also false positives.</td></tr>
+          &le;6 = very similar (different resolution or minor JPEG artefacts);
+          &le;16 = noticeably similar; higher values increase recall but also false positives.</td></tr>
 </table>
+<div class="note">After upgrading, run <b>Database Maintenance &rarr; Recompute Image Hashes</b>
+once so existing thumbnails are re-hashed with the current 128-bit algorithm; until then
+older 64-bit hashes are recomputed on the fly during a search.</div>
 <div class="tip">Tip: hover any row in the Images tab to see a side-by-side popup of both
 archives&rsquo; first thumbnails, making it easy to judge whether the match is genuine.</div>
 

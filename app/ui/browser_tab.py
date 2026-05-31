@@ -1711,12 +1711,20 @@ class BrowserTab(QWidget):
 
     # ------------------------------------------------------------------
     def refresh(self) -> None:
-        """Reload all data from the database."""
+        """Reload all data from the database, preserving the active filters.
+
+        ``_apply_checked_filters`` reads the current filter-tree checkboxes (still
+        intact at this point), reloads the table with those filters, and then
+        rebuilds the filter tree — restoring the checked/excluded state from the
+        fresh data.  We must NOT call ``_populate_filter_tree`` first: it clears
+        the tree synchronously and rebuilds it on a background thread, so the
+        immediate ``_apply_checked_filters`` would otherwise read an empty tree
+        and silently drop every active filter.
+        """
         from app.database.filter_cache import invalidate_filter_cache
         invalidate_filter_cache()
         _lookup_cache.invalidate()
         self._panel_cache.clear()
-        self._populate_filter_tree()
         self._apply_checked_filters()
         self._clear_thumbnails()
 

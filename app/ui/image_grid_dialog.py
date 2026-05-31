@@ -260,6 +260,11 @@ class ImageGridDialog(QDialog):
     def __init__(self, model_ids: list[int], parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"Image Grid — {len(model_ids)} model{'s' if len(model_ids) != 1 else ''}")
+        self.setWindowFlags(
+            self.windowFlags()
+            | Qt.WindowType.WindowMinimizeButtonHint
+            | Qt.WindowType.WindowMaximizeButtonHint
+        )
         self.resize(920, 700)
         self._cells_data: list[_CellData] = []
         self._selected_indices: set[int] = set()   # tracks original_index values
