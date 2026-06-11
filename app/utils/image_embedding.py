@@ -84,6 +84,22 @@ def model_path() -> Optional[Path]:
     return None
 
 
+def default_model_dest() -> Optional[Path]:
+    """Return the preferred local path for storing the downloaded CLIP model."""
+    try:
+        from app.ui.config_dialog import get_data_dir
+        return Path(get_data_dir()) / "models" / MODEL_FILENAME
+    except Exception:
+        return None
+
+
+def reset_session() -> None:
+    """Discard the cached ORT session so the next call to embed_jpeg reloads it."""
+    global _session, _session_tried
+    _session = None
+    _session_tried = False
+
+
 def is_available() -> bool:
     """True if embeddings can be computed (deps installed and model present)."""
     return _deps_ok() and model_path() is not None
@@ -124,9 +140,13 @@ def _get_session():
         sess = ort.InferenceSession(str(path), providers=providers)
         active = sess.get_providers()[0]
         _input_name = sess.get_inputs()[0].name
-        _output_name = sess.get_outputs()[0].name
+        # Prefer pooler_output (CLS token, shape N×D) over last_hidden_state
+        # (all patch tokens, shape N×197×D) when both are present (Xenova exports).
+        output_names = [o.name for o in sess.get_outputs()]
+        _output_name = "pooler_output" if "pooler_output" in output_names else output_names[0]
         _session = sess
-        log.info("Loaded CLIP image encoder: %s (provider: %s)", path, active)
+        log.info("Loaded CLIP image encoder: %s (provider: %s, output: %s)",
+                 path, active, _output_name)
         return sess
     except Exception as exc:
         log.error("Failed to load CLIP ONNX model: %s", exc)
