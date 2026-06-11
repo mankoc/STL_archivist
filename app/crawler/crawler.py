@@ -274,6 +274,15 @@ class CrawlerWorker(QThread):
                 msg = f"WARNING: Cannot open archive (possibly corrupted): {p.name}"
                 self.warning.emit(msg)
                 logger.warning("Corrupted or unreadable archive: %s (%s)", p, h)
+                # Mark as unreadable in the DB warning field so it appears in the filter.
+                ex2 = existing_map.get(str(p))
+                if ex2 is not None:
+                    _uw = "Unreadable archive"
+                    if ex2.warning:
+                        if _uw not in ex2.warning:
+                            ex2.warning += "\n" + _uw
+                    else:
+                        ex2.warning = _uw
 
             ex = existing_map.get(str(p))
             if ex is None:
@@ -900,6 +909,14 @@ class CrawlerWorker(QThread):
                     model.warning += "\n" + _warn_text
             else:
                 model.warning = _warn_text
+
+        if current_hash.startswith("fallback:"):
+            _uw = "Unreadable archive"
+            if model.warning:
+                if _uw not in model.warning:
+                    model.warning += "\n" + _uw
+            else:
+                model.warning = _uw
 
         self._assign_metadata(model, meta, session)
 

@@ -925,9 +925,20 @@ class _FilterTreeWorker(QRunnable):
                 ]
                 for _wt in ("Models with presupported stl", "Archive without images",
                             "Nested archives", "Archive with supports",
-                            "Archive without printable files"):
+                            "Archive without printable files", "Unreadable archive"):
                     _counts[("warning", _wt)] = sum(1 for w in _all_warnings if _wt in w)
                 _grp["warning"] = sum(1 for w in _all_warnings if w)
+
+                # File type counts (derived from archive_path extension).
+                _ft_raw = [
+                    _P(ap).suffix.lower()
+                    for (ap,) in session.query(STLModel.archive_path)
+                    .filter(STLModel.archive_path.isnot(None)).all()
+                    if ap
+                ]
+                for _ft in set(_ft_raw):
+                    _counts[("filetype", _ft)] = _ft_raw.count(_ft)
+                _grp["filetype"] = len(_ft_raw)
 
                 # Use pre-computed archive_folder when available (SQL GROUP BY),
                 # falling back to Python path parsing for older rows where it is NULL.
@@ -1050,6 +1061,19 @@ class _FilterTreeWorker(QRunnable):
                                     "Archive without printable files"):
                             _scoped_counts[("warning", _wt)] = sum(1 for w in _sc_warns if _wt in w)
                         _scoped_counts[("group", "warning")] = sum(1 for w in _sc_warns if w)
+
+                    _ft_sc = _s("filetype")
+                    if _ft_sc is not None:
+                        _sc_ft = [
+                            _P(ap).suffix.lower()
+                            for (ap,) in session.query(STLModel.archive_path)
+                            .filter(STLModel.id.in_(_ft_sc))
+                            .filter(STLModel.archive_path.isnot(None)).all()
+                            if ap
+                        ]
+                        for _ft in set(_sc_ft):
+                            _scoped_counts[("filetype", _ft)] = _sc_ft.count(_ft)
+                        _scoped_counts[("group", "filetype")] = len(_sc_ft)
 
                     _path_sc = _s("path")
                     if _path_sc is not None:
@@ -1243,6 +1267,18 @@ class _FilterTreeWorker(QRunnable):
                     q = q.filter(STLModel.id.in_(_ps2))
                 presupports = [v for (v,) in q.all() if v]
 
+            # ── File types ─────────────────────────────────────────────────────
+            filetypes: list[str] = []
+            _ft_sc2 = _scoped_ids("filetype")
+            _ft_q = session.query(STLModel.archive_path).filter(STLModel.archive_path.isnot(None))
+            if _ft_sc2 is not None:
+                _ft_q = _ft_q.filter(STLModel.id.in_(_ft_sc2))
+            filetypes = sorted({
+                _P(ap).suffix.lower()
+                for (ap,) in _ft_q.all()
+                if ap and _P(ap).suffix
+            })
+
             # ── Path dirs ──────────────────────────────────────────────────────
             sorted_dirs: list[str] = []
             scoped_dirs: "list[str] | None" = None
@@ -1310,6 +1346,7 @@ class _FilterTreeWorker(QRunnable):
             "releases": releases,
             "scales": scales,
             "presupports": presupports,
+            "filetypes":   filetypes,
             "sorted_dirs": sorted_dirs,
             "scoped_dirs": scoped_dirs,
             "new_dirs_frozen": new_dirs_frozen,
@@ -1891,12 +1928,12 @@ class BrowserTab(QWidget):
         _SCOPED_KINDS = (
             "creator", "source", "tag", "date_month", "date_year",
             "sculptor_id", "collection_id", "subcollection_id", "category_id",
-            "release_id", "scale_id", "presupports", "warning", "path", "group",
+            "release_id", "scale_id", "presupports", "warning", "filetype", "path", "group",
         )
         _SCOPED_GROUPS = (
             "creator", "source", "tag", "date", "sculptor",
             "collection", "subcollection", "category", "release",
-            "scale", "presupports", "warning", "path",
+            "scale", "presupports", "warning", "filetype", "path",
         )
 
         def _c(data) -> "int | None":
@@ -2067,12 +2104,26 @@ class BrowserTab(QWidget):
                 "Nested archives",
                 "Archive with supports",
                 "Archive without printable files",
+                "Unreadable archive",
             ]
             warn_item = _make_leaf("Warnings", ("group", "warning"), _c(("group", "warning")))
             warn_item.setIcon(0, _icon_warnings)
             self._filter_tree.addTopLevelItem(warn_item)
             for wtype in _WARNING_TYPES:
                 warn_item.addChild(_make_leaf(wtype, ("warning", wtype), _c(("warning", wtype))))
+
+        if payload.get("filetypes"):
+            ft_item = _make_leaf(
+                self.tr("File Type"), ("group", "filetype"), _c(("group", "filetype"))
+            )
+            ft_item.setIcon(0, _icon_path)
+            self._filter_tree.addTopLevelItem(ft_item)
+            for ext in payload["filetypes"]:
+                ft_item.addChild(_make_leaf(ext, ("filetype", ext), _c(("filetype", ext))))
+            if ("filetype" in (expanded_sections or set())
+                    or any(d[0] == "filetype" for d in checked_data)
+                    or any(d[0] == "filetype" for d in excluded_data)):
+                ft_item.setExpanded(True)
 
         if show.get("path"):
             paths_item = _make_leaf("Path", ("group", "path"), _c(("group", "path")))
@@ -2189,6 +2240,8 @@ class BrowserTab(QWidget):
         presupports_exc_filters: list[str] | None = None,
         warning_filters:       list[str] | None = None,
         warning_exc_filters:   list[str] | None = None,
+        filetype_filters:      list[str] | None = None,
+        filetype_exc_filters:  list[str] | None = None,
         has_value_groups:      list[str] | None = None,
         no_value_groups:       list[str] | None = None,
         id_filters:            list[int] | None = None,
@@ -2274,6 +2327,9 @@ class BrowserTab(QWidget):
             stmt = stmt.where(mv.c.presupports.in_(presupports_filters))
         if warning_filters:
             stmt = stmt.where(or_(*(mv.c.warning.contains(w) for w in warning_filters)))
+        if filetype_filters:
+            _ap_lc = func.lower(mv.c.archive_path)
+            stmt = stmt.where(or_(*(_ap_lc.like("%" + ext) for ext in filetype_filters)))
         # --- exclude filters ---
         if author_exc_filters:
             stmt = stmt.where(~mv.c.creator.in_(author_exc_filters))
@@ -2303,6 +2359,9 @@ class BrowserTab(QWidget):
             stmt = stmt.where(~mv.c.presupports.in_(presupports_exc_filters))
         if warning_exc_filters:
             stmt = stmt.where(and_(*(~mv.c.warning.contains(w) for w in warning_exc_filters)))
+        if filetype_exc_filters:
+            _ap_lc = func.lower(mv.c.archive_path)
+            stmt = stmt.where(and_(*(~_ap_lc.like("%" + ext) for ext in filetype_exc_filters)))
 
         # --- group-level has/no-value filters ---
         _has_tag_sub = sa_select(_mt_global.c.model_id).distinct()
@@ -2697,6 +2756,7 @@ class BrowserTab(QWidget):
         scale_inc:           list[int]   = []; scale_exc:           list[int]   = []
         presupports_inc:     list[str]   = []; presupports_exc:     list[str]   = []
         warning_inc:         list[str]   = []; warning_exc:         list[str]   = []
+        filetype_inc:        list[str]   = []; filetype_exc:        list[str]   = []
         has_value_groups:    set[str]    = set()
         no_value_groups:     set[str]    = set()
 
@@ -2713,6 +2773,7 @@ class BrowserTab(QWidget):
             "scale_id":          (scale_inc,        scale_exc),
             "presupports":       (presupports_inc,  presupports_exc),
             "warning":           (warning_inc,      warning_exc),
+            "filetype":          (filetype_inc,     filetype_exc),
         }
 
         def _collect(item: QTreeWidgetItem):
@@ -2749,6 +2810,7 @@ class BrowserTab(QWidget):
             scale_filters=scale_inc or None,                 scale_exc_filters=scale_exc or None,
             presupports_filters=presupports_inc or None,     presupports_exc_filters=presupports_exc or None,
             warning_filters=warning_inc or None,             warning_exc_filters=warning_exc or None,
+            filetype_filters=filetype_inc or None,           filetype_exc_filters=filetype_exc or None,
             has_value_groups=has_value_groups or None,
             no_value_groups=no_value_groups or None,
         )
@@ -2768,11 +2830,12 @@ class BrowserTab(QWidget):
         _has_scale       = bool(scale_inc or scale_exc)
         _has_presupports = bool(presupports_inc or presupports_exc)
         _has_warning     = bool(warning_inc or warning_exc)
+        _has_filetype    = bool(filetype_inc or filetype_exc)
         _has_group       = bool(has_value_groups or no_value_groups)
         _has_any = any([
             _has_creator, _has_type, _has_path, _has_tag, _has_date,
             _has_sculptor, _has_col, _has_sub, _has_category, _has_rel,
-            _has_scale, _has_presupports, _has_warning, _has_group,
+            _has_scale, _has_presupports, _has_warning, _has_filetype, _has_group,
         ])
 
         scope_by_section: dict | None = None
@@ -2803,7 +2866,7 @@ class BrowserTab(QWidget):
                 skip_tag=False, skip_date=False, skip_sculptor=False,
                 skip_col=False, skip_sub=False, skip_category=False,
                 skip_rel=False, skip_scale=False, skip_presupports=False,
-                skip_warning=False,
+                skip_warning=False, skip_filetype=False,
             ):
                 q = sa_select(STLModel.id)
                 _has_condition = False
@@ -2858,6 +2921,12 @@ class BrowserTab(QWidget):
                 if not skip_warning:
                     if warning_inc:  _w(or_(*(STLModel.warning.contains(w) for w in warning_inc)))
                     if warning_exc:  _w(and_(*(~STLModel.warning.contains(w) for w in warning_exc)))
+                if not skip_filetype:
+                    _ap = func.lower(STLModel.archive_path)
+                    if filetype_inc:
+                        _w(or_(*(_ap.like("%" + ext) for ext in filetype_inc)))
+                    if filetype_exc:
+                        _w(and_(*(~_ap.like("%" + ext) for ext in filetype_exc)))
                 _group_conds = {
                     "creator":       lambda: and_(STLModel.creator.isnot(None),      STLModel.creator != ""),
                     "tag":           lambda: STLModel.tags.any(),
@@ -2894,6 +2963,7 @@ class BrowserTab(QWidget):
                 "scale":         _run_id_subquery(skip_scale=True),
                 "presupports":   _run_id_subquery(skip_presupports=True),
                 "warning":       _run_id_subquery(skip_warning=True),
+                "filetype":      _run_id_subquery(skip_filetype=True),
             }
 
         self._populate_filter_tree(scope_by_section=scope_by_section)
