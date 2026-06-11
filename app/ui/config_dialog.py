@@ -10,7 +10,7 @@ import re
 import sys
 from pathlib import Path
 
-from PyQt6.QtCore import QCoreApplication, QSettings, QSize, Qt, QT_TRANSLATE_NOOP
+from PyQt6.QtCore import QCoreApplication, QSettings, QSize, Qt, QT_TRANSLATE_NOOP, QThread, pyqtSignal
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QGridLayout, QGroupBox,
@@ -600,6 +600,64 @@ def apply_color_scheme(scheme_name: str) -> None:
         app.setStyleSheet(override_css)
 
 
+_CLIP_DOWNLOAD_URL = (
+    "https://huggingface.co/Xenova/clip-vit-base-patch32"
+    "/resolve/main/onnx/vision_model.onnx"
+)
+
+
+class _ClipDownloadWorker(QThread):
+    """Downloads the CLIP ONNX vision model from Hugging Face in a background thread."""
+
+    progress = pyqtSignal(int, int)   # (bytes_done, total_bytes)
+    finished = pyqtSignal(bool, str)  # (success, message)
+
+    def __init__(self, dest: "Path", parent=None) -> None:
+        super().__init__(parent)
+        self._dest = dest
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+    def run(self) -> None:
+        import urllib.request
+        from pathlib import Path
+
+        dest = Path(self._dest)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_suffix(".onnx.part")
+
+        try:
+            req = urllib.request.Request(
+                _CLIP_DOWNLOAD_URL,
+                headers={"User-Agent": "stlLibrary/1.0"},
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                total = int(resp.headers.get("Content-Length", 0))
+                done = 0
+                chunk = 1 << 16  # 64 KB
+                with open(tmp, "wb") as f:
+                    while not self._cancelled:
+                        data = resp.read(chunk)
+                        if not data:
+                            break
+                        f.write(data)
+                        done += len(data)
+                        self.progress.emit(done, total)
+
+            if self._cancelled:
+                tmp.unlink(missing_ok=True)
+                self.finished.emit(False, "Download cancelled.")
+                return
+
+            tmp.rename(dest)
+            self.finished.emit(True, f"Model saved to {dest}")
+        except Exception as exc:
+            tmp.unlink(missing_ok=True)
+            self.finished.emit(False, f"Download failed: {exc}")
+
+
 class ConfigDialog(QDialog):
     """Multi-page settings dialog.
 
@@ -1133,13 +1191,98 @@ class ConfigDialog(QDialog):
         ))
         sim_form.addRow(self.tr("Batch size:"), self._ai_batch_size_spin)
 
+        from app.utils import image_embedding as _emb
+        self._clip_model_present = _emb.is_available()
+        self._clip_dl_worker: _ClipDownloadWorker | None = None
+
+        dl_row = QHBoxLayout()
+        self._clip_dl_btn = QPushButton(self.tr("Download CLIP model (~90 MB)"))
+        self._clip_dl_btn.setToolTip(self.tr(
+            "Download the CLIP ViT-B/32 image encoder (Xenova, ONNX) from Hugging Face "
+            "and save it to the models folder inside your data directory."
+        ))
+        self._clip_dl_btn.clicked.connect(self._start_clip_download)
+        dl_row.addWidget(self._clip_dl_btn)
+        self._clip_dl_cancel_btn = QPushButton(self.tr("Cancel"))
+        self._clip_dl_cancel_btn.setVisible(False)
+        self._clip_dl_cancel_btn.clicked.connect(self._cancel_clip_download)
+        dl_row.addWidget(self._clip_dl_cancel_btn)
+        sim_form.addRow("", dl_row)
+
+        self._clip_dl_status = QLabel()
+        self._clip_dl_status.setWordWrap(True)
+        sim_form.addRow("", self._clip_dl_status)
+
+        self._refresh_clip_dl_button()
+
         layout.addWidget(sim_group)
         layout.addStretch()
         return page
 
+    def _refresh_clip_dl_button(self) -> None:
+        from app.utils import image_embedding as _emb
+        self._clip_model_present = _emb.is_available()
+        enabled = self._ai_embeddings_check.isChecked()
+        downloading = self._clip_dl_worker is not None and self._clip_dl_worker.isRunning()
+        if self._clip_model_present:
+            self._clip_dl_btn.setVisible(False)
+            self._clip_dl_cancel_btn.setVisible(False)
+            self._clip_dl_status.setText(
+                f'<span style="color:green;">✓ {self.tr("CLIP model is installed.")}</span>'
+            )
+        elif not enabled:
+            self._clip_dl_btn.setVisible(False)
+            self._clip_dl_cancel_btn.setVisible(False)
+            self._clip_dl_status.clear()
+        else:
+            self._clip_dl_btn.setVisible(not downloading)
+            self._clip_dl_cancel_btn.setVisible(downloading)
+            if not downloading:
+                self._clip_dl_status.setText(
+                    self.tr("CLIP model not found. Download it to enable AI embeddings.")
+                )
+
+    def _start_clip_download(self) -> None:
+        from app.utils import image_embedding as _emb
+        dest = _emb.default_model_dest()
+        if dest is None:
+            self._clip_dl_status.setText(
+                self.tr("Cannot determine data directory. Set it in Configuration → Database first.")
+            )
+            return
+        self._clip_dl_worker = _ClipDownloadWorker(dest, parent=self)
+        self._clip_dl_worker.progress.connect(self._on_clip_dl_progress)
+        self._clip_dl_worker.finished.connect(self._on_clip_dl_finished)
+        self._clip_dl_worker.start()
+        self._refresh_clip_dl_button()
+
+    def _cancel_clip_download(self) -> None:
+        if self._clip_dl_worker:
+            self._clip_dl_worker.cancel()
+
+    def _on_clip_dl_progress(self, done: int, total: int) -> None:
+        if total > 0:
+            pct = int(done * 100 / total)
+            mb_done = done / 1_048_576
+            mb_total = total / 1_048_576
+            self._clip_dl_status.setText(
+                f"{pct}%  ({mb_done:.1f} / {mb_total:.1f} MB)"
+            )
+        else:
+            self._clip_dl_status.setText(f"{done / 1_048_576:.1f} MB downloaded…")
+
+    def _on_clip_dl_finished(self, success: bool, message: str) -> None:
+        from app.utils import image_embedding as _emb
+        _emb.reset_session()
+        self._clip_dl_worker = None
+        color = "green" if success else "red"
+        self._clip_dl_status.setText(f'<span style="color:{color};">{message}</span>')
+        self._refresh_clip_dl_button()
+
     def _update_ai_embeddings_enabled(self, enabled: bool) -> None:
         self._ai_embeddings_crawl_check.setEnabled(enabled)
         self._ai_batch_size_spin.setEnabled(enabled)
+        self._refresh_clip_dl_button()
 
     def _update_alpha_threshold_enabled(self, enabled: bool) -> None:
         self._filter_alpha_threshold_spin.setEnabled(enabled)
@@ -1670,6 +1813,7 @@ class ConfigDialog(QDialog):
         self._ai_embeddings_crawl_check.setEnabled(ai_embed_enabled)
         self._ai_batch_size_spin.setValue(get_ai_embeddings_batch_size())
         self._ai_batch_size_spin.setEnabled(ai_embed_enabled)
+        self._refresh_clip_dl_button()
 
         self._debug_menu_check.setChecked(get_debug_menu_enabled())
         self._logging_enabled_check.setChecked(get_logging_enabled())
