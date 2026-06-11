@@ -53,6 +53,8 @@ Version: 2026.21
   - xxhash
   - lmdb
   - qt-material
+  - onnxruntime
+  - numpy
 
 ## Installation
 
