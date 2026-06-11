@@ -8,6 +8,13 @@ qt-material>=2.14
 xxhash>=3.4
 lmdb>=1.4
 
+# Optional — AI image embeddings (the "AI embedding (CLIP)" method in Find by
+# Image / Find Duplicate Archives). The app runs fine without these; the feature
+# stays disabled until they are installed AND a CLIP image-encoder ONNX model is
+# placed at <data_dir>/models/clip_image_encoder.onnx (or $STLLIBRARY_CLIP_MODEL).
+#   onnxruntime>=1.17
+#   numpy>=1.24
+
 # Dev / test
 pytest>=8.0
 pytest-cov>=5.0

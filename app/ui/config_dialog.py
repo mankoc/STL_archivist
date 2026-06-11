@@ -442,6 +442,16 @@ def get_filter_alpha_threshold() -> int:
     return int(_load_library_settings().get("filter_alpha_threshold", 50))
 
 
+def get_ai_embeddings_enabled() -> bool:
+    """Whether AI image embeddings (CLIP) are enabled for image similarity search."""
+    return bool(_load_library_settings().get("ai_embeddings_enabled", True))
+
+
+def get_ai_embeddings_during_crawl() -> bool:
+    """Whether AI image embeddings are computed automatically during crawl."""
+    return bool(_load_library_settings().get("ai_embeddings_during_crawl", False))
+
+
 def get_file_manager() -> str:
     """Return the configured file manager preset key."""
     return _load_library_settings().get("file_manager", FILE_MANAGER_SYSTEM)
@@ -1089,8 +1099,31 @@ class ConfigDialog(QDialog):
         img_form.addRow(self.tr("Paginate above:"), self._thumb_page_size_spin)
 
         layout.addWidget(img_group)
+
+        sim_group = QGroupBox(self.tr("Image similarity"))
+        sim_form = QFormLayout(sim_group)
+
+        self._ai_embeddings_check = QCheckBox(self.tr("Enable AI image embeddings (CLIP)"))
+        self._ai_embeddings_check.setToolTip(self.tr(
+            "Enable the AI embedding (CLIP) method in image similarity search. "
+            "Requires onnxruntime, numpy, and a CLIP ONNX model file."
+        ))
+        self._ai_embeddings_check.toggled.connect(self._update_ai_embeddings_enabled)
+        sim_form.addRow("", self._ai_embeddings_check)
+
+        self._ai_embeddings_crawl_check = QCheckBox(self.tr("Compute embeddings during crawl"))
+        self._ai_embeddings_crawl_check.setToolTip(self.tr(
+            "Automatically compute AI image embeddings for new thumbnails during each crawl. "
+            "Slows crawl speed when enabled."
+        ))
+        sim_form.addRow("", self._ai_embeddings_crawl_check)
+
+        layout.addWidget(sim_group)
         layout.addStretch()
         return page
+
+    def _update_ai_embeddings_enabled(self, enabled: bool) -> None:
+        self._ai_embeddings_crawl_check.setEnabled(enabled)
 
     def _update_alpha_threshold_enabled(self, enabled: bool) -> None:
         self._filter_alpha_threshold_spin.setEnabled(enabled)
@@ -1615,6 +1648,10 @@ class ConfigDialog(QDialog):
         self._file_manager_path_edit.setText(get_file_manager_path())
         self._update_file_manager_path_visibility()
         self._thumb_page_size_spin.setValue(get_thumb_page_size())
+        ai_embed_enabled = get_ai_embeddings_enabled()
+        self._ai_embeddings_check.setChecked(ai_embed_enabled)
+        self._ai_embeddings_crawl_check.setChecked(get_ai_embeddings_during_crawl())
+        self._ai_embeddings_crawl_check.setEnabled(ai_embed_enabled)
 
         self._debug_menu_check.setChecked(get_debug_menu_enabled())
         self._logging_enabled_check.setChecked(get_logging_enabled())
@@ -1688,6 +1725,8 @@ class ConfigDialog(QDialog):
                 "file_manager":       self._file_manager_combo.currentData(),
                 "file_manager_path":  self._file_manager_path_edit.text().strip(),
                 "thumb_page_size":    self._thumb_page_size_spin.value(),
+                "ai_embeddings_enabled":      self._ai_embeddings_check.isChecked(),
+                "ai_embeddings_during_crawl": self._ai_embeddings_crawl_check.isChecked(),
                 "hotkeys": {
                     action_id: editor.keySequence().toString()
                     for action_id, editor in self._hotkey_edits.items()

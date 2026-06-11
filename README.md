@@ -29,7 +29,8 @@ Version: 2026.21
 - **File Size column** — browser table shows each archive's size on disk (B / KB / MB / GB), sortable numerically
 - **STL file list** — optionally records the name and uncompressed size of every `.stl` file inside each archive (enable *Store STL file list* in Configuration); included in METADATA.7z sidecars
 - **Find Metadata Duplicates** — finds models with identical or phonetically similar field values; supports exact match, Levenshtein (configurable distance), and Soundex; results can be sent directly to the browser table
-- **Find Archives by Content** — two-tab tool: the *STL Files* tab flags archive pairs that share a configurable fraction of identical files; the *Images* tab finds archives with perceptually similar thumbnails using 64-bit dHash and configurable Hamming distance; hover any row to see thumbnails in a popup; right-click any result row to open the archive's folder in the configured file manager, compare archive contents, or delete the archive from disk
+- **Find Archives by Content** — two-tab tool: the *STL Files* tab flags archive pairs that share a configurable fraction of identical files; the *Images* tab finds archives with similar thumbnails (selecting a result previews both archives' images); hover any row to see thumbnails in a popup; right-click any result row to open the archive's folder in the configured file manager, compare archive contents, or delete the archive from disk
+- **Image similarity matching** — two methods, selectable in the *Images* tab and *Find by Image*: a built-in **128-bit perceptual hash (dHash)** for near-duplicates, and an optional **AI embedding (CLIP)** for semantic matching of the same model across different renders, angles, and colours. Embeddings are an optional, dependency-light add-on (`onnxruntime` + a CLIP ONNX model); compute them via **Database Maintenance → Compute Image Embeddings**
 - **Archive content viewer** — list every `.stl` file in an archive, or compare two archives side-by-side with configurable matching by filename, size, or hash
 - **Physical file deletion** — optionally delete or trash archive files from disk via the right-click menu in the browser table or the duplicate-finder results (enable in Configuration → File writing)
 - **Configurable file manager** — choose which program opens archive folders from right-click menus: System Default, Double Commander, or a custom executable (Configuration → Browser)
@@ -258,6 +259,33 @@ cp resources/i18n/en.ts resources/i18n/de.ts   # then edit de.ts (Qt Linguist wo
 At runtime [app/utils/i18n.py](app/utils/i18n.py) parses the chosen `.ts` file
 directly through a custom `QTranslator`, so no `lrelease`/`.qm` compilation step
 is needed.
+
+## AI Image Embeddings (optional)
+
+The image-similarity tools can use a learned **CLIP** embedding for semantic
+matching (the same model across different renders, angles, and colours) in
+addition to the built-in perceptual hash. This is **optional** and off by
+default — the app runs normally without it.
+
+To enable it:
+
+```bash
+# 1. Install the runtime dependencies
+pip install onnxruntime numpy
+
+# 2. Provide a CLIP image-encoder ONNX model (input 1×3×224×224, RGB,
+#    CLIP-normalised; output N×D). Place it at one of:
+#      $STLLIBRARY_CLIP_MODEL
+#      <data_dir>/models/clip_image_encoder.onnx
+#      resources/models/clip_image_encoder.onnx
+```
+
+Then open **Database Maintenance → Compute Image Embeddings** to populate
+embeddings for existing thumbnails. The **AI embedding (CLIP)** method becomes
+selectable in *Find by Image* and the *Find Duplicate Archives → Images* tab.
+Vectors are stored on each image (`Image.embedding`) and tagged with the model
+id, so changing the model invalidates and recomputes stale vectors. See
+[app/utils/image_embedding.py](app/utils/image_embedding.py).
 
 ## License
 

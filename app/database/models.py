@@ -238,6 +238,12 @@ class Image(Base):
     # Older databases may still hold 16-char (64-bit) hashes; those are treated
     # as stale and recomputed (Database Maintenance → Recompute Image Hashes).
     dhash          = Column(String(32), nullable=True)      # 128-bit perceptual hash (hex)
+    # Optional learned image embedding (CLIP via ONNX) for semantic similarity.
+    # `embedding` holds raw float32 bytes; `embedding_model` records which model
+    # produced it so a model change invalidates stale vectors. Populated via
+    # Database Maintenance → Compute Image Embeddings (optional feature).
+    embedding       = Column(LargeBinary, nullable=True)
+    embedding_model = Column(String(64), nullable=True)
 
     model = relationship("STLModel", back_populates="images")
 

@@ -2,7 +2,13 @@
   "permissions": {
     "allow": [
       "Bash(python3 -c \"import sys; print\\(sys.executable\\)\")",
-      "Bash(grep -rn \"get_max_thumbnails\\\\|thumb_size\\\\|max_size\" /home/mankoc/Projects/stl_database/app/ --include=*.py)"
+      "Bash(grep -rn \"get_max_thumbnails\\\\|thumb_size\\\\|max_size\" /home/mankoc/Projects/stl_database/app/ --include=*.py)",
+      "Bash(.venv/bin/python -m pip install numpy onnxruntime onnx)",
+      "Bash(.venv/bin/python -c \"import numpy,onnxruntime,onnx; print\\('numpy',numpy.__version__,'ort',onnxruntime.__version__,'onnx',onnx.__version__\\)\")",
+      "Bash(.venv/bin/python -u -)",
+      "Bash(.venv/bin/python -c \"import ast; ast.parse\\(open\\('app/ui/db_maintenance_dialog.py'\\).read\\(\\)\\); print\\('parse OK'\\)\")",
+      "Bash(QT_QPA_PLATFORM=offscreen .venv/bin/python -c ' *)",
+      "Bash(.venv/bin/python /tmp/regen_ts.py)"
     ],
     "additionalDirectories": [
       "/home/mankoc/Projects/stl_database"

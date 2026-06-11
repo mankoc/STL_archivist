@@ -2,6 +2,7 @@
 
 ## 2026.22 — 2026-05-30
 
+- AI image similarity (optional): images can now carry a learned **CLIP embedding** (ONNX, CPU) for semantic matching of the same model across different renders/angles/colours. New **Database Maintenance → Compute Image Embeddings** button, plus an **AI embedding (CLIP)** method selector in *Find by Image* and *Find Duplicate Archives → Images*. Optional and dependency-light: disabled gracefully until `onnxruntime` + a CLIP ONNX model are present.
 - Fixed: the browser's active filters were silently dropped after a mass edit (and any other refresh); the table now stays filtered and the filter-pane selections are preserved.
 - Image similarity: perceptual hash upgraded from 64-bit to **128-bit** (horizontal + vertical dHash) for fewer false matches; old hashes are recomputed on the fly, and **Database Maintenance → Recompute Image Hashes** re-hashes the whole library. Still dependency-free (pure Pillow).
 - Find Duplicate Archives by Content (STL Files tab): selecting a result now previews the thumbnails of both archives side by side.

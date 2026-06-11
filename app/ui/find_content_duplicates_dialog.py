@@ -17,8 +17,9 @@ from PyQt6.QtCore import QEvent, QObject, QPoint, QThread, pyqtSignal, Qt
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QApplication, QDialog, QFrame, QMenu, QMessageBox, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QHeaderView,
-    QProgressBar, QGroupBox, QFormLayout, QTabWidget, QWidget, QScrollArea, QSplitter,
+    QPushButton, QSpinBox, QDoubleSpinBox, QComboBox, QTableWidget, QTableWidgetItem,
+    QHeaderView, QProgressBar, QGroupBox, QFormLayout, QTabWidget, QWidget,
+    QScrollArea, QSplitter,
 )
 
 logger = logging.getLogger(__name__)
@@ -507,6 +508,146 @@ class _ImageDupWorker(QThread):
             self.finished.emit([])
 
 
+class _EmbeddingDupWorker(QThread):
+    """Find archive pairs whose thumbnails are semantically similar.
+
+    Uses the stored CLIP embeddings (cosine similarity).  Only images that
+    already have a current embedding are considered; the rest are ignored
+    (run Database Maintenance → Compute Image Embeddings first).
+    """
+
+    progress = pyqtSignal(str)
+    prog_val = pyqtSignal(int, int)
+    finished = pyqtSignal(list)
+
+    def __init__(self, threshold: float, parent=None) -> None:
+        super().__init__(parent)
+        self._threshold = threshold
+        self._stop = False
+
+    def stop(self) -> None:
+        self._stop = True
+
+    def run(self) -> None:
+        from app.database.db import session_scope
+        from app.database.models import Image, STLModel
+        from app.utils import image_embedding as emb
+
+        try:
+            if not emb.is_available():
+                self.progress.emit(emb.unavailable_reason())
+                self.finished.emit([])
+                return
+            import numpy as np
+
+            self.progress.emit("Loading image embeddings…")
+            with session_scope() as session:
+                rows = (
+                    session.query(Image.model_id, Image.embedding)
+                    .join(STLModel, STLModel.id == Image.model_id)
+                    .filter(Image.embedding.isnot(None))
+                    .filter(Image.embedding_model == emb.EMBED_MODEL_ID)
+                    .filter(STLModel.is_missing.isnot(True))
+                    .all()
+                )
+            if not rows:
+                self.finished.emit([])
+                return
+
+            model_ids: list[int] = []
+            vecs: list = []
+            model_img_count: dict[int, int] = defaultdict(int)
+            dim: int | None = None
+            for model_id, blob in rows:
+                v = emb.from_blob(blob)
+                if v is None or v.size == 0:
+                    continue
+                if dim is None:
+                    dim = v.size
+                elif v.size != dim:
+                    continue
+                model_ids.append(model_id)
+                vecs.append(v)
+                model_img_count[model_id] += 1
+
+            if len(vecs) < 2:
+                self.finished.emit([])
+                return
+
+            M = np.vstack(vecs).astype(np.float32)   # n × D (already L2-normalised)
+            mids = np.asarray(model_ids)
+            n = M.shape[0]
+            thr = self._threshold
+
+            pair_best: dict[tuple[int, int], float] = {}
+            pair_cnt:  dict[tuple[int, int], int]   = defaultdict(int)
+
+            self.progress.emit(f"Comparing {n} embedding(s)…")
+            CHUNK = 512
+            for start in range(0, n, CHUNK):
+                if self._stop:
+                    self.finished.emit([])
+                    return
+                end = min(start + CHUNK, n)
+                sims = M[start:end] @ M.T            # (end-start) × n cosine sims
+                for li in range(start, end):
+                    row = sims[li - start]
+                    js = np.where(row[li + 1:] >= thr)[0] + (li + 1)
+                    ma = int(mids[li])
+                    for j in js:
+                        mb = int(mids[j])
+                        if ma == mb:
+                            continue
+                        key = (min(ma, mb), max(ma, mb))
+                        s = float(row[j])
+                        pair_cnt[key] += 1
+                        if key not in pair_best or s > pair_best[key]:
+                            pair_best[key] = s
+                self.prog_val.emit(end, n)
+
+            if not pair_best:
+                self.finished.emit([])
+                return
+
+            all_ids: set[int] = set()
+            for a, b in pair_best:
+                all_ids.add(a)
+                all_ids.add(b)
+            with session_scope() as session:
+                models_map = {
+                    m.id: m
+                    for m in session.query(STLModel)
+                        .filter(STLModel.id.in_(list(all_ids)))
+                        .all()
+                }
+
+            results = []
+            for (a, b), best in pair_best.items():
+                ma = models_map.get(a)
+                mb = models_map.get(b)
+                if ma and mb:
+                    results.append({
+                        "id_a":    a,
+                        "title_a": ma.title or Path(ma.archive_path).stem,
+                        "path_a":  ma.archive_path or "",
+                        "imgs_a":  model_img_count.get(a, 0),
+                        "id_b":    b,
+                        "title_b": mb.title or Path(mb.archive_path).stem,
+                        "path_b":  mb.archive_path or "",
+                        "imgs_b":  model_img_count.get(b, 0),
+                        "pairs":   pair_cnt[(a, b)],
+                        "best":    best,            # cosine similarity (higher = better)
+                    })
+
+            # Most similar first, then most matching image pairs.
+            results.sort(key=lambda r: (-r["best"], -r["pairs"]))
+            self.finished.emit(results)
+
+        except Exception as exc:
+            logger.error("Embedding duplicate search failed: %s", exc, exc_info=True)
+            self.finished.emit([])
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Thumbnail hover popup
 # ─────────────────────────────────────────────────────────────────────────────
@@ -796,6 +937,28 @@ class FindContentDuplicatesDialog(QDialog):
 
         grp  = QGroupBox(self.tr("Search Parameters"))
         form = QFormLayout(grp)
+        self._img_form = form
+
+        # ── Method selector: perceptual hash vs learned embedding ──────────
+        from app.utils import image_embedding as _emb
+        from app.ui.config_dialog import get_ai_embeddings_enabled
+        self._img_embed_available = _emb.is_available() and get_ai_embeddings_enabled()
+        self._img_method_combo = QComboBox()
+        self._img_method_combo.addItem(self.tr("Perceptual hash (dHash)"), "dhash")
+        self._img_method_combo.addItem(self.tr("AI embedding (CLIP)"), "embedding")
+        if not self._img_embed_available:
+            mi = self._img_method_combo.findData("embedding")
+            self._img_method_combo.model().item(mi).setEnabled(False)
+            self._img_method_combo.setItemData(
+                mi,
+                _emb.unavailable_reason() if not _emb.is_available()
+                else self.tr("AI embeddings are disabled in Configuration → Browser"),
+                Qt.ItemDataRole.ToolTipRole,
+            )
+        self._img_method_combo.currentIndexChanged.connect(self._on_img_method_changed)
+        form.addRow(self.tr("Method:"), self._img_method_combo)
+
+        # ── dHash parameters ───────────────────────────────────────────────
         self._img_dist_spin = QSpinBox()
         self._img_dist_spin.setRange(0, 32)
         self._img_dist_spin.setValue(10)
@@ -807,15 +970,39 @@ class FindContentDuplicatesDialog(QDialog):
             "≤30 = loosely similar (use with caution — many false positives)")
         )
         form.addRow(self.tr("Max hash distance:"), self._img_dist_spin)
-        form.addRow("", QLabel(
+        self._img_dhash_help = QLabel(
             self.tr("<small>Preview thumbnails are compared with a perceptual difference "
             "hash (dHash). Two thumbnails are considered similar when their "
             "128-bit hashes differ in at most this many bits. A distance of 0 "
             "catches only near-identical images; 10 typically catches the same "
             "render at different resolutions or with slight colour shifts. "
             "Higher values increase recall but also false positives.</small>")
-        ))
+        )
+        self._img_dhash_help.setWordWrap(True)
+        form.addRow("", self._img_dhash_help)
+
+        # ── Embedding parameters ───────────────────────────────────────────
+        self._img_sim_spin = QDoubleSpinBox()
+        self._img_sim_spin.setRange(0.50, 1.00)
+        self._img_sim_spin.setSingleStep(0.01)
+        self._img_sim_spin.setDecimals(2)
+        self._img_sim_spin.setValue(0.90)
+        self._img_sim_spin.setToolTip(
+            self.tr("Minimum cosine similarity between embeddings (1.00 = identical).")
+        )
+        form.addRow(self.tr("Min similarity:"), self._img_sim_spin)
+        self._img_embed_help = QLabel(
+            self.tr("<small>Thumbnails are compared by a learned CLIP embedding (cosine "
+            "similarity), which matches the same model across different renders, "
+            "angles, and colours far better than the perceptual hash. Requires "
+            "embeddings to be computed first (Database Maintenance → Compute Image "
+            "Embeddings); images without one are ignored.</small>")
+        )
+        self._img_embed_help.setWordWrap(True)
+        form.addRow("", self._img_embed_help)
+
         layout.addWidget(grp)
+        self._on_img_method_changed()
 
         ctrl = QHBoxLayout()
         self._img_find_btn = QPushButton(self.tr("Find Duplicates"))
@@ -1039,6 +1226,19 @@ class FindContentDuplicatesDialog(QDialog):
 
     # ── Image search ──────────────────────────────────────────────────────────
 
+    def _on_img_method_changed(self, *_args) -> None:
+        """Show the parameter row relevant to the selected matching method."""
+        is_embed = self._img_method_combo.currentData() == "embedding"
+        self._img_form.setRowVisible(self._img_dist_spin,  not is_embed)
+        self._img_form.setRowVisible(self._img_dhash_help, not is_embed)
+        self._img_form.setRowVisible(self._img_sim_spin,   is_embed)
+        self._img_form.setRowVisible(self._img_embed_help, is_embed)
+
+    def _set_img_score_header(self, similarity: bool) -> None:
+        item = self._img_table.horizontalHeaderItem(_I_DIST)
+        if item is not None:
+            item.setText(self.tr("Best Similarity") if similarity else self.tr("Best Distance"))
+
     def _start_img_search(self) -> None:
         self._img_table.setRowCount(0)
         self._img_results = []
@@ -1050,9 +1250,17 @@ class FindContentDuplicatesDialog(QDialog):
         self._img_status.setText(self.tr("Searching…"))
         self._refresh_bottom_buttons()
 
-        self._img_worker = _ImageDupWorker(
-            self._img_dist_spin.value(), parent=self
-        )
+        self._img_method_active = self._img_method_combo.currentData()
+        if self._img_method_active == "embedding":
+            self._set_img_score_header(similarity=True)
+            self._img_worker = _EmbeddingDupWorker(
+                self._img_sim_spin.value(), parent=self
+            )
+        else:
+            self._set_img_score_header(similarity=False)
+            self._img_worker = _ImageDupWorker(
+                self._img_dist_spin.value(), parent=self
+            )
         self._img_worker.progress.connect(self._img_status.setText)
         self._img_worker.prog_val.connect(self._on_img_progress)
         self._img_worker.finished.connect(self._on_img_finished)
@@ -1093,15 +1301,24 @@ class FindContentDuplicatesDialog(QDialog):
             self._img_table.setItem(row_idx, _I_SIZE_B,  _size_item(r["path_b"]))
             self._img_table.setItem(row_idx, _I_IMGS_B,  _item(str(r["imgs_b"]), align=c))
             self._img_table.setItem(row_idx, _I_PAIRS,   _item(str(r["pairs"]),  align=c))
-            self._img_table.setItem(row_idx, _I_DIST,    _item(str(r["best"]),   align=c))
+            is_embed = getattr(self, "_img_method_active", "dhash") == "embedding"
+            best_text = f"{r['best']:.3f}" if is_embed else str(r["best"])
+            self._img_table.setItem(row_idx, _I_DIST,    _item(best_text, align=c))
         self._img_table.setSortingEnabled(True)
 
         n = len(results)
-        self._img_status.setText(
-            f"{n} archive pair(s) with similar images found." if n else
-            "No similar image pairs found. "
-            "Ensure thumbnails exist (crawl with thumbnails enabled)."
-        )
+        if n:
+            self._img_status.setText(f"{n} archive pair(s) with similar images found.")
+        elif getattr(self, "_img_method_active", "dhash") == "embedding":
+            self._img_status.setText(
+                "No similar image pairs found. Run Database Maintenance → "
+                "Compute Image Embeddings, or lower the similarity threshold."
+            )
+        else:
+            self._img_status.setText(
+                "No similar image pairs found. "
+                "Ensure thumbnails exist (crawl with thumbnails enabled)."
+            )
         all_ids = {r["id_a"] for r in results} | {r["id_b"] for r in results}
         self._img_model_thumb = self._load_model_thumbs(all_ids)
         self._refresh_bottom_buttons()
