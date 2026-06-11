@@ -1148,8 +1148,21 @@ class CrawlerWorker(QThread):
             ]
             batch_results = save_thumbnails_batch(batch_items)
 
+            # Compute embeddings in one batched inference call when enabled.
+            embed_vecs: list = []
+            if self._config.embed_during_crawl:
+                try:
+                    from app.utils import image_embedding as _emb
+                    jpegs = [
+                        jpeg_bytes if rel_path else b""
+                        for _img, (_iid, rel_path, jpeg_bytes) in zip(img_records, batch_results)
+                    ]
+                    embed_vecs = _emb.embed_batch(jpegs)
+                except Exception:
+                    embed_vecs = [None] * len(img_records)
+
             count = 0
-            for img, (_iid, rel_path, jpeg_bytes) in zip(img_records, batch_results):
+            for i, (img, (_iid, rel_path, jpeg_bytes)) in enumerate(zip(img_records, batch_results)):
                 if rel_path:
                     img.thumbnail_path = rel_path
                     try:
@@ -1159,15 +1172,15 @@ class CrawlerWorker(QThread):
                                 img.dhash = format_dhash(h)
                     except Exception:
                         logger.debug("  Failed to compute dHash for image id %s", img.id)
-                    if self._config.embed_during_crawl and jpeg_bytes:
+                    if embed_vecs:
                         try:
                             from app.utils import image_embedding as _emb
-                            vec = _emb.embed_jpeg(jpeg_bytes)
+                            vec = embed_vecs[i]
                             if vec is not None:
                                 img.embedding = _emb.to_blob(vec)
                                 img.embedding_model = _emb.EMBED_MODEL_ID
                         except Exception:
-                            logger.debug("  Failed to compute embedding for image id %s", img.id)
+                            logger.debug("  Failed to store embedding for image id %s", img.id)
                     count += 1
                     logger.debug("  Thumbnail saved: %s → %s", img.filename, rel_path)
                 else:

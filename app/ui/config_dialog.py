@@ -452,6 +452,11 @@ def get_ai_embeddings_during_crawl() -> bool:
     return bool(_load_library_settings().get("ai_embeddings_during_crawl", False))
 
 
+def get_ai_embeddings_batch_size() -> int:
+    """Number of images per CLIP inference call (higher = better GPU utilisation)."""
+    return int(_load_library_settings().get("ai_embeddings_batch_size", 32))
+
+
 def get_file_manager() -> str:
     """Return the configured file manager preset key."""
     return _load_library_settings().get("file_manager", FILE_MANAGER_SYSTEM)
@@ -1118,12 +1123,23 @@ class ConfigDialog(QDialog):
         ))
         sim_form.addRow("", self._ai_embeddings_crawl_check)
 
+        self._ai_batch_size_spin = QSpinBox()
+        self._ai_batch_size_spin.setRange(1, 512)
+        self._ai_batch_size_spin.setSingleStep(8)
+        self._ai_batch_size_spin.setToolTip(self.tr(
+            "Number of images sent to the CLIP model in a single inference call. "
+            "Higher values improve GPU throughput but use more VRAM. "
+            "Reduce if you get out-of-memory errors."
+        ))
+        sim_form.addRow(self.tr("Batch size:"), self._ai_batch_size_spin)
+
         layout.addWidget(sim_group)
         layout.addStretch()
         return page
 
     def _update_ai_embeddings_enabled(self, enabled: bool) -> None:
         self._ai_embeddings_crawl_check.setEnabled(enabled)
+        self._ai_batch_size_spin.setEnabled(enabled)
 
     def _update_alpha_threshold_enabled(self, enabled: bool) -> None:
         self._filter_alpha_threshold_spin.setEnabled(enabled)
@@ -1652,6 +1668,8 @@ class ConfigDialog(QDialog):
         self._ai_embeddings_check.setChecked(ai_embed_enabled)
         self._ai_embeddings_crawl_check.setChecked(get_ai_embeddings_during_crawl())
         self._ai_embeddings_crawl_check.setEnabled(ai_embed_enabled)
+        self._ai_batch_size_spin.setValue(get_ai_embeddings_batch_size())
+        self._ai_batch_size_spin.setEnabled(ai_embed_enabled)
 
         self._debug_menu_check.setChecked(get_debug_menu_enabled())
         self._logging_enabled_check.setChecked(get_logging_enabled())
@@ -1727,6 +1745,7 @@ class ConfigDialog(QDialog):
                 "thumb_page_size":    self._thumb_page_size_spin.value(),
                 "ai_embeddings_enabled":      self._ai_embeddings_check.isChecked(),
                 "ai_embeddings_during_crawl": self._ai_embeddings_crawl_check.isChecked(),
+                "ai_embeddings_batch_size":   self._ai_batch_size_spin.value(),
                 "hotkeys": {
                     action_id: editor.keySequence().toString()
                     for action_id, editor in self._hotkey_edits.items()

@@ -393,7 +393,10 @@ class EmbeddingWorker(QThread):
     log      = pyqtSignal(str)
     finished = pyqtSignal(int, int)   # (computed, skipped)
 
-    _BATCH = 100
+    # Batch size read from config at run time; fallback keeps the class usable in tests.
+    _INFER_BATCH = 32  # overridden in run()
+    # How many DB writes to accumulate before flushing to SQLite.
+    _WRITE_BATCH = 200
 
     def __init__(self, recompute_all: bool = False, parent=None) -> None:
         super().__init__(parent)
@@ -408,8 +411,10 @@ class EmbeddingWorker(QThread):
         from app.database.models import Image as DBImage
         from app.utils.thumbnailer import get_thumbnail_bytes
         from app.utils import image_embedding as emb
+        from app.ui.config_dialog import get_ai_embeddings_batch_size
 
         self._stop_requested = False
+        self._INFER_BATCH = get_ai_embeddings_batch_size()
 
         if not emb.is_available():
             self.log.emit(emb.unavailable_reason())
@@ -419,7 +424,6 @@ class EmbeddingWorker(QThread):
         with session_scope() as session:
             query = session.query(DBImage.id, DBImage.thumbnail)
             if not self._recompute_all:
-                # Images with no embedding, or one from a different model version.
                 query = query.filter(
                     DBImage.embedding.is_(None)
                     | (DBImage.embedding_model != emb.EMBED_MODEL_ID)
@@ -450,27 +454,35 @@ class EmbeddingWorker(QThread):
 
         computed = 0
         skipped  = 0
-        for idx, (image_id, legacy_blob) in enumerate(rows, 1):
+        idx = 0
+
+        # Process images in inference-sized batches so the GPU runs at full
+        # utilisation (one sess.run call per INFER_BATCH instead of per image).
+        for batch_start in range(0, total, self._INFER_BATCH):
             if self._stop_requested:
                 self.log.emit("Stopped by user.")
                 break
 
-            self.progress.emit(idx, total)
+            batch_rows = rows[batch_start: batch_start + self._INFER_BATCH]
+            jpegs: list[bytes | None] = []
+            ids: list[int] = []
+            for image_id, legacy_blob in batch_rows:
+                jpeg = get_thumbnail_bytes(image_id) or legacy_blob
+                jpegs.append(jpeg or b"")
+                ids.append(image_id)
 
-            jpeg = get_thumbnail_bytes(image_id) or legacy_blob
-            if not jpeg:
-                skipped += 1
-                continue
+            vecs = emb.embed_batch(jpegs)
 
-            vec = emb.embed_jpeg(jpeg)
-            if vec is None:
-                skipped += 1
-                continue
+            for image_id, vec in zip(ids, vecs):
+                idx += 1
+                self.progress.emit(idx, total)
+                if vec is None:
+                    skipped += 1
+                else:
+                    pending.append((image_id, emb.to_blob(vec)))
+                    computed += 1
 
-            pending.append((image_id, emb.to_blob(vec)))
-            computed += 1
-
-            if len(pending) >= self._BATCH:
+            if len(pending) >= self._WRITE_BATCH:
                 flush()
 
         flush()

@@ -47,6 +47,10 @@ _session_tried = False   # don't retry a failed load on every call
 _input_name: Optional[str] = None
 _output_name: Optional[str] = None
 
+# Images per GPU inference call.  GPU throughput scales roughly linearly with
+# batch size up to ~64; CPU sees little benefit above 1.
+INFERENCE_BATCH_SIZE = 32
+
 
 def _deps_ok() -> bool:
     try:
@@ -166,6 +170,47 @@ def embed_jpeg(jpeg_bytes: bytes) -> "Optional[np.ndarray]":
     except Exception as exc:
         log.debug("Embedding computation failed: %s", exc)
         return None
+
+
+def embed_batch(jpeg_list: "list[bytes]") -> "list[Optional[np.ndarray]]":
+    """Return L2-normalised embeddings for a list of JPEG byte strings.
+
+    Images are stacked into a single ``(N, 3, 224, 224)`` tensor and run
+    through the model in one call, which makes far better use of GPU
+    parallelism than calling :func:`embed_jpeg` in a loop.
+
+    Returns a list of the same length as *jpeg_list*; entries are ``None``
+    for images that failed to preprocess or embed.
+    """
+    sess = _get_session()
+    if sess is None or not jpeg_list:
+        return [None] * len(jpeg_list)
+    import numpy as np
+    tensors: list = []
+    indices: list[int] = []
+    results: list = [None] * len(jpeg_list)
+    for i, raw in enumerate(jpeg_list):
+        if not raw:
+            continue
+        try:
+            tensors.append(_preprocess(raw))   # (1, 3, 224, 224)
+            indices.append(i)
+        except Exception as exc:
+            log.debug("Preprocess failed for image %d: %s", i, exc)
+    if not tensors:
+        return results
+    try:
+        batch = np.concatenate(tensors, axis=0)   # (N, 3, 224, 224)
+        out = sess.run([_output_name], {_input_name: batch})[0]  # (N, D)
+        vecs = np.asarray(out, dtype=np.float32)
+        norms = np.linalg.norm(vecs, axis=1, keepdims=True)
+        norms = np.where(norms > 0, norms, 1.0)
+        vecs = vecs / norms
+        for pos, idx in enumerate(indices):
+            results[idx] = vecs[pos].astype(np.float32)
+    except Exception as exc:
+        log.debug("Batch embedding failed: %s", exc)
+    return results
 
 
 def to_blob(vec) -> bytes:
