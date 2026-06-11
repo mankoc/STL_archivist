@@ -110,11 +110,19 @@ def _get_session():
     try:
         import onnxruntime as ort
         path = model_path()
-        sess = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
+        # Prefer GPU providers in priority order; ORT silently skips unavailable ones.
+        providers = [
+            "CUDAExecutionProvider",       # NVIDIA (requires onnxruntime-gpu)
+            "DmlExecutionProvider",        # DirectML — Windows AMD/Intel/NVIDIA
+            "CoreMLExecutionProvider",     # Apple Silicon / macOS
+            "CPUExecutionProvider",        # always available
+        ]
+        sess = ort.InferenceSession(str(path), providers=providers)
+        active = sess.get_providers()[0]
         _input_name = sess.get_inputs()[0].name
         _output_name = sess.get_outputs()[0].name
         _session = sess
-        log.info("Loaded CLIP image encoder: %s", path)
+        log.info("Loaded CLIP image encoder: %s (provider: %s)", path, active)
         return sess
     except Exception as exc:
         log.error("Failed to load CLIP ONNX model: %s", exc)
