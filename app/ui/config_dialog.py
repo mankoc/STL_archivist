@@ -1221,19 +1221,29 @@ class ConfigDialog(QDialog):
 
     def _refresh_clip_dl_button(self) -> None:
         from app.utils import image_embedding as _emb
-        self._clip_model_present = _emb.is_available()
-        enabled = self._ai_embeddings_check.isChecked()
+        model_found = _emb.model_path() is not None
+        deps_ok     = _emb.is_available()   # deps + model
+        enabled     = self._ai_embeddings_check.isChecked()
         downloading = self._clip_dl_worker is not None and self._clip_dl_worker.isRunning()
-        if self._clip_model_present:
+
+        if not enabled:
+            self._clip_dl_btn.setVisible(False)
+            self._clip_dl_cancel_btn.setVisible(False)
+            self._clip_dl_status.clear()
+        elif model_found and deps_ok:
             self._clip_dl_btn.setVisible(False)
             self._clip_dl_cancel_btn.setVisible(False)
             self._clip_dl_status.setText(
                 f'<span style="color:green;">✓ {self.tr("CLIP model is installed.")}</span>'
             )
-        elif not enabled:
+        elif model_found and not deps_ok:
+            # Model file is present but runtime deps are missing.
             self._clip_dl_btn.setVisible(False)
             self._clip_dl_cancel_btn.setVisible(False)
-            self._clip_dl_status.clear()
+            self._clip_dl_status.setText(
+                f'<span style="color:orange;">⚠ {self.tr("Model found but onnxruntime / numpy are not installed.")}<br>'
+                f'Run: <code>pip install onnxruntime numpy</code></span>'
+            )
         else:
             self._clip_dl_btn.setVisible(not downloading)
             self._clip_dl_cancel_btn.setVisible(downloading)
