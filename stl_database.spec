@@ -18,8 +18,13 @@ hiddenimports = [
     'PIL.PngImagePlugin',
     'PIL.BmpImagePlugin',
     'PIL.WebPImagePlugin',
+    'onnxruntime',
+    'onnxruntime.capi._pybind_state',
+    'numpy',
+    'numpy.core._multiarray_umath',
 ]
 hiddenimports += collect_submodules('sqlalchemy.dialects.sqlite')
+hiddenimports += collect_submodules('onnxruntime')
 
 a = Analysis(
     ['main.py'],
@@ -34,7 +39,7 @@ a = Analysis(
         },
     },
     runtime_hooks=[],
-    excludes=['tkinter', 'matplotlib', 'numpy', 'scipy'],
+    excludes=['tkinter', 'matplotlib', 'scipy'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
