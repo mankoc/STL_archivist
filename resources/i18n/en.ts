@@ -192,167 +192,167 @@
         <translation>Images</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3754" />
+        <location filename="../../app/ui/browser_tab.py" line="3762" />
         <location filename="../../app/ui/browser_tab.py" line="1668" />
         <source>Show All</source>
         <translation>Show All</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3105" />
+        <location filename="../../app/ui/browser_tab.py" line="3113" />
         <source>Warning Details</source>
         <translation>Warning Details</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3246" />
+        <location filename="../../app/ui/browser_tab.py" line="3254" />
         <source>Show Files…</source>
         <translation>Show Files…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3248" />
+        <location filename="../../app/ui/browser_tab.py" line="3256" />
         <source>Open Containing Folder</source>
         <translation>Open Containing Folder</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3252" />
+        <location filename="../../app/ui/browser_tab.py" line="3260" />
         <source>Edit Model…</source>
         <translation>Edit Model…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3285" />
+        <location filename="../../app/ui/browser_tab.py" line="3293" />
         <source>Edit Creator Information…</source>
         <translation>Edit Creator Information…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3289" />
+        <location filename="../../app/ui/browser_tab.py" line="3297" />
         <source>Edit Authors…</source>
         <translation>Edit Authors…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3293" />
+        <location filename="../../app/ui/browser_tab.py" line="3301" />
         <source>Add Tag…</source>
         <translation>Add Tag…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3294" />
+        <location filename="../../app/ui/browser_tab.py" line="3302" />
         <source>Edit Tags…</source>
         <translation>Edit Tags…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3297" />
+        <location filename="../../app/ui/browser_tab.py" line="3305" />
         <source>Edit Collections…</source>
         <translation>Edit Collections…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3300" />
+        <location filename="../../app/ui/browser_tab.py" line="3308" />
         <source>Edit Subcollections…</source>
         <translation>Edit Subcollections…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3303" />
+        <location filename="../../app/ui/browser_tab.py" line="3311" />
         <source>Edit Categories…</source>
         <translation>Edit Categories…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3306" />
+        <location filename="../../app/ui/browser_tab.py" line="3314" />
         <source>Edit Scales…</source>
         <translation>Edit Scales…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3491" />
+        <location filename="../../app/ui/browser_tab.py" line="3499" />
         <source>Recrawl failed</source>
         <translation>Recrawl failed</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3494" />
+        <location filename="../../app/ui/browser_tab.py" line="3502" />
         <source>Recrawl complete</source>
         <translation>Recrawl complete</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3523" />
+        <location filename="../../app/ui/browser_tab.py" line="3531" />
         <source>Rescan complete</source>
         <translation>Rescan complete</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3529" />
+        <location filename="../../app/ui/browser_tab.py" line="3537" />
         <source>Rescan failed</source>
         <translation>Rescan failed</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3573" />
+        <location filename="../../app/ui/browser_tab.py" line="3581" />
         <source>Delete Files</source>
         <translation>Delete Files</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3583" />
+        <location filename="../../app/ui/browser_tab.py" line="3591" />
         <source>Delete Model</source>
         <translation>Delete Model</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3663" />
+        <location filename="../../app/ui/browser_tab.py" line="3671" />
         <source>Image import</source>
         <translation>Image import</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3748" />
+        <location filename="../../app/ui/browser_tab.py" line="3756" />
         <source>Paginate</source>
         <translation>Paginate</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3833" />
-        <location filename="../../app/ui/browser_tab.py" line="3827" />
+        <location filename="../../app/ui/browser_tab.py" line="3841" />
+        <location filename="../../app/ui/browser_tab.py" line="3835" />
         <source>Add Tag</source>
         <translation>Add Tag</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3827" />
+        <location filename="../../app/ui/browser_tab.py" line="3835" />
         <source>Tag name:</source>
         <translation>Tag name:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3980" />
-        <location filename="../../app/ui/browser_tab.py" line="3922" />
-        <location filename="../../app/ui/browser_tab.py" line="3900" />
-        <location filename="../../app/ui/browser_tab.py" line="3886" />
+        <location filename="../../app/ui/browser_tab.py" line="3988" />
+        <location filename="../../app/ui/browser_tab.py" line="3930" />
+        <location filename="../../app/ui/browser_tab.py" line="3908" />
+        <location filename="../../app/ui/browser_tab.py" line="3894" />
         <source>Generate Thumbnails</source>
         <translation>Generate Thumbnails</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3887" />
+        <location filename="../../app/ui/browser_tab.py" line="3895" />
         <source>Number of thumbnails to generate per model:</source>
         <translation>Number of thumbnails to generate per model:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3903" />
+        <location filename="../../app/ui/browser_tab.py" line="3911" />
         <source>Generating thumbnails…</source>
         <translation>Generating thumbnails…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3911" />
+        <location filename="../../app/ui/browser_tab.py" line="3919" />
         <source>Send to background</source>
         <translation>Send to background</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3912" />
+        <location filename="../../app/ui/browser_tab.py" line="3920" />
         <source>Cancel</source>
         <translation>Cancel</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3922" />
+        <location filename="../../app/ui/browser_tab.py" line="3930" />
         <source>Another background job is already running. Try again later.</source>
         <translation>Another background job is already running. Try again later.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="3981" />
+        <location filename="../../app/ui/browser_tab.py" line="3989" />
         <source>Select one or more models in the table first.</source>
         <translation>Select one or more models in the table first.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="4000" />
+        <location filename="../../app/ui/browser_tab.py" line="4008" />
         <source>Create Sidecar</source>
         <translation>Create Sidecar</translation>
     </message>
     <message>
-        <location filename="../../app/ui/browser_tab.py" line="4000" />
+        <location filename="../../app/ui/browser_tab.py" line="4008" />
         <source>No valid file paths found for the selected models.</source>
         <translation>No valid file paths found for the selected models.</translation>
     </message>
@@ -561,633 +561,658 @@
 </context><context>
     <name>ConfigDialog</name>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1732" />
-        <location filename="../../app/ui/config_dialog.py" line="1726" />
-        <location filename="../../app/ui/config_dialog.py" line="604" />
+        <location filename="../../app/ui/config_dialog.py" line="1771" />
+        <location filename="../../app/ui/config_dialog.py" line="1765" />
+        <location filename="../../app/ui/config_dialog.py" line="614" />
         <source>Configuration</source>
         <translation>Configuration</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="701" />
-        <location filename="../../app/ui/config_dialog.py" line="642" />
+        <location filename="../../app/ui/config_dialog.py" line="711" />
+        <location filename="../../app/ui/config_dialog.py" line="652" />
         <source>Database</source>
         <translation>Database</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1228" />
-        <location filename="../../app/ui/config_dialog.py" line="643" />
+        <location filename="../../app/ui/config_dialog.py" line="1261" />
+        <location filename="../../app/ui/config_dialog.py" line="653" />
         <source>Language</source>
         <translation>Language</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="729" />
-        <location filename="../../app/ui/config_dialog.py" line="644" />
+        <location filename="../../app/ui/config_dialog.py" line="739" />
+        <location filename="../../app/ui/config_dialog.py" line="654" />
         <source>Crawler</source>
         <translation>Crawler</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="645" />
+        <location filename="../../app/ui/config_dialog.py" line="655" />
         <source>Warnings</source>
         <translation>Warnings</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1120" />
-        <location filename="../../app/ui/config_dialog.py" line="646" />
+        <location filename="../../app/ui/config_dialog.py" line="1153" />
+        <location filename="../../app/ui/config_dialog.py" line="656" />
         <source>File writing</source>
         <translation>File writing</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="647" />
+        <location filename="../../app/ui/config_dialog.py" line="657" />
         <source>Sidecar</source>
         <translation>Sidecar</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="648" />
+        <location filename="../../app/ui/config_dialog.py" line="658" />
         <source>Browser</source>
         <translation>Browser</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="649" />
+        <location filename="../../app/ui/config_dialog.py" line="659" />
         <source>Appearance</source>
         <translation>Appearance</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="650" />
+        <location filename="../../app/ui/config_dialog.py" line="660" />
         <source>Hotkeys</source>
         <translation>Hotkeys</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="957" />
-        <location filename="../../app/ui/config_dialog.py" line="651" />
+        <location filename="../../app/ui/config_dialog.py" line="967" />
+        <location filename="../../app/ui/config_dialog.py" line="661" />
         <source>Debug</source>
         <translation>Debug</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1154" />
-        <location filename="../../app/ui/config_dialog.py" line="1070" />
-        <location filename="../../app/ui/config_dialog.py" line="769" />
-        <location filename="../../app/ui/config_dialog.py" line="709" />
+        <location filename="../../app/ui/config_dialog.py" line="1187" />
+        <location filename="../../app/ui/config_dialog.py" line="1080" />
+        <location filename="../../app/ui/config_dialog.py" line="779" />
+        <location filename="../../app/ui/config_dialog.py" line="719" />
         <source>Browse…</source>
         <translation>Browse…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="713" />
+        <location filename="../../app/ui/config_dialog.py" line="723" />
         <source>Data directory:</source>
         <translation>Data directory:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="717" />
+        <location filename="../../app/ui/config_dialog.py" line="727" />
         <source>&lt;small&gt;All database files are stored in this directory. A restart is required for changes to take effect.&lt;/small&gt;</source>
         <translation>&lt;small&gt;All database files are stored in this directory. A restart is required for changes to take effect.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="734" />
+        <location filename="../../app/ui/config_dialog.py" line="744" />
         <source> image(s)</source>
         <translation> image(s)</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="735" />
+        <location filename="../../app/ui/config_dialog.py" line="745" />
         <source>Max thumbnails per model:</source>
         <translation>Max thumbnails per model:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="738" />
+        <location filename="../../app/ui/config_dialog.py" line="748" />
         <source>&lt;small&gt;Maximum number of preview images extracted from each archive.&lt;/small&gt;</source>
         <translation>&lt;small&gt;Maximum number of preview images extracted from each archive.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="744" />
+        <location filename="../../app/ui/config_dialog.py" line="754" />
         <source> px</source>
         <translation> px</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="745" />
+        <location filename="../../app/ui/config_dialog.py" line="755" />
         <source>Max image size:</source>
         <translation>Max image size:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="748" />
+        <location filename="../../app/ui/config_dialog.py" line="758" />
         <source>&lt;small&gt;Longest side in pixels when storing images (width &amp; height capped at this value).&lt;/small&gt;</source>
         <translation>&lt;small&gt;Longest side in pixels when storing images (width &amp; height capped at this value).&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="753" />
+        <location filename="../../app/ui/config_dialog.py" line="763" />
         <source> thread(s)</source>
         <translation> thread(s)</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="754" />
+        <location filename="../../app/ui/config_dialog.py" line="764" />
         <source>Parallel workers:</source>
         <translation>Parallel workers:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="773" />
+        <location filename="../../app/ui/config_dialog.py" line="783" />
         <source>RAR tool:</source>
         <translation>RAR tool:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="777" />
+        <location filename="../../app/ui/config_dialog.py" line="787" />
         <source>&lt;small&gt;Path to &lt;b&gt;unrar.exe&lt;/b&gt; or &lt;b&gt;rar.exe&lt;/b&gt; used to extract .rar archives. Leave blank to use the one on your PATH.&lt;/small&gt;</source>
         <translation>&lt;small&gt;Path to &lt;b&gt;unrar.exe&lt;/b&gt; or &lt;b&gt;rar.exe&lt;/b&gt; used to extract .rar archives. Leave blank to use the one on your PATH.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="785" />
+        <location filename="../../app/ui/config_dialog.py" line="795" />
         <source>Crawl Scope</source>
         <translation>Crawl Scope</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="787" />
+        <location filename="../../app/ui/config_dialog.py" line="797" />
         <source>Recurse subdirectories</source>
         <translation>Recurse subdirectories</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="788" />
+        <location filename="../../app/ui/config_dialog.py" line="798" />
         <source>Recurse subdirs:</source>
         <translation>Recurse subdirs:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="792" />
+        <location filename="../../app/ui/config_dialog.py" line="802" />
         <source>&lt;small&gt;When enabled, the crawler will search the selected folder and all its subfolders. When disabled, only archives directly inside the selected folder are processed.&lt;/small&gt;</source>
         <translation>&lt;small&gt;When enabled, the crawler will search the selected folder and all its subfolders. When disabled, only archives directly inside the selected folder are processed.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="798" />
+        <location filename="../../app/ui/config_dialog.py" line="808" />
         <source>Full File Info</source>
         <translation>Full File Info</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="801" />
+        <location filename="../../app/ui/config_dialog.py" line="811" />
         <source>Store STL, OBJ, LYS, and Chitubox file list</source>
         <translation>Store STL, OBJ, LYS, and Chitubox file list</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="806" />
+        <location filename="../../app/ui/config_dialog.py" line="816" />
         <source>&lt;small&gt;When enabled, the crawler records the name and uncompressed size of every &lt;b&gt;.stl&lt;/b&gt; file found inside each archive. Stored in the &lt;b&gt;stl_files&lt;/b&gt; database table. Archives already in the database that are missing file information will be automatically re-crawled to populate the missing entries.&lt;/small&gt;</source>
         <translation>&lt;small&gt;When enabled, the crawler records the name and uncompressed size of every &lt;b&gt;.stl&lt;/b&gt; file found inside each archive. Stored in the &lt;b&gt;stl_files&lt;/b&gt; database table. Archives already in the database that are missing file information will be automatically re-crawled to populate the missing entries.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="821" />
+        <location filename="../../app/ui/config_dialog.py" line="831" />
         <source>Crawler Warnings</source>
         <translation>Crawler Warnings</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="824" />
+        <location filename="../../app/ui/config_dialog.py" line="834" />
         <source>Archive contains supported STLs</source>
         <translation>Archive contains supported STLs</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="829" />
+        <location filename="../../app/ui/config_dialog.py" line="839" />
         <source>&lt;small&gt;Warn when an archive contains STL files matching any of the patterns below. Each pattern is a Python regex applied (case-insensitively) to every archive member filename.&lt;/small&gt;</source>
         <translation>&lt;small&gt;Warn when an archive contains STL files matching any of the patterns below. Each pattern is a Python regex applied (case-insensitively) to every archive member filename.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="845" />
+        <location filename="../../app/ui/config_dialog.py" line="855" />
         <source>Add pattern</source>
         <translation>Add pattern</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="847" />
+        <location filename="../../app/ui/config_dialog.py" line="857" />
         <source>Remove selected</source>
         <translation>Remove selected</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="857" />
+        <location filename="../../app/ui/config_dialog.py" line="867" />
         <source>Archive contains images</source>
         <translation>Archive contains images</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="862" />
+        <location filename="../../app/ui/config_dialog.py" line="872" />
         <source>&lt;small&gt;Warn when an archive contains no image files (.jpg, .png, .webp, …).&lt;/small&gt;</source>
         <translation>&lt;small&gt;Warn when an archive contains no image files (.jpg, .png, .webp, …).&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="867" />
+        <location filename="../../app/ui/config_dialog.py" line="877" />
         <source>Nested archives</source>
         <translation>Nested archives</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="872" />
+        <location filename="../../app/ui/config_dialog.py" line="882" />
         <source>&lt;small&gt;Warn when an archive contains another compressed archive (.zip, .rar, .7z).&lt;/small&gt;</source>
         <translation>&lt;small&gt;Warn when an archive contains another compressed archive (.zip, .rar, .7z).&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="877" />
+        <location filename="../../app/ui/config_dialog.py" line="887" />
         <source>Archive without printable files</source>
         <translation>Archive without printable files</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="882" />
+        <location filename="../../app/ui/config_dialog.py" line="892" />
         <source>&lt;small&gt;Warn when an archive contains no printable model files (.stl, .obj, .lys, .chitubox).&lt;/small&gt;</source>
         <translation>&lt;small&gt;Warn when an archive contains no printable model files (.stl, .obj, .lys, .chitubox).&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="887" />
+        <location filename="../../app/ui/config_dialog.py" line="897" />
         <source>Archive with low compression rate</source>
         <translation>Archive with low compression rate</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="891" />
+        <location filename="../../app/ui/config_dialog.py" line="901" />
         <source>Threshold (compressed/uncompressed ratio):</source>
         <translation>Threshold (compressed/uncompressed ratio):</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="904" />
+        <location filename="../../app/ui/config_dialog.py" line="914" />
         <source>&lt;small&gt;Warn when compressed size ÷ uncompressed size exceeds this value (e.g. 0.95 = 95 %). Values near 1.0 indicate little or no compression.&lt;/small&gt;</source>
         <translation>&lt;small&gt;Warn when compressed size ÷ uncompressed size exceeds this value (e.g. 0.95 = 95 %). Values near 1.0 indicate little or no compression.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="921" />
+        <location filename="../../app/ui/config_dialog.py" line="931" />
         <source>Metadata Sidecar (METADATA.7z)</source>
         <translation>Metadata Sidecar (METADATA.7z)</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="924" />
+        <location filename="../../app/ui/config_dialog.py" line="934" />
         <source>Enable metadata sidecar</source>
         <translation>Enable metadata sidecar</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="929" />
+        <location filename="../../app/ui/config_dialog.py" line="939" />
         <source>&lt;small&gt;When enabled, a &lt;b&gt;METADATA.7z&lt;/b&gt; sidecar file is created in each folder after crawling. This allows the library to be restored on a new machine without re-crawling every archive. Disable to prevent any METADATA.7z files from being written.&lt;/small&gt;</source>
         <translation>&lt;small&gt;When enabled, a &lt;b&gt;METADATA.7z&lt;/b&gt; sidecar file is created in each folder after crawling. This allows the library to be restored on a new machine without re-crawling every archive. Disable to prevent any METADATA.7z files from being written.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="936" />
+        <location filename="../../app/ui/config_dialog.py" line="946" />
         <source>Include thumbnails</source>
         <translation>Include thumbnails</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="941" />
+        <location filename="../../app/ui/config_dialog.py" line="951" />
         <source>&lt;small&gt;When enabled, each folder's &lt;b&gt;METADATA.7z&lt;/b&gt; sidecar will contain thumbnail images alongside the metadata JSON. Disable to save disk space; thumbnails will be omitted from the sidecar and not restored when importing on a new machine.&lt;/small&gt;</source>
         <translation>&lt;small&gt;When enabled, each folder's &lt;b&gt;METADATA.7z&lt;/b&gt; sidecar will contain thumbnail images alongside the metadata JSON. Disable to save disk space; thumbnails will be omitted from the sidecar and not restored when importing on a new machine.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="960" />
+        <location filename="../../app/ui/config_dialog.py" line="970" />
         <source>Show Debug menu</source>
         <translation>Show Debug menu</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="965" />
+        <location filename="../../app/ui/config_dialog.py" line="975" />
         <source>&lt;small&gt;Shows the &lt;b&gt;Debug&lt;/b&gt; menu in the menu bar, which gives access to destructive operations such as deleting the database and log files.&lt;/small&gt;</source>
         <translation>&lt;small&gt;Shows the &lt;b&gt;Debug&lt;/b&gt; menu in the menu bar, which gives access to destructive operations such as deleting the database and log files.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="971" />
+        <location filename="../../app/ui/config_dialog.py" line="981" />
         <source>Enable logging</source>
         <translation>Enable logging</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="976" />
+        <location filename="../../app/ui/config_dialog.py" line="986" />
         <source>&lt;small&gt;Write application events and errors to the log file. Uncheck to silence all log output. Uncaught exceptions are always captured regardless of this setting.&lt;/small&gt;</source>
         <translation>&lt;small&gt;Write application events and errors to the log file. Uncheck to silence all log output. Uncaught exceptions are always captured regardless of this setting.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="982" />
+        <location filename="../../app/ui/config_dialog.py" line="992" />
         <source>Log SQL statement timings</source>
         <translation>Log SQL statement timings</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="987" />
+        <location filename="../../app/ui/config_dialog.py" line="997" />
         <source>&lt;small&gt;Logs the duration of every SQL statement. Statements taking 100 ms or longer are also written at WARNING level for easy &lt;tt&gt;grep&lt;/tt&gt;. Takes effect immediately without restarting.&lt;/small&gt;</source>
         <translation>&lt;small&gt;Logs the duration of every SQL statement. Statements taking 100 ms or longer are also written at WARNING level for easy &lt;tt&gt;grep&lt;/tt&gt;. Takes effect immediately without restarting.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1000" />
+        <location filename="../../app/ui/config_dialog.py" line="1010" />
         <source>Keyboard shortcuts</source>
         <translation>Keyboard shortcuts</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1008" />
+        <location filename="../../app/ui/config_dialog.py" line="1018" />
         <source>Press the key combination you want to use for "%s"</source>
         <translation>Press the key combination you want to use for "%s"</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1012" />
+        <location filename="../../app/ui/config_dialog.py" line="1022" />
         <source>Reset to defaults</source>
         <translation>Reset to defaults</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1020" />
+        <location filename="../../app/ui/config_dialog.py" line="1030" />
         <source>&lt;small&gt;Changes take effect after clicking OK. Restart the application if shortcuts do not update immediately.&lt;/small&gt;</source>
         <translation>&lt;small&gt;Changes take effect after clicking OK. Restart the application if shortcuts do not update immediately.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1037" />
+        <location filename="../../app/ui/config_dialog.py" line="1047" />
         <source>Filter pane</source>
         <translation>Filter pane</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1040" />
+        <location filename="../../app/ui/config_dialog.py" line="1050" />
         <source>Show model counts in filter pane</source>
         <translation>Show model counts in filter pane</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1041" />
+        <location filename="../../app/ui/config_dialog.py" line="1051" />
         <source>Counts:</source>
         <translation>Counts:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1043" />
+        <location filename="../../app/ui/config_dialog.py" line="1053" />
         <source>Group large sections into letter bins (A, B, C, …)</source>
         <translation>Group large sections into letter bins (A, B, C, …)</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1045" />
+        <location filename="../../app/ui/config_dialog.py" line="1055" />
         <source>Letter bins:</source>
         <translation>Letter bins:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1050" />
+        <location filename="../../app/ui/config_dialog.py" line="1060" />
         <source> items</source>
         <translation> items</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1052" />
+        <location filename="../../app/ui/config_dialog.py" line="1062" />
         <source>Split a filter section into A/B/C… groups when it has more than this many entries.</source>
         <translation>Split a filter section into A/B/C… groups when it has more than this many entries.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1054" />
+        <location filename="../../app/ui/config_dialog.py" line="1064" />
         <source>Split above:</source>
         <translation>Split above:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1058" />
+        <location filename="../../app/ui/config_dialog.py" line="1068" />
         <source>File Manager</source>
         <translation>File Manager</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1065" />
+        <location filename="../../app/ui/config_dialog.py" line="1075" />
         <source>Open folder with:</source>
         <translation>Open folder with:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1075" />
+        <location filename="../../app/ui/config_dialog.py" line="1085" />
         <source>Executable:</source>
         <translation>Executable:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1079" />
+        <location filename="../../app/ui/config_dialog.py" line="1089" />
         <source>Image panel</source>
         <translation>Image panel</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1085" />
+        <location filename="../../app/ui/config_dialog.py" line="1095" />
         <source> images</source>
         <translation> images</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1087" />
+        <location filename="../../app/ui/config_dialog.py" line="1097" />
         <source>When a model has more images than this, the image panel paginates instead of showing them all at once.</source>
         <translation>When a model has more images than this, the image panel paginates instead of showing them all at once.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1089" />
+        <location filename="../../app/ui/config_dialog.py" line="1099" />
         <source>Paginate above:</source>
         <translation>Paginate above:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1110" />
+        <location filename="../../app/ui/config_dialog.py" line="1103" />
+        <source>Image similarity</source>
+        <translation>Image similarity</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/config_dialog.py" line="1106" />
+        <source>Enable AI image embeddings (CLIP)</source>
+        <translation>Enable AI image embeddings (CLIP)</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/config_dialog.py" line="1107" />
+        <source>Enable the AI embedding (CLIP) method in image similarity search. Requires onnxruntime, numpy, and a CLIP ONNX model file.</source>
+        <translation>Enable the AI embedding (CLIP) method in image similarity search. Requires onnxruntime, numpy, and a CLIP ONNX model file.</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/config_dialog.py" line="1114" />
+        <source>Compute embeddings during crawl</source>
+        <translation>Compute embeddings during crawl</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/config_dialog.py" line="1115" />
+        <source>Automatically compute AI image embeddings for new thumbnails during each crawl. Slows crawl speed when enabled.</source>
+        <translation>Automatically compute AI image embeddings for new thumbnails during each crawl. Slows crawl speed when enabled.</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/config_dialog.py" line="1143" />
         <source>Select file manager executable</source>
         <translation>Select file manager executable</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1123" />
+        <location filename="../../app/ui/config_dialog.py" line="1156" />
         <source>Enable file sorting</source>
         <translation>Enable file sorting</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1124" />
+        <location filename="../../app/ui/config_dialog.py" line="1157" />
         <source>File sorting:</source>
         <translation>File sorting:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1128" />
+        <location filename="../../app/ui/config_dialog.py" line="1161" />
         <source>&lt;small&gt;When enabled, a &lt;b&gt;Sort files into directory…&lt;/b&gt; option appears in the table right-click menu, allowing selected archive files to be moved and renamed using a path pattern.&lt;/small&gt;</source>
         <translation>&lt;small&gt;When enabled, a &lt;b&gt;Sort files into directory…&lt;/b&gt; option appears in the table right-click menu, allowing selected archive files to be moved and renamed using a path pattern.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1134" />
+        <location filename="../../app/ui/config_dialog.py" line="1167" />
         <source>Allow file delete</source>
         <translation>Allow file delete</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1137" />
+        <location filename="../../app/ui/config_dialog.py" line="1170" />
         <source>Delete:</source>
         <translation>Delete:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1141" />
+        <location filename="../../app/ui/config_dialog.py" line="1174" />
         <source>&lt;small&gt;When enabled, a &lt;b&gt;Delete Archive File from Disk…&lt;/b&gt; option appears in the table right-click menu. This deletes the physical file.&lt;/small&gt;</source>
         <translation>&lt;small&gt;When enabled, a &lt;b&gt;Delete Archive File from Disk…&lt;/b&gt; option appears in the table right-click menu. This deletes the physical file.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1146" />
+        <location filename="../../app/ui/config_dialog.py" line="1179" />
         <source>Use trash folder</source>
         <translation>Use trash folder</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1147" />
+        <location filename="../../app/ui/config_dialog.py" line="1180" />
         <source>Trash:</source>
         <translation>Trash:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1151" />
+        <location filename="../../app/ui/config_dialog.py" line="1184" />
         <source>/path/to/trash</source>
         <translation>/path/to/trash</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1162" />
+        <location filename="../../app/ui/config_dialog.py" line="1195" />
         <source>&lt;small&gt;If enabled, files are moved here instead of being permanently deleted. A sidecar file with recovery info is created alongside.&lt;/small&gt;</source>
         <translation>&lt;small&gt;If enabled, files are moved here instead of being permanently deleted. A sidecar file with recovery info is created alongside.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1186" />
+        <location filename="../../app/ui/config_dialog.py" line="1219" />
         <source>DANGER: File Deletion</source>
         <translation>DANGER: File Deletion</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1194" />
+        <location filename="../../app/ui/config_dialog.py" line="1227" />
         <source>&lt;span style='color: #d32f2f; font-weight: bold;'&gt;Enabling this option allows the application to physically DELETE your archive files from the disk.&lt;/span&gt;&lt;br&gt;&lt;br&gt;This could lead to permanent loss of data. Use with extreme caution!</source>
         <translation>&lt;span style='color: #d32f2f; font-weight: bold;'&gt;Enabling this option allows the application to physically DELETE your archive files from the disk.&lt;/span&gt;&lt;br&gt;&lt;br&gt;This could lead to permanent loss of data. Use with extreme caution!</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1204" />
+        <location filename="../../app/ui/config_dialog.py" line="1237" />
         <source>I understand this and want to continue</source>
         <translation>I understand this and want to continue</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1220" />
+        <location filename="../../app/ui/config_dialog.py" line="1253" />
         <source>Choose trash directory</source>
         <translation>Choose trash directory</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1234" />
+        <location filename="../../app/ui/config_dialog.py" line="1267" />
         <source>Language:</source>
         <translation>Language:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1237" />
+        <location filename="../../app/ui/config_dialog.py" line="1270" />
         <source>&lt;small&gt;Choose the interface language. Restart the application for the change to fully take effect.&lt;/small&gt;</source>
         <translation>&lt;small&gt;Choose the interface language. Restart the application for the change to fully take effect.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1260" />
+        <location filename="../../app/ui/config_dialog.py" line="1293" />
         <source>Color Scheme</source>
         <translation>Color Scheme</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1266" />
+        <location filename="../../app/ui/config_dialog.py" line="1299" />
         <source>Scheme:</source>
         <translation>Scheme:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1269" />
+        <location filename="../../app/ui/config_dialog.py" line="1302" />
         <source>&lt;small&gt;Preview is applied immediately. Cancel reverts to the previous scheme.&lt;/small&gt;</source>
         <translation>&lt;small&gt;Preview is applied immediately. Cancel reverts to the previous scheme.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1274" />
+        <location filename="../../app/ui/config_dialog.py" line="1307" />
         <source>Duplicate Highlight Colors</source>
         <translation>Duplicate Highlight Colors</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1280" />
+        <location filename="../../app/ui/config_dialog.py" line="1313" />
         <source>&lt;small&gt;Row highlight colors used in the duplicate finder.&lt;/small&gt;</source>
         <translation>&lt;small&gt;Row highlight colors used in the duplicate finder.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1284" />
+        <location filename="../../app/ui/config_dialog.py" line="1317" />
         <source>Status Indicators</source>
         <translation>Status Indicators</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1291" />
+        <location filename="../../app/ui/config_dialog.py" line="1324" />
         <source>&lt;small&gt;Circle indicators drawn on group items in the browser tree.&lt;/small&gt;</source>
         <translation>&lt;small&gt;Circle indicators drawn on group items in the browser tree.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1295" />
+        <location filename="../../app/ui/config_dialog.py" line="1328" />
         <source>Warning Rows</source>
         <translation>Warning Rows</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1301" />
+        <location filename="../../app/ui/config_dialog.py" line="1334" />
         <source>&lt;small&gt;Row colors for archive entries flagged with a warning in the browser.&lt;/small&gt;</source>
         <translation>&lt;small&gt;Row colors for archive entries flagged with a warning in the browser.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1305" />
+        <location filename="../../app/ui/config_dialog.py" line="1338" />
         <source>Maintenance View</source>
         <translation>Maintenance View</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1311" />
+        <location filename="../../app/ui/config_dialog.py" line="1344" />
         <source>&lt;small&gt;Row colors in the database maintenance / verification table.&lt;/small&gt;</source>
         <translation>&lt;small&gt;Row colors in the database maintenance / verification table.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1315" />
+        <location filename="../../app/ui/config_dialog.py" line="1348" />
         <source>Highlights</source>
         <translation>Highlights</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1323" />
+        <location filename="../../app/ui/config_dialog.py" line="1356" />
         <source>&lt;small&gt;File match: translucent tint on matched rows in the file-comparison table. Selection: thumbnail selection in the image grid.&lt;/small&gt;</source>
         <translation>&lt;small&gt;File match: translucent tint on matched rows in the file-comparison table. Selection: thumbnail selection in the image grid.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1329" />
+        <location filename="../../app/ui/config_dialog.py" line="1362" />
         <source>Window Colors</source>
         <translation>Window Colors</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1335" />
+        <location filename="../../app/ui/config_dialog.py" line="1368" />
         <source>&lt;small&gt;Override the background and text color for all windows. Leave blank to use the active theme's colors.&lt;/small&gt;</source>
         <translation>&lt;small&gt;Override the background and text color for all windows. Leave blank to use the active theme's colors.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1341" />
+        <location filename="../../app/ui/config_dialog.py" line="1374" />
         <source>Custom Colors</source>
         <translation>Custom Colors</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1362" />
+        <location filename="../../app/ui/config_dialog.py" line="1395" />
         <source>Reset all to theme defaults</source>
         <translation>Reset all to theme defaults</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1364" />
+        <location filename="../../app/ui/config_dialog.py" line="1397" />
         <source>Save as color scheme…</source>
         <translation>Save as color scheme…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1374" />
+        <location filename="../../app/ui/config_dialog.py" line="1407" />
         <source>Typography</source>
         <translation>Typography</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1380" />
+        <location filename="../../app/ui/config_dialog.py" line="1413" />
         <source>Font family:</source>
         <translation>Font family:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1385" />
+        <location filename="../../app/ui/config_dialog.py" line="1418" />
         <source> pt</source>
         <translation> pt</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1386" />
+        <location filename="../../app/ui/config_dialog.py" line="1419" />
         <source>(theme default)</source>
         <translation>(theme default)</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1388" />
+        <location filename="../../app/ui/config_dialog.py" line="1421" />
         <source>Font size:</source>
         <translation>Font size:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1390" />
+        <location filename="../../app/ui/config_dialog.py" line="1423" />
         <source>Reset to theme font</source>
         <translation>Reset to theme font</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1396" />
+        <location filename="../../app/ui/config_dialog.py" line="1429" />
         <source>&lt;small&gt;Changes take effect after clicking OK. Set size to 0 to use the theme default.&lt;/small&gt;</source>
         <translation>&lt;small&gt;Changes take effect after clicking OK. Set size to 0 to use the theme default.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1423" />
+        <location filename="../../app/ui/config_dialog.py" line="1456" />
         <source>Choose data directory</source>
         <translation>Choose data directory</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1433" />
+        <location filename="../../app/ui/config_dialog.py" line="1466" />
         <source>Select unrar or rar executable</source>
         <translation>Select unrar or rar executable</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1435" />
+        <location filename="../../app/ui/config_dialog.py" line="1468" />
         <source>Executables (*.exe);;All files (*)</source>
         <translation>Executables (*.exe);;All files (*)</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1508" />
-        <location filename="../../app/ui/config_dialog.py" line="1502" />
+        <location filename="../../app/ui/config_dialog.py" line="1541" />
+        <location filename="../../app/ui/config_dialog.py" line="1535" />
         <source>Save Color Scheme</source>
         <translation>Save Color Scheme</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1502" />
+        <location filename="../../app/ui/config_dialog.py" line="1535" />
         <source>Scheme name:</source>
         <translation>Scheme name:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1727" />
+        <location filename="../../app/ui/config_dialog.py" line="1766" />
         <source>Data directory updated. Please restart the application for the change to take effect.</source>
         <translation>Data directory updated. Please restart the application for the change to take effect.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="1733" />
+        <location filename="../../app/ui/config_dialog.py" line="1772" />
         <source>Language updated. Please restart the application for the change to fully take effect.</source>
         <translation>Language updated. Please restart the application for the change to fully take effect.</translation>
     </message>
@@ -1426,186 +1451,201 @@
 </context><context>
     <name>DbMaintenanceDialog</name>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="563" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="668" />
         <source>Database Maintenance</source>
         <translation>Database Maintenance</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="580" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="686" />
         <source>Verify that every archive catalogued in the database still exists on disk. Missing archives can be relocated by searching a folder recursively, or removed from the database.</source>
         <translation>Verify that every archive catalogued in the database still exists on disk. Missing archives can be relocated by searching a folder recursively, or removed from the database.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="591" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="697" />
         <source>Verify</source>
         <translation>Verify</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="592" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="698" />
         <source>Check all archive paths for existence on disk</source>
         <translation>Check all archive paths for existence on disk</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="596" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="702" />
         <source>Stop</source>
         <translation>Stop</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="603" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="709" />
         <source>Search in Folder…</source>
         <translation>Search in Folder…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="605" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="711" />
         <source>Pick a folder to search recursively for selected (or all) missing archives</source>
         <translation>Pick a folder to search recursively for selected (or all) missing archives</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="612" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="718" />
         <source>Find Moved in DB…</source>
         <translation>Find Moved in DB…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="615" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="721" />
         <source>Check whether missing archives have been re-crawled at a different location and offer to transfer their metadata</source>
         <translation>Check whether missing archives have been re-crawled at a different location and offer to transfer their metadata</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="623" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="729" />
         <source>Find Duplicate Entries…</source>
         <translation>Find Duplicate Entries…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="626" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="732" />
         <source>Find records that share the same archive content hash or the same filename + file size, indicating the same file is catalogued more than once</source>
         <translation>Find records that share the same archive content hash or the same filename + file size, indicating the same file is catalogued more than once</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="633" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="739" />
         <source>Recompute Image Hashes</source>
         <translation>Recompute Image Hashes</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="636" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="742" />
         <source>Recompute the perceptual hash (dHash) of every thumbnail. Run this after upgrading so image-similarity searches use the current 128-bit algorithm.</source>
         <translation>Recompute the perceptual hash (dHash) of every thumbnail. Run this after upgrading so image-similarity searches use the current 128-bit algorithm.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="976" />
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="644" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="753" />
+        <source>Compute Image Embeddings</source>
+        <translation>Compute Image Embeddings</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="757" />
+        <source>Compute AI image embeddings (CLIP) for every thumbnail so image-similarity searches can match the same model across different renders, angles, and colours.</source>
+        <translation>Compute AI image embeddings (CLIP) for every thumbnail so image-similarity searches can match the same model across different renders, angles, and colours.</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="765" />
+        <source>AI embeddings are disabled in Configuration → Browser</source>
+        <translation>AI embeddings are disabled in Configuration → Browser</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="1121" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="771" />
         <source>Merge Moved</source>
         <translation>Merge Moved</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="647" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="774" />
         <source>Transfer metadata from selected 'Moved (in DB)' records to their new locations</source>
         <translation>Transfer metadata from selected 'Moved (in DB)' records to their new locations</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="653" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="780" />
         <source>Remove Selected</source>
         <translation>Remove Selected</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="654" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="781" />
         <source>Remove the selected records from the database</source>
         <translation>Remove the selected records from the database</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="1109" />
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="660" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="1254" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="787" />
         <source>Remove All Missing</source>
         <translation>Remove All Missing</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="663" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="790" />
         <source>Remove every record whose archive no longer exists on disk</source>
         <translation>Remove every record whose archive no longer exists on disk</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="1151" />
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="670" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="1296" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="797" />
         <source>Remove Flagged Missing</source>
         <translation>Remove Flagged Missing</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="673" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="800" />
         <source>Remove records flagged as missing by the crawler that are still absent on disk</source>
         <translation>Remove records flagged as missing by the crawler that are still absent on disk</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="682" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="809" />
         <source>Close</source>
         <translation>Close</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="695" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="822" />
         <source>Show only problems (missing / modified)</source>
         <translation>Show only problems (missing / modified)</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="703" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="830" />
         <source>ID</source>
         <translation>ID</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="703" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="830" />
         <source>Title</source>
         <translation>Title</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="703" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="830" />
         <source>Archive Path</source>
         <translation>Archive Path</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="703" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="830" />
         <source>Status</source>
         <translation>Status</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="703" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="830" />
         <source>Match Path</source>
         <translation>Match Path</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="717" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="844" />
         <source>Log:</source>
         <translation>Log:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="882" />
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="870" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="1027" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="1015" />
         <source>Search</source>
         <translation>Search</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="871" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="1016" />
         <source>None of the selected rows are missing — nothing to search for.</source>
         <translation>None of the selected rows are missing — nothing to search for.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="882" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="1027" />
         <source>No missing archives to search for.</source>
         <translation>No missing archives to search for.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="886" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="1031" />
         <source>Select Folder to Search</source>
         <translation>Select Folder to Search</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="925" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="1070" />
         <source>Find Moved</source>
         <translation>Find Moved</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="925" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="1070" />
         <source>No missing archives to check.</source>
         <translation>No missing archives to check.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="977" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="1122" />
         <source>No 'Moved (in DB)' records selected (or none found).
 
 Run 'Find Moved in DB' first, then select rows to merge.</source>
@@ -1614,38 +1654,38 @@ Run 'Find Moved in DB' first, then select rows to merge.</source>
 Run 'Find Moved in DB' first, then select rows to merge.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="983" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="1128" />
         <source>Merge Moved Records</source>
         <translation>Merge Moved Records</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="1103" />
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="1073" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="1248" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="1218" />
         <source>Remove</source>
         <translation>Remove</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="1073" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="1218" />
         <source>No rows selected.</source>
         <translation>No rows selected.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="1079" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="1224" />
         <source>Remove Records</source>
         <translation>Remove Records</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="1103" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="1248" />
         <source>No missing archives to remove.</source>
         <translation>No missing archives to remove.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="1145" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="1290" />
         <source>Remove Flagged</source>
         <translation>Remove Flagged</translation>
     </message>
     <message>
-        <location filename="../../app/ui/db_maintenance_dialog.py" line="1145" />
+        <location filename="../../app/ui/db_maintenance_dialog.py" line="1290" />
         <source>No flagged-missing records to remove.</source>
         <translation>No flagged-missing records to remove.</translation>
     </message>
@@ -1869,170 +1909,220 @@ Run 'Find Moved in DB' first, then select rows to merge.</translation>
 </context><context>
     <name>FindByImageDialog</name>
     <message>
-        <location filename="../../app/ui/find_by_image_dialog.py" line="103" />
+        <location filename="../../app/ui/find_by_image_dialog.py" line="104" />
         <source>Find by Image</source>
         <translation>Find by Image</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_by_image_dialog.py" line="118" />
+        <location filename="../../app/ui/find_by_image_dialog.py" line="120" />
         <source>Image:</source>
         <translation>Image:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_by_image_dialog.py" line="122" />
+        <location filename="../../app/ui/find_by_image_dialog.py" line="124" />
         <source>No image selected</source>
         <translation>No image selected</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_by_image_dialog.py" line="125" />
+        <location filename="../../app/ui/find_by_image_dialog.py" line="127" />
         <source>Browse…</source>
         <translation>Browse…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_by_image_dialog.py" line="129" />
+        <location filename="../../app/ui/find_by_image_dialog.py" line="134" />
+        <source>Method:</source>
+        <translation>Method:</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/find_by_image_dialog.py" line="136" />
+        <source>Perceptual hash (dHash)</source>
+        <translation>Perceptual hash (dHash)</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/find_by_image_dialog.py" line="137" />
+        <source>AI embedding (CLIP)</source>
+        <translation>AI embedding (CLIP)</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/find_by_image_dialog.py" line="144" />
+        <source>AI embeddings are disabled in Configuration → Browser</source>
+        <translation>AI embeddings are disabled in Configuration → Browser</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/find_by_image_dialog.py" line="150" />
         <source>Max distance:</source>
         <translation>Max distance:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_by_image_dialog.py" line="134" />
+        <location filename="../../app/ui/find_by_image_dialog.py" line="156" />
         <source>Hamming distance threshold (0 = exact match, 64 = very loose)</source>
         <translation>Hamming distance threshold (0 = exact match, 64 = very loose)</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_by_image_dialog.py" line="138" />
+        <location filename="../../app/ui/find_by_image_dialog.py" line="160" />
+        <source>Min similarity:</source>
+        <translation>Min similarity:</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/find_by_image_dialog.py" line="168" />
+        <source>Minimum cosine similarity between embeddings (1.00 = identical).</source>
+        <translation>Minimum cosine similarity between embeddings (1.00 = identical).</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/find_by_image_dialog.py" line="174" />
         <source>Search</source>
         <translation>Search</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_by_image_dialog.py" line="155" />
+        <location filename="../../app/ui/find_by_image_dialog.py" line="191" />
         <source>&lt;b&gt;Query Image&lt;/b&gt;</source>
         <translation>&lt;b&gt;Query Image&lt;/b&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_by_image_dialog.py" line="159" />
+        <location filename="../../app/ui/find_by_image_dialog.py" line="195" />
         <source>No image loaded</source>
         <translation>No image loaded</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_by_image_dialog.py" line="182" />
+        <location filename="../../app/ui/find_by_image_dialog.py" line="218" />
         <source>Load an image and click Search.</source>
         <translation>Load an image and click Search.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_by_image_dialog.py" line="201" />
+        <location filename="../../app/ui/find_by_image_dialog.py" line="244" />
         <source>Select Image</source>
         <translation>Select Image</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_by_image_dialog.py" line="202" />
+        <location filename="../../app/ui/find_by_image_dialog.py" line="245" />
         <source>Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.tif *.tiff)</source>
         <translation>Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.tif *.tiff)</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_by_image_dialog.py" line="220" />
+        <location filename="../../app/ui/find_by_image_dialog.py" line="263" />
         <source>Could not compute hash — unsupported image format.</source>
         <translation>Could not compute hash — unsupported image format.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_by_image_dialog.py" line="224" />
+        <location filename="../../app/ui/find_by_image_dialog.py" line="267" />
         <source>Cannot decode image</source>
         <translation>Cannot decode image</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_by_image_dialog.py" line="243" />
+        <location filename="../../app/ui/find_by_image_dialog.py" line="287" />
         <source>Image loaded. Click Search to find matches.</source>
         <translation>Image loaded. Click Search to find matches.</translation>
     </message>
 </context><context>
     <name>FindContentDuplicatesDialog</name>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="666" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="807" />
         <source>Find Duplicate Archives by Content</source>
         <translation>Find Duplicate Archives by Content</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="688" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="829" />
         <source>STL Files</source>
         <translation>STL Files</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="689" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="830" />
         <source>Images</source>
         <translation>Images</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="694" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="835" />
         <source>Show Pair in Main Table</source>
         <translation>Show Pair in Main Table</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="697" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="838" />
         <source>Show All Duplicates in Main Table</source>
         <translation>Show All Duplicates in Main Table</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="700" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="841" />
         <source>Close</source>
         <translation>Close</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="797" />
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="712" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="938" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="853" />
         <source>Search Parameters</source>
         <translation>Search Parameters</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="719" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="860" />
         <source>Minimum fraction of files (relative to the larger archive) that must be identical for a pair to be flagged.</source>
         <translation>Minimum fraction of files (relative to the larger archive) that must be identical for a pair to be flagged.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="722" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="863" />
         <source>Similarity threshold:</source>
         <translation>Similarity threshold:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="724" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="865" />
         <source>&lt;small&gt;Two archives are flagged when at least this fraction of the &lt;i&gt;larger&lt;/i&gt; archive's STL files appear in both (matched by filename and size). Requires &lt;b&gt;Store STL file list&lt;/b&gt; to be enabled in Settings and archives to have been crawled.&lt;/small&gt;</source>
         <translation>&lt;small&gt;Two archives are flagged when at least this fraction of the &lt;i&gt;larger&lt;/i&gt; archive's STL files appear in both (matched by filename and size). Requires &lt;b&gt;Store STL file list&lt;/b&gt; to be enabled in Settings and archives to have been crawled.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="821" />
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="732" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1008" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="873" />
         <source>Find Duplicates</source>
         <translation>Find Duplicates</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="823" />
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="735" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1010" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="876" />
         <source>Stop</source>
         <translation>Stop</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="834" />
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="746" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1021" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="887" />
         <source>Ready.</source>
         <translation>Ready.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="761" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="902" />
         <source>Images in selected pair</source>
         <translation>Images in selected pair</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="926" />
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="766" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1113" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="907" />
         <source>Archive A</source>
         <translation>Archive A</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="927" />
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="773" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1114" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="914" />
         <source>Archive B</source>
         <translation>Archive B</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="803" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="947" />
+        <source>Perceptual hash (dHash)</source>
+        <translation>Perceptual hash (dHash)</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="948" />
+        <source>AI embedding (CLIP)</source>
+        <translation>AI embedding (CLIP)</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="955" />
+        <source>AI embeddings are disabled in Configuration → Browser</source>
+        <translation>AI embeddings are disabled in Configuration → Browser</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="959" />
+        <source>Method:</source>
+        <translation>Method:</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="966" />
         <source>Maximum Hamming distance between 128-bit dHash fingerprints.
 0 = bit-for-bit identical pixels
 ≤6 = very similar (different resolution / minor JPEG artefacts)
@@ -2045,79 +2135,104 @@ Run 'Find Moved in DB' first, then select rows to merge.</translation>
 ≤30 = loosely similar (use with caution — many false positives)</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="809" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="972" />
         <source>Max hash distance:</source>
         <translation>Max hash distance:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="811" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="974" />
         <source>&lt;small&gt;Preview thumbnails are compared with a perceptual difference hash (dHash). Two thumbnails are considered similar when their 128-bit hashes differ in at most this many bits. A distance of 0 catches only near-identical images; 10 typically catches the same render at different resolutions or with slight colour shifts. Higher values increase recall but also false positives.&lt;/small&gt;</source>
         <translation>&lt;small&gt;Preview thumbnails are compared with a perceptual difference hash (dHash). Two thumbnails are considered similar when their 128-bit hashes differ in at most this many bits. A distance of 0 catches only near-identical images; 10 typically catches the same render at different resolutions or with slight colour shifts. Higher values increase recall but also false positives.&lt;/small&gt;</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1050" />
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="865" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="991" />
+        <source>Minimum cosine similarity between embeddings (1.00 = identical).</source>
+        <translation>Minimum cosine similarity between embeddings (1.00 = identical).</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="993" />
+        <source>Min similarity:</source>
+        <translation>Min similarity:</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="995" />
+        <source>&lt;small&gt;Thumbnails are compared by a learned CLIP embedding (cosine similarity), which matches the same model across different renders, angles, and colours far better than the perceptual hash. Requires embeddings to be computed first (Database Maintenance → Compute Image Embeddings); images without one are ignored.&lt;/small&gt;</source>
+        <translation>&lt;small&gt;Thumbnails are compared by a learned CLIP embedding (cosine similarity), which matches the same model across different renders, angles, and colours far better than the perceptual hash. Requires embeddings to be computed first (Database Maintenance → Compute Image Embeddings); images without one are ignored.&lt;/small&gt;</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1250" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1052" />
         <source>Searching…</source>
         <translation>Searching…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1072" />
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="882" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1280" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1069" />
         <source>Search stopped.</source>
         <translation>Search stopped.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="928" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1115" />
         <source>Select a result to preview its images.</source>
         <translation>Select a result to preview its images.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="940" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1127" />
         <source>Archive A: %s</source>
         <translation>Archive A: %s</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="941" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1128" />
         <source>Archive B: %s</source>
         <translation>Archive B: %s</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="942" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1129" />
         <source>No images in this archive.</source>
         <translation>No images in this archive.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="995" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1182" />
         <source>Compare Archive Contents…</source>
         <translation>Compare Archive Contents…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1000" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1187" />
         <source>Open Folder of Archive A in Explorer</source>
         <translation>Open Folder of Archive A in Explorer</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1005" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1192" />
         <source>Open Folder of Archive B in Explorer</source>
         <translation>Open Folder of Archive B in Explorer</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1015" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1202" />
         <source>Delete Archive A from Disk…</source>
         <translation>Delete Archive A from Disk…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1019" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1206" />
         <source>Delete Archive B from Disk…</source>
         <translation>Delete Archive B from Disk…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1144" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1240" />
+        <source>Best Similarity</source>
+        <translation>Best Similarity</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1240" />
+        <source>Best Distance</source>
+        <translation>Best Distance</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1361" />
         <source>Delete Archive</source>
         <translation>Delete Archive</translation>
     </message>
     <message>
-        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1181" />
+        <location filename="../../app/ui/find_content_duplicates_dialog.py" line="1398" />
         <source>Failed to load model thumbnails for popup: %s</source>
         <translation>Failed to load model thumbnails for popup: %s</translation>
     </message>
@@ -2251,64 +2366,64 @@ Run 'Find Moved in DB' first, then select rows to merge.</translation>
 </context><context>
     <name>HelpDialog</name>
     <message>
-        <location filename="../../app/ui/help_dialog.py" line="1251" />
+        <location filename="../../app/ui/help_dialog.py" line="1266" />
         <source>stlLibrary — Help</source>
         <translation>stlLibrary — Help</translation>
     </message>
     <message>
-        <location filename="../../app/ui/help_dialog.py" line="1286" />
+        <location filename="../../app/ui/help_dialog.py" line="1301" />
         <source>← Back</source>
         <translation>← Back</translation>
     </message>
     <message>
-        <location filename="../../app/ui/help_dialog.py" line="1290" />
+        <location filename="../../app/ui/help_dialog.py" line="1305" />
         <source>Forward →</source>
         <translation>Forward →</translation>
     </message>
 </context><context>
     <name>ImageGridDialog</name>
     <message>
-        <location filename="../../app/ui/image_grid_dialog.py" line="282" />
+        <location filename="../../app/ui/image_grid_dialog.py" line="287" />
         <source>Size:</source>
         <translation>Size:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/image_grid_dialog.py" line="297" />
+        <location filename="../../app/ui/image_grid_dialog.py" line="302" />
         <source>Sort:</source>
         <translation>Sort:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/image_grid_dialog.py" line="308" />
+        <location filename="../../app/ui/image_grid_dialog.py" line="313" />
         <source>Ascending</source>
         <translation>Ascending</translation>
     </message>
     <message>
-        <location filename="../../app/ui/image_grid_dialog.py" line="315" />
+        <location filename="../../app/ui/image_grid_dialog.py" line="320" />
         <source>Select All</source>
         <translation>Select All</translation>
     </message>
     <message>
-        <location filename="../../app/ui/image_grid_dialog.py" line="320" />
+        <location filename="../../app/ui/image_grid_dialog.py" line="325" />
         <source>Deselect All</source>
         <translation>Deselect All</translation>
     </message>
     <message>
-        <location filename="../../app/ui/image_grid_dialog.py" line="415" />
+        <location filename="../../app/ui/image_grid_dialog.py" line="420" />
         <source>Show selected in main window</source>
         <translation>Show selected in main window</translation>
     </message>
     <message>
-        <location filename="../../app/ui/image_grid_dialog.py" line="417" />
+        <location filename="../../app/ui/image_grid_dialog.py" line="422" />
         <source>Filter the main browser to show only selected models</source>
         <translation>Filter the main browser to show only selected models</translation>
     </message>
     <message>
-        <location filename="../../app/ui/image_grid_dialog.py" line="421" />
+        <location filename="../../app/ui/image_grid_dialog.py" line="426" />
         <source>Close</source>
         <translation>Close</translation>
     </message>
     <message>
-        <location filename="../../app/ui/image_grid_dialog.py" line="450" />
+        <location filename="../../app/ui/image_grid_dialog.py" line="455" />
         <source>No image</source>
         <translation>No image</translation>
     </message>
@@ -3820,7 +3935,7 @@ Progress will be shown in the status bar.</translation>
 </context><context>
     <name>_ResultCell</name>
     <message>
-        <location filename="../../app/ui/find_by_image_dialog.py" line="71" />
+        <location filename="../../app/ui/find_by_image_dialog.py" line="72" />
         <source>(no image)</source>
         <translation>(no image)</translation>
     </message>
@@ -3842,74 +3957,74 @@ Progress will be shown in the status bar.</translation>
         <translation>Custom…</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="479" />
+        <location filename="../../app/ui/config_dialog.py" line="489" />
         <source>Edit model</source>
         <translation>Edit model</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="480" />
+        <location filename="../../app/ui/config_dialog.py" line="490" />
         <source>Mass edit selected</source>
         <translation>Mass edit selected</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="481" />
+        <location filename="../../app/ui/config_dialog.py" line="491" />
         <source>Refresh table</source>
         <translation>Refresh table</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="482" />
+        <location filename="../../app/ui/config_dialog.py" line="492" />
         <source>Apply filter</source>
         <translation>Apply filter</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="483" />
+        <location filename="../../app/ui/config_dialog.py" line="493" />
         <source>Delete from DB</source>
         <translation>Delete from DB</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="484" />
+        <location filename="../../app/ui/config_dialog.py" line="494" />
         <source>Open containing folder</source>
         <translation>Open containing folder</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="485" />
+        <location filename="../../app/ui/config_dialog.py" line="495" />
         <source>Show archive files</source>
         <translation>Show archive files</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="486" />
+        <location filename="../../app/ui/config_dialog.py" line="496" />
         <source>Image grid</source>
         <translation>Image grid</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="487" />
+        <location filename="../../app/ui/config_dialog.py" line="497" />
         <source>Toggle image pane</source>
         <translation>Toggle image pane</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="488" />
+        <location filename="../../app/ui/config_dialog.py" line="498" />
         <source>Open Crawler</source>
         <translation>Open Crawler</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="489" />
+        <location filename="../../app/ui/config_dialog.py" line="499" />
         <source>Update crawled folders</source>
         <translation>Update crawled folders</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="490" />
+        <location filename="../../app/ui/config_dialog.py" line="500" />
         <source>Find metadata duplicates</source>
         <translation>Find metadata duplicates</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="528" />
-        <location filename="../../app/ui/config_dialog.py" line="524" />
-        <location filename="../../app/ui/config_dialog.py" line="516" />
+        <location filename="../../app/ui/config_dialog.py" line="538" />
+        <location filename="../../app/ui/config_dialog.py" line="534" />
+        <location filename="../../app/ui/config_dialog.py" line="526" />
         <source>Open Folder</source>
         <translation>Open Folder</translation>
     </message>
     <message>
-        <location filename="../../app/ui/config_dialog.py" line="516" />
+        <location filename="../../app/ui/config_dialog.py" line="526" />
         <source>No file manager executable configured.</source>
         <translation>No file manager executable configured.</translation>
     </message>

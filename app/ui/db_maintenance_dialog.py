@@ -377,6 +377,111 @@ class DHashWorker(QThread):
         self.finished.emit(computed, skipped)
 
 
+class EmbeddingWorker(QThread):
+    """Compute and persist learned image embeddings (CLIP) for thumbnails.
+
+    Optional feature: if embeddings are unavailable (missing onnxruntime/numpy
+    or model file) it logs the reason and finishes without doing anything.
+
+    Signals:
+        progress(current, total): Image index and total count.
+        log(message): Human-readable status line for the UI log panel.
+        finished(computed, skipped): Counts once the run completes.
+    """
+
+    progress = pyqtSignal(int, int)
+    log      = pyqtSignal(str)
+    finished = pyqtSignal(int, int)   # (computed, skipped)
+
+    _BATCH = 100
+
+    def __init__(self, recompute_all: bool = False, parent=None) -> None:
+        super().__init__(parent)
+        self._stop_requested = False
+        self._recompute_all = recompute_all
+
+    def stop(self) -> None:
+        self._stop_requested = True
+
+    def run(self) -> None:
+        from app.database.db import session_scope
+        from app.database.models import Image as DBImage
+        from app.utils.thumbnailer import get_thumbnail_bytes
+        from app.utils import image_embedding as emb
+
+        self._stop_requested = False
+
+        if not emb.is_available():
+            self.log.emit(emb.unavailable_reason())
+            self.finished.emit(0, 0)
+            return
+
+        with session_scope() as session:
+            query = session.query(DBImage.id, DBImage.thumbnail)
+            if not self._recompute_all:
+                # Images with no embedding, or one from a different model version.
+                query = query.filter(
+                    DBImage.embedding.is_(None)
+                    | (DBImage.embedding_model != emb.EMBED_MODEL_ID)
+                )
+            rows = query.all()
+
+        total = len(rows)
+        if total == 0:
+            self.log.emit("All images already have a current embedding.")
+            self.finished.emit(0, 0)
+            return
+
+        verb = "Recomputing" if self._recompute_all else "Computing"
+        self.log.emit(f"{verb} image embeddings for {total} image(s)…")
+
+        pending: list[tuple[int, bytes]] = []   # (image_id, blob)
+
+        def flush() -> None:
+            if not pending:
+                return
+            with session_scope() as s:
+                for img_id, blob in pending:
+                    img = s.query(DBImage).filter(DBImage.id == img_id).first()
+                    if img:
+                        img.embedding = blob
+                        img.embedding_model = emb.EMBED_MODEL_ID
+            pending.clear()
+
+        computed = 0
+        skipped  = 0
+        for idx, (image_id, legacy_blob) in enumerate(rows, 1):
+            if self._stop_requested:
+                self.log.emit("Stopped by user.")
+                break
+
+            self.progress.emit(idx, total)
+
+            jpeg = get_thumbnail_bytes(image_id) or legacy_blob
+            if not jpeg:
+                skipped += 1
+                continue
+
+            vec = emb.embed_jpeg(jpeg)
+            if vec is None:
+                skipped += 1
+                continue
+
+            pending.append((image_id, emb.to_blob(vec)))
+            computed += 1
+
+            if len(pending) >= self._BATCH:
+                flush()
+
+        flush()
+
+        self.log.emit(
+            f"Done — {computed} embedding(s) computed, "
+            f"{skipped} skipped (no thumbnail or decode error)."
+        )
+        self.finished.emit(computed, skipped)
+
+
 class FindDuplicateEntriesWorker(QThread):
     """Find DB records that share the same archive content (hash) or the same
     filename + file size, indicating the same physical file has been catalogued
@@ -566,6 +671,7 @@ class DbMaintenanceDialog(QDialog):
         self._verify_worker:    VerifyWorker                 | None = None
         self._search_worker:    SearchWorker                 | None = None
         self._dhash_worker:     DHashWorker                  | None = None
+        self._embed_worker:     EmbeddingWorker              | None = None
         self._moved_db_worker:  MovedInDbWorker              | None = None
         self._dup_entry_worker: FindDuplicateEntriesWorker   | None = None
         self._results: list[dict] = []
@@ -639,6 +745,27 @@ class DbMaintenanceDialog(QDialog):
         )
         self._recompute_dhash_btn.clicked.connect(lambda: self._start_dhash(recompute_all=True))
         btn_row.addWidget(self._recompute_dhash_btn)
+
+        from app.utils import image_embedding as _emb
+        from app.ui.config_dialog import get_ai_embeddings_enabled
+        self._embed_available = _emb.is_available() and get_ai_embeddings_enabled()
+        self._embed_btn = QPushButton(
+            style.standardIcon(SP.SP_FileDialogInfoView), self.tr("Compute Image Embeddings")
+        )
+        if self._embed_available:
+            self._embed_btn.setToolTip(
+                self.tr("Compute AI image embeddings (CLIP) for every thumbnail so "
+                "image-similarity searches can match the same model across different "
+                "renders, angles, and colours.")
+            )
+        else:
+            self._embed_btn.setEnabled(False)
+            self._embed_btn.setToolTip(
+                _emb.unavailable_reason() if not _emb.is_available()
+                else self.tr("AI embeddings are disabled in Configuration → Browser")
+            )
+        self._embed_btn.clicked.connect(lambda: self._start_embeddings(recompute_all=True))
+        btn_row.addWidget(self._embed_btn)
 
         self._merge_moved_btn = QPushButton(
             style.standardIcon(SP.SP_ArrowRight), self.tr("Merge Moved")
@@ -729,6 +856,7 @@ class DbMaintenanceDialog(QDialog):
         self._find_moved_btn.setEnabled(False)
         self._find_dup_entries_btn.setEnabled(not busy)
         self._recompute_dhash_btn.setEnabled(not busy)
+        self._embed_btn.setEnabled(not busy and self._embed_available)
         self._merge_moved_btn.setEnabled(False)
         self._remove_sel_btn.setEnabled(False)
         self._remove_all_btn.setEnabled(False)
@@ -746,6 +874,7 @@ class DbMaintenanceDialog(QDialog):
         self._find_moved_btn.setEnabled(has_missing or has_flagged)
         self._find_dup_entries_btn.setEnabled(True)
         self._recompute_dhash_btn.setEnabled(True)
+        self._embed_btn.setEnabled(self._embed_available)
         self._merge_moved_btn.setEnabled(has_moved_db)
         self._remove_sel_btn.setEnabled(has_any)
         self._remove_all_btn.setEnabled(has_missing)
@@ -755,7 +884,7 @@ class DbMaintenanceDialog(QDialog):
     def _stop(self) -> None:
         for worker in (
             self._verify_worker, self._search_worker,
-            self._dhash_worker, self._moved_db_worker,
+            self._dhash_worker, self._embed_worker, self._moved_db_worker,
         ):
             if worker and worker.isRunning():
                 worker.stop()
@@ -796,6 +925,22 @@ class DbMaintenanceDialog(QDialog):
 
     def _on_dhash_finished(self, computed: int, skipped: int) -> None:
         self._dhash_worker = None
+        self._set_idle()
+
+    # ------------------------------------------------------------------
+    def _start_embeddings(self, recompute_all: bool = False) -> None:
+        self._log.clear()
+        self._progress.setValue(0)
+        self._set_busy(True)
+
+        self._embed_worker = EmbeddingWorker(recompute_all=recompute_all)
+        self._embed_worker.log.connect(self._on_log)
+        self._embed_worker.progress.connect(self._on_progress)
+        self._embed_worker.finished.connect(self._on_embed_finished)
+        self._embed_worker.start()
+
+    def _on_embed_finished(self, computed: int, skipped: int) -> None:
+        self._embed_worker = None
         self._set_idle()
 
     def _populate_table(self, results: list) -> None:
@@ -1192,6 +1337,7 @@ class DbMaintenanceDialog(QDialog):
         self._find_moved_btn.setEnabled(has_missing or has_flagged)
         self._find_dup_entries_btn.setEnabled(True)
         self._recompute_dhash_btn.setEnabled(True)
+        self._embed_btn.setEnabled(self._embed_available)
         self._merge_moved_btn.setEnabled(has_moved_db)
         self._remove_all_btn.setEnabled(has_missing)
         self._remove_flagged_btn.setEnabled(has_flagged)
@@ -1210,7 +1356,7 @@ class DbMaintenanceDialog(QDialog):
     def closeEvent(self, event) -> None:
         for worker in (
             self._verify_worker, self._search_worker,
-            self._dhash_worker, self._moved_db_worker,
+            self._dhash_worker, self._embed_worker, self._moved_db_worker,
         ):
             if worker and worker.isRunning():
                 worker.stop()

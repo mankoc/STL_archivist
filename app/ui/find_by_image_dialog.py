@@ -10,13 +10,14 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QApplication, QDialog, QFileDialog, QGridLayout, QHBoxLayout,
-    QLabel, QLineEdit, QPushButton, QScrollArea, QSpinBox, QSplitter,
-    QVBoxLayout, QWidget, QFrame,
+    QLabel, QLineEdit, QPushButton, QScrollArea, QSpinBox, QDoubleSpinBox,
+    QComboBox, QSplitter, QVBoxLayout, QWidget, QFrame,
 )
 
 from app.database.db import session_scope
 from app.database.models import Image as DBImage, STLModel
 from app.utils.thumbnailer import pixmap_from_path
+from app.utils import image_embedding as _emb
 from app.ui.find_content_duplicates_dialog import compute_dhash_from_jpeg, format_dhash, parse_dhash
 
 logger = logging.getLogger(__name__)
@@ -41,7 +42,7 @@ class _ResultCell(QFrame):
     clicked = pyqtSignal(int)   # emits model_id
 
     def __init__(self, model_id: int, thumbnail_path: Optional[str],
-                 title: str, archive: str, distance: int, parent=None) -> None:
+                 title: str, archive: str, score_text: str, parent=None) -> None:
         super().__init__(parent)
         self._model_id = model_id
         self.setFrameShape(QFrame.Shape.Box)
@@ -49,7 +50,7 @@ class _ResultCell(QFrame):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedWidth(_CELL_WIDTH)
         self.setToolTip(
-            f"{title or '(no title)'}\n{archive}\nDistance: {distance}\n"
+            f"{title or '(no title)'}\n{archive}\n{score_text}\n"
             "Click to show in browser"
         )
 
@@ -71,7 +72,7 @@ class _ResultCell(QFrame):
             thumb.setText(self.tr("(no image)"))
         layout.addWidget(thumb)
 
-        dist_lbl = QLabel(f"Distance: {distance}")
+        dist_lbl = QLabel(score_text)
         dist_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         dist_lbl.setStyleSheet("font-size: 10px; color: gray;")
         layout.addWidget(dist_lbl)
@@ -104,6 +105,7 @@ class FindByImageDialog(QDialog):
         self.setWindowFlag(Qt.WindowType.Window)
         self.resize(940, 640)
         self._query_hash: Optional[int] = None
+        self._query_embed = None          # numpy vector when embeddings are available
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -126,7 +128,27 @@ class FindByImageDialog(QDialog):
         browse_btn.clicked.connect(self._browse)
         ctrl.addWidget(browse_btn)
 
-        ctrl.addWidget(QLabel(self.tr("Max distance:")))
+        # Matching method: perceptual hash (default) or learned embedding.
+        from app.ui.config_dialog import get_ai_embeddings_enabled
+        self._embed_available = _emb.is_available() and get_ai_embeddings_enabled()
+        ctrl.addWidget(QLabel(self.tr("Method:")))
+        self._method_combo = QComboBox()
+        self._method_combo.addItem(self.tr("Perceptual hash (dHash)"), "dhash")
+        self._method_combo.addItem(self.tr("AI embedding (CLIP)"), "embedding")
+        if not self._embed_available:
+            mi = self._method_combo.findData("embedding")
+            self._method_combo.model().item(mi).setEnabled(False)
+            self._method_combo.setItemData(
+                mi,
+                _emb.unavailable_reason() if not _emb.is_available()
+                else self.tr("AI embeddings are disabled in Configuration → Browser"),
+                Qt.ItemDataRole.ToolTipRole,
+            )
+        self._method_combo.currentIndexChanged.connect(self._on_method_changed)
+        ctrl.addWidget(self._method_combo)
+
+        self._dist_label = QLabel(self.tr("Max distance:"))
+        ctrl.addWidget(self._dist_label)
         self._dist_spin = QSpinBox()
         self._dist_spin.setRange(0, 64)
         self._dist_spin.setValue(_MAX_DIST_DEFAULT)
@@ -134,6 +156,20 @@ class FindByImageDialog(QDialog):
             self.tr("Hamming distance threshold (0 = exact match, 64 = very loose)")
         )
         ctrl.addWidget(self._dist_spin)
+
+        self._sim_label = QLabel(self.tr("Min similarity:"))
+        ctrl.addWidget(self._sim_label)
+        self._sim_spin = QDoubleSpinBox()
+        self._sim_spin.setRange(0.50, 1.00)
+        self._sim_spin.setSingleStep(0.01)
+        self._sim_spin.setDecimals(2)
+        self._sim_spin.setValue(0.85)
+        self._sim_spin.setToolTip(
+            self.tr("Minimum cosine similarity between embeddings (1.00 = identical).")
+        )
+        ctrl.addWidget(self._sim_spin)
+        self._sim_label.setVisible(False)
+        self._sim_spin.setVisible(False)
 
         self._search_btn = QPushButton(self.tr("Search"))
         self._search_btn.setEnabled(False)
@@ -195,6 +231,13 @@ class FindByImageDialog(QDialog):
 
         root.addWidget(splitter, 1)
 
+    def _on_method_changed(self, *_args) -> None:
+        is_embed = self._method_combo.currentData() == "embedding"
+        self._dist_label.setVisible(not is_embed)
+        self._dist_spin.setVisible(not is_embed)
+        self._sim_label.setVisible(is_embed)
+        self._sim_spin.setVisible(is_embed)
+
     # ------------------------------------------------------------------
     def _browse(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -226,6 +269,7 @@ class FindByImageDialog(QDialog):
             return
 
         self._query_hash = h
+        self._query_embed = _emb.embed_jpeg(raw) if self._embed_available else None
 
         px = QPixmap()
         px.loadFromData(raw)
@@ -247,7 +291,7 @@ class FindByImageDialog(QDialog):
         if self._query_hash is None:
             return
 
-        max_dist = self._dist_spin.value()
+        method = self._method_combo.currentData()
 
         old = self._scroll.takeWidget()
         if old:
@@ -255,7 +299,27 @@ class FindByImageDialog(QDialog):
 
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            results = self._find_matches(max_dist)
+            if method == "embedding":
+                thr = self._sim_spin.value()
+                results = self._find_matches_embed(thr)
+                score_fmt = lambda v: f"Similarity: {v:.3f}"
+                empty_msg = (
+                    f"No matches found (similarity ≥ {thr:.2f}). "
+                    "Run Database Maintenance → Compute Image Embeddings first."
+                )
+                found_msg = (
+                    f"{len(results)} model(s) found (similarity ≥ {thr:.2f}), "
+                    "sorted by similarity."
+                )
+            else:
+                max_dist = self._dist_spin.value()
+                results = self._find_matches(max_dist)
+                score_fmt = lambda v: f"Distance: {v}"
+                empty_msg = f"No matches found within distance {max_dist}."
+                found_msg = (
+                    f"{len(results)} model(s) found (distance ≤ {max_dist}), "
+                    "sorted by similarity."
+                )
         except Exception as exc:
             logger.exception("Find-by-image search failed")
             self._status_lbl.setText(f"Search failed: {exc}")
@@ -271,16 +335,11 @@ class FindByImageDialog(QDialog):
         grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
 
         if not results:
-            self._status_lbl.setText(
-                f"No matches found within distance {max_dist}."
-            )
+            self._status_lbl.setText(empty_msg)
         else:
-            self._status_lbl.setText(
-                f"{len(results)} model(s) found (distance ≤ {max_dist}),"
-                " sorted by similarity."
-            )
-            for i, (dist, model_id, title, archive, thumb_path) in enumerate(results):
-                cell = _ResultCell(model_id, thumb_path, title, archive, dist)
+            self._status_lbl.setText(found_msg)
+            for i, (score, model_id, title, archive, thumb_path) in enumerate(results):
+                cell = _ResultCell(model_id, thumb_path, title, archive, score_fmt(score))
                 cell.clicked.connect(self._on_result_clicked)
                 grid.addWidget(cell, i // _COLS, i % _COLS)
 
@@ -330,6 +389,49 @@ class FindByImageDialog(QDialog):
             for mid, (d, t, arch, tp) in best.items()
         ]
         out.sort(key=lambda x: x[0])
+        return out
+
+    def _find_matches_embed(
+        self, threshold: float
+    ) -> list[tuple[float, int, str, str, Optional[str]]]:
+        """Return (similarity, model_id, title, archive, thumbnail_path), best per model."""
+        if self._query_embed is None:
+            return []
+        import numpy as np
+
+        q = np.asarray(self._query_embed, dtype=np.float32)
+        qn = float(np.linalg.norm(q))
+        if qn > 0:
+            q = q / qn
+
+        best: dict[int, tuple[float, str, str, Optional[str]]] = {}
+        with session_scope() as session:
+            rows = (
+                session.query(
+                    DBImage.model_id,
+                    DBImage.embedding,
+                    DBImage.thumbnail_path,
+                    STLModel.title,
+                    STLModel.archive_path,
+                )
+                .join(STLModel, DBImage.model_id == STLModel.id)
+                .filter(DBImage.embedding.isnot(None))
+                .filter(DBImage.embedding_model == _emb.EMBED_MODEL_ID)
+                .all()
+            )
+
+        for model_id, blob, thumb_path, title, archive_path in rows:
+            v = _emb.from_blob(blob)
+            if v is None or v.size != q.size:
+                continue
+            sim = float(q @ v)
+            if sim >= threshold:
+                if model_id not in best or sim > best[model_id][0]:
+                    archive_name = Path(archive_path).name if archive_path else ""
+                    best[model_id] = (sim, title or "", archive_name, thumb_path)
+
+        out = [(s, mid, t, arch, tp) for mid, (s, t, arch, tp) in best.items()]
+        out.sort(key=lambda x: -x[0])
         return out
 
     def _on_result_clicked(self, model_id: int) -> None:

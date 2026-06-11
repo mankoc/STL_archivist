@@ -88,6 +88,9 @@ class CrawlerConfig:
     # reconciliation pass and then deleting any unmatched deferred records.
     defer_missing_deletion: bool = False
 
+    # Compute AI image embeddings (CLIP) for new thumbnails during crawl.
+    embed_during_crawl: bool = False
+
     # Per-crawl metadata overrides (empty string = do not override).
     force_creator:    str = ""
     force_source:     str = ""

@@ -1027,6 +1027,21 @@ render at different sizes is caught.</p>
 <div class="note">After upgrading, run <b>Database Maintenance &rarr; Recompute Image Hashes</b>
 once so existing thumbnails are re-hashed with the current 128-bit algorithm; until then
 older 64-bit hashes are recomputed on the fly during a search.</div>
+
+<h4>Matching method &mdash; dHash vs AI embedding</h4>
+<p>The <b>Method</b> dropdown chooses how images are compared:</p>
+<ul>
+  <li><b>Perceptual hash (dHash)</b> &mdash; the built-in, dependency-free method above;
+      great for near-duplicates (re-encodes, resizes, minor edits).</li>
+  <li><b>AI embedding (CLIP)</b> &mdash; an optional learned embedding that matches the
+      <em>same model</em> across different renders, angles, and colours far more accurately.
+      Pairs are scored by <em>cosine similarity</em> (0&ndash;1); set a <b>Min similarity</b>
+      threshold (e.g. 0.90). This option is greyed out until the optional dependencies
+      (<code>onnxruntime</code> + a CLIP ONNX model) are installed and embeddings have been
+      computed via <b>Database Maintenance &rarr; Compute Image Embeddings</b>. See the README
+      for setup. The same method selector is available in <b>Find by Image</b>.</li>
+</ul>
+
 <div class="tip">Tip: hover any row in the Images tab to see a side-by-side popup of both
 archives&rsquo; first thumbnails, making it easy to judge whether the match is genuine.</div>
 

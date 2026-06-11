@@ -23,6 +23,8 @@ from app.ui.config_dialog import (
     get_warn_supports,
     get_warn_low_compression,
     get_low_compression_threshold,
+    get_ai_embeddings_enabled,
+    get_ai_embeddings_during_crawl,
 )
 
 
@@ -60,4 +62,5 @@ def build_crawler_config(max_thumbnails: int | None = None, force_rescan: bool =
         force_rescan=force_rescan,
         warn_low_compression=get_warn_low_compression(),
         low_compression_threshold=get_low_compression_threshold(),
+        embed_during_crawl=get_ai_embeddings_enabled() and get_ai_embeddings_during_crawl(),
     )

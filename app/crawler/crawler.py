@@ -1159,6 +1159,15 @@ class CrawlerWorker(QThread):
                                 img.dhash = format_dhash(h)
                     except Exception:
                         logger.debug("  Failed to compute dHash for image id %s", img.id)
+                    if self._config.embed_during_crawl and jpeg_bytes:
+                        try:
+                            from app.utils import image_embedding as _emb
+                            vec = _emb.embed_jpeg(jpeg_bytes)
+                            if vec is not None:
+                                img.embedding = _emb.to_blob(vec)
+                                img.embedding_model = _emb.EMBED_MODEL_ID
+                        except Exception:
+                            logger.debug("  Failed to compute embedding for image id %s", img.id)
                     count += 1
                     logger.debug("  Thumbnail saved: %s → %s", img.filename, rel_path)
                 else:
