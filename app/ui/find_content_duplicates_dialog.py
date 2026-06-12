@@ -9,7 +9,10 @@ Two separate tabs handle the two modes:
 """
 import io
 import logging
+import os
+import threading
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
 
@@ -398,27 +401,40 @@ class _ImageDupWorker(QThread):
                 for row in session.execute(_text("SELECT id, dhash FROM images")):
                     stored_dhash[row[0]] = row[1]
 
+            n_workers = min(os.cpu_count() or 1, 8)
             self.prog_val.emit(0, total)
-            self.progress.emit(f"Computing perceptual hashes for {total} image(s)…")
+            self.progress.emit(
+                f"Computing perceptual hashes for {total} image(s) ({n_workers} worker(s))…"
+            )
 
             # (image_id, model_id, dhash_value)
             hashes: list[tuple[int, int, int]] = []
             model_img_count: dict[int, int] = defaultdict(int)
 
-            for n, (img_id, model_id) in enumerate(image_rows):
-                if self._stop:
-                    self.finished.emit([])
-                    return
-                h_int = parse_dhash(stored_dhash.get(img_id))
-                if h_int is None:
+            # Pillow image decode and LMDB reads both release the GIL, so
+            # ThreadPoolExecutor gives genuine parallelism here without pickling
+            # overhead.
+            def _hash_one(row: tuple) -> tuple:
+                img_id, model_id = row
+                h = parse_dhash(stored_dhash.get(img_id))
+                if h is None:
                     jpeg = get_thumbnail_bytes(img_id)
                     if jpeg:
-                        h_int = _dhash(jpeg)
-                if h_int is not None:
-                    hashes.append((img_id, model_id, h_int))
-                    model_img_count[model_id] += 1
-                if (n + 1) % 200 == 0:
-                    self.prog_val.emit(n + 1, total)
+                        h = _dhash(jpeg)
+                return img_id, model_id, h
+
+            done = 0
+            with ThreadPoolExecutor(max_workers=n_workers) as pool:
+                for img_id, model_id, h_int in pool.map(_hash_one, image_rows, chunksize=200):
+                    if self._stop:
+                        self.finished.emit([])
+                        return
+                    if h_int is not None:
+                        hashes.append((img_id, model_id, h_int))
+                        model_img_count[model_id] += 1
+                    done += 1
+                    if done % 200 == 0:
+                        self.prog_val.emit(done, total)
 
             self.prog_val.emit(total, total)
             self.hashes_computed = len(hashes)
@@ -472,73 +488,91 @@ class _ImageDupWorker(QThread):
             hi_arr = np.array([h >> 64   for _, _, h in hashes], dtype=np.uint64)
             model_arr = np.array([m for _, m, _ in hashes], dtype=np.int64)
 
-            CHUNK = 50   # rows per batch — trade memory (↑) vs overhead (↓)
+            # Phase 1 parallelism: numpy XOR/popcount releases the GIL, so
+            # multiple threads can compute distance chunks simultaneously.
+            # CHUNK=50 keeps each worker's intermediate XOR array ≤ 270 MB;
+            # with 4 workers the peak resident cost stays under ~1.1 GB.
+            CHUNK = 50
+            # Cap workers so total peak XOR memory stays ≤ ~1 GB regardless of N.
+            max_by_mem = max(1, (1 << 30) // max(1, CHUNK * n * 16))
+            phase1_workers = min(n_workers, max_by_mem, 4)
 
             candidate_model_pairs: set[tuple[int, int]] = set()
-            prev_pair_count = 0
-            stable_chunks = 0   # chunks with no new pairs found (early-stop signal)
+            stop_event = threading.Event()
 
-            self.progress.emit(
-                f"Phase 1 — scanning {n} hash(es) (numpy) for candidate pairs…"
-            )
-            self.prog_val.emit(0, n)
+            max_dist = self._max_dist  # capture before entering threads
 
-            for chunk_start in range(0, n, CHUNK):
-                if self._stop:
-                    self.finished.emit([])
-                    return
-
+            def _scan_chunk(chunk_start: int) -> list:
+                """Return new (model_a, model_b) pairs found in this chunk."""
+                if stop_event.is_set():
+                    return []
                 chunk_end = min(chunk_start + CHUNK, n)
-                Nq = chunk_end - chunk_start
-
-                lo_q = lo_arr[chunk_start:chunk_end]
-                hi_q = hi_arr[chunk_start:chunk_end]
-
-                # (Nq, n) int32 Hamming distances from this chunk to all hashes
-                dist_mat = _hamming128_batch(lo_q, hi_q, lo_arr, hi_arr)
-
-                # Extract model pairs: only upper triangle (j > i_global)
-                for i_local in range(Nq):
+                dist_mat = _hamming128_batch(
+                    lo_arr[chunk_start:chunk_end],
+                    hi_arr[chunk_start:chunk_end],
+                    lo_arr, hi_arr,
+                )
+                found: list = []
+                for i_local in range(chunk_end - chunk_start):
                     i_global = chunk_start + i_local
                     model_a  = int(model_arr[i_global])
-                    # Slice to j > i_global so each pair is visited once
                     dist_row   = dist_mat[i_local, i_global + 1:]
                     models_row = model_arr[i_global + 1:]
-                    within     = dist_row <= self._max_dist
+                    within = dist_row <= max_dist
                     if not np.any(within):
                         continue
                     matching = models_row[within]
                     matching = matching[matching != model_a]
                     for mb in np.unique(matching):
-                        mb_int = int(mb)
-                        candidate_model_pairs.add(
-                            (min(model_a, mb_int), max(model_a, mb_int))
-                        )
-
-                # Free the large intermediate arrays promptly.
+                        found.append((min(model_a, int(mb)), max(model_a, int(mb))))
                 del dist_mat
+                return found
 
-                self.prog_val.emit(chunk_end, n)
-                new_count = len(candidate_model_pairs)
-                if chunk_start % (CHUNK * 10) == 0:
+            self.progress.emit(
+                f"Phase 1 — scanning {n} hash(es) ({phase1_workers} worker(s))…"
+            )
+            self.prog_val.emit(0, n)
+
+            all_starts = list(range(0, n, CHUNK))
+            WAVE = phase1_workers  # one wave = one full set of concurrent chunks
+
+            prev_pair_count = 0
+            stable_waves = 0
+
+            with ThreadPoolExecutor(max_workers=phase1_workers) as pool:
+                for wave_idx in range(0, len(all_starts), WAVE):
+                    if self._stop:
+                        stop_event.set()
+                        self.finished.emit([])
+                        return
+
+                    wave = all_starts[wave_idx: wave_idx + WAVE]
+                    futures = [pool.submit(_scan_chunk, s) for s in wave]
+
+                    for fut in as_completed(futures):
+                        for pair in fut.result():
+                            candidate_model_pairs.add(pair)
+
+                    last_end = min(wave[-1] + CHUNK, n)
+                    self.prog_val.emit(last_end, n)
+                    new_count = len(candidate_model_pairs)
                     self.progress.emit(
-                        f"Phase 1 — {chunk_end}/{n} scanned, "
+                        f"Phase 1 — {last_end}/{n} scanned, "
                         f"{new_count} candidate pair(s) found…"
                     )
 
-                # Early-stop: if no new model pairs appear for several consecutive
-                # chunks the candidate set has likely stabilised.
-                if new_count == prev_pair_count:
-                    stable_chunks += 1
-                    if stable_chunks >= 5:
-                        self.progress.emit(
-                            f"Phase 1 — converged after {chunk_end} images, "
-                            f"{new_count} candidate pair(s)."
-                        )
-                        break
-                else:
-                    stable_chunks   = 0
-                    prev_pair_count = new_count
+                    if new_count == prev_pair_count:
+                        stable_waves += 1
+                        if stable_waves >= 5:
+                            stop_event.set()
+                            self.progress.emit(
+                                f"Phase 1 — converged after {last_end} images, "
+                                f"{new_count} candidate pair(s)."
+                            )
+                            break
+                    else:
+                        stable_waves    = 0
+                        prev_pair_count = new_count
 
             self.prog_val.emit(n, n)
             # (model_a, model_b) → list of per-image-pair distances within threshold
@@ -626,6 +660,9 @@ class _EmbeddingDupWorker(QThread):
         super().__init__(parent)
         self._threshold = threshold
         self._stop = False
+        # Diagnostic counts — read by _on_img_finished.
+        self.embeddings_loaded: int = 0
+        self.embeddings_valid:  int = 0
 
     def stop(self) -> None:
         self._stop = True
@@ -636,10 +673,9 @@ class _EmbeddingDupWorker(QThread):
         from app.utils import image_embedding as emb
 
         try:
-            if not emb.is_available():
-                self.progress.emit(emb.unavailable_reason())
-                self.finished.emit([])
-                return
+            # Only numpy is needed here — the stored embeddings are plain
+            # float32 blobs; the CLIP model file is NOT required for search.
+            # (The model is only needed when computing new embeddings.)
             import numpy as np
 
             self.progress.emit("Loading image embeddings…")
@@ -652,6 +688,7 @@ class _EmbeddingDupWorker(QThread):
                     .filter(STLModel.is_missing.isnot(True))
                     .all()
                 )
+            self.embeddings_loaded = len(rows)
             if not rows:
                 self.finished.emit([])
                 return
@@ -672,6 +709,7 @@ class _EmbeddingDupWorker(QThread):
                 vecs.append(v)
                 model_img_count[model_id] += 1
 
+            self.embeddings_valid = len(vecs)
             if len(vecs) < 2:
                 self.finished.emit([])
                 return
@@ -1413,10 +1451,26 @@ class FindContentDuplicatesDialog(QDialog):
         if n:
             self._img_status.setText(f"{n} archive pair(s) with similar images found.")
         elif getattr(self, "_img_method_active", "dhash") == "embedding":
-            self._img_status.setText(
-                "No similar image pairs found. Run Database Maintenance → "
-                "Compute Image Embeddings, or lower the similarity threshold."
-            )
+            worker = self._img_worker
+            loaded  = getattr(worker, "embeddings_loaded", 0)
+            valid   = getattr(worker, "embeddings_valid",  0)
+            if loaded == 0:
+                detail = (
+                    "No embeddings found in the database. "
+                    "Run Database Maintenance → Compute Image Embeddings first."
+                )
+            elif valid < 2:
+                detail = (
+                    f"{loaded} embedding record(s) found but fewer than 2 could be "
+                    "decoded. Re-run Compute Image Embeddings."
+                )
+            else:
+                detail = (
+                    f"{valid} embedding(s) compared — no pair exceeded the "
+                    f"{self._img_sim_spin.value():.2f} threshold. "
+                    "Try lowering the similarity threshold (e.g. 0.85–0.90)."
+                )
+            self._img_status.setText(f"No similar image pairs found. {detail}")
         else:
             worker = self._img_worker
             imgs  = getattr(worker, "images_loaded",   0)
