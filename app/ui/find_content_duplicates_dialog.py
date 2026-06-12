@@ -495,10 +495,16 @@ class _ImageDupWorker(QThread):
                     for s in range(num_seg):
                         index[(s, (h >> (s * seg_bits)) & seg_mask)].append(idx)
 
-                # Cap over-populated buckets: a segment value shared by thousands
-                # of images is not discriminative.  True duplicates will still be
-                # found via one of their less-popular shared segments.
-                max_bucket = max(100, 4 * len(hashes) // 2048)
+                # Cap over-populated buckets to limit per-image work.
+                # The cap is relative to the *expected* bucket size for this
+                # segment width (N / 2^seg_bits), not a fixed constant.  A
+                # fixed constant would skip ALL buckets when seg_bits < 11
+                # (i.e., max_dist > 10), producing zero candidates.
+                # Allow up to 8× the expected size before skipping a bucket;
+                # genuinely over-popular entries (solid-colour thumbnails, etc.)
+                # exceed this ratio while normal near-duplicate hashes do not.
+                expected_bucket = max(1, len(hashes) >> seg_bits)
+                max_bucket = max(500, expected_bucket * 8)
 
                 candidate_model_pairs = set()
                 n_processed = 0
