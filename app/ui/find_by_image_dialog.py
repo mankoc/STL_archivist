@@ -105,7 +105,9 @@ class FindByImageDialog(QDialog):
         self.setWindowFlag(Qt.WindowType.Window)
         self.resize(940, 640)
         self._query_hash: Optional[int] = None
-        self._query_embed = None          # numpy vector when embeddings are available
+        self._query_raw:  Optional[bytes] = None
+        self._query_embed = None
+        self._dhash_outdated: int = 0
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -268,8 +270,9 @@ class FindByImageDialog(QDialog):
             self._hash_lbl.clear()
             return
 
-        self._query_hash = h
-        self._query_embed = _emb.embed_jpeg(raw) if self._embed_available else None
+        self._query_hash  = h
+        self._query_raw   = raw
+        self._query_embed = None   # computed lazily in _find_matches_embed when Search is clicked
 
         px = QPixmap()
         px.loadFromData(raw)
@@ -335,9 +338,19 @@ class FindByImageDialog(QDialog):
         grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
 
         if not results:
+            if method == "dhash" and self._dhash_outdated > 0:
+                empty_msg = self.tr(
+                    "{n} image(s) were skipped because their hashes use an outdated format. "
+                    "Run Database Maintenance → Recompute Image Hashes, then search again."
+                ).replace("{n}", str(self._dhash_outdated))
             self._status_lbl.setText(empty_msg)
         else:
-            self._status_lbl.setText(found_msg)
+            suffix = ""
+            if method == "dhash" and self._dhash_outdated > 0:
+                suffix = self.tr(" ({n} image(s) with outdated hashes were skipped — "
+                                 "Recompute Image Hashes for complete results)").replace(
+                    "{n}", str(self._dhash_outdated))
+            self._status_lbl.setText(found_msg + suffix)
             for i, (score, model_id, title, archive, thumb_path) in enumerate(results):
                 cell = _ResultCell(model_id, thumb_path, title, archive, score_fmt(score))
                 cell.clicked.connect(self._on_result_clicked)
@@ -353,7 +366,6 @@ class FindByImageDialog(QDialog):
         Deduplicates by model_id — only the best-matching image per model is kept.
         """
         query_hash = self._query_hash
-        # best[model_id] = (distance, title, archive_path, thumbnail_path)
         best: dict[int, tuple[int, str, str, Optional[str]]] = {}
 
         with session_scope() as session:
@@ -370,11 +382,11 @@ class FindByImageDialog(QDialog):
                 .all()
             )
 
+        outdated = 0
         for model_id, dhash_hex, thumb_path, title, archive_path in rows:
             h = parse_dhash(dhash_hex)
             if h is None:
-                # Stored with an older/narrower algorithm — skip until recomputed
-                # (Database Maintenance → Recompute Image Hashes).
+                outdated += 1
                 continue
             dist = _hamming(query_hash, h)
             if dist <= max_dist:
@@ -383,6 +395,8 @@ class FindByImageDialog(QDialog):
                         Path(archive_path).name if archive_path else ""
                     )
                     best[model_id] = (dist, title or "", archive_name, thumb_path)
+
+        self._dhash_outdated = outdated
 
         out = [
             (d, mid, t, arch, tp)
@@ -395,6 +409,10 @@ class FindByImageDialog(QDialog):
         self, threshold: float
     ) -> list[tuple[float, int, str, str, Optional[str]]]:
         """Return (similarity, model_id, title, archive, thumbnail_path), best per model."""
+        if self._query_raw is None:
+            return []
+        if self._query_embed is None:
+            self._query_embed = _emb.embed_jpeg(self._query_raw)
         if self._query_embed is None:
             return []
         import numpy as np
