@@ -13,6 +13,12 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
+
+# Lookup table: byte value → popcount.  Used by _hamming128_batch to count
+# differing bits in 128-bit dHash fingerprints without a Python-level loop.
+_BYTE_POPCNT = np.array([bin(i).count('1') for i in range(256)], dtype=np.int32)
+
 from PyQt6.QtCore import QEvent, QObject, QPoint, QThread, pyqtSignal, Qt
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
@@ -190,50 +196,31 @@ def _hamming(a: int, b: int) -> int:
     return bin(a ^ b).count("1")
 
 
-def _find_candidates(
-    hashes: list[tuple[int, int, int]],   # (image_id, model_id, hash_value)
-    max_dist: int,
-) -> set[tuple[int, int]]:
-    """Return index pairs (i, j) with i < j that may have Hamming distance ≤ max_dist.
+def _hamming128_batch(
+    lo_q: "np.ndarray",
+    hi_q: "np.ndarray",
+    lo_db: "np.ndarray",
+    hi_db: "np.ndarray",
+) -> "np.ndarray":
+    """Hamming distance from a chunk of query hashes to *all* DB hashes.
 
-    Uses the pigeonhole principle: split the 128-bit hash into (max_dist + 1)
-    equal segments.  Two hashes that differ in ≤ max_dist bits must share at
-    least one segment verbatim, so the segment inverted index has no false
-    negatives.  False positives are removed by the caller via exact distance.
+    Parameters
+    ----------
+    lo_q, hi_q : (Nq,) uint64 — low/high 64 bits of query hashes
+    lo_db, hi_db : (Ndb,) uint64 — low/high 64 bits of DB hashes
 
-    For max_dist = 0 a plain dict grouping is used instead.
+    Returns
+    -------
+    (Nq, Ndb) int32 — pairwise Hamming distances
     """
-    if not hashes:
-        return set()
+    Nq, Ndb = len(lo_q), len(lo_db)
+    xor_lo = lo_q[:, None] ^ lo_db[None, :]   # (Nq, Ndb) uint64
+    xor_hi = hi_q[:, None] ^ hi_db[None, :]
+    # View each uint64 as 8 bytes, look up per-byte popcount, then sum.
+    lo_bits = _BYTE_POPCNT[xor_lo.view(np.uint8).reshape(Nq, Ndb, 8)].sum(axis=2)
+    hi_bits = _BYTE_POPCNT[xor_hi.view(np.uint8).reshape(Nq, Ndb, 8)].sum(axis=2)
+    return (lo_bits + hi_bits).astype(np.int32)
 
-    if max_dist == 0:
-        bucket: dict[int, list[int]] = defaultdict(list)
-        for idx, (_, _, h) in enumerate(hashes):
-            bucket[h].append(idx)
-        out: set[tuple[int, int]] = set()
-        for grp in bucket.values():
-            for a in range(len(grp)):
-                for b in range(a + 1, len(grp)):
-                    out.add((grp[a], grp[b]))
-        return out
-
-    num_seg  = max_dist + 1
-    seg_bits = DHASH_BITS // num_seg
-    seg_mask = (1 << seg_bits) - 1
-
-    index: dict[tuple[int, int], list[int]] = defaultdict(list)
-    for idx, (_, _, h) in enumerate(hashes):
-        for s in range(num_seg):
-            index[(s, (h >> (s * seg_bits)) & seg_mask)].append(idx)
-
-    candidates: set[tuple[int, int]] = set()
-    for idx, (_, _, h) in enumerate(hashes):
-        for s in range(num_seg):
-            seg_val = (h >> (s * seg_bits)) & seg_mask
-            for other in index[(s, seg_val)]:
-                if other > idx:
-                    candidates.add((idx, other))
-    return candidates
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -464,78 +451,98 @@ class _ImageDupWorker(QThread):
             for idx, (_, model_id, _) in enumerate(hashes):
                 model_to_idxs[model_id].append(idx)
 
+            # ── Phase 1: numpy vectorised pairwise Hamming scan ──────────────
+            #
+            # The previous segment-index approach required O(N × segs × bucket)
+            # Python-level iterations.  For max_dist > 10 the segments are only
+            # 1–3 bits wide (2–8 buckets), so every bucket contains N/2–N/8
+            # images and the inner loop becomes O(N²) in slow Python.
+            #
+            # Instead: split each 128-bit hash into two uint64 halves, broadcast
+            # XOR over chunks of the distance matrix, count bits via a 256-entry
+            # byte lookup table, and collect matching model pairs.  The work is
+            # still O(N²) but runs in numpy C-loops — roughly 200× faster.
+            #
+            # Memory per chunk: 2 × (CHUNK × N × 8 bytes) for the XOR matrices
+            # ≈ 2 × 50 × 340 K × 8 = 272 MB.  Acceptable on modern machines.
+
+            _U64 = (1 << 64) - 1
+            n = len(hashes)
+            lo_arr = np.array([h & _U64 for _, _, h in hashes],  dtype=np.uint64)
+            hi_arr = np.array([h >> 64   for _, _, h in hashes], dtype=np.uint64)
+            model_arr = np.array([m for _, m, _ in hashes], dtype=np.int64)
+
+            CHUNK = 50   # rows per batch — trade memory (↑) vs overhead (↓)
+
+            candidate_model_pairs: set[tuple[int, int]] = set()
+            prev_pair_count = 0
+            stable_chunks = 0   # chunks with no new pairs found (early-stop signal)
+
+            self.progress.emit(
+                f"Phase 1 — scanning {n} hash(es) (numpy) for candidate pairs…"
+            )
+            self.prog_val.emit(0, n)
+
+            for chunk_start in range(0, n, CHUNK):
+                if self._stop:
+                    self.finished.emit([])
+                    return
+
+                chunk_end = min(chunk_start + CHUNK, n)
+                Nq = chunk_end - chunk_start
+
+                lo_q = lo_arr[chunk_start:chunk_end]
+                hi_q = hi_arr[chunk_start:chunk_end]
+
+                # (Nq, n) int32 Hamming distances from this chunk to all hashes
+                dist_mat = _hamming128_batch(lo_q, hi_q, lo_arr, hi_arr)
+
+                # Extract model pairs: only upper triangle (j > i_global)
+                for i_local in range(Nq):
+                    i_global = chunk_start + i_local
+                    model_a  = int(model_arr[i_global])
+                    # Slice to j > i_global so each pair is visited once
+                    dist_row   = dist_mat[i_local, i_global + 1:]
+                    models_row = model_arr[i_global + 1:]
+                    within     = dist_row <= self._max_dist
+                    if not np.any(within):
+                        continue
+                    matching = models_row[within]
+                    matching = matching[matching != model_a]
+                    for mb in np.unique(matching):
+                        mb_int = int(mb)
+                        candidate_model_pairs.add(
+                            (min(model_a, mb_int), max(model_a, mb_int))
+                        )
+
+                # Free the large intermediate arrays promptly.
+                del dist_mat
+
+                self.prog_val.emit(chunk_end, n)
+                new_count = len(candidate_model_pairs)
+                if chunk_start % (CHUNK * 10) == 0:
+                    self.progress.emit(
+                        f"Phase 1 — {chunk_end}/{n} scanned, "
+                        f"{new_count} candidate pair(s) found…"
+                    )
+
+                # Early-stop: if no new model pairs appear for several consecutive
+                # chunks the candidate set has likely stabilised.
+                if new_count == prev_pair_count:
+                    stable_chunks += 1
+                    if stable_chunks >= 5:
+                        self.progress.emit(
+                            f"Phase 1 — converged after {chunk_end} images, "
+                            f"{new_count} candidate pair(s)."
+                        )
+                        break
+                else:
+                    stable_chunks   = 0
+                    prev_pair_count = new_count
+
+            self.prog_val.emit(n, n)
             # (model_a, model_b) → list of per-image-pair distances within threshold
             pair_dists: dict[tuple[int, int], list[int]] = defaultdict(list)
-
-            if self._max_dist == 0:
-                # Exact match: group by hash value and cross-join models.
-                bucket_exact: dict[int, list[int]] = defaultdict(list)
-                for idx, (_, _, h) in enumerate(hashes):
-                    bucket_exact[h].append(idx)
-                candidate_model_pairs: set[tuple[int, int]] = set()
-                for indices in bucket_exact.values():
-                    if len(indices) < 2:
-                        continue
-                    for i in range(len(indices)):
-                        for j in range(i + 1, len(indices)):
-                            ma = hashes[indices[i]][1]
-                            mb = hashes[indices[j]][1]
-                            if ma != mb:
-                                candidate_model_pairs.add(
-                                    (min(ma, mb), max(ma, mb))
-                                )
-            else:
-                num_seg  = self._max_dist + 1
-                seg_bits = DHASH_BITS // num_seg
-                seg_mask = (1 << seg_bits) - 1
-
-                # Build segment index.
-                index: dict[tuple[int, int], list[int]] = defaultdict(list)
-                for idx, (_, _, h) in enumerate(hashes):
-                    for s in range(num_seg):
-                        index[(s, (h >> (s * seg_bits)) & seg_mask)].append(idx)
-
-                # Cap over-populated buckets to limit per-image work.
-                # The cap is relative to the *expected* bucket size for this
-                # segment width (N / 2^seg_bits), not a fixed constant.  A
-                # fixed constant would skip ALL buckets when seg_bits < 11
-                # (i.e., max_dist > 10), producing zero candidates.
-                # Allow up to 8× the expected size before skipping a bucket;
-                # genuinely over-popular entries (solid-colour thumbnails, etc.)
-                # exceed this ratio while normal near-duplicate hashes do not.
-                expected_bucket = max(1, len(hashes) >> seg_bits)
-                max_bucket = max(500, expected_bucket * 8)
-
-                candidate_model_pairs = set()
-                n_processed = 0
-                self.progress.emit(
-                    f"Phase 1 — scanning {len(hashes)} hash(es) for candidate pairs…"
-                )
-                for idx, (_, model_a, h_a) in enumerate(hashes):
-                    if self._stop:
-                        self.finished.emit([])
-                        return
-                    for s in range(num_seg):
-                        seg_val = (h_a >> (s * seg_bits)) & seg_mask
-                        bucket  = index[(s, seg_val)]
-                        if len(bucket) > max_bucket:
-                            continue  # not discriminative enough
-                        for other in bucket:
-                            if other <= idx:
-                                continue
-                            _, model_b, h_b = hashes[other]
-                            if model_a == model_b:
-                                continue
-                            model_key = (min(model_a, model_b), max(model_a, model_b))
-                            if model_key in candidate_model_pairs:
-                                continue  # already confirmed — skip Hamming check
-                            if _hamming(h_a, h_b) <= self._max_dist:
-                                candidate_model_pairs.add(model_key)
-                    n_processed += 1
-                    if n_processed % 500 == 0:
-                        self.prog_val.emit(n_processed, len(hashes))
-
-                self.prog_val.emit(len(hashes), len(hashes))
 
             self.candidates_found = len(candidate_model_pairs)
 
