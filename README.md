@@ -262,32 +262,38 @@ At runtime [app/utils/i18n.py](app/utils/i18n.py) parses the chosen `.ts` file
 directly through a custom `QTranslator`, so no `lrelease`/`.qm` compilation step
 is needed.
 
-## AI Image Embeddings (optional)
+## AI Image Embeddings
 
 The image-similarity tools can use a learned **CLIP** embedding for semantic
 matching (the same model across different renders, angles, and colours) in
-addition to the built-in perceptual hash. This is **optional** and off by
-default — the app runs normally without it.
+addition to the built-in perceptual hash. `onnxruntime` and `numpy` are
+included in `requirements.txt` and bundled in the Windows executable.
 
-To enable it:
+The only additional step is providing the model file:
 
-```bash
-# 1. Install the runtime dependencies
-pip install onnxruntime numpy
-
-# 2. Provide a CLIP image-encoder ONNX model (input 1×3×224×224, RGB,
-#    CLIP-normalised; output N×D). Place it at one of:
-#      $STLLIBRARY_CLIP_MODEL
-#      <data_dir>/models/clip_image_encoder.onnx
-#      resources/models/clip_image_encoder.onnx
+```
+<data_dir>/models/clip_image_encoder.onnx
 ```
 
-Then open **Database Maintenance → Compute Image Embeddings** to populate
-embeddings for existing thumbnails. The **AI embedding (CLIP)** method becomes
-selectable in *Find by Image* and the *Find Duplicate Archives → Images* tab.
-Vectors are stored on each image (`Image.embedding`) and tagged with the model
-id, so changing the model invalidates and recomputes stale vectors. See
-[app/utils/image_embedding.py](app/utils/image_embedding.py).
+Use **Configuration → Browser → Image similarity → Download CLIP model** to
+fetch it automatically, or export it manually:
+
+```bash
+pip install optimum[exporters]
+optimum-cli export onnx --model openai/clip-vit-base-patch32 \
+    --task zero-shot-image-classification clip_onnx/
+# then copy clip_onnx/vision_model.onnx to <data_dir>/models/clip_image_encoder.onnx
+```
+
+Once the model is in place, open **Database Maintenance → Compute Image
+Embeddings** to populate embeddings for existing thumbnails. The **AI embedding
+(CLIP)** method becomes selectable in *Find by Image* and *Find Duplicate
+Archives → Images*.
+
+**GPU acceleration** — the Windows executable uses the **DirectML** backend
+(built into Windows, works on NVIDIA / AMD / Intel GPUs with no extra driver
+install). When running from source on Linux/macOS with an NVIDIA GPU, install
+`onnxruntime-gpu` instead of `onnxruntime` for CUDA acceleration.
 
 ## License
 

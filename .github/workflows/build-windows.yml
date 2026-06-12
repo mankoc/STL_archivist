@@ -39,6 +39,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller pyinstaller-hooks-contrib
+          # Replace CPU-only onnxruntime with DirectML variant so the packaged
+          # exe uses the Windows DirectML GPU backend (NVIDIA / AMD / Intel)
+          # without requiring a separate CUDA installation on the user's machine.
+          pip uninstall -y onnxruntime
+          pip install onnxruntime-directml
 
       - name: Build executable
         run: pyinstaller stl_database.spec

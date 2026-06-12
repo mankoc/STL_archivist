@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_dynamic_libs
 
 block_cipher = None
 
@@ -7,6 +7,10 @@ datas = [
     ('resources', 'resources'),
 ]
 datas += collect_data_files('qt_material')
+datas += collect_data_files('onnxruntime')
+
+# Bundle the onnxruntime native DLLs (includes DirectML provider on Windows).
+binaries = collect_dynamic_libs('onnxruntime')
 
 hiddenimports = [
     'sqlalchemy.dialects.sqlite',
@@ -20,6 +24,7 @@ hiddenimports = [
     'PIL.WebPImagePlugin',
     'onnxruntime',
     'onnxruntime.capi._pybind_state',
+    'onnxruntime.capi.onnxruntime_pybind11_state',
     'numpy',
     'numpy.core._multiarray_umath',
 ]
@@ -29,7 +34,7 @@ hiddenimports += collect_submodules('onnxruntime')
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
