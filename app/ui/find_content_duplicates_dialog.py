@@ -196,7 +196,7 @@ def _find_candidates(
 ) -> set[tuple[int, int]]:
     """Return index pairs (i, j) with i < j that may have Hamming distance ≤ max_dist.
 
-    Uses the pigeonhole principle: split the 64-bit hash into (max_dist + 1)
+    Uses the pigeonhole principle: split the 128-bit hash into (max_dist + 1)
     equal segments.  Two hashes that differ in ≤ max_dist bits must share at
     least one segment verbatim, so the segment inverted index has no false
     negatives.  False positives are removed by the caller via exact distance.
@@ -371,6 +371,10 @@ class _ImageDupWorker(QThread):
         super().__init__(parent)
         self._max_dist = max_dist
         self._stop = False
+        # Diagnostic counts — set during run(), read by _on_img_finished.
+        self.images_loaded: int = 0
+        self.hashes_computed: int = 0
+        self.candidates_found: int = 0
 
     def stop(self) -> None:
         self._stop = True
@@ -382,6 +386,8 @@ class _ImageDupWorker(QThread):
 
         try:
             with session_scope() as session:
+                from sqlalchemy import text as _text
+
                 self.progress.emit("Loading image records…")
                 image_rows = (
                     session.query(Image.id, Image.model_id)
@@ -391,89 +397,172 @@ class _ImageDupWorker(QThread):
                     .all()
                 )
                 if not image_rows:
+                    self.images_loaded = 0
                     self.finished.emit([])
                     return
 
                 total = len(image_rows)
-                self.prog_val.emit(0, total)
-                self.progress.emit(f"Computing perceptual hashes for {total} image(s)…")
+                self.images_loaded = total
 
-                # (image_id, model_id, dhash_value)
-                hashes: list[tuple[int, int, int]] = []
-                model_img_count: dict[int, int] = defaultdict(int)
+                # Bulk-load all stored dhash values in one query — avoids opening
+                # N separate sessions (the previous per-image session loop).
+                self.progress.emit(f"Loading stored hashes for {total} image(s)…")
+                stored_dhash: dict[int, Optional[str]] = {}
+                for row in session.execute(_text("SELECT id, dhash FROM images")):
+                    stored_dhash[row[0]] = row[1]
 
-                for n, (img_id, model_id) in enumerate(image_rows):
-                    if self._stop:
-                        self.finished.emit([])
-                        return
-                    # Prefer a stored dhash in the Image row when available to avoid recomputing
-                    # (load Image.dhash lazily via a separate query to keep the main query simple)
-                    from app.database.db import get_session
-                    s = get_session()
-                    try:
-                        from sqlalchemy import text
-                        row = s.execute(
-                            text("SELECT dhash FROM images WHERE id = :id"),
-                            {"id": img_id},
-                        ).fetchone()
-                        dh = row[0] if row is not None else None
-                    finally:
-                        s.close()
-                    # Accept the stored hash only if it matches the current algorithm;
-                    # otherwise (missing or an older/narrower hash) recompute it.
-                    h_int = parse_dhash(dh)
-                    if h_int is None:
-                        jpeg = get_thumbnail_bytes(img_id)
-                        if jpeg:
-                            h_int = _dhash(jpeg)
-                    if h_int is not None:
-                        hashes.append((img_id, model_id, h_int))
-                        model_img_count[model_id] += 1
-                    if (n + 1) % 50 == 0:
-                        self.prog_val.emit(n + 1, total)
+            self.prog_val.emit(0, total)
+            self.progress.emit(f"Computing perceptual hashes for {total} image(s)…")
 
-                self.prog_val.emit(total, total)
+            # (image_id, model_id, dhash_value)
+            hashes: list[tuple[int, int, int]] = []
+            model_img_count: dict[int, int] = defaultdict(int)
 
-                if not hashes:
-                    self.finished.emit([])
-                    return
-
-                self.progress.emit(
-                    f"Finding similar image pairs among {len(hashes)} hashed image(s)…"
-                )
-                candidates = _find_candidates(hashes, self._max_dist)
-
+            for n, (img_id, model_id) in enumerate(image_rows):
                 if self._stop:
                     self.finished.emit([])
                     return
+                h_int = parse_dhash(stored_dhash.get(img_id))
+                if h_int is None:
+                    jpeg = get_thumbnail_bytes(img_id)
+                    if jpeg:
+                        h_int = _dhash(jpeg)
+                if h_int is not None:
+                    hashes.append((img_id, model_id, h_int))
+                    model_img_count[model_id] += 1
+                if (n + 1) % 200 == 0:
+                    self.prog_val.emit(n + 1, total)
 
-                self.progress.emit(f"Scoring {len(candidates)} candidate pair(s)…")
+            self.prog_val.emit(total, total)
+            self.hashes_computed = len(hashes)
 
-                # (model_a, model_b) → list of per-image-pair Hamming distances
-                pair_dists: dict[tuple[int, int], list[int]] = defaultdict(list)
+            if not hashes:
+                self.finished.emit([])
+                return
 
-                for i, j in candidates:
+            # ── Two-phase matching (no O(N²) candidates set) ──────────────────
+            #
+            # Phase 1: stream through the segment index to find *model* pairs
+            #   that have at least one image pair within threshold.  We never
+            #   materialise a full (image_i, image_j) candidate set; instead we
+            #   emit (model_a, model_b) the moment the first qualifying image
+            #   pair is found, then skip further work for that model pair.
+            #
+            # Phase 2: for each candidate model pair do an exact per-image
+            #   Cartesian product to get the true pair count and best distance.
+            #
+            # Memory: O(N) for the index + O(models²) for candidate model pairs
+            #   — instead of the previous O(image_pairs²) which caused ~48 GB
+            #   peak usage on large collections.
+
+            self.progress.emit(
+                f"Building segment index over {len(hashes)} hash(es)…"
+            )
+
+            # model_id → list of positions in the `hashes` list
+            model_to_idxs: dict[int, list[int]] = defaultdict(list)
+            for idx, (_, model_id, _) in enumerate(hashes):
+                model_to_idxs[model_id].append(idx)
+
+            # (model_a, model_b) → list of per-image-pair distances within threshold
+            pair_dists: dict[tuple[int, int], list[int]] = defaultdict(list)
+
+            if self._max_dist == 0:
+                # Exact match: group by hash value and cross-join models.
+                bucket_exact: dict[int, list[int]] = defaultdict(list)
+                for idx, (_, _, h) in enumerate(hashes):
+                    bucket_exact[h].append(idx)
+                candidate_model_pairs: set[tuple[int, int]] = set()
+                for indices in bucket_exact.values():
+                    if len(indices) < 2:
+                        continue
+                    for i in range(len(indices)):
+                        for j in range(i + 1, len(indices)):
+                            ma = hashes[indices[i]][1]
+                            mb = hashes[indices[j]][1]
+                            if ma != mb:
+                                candidate_model_pairs.add(
+                                    (min(ma, mb), max(ma, mb))
+                                )
+            else:
+                num_seg  = self._max_dist + 1
+                seg_bits = DHASH_BITS // num_seg
+                seg_mask = (1 << seg_bits) - 1
+
+                # Build segment index.
+                index: dict[tuple[int, int], list[int]] = defaultdict(list)
+                for idx, (_, _, h) in enumerate(hashes):
+                    for s in range(num_seg):
+                        index[(s, (h >> (s * seg_bits)) & seg_mask)].append(idx)
+
+                # Cap over-populated buckets: a segment value shared by thousands
+                # of images is not discriminative.  True duplicates will still be
+                # found via one of their less-popular shared segments.
+                max_bucket = max(100, 4 * len(hashes) // 2048)
+
+                candidate_model_pairs = set()
+                n_processed = 0
+                self.progress.emit(
+                    f"Phase 1 — scanning {len(hashes)} hash(es) for candidate pairs…"
+                )
+                for idx, (_, model_a, h_a) in enumerate(hashes):
                     if self._stop:
                         self.finished.emit([])
                         return
-                    _, model_a, h_a = hashes[i]
-                    _, model_b, h_b = hashes[j]
-                    if model_a == model_b:
-                        continue
-                    dist = _hamming(h_a, h_b)
-                    if dist <= self._max_dist:
-                        key = (min(model_a, model_b), max(model_a, model_b))
-                        pair_dists[key].append(dist)
+                    for s in range(num_seg):
+                        seg_val = (h_a >> (s * seg_bits)) & seg_mask
+                        bucket  = index[(s, seg_val)]
+                        if len(bucket) > max_bucket:
+                            continue  # not discriminative enough
+                        for other in bucket:
+                            if other <= idx:
+                                continue
+                            _, model_b, h_b = hashes[other]
+                            if model_a == model_b:
+                                continue
+                            model_key = (min(model_a, model_b), max(model_a, model_b))
+                            if model_key in candidate_model_pairs:
+                                continue  # already confirmed — skip Hamming check
+                            if _hamming(h_a, h_b) <= self._max_dist:
+                                candidate_model_pairs.add(model_key)
+                    n_processed += 1
+                    if n_processed % 500 == 0:
+                        self.prog_val.emit(n_processed, len(hashes))
 
-                if not pair_dists:
+                self.prog_val.emit(len(hashes), len(hashes))
+
+            self.candidates_found = len(candidate_model_pairs)
+
+            if not candidate_model_pairs:
+                self.finished.emit([])
+                return
+
+            # Phase 2: exact per-image Cartesian scoring for found model pairs.
+            self.progress.emit(
+                f"Phase 2 — scoring {len(candidate_model_pairs)} candidate pair(s)…"
+            )
+            for model_a, model_b in candidate_model_pairs:
+                if self._stop:
                     self.finished.emit([])
                     return
+                for ia in model_to_idxs.get(model_a, []):
+                    _, _, h_a = hashes[ia]
+                    for ib in model_to_idxs.get(model_b, []):
+                        _, _, h_b = hashes[ib]
+                        d = _hamming(h_a, h_b)
+                        if d <= self._max_dist:
+                            pair_dists[(model_a, model_b)].append(d)
 
-                self.progress.emit("Loading model titles…")
-                all_ids: set[int] = set()
-                for id_a, id_b in pair_dists:
-                    all_ids.add(id_a)
-                    all_ids.add(id_b)
+            if not pair_dists:
+                self.finished.emit([])
+                return
+
+            self.progress.emit("Loading model titles…")
+            all_ids: set[int] = set()
+            for id_a, id_b in pair_dists:
+                all_ids.add(id_a)
+                all_ids.add(id_b)
+            with session_scope() as session:
                 models_map = {
                     m.id: m
                     for m in session.query(STLModel)
@@ -960,21 +1049,22 @@ class FindContentDuplicatesDialog(QDialog):
 
         # ── dHash parameters ───────────────────────────────────────────────
         self._img_dist_spin = QSpinBox()
-        self._img_dist_spin.setRange(0, 32)
+        self._img_dist_spin.setRange(0, 64)
         self._img_dist_spin.setValue(10)
         self._img_dist_spin.setToolTip(
             self.tr("Maximum Hamming distance between 128-bit dHash fingerprints.\n"
             "0 = bit-for-bit identical pixels\n"
-            "≤6 = very similar (different resolution / minor JPEG artefacts)\n"
-            "≤16 = noticeably similar (recolour, slight crop)\n"
-            "≤30 = loosely similar (use with caution — many false positives)")
+            "≤10 = very similar (different resolution / minor JPEG artefacts)\n"
+            "≤20 = noticeably similar (recolour, slight crop)\n"
+            "≤30 = loosely similar\n"
+            "≤50 = broad similarity (use with caution — many false positives)")
         )
         form.addRow(self.tr("Max hash distance:"), self._img_dist_spin)
         self._img_dhash_help = QLabel(
             self.tr("<small>Preview thumbnails are compared with a perceptual difference "
             "hash (dHash). Two thumbnails are considered similar when their "
             "128-bit hashes differ in at most this many bits. A distance of 0 "
-            "catches only near-identical images; 10 typically catches the same "
+            "catches only near-identical images; 10–20 typically catches the same "
             "render at different resolutions or with slight colour shifts. "
             "Higher values increase recall but also false positives.</small>")
         )
@@ -1315,10 +1405,28 @@ class FindContentDuplicatesDialog(QDialog):
                 "Compute Image Embeddings, or lower the similarity threshold."
             )
         else:
-            self._img_status.setText(
-                "No similar image pairs found. "
-                "Ensure thumbnails exist (crawl with thumbnails enabled)."
-            )
+            worker = self._img_worker
+            imgs  = getattr(worker, "images_loaded",   0)
+            hashes = getattr(worker, "hashes_computed", 0)
+            cands  = getattr(worker, "candidates_found", 0)
+            if imgs == 0:
+                detail = "No thumbnails found — crawl with thumbnails enabled."
+            elif hashes == 0:
+                detail = (
+                    f"{imgs} thumbnail(s) found but none had a valid hash. "
+                    "Run Database Maintenance → Recompute Image Hashes."
+                )
+            elif cands == 0:
+                detail = (
+                    f"{hashes} hash(es) computed, 0 candidate pairs — "
+                    "no images share any hash segment. Try increasing the distance threshold."
+                )
+            else:
+                detail = (
+                    f"{hashes} hash(es), {cands} candidate pair(s) checked — "
+                    "all exceeded the distance threshold. Try a higher value."
+                )
+            self._img_status.setText(f"No similar image pairs found. {detail}")
         all_ids = {r["id_a"] for r in results} | {r["id_b"] for r in results}
         self._img_model_thumb = self._load_model_thumbs(all_ids)
         self._refresh_bottom_buttons()
