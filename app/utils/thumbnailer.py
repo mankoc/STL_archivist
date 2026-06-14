@@ -194,6 +194,19 @@ def save_thumbnails_batch(
     return results
 
 
+def write_raw_thumbnails_batch(items: "list[tuple[int, bytes]]") -> None:
+    """Write already-processed JPEG bytes for multiple images in one LMDB transaction."""
+    if _lmdb_env is None or not items:
+        return
+    try:
+        with _lmdb_env.begin(write=True) as txn:
+            for image_id, jpeg_bytes in items:
+                if jpeg_bytes:
+                    txn.put(_key(image_id), jpeg_bytes)
+    except lmdb.Error:
+        pass
+
+
 def write_raw_thumbnail(image_id: int, jpeg_bytes: bytes) -> Optional[str]:
     """Write already-processed JPEG bytes to LMDB without resizing.
 

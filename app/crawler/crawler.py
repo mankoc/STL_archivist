@@ -36,7 +36,7 @@ from app.database.helpers import (
 from app.database.models import STLModel, Image, STLFile, CrawledFolder
 from app.utils.thumbnailer import (
     save_thumbnail, delete_thumbnail, get_thumbnail_base_dir,
-    get_thumbnail_bytes, save_thumbnails_batch,
+    get_thumbnail_bytes, save_thumbnails_batch, write_raw_thumbnails_batch,
 )
 from app.ui.find_content_duplicates_dialog import compute_dhash_from_jpeg, format_dhash
 from app.utils.path_pattern import parse_path, apply_extracted_to_model, parse_release_date
@@ -132,14 +132,14 @@ class CrawlerWorker(QThread):
                 to_extract, stl_backfill, existing_map = self._phase_diff(batch, hashes, session)
                 if to_extract and batch_start == 0:
                     self.phase.emit(f"Extracting new/changed archives…")
-                contents_map, all_names_map, stl_info_map, uncompressed_map = self._phase_extract(to_extract, stl_backfill)
+                contents_map, all_names_map, stl_info_map, uncompressed_map, precomp_map = self._phase_extract(to_extract, stl_backfill)
                 # Fresh per-batch lookup cache so repeated sculptor/tag/scale
                 # references within the same batch skip redundant SELECTs.
                 self._lookup_cache: dict = {}
                 stopped = self._phase_upsert(
                     batch, batch_start, total, hashes,
                     existing_map, contents_map, all_names_map, stl_info_map, uncompressed_map,
-                    session, modified_folders,
+                    precomp_map, session, modified_folders,
                 )
                 self._lookup_cache = {}
 
@@ -345,25 +345,34 @@ class CrawlerWorker(QThread):
         dict[Path, list[str]],
         dict[Path, dict[str, int | None]],
         dict[Path, int | None],
+        dict[Path, dict[str, tuple]],
     ]:
         """Phase 3: parallel archive decompression for new/changed archives.
 
         Archives in *stl_backfill* only need their STL member list populated —
         they are listed without content extraction and appear as unchanged in
         the UI (contents_map is not populated for them).
+
+        Each extracted archive also has its image thumbnails pre-generated
+        (Pillow resize + dHash) in the same parallel worker so that the serial
+        Phase 4 only needs to write the final JPEG bytes to LMDB.
         """
         contents_map:      dict[Path, dict[str, bytes]]       = {}
         all_names_map:     dict[Path, list[str]]              = {}
         stl_info_map:      dict[Path, dict[str, int | None]]  = {}
         uncompressed_map:  dict[Path, int | None]             = {}
+        precomp_map:       dict[Path, dict[str, tuple]]       = {}
 
         if not to_extract and not stl_backfill:
             logger.debug("Phase 3 skipped — no archives need extraction")
-            return contents_map, all_names_map, stl_info_map, uncompressed_map
+            return contents_map, all_names_map, stl_info_map, uncompressed_map, precomp_map
+
+        max_thumbs     = self._config.max_thumbnails
+        max_thumb_size = self._config.max_thumb_size
 
         def _extract_one(
             p: Path,
-        ) -> tuple[dict[str, bytes], list[str], dict[str, int | None], int | None]:
+        ) -> tuple[dict[str, bytes], list[str], dict[str, int | None], int | None, dict[str, tuple]]:
             names:    list[str]             = []
             stl_info: dict[str, int | None] = {}
             uncompressed_out: list[int]     = []
@@ -375,7 +384,28 @@ class CrawlerWorker(QThread):
                 uncompressed_size_out=uncompressed_out,
             )
             uncompressed = uncompressed_out[0] if uncompressed_out else None
-            return data, names, stl_info, uncompressed
+
+            # Pre-generate thumbnail JPEG bytes and dHashes in the worker thread
+            # so Phase 4 (serial) only needs a cheap LMDB write, not Pillow work.
+            from app.utils.thumbnailer import make_thumbnail, pdf_first_page_to_image_bytes
+            precomp: dict[str, tuple] = {}
+            image_candidates = [
+                n for n in data
+                if Path(n.replace("\\", "/")).suffix.lower() in IMAGE_SUFFIXES
+                or Path(n.replace("\\", "/")).suffix.lower() == ".pdf"
+            ][:max_thumbs]
+            for fname in image_candidates:
+                raw = data.get(fname, b"")
+                if not raw:
+                    precomp[fname] = (None, None)
+                    continue
+                if Path(fname.replace("\\", "/")).suffix.lower() == ".pdf":
+                    raw = pdf_first_page_to_image_bytes(raw) or b""
+                jpeg = make_thumbnail(raw, max_thumb_size) if raw else None
+                dhash_int = compute_dhash_from_jpeg(jpeg) if jpeg else None
+                precomp[fname] = (jpeg, dhash_int)
+
+            return data, names, stl_info, uncompressed, precomp
 
         workers = self._config.max_workers
         if to_extract:
@@ -385,11 +415,12 @@ class CrawlerWorker(QThread):
                 for future in as_completed(futures):
                     p = futures[future]
                     try:
-                        data, names, stl_info, uncompressed = future.result()
+                        data, names, stl_info, uncompressed, precomp = future.result()
                         contents_map[p]     = data
                         all_names_map[p]    = names
                         stl_info_map[p]     = stl_info
                         uncompressed_map[p] = uncompressed
+                        precomp_map[p]      = precomp
                         logger.debug("  extracted %s → %d file(s), %d member(s), %d stl(s)",
                                      p.name, len(data), len(names), len(stl_info))
                     except Exception as exc:
@@ -400,6 +431,7 @@ class CrawlerWorker(QThread):
                         all_names_map[p]    = []
                         stl_info_map[p]     = {}
                         uncompressed_map[p] = None
+                        precomp_map[p]      = {}
 
         if stl_backfill:
             logger.debug("Phase 3: lightweight STL listing for %d archive(s)", len(stl_backfill))
@@ -411,7 +443,7 @@ class CrawlerWorker(QThread):
 
         logger.debug("Phase 3 complete — %d extracted, %d stl-listed",
                      len(contents_map), len(stl_backfill))
-        return contents_map, all_names_map, stl_info_map, uncompressed_map
+        return contents_map, all_names_map, stl_info_map, uncompressed_map, precomp_map
 
     def _phase_upsert(
         self,
@@ -424,6 +456,7 @@ class CrawlerWorker(QThread):
         all_names_map: dict[Path, list[str]],
         stl_info_map: dict[Path, dict],
         uncompressed_map: dict[Path, int | None],
+        precomp_map: dict,
         session: Session,
         modified_folders: set[Path],
     ) -> bool:
@@ -457,6 +490,7 @@ class CrawlerWorker(QThread):
                     all_names=all_names_map.get(archive_path),
                     stl_info=stl_info_map.get(archive_path),
                     uncompressed_size=uncompressed_map.get(archive_path),
+                    precomp=precomp_map.get(archive_path),
                 )
                 sp.commit()
                 if _contents is not None:
@@ -826,6 +860,7 @@ class CrawlerWorker(QThread):
         all_names: Optional[list[str]] = None,
         stl_info: Optional[dict] = None,
         uncompressed_size: Optional[int] = None,
+        precomp: Optional[dict] = None,
     ) -> None:
         """Write one archive to the database using pre-computed hash and contents.
 
@@ -970,6 +1005,7 @@ class CrawlerWorker(QThread):
         self._update_thumbnails(
             model, existing, contents, image_names,
             session, max_thumbs, max_thumb_size, archive_path, hash_changed,
+            precomp_cache=precomp,
         )
 
         if self._config.store_stl_file_list and stl_info is not None:
@@ -1104,6 +1140,7 @@ class CrawlerWorker(QThread):
         max_thumb_size: int,
         archive_path: Path,
         hash_changed: bool,
+        precomp_cache: Optional[dict] = None,
     ) -> None:
         """Purge stale thumbnails and store new ones for a new or changed archive.
 
@@ -1121,6 +1158,8 @@ class CrawlerWorker(QThread):
             archive_path: Path used in log messages.
             hash_changed: ``True`` when the archive existed before but its
                 content hash differs — old thumbnails must be purged first.
+            precomp_cache: ``{filename: (jpeg_bytes, dhash_int)}`` pre-computed
+                in parallel Phase 3; when populated, skips serial resize/dHash.
         """
         if hash_changed:
             old_thumb_count = len([i for i in existing.images if i.thumbnail_path])
@@ -1143,52 +1182,33 @@ class CrawlerWorker(QThread):
                 img_records.append(img)
             session.flush()
 
-            # Resolve raw bytes for each candidate; convert PDF pages to raster.
-            from app.utils.thumbnailer import pdf_first_page_to_image_bytes
-            resolved: list[tuple[Image, bytes]] = []
-            for img in img_records:
-                raw = contents[img.filename]
-                if Path(img.filename.replace("\\", "/")).suffix.lower() == ".pdf":
-                    raw = pdf_first_page_to_image_bytes(raw)
-                    if raw is None:
-                        session.delete(img)
-                        logger.warning("PDF render failed: %s in %s",
-                                       img.filename, archive_path.name)
-                        continue
-                resolved.append((img, raw))
-            img_records = [img for img, _ in resolved]
-
-            # Batch-write all thumbnails in a single LMDB transaction.
-            batch_items = [
-                (img.id, raw, max_thumb_size)
-                for img, raw in resolved
-            ]
-            batch_results = save_thumbnails_batch(batch_items)
-
-            # Compute embeddings in one batched inference call when enabled.
-            embed_vecs: list = []
-            if self._config.embed_during_crawl:
-                try:
-                    from app.utils import image_embedding as _emb
-                    jpegs = [
-                        jpeg_bytes if rel_path else b""
-                        for _img, (_iid, rel_path, jpeg_bytes) in zip(img_records, batch_results)
-                    ]
-                    embed_vecs = _emb.embed_batch(jpegs)
-                except Exception:
-                    embed_vecs = [None] * len(img_records)
-
             count = 0
-            for i, (img, (_iid, rel_path, jpeg_bytes)) in enumerate(zip(img_records, batch_results)):
-                if rel_path:
-                    img.thumbnail_path = rel_path
+            if precomp_cache:
+                # Fast path: JPEG bytes and dHash were computed in parallel Phase 3.
+                resolved_pre: list[tuple[Image, bytes, object]] = []
+                for img in img_records:
+                    jpeg, dhash_int = precomp_cache.get(img.filename, (None, None))
+                    if jpeg:
+                        resolved_pre.append((img, jpeg, dhash_int))
+                    else:
+                        session.delete(img)
+                        logger.warning("Thumbnail conversion failed: %s in %s",
+                                       img.filename, archive_path.name)
+
+                write_raw_thumbnails_batch([(img.id, jpeg) for img, jpeg, _ in resolved_pre])
+
+                embed_vecs: list = []
+                if self._config.embed_during_crawl:
                     try:
-                        if jpeg_bytes:
-                            h = compute_dhash_from_jpeg(jpeg_bytes)
-                            if h is not None:
-                                img.dhash = format_dhash(h)
+                        from app.utils import image_embedding as _emb
+                        embed_vecs = _emb.embed_batch([jpeg for _, jpeg, _ in resolved_pre])
                     except Exception:
-                        logger.debug("  Failed to compute dHash for image id %s", img.id)
+                        embed_vecs = [None] * len(resolved_pre)
+
+                for i, (img, jpeg, dhash_int) in enumerate(resolved_pre):
+                    img.thumbnail_path = str(img.id)
+                    if dhash_int is not None:
+                        img.dhash = format_dhash(dhash_int)
                     if embed_vecs:
                         try:
                             from app.utils import image_embedding as _emb
@@ -1199,13 +1219,69 @@ class CrawlerWorker(QThread):
                         except Exception:
                             logger.debug("  Failed to store embedding for image id %s", img.id)
                     count += 1
-                    logger.debug("  Thumbnail saved: %s → %s", img.filename, rel_path)
-                else:
-                    session.delete(img)
-                    msg = f"  WARNING: thumbnail conversion failed for {img.filename}"
-                    self.log.emit(msg)
-                    logger.warning("Thumbnail conversion failed: %s in %s",
-                                   img.filename, archive_path.name)
+                    logger.debug("  Thumbnail saved: %s → %s", img.filename, img.thumbnail_path)
+            else:
+                # Slow path (fallback): resolve raw bytes and resize serially.
+                from app.utils.thumbnailer import pdf_first_page_to_image_bytes
+                resolved_raw: list[tuple[Image, bytes]] = []
+                for img in img_records:
+                    raw = contents[img.filename]
+                    if Path(img.filename.replace("\\", "/")).suffix.lower() == ".pdf":
+                        raw = pdf_first_page_to_image_bytes(raw)
+                        if raw is None:
+                            session.delete(img)
+                            logger.warning("PDF render failed: %s in %s",
+                                           img.filename, archive_path.name)
+                            continue
+                    resolved_raw.append((img, raw))
+                img_records = [img for img, _ in resolved_raw]
+
+                batch_items = [
+                    (img.id, raw, max_thumb_size)
+                    for img, raw in resolved_raw
+                ]
+                batch_results = save_thumbnails_batch(batch_items)
+
+                embed_vecs = []
+                if self._config.embed_during_crawl:
+                    try:
+                        from app.utils import image_embedding as _emb
+                        jpegs = [
+                            jpeg_bytes if rel_path else b""
+                            for _img, (_iid, rel_path, jpeg_bytes) in zip(img_records, batch_results)
+                        ]
+                        embed_vecs = _emb.embed_batch(jpegs)
+                    except Exception:
+                        embed_vecs = [None] * len(img_records)
+
+                for i, (img, (_iid, rel_path, jpeg_bytes)) in enumerate(zip(img_records, batch_results)):
+                    if rel_path:
+                        img.thumbnail_path = rel_path
+                        try:
+                            if jpeg_bytes:
+                                h = compute_dhash_from_jpeg(jpeg_bytes)
+                                if h is not None:
+                                    img.dhash = format_dhash(h)
+                        except Exception:
+                            logger.debug("  Failed to compute dHash for image id %s", img.id)
+                        if embed_vecs:
+                            try:
+                                from app.utils import image_embedding as _emb
+                                vec = embed_vecs[i]
+                                if vec is not None:
+                                    img.embedding = _emb.to_blob(vec)
+                                    img.embedding_model = _emb.EMBED_MODEL_ID
+                            except Exception:
+                                logger.debug("  Failed to store embedding for image id %s", img.id)
+                        count += 1
+                        logger.debug("  Thumbnail saved: %s → %s", img.filename, rel_path)
+                    else:
+                        session.delete(img)
+                        msg = f"  WARNING: thumbnail conversion failed for {img.filename}"
+                        self.log.emit(msg)
+                        logger.warning("Thumbnail conversion failed: %s in %s",
+                                       img.filename, archive_path.name)
+
             self.log.emit(f"  {count} thumbnail(s) stored")
             logger.debug("  %d thumbnail(s) stored for %s", count, archive_path.name)
 
