@@ -922,6 +922,8 @@ class DbMaintenanceDialog(QDialog):
         self._populate_table(results)
         self._verify_worker = None
         self._set_idle()
+        from app.utils.sound import play_notification
+        play_notification("maintenance")
 
     # ------------------------------------------------------------------
     def _start_dhash(self, recompute_all: bool = False) -> None:
@@ -938,6 +940,8 @@ class DbMaintenanceDialog(QDialog):
     def _on_dhash_finished(self, computed: int, skipped: int) -> None:
         self._dhash_worker = None
         self._set_idle()
+        from app.utils.sound import play_notification
+        play_notification("maintenance")
 
     # ------------------------------------------------------------------
     def _start_embeddings(self, recompute_all: bool = False) -> None:
@@ -954,6 +958,8 @@ class DbMaintenanceDialog(QDialog):
     def _on_embed_finished(self, computed: int, skipped: int) -> None:
         self._embed_worker = None
         self._set_idle()
+        from app.utils.sound import play_notification
+        play_notification("maintenance")
 
     def _populate_table(self, results: list) -> None:
         self._table.setRowCount(0)

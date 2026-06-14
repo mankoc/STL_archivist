@@ -1214,6 +1214,8 @@ class FindContentDuplicatesDialog(QDialog):
         self._stl_find_btn.setEnabled(True)
         self._stl_stop_btn.setEnabled(False)
         self._stl_progress.setVisible(False)
+        from app.utils.sound import play_notification
+        play_notification("duplicates")
 
         self._stl_table.setSortingEnabled(False)
         self._stl_table.setRowCount(0)
@@ -1425,6 +1427,8 @@ class FindContentDuplicatesDialog(QDialog):
         self._img_find_btn.setEnabled(True)
         self._img_stop_btn.setEnabled(False)
         self._img_progress.setVisible(False)
+        from app.utils.sound import play_notification
+        play_notification("duplicates")
 
         self._img_table.setSortingEnabled(False)
         self._img_table.setRowCount(0)
