@@ -673,77 +673,108 @@ class _EmbeddingDupWorker(QThread):
         from app.utils import image_embedding as emb
 
         try:
-            # Only numpy is needed here — the stored embeddings are plain
-            # float32 blobs; the CLIP model file is NOT required for search.
-            # (The model is only needed when computing new embeddings.)
             import numpy as np
 
+            # Stream embeddings from DB row-by-row to avoid a ~1 GB materialised result set.
             self.progress.emit("Loading image embeddings…")
+            model_ids: list[int] = []
+            vecs: list = []
+            model_img_count: dict[int, int] = defaultdict(int)
+            dim: int | None = None
+            self.embeddings_loaded = 0
+
             with session_scope() as session:
-                rows = (
+                q = (
                     session.query(Image.model_id, Image.embedding)
                     .join(STLModel, STLModel.id == Image.model_id)
                     .filter(Image.embedding.isnot(None))
                     .filter(Image.embedding_model == emb.EMBED_MODEL_ID)
                     .filter(STLModel.is_missing.isnot(True))
-                    .all()
+                    .yield_per(1000)
                 )
-            self.embeddings_loaded = len(rows)
-            if not rows:
-                self.finished.emit([])
-                return
-
-            model_ids: list[int] = []
-            vecs: list = []
-            model_img_count: dict[int, int] = defaultdict(int)
-            dim: int | None = None
-            for model_id, blob in rows:
-                v = emb.from_blob(blob)
-                if v is None or v.size == 0:
-                    continue
-                if dim is None:
-                    dim = v.size
-                elif v.size != dim:
-                    continue
-                model_ids.append(model_id)
-                vecs.append(v)
-                model_img_count[model_id] += 1
+                for model_id, blob in q:
+                    self.embeddings_loaded += 1
+                    v = emb.from_blob(blob)
+                    if v is None or v.size == 0:
+                        continue
+                    if dim is None:
+                        dim = v.size
+                    elif v.size != dim:
+                        continue
+                    model_ids.append(model_id)
+                    vecs.append(v.astype(np.float16))  # halves per-vector footprint immediately
+                    model_img_count[model_id] += 1
+                    if self.embeddings_loaded % 10_000 == 0:
+                        self.progress.emit(f"Loading embeddings… {self.embeddings_loaded:,}")
 
             self.embeddings_valid = len(vecs)
             if len(vecs) < 2:
                 self.finished.emit([])
                 return
 
-            M = np.vstack(vecs).astype(np.float32)   # n × D (already L2-normalised)
+            # Build the matrix and immediately release the Python list.
+            # float16: ~512 MB for 500K×512-dim vs ~1 GB for float32.
+            M = np.vstack(vecs).astype(np.float16)
+            del vecs
             mids = np.asarray(model_ids)
             n = M.shape[0]
-            thr = self._threshold
+            thr = np.float16(self._threshold)
 
             pair_best: dict[tuple[int, int], float] = {}
             pair_cnt:  dict[tuple[int, int], int]   = defaultdict(int)
 
-            self.progress.emit(f"Comparing {n} embedding(s)…")
-            CHUNK = 512
-            for start in range(0, n, CHUNK):
+            self.progress.emit(f"Comparing {n:,} embedding(s)…")
+
+            # Tiled upper-triangle scan: CHUNK×CHUNK sims blocks (~8 MB each at CHUNK=2048)
+            # instead of CHUNK×n blocks (~500 MB each at CHUNK=512 for n=500K).
+            CHUNK = 2048
+            for start_r in range(0, n, CHUNK):
                 if self._stop:
                     self.finished.emit([])
                     return
-                end = min(start + CHUNK, n)
-                sims = M[start:end] @ M.T            # (end-start) × n cosine sims
-                for li in range(start, end):
-                    row = sims[li - start]
-                    js = np.where(row[li + 1:] >= thr)[0] + (li + 1)
+                end_r = min(start_r + CHUNK, n)
+                block_r = M[start_r:end_r]
+
+                # Diagonal tile — pairs where both i and j fall in [start_r, end_r).
+                sims_d = block_r @ block_r.T
+                for li in range(start_r, end_r):
+                    local_i = li - start_r
+                    row = sims_d[local_i]
+                    offset = local_i + 1
+                    local_js = np.where(row[offset:] >= thr)[0]
                     ma = int(mids[li])
-                    for j in js:
-                        mb = int(mids[j])
+                    for lj in local_js:
+                        mb = int(mids[start_r + offset + lj])
                         if ma == mb:
                             continue
                         key = (min(ma, mb), max(ma, mb))
-                        s = float(row[j])
+                        s = float(row[offset + lj])
                         pair_cnt[key] += 1
                         if key not in pair_best or s > pair_best[key]:
                             pair_best[key] = s
-                self.prog_val.emit(end, n)
+                del sims_d
+
+                # Off-diagonal tiles — pairs where i ∈ [start_r, end_r), j ∈ [start_c, end_c).
+                for start_c in range(end_r, n, CHUNK):
+                    end_c = min(start_c + CHUNK, n)
+                    sims_o = block_r @ M[start_c:end_c].T
+                    for li in range(start_r, end_r):
+                        local_i = li - start_r
+                        row = sims_o[local_i]
+                        local_js = np.where(row >= thr)[0]
+                        ma = int(mids[li])
+                        for lj in local_js:
+                            mb = int(mids[start_c + lj])
+                            if ma == mb:
+                                continue
+                            key = (min(ma, mb), max(ma, mb))
+                            s = float(row[lj])
+                            pair_cnt[key] += 1
+                            if key not in pair_best or s > pair_best[key]:
+                                pair_best[key] = s
+                    del sims_o
+
+                self.prog_val.emit(end_r, n)
 
             if not pair_best:
                 self.finished.emit([])

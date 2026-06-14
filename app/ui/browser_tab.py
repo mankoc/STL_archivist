@@ -9,7 +9,7 @@ from pathlib import Path as FSPath, Path
 
 _ICONS_DIR = FSPath(__file__).parent.parent.parent / "resources" / "icons"
 
-from PyQt6.QtCore import Qt, QSortFilterProxyModel, QSize, QStringListModel, QEvent, pyqtSignal, QItemSelection, QTimer, QThread, QThreadPool, QRunnable, QRect, QPointF, QRectF, QUrl, QObject
+from PyQt6.QtCore import Qt, QSortFilterProxyModel, QSize, QStringListModel, QEvent, pyqtSignal, QItemSelection, QTimer, QThread, QThreadPool, QRunnable, QRect, QPointF, QRectF, QUrl, QObject, QAbstractTableModel, QModelIndex
 from PyQt6.QtGui import QStandardItemModel, QStandardItem, QPixmap, QPixmapCache, QIcon, QKeySequence, QShortcut, QColor, QFont, QPainter, QPen, QDesktopServices
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
@@ -84,44 +84,425 @@ def _prune_ancestor_paths(paths: list[str]) -> list[str]:
     return result
 
 
-class _BrowserProxyModel(QSortFilterProxyModel):
-    """Proxy model that sorts the File Size column numerically via UserRole data."""
+MODEL_ID_ROLE = Qt.ItemDataRole.UserRole + 1
 
-    _NUMERIC_COLS: "frozenset[int]"  # populated after COL_* constants are defined
+
+# ---------------------------------------------------------------------------
+# SQL-backed paged model helpers
+# ---------------------------------------------------------------------------
+
+def _pack_row(row, tags_for: dict, pair_for_id: dict) -> tuple:
+    return (
+        row.id, row.title, row.creator, row.source,
+        row.release_year, row.release_month, row.archive_path,
+        row.presupports, row.warning, row.archive_size,
+        row.compression_rate, row.sequence, row.created_at,
+        row.sculptor_name, row.collection_name, row.subcollection_name,
+        row.category_name, row.release_name, row.scale_name,
+        tags_for.get(row.id, ""), pair_for_id.get(row.id, -1),
+    )
+
+
+class _IdLoaderThread(QThread):
+    ids_ready       = pyqtSignal(list)   # complete sorted list[int]
+    finished_signal = pyqtSignal(int)    # total count
+
+    def __init__(self, id_stmt, pair_order=None, parent=None):
+        super().__init__(parent)
+        self._id_stmt    = id_stmt
+        self._pair_order = pair_order
+        self._stop       = False
+
+    def stop(self):
+        self._stop = True
+
+    def run(self):
+        from app.database.db import get_session
+        session = get_session()
+        try:
+            if self._pair_order is not None:
+                all_ids = [row[0] for row in session.execute(self._id_stmt).all()]
+                all_ids.sort(key=lambda i: self._pair_order.get(i, len(self._pair_order)))
+            else:
+                all_ids = []
+                result = session.execute(
+                    self._id_stmt.execution_options(yield_per=2000)
+                )
+                for row in result:
+                    if self._stop:
+                        break
+                    all_ids.append(row[0])
+            if not self._stop:
+                self.ids_ready.emit(all_ids)
+                self.finished_signal.emit(len(all_ids))
+        finally:
+            session.close()
+
+
+class _PageFetchRunnable(QRunnable):
+    class _Signals(QObject):
+        page_ready = pyqtSignal(int, list)   # page_idx, rows
+
+    def __init__(self, page_idx: int, ids: list, pair_for_id: dict):
+        super().__init__()
+        self.signals      = self._Signals()
+        self._page_idx    = page_idx
+        self._ids         = ids
+        self._pair_for_id = pair_for_id
+        self.setAutoDelete(True)
+
+    def run(self):
+        from app.database.db import get_session, get_models_view
+        from app.database.models import Tag
+        from sqlalchemy import select as sa_sel, func
+        session = get_session()
+        try:
+            mv   = get_models_view()
+            ids  = self._ids
+            stmt = sa_sel(
+                mv.c.id, mv.c.title, mv.c.creator, mv.c.source,
+                mv.c.release_year, mv.c.release_month,
+                mv.c.archive_path, mv.c.presupports, mv.c.warning,
+                mv.c.archive_size, mv.c.compression_rate,
+                mv.c.sequence, mv.c.created_at,
+                mv.c.sculptor_name, mv.c.collection_name,
+                mv.c.subcollection_name, mv.c.category_name,
+                mv.c.release_name, mv.c.scale_name,
+            ).select_from(mv).where(mv.c.id.in_(ids))
+            rows_by_id = {row.id: row for row in session.execute(stmt).all()}
+
+            tags_stmt = (
+                sa_sel(_mt_global.c.model_id, func.group_concat(Tag.name, ", "))
+                .join(Tag, _mt_global.c.tag_id == Tag.id)
+                .where(_mt_global.c.model_id.in_(ids))
+                .group_by(_mt_global.c.model_id)
+            )
+            tags_for = {mid: ts or "" for mid, ts in session.execute(tags_stmt).all()}
+            pair_for_id = self._pair_for_id
+            packed = [
+                _pack_row(rows_by_id[mid], tags_for, pair_for_id)
+                for mid in ids if mid in rows_by_id
+            ]
+            self.signals.page_ready.emit(self._page_idx, packed)
+        except Exception:
+            self.signals.page_ready.emit(self._page_idx, [])
+        finally:
+            session.close()
+
+
+class _SqlTableModel(QAbstractTableModel):
+    """Memory-efficient paged table model backed by SQLite.
+
+    Keeps sorted model IDs in memory (~4 MB for 500K models) and fetches
+    row data in pages via QThreadPool on demand.  Only _MAX_PAGES pages are
+    resident at once; older pages are evicted via LRU.
+    """
+    _PAGE_SIZE = 200
+    _MAX_PAGES = 60   # 60 x 200 = 12 000 rows resident at most
+
+    load_started  = pyqtSignal()
+    load_finished = pyqtSignal(int)        # total visible rows
+    cell_edited   = pyqtSignal(int, int, str)  # row, col, new_text
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._sort_cache: dict[tuple[int, int], object] = {}
+        self._ordered_ids: list              = []
+        self._page_cache:  dict              = {}
+        self._page_lru:    list              = []
+        self._pending_pages: set             = set()
+        self._pair_for_id: dict              = {}
+        self._pair_colors                    = None
+        self._warn_bg                        = None
+        self._warn_fg                        = None
+        self._warn_font                      = None
+        self._main_stmt                      = None
+        self._pair_order                     = None
+        self._sort_col: int                  = COL_TITLE
+        self._sort_order                     = Qt.SortOrder.AscendingOrder
+        self._search_text: str               = ""
+        self._id_loader                      = None
 
-    def setSourceModel(self, model) -> None:
-        super().setSourceModel(model)
-        self._sort_cache.clear()
-        if model is not None:
-            model.modelReset.connect(self._sort_cache.clear)
+    # -- QAbstractTableModel interface ------------------------------------
 
-    def _sort_key(self, index) -> object:
-        col = index.column()
-        row = index.row()
-        key = (col, row)
-        if key not in self._sort_cache:
-            v = index.data(Qt.ItemDataRole.UserRole)
+    def rowCount(self, parent=QModelIndex()) -> int:
+        return 0 if parent.isValid() else len(self._ordered_ids)
+
+    def columnCount(self, parent=QModelIndex()) -> int:
+        return 0 if parent.isValid() else len(_HEADERS)
+
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
+        if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
+            return _HEADERS[section]
+        return None
+
+    def flags(self, index):
+        if not index.isValid():
+            return Qt.ItemFlag.NoItemFlags
+        base = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+        if index.column() not in (COL_THUMB, COL_ADDED, COL_WARNING,
+                                  COL_FILESIZE, COL_COMPRESSION):
+            base |= Qt.ItemFlag.ItemIsEditable
+        return base
+
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        if not index.isValid():
+            return None
+        row, col = index.row(), index.column()
+        if row >= len(self._ordered_ids):
+            return None
+        if role == MODEL_ID_ROLE:
+            return self._ordered_ids[row]
+        page_idx = row // self._PAGE_SIZE
+        page = self._page_cache.get(page_idx)
+        if page is None:
+            self._request_page(page_idx)
+            return "" if role == Qt.ItemDataRole.DisplayRole and col != COL_THUMB else None
+        offset = row % self._PAGE_SIZE
+        if offset >= len(page):
+            return None
+        return self._role_data(page[offset], col, role)
+
+    def setData(self, index, value, role=Qt.ItemDataRole.EditRole):
+        if not index.isValid() or role != Qt.ItemDataRole.EditRole:
+            return False
+        row, col = index.row(), index.column()
+        if col in (COL_THUMB, COL_ADDED, COL_WARNING, COL_FILESIZE, COL_COMPRESSION):
+            return False
+        text = str(value).strip() if value is not None else ""
+        # Optimistically update cache
+        page_idx = row // self._PAGE_SIZE
+        offset   = row % self._PAGE_SIZE
+        page = self._page_cache.get(page_idx)
+        if page is not None and offset < len(page):
+            _TI = {
+                COL_TITLE: 1, COL_CREATOR: 2, COL_SOURCE: 3, COL_TAGS: 19,
+                COL_SCULPTOR: 13, COL_COLLECTION: 14, COL_SUBCOLLECTION: 15,
+                COL_CATEGORY: 16, COL_SEQUENCE: 11, COL_RELEASE: 17,
+                COL_PATH: 6, COL_SCALE: 18, COL_PRESUPPORTED: 7,
+            }
+            ti = _TI.get(col)
+            if ti is not None:
+                t = list(page[offset])
+                t[ti] = text if text else None
+                page[offset] = tuple(t)
+        self.dataChanged.emit(index, index, [Qt.ItemDataRole.DisplayRole])
+        self.cell_edited.emit(row, col, text)
+        return True
+
+    def sort(self, column: int, order) -> None:
+        if self._main_stmt is None or self._pair_order is not None:
+            return
+        self._sort_col   = column
+        self._sort_order = order
+        self._do_reload()
+
+    # -- Public API -------------------------------------------------------
+
+    def model_id_for_row(self, row: int):
+        return self._ordered_ids[row] if 0 <= row < len(self._ordered_ids) else None
+
+    def all_visible_ids(self) -> list:
+        return list(self._ordered_ids)
+
+    def load(self, main_stmt, pair_order=None, pair_for_id=None, pair_colors=None) -> None:
+        self._main_stmt   = main_stmt
+        self._pair_order  = pair_order
+        self._pair_for_id = pair_for_id or {}
+        self._pair_colors = pair_colors
+        from app.ui.config_dialog import get_warn_row_bg_color, get_warn_row_fg_color
+        self._warn_bg   = QColor(get_warn_row_bg_color())
+        self._warn_fg   = QColor(get_warn_row_fg_color())
+        self._warn_font = QFont()
+        self._warn_font.setPointSize(16)
+        self._warn_font.setBold(True)
+        self._do_reload()
+
+    def set_search(self, text: str) -> None:
+        if text == self._search_text:
+            return
+        self._search_text = text
+        if self._main_stmt is not None:
+            self._do_reload()
+
+    def stop(self) -> None:
+        if self._id_loader is not None:
+            self._id_loader.stop()
+            self._id_loader = None
+
+    # -- Internal ---------------------------------------------------------
+
+    def _do_reload(self) -> None:
+        if self._id_loader is not None:
+            self._id_loader.stop()
+            self._id_loader = None
+        self._pending_pages.clear()
+        self.beginResetModel()
+        self._ordered_ids = []
+        self._page_cache  = {}
+        self._page_lru    = []
+        self.endResetModel()
+        self.load_started.emit()
+        id_stmt = self._build_id_stmt()
+        loader  = _IdLoaderThread(id_stmt, self._pair_order, parent=self)
+        loader.ids_ready.connect(self._on_ids_ready)
+        loader.finished_signal.connect(self._on_load_finished)
+        self._id_loader = loader
+        loader.start()
+
+    def _build_id_stmt(self):
+        from app.database.db import get_models_view
+        from sqlalchemy import select as sa_sel
+        mv      = get_models_view()
+        id_stmt = sa_sel(mv.c.id).select_from(mv)
+        if self._main_stmt is not None and self._main_stmt.whereclause is not None:
+            id_stmt = id_stmt.where(self._main_stmt.whereclause)
+        if self._search_text and self._pair_order is None:
+            id_stmt = self._apply_search_where(id_stmt, mv)
+        if self._pair_order is None:
+            id_stmt = id_stmt.order_by(self._sort_expr(mv))
+        return id_stmt
+
+    def _apply_search_where(self, stmt, mv):
+        from sqlalchemy import or_, select as sa_sel
+        from app.database.models import Tag
+        pat     = f"%{self._search_text}%"
+        tag_sub = (
+            sa_sel(_mt_global.c.model_id)
+            .join(Tag, _mt_global.c.tag_id == Tag.id)
+            .where(Tag.name.like(pat))
+        )
+        return stmt.where(or_(
+            mv.c.title.like(pat),
+            mv.c.creator.like(pat),
+            mv.c.sculptor_name.like(pat),
+            mv.c.collection_name.like(pat),
+            mv.c.archive_path.like(pat),
+            mv.c.id.in_(tag_sub),
+        ))
+
+    def _sort_expr(self, mv):
+        from sqlalchemy import asc, desc, nullslast
+        _COLS = {
+            COL_TITLE:         mv.c.title,
+            COL_CREATOR:       mv.c.creator,
+            COL_SOURCE:        mv.c.source,
+            COL_SCULPTOR:      mv.c.sculptor_name,
+            COL_COLLECTION:    mv.c.collection_name,
+            COL_SUBCOLLECTION: mv.c.subcollection_name,
+            COL_SEQUENCE:      mv.c.sequence,
+            COL_RELEASE:       mv.c.release_name,
+            COL_PATH:          mv.c.archive_path,
+            COL_SCALE:         mv.c.scale_name,
+            COL_PRESUPPORTED:  mv.c.presupports,
+            COL_ADDED:         mv.c.created_at,
+            COL_FILESIZE:      mv.c.archive_size,
+            COL_COMPRESSION:   mv.c.compression_rate,
+            COL_CATEGORY:      mv.c.category_name,
+        }
+        col_expr = _COLS.get(self._sort_col, mv.c.title)
+        fn = desc if self._sort_order == Qt.SortOrder.DescendingOrder else asc
+        return nullslast(fn(col_expr))
+
+    def _request_page(self, page_idx: int) -> None:
+        if page_idx in self._pending_pages:
+            return
+        self._pending_pages.add(page_idx)
+        start    = page_idx * self._PAGE_SIZE
+        end      = min(start + self._PAGE_SIZE, len(self._ordered_ids))
+        ids      = self._ordered_ids[start:end]
+        runnable = _PageFetchRunnable(page_idx, ids, self._pair_for_id)
+        runnable.signals.page_ready.connect(self._on_page_ready)
+        QThreadPool.globalInstance().start(runnable)
+
+    def _on_ids_ready(self, ids: list) -> None:
+        if ids:
+            self.beginInsertRows(QModelIndex(), 0, len(ids) - 1)
+            self._ordered_ids = ids
+            self.endInsertRows()
+            self._request_page(0)
+        else:
+            self._ordered_ids = []
+
+    def _on_load_finished(self, total: int) -> None:
+        self._id_loader = None
+        self.load_finished.emit(total)
+
+    def _on_page_ready(self, page_idx: int, rows: list) -> None:
+        self._pending_pages.discard(page_idx)
+        if page_idx in self._page_lru:
+            self._page_lru.remove(page_idx)
+        self._page_lru.append(page_idx)
+        while len(self._page_lru) > self._MAX_PAGES:
+            old = self._page_lru.pop(0)
+            self._page_cache.pop(old, None)
+        self._page_cache[page_idx] = rows
+        start = page_idx * self._PAGE_SIZE
+        end   = start + len(rows) - 1
+        if start <= end:
+            self.dataChanged.emit(
+                self.index(start, 0),
+                self.index(end, self.columnCount() - 1),
+            )
+
+    def _role_data(self, t: tuple, col: int, role: int):
+        # t layout: 0=id,1=title,2=creator,3=source,4=yr,5=mo,6=archive_path,
+        #           7=presupports,8=warning,9=archive_size,10=compression_rate,
+        #           11=sequence,12=created_at,13=sculptor_name,14=collection_name,
+        #           15=subcollection_name,16=category_name,17=release_name,
+        #           18=scale_name,19=tags_str,20=pair_idx
+        if role == Qt.ItemDataRole.DisplayRole:
+            if col == COL_THUMB:         return None
+            if col == COL_TITLE:         return t[1] or ""
+            if col == COL_CREATOR:       return t[2] or ""
+            if col == COL_SOURCE:        return t[3] or ""
+            if col == COL_DATE:          return format_release_date(t[4], t[5])
+            if col == COL_TAGS:          return t[19] or ""
+            if col == COL_SCULPTOR:      return t[13] or ""
+            if col == COL_COLLECTION:    return t[14] or ""
+            if col == COL_SUBCOLLECTION: return t[15] or ""
+            if col == COL_SEQUENCE:      return str(t[11]) if t[11] is not None else ""
+            if col == COL_RELEASE:       return t[17] or ""
+            if col == COL_PATH:          return t[6] or ""
+            if col == COL_SCALE:         return t[18] or ""
+            if col == COL_PRESUPPORTED:  return t[7] or ""
+            if col == COL_ADDED:         return t[12].strftime("%Y-%m-%d %H:%M") if t[12] else ""
+            if col == COL_WARNING:       return "⚠" if t[8] else ""
+            if col == COL_FILESIZE:
+                raw = t[9] if t[9] is not None else -1
+                return _fmt_size(raw) if raw >= 0 else ""
+            if col == COL_CATEGORY:      return t[16] or ""
+            if col == COL_COMPRESSION:
+                cr = t[10]
+                return f"{1/cr:.1f}x" if cr and cr > 0 else ""
+            return ""
+        if role == Qt.ItemDataRole.UserRole:
             if col == COL_SEQUENCE:
-                try:
-                    v = int(v) if v is not None else -1
-                except Exception:
-                    v = -1
-            else:
-                v = v if v is not None else -1
-            self._sort_cache[key] = v
-        return self._sort_cache[key]
-
-    def lessThan(self, left, right):
-        col = left.column()
-        if col in (COL_FILESIZE, COL_COMPRESSION, COL_SEQUENCE):
-            return self._sort_key(left) < self._sort_key(right)
-        return super().lessThan(left, right)
-
-MODEL_ID_ROLE = Qt.ItemDataRole.UserRole + 1
+                try:    return int(t[11]) if t[11] is not None else -1
+                except: return -1
+            if col == COL_FILESIZE:
+                return t[9] if t[9] is not None else -1
+            if col == COL_COMPRESSION:
+                return t[10] if t[10] else -1.0
+            return None
+        if role == Qt.ItemDataRole.ToolTipRole:
+            return t[8] or None if col == COL_WARNING else None
+        if role == Qt.ItemDataRole.TextAlignmentRole:
+            if col in (COL_WARNING, COL_COMPRESSION):
+                return Qt.AlignmentFlag.AlignCenter
+            return None
+        if role == Qt.ItemDataRole.BackgroundRole:
+            if self._pair_colors is not None and t[20] >= 0:
+                return self._pair_colors[t[20] % 2]
+            if t[8]:
+                return self._warn_bg
+            return None
+        if role == Qt.ItemDataRole.ForegroundRole:
+            return self._warn_fg if t[8] else None
+        if role == Qt.ItemDataRole.FontRole:
+            return self._warn_font if (t[8] and col == COL_WARNING) else None
+        if role == MODEL_ID_ROLE:
+            return t[0]
+        return None
 
 
 class ClickableLabel(QLabel):
@@ -1368,115 +1749,6 @@ class _FilterTreeWorker(QRunnable):
         self.signals.ready.emit(self._gen, payload)
 
 
-class TableLoaderWorker(QThread):
-    """Fetches table rows in a background thread and emits them in batches.
-
-    Receives a pre-built SQLAlchemy ``select()`` statement (constructed on the
-    main thread; SA expressions are thread-safe to pass).  Executes it with its
-    own session, merges pre-fetched tag strings, and emits batches of plain
-    Python tuples so the main thread can create ``QStandardItem`` rows without
-    blocking.
-    """
-
-    rows_ready = pyqtSignal(list)  # list[tuple] — one tuple per row
-    finished   = pyqtSignal(int)   # total rows emitted
-
-    _BATCH = 200
-
-    def __init__(
-        self,
-        main_stmt,
-        tags_stmt,
-        pair_order:   dict | None = None,  # {model_id: sort_position} for dup pairs
-        pair_for_id:  dict | None = None,  # {model_id: pair_index}
-        parent=None,
-    ) -> None:
-        super().__init__(parent)
-        self._main_stmt  = main_stmt
-        self._tags_stmt  = tags_stmt
-        self._pair_order = pair_order
-        self._pair_for_id = pair_for_id
-        self._stop = False
-
-    def stop(self) -> None:
-        self._stop = True
-
-    def run(self) -> None:
-        from app.database.db import get_session
-        session = get_session()
-        try:
-            # Tags: single GROUP_CONCAT query → {model_id: "tag1, tag2"}
-            tags_for: dict[int, str] = {}
-            for mid, ts in session.execute(self._tags_stmt).all():
-                tags_for[mid] = ts or ""
-
-            pair_for_id = self._pair_for_id or {}
-
-            if self._pair_order is not None:
-                # Duplicate-pairs mode: collect all, sort by pair position, then batch
-                all_rows = session.execute(self._main_stmt).all()
-                all_rows.sort(key=lambda r: self._pair_order.get(r.id, len(self._pair_order)))
-                batched = []
-                for row in all_rows:
-                    if self._stop:
-                        break
-                    batched.append(self._pack(row, tags_for, pair_for_id))
-                    if len(batched) >= self._BATCH:
-                        self.rows_ready.emit(batched)
-                        batched = []
-                if batched and not self._stop:
-                    self.rows_ready.emit(batched)
-                if not self._stop:
-                    self.finished.emit(len(all_rows))
-            else:
-                # Normal mode: stream with yield_per for progressive display
-                result = session.execute(
-                    self._main_stmt.execution_options(yield_per=self._BATCH)
-                )
-                batch: list = []
-                total = 0
-                for row in result:
-                    if self._stop:
-                        break
-                    batch.append(self._pack(row, tags_for, pair_for_id))
-                    total += 1
-                    if len(batch) >= self._BATCH:
-                        self.rows_ready.emit(batch)
-                        batch = []
-                if batch and not self._stop:
-                    self.rows_ready.emit(batch)
-                if not self._stop:
-                    self.finished.emit(total)
-        finally:
-            session.close()
-
-    @staticmethod
-    def _pack(row, tags_for: dict, pair_for_id: dict) -> tuple:
-        return (
-            row.id,
-            row.title,
-            row.creator,
-            row.source,
-            row.release_year,
-            row.release_month,
-            row.archive_path,
-            row.presupports,
-            row.warning,
-            row.archive_size,
-            row.compression_rate,
-            row.sequence,
-            row.created_at,
-            row.sculptor_name,
-            row.collection_name,
-            row.subcollection_name,
-            row.category_name,
-            row.release_name,
-            row.scale_name,
-            tags_for.get(row.id, ""),
-            pair_for_id.get(row.id, -1),
-        )
-
-
 class BrowserTab(QWidget):
     """Main model-browser widget.
 
@@ -1507,8 +1779,6 @@ class BrowserTab(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._loading = False
-        self._table_loader: TableLoaderWorker | None = None
-        self._load_gen: int = 0          # incremented on each _load_table call
         self._load_pair_colors: list | None = None  # QColor list for dup-pair mode
         self._rescan_dialog: RescanProgressDialog | None = None
         self._current_model_id: int | None = None
@@ -1539,8 +1809,8 @@ class BrowserTab(QWidget):
         self._panel_cache: dict[int, dict] = {}
         # Generation counter for async filter-tree rebuilds (discard stale results)
         self._filter_gen: int = 0
-        # Debounce rapid cell edits: keyed by (row, col) → QStandardItem
-        self._pending_edits: dict[tuple[int, int], "QStandardItem"] = {}
+        # Debounce rapid cell edits: keyed by (row, col) → str
+        self._pending_edits: dict[tuple[int, int], str] = {}
         self._edit_timer = QTimer(self)
         self._edit_timer.setSingleShot(True)
         self._edit_timer.setInterval(400)  # ms
@@ -1604,17 +1874,13 @@ class BrowserTab(QWidget):
         search_row.addWidget(self._search_edit)
         centre_layout.addLayout(search_row)
 
-        self._model = QStandardItemModel()
-        self._model.setHorizontalHeaderLabels(_HEADERS)
-        self._model.itemChanged.connect(self._on_item_changed)
-
-        self._proxy = _BrowserProxyModel()
-        self._proxy.setSourceModel(self._model)
-        self._proxy.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        self._proxy.setFilterKeyColumn(-1)  # search all columns
+        self._model = _SqlTableModel(parent=self)
+        self._model.load_started.connect(self._on_load_started)
+        self._model.load_finished.connect(self._on_load_finished_model)
+        self._model.cell_edited.connect(self._on_cell_edited)
 
         self._table = QTableView()
-        self._table.setModel(self._proxy)
+        self._table.setModel(self._model)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked)
@@ -1778,10 +2044,7 @@ class BrowserTab(QWidget):
             self._creator_panel.setVisible(False)
         elif self._current_model_id is not None:
             # Re-populate immediately if a model is already selected
-            src_index = self._proxy.mapToSource(
-                self._table.selectionModel().currentIndex()
-            )
-            r = src_index.row()
+            r = self._table.selectionModel().currentIndex().row()
             if r >= 0:
                 self._update_model_info_panel(self._current_model_id, self._row_data_at(r))
         return self._info_pane_enabled
@@ -2202,15 +2465,15 @@ class BrowserTab(QWidget):
     def show_model_ids(self, ids: list[int]) -> None:
         """Show only the models with the given IDs, ignoring all sidebar filters."""
         self._load_table(id_filters=ids)
-        if self._proxy.rowCount() > 0:
-            self._table.setCurrentIndex(self._proxy.index(0, 0))
+        if self._model.rowCount() > 0:
+            self._table.setCurrentIndex(self._model.index(0, 0))
 
     def show_duplicate_pairs(self, pairs: list) -> None:
         """Show duplicate pairs sorted by pair and color-coded with alternating colors."""
         all_ids = list({pid for pair in pairs for pid in pair})
         self._load_table(id_filters=all_ids, duplicate_pairs=pairs)
-        if self._proxy.rowCount() > 0:
-            self._table.setCurrentIndex(self._proxy.index(0, 0))
+        if self._model.rowCount() > 0:
+            self._table.setCurrentIndex(self._model.index(0, 0))
 
     def _load_table(
         self,
@@ -2256,14 +2519,6 @@ class BrowserTab(QWidget):
         Data is fetched in a background thread (TableLoaderWorker) and appended
         to the model in 200-row batches so the UI stays responsive during loading.
         """
-        self._stop_loader()
-        self._load_gen += 1
-        gen = self._load_gen
-
-        self._loading = True
-        self.loading_started.emit()
-        self._model.removeRows(0, self._model.rowCount())
-
         # ------------------------------------------------------------------
         # Build flat SELECT from models_view — the view pre-joins the six FK
         # lookup tables, so no outer-join construction is needed here.
@@ -2411,163 +2666,36 @@ class BrowserTab(QWidget):
                         pair_for_id[_pid] = _pi
         else:
             self._load_pair_colors = None
-            stmt = stmt.order_by(mv.c.title)
 
-        # Tags GROUP_CONCAT query — scoped to the same filtered model set as stmt.
-        _id_sub = sa_select(mv.c.id).select_from(mv)
-        if stmt.whereclause is not None:
-            _id_sub = _id_sub.where(stmt.whereclause)
-        tags_stmt = (
-            sa_select(_mt_global.c.model_id, func.group_concat(Tag.name, ", "))
-            .join(Tag, _mt_global.c.tag_id == Tag.id)
-            .where(_mt_global.c.model_id.in_(_id_sub))
-            .group_by(_mt_global.c.model_id)
-        )
-
-        # ------------------------------------------------------------------
-        # Start background worker — appends rows via _append_rows signal slot
-        # ------------------------------------------------------------------
-        worker = TableLoaderWorker(stmt, tags_stmt, pair_order, pair_for_id, parent=self)
-        self._table_loader = worker
-        worker.rows_ready.connect(
-            lambda rows, g=gen: self._append_rows(rows, g)
-        )
-        worker.finished.connect(
-            lambda n, g=gen: self._on_load_finished(n, g)
-        )
-        worker.start()
+        self.loading_started.emit()
+        self._loading = True
+        self._model.load(stmt, pair_order, pair_for_id, self._load_pair_colors)
 
     # ------------------------------------------------------------------
-    def _stop_loader(self) -> None:
-        """Stop any in-flight TableLoaderWorker gracefully."""
-        if self._table_loader is not None:
-            self._table_loader.stop()
-            self._table_loader = None
+    def _on_load_started(self) -> None:
+        self._loading = True
 
-    def _append_rows(self, rows: list, gen: int) -> None:
-        """Slot: receive a batch of raw tuples from TableLoaderWorker and build QStandardItem rows."""
-        if gen != self._load_gen:
-            return  # stale batch from a cancelled load
-
-        from app.ui.config_dialog import get_warn_row_bg_color, get_warn_row_fg_color
-        warn_bg   = QColor(get_warn_row_bg_color())
-        warn_fg   = QColor(get_warn_row_fg_color())
-        warn_font = QFont()
-        warn_font.setPointSize(16)
-        warn_font.setBold(True)
-        pair_colors = self._load_pair_colors
-
-        for (mid, title, creator, source, yr, mo, ap, presupports, warning,
-             archive_size, compression_rate, sequence, created_at,
-             sculptor_name, collection_name, subcollection_name, category_name,
-             release_name, scale_name, tags_str, pair_idx) in rows:
-
-            thumb_item = QStandardItem()
-            thumb_item.setData(mid, MODEL_ID_ROLE)
-            thumb_item.setEditable(False)
-
-            seq_str  = str(sequence) if sequence is not None else ""
-            seq_item = QStandardItem(seq_str)
-            seq_item.setEditable(True)
-            seq_item.setData(sequence, Qt.ItemDataRole.UserRole)
-
-            added_str  = created_at.strftime("%Y-%m-%d %H:%M") if created_at else ""
-            added_item = QStandardItem(added_str)
-            added_item.setEditable(False)
-
-            warning_item = QStandardItem("⚠" if warning else "")
-            warning_item.setEditable(False)
-            warning_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            if warning:
-                warning_item.setData(warning, Qt.ItemDataRole.ToolTipRole)
-                warning_item.setBackground(warn_bg)
-                warning_item.setForeground(warn_fg)
-                warning_item.setFont(warn_font)
-
-            raw_size   = archive_size if archive_size is not None else -1
-            size_item  = QStandardItem(_fmt_size(raw_size) if raw_size >= 0 else "")
-            size_item.setData(raw_size, Qt.ItemDataRole.UserRole)
-            size_item.setEditable(False)
-
-            cr = compression_rate
-            if cr and cr > 0:
-                comp_display = f"{1 / cr:.1f}x"
-                comp_sort    = cr
-            else:
-                comp_display = ""
-                comp_sort    = -1.0
-            comp_item = QStandardItem(comp_display)
-            comp_item.setData(comp_sort, Qt.ItemDataRole.UserRole)
-            comp_item.setEditable(False)
-            comp_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-
-            path_item = QStandardItem(ap or "")
-            path_item.setEditable(False)
-
-            row = [
-                thumb_item,
-                QStandardItem(title or ""),
-                QStandardItem(creator or ""),
-                QStandardItem(source or ""),
-                QStandardItem(format_release_date(yr, mo)),
-                QStandardItem(tags_str),
-                QStandardItem(sculptor_name or ""),
-                QStandardItem(collection_name or ""),
-                QStandardItem(subcollection_name or ""),
-                seq_item,
-                QStandardItem(release_name or ""),
-                path_item,
-                QStandardItem(scale_name or ""),
-                QStandardItem(presupports or ""),
-                added_item,
-                warning_item,
-                size_item,
-                QStandardItem(category_name or ""),
-                comp_item,
-            ]
-            if pair_colors is not None and pair_idx >= 0:
-                _color = pair_colors[pair_idx % 2]
-                for _it in row:
-                    _it.setBackground(_color)
-
-            self._model.appendRow(row)
-
-        self.model_count_changed.emit(self._model.rowCount())
-
-    def _on_load_finished(self, _total: int, gen: int) -> None:
-        """Slot: called when TableLoaderWorker has emitted all rows."""
-        if gen != self._load_gen:
-            return
+    def _on_load_finished_model(self, total: int) -> None:
         self._loading = False
-        self._table_loader = None
-        self.model_count_changed.emit(self._model.rowCount())
+        self.model_count_changed.emit(total)
 
-    # ------------------------------------------------------------------
-    def _on_item_changed(self, item: QStandardItem) -> None:
-        """Debounce cell edits; actual DB write is deferred to *_flush_pending_edits*."""
-        if self._loading:
-            return
-        col = item.column()
-        if col in (COL_THUMB, COL_ADDED, COL_WARNING, COL_FILESIZE, COL_COMPRESSION):
-            return
-        # Debounce: store the latest item for this cell and (re)start the timer.
-        self._pending_edits[(item.row(), col)] = item
+    def _on_cell_edited(self, row: int, col: int, text: str) -> None:
+        self._pending_edits[(row, col)] = text
         self._edit_timer.start()
 
     def _flush_pending_edits(self) -> None:
         """Write all debounced cell edits to the DB in a single pass."""
-        items = list(self._pending_edits.values())
+        edits = list(self._pending_edits.items())
         self._pending_edits.clear()
-        for item in items:
-            self._write_item(item)
+        for (row, col), text in edits:
+            self._write_cell(row, col, text)
 
-    def _write_item(self, item: QStandardItem) -> None:
+    def _write_cell(self, row: int, col: int, text: str) -> None:
         """Persist a single edited table cell to the database."""
-        col = item.column()
-        model_id = self._model.item(item.row(), COL_THUMB).data(MODEL_ID_ROLE)
+        model_id = self._model.model_id_for_row(row)
         if model_id is None:
             return
-        value = item.text().strip() or None
+        value = text.strip() or None
         with session_scope() as session:
             stl: STLModel = session.get(STLModel, model_id)
             if stl is None:
@@ -2683,7 +2811,7 @@ class BrowserTab(QWidget):
 
     # ------------------------------------------------------------------
     def _on_search(self, text: str) -> None:
-        self._proxy.setFilterFixedString(text)
+        self._model.set_search(text)
 
     def _on_filter_item_changed(self, item: QTreeWidgetItem, _col: int) -> None:
         """Called when a checkbox in the filter tree changes state."""
@@ -2986,25 +3114,27 @@ class BrowserTab(QWidget):
 
     def _row_data_at(self, r: int) -> dict:
         """Extract all displayable fields from table row *r* into a flat dict."""
+        def _d(col):
+            return self._model.data(self._model.index(r, col)) or ""
         return {
-            "title":         self._model.item(r, COL_TITLE).text(),
-            "creator":       self._model.item(r, COL_CREATOR).text(),
-            "source":        self._model.item(r, COL_SOURCE).text(),
-            "date":          self._model.item(r, COL_DATE).text(),
-            "tags":          self._model.item(r, COL_TAGS).text(),
-            "sculptor":      self._model.item(r, COL_SCULPTOR).text(),
-            "collection":    self._model.item(r, COL_COLLECTION).text(),
-            "subcollection": self._model.item(r, COL_SUBCOLLECTION).text(),
-            "category":      self._model.item(r, COL_CATEGORY).text(),
-            "release":       self._model.item(r, COL_RELEASE).text(),
-            "scale":         self._model.item(r, COL_SCALE).text(),
-            "presupports":   self._model.item(r, COL_PRESUPPORTED).text(),
-            "sequence":      self._model.item(r, COL_SEQUENCE).text(),
-            "path":          self._model.item(r, COL_PATH).text(),
-            "filesize":      self._model.item(r, COL_FILESIZE).text(),
-            "compression":   self._model.item(r, COL_COMPRESSION).text(),
-            "added":         self._model.item(r, COL_ADDED).text(),
-            "warning":       self._model.item(r, COL_WARNING).data(Qt.ItemDataRole.ToolTipRole) or "",
+            "title":         _d(COL_TITLE),
+            "creator":       _d(COL_CREATOR),
+            "source":        _d(COL_SOURCE),
+            "date":          _d(COL_DATE),
+            "tags":          _d(COL_TAGS),
+            "sculptor":      _d(COL_SCULPTOR),
+            "collection":    _d(COL_COLLECTION),
+            "subcollection": _d(COL_SUBCOLLECTION),
+            "category":      _d(COL_CATEGORY),
+            "release":       _d(COL_RELEASE),
+            "scale":         _d(COL_SCALE),
+            "presupports":   _d(COL_PRESUPPORTED),
+            "sequence":      _d(COL_SEQUENCE),
+            "path":          _d(COL_PATH),
+            "filesize":      _d(COL_FILESIZE),
+            "compression":   _d(COL_COMPRESSION),
+            "added":         _d(COL_ADDED),
+            "warning":       self._model.data(self._model.index(r, COL_WARNING), Qt.ItemDataRole.ToolTipRole) or "",
         }
 
     def _on_current_changed(self, current, previous) -> None:
@@ -3013,9 +3143,8 @@ class BrowserTab(QWidget):
             self._clear_thumbnails()
             self._creator_panel.setVisible(False)
             return
-        src_index = self._proxy.mapToSource(current)
-        r = src_index.row()
-        model_id = self._model.item(r, COL_THUMB).data(MODEL_ID_ROLE)
+        r = current.row()
+        model_id = self._model.model_id_for_row(r)
         if model_id is not None:
             self._current_model_id = model_id
             self._show_thumbnails(model_id)
@@ -3112,10 +3241,7 @@ class BrowserTab(QWidget):
         dlg = CreatorEditorDialog(creator_name, parent=self)
         if dlg.exec() and self._current_model_id is not None and self._info_pane_enabled:
             self._panel_cache.pop(self._current_model_id, None)
-            src_index = self._proxy.mapToSource(
-                self._table.selectionModel().currentIndex()
-            )
-            r = src_index.row()
+            r = self._table.selectionModel().currentIndex().row()
             if r >= 0:
                 self._update_model_info_panel(self._current_model_id, self._row_data_at(r))
 
@@ -3128,22 +3254,18 @@ class BrowserTab(QWidget):
     def _on_double_click(self, index) -> None:
         if index.column() != COL_PATH:
             return  # let the cell editor handle it
-        src_index = self._proxy.mapToSource(index)
-        model_id = self._model.item(src_index.row(), COL_THUMB).data(MODEL_ID_ROLE)
+        model_id = self._model.model_id_for_row(index.row())
         if model_id is not None:
             self._open_editor(model_id)
 
     def _on_table_click(self, index) -> None:
         if index.column() != COL_WARNING:
             return
-        src_index = self._proxy.mapToSource(index)
-        warning_item = self._model.item(src_index.row(), COL_WARNING)
-        if not warning_item or not warning_item.text():
-            return
-        warning_text = warning_item.data(Qt.ItemDataRole.ToolTipRole) or ""
+        r = index.row()
+        warning_text = self._model.data(self._model.index(r, COL_WARNING), Qt.ItemDataRole.ToolTipRole) or ""
         if not warning_text:
             return
-        archive_path = self._model.item(src_index.row(), COL_PATH).text()
+        archive_path = self._model.data(self._model.index(r, COL_PATH)) or ""
         self._show_warning_detail(archive_path, warning_text)
 
     def _show_warning_detail(self, archive_path: str, warning_text: str) -> None:
@@ -3237,7 +3359,7 @@ class BrowserTab(QWidget):
         indexes = self._table.selectedIndexes()
         if not indexes:
             return
-        src_row = self._proxy.mapToSource(indexes[0]).row()
+        src_row = indexes[0].row()
         self._open_containing_folder(src_row)
 
     def _show_files_kb(self) -> None:
@@ -3246,12 +3368,10 @@ class BrowserTab(QWidget):
             self._show_files(ids[0])
 
     def _selected_model_ids(self) -> list[int]:
-        rows = {self._proxy.mapToSource(idx).row()
-                for idx in self._table.selectedIndexes()}
+        rows = {idx.row() for idx in self._table.selectedIndexes()}
         return [
-            self._model.item(r, COL_THUMB).data(MODEL_ID_ROLE)
-            for r in sorted(rows)
-            if self._model.item(r, COL_THUMB) is not None
+            mid for r in sorted(rows)
+            if (mid := self._model.model_id_for_row(r)) is not None
         ]
 
     def _save_header_state(self) -> None:
@@ -3312,8 +3432,7 @@ class BrowserTab(QWidget):
         index = self._table.indexAt(pos)
         if not index.isValid():
             return
-        src_index = self._proxy.mapToSource(index)
-        model_id = self._model.item(src_index.row(), COL_THUMB).data(MODEL_ID_ROLE)
+        model_id = self._model.model_id_for_row(index.row())
 
         selected_ids = self._selected_model_ids()
 
@@ -3355,7 +3474,7 @@ class BrowserTab(QWidget):
         edit_scales_act = None
         edit_creator_act = None
         edit_authors_act = None
-        src_col = self._proxy.mapToSource(index).column()
+        src_col = index.column()
         if src_col == COL_CREATOR:
             menu.addSeparator()
             edit_creator_act = menu.addAction(
@@ -3417,7 +3536,7 @@ class BrowserTab(QWidget):
         if action == show_files_act:
             self._show_files(model_id)
         elif action == open_folder_act:
-            self._open_containing_folder(src_index.row())
+            self._open_containing_folder(index.row())
         elif action == edit_act:
             self._open_editor(model_id)
         elif action == mass_act:
@@ -3449,7 +3568,7 @@ class BrowserTab(QWidget):
         elif edit_scales_act and action == edit_scales_act:
             self._open_scale_editor()
         elif edit_creator_act and action == edit_creator_act:
-            creator_name = self._model.item(src_index.row(), COL_CREATOR).text()
+            creator_name = self._model.data(self._model.index(index.row(), COL_CREATOR)) or ""
             if creator_name:
                 self._open_creator_editor(creator_name)
         elif edit_authors_act and action == edit_authors_act:
@@ -3460,7 +3579,7 @@ class BrowserTab(QWidget):
         FileListDialog(model_id, parent=self).exec()
 
     def _open_containing_folder(self, source_row: int) -> None:
-        archive_path = self._model.item(source_row, COL_PATH).text()
+        archive_path = self._model.data(self._model.index(source_row, COL_PATH)) or ""
         if not archive_path:
             return
         folder = Path(archive_path).parent
@@ -4083,14 +4202,7 @@ class BrowserTab(QWidget):
 
     def show_image_grid(self) -> None:
         """Open an image grid for all models currently visible in the table."""
-        model_ids = []
-        for proxy_row in range(self._proxy.rowCount()):
-            src_row = self._proxy.mapToSource(self._proxy.index(proxy_row, 0)).row()
-            item = self._model.item(src_row, COL_THUMB)
-            if item is not None:
-                mid = item.data(MODEL_ID_ROLE)
-                if mid is not None:
-                    model_ids.append(mid)
+        model_ids = self._model.all_visible_ids()
         from app.ui.image_grid_dialog import ImageGridDialog
         dlg = ImageGridDialog(model_ids, parent=self)
         dlg.show_selection_requested.connect(self.show_model_ids)
