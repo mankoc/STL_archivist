@@ -18,7 +18,11 @@ from app.database.db import session_scope
 from app.database.models import Image as DBImage, STLModel
 from app.utils.thumbnailer import pixmap_from_path
 from app.utils import image_embedding as _emb
-from app.ui.find_content_duplicates_dialog import compute_dhash_from_jpeg, format_dhash, parse_dhash
+import numpy as np
+from app.ui.find_content_duplicates_dialog import (
+    compute_dhash_from_jpeg, format_dhash, parse_dhash,
+    _hamming128_batch,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +30,6 @@ _THUMB_SIZE       = 130
 _CELL_WIDTH       = 156   # thumb + padding
 _COLS             = 4
 _MAX_DIST_DEFAULT = 16
-
-
-def _hamming(a: int, b: int) -> int:
-    return bin(a ^ b).count("1")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -364,9 +364,13 @@ class FindByImageDialog(QDialog):
         """Return (distance, model_id, title, archive, thumbnail_path) sorted by distance.
 
         Deduplicates by model_id — only the best-matching image per model is kept.
+        Uses vectorised numpy Hamming so the distance computation is a single
+        C-level call rather than a Python loop over all rows.
         """
         query_hash = self._query_hash
-        best: dict[int, tuple[int, str, str, Optional[str]]] = {}
+        _U64 = (1 << 64) - 1
+        qlo = np.array([query_hash & _U64], dtype=np.uint64)
+        qhi = np.array([query_hash >> 64],  dtype=np.uint64)
 
         with session_scope() as session:
             rows = (
@@ -382,49 +386,80 @@ class FindByImageDialog(QDialog):
                 .all()
             )
 
+        # Parse stored hashes, skipping outdated (16-char) entries.
         outdated = 0
+        valid_rows: list = []
+        lo_list: list[int] = []
+        hi_list: list[int] = []
         for model_id, dhash_hex, thumb_path, title, archive_path in rows:
             h = parse_dhash(dhash_hex)
             if h is None:
                 outdated += 1
                 continue
-            dist = _hamming(query_hash, h)
-            if dist <= max_dist:
-                if model_id not in best or dist < best[model_id][0]:
-                    archive_name = (
-                        Path(archive_path).name if archive_path else ""
-                    )
-                    best[model_id] = (dist, title or "", archive_name, thumb_path)
+            lo_list.append(h & _U64)
+            hi_list.append(h >> 64)
+            valid_rows.append((model_id, thumb_path, title or "", archive_path))
 
         self._dhash_outdated = outdated
+        if not valid_rows:
+            return []
 
-        out = [
-            (d, mid, t, arch, tp)
-            for mid, (d, t, arch, tp) in best.items()
-        ]
+        lo_arr = np.array(lo_list, dtype=np.uint64)
+        hi_arr = np.array(hi_list, dtype=np.uint64)
+        dist_arr = _hamming128_batch(qlo, qhi, lo_arr, hi_arr)[0]  # shape (N,)
+
+        best: dict[int, tuple[int, str, str, Optional[str]]] = {}
+        for i, (model_id, thumb_path, title, archive_path) in enumerate(valid_rows):
+            dist = int(dist_arr[i])
+            if dist <= max_dist:
+                if model_id not in best or dist < best[model_id][0]:
+                    archive_name = Path(archive_path).name if archive_path else ""
+                    best[model_id] = (dist, title, archive_name, thumb_path)
+
+        out = [(d, mid, t, arch, tp) for mid, (d, t, arch, tp) in best.items()]
         out.sort(key=lambda x: x[0])
         return out
 
     def _find_matches_embed(
         self, threshold: float
     ) -> list[tuple[float, int, str, str, Optional[str]]]:
-        """Return (similarity, model_id, title, archive, thumbnail_path), best per model."""
+        """Return (similarity, model_id, title, archive, thumbnail_path), best per model.
+
+        Processes embeddings in batches so peak memory is O(BATCH × D) rather
+        than O(N × D).  Each batch is stacked into a small matrix, multiplied
+        with the query vector (BLAS, multi-core), then immediately discarded.
+        """
         if self._query_raw is None:
             return []
         if self._query_embed is None:
             self._query_embed = _emb.embed_jpeg(self._query_raw)
         if self._query_embed is None:
             return []
-        import numpy as np
 
         q = np.asarray(self._query_embed, dtype=np.float32)
         qn = float(np.linalg.norm(q))
         if qn > 0:
             q = q / qn
 
+        from app.ui.config_dialog import get_embed_search_batch_size
+        BATCH = get_embed_search_batch_size()
+
         best: dict[int, tuple[float, str, str, Optional[str]]] = {}
+
+        def _flush(batch_vecs: list, batch_meta: list) -> None:
+            if not batch_vecs:
+                return
+            M = np.stack(batch_vecs, axis=0)  # (B, D) — new contiguous copy
+            sims = M @ q                       # (B,)   — BLAS, uses all cores
+            for i, (model_id, thumb_path, title, archive_path) in enumerate(batch_meta):
+                sim = float(sims[i])
+                if sim >= threshold:
+                    if model_id not in best or sim > best[model_id][0]:
+                        archive_name = Path(archive_path).name if archive_path else ""
+                        best[model_id] = (sim, title, archive_name, thumb_path)
+
         with session_scope() as session:
-            rows = (
+            query = (
                 session.query(
                     DBImage.model_id,
                     DBImage.embedding,
@@ -435,18 +470,24 @@ class FindByImageDialog(QDialog):
                 .join(STLModel, DBImage.model_id == STLModel.id)
                 .filter(DBImage.embedding.isnot(None))
                 .filter(DBImage.embedding_model == _emb.EMBED_MODEL_ID)
-                .all()
+                .yield_per(BATCH)
             )
 
-        for model_id, blob, thumb_path, title, archive_path in rows:
-            v = _emb.from_blob(blob)
-            if v is None or v.size != q.size:
-                continue
-            sim = float(q @ v)
-            if sim >= threshold:
-                if model_id not in best or sim > best[model_id][0]:
-                    archive_name = Path(archive_path).name if archive_path else ""
-                    best[model_id] = (sim, title or "", archive_name, thumb_path)
+            batch_vecs: list = []
+            batch_meta: list = []
+
+            for model_id, blob, thumb_path, title, archive_path in query:
+                v = _emb.from_blob(blob)
+                if v is None or v.size != q.size:
+                    continue
+                batch_vecs.append(v)
+                batch_meta.append((model_id, thumb_path, title or "", archive_path))
+                if len(batch_vecs) == BATCH:
+                    _flush(batch_vecs, batch_meta)
+                    batch_vecs = []
+                    batch_meta = []
+
+            _flush(batch_vecs, batch_meta)
 
         out = [(s, mid, t, arch, tp) for mid, (s, t, arch, tp) in best.items()]
         out.sort(key=lambda x: -x[0])

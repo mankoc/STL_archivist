@@ -353,6 +353,8 @@ class MetadataSidecarDialog(QDialog):
         if self._worker is not None:
             self._worker.deleteLater()
         self._worker = None
+        from app.utils.sound import play_notification
+        play_notification("sidecar")
 
     # ------------------------------------------------------------------
     def closeEvent(self, event):

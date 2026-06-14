@@ -175,6 +175,8 @@ class BackupRestoreDialog(QDialog):
         self._btn_restore.setEnabled(True)
         self._close_btn.setEnabled(True)
         self._worker = None
+        from app.utils.sound import play_notification
+        play_notification("backup")
         if success:
             QMessageBox.information(self, self.tr("Done"), msg)
         else:

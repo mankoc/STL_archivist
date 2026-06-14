@@ -810,3 +810,5 @@ class CrawlerTab(QWidget):
         self._remove_btn.setEnabled(True)
         self._worker = None
         self.crawl_finished.emit()
+        from app.utils.sound import play_notification
+        play_notification("crawl")

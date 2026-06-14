@@ -343,6 +343,8 @@ class FindDuplicatesDialog(QDialog):
         self._find_btn.setEnabled(True)
         self._stop_btn.setEnabled(False)
         self._groups = groups
+        from app.utils.sound import play_notification
+        play_notification("duplicates")
 
         if not groups:
             self._show_all_btn.setEnabled(False)

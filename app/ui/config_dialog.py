@@ -512,6 +512,45 @@ def get_hotkeys() -> dict[str, str]:
     return {k: stored.get(k, v) for k, v in HOTKEY_DEFAULTS.items()}
 
 
+# ── Notification settings ─────────────────────────────────────────────────────
+
+def get_notifications_enabled() -> bool:
+    return bool(_load_library_settings().get("notifications_enabled", True))
+
+
+def get_notification_sound() -> str:
+    """Return ``"beep"`` (system beep) or ``"custom"`` (play a file)."""
+    return str(_load_library_settings().get("notification_sound", "beep"))
+
+
+def get_notification_sound_file() -> str:
+    return str(_load_library_settings().get("notification_sound_file", ""))
+
+
+def get_notify_crawl() -> bool:
+    return bool(_load_library_settings().get("notify_crawl", True))
+
+
+def get_notify_duplicates() -> bool:
+    return bool(_load_library_settings().get("notify_duplicates", True))
+
+
+def get_notify_maintenance() -> bool:
+    return bool(_load_library_settings().get("notify_maintenance", True))
+
+
+def get_notify_sidecar() -> bool:
+    return bool(_load_library_settings().get("notify_sidecar", True))
+
+
+def get_notify_backup() -> bool:
+    return bool(_load_library_settings().get("notify_backup", True))
+
+
+def get_embed_search_batch_size() -> int:
+    return int(_load_library_settings().get("embed_search_batch_size", 1000))
+
+
 def open_folder_with_file_manager(folder: str) -> None:
     """Open *folder* in the configured file manager."""
     from PyQt6.QtWidgets import QMessageBox
@@ -696,7 +735,7 @@ class ConfigDialog(QDialog):
         # Left: section tree
         # Page indices must match the order pages are added to self._stack below.
         # 0=Database  1=Crawler  2=Warnings(child)  3=File writing  4=Appearance
-        # 5=Sidecar(child)  6=Debug  7=Browser  8=Hotkeys  9=Language
+        # 5=Sidecar(child)  6=Debug  7=Browser  8=Hotkeys  9=Language  10=Notifications
         self._section_tree = QTreeWidget()
         self._section_tree.setFixedWidth(155)
         self._section_tree.setHeaderHidden(True)
@@ -712,16 +751,17 @@ class ConfigDialog(QDialog):
             item.setData(0, Qt.ItemDataRole.UserRole, page_idx)
             return item
 
-        _item(self._section_tree, self.tr("Database"),     sp.SP_DriveHDIcon,            0)
-        _item(self._section_tree, self.tr("Language"),     sp.SP_DialogHelpButton,       9)
+        _item(self._section_tree, self.tr("Database"),      sp.SP_DriveHDIcon,            0)
+        _item(self._section_tree, self.tr("Language"),      sp.SP_DialogHelpButton,       9)
         crawler_item = _item(self._section_tree, self.tr("Crawler"), sp.SP_FileDialogDetailedView, 1)
-        _item(crawler_item,            self.tr("Warnings"), sp.SP_MessageBoxWarning,      2)
+        _item(crawler_item,            self.tr("Warnings"),  sp.SP_MessageBoxWarning,      2)
         fw_item = _item(self._section_tree, self.tr("File writing"), sp.SP_DesktopIcon,   3)
-        _item(fw_item,                 self.tr("Sidecar"),  sp.SP_DialogSaveButton,       5)
-        _item(self._section_tree, self.tr("Browser"),      sp.SP_FileDialogListView,      7)
-        _item(self._section_tree, self.tr("Appearance"),   sp.SP_TitleBarNormalButton,    4)
-        _item(self._section_tree, self.tr("Hotkeys"),      sp.SP_MediaVolumeMuted,        8)
-        _item(self._section_tree, self.tr("Debug"),        sp.SP_MessageBoxCritical,      6)
+        _item(fw_item,                 self.tr("Sidecar"),   sp.SP_DialogSaveButton,       5)
+        _item(self._section_tree, self.tr("Browser"),       sp.SP_FileDialogListView,      7)
+        _item(self._section_tree, self.tr("Appearance"),    sp.SP_TitleBarNormalButton,    4)
+        _item(self._section_tree, self.tr("Hotkeys"),       sp.SP_MediaVolumeMuted,        8)
+        _item(self._section_tree, self.tr("Notifications"), sp.SP_MediaVolume,            10)
+        _item(self._section_tree, self.tr("Debug"),         sp.SP_MessageBoxCritical,      6)
 
         crawler_item.setExpanded(True)
         fw_item.setExpanded(True)
@@ -746,6 +786,7 @@ class ConfigDialog(QDialog):
         self._stack.addWidget(self._build_browser_config_page())  # 7
         self._stack.addWidget(self._build_hotkeys_page())         # 8
         self._stack.addWidget(self._build_language_page())        # 9
+        self._stack.addWidget(self._build_notifications_page())   # 10
 
         self._section_tree.setCurrentItem(
             self._section_tree.topLevelItem(0)
@@ -1060,6 +1101,21 @@ class ConfigDialog(QDialog):
                 self.tr("<small>Logs the duration of every SQL statement. "
                 "Statements taking 100 ms or longer are also written at WARNING level "
                 "for easy <tt>grep</tt>. Takes effect immediately without restarting.</small>")
+            ),
+        )
+
+        self._embed_search_batch_spin = QSpinBox()
+        self._embed_search_batch_spin.setRange(100, 10000)
+        self._embed_search_batch_spin.setSingleStep(100)
+        self._embed_search_batch_spin.setSuffix(self.tr(" rows"))
+        form.addRow(self.tr("Embedding search batch:"), self._embed_search_batch_spin)
+        form.addRow(
+            "",
+            QLabel(
+                self.tr("<small>Number of image embeddings scored per batch during "
+                "<i>Find by Image</i> (CLIP). "
+                "Lower values use less RAM; higher values improve BLAS throughput. "
+                "Default: 1000.</small>")
             ),
         )
 
@@ -1731,6 +1787,97 @@ class ConfigDialog(QDialog):
         self._theme_combo.setCurrentText(name)
 
     # ------------------------------------------------------------------
+    def _build_notifications_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+
+        # ── Sound settings ────────────────────────────────────────────────────
+        sound_group = QGroupBox(self.tr("Sound"))
+        sound_form = QFormLayout(sound_group)
+
+        self._notif_enabled_check = QCheckBox(
+            self.tr("Enable completion notifications")
+        )
+        sound_form.addRow("", self._notif_enabled_check)
+
+        self._notif_sound_combo = QComboBox()
+        self._notif_sound_combo.addItem(self.tr("System beep"), "beep")
+        self._notif_sound_combo.addItem(self.tr("Custom sound file…"), "custom")
+        self._notif_sound_combo.currentIndexChanged.connect(
+            self._update_notif_file_row
+        )
+        sound_form.addRow(self.tr("Sound:"), self._notif_sound_combo)
+
+        file_row = QHBoxLayout()
+        self._notif_file_edit = QLineEdit()
+        self._notif_file_edit.setPlaceholderText(
+            self.tr("Path to a .wav or .mp3 file")
+        )
+        file_row.addWidget(self._notif_file_edit)
+
+        browse_sound_btn = QPushButton(self.tr("Browse…"))
+        browse_sound_btn.clicked.connect(self._browse_notification_sound)
+        file_row.addWidget(browse_sound_btn)
+
+        test_btn = QPushButton(self.tr("Test"))
+        test_btn.clicked.connect(self._test_notification_sound)
+        file_row.addWidget(test_btn)
+
+        self._notif_file_row_label = QLabel(self.tr("File:"))
+        self._notif_file_row_widget = QWidget()
+        self._notif_file_row_widget.setLayout(file_row)
+        sound_form.addRow(self._notif_file_row_label, self._notif_file_row_widget)
+
+        layout.addWidget(sound_group)
+
+        # ── Per-operation toggles ─────────────────────────────────────────────
+        ops_group = QGroupBox(self.tr("Notify on completion of:"))
+        ops_layout = QVBoxLayout(ops_group)
+
+        self._notify_crawl_check      = QCheckBox(self.tr("Crawl"))
+        self._notify_dupes_check      = QCheckBox(self.tr("Duplicate search"))
+        self._notify_maint_check      = QCheckBox(self.tr("Database maintenance"))
+        self._notify_sidecar_check    = QCheckBox(self.tr("Sidecar generation"))
+        self._notify_backup_check     = QCheckBox(self.tr("Backup / Restore"))
+
+        for chk in (
+            self._notify_crawl_check,
+            self._notify_dupes_check,
+            self._notify_maint_check,
+            self._notify_sidecar_check,
+            self._notify_backup_check,
+        ):
+            ops_layout.addWidget(chk)
+
+        layout.addWidget(ops_group)
+        layout.addStretch()
+        self._update_notif_file_row()
+        return page
+
+    def _update_notif_file_row(self) -> None:
+        is_custom = self._notif_sound_combo.currentData() == "custom"
+        self._notif_file_row_label.setVisible(is_custom)
+        self._notif_file_row_widget.setVisible(is_custom)
+
+    def _browse_notification_sound(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            self.tr("Select Sound File"),
+            str(Path(self._notif_file_edit.text()).parent)
+            if self._notif_file_edit.text()
+            else str(Path.home()),
+            self.tr("Audio files (*.wav *.mp3 *.ogg *.oga *.flac);;All files (*)"),
+        )
+        if path:
+            self._notif_file_edit.setText(path)
+
+    def _test_notification_sound(self) -> None:
+        from app.utils.sound import play_test_sound
+        play_test_sound(
+            self._notif_sound_combo.currentData() or "beep",
+            self._notif_file_edit.text().strip(),
+        )
+
     def _load(self) -> None:
         """Populate all form fields from current QSettings / library settings."""
         self._data_dir_edit.setText(get_data_dir())
@@ -1825,8 +1972,20 @@ class ConfigDialog(QDialog):
         self._ai_batch_size_spin.setEnabled(ai_embed_enabled)
         self._refresh_clip_dl_button()
 
+        self._notif_enabled_check.setChecked(get_notifications_enabled())
+        notif_sound_idx = self._notif_sound_combo.findData(get_notification_sound())
+        self._notif_sound_combo.setCurrentIndex(notif_sound_idx if notif_sound_idx >= 0 else 0)
+        self._notif_file_edit.setText(get_notification_sound_file())
+        self._update_notif_file_row()
+        self._notify_crawl_check.setChecked(get_notify_crawl())
+        self._notify_dupes_check.setChecked(get_notify_duplicates())
+        self._notify_maint_check.setChecked(get_notify_maintenance())
+        self._notify_sidecar_check.setChecked(get_notify_sidecar())
+        self._notify_backup_check.setChecked(get_notify_backup())
+
         self._debug_menu_check.setChecked(get_debug_menu_enabled())
         self._logging_enabled_check.setChecked(get_logging_enabled())
+        self._embed_search_batch_spin.setValue(get_embed_search_batch_size())
         from PyQt6.QtCore import QSettings as _QSettings
         self._sql_profiling_check.setChecked(
             _QSettings().value("debug/sql_profiling", False, type=bool)
@@ -1887,8 +2046,9 @@ class ConfigDialog(QDialog):
                 "metadata_thumbnails": self._metadata_thumbnails_check.isChecked(),
                 "store_stl_file_list": self._store_stl_list_check.isChecked(),
                 "recurse_subdirs": self._recurse_subdirs_check.isChecked(),
-                "debug_menu_enabled": self._debug_menu_check.isChecked(),
-                "logging_enabled":    self._logging_enabled_check.isChecked(),
+                "debug_menu_enabled":       self._debug_menu_check.isChecked(),
+                "logging_enabled":          self._logging_enabled_check.isChecked(),
+                "embed_search_batch_size":  self._embed_search_batch_spin.value(),
                 "allow_file_delete": self._allow_file_delete_check.isChecked(),
                 "use_trash_folder": self._use_trash_folder_check.isChecked(),
                 "trash_folder_path": self._trash_folder_edit.text().strip(),
@@ -1904,6 +2064,14 @@ class ConfigDialog(QDialog):
                     action_id: editor.keySequence().toString()
                     for action_id, editor in self._hotkey_edits.items()
                 },
+                "notifications_enabled":   self._notif_enabled_check.isChecked(),
+                "notification_sound":      self._notif_sound_combo.currentData(),
+                "notification_sound_file": self._notif_file_edit.text().strip(),
+                "notify_crawl":            self._notify_crawl_check.isChecked(),
+                "notify_duplicates":       self._notify_dupes_check.isChecked(),
+                "notify_maintenance":      self._notify_maint_check.isChecked(),
+                "notify_sidecar":          self._notify_sidecar_check.isChecked(),
+                "notify_backup":           self._notify_backup_check.isChecked(),
             },
             data_dir=data_dir,
         )
