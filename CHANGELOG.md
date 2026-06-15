@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026.24 — 2026-06-15
+
+- **AI Tagging**: new right-click "AI Tagging…" option (any column, single row) opens a dialog that uses Qwen2-VL-2B-Instruct to suggest tags and fill all editable metadata fields (title, creator, sculptor, category, scale, source, year, description). Each suggestion is editable inline; tags appear as removable pill buttons. OK merges suggestions into the database without overwriting existing tags.
+- AI packages and the Qwen2-VL model weights (~4.8 GB total) are downloaded on first use into `<data_dir>/ai_packages/` and `<data_dir>/ai_cache/` — no system install or admin rights required. A first-run setup dialog shows download progress.
+- Works on Windows without a GPU (CPU inference via PyTorch CPU wheel); if an NVIDIA GPU is present it is used automatically.
+- Packaged `.exe` bundles `pip` so the download-and-install flow works inside the frozen app with no Python on the host system.
+
 ## 2026.22 — 2026-05-30
 
 - AI image similarity (optional): images can now carry a learned **CLIP embedding** (ONNX, CPU) for semantic matching of the same model across different renders/angles/colours. New **Database Maintenance → Compute Image Embeddings** button, plus an **AI embedding (CLIP)** method selector in *Find by Image* and *Find Duplicate Archives → Images*. Optional and dependency-light: disabled gracefully until `onnxruntime` + a CLIP ONNX model are present.
