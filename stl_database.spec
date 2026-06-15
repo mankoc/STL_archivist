@@ -8,13 +8,10 @@ datas = [
 ]
 datas += collect_data_files('qt_material')
 datas += collect_data_files('onnxruntime')
+datas += collect_data_files('transformers')
+datas += collect_data_files('tokenizers')
 
-# Bundle pip so install_ai_packages() can run inside the frozen .exe.
-# (AI tagging packages are NOT included in the build — they are downloaded
-#  on first use into <data_dir>/ai_packages/ via AISetupDialog.)
-_pip_d, _pip_b, _pip_h = collect_all('pip')
-datas    += _pip_d
-binaries = collect_dynamic_libs('onnxruntime') + _pip_b
+binaries = collect_dynamic_libs('onnxruntime')
 
 hiddenimports = [
     'sqlalchemy.dialects.sqlite',
@@ -33,15 +30,19 @@ hiddenimports = [
     'onnxruntime.capi.onnxruntime_pybind11_state',
     'numpy',
     'numpy.core._multiarray_umath',
-    # AI tagging modules — imported via deferred/conditional imports that
-    # PyInstaller's static analyser can miss.
+    # AI tagger runtime (raw onnxruntime sessions, no PyTorch or optimum needed)
+    'transformers',
+    'transformers.models.qwen2_vl',
+    'transformers.models.qwen2_vl.image_processing_qwen2_vl',
+    'tokenizers',
+    # App modules
     'app.ui.ai_tagger_dialog',
     'app.ui.ai_setup_dialog',
     'app.utils.ai_runtime',
 ]
 hiddenimports += collect_submodules('sqlalchemy.dialects.sqlite')
 hiddenimports += collect_submodules('onnxruntime')
-hiddenimports += _pip_h
+hiddenimports += collect_submodules('transformers.models.qwen2_vl')
 
 a = Analysis(
     ['main.py'],
@@ -56,13 +57,9 @@ a = Analysis(
         },
     },
     runtime_hooks=[],
-    # AI tagging packages are NOT bundled — they are downloaded on first use
-    # by AISetupDialog into <data_dir>/ai_packages/.  Listing them here
-    # prevents accidental bundling when building on a dev machine that already
-    # has them installed.
     excludes=[
         'tkinter', 'matplotlib', 'scipy',
-        'torch', 'torchvision', 'transformers', 'accelerate', 'qwen_vl_utils',
+        'torch', 'torchvision', 'accelerate', 'qwen_vl_utils', 'optimum',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,

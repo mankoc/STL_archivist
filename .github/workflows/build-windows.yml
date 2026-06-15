@@ -39,18 +39,21 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller pyinstaller-hooks-contrib
-          # Replace CPU-only onnxruntime with DirectML variant so the packaged
-          # exe uses the Windows DirectML GPU backend (NVIDIA / AMD / Intel)
-          # without requiring a separate CUDA installation on the user's machine.
+          # Swap onnxruntime for DirectML variant: works with NVIDIA / AMD / Intel
+          # via Windows-native DirectML API — no CUDA install required on user machines.
           pip uninstall -y onnxruntime
           pip install onnxruntime-directml
 
-      - name: Verify pip is importable for PyInstaller
-        # collect_all('pip') in the spec bundles pip inside the exe so that
-        # AISetupDialog can install AI packages (torch, transformers, Qwen2-VL)
-        # into <data_dir>/ai_packages/ on the user's machine at first use.
-        # This step fails fast if pip's metadata is missing.
-        run: python -c "import pip; from pip._internal.cli.main import main; print(f'pip {pip.__version__} — bundling OK')"
+      - name: Verify AI runtime imports
+        run: |
+          python -c "
+          import onnxruntime as ort
+          print('onnxruntime', ort.__version__, '| providers:', ort.get_available_providers())
+          from transformers import AutoProcessor
+          from transformers.models.qwen2_vl.image_processing_qwen2_vl import Qwen2VLImageProcessor
+          import numpy as np
+          print('transformers + numpy OK')
+          "
 
       - name: Build executable
         run: pyinstaller stl_database.spec --noconfirm
