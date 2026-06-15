@@ -26,171 +26,28 @@ from app.database.models import STLModel, Tag, Category, Sculptor, Scale
 from app.utils.thumbnailer import get_thumbnail_bytes
 
 
-QWEN_ONNX_DIR = "qwen2vl_onnx"   # subdir inside ai_cache written by tools/create_ai_model.py
-MAX_IMAGE_SIDE = 448              # PIL pre-resize limit per image before ONNX processing
+QWEN_MODEL = "Qwen/Qwen2-VL-2B-Instruct"
+MAX_VISUAL_TOKENS = 600
+PATCH = 28
 
 _VALID_SOURCES = {"patreon", "kickstarter", "myminifactory", "unknown"}
 
-# Qwen2-VL token IDs (fixed for this model family)
-_IMAGE_TOKEN_ID        = 151655   # <|image_pad|>
-_VISION_START_TOKEN_ID = 151652   # <|vision_start|>
-
-# ONNX model constants (Qwen2-VL-2B)
-_NUM_LAYERS   = 28
-_NUM_KV_HEADS = 2
-_HEAD_DIM     = 128
-
-# Preprocessing constants (mirrors Qwen2VLImageProcessor defaults, no torch needed)
-_PATCH_SIZE     = 14
-_TEMPORAL_PATCH = 2
-_MERGE_SIZE     = 2
-_MIN_PIXELS     = 3_136        # 56 × 56
-_MAX_PIXELS     = 12_845_056   # 1280 × 28 × 28
-_IMG_MEAN = (0.48145466, 0.4578275, 0.40821073)
-_IMG_STD  = (0.26862954, 0.26130258, 0.27577711)
-
-# Module-level session cache: reloaded when provider or variant changes
-_cached_sessions: dict | None = None
-_cached_tokenizer = None
-_cached_provider: str | None = None
-_cached_variant:  str | None = None
+# Module-level model cache: keyed by device string.
+# Keeping the model alive here prevents CUDA tensor destructors from running
+# off the main thread (which causes glibc double-free / heap corruption).
+_cached_model = None
+_cached_proc  = None
+_cached_device: str | None = None
 
 
 # ---------------------------------------------------------------------------
-# Helpers shared between prompt building and the inference thread
+# Prompt helpers
 # ---------------------------------------------------------------------------
 
-def _detect_variant(onnx_dir: "Path", is_cpu: bool) -> Optional[str]:
-    """Return the first available ONNX variant that suits the provider."""
-    gpu_order = ("fp16", "q4f16", "int8", "q4")
-    cpu_order = ("q4", "int8", "q4f16", "fp16")
-    for v in (cpu_order if is_cpu else gpu_order):
-        if (onnx_dir / f"vision_encoder_{v}.onnx").exists():
-            return v
-    return None
-
-
-def _smart_resize(h: int, w: int) -> tuple[int, int]:
-    """Resize dimensions to be multiples of patch_size*merge_size within pixel bounds."""
-    import math
-    factor = _PATCH_SIZE * _MERGE_SIZE   # 28
-    if min(h, w) == 0 or max(h, w) / min(h, w) > 200:
-        raise ValueError(f"Image dimensions {h}×{w} have extreme or zero aspect ratio")
-    nh = round(h / factor) * factor
-    nw = round(w / factor) * factor
-    if nh * nw > _MAX_PIXELS:
-        beta = math.sqrt((h * w) / _MAX_PIXELS)
-        nh = max(factor, math.floor(h / beta / factor) * factor)
-        nw = max(factor, math.floor(w / beta / factor) * factor)
-    elif nh * nw < _MIN_PIXELS:
-        beta = math.sqrt(_MIN_PIXELS / (h * w))
-        nh = math.ceil(h * beta / factor) * factor
-        nw = math.ceil(w * beta / factor) * factor
-    return nh, nw
-
-
-def _preprocess_images_numpy(pil_images: list) -> tuple:
-    """
-    Convert PIL images to Qwen2-VL patch tensors using pure numpy/PIL.
-
-    Returns (pixel_values, grid_thw) where:
-      pixel_values: float32 [total_patches, C*temporal_patch_size*patch_size^2]
-      grid_thw:     int64   [n_images, 3]  — (t, h, w) grid per image
-    """
-    import numpy as np
-    from PIL import Image
-
-    mean = np.array(_IMG_MEAN, dtype=np.float32)
-    std  = np.array(_IMG_STD,  dtype=np.float32)
-    all_patches: list[np.ndarray] = []
-    all_grids:   list[list[int]]  = []
-
-    for pil_img in pil_images:
-        img = pil_img.convert("RGB")
-        th, tw = _smart_resize(img.height, img.width)
-        img = img.resize((tw, th), Image.BICUBIC)
-
-        arr = np.array(img, dtype=np.float32) / 255.0
-        arr = (arr - mean) / std              # [H, W, C] — normalised
-        arr = arr.transpose(2, 0, 1)          # [C, H, W]
-
-        # Duplicate single frame to satisfy temporal_patch_size=2
-        frames = np.stack([arr, arr], axis=0) # [2, C, H, W]
-
-        C      = frames.shape[1]
-        grid_t = 1                            # one temporal group per image
-        grid_h = th // _PATCH_SIZE
-        grid_w = tw // _PATCH_SIZE
-
-        # Extract and interleave patches following Qwen2VLImageProcessor._preprocess
-        patches = frames.reshape(
-            grid_t, _TEMPORAL_PATCH, C,
-            grid_h // _MERGE_SIZE, _MERGE_SIZE, _PATCH_SIZE,
-            grid_w // _MERGE_SIZE, _MERGE_SIZE, _PATCH_SIZE,
-        )
-        patches = patches.transpose(0, 3, 6, 4, 7, 2, 1, 5, 8)
-        patches = patches.reshape(
-            grid_t * grid_h * grid_w,
-            C * _TEMPORAL_PATCH * _PATCH_SIZE * _PATCH_SIZE,
-        )
-        all_patches.append(patches.astype(np.float32))
-        all_grids.append([grid_t, grid_h, grid_w])
-
-    return (
-        np.concatenate(all_patches, axis=0),
-        np.array(all_grids, dtype=np.int64),
-    )
-
-
-def _compute_mrope_position_ids(input_ids_arr, grid_thw_arr, spatial_merge: int = 2):
-    """
-    Port of Qwen2VLForConditionalGeneration.get_rope_index() to numpy.
-
-    Returns position_ids of shape [3, batch, seq_len] (int64).
-    """
-    import numpy as np
-    batch, seq_len = input_ids_arr.shape
-    pos = np.ones((3, batch, seq_len), dtype=np.int64)
-    for b in range(batch):
-        ids = input_ids_arr[b].tolist()
-        # Count images by inspecting tokens after each vision_start
-        vs_positions = [j for j, x in enumerate(ids) if x == _VISION_START_TOKEN_ID]
-        img_nums = sum(
-            1 for j in vs_positions
-            if j + 1 < len(ids) and ids[j + 1] == _IMAGE_TOKEN_ID
-        )
-        parts: list = []
-        st = 0
-        img_idx = 0
-        for _ in range(img_nums):
-            try:
-                ed = ids.index(_IMAGE_TOKEN_ID, st)
-            except ValueError:
-                break
-            t = int(grid_thw_arr[img_idx, 0])
-            gh = int(grid_thw_arr[img_idx, 1]) // spatial_merge
-            gw = int(grid_thw_arr[img_idx, 2]) // spatial_merge
-            img_idx += 1
-            base = int(parts[-1].max()) + 1 if parts else 0
-            # Text before this image (includes <|vision_start|>)
-            if ed > st:
-                tp = (np.arange(ed - st, dtype=np.int64) + base)[np.newaxis]
-                parts.append(np.tile(tp, (3, 1)))
-                base = int(parts[-1].max()) + 1
-            # Image grid positions (t, h, w)
-            ti = np.repeat(np.arange(t, dtype=np.int64), gh * gw)
-            hi = np.tile(np.repeat(np.arange(gh, dtype=np.int64), gw), t)
-            wi = np.tile(np.arange(gw, dtype=np.int64), gh * t)
-            parts.append(np.stack([ti, hi, wi]) + base)
-            st = ed + t * gh * gw
-        # Remaining text (includes <|vision_end|> and the rest)
-        if st < len(ids):
-            base = int(parts[-1].max()) + 1 if parts else 0
-            tp = (np.arange(len(ids) - st, dtype=np.int64) + base)[np.newaxis]
-            parts.append(np.tile(tp, (3, 1)))
-        if parts:
-            pos[:, b, :] = np.concatenate(parts, axis=1)
-    return pos
+def _image_size_for(n: int) -> int:
+    tokens_each = MAX_VISUAL_TOKENS // max(n, 1)
+    side = int((tokens_each ** 0.5) * PATCH)
+    return max(224, min(512, (side // PATCH) * PATCH))
 
 
 def _build_tags_prompt(stems: list[str], archive_path: str) -> str:
@@ -319,239 +176,88 @@ class _InferenceThread(QThread):
         self._archive_path = archive_path
 
     def run(self) -> None:
-        global _cached_sessions, _cached_tokenizer
-        global _cached_provider, _cached_variant
+        global _cached_model, _cached_proc, _cached_device
         try:
             warnings.filterwarnings("ignore", category=FutureWarning)
             warnings.filterwarnings("ignore", category=UserWarning)
 
             try:
-                import numpy as np
-                import onnxruntime as ort
-                from transformers import AutoTokenizer
+                import torch
                 from PIL import Image
+                from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
+                from qwen_vl_utils import process_vision_info
             except ModuleNotFoundError as missing:
                 raise RuntimeError(
-                    f"Required package missing: {missing.name}.\n\n"
-                    "Re-install the application or contact support."
+                    f"AI tagging requires additional packages ({missing.name} is not installed).\n\n"
+                    "Install them with:\n"
+                    "  pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124\n"
+                    "  pip install transformers accelerate qwen-vl-utils"
                 ) from None
 
-            from app.utils.ai_runtime import ai_cache_dir
-            cache = ai_cache_dir()
-            if cache is None:
-                raise RuntimeError(
-                    "Data directory is not configured.\n"
-                    "Open Settings and set a data directory first."
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+
+            if _cached_model is None or _cached_device != device:
+                self.status.emit("Loading Qwen model…", "#f59e0b")
+                _cached_proc = AutoProcessor.from_pretrained(QWEN_MODEL)
+                _cached_model = Qwen2VLForConditionalGeneration.from_pretrained(
+                    QWEN_MODEL,
+                    torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+                    device_map=device,
                 )
+                _cached_model.eval()
+                _cached_device = device
 
-            model_dir = cache / QWEN_ONNX_DIR
-            if not (model_dir / "config.json").exists():
-                raise RuntimeError(
-                    "Qwen2-VL ONNX model not found.\n\n"
-                    f"Expected: {model_dir}\n\n"
-                    "Run the downloader once:\n"
-                    "  python tools/create_ai_model.py --output <data_dir>/ai_cache"
-                )
+            proc  = _cached_proc
+            model = _cached_model
 
-            onnx_dir = model_dir / "onnx"
-
-            # Pick best available execution provider
-            available = ort.get_available_providers()
-            if "CUDAExecutionProvider" in available:
-                provider = "CUDAExecutionProvider"
-                device_label = "GPU (CUDA)"
-            elif "DmlExecutionProvider" in available:
-                provider = "DmlExecutionProvider"
-                device_label = "GPU (DirectML)"
-            else:
-                provider = "CPUExecutionProvider"
-                device_label = "CPU"
-
-            is_cpu = (provider == "CPUExecutionProvider")
-            variant = _detect_variant(onnx_dir, is_cpu)
-            if variant is None:
-                raise RuntimeError(
-                    "No compatible ONNX variant found.\n\n"
-                    "GPU variants (fp16/q4f16) require CUDA or DirectML.\n"
-                    "CPU-compatible variants (q4, int8) are also available:\n"
-                    "  python tools/create_ai_model.py --output <data_dir>/ai_cache --variant q4"
-                )
-
-            if (
-                _cached_sessions is None
-                or _cached_provider != provider
-                or _cached_variant != variant
-            ):
-                self.status.emit(f"Loading model on {device_label}…", "#f59e0b")
-
-                so = ort.SessionOptions()
-                so.log_severity_level = 3
-                so.enable_mem_reuse = False   # required: KV cache grows between steps
-
-                providers_list = [provider, "CPUExecutionProvider"]
-                _cached_sessions = {
-                    "vis": ort.InferenceSession(
-                        str(onnx_dir / f"vision_encoder_{variant}.onnx"),
-                        so, providers=providers_list,
-                    ),
-                    "emb": ort.InferenceSession(
-                        str(onnx_dir / f"embed_tokens_{variant}.onnx"),
-                        so, providers=providers_list,
-                    ),
-                    "dec": ort.InferenceSession(
-                        str(onnx_dir / f"decoder_model_merged_{variant}.onnx"),
-                        so, providers=providers_list,
-                    ),
-                }
-
-                _cached_tokenizer = AutoTokenizer.from_pretrained(
-                    str(model_dir), use_fast=True, trust_remote_code=False,
-                )
-                _cached_provider  = provider
-                _cached_variant   = variant
-
-            sessions  = _cached_sessions
-            tokenizer = _cached_tokenizer
-            dec_out_names = [o.name for o in sessions["dec"].get_outputs()]
-
-            # Load and pre-resize images
             pil_images: list[Image.Image] = []
-            for b in self._images:
-                img = Image.open(io.BytesIO(b)).convert("RGB")
-                img.thumbnail((MAX_IMAGE_SIDE, MAX_IMAGE_SIDE), Image.LANCZOS)
-                pil_images.append(img)
+            if self._images:
+                size = _image_size_for(len(self._images))
+                for b in self._images:
+                    img = Image.open(io.BytesIO(b)).convert("RGB")
+                    img.thumbnail((size, size), Image.LANCZOS)
+                    pil_images.append(img)
 
-            def _infer(prompt_text: str, max_new_tokens: int = 150) -> str:
-                if pil_images:
-                    pixel_values, grid_thw = _preprocess_images_numpy(pil_images)
-                    n_images = len(pil_images)
-                else:
-                    # Text-only: dummy image keeps the chat template consistent
-                    dummy = Image.new("RGB", (56, 56), (128, 128, 128))
-                    pixel_values, grid_thw = _preprocess_images_numpy([dummy])
-                    n_images = 1
-
-                messages = [{"role": "user", "content":
-                    [{"type": "image"} for _ in range(n_images)]
-                    + [{"type": "text", "text": prompt_text}]}]
-                text = tokenizer.apply_chat_template(
+            def _infer(prompt_text: str, max_tokens: int = 150) -> str:
+                content = [{"type": "image", "image": img} for img in pil_images]
+                content.append({"type": "text", "text": prompt_text})
+                messages = [{"role": "user", "content": content}]
+                text = proc.apply_chat_template(
                     messages, tokenize=False, add_generation_prompt=True
                 )
-                # Expand <|image_pad|> × n_tokens per image
-                for thw in grid_thw:
-                    n = int(thw.prod()) // (_MERGE_SIZE ** 2)
-                    text = text.replace("<|image_pad|>", "<|image_pad|>" * n, 1)
+                img_in, vid_in = process_vision_info(messages)
+                inputs = proc(
+                    text=[text],
+                    images=img_in if img_in else None,
+                    videos=vid_in if vid_in else None,
+                    padding=True,
+                    return_tensors="pt",
+                ).to(device)
+                with torch.no_grad():
+                    ids = model.generate(**inputs, max_new_tokens=max_tokens)
+                trimmed = ids[0][inputs.input_ids.shape[1]:]
+                result = proc.decode(trimmed, skip_special_tokens=True).strip()
+                del inputs, ids, trimmed
+                if device == "cuda":
+                    torch.cuda.empty_cache()
+                return result
 
-                input_ids = np.array([tokenizer.encode(text)], dtype=np.int64)
-
-                # Vision encoder — process one image at a time.
-                # The ONNX model's internal Split node is fixed for batch=1,
-                # so batching multiple images causes a shape error.
-                all_feats = []
-                patch_offset = 0
-                for thw in grid_thw:
-                    n = int(thw[0]) * int(thw[1]) * int(thw[2])
-                    feat = sessions["vis"].run(
-                        ["image_features"],
-                        {
-                            "pixel_values": pixel_values[patch_offset : patch_offset + n],
-                            "grid_thw": thw[np.newaxis],
-                        },
-                    )[0]
-                    all_feats.append(feat)
-                    patch_offset += n
-                img_feats = np.concatenate(all_feats, axis=0) if all_feats else np.empty((0, 1536), dtype=np.float32)
-
-                # Embed all tokens
-                inputs_embeds = sessions["emb"].run(
-                    ["inputs_embeds"], {"input_ids": input_ids}
-                )[0]
-
-                # Splice vision features into image token positions
-                img_mask = input_ids[0] == _IMAGE_TOKEN_ID
-                inputs_embeds[0, img_mask] = img_feats.astype(inputs_embeds.dtype)
-
-                # Compute MROPE position IDs
-                position_ids  = _compute_mrope_position_ids(input_ids, grid_thw)
-                attention_mask = np.ones((1, input_ids.shape[1]), dtype=np.int64)
-
-                # Empty initial KV cache
-                empty_kv = np.zeros((1, _NUM_KV_HEADS, 0, _HEAD_DIM), dtype=np.float32)
-                kvs = {
-                    f"past_key_values.{l}.{k}": empty_kv
-                    for l in range(_NUM_LAYERS) for k in ("key", "value")
-                }
-
-                # Prefill
-                dec_out = sessions["dec"].run(
-                    None,
-                    {"inputs_embeds": inputs_embeds,
-                     "attention_mask": attention_mask,
-                     "position_ids": position_ids,
-                     **kvs},
-                )
-                logits_idx = dec_out_names.index("logits")
-                next_token = int(np.argmax(dec_out[logits_idx][0, -1]))
-                next_pos   = int(position_ids.max()) + 1
-
-                # Copy present tensors (onnxruntime may alias them internally)
-                present = {
-                    dec_out_names[i]: np.array(dec_out[i])
-                    for i, n in enumerate(dec_out_names)
-                    if n.startswith("present.")
-                }
-
-                eos = tokenizer.eos_token_id
-                generated = [next_token]
-                prefill_len = input_ids.shape[1]
-
-                # Autoregressive decode loop
-                for step in range(max_new_tokens - 1):
-                    if next_token == eos:
-                        break
-                    ne = sessions["emb"].run(
-                        ["inputs_embeds"],
-                        {"input_ids": np.array([[next_token]], dtype=np.int64)},
-                    )[0]
-                    past_len = prefill_len + step
-                    am  = np.ones((1, past_len + 1), dtype=np.int64)
-                    pis = np.full((3, 1, 1), next_pos + step, dtype=np.int64)
-                    kv  = {
-                        f"past_key_values.{l}.{k}": present[f"present.{l}.{k}"]
-                        for l in range(_NUM_LAYERS) for k in ("key", "value")
-                    }
-                    do = sessions["dec"].run(
-                        None,
-                        {"inputs_embeds": ne, "attention_mask": am,
-                         "position_ids": pis, **kv},
-                    )
-                    next_token = int(np.argmax(do[logits_idx][0, -1]))
-                    generated.append(next_token)
-                    present = {
-                        dec_out_names[i]: np.array(do[i])
-                        for i, n in enumerate(dec_out_names)
-                        if n.startswith("present.")
-                    }
-
-                return tokenizer.decode(generated, skip_special_tokens=True).strip()
-
-            # Tags pass
+            # Tags
             self.status.emit("Generating tags…", "#f59e0b")
             raw_tags = _infer(
-                _build_tags_prompt(self._stems, self._archive_path), max_new_tokens=120
+                _build_tags_prompt(self._stems, self._archive_path), max_tokens=120
             )
             seen: set[str] = set()
             tags = [
                 t
                 for raw in raw_tags.split(",")
-                if (t := raw.strip()) and t.lower() not in seen
-                and not seen.add(t.lower())  # type: ignore[func-returns-value]
+                if (t := raw.strip()) and t.lower() not in seen and not seen.add(t.lower())
             ]
             self.tags_ready.emit(tags)
 
-            # Metadata pass
+            # Metadata
             self.status.emit("Extracting metadata…", "#f59e0b")
-            raw_meta = _infer(_build_meta_prompt(self._archive_path), max_new_tokens=200)
+            raw_meta = _infer(_build_meta_prompt(self._archive_path), max_tokens=200)
             meta: dict[str, str] = {}
             for line in raw_meta.splitlines():
                 if ":" in line:
@@ -565,8 +271,7 @@ class _InferenceThread(QThread):
             self.status.emit("Done", "#22c55e")
 
         except Exception as exc:
-            import traceback as _tb
-            self.error.emit(f"{exc}\n\n{_tb.format_exc()}")
+            self.error.emit(str(exc))
 
 
 # ---------------------------------------------------------------------------
@@ -1111,11 +816,26 @@ class AITaggerDialog(QDialog):
 
     # ------------------------------------------------------------------
     def closeEvent(self, event) -> None:
-        global _cached_sessions, _cached_tokenizer
-        global _cached_provider, _cached_variant
+        global _cached_model, _cached_proc, _cached_device
         self._stop_thread()
-        _cached_sessions  = None
-        _cached_tokenizer = None
-        _cached_provider  = None
-        _cached_variant   = None
+        try:
+            import gc
+            import torch
+            cuda = torch.cuda.is_available()
+            if _cached_model is not None and cuda:
+                # Move all parameters off the GPU before dropping the reference
+                # so VRAM is reclaimed immediately rather than waiting for the
+                # Python GC to get around to it.
+                _cached_model.cpu()
+                if hasattr(_cached_model, 'visual'):
+                    _cached_model.visual.cpu()
+            _cached_model  = None
+            _cached_proc   = None
+            _cached_device = None
+            gc.collect()
+            if cuda:
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
         super().closeEvent(event)
