@@ -77,11 +77,18 @@ class _DownloadWorker(QThread):
         self._output_dir = output_dir
         self._variant    = variant
         self._cancelled  = False
+        # Tracks per-tqdm-instance (done, total) for aggregate progress.
+        # Written from download threads; protected by _progress_lock.
+        self._file_progress: dict[int, tuple[int, int]] = {}
+        self._progress_lock = None   # initialised in run() (threading not imported yet)
 
     def cancel(self) -> None:
         self._cancelled = True
 
     def run(self) -> None:
+        import threading
+        self._progress_lock = threading.Lock()
+
         try:
             from huggingface_hub import snapshot_download
             from tqdm import tqdm as _TqdmBase
@@ -93,25 +100,40 @@ class _DownloadWorker(QThread):
             return
 
         worker = self
+        _next_id = [0]  # mutable counter shared by all _QtTqdm instances
 
         class _QtTqdm(_TqdmBase):
-            """tqdm subclass that forwards progress to the Qt signal."""
+            """tqdm subclass that aggregates per-file progress and emits totals."""
+
+            def __init__(self, *args, **kwargs) -> None:
+                super().__init__(*args, **kwargs)
+                with worker._progress_lock:
+                    _next_id[0] += 1
+                    self._tid = _next_id[0]
+                    worker._file_progress[self._tid] = (0, int(self.total or 0))
 
             def update(self, n: int = 1) -> None:
                 super().update(n)
+                if worker._cancelled:
+                    return
+                with worker._progress_lock:
+                    worker._file_progress[self._tid] = (int(self.n), int(self.total or 0))
+                    total_done  = sum(v[0] for v in worker._file_progress.values())
+                    total_bytes = sum(v[1] for v in worker._file_progress.values())
+                worker.progress.emit(total_done, total_bytes, str(self.desc or ""))
+
+            def close(self) -> None:
+                # Mark this file as fully complete so the aggregate stays accurate.
                 if not worker._cancelled:
-                    worker.progress.emit(
-                        int(self.n),
-                        int(self.total or 0),
-                        str(self.desc or ""),
-                    )
+                    with worker._progress_lock:
+                        _, t = worker._file_progress.get(self._tid, (0, 0))
+                        if t > 0:
+                            worker._file_progress[self._tid] = (t, t)
+                super().close()
 
             # Silence all console output — Qt handles display
             def display(self, *args, **kwargs) -> None:
                 pass
-
-            def close(self) -> None:
-                super().close()
 
         local_dir = self._output_dir / _OUT_SUBDIR
         local_dir.mkdir(parents=True, exist_ok=True)
@@ -282,22 +304,34 @@ class AISetupDialog(QDialog):
 
     # ------------------------------------------------------------------
     def _on_progress(self, done: int, total: int, desc: str) -> None:
-        if total > 0:
+        # huggingface_hub prefixes desc with "Downloading "; strip it so we
+        # don't show "Downloading Downloading …".  If the remainder looks like
+        # a plain filename (has an extension, no parentheses) use it as a label.
+        clean = desc.strip()
+        if clean.lower().startswith("downloading "):
+            clean = clean[len("downloading "):]
+        file_name = clean if ("." in clean and "(" not in clean) else ""
+
+        if total > 0 and done <= total:
             self._progress.setRange(0, 100)
             self._progress.setValue(int(done * 100 / total))
-            done_mb  = done  / 1_048_576
-            total_mb = total / 1_048_576
-            size_str = f"{done_mb:.0f} MB / {total_mb:.0f} MB"
+            size_str = f"{done / 1_048_576:.0f} MB / {total / 1_048_576:.0f} MB"
+        elif total > 0 and done > total:
+            # Race between concurrent tqdm instances: cap at 100 %
+            self._progress.setRange(0, 100)
+            self._progress.setValue(100)
+            size_str = f"{total / 1_048_576:.0f} MB / {total / 1_048_576:.0f} MB"
         else:
-            # Unknown total — pulse
+            # Total unknown — pulse
             self._progress.setRange(0, 0)
-            size_str = f"{done / 1_048_576:.0f} MB"
+            size_str = f"{done / 1_048_576:.0f} MB" if done else ""
 
-        file_name = Path(desc).name if desc else ""
         if file_name:
-            self._status_lbl.setText(f"Downloading {file_name}… ({size_str})")
-        else:
+            self._status_lbl.setText(f"Downloading {file_name}… ({size_str})" if size_str else f"Downloading {file_name}…")
+        elif size_str:
             self._status_lbl.setText(f"Downloading… ({size_str})")
+        else:
+            self._status_lbl.setText("Preparing download…")
 
     def _on_finished(self) -> None:
         self._worker = None
