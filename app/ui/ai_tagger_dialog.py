@@ -404,7 +404,9 @@ class _InferenceThread(QThread):
                     ),
                 }
 
-                _cached_tokenizer = AutoTokenizer.from_pretrained(str(model_dir))
+                _cached_tokenizer = AutoTokenizer.from_pretrained(
+                    str(model_dir), use_fast=True, trust_remote_code=False,
+                )
                 _cached_provider  = provider
                 _cached_variant   = variant
 
@@ -563,7 +565,8 @@ class _InferenceThread(QThread):
             self.status.emit("Done", "#22c55e")
 
         except Exception as exc:
-            self.error.emit(str(exc))
+            import traceback as _tb
+            self.error.emit(f"{exc}\n\n{_tb.format_exc()}")
 
 
 # ---------------------------------------------------------------------------
