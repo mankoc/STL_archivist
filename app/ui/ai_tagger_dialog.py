@@ -40,10 +40,18 @@ _NUM_LAYERS   = 28
 _NUM_KV_HEADS = 2
 _HEAD_DIM     = 128
 
+# Preprocessing constants (mirrors Qwen2VLImageProcessor defaults, no torch needed)
+_PATCH_SIZE     = 14
+_TEMPORAL_PATCH = 2
+_MERGE_SIZE     = 2
+_MIN_PIXELS     = 3_136        # 56 × 56
+_MAX_PIXELS     = 12_845_056   # 1280 × 28 × 28
+_IMG_MEAN = (0.48145466, 0.4578275, 0.40821073)
+_IMG_STD  = (0.26862954, 0.26130258, 0.27577711)
+
 # Module-level session cache: reloaded when provider or variant changes
 _cached_sessions: dict | None = None
-_cached_proc     = None
-_cached_img_proc = None
+_cached_tokenizer = None
 _cached_provider: str | None = None
 _cached_variant:  str | None = None
 
@@ -62,30 +70,74 @@ def _detect_variant(onnx_dir: "Path", is_cpu: bool) -> Optional[str]:
     return None
 
 
-def _preprocess_images_numpy(img_proc, pil_images: list) -> tuple:
-    """Run Qwen2VLImageProcessor._preprocess per image; return (pixel_values, grid_thw)."""
+def _smart_resize(h: int, w: int) -> tuple[int, int]:
+    """Resize dimensions to be multiples of patch_size*merge_size within pixel bounds."""
+    import math
+    factor = _PATCH_SIZE * _MERGE_SIZE   # 28
+    if min(h, w) == 0 or max(h, w) / min(h, w) > 200:
+        raise ValueError(f"Image dimensions {h}×{w} have extreme or zero aspect ratio")
+    nh = round(h / factor) * factor
+    nw = round(w / factor) * factor
+    if nh * nw > _MAX_PIXELS:
+        beta = math.sqrt((h * w) / _MAX_PIXELS)
+        nh = max(factor, math.floor(h / beta / factor) * factor)
+        nw = max(factor, math.floor(w / beta / factor) * factor)
+    elif nh * nw < _MIN_PIXELS:
+        beta = math.sqrt(_MIN_PIXELS / (h * w))
+        nh = math.ceil(h * beta / factor) * factor
+        nw = math.ceil(w * beta / factor) * factor
+    return nh, nw
+
+
+def _preprocess_images_numpy(pil_images: list) -> tuple:
+    """
+    Convert PIL images to Qwen2-VL patch tensors using pure numpy/PIL.
+
+    Returns (pixel_values, grid_thw) where:
+      pixel_values: float32 [total_patches, C*temporal_patch_size*patch_size^2]
+      grid_thw:     int64   [n_images, 3]  — (t, h, w) grid per image
+    """
     import numpy as np
-    all_patches, all_grids = [], []
-    for img in pil_images:
-        patches, (gt, gh, gw) = img_proc._preprocess(
-            [img],
-            do_resize=True,
-            size={"shortest_edge": img_proc.min_pixels, "longest_edge": img_proc.max_pixels},
-            resample=img_proc.resample,
-            do_rescale=True,
-            rescale_factor=img_proc.rescale_factor,
-            do_normalize=True,
-            image_mean=img_proc.image_mean,
-            image_std=img_proc.image_std,
-            patch_size=img_proc.patch_size,
-            temporal_patch_size=img_proc.temporal_patch_size,
-            merge_size=img_proc.merge_size,
-            do_convert_rgb=img_proc.do_convert_rgb,
+    from PIL import Image
+
+    mean = np.array(_IMG_MEAN, dtype=np.float32)
+    std  = np.array(_IMG_STD,  dtype=np.float32)
+    all_patches: list[np.ndarray] = []
+    all_grids:   list[list[int]]  = []
+
+    for pil_img in pil_images:
+        img = pil_img.convert("RGB")
+        th, tw = _smart_resize(img.height, img.width)
+        img = img.resize((tw, th), Image.BICUBIC)
+
+        arr = np.array(img, dtype=np.float32) / 255.0
+        arr = (arr - mean) / std              # [H, W, C] — normalised
+        arr = arr.transpose(2, 0, 1)          # [C, H, W]
+
+        # Duplicate single frame to satisfy temporal_patch_size=2
+        frames = np.stack([arr, arr], axis=0) # [2, C, H, W]
+
+        C      = frames.shape[1]
+        grid_t = 1                            # one temporal group per image
+        grid_h = th // _PATCH_SIZE
+        grid_w = tw // _PATCH_SIZE
+
+        # Extract and interleave patches following Qwen2VLImageProcessor._preprocess
+        patches = frames.reshape(
+            grid_t, _TEMPORAL_PATCH, C,
+            grid_h // _MERGE_SIZE, _MERGE_SIZE, _PATCH_SIZE,
+            grid_w // _MERGE_SIZE, _MERGE_SIZE, _PATCH_SIZE,
         )
-        all_patches.append(patches)
-        all_grids.append([gt, gh, gw])
+        patches = patches.transpose(0, 3, 6, 4, 7, 2, 1, 5, 8)
+        patches = patches.reshape(
+            grid_t * grid_h * grid_w,
+            C * _TEMPORAL_PATCH * _PATCH_SIZE * _PATCH_SIZE,
+        )
+        all_patches.append(patches.astype(np.float32))
+        all_grids.append([grid_t, grid_h, grid_w])
+
     return (
-        np.concatenate(all_patches, axis=0).astype(np.float32),
+        np.concatenate(all_patches, axis=0),
         np.array(all_grids, dtype=np.int64),
     )
 
@@ -267,7 +319,7 @@ class _InferenceThread(QThread):
         self._archive_path = archive_path
 
     def run(self) -> None:
-        global _cached_sessions, _cached_proc, _cached_img_proc
+        global _cached_sessions, _cached_tokenizer
         global _cached_provider, _cached_variant
         try:
             warnings.filterwarnings("ignore", category=FutureWarning)
@@ -276,10 +328,7 @@ class _InferenceThread(QThread):
             try:
                 import numpy as np
                 import onnxruntime as ort
-                from transformers import AutoProcessor
-                from transformers.models.qwen2_vl.image_processing_qwen2_vl import (
-                    Qwen2VLImageProcessor,
-                )
+                from transformers import AutoTokenizer
                 from PIL import Image
             except ModuleNotFoundError as missing:
                 raise RuntimeError(
@@ -355,22 +404,12 @@ class _InferenceThread(QThread):
                     ),
                 }
 
-                _cached_proc = AutoProcessor.from_pretrained(str(model_dir))
+                _cached_tokenizer = AutoTokenizer.from_pretrained(str(model_dir))
+                _cached_provider  = provider
+                _cached_variant   = variant
 
-                # Use the slow image processor (pure numpy, no torch)
-                _cached_img_proc = Qwen2VLImageProcessor(
-                    min_pixels=3136,
-                    max_pixels=12845056,
-                    patch_size=14,
-                    temporal_patch_size=2,
-                    merge_size=2,
-                )
-                _cached_provider = provider
-                _cached_variant  = variant
-
-            sessions = _cached_sessions
-            proc     = _cached_proc
-            img_proc = _cached_img_proc
+            sessions  = _cached_sessions
+            tokenizer = _cached_tokenizer
             dec_out_names = [o.name for o in sessions["dec"].get_outputs()]
 
             # Load and pre-resize images
@@ -382,26 +421,26 @@ class _InferenceThread(QThread):
 
             def _infer(prompt_text: str, max_new_tokens: int = 150) -> str:
                 if pil_images:
-                    pixel_values, grid_thw = _preprocess_images_numpy(img_proc, pil_images)
+                    pixel_values, grid_thw = _preprocess_images_numpy(pil_images)
+                    n_images = len(pil_images)
                 else:
-                    # Text-only: dummy image keeps processor template consistent
+                    # Text-only: dummy image keeps the chat template consistent
                     dummy = Image.new("RGB", (56, 56), (128, 128, 128))
-                    pixel_values, grid_thw = _preprocess_images_numpy(img_proc, [dummy])
+                    pixel_values, grid_thw = _preprocess_images_numpy([dummy])
+                    n_images = 1
 
-                imgs_for_template = pil_images if pil_images else [dummy]  # type: ignore[possibly-undefined]
                 messages = [{"role": "user", "content":
-                    [{"type": "image", "image": img} for img in imgs_for_template]
+                    [{"type": "image"} for _ in range(n_images)]
                     + [{"type": "text", "text": prompt_text}]}]
-                text = proc.apply_chat_template(
+                text = tokenizer.apply_chat_template(
                     messages, tokenize=False, add_generation_prompt=True
                 )
                 # Expand <|image_pad|> × n_tokens per image
-                merge_len = img_proc.merge_size ** 2
                 for thw in grid_thw:
-                    n = int(thw.prod()) // merge_len
+                    n = int(thw.prod()) // (_MERGE_SIZE ** 2)
                     text = text.replace("<|image_pad|>", "<|image_pad|>" * n, 1)
 
-                input_ids = np.array([proc.tokenizer.encode(text)], dtype=np.int64)
+                input_ids = np.array([tokenizer.encode(text)], dtype=np.int64)
 
                 # Vision encoder — process one image at a time.
                 # The ONNX model's internal Split node is fixed for batch=1,
@@ -460,7 +499,7 @@ class _InferenceThread(QThread):
                     if n.startswith("present.")
                 }
 
-                eos = proc.tokenizer.eos_token_id
+                eos = tokenizer.eos_token_id
                 generated = [next_token]
                 prefill_len = input_ids.shape[1]
 
@@ -492,7 +531,7 @@ class _InferenceThread(QThread):
                         if n.startswith("present.")
                     }
 
-                return proc.tokenizer.decode(generated, skip_special_tokens=True).strip()
+                return tokenizer.decode(generated, skip_special_tokens=True).strip()
 
             # Tags pass
             self.status.emit("Generating tags…", "#f59e0b")
@@ -1069,12 +1108,11 @@ class AITaggerDialog(QDialog):
 
     # ------------------------------------------------------------------
     def closeEvent(self, event) -> None:
-        global _cached_sessions, _cached_proc, _cached_img_proc
+        global _cached_sessions, _cached_tokenizer
         global _cached_provider, _cached_variant
         self._stop_thread()
-        _cached_sessions = None
-        _cached_proc     = None
-        _cached_img_proc = None
-        _cached_provider = None
-        _cached_variant  = None
+        _cached_sessions  = None
+        _cached_tokenizer = None
+        _cached_provider  = None
+        _cached_variant   = None
         super().closeEvent(event)

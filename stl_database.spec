@@ -31,9 +31,9 @@ hiddenimports = [
     'numpy',
     'numpy.core._multiarray_umath',
     # AI tagger runtime (raw onnxruntime sessions, no PyTorch or optimum needed)
+    # Only AutoTokenizer is used — do NOT import image_processing_qwen2_vl (imports torch)
     'transformers',
     'transformers.models.qwen2_vl',
-    'transformers.models.qwen2_vl.image_processing_qwen2_vl',
     'tokenizers',
     # App modules
     'app.ui.ai_tagger_dialog',
@@ -42,7 +42,6 @@ hiddenimports = [
 ]
 hiddenimports += collect_submodules('sqlalchemy.dialects.sqlite')
 hiddenimports += collect_submodules('onnxruntime')
-hiddenimports += collect_submodules('transformers.models.qwen2_vl')
 
 a = Analysis(
     ['main.py'],
