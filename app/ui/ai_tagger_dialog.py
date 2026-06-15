@@ -818,14 +818,23 @@ class AITaggerDialog(QDialog):
     def closeEvent(self, event) -> None:
         global _cached_model, _cached_proc, _cached_device
         self._stop_thread()
-        _cached_model  = None
-        _cached_proc   = None
-        _cached_device = None
         try:
             import gc
-            gc.collect()
             import torch
-            if torch.cuda.is_available():
+            cuda = torch.cuda.is_available()
+            if _cached_model is not None and cuda:
+                # Move all parameters off the GPU before dropping the reference
+                # so VRAM is reclaimed immediately rather than waiting for the
+                # Python GC to get around to it.
+                _cached_model.cpu()
+                if hasattr(_cached_model, 'visual'):
+                    _cached_model.visual.cpu()
+            _cached_model  = None
+            _cached_proc   = None
+            _cached_device = None
+            gc.collect()
+            if cuda:
+                torch.cuda.synchronize()
                 torch.cuda.empty_cache()
         except Exception:
             pass
