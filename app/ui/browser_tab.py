@@ -3450,6 +3450,8 @@ class BrowserTab(QWidget):
         edit_act.setVisible(len(selected_ids) == 1)
         mass_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), f"Mass Edit {len(selected_ids)} model(s)…")
         mass_act.setVisible(len(selected_ids) > 1)
+        ai_tag_act = menu.addAction(self.tr("AI Tagging…"))
+        ai_tag_act.setVisible(len(selected_ids) >= 1)
         menu.addSeparator()
 
         _warn_px = style.standardIcon(SP.SP_MessageBoxWarning).pixmap(16, 16)
@@ -3559,6 +3561,8 @@ class BrowserTab(QWidget):
             self.add_tag()
         elif edit_tags_act and action == edit_tags_act:
             self._open_tag_editor()
+        elif ai_tag_act and action == ai_tag_act:
+            self._open_ai_tagger(selected_ids)
         elif edit_collections_act and action == edit_collections_act:
             self._open_category_editor()
         elif edit_subcollections_act and action == edit_subcollections_act:
@@ -4036,6 +4040,13 @@ class BrowserTab(QWidget):
         from app.ui.tag_editor_dialog import TagEditorDialog
         TagEditorDialog(parent=self).exec()
         self.refresh()
+
+    def _open_ai_tagger(self, model_ids: list) -> None:
+        from app.ui.ai_tagger_dialog import AITaggerDialog
+        dlg = AITaggerDialog(model_ids, parent=self)
+        dlg.exec()
+        if dlg._any_saved:
+            self.refresh()
 
     def _open_category_editor(self, new_category: bool = False) -> None:
         if new_category:

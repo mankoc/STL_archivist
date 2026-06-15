@@ -45,8 +45,15 @@ jobs:
           pip uninstall -y onnxruntime
           pip install onnxruntime-directml
 
+      - name: Verify pip is importable for PyInstaller
+        # collect_all('pip') in the spec bundles pip inside the exe so that
+        # AISetupDialog can install AI packages (torch, transformers, Qwen2-VL)
+        # into <data_dir>/ai_packages/ on the user's machine at first use.
+        # This step fails fast if pip's metadata is missing.
+        run: python -c "import pip; from pip._internal.cli.main import main; print(f'pip {pip.__version__} — bundling OK')"
+
       - name: Build executable
-        run: pyinstaller stl_database.spec
+        run: pyinstaller stl_database.spec --noconfirm
 
       - name: Rename executable with version
         shell: bash

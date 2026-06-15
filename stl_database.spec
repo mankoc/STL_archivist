@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_dynamic_libs
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_dynamic_libs, collect_all
 
 block_cipher = None
 
@@ -9,8 +9,12 @@ datas = [
 datas += collect_data_files('qt_material')
 datas += collect_data_files('onnxruntime')
 
-# Bundle the onnxruntime native DLLs (includes DirectML provider on Windows).
-binaries = collect_dynamic_libs('onnxruntime')
+# Bundle pip so install_ai_packages() can run inside the frozen .exe.
+# (AI tagging packages are NOT included in the build — they are downloaded
+#  on first use into <data_dir>/ai_packages/ via AISetupDialog.)
+_pip_d, _pip_b, _pip_h = collect_all('pip')
+datas    += _pip_d
+binaries = collect_dynamic_libs('onnxruntime') + _pip_b
 
 hiddenimports = [
     'sqlalchemy.dialects.sqlite',
@@ -22,14 +26,22 @@ hiddenimports = [
     'PIL.PngImagePlugin',
     'PIL.BmpImagePlugin',
     'PIL.WebPImagePlugin',
+    'PIL.GifImagePlugin',
+    'PIL.TiffImagePlugin',
     'onnxruntime',
     'onnxruntime.capi._pybind_state',
     'onnxruntime.capi.onnxruntime_pybind11_state',
     'numpy',
     'numpy.core._multiarray_umath',
+    # AI tagging modules — imported via deferred/conditional imports that
+    # PyInstaller's static analyser can miss.
+    'app.ui.ai_tagger_dialog',
+    'app.ui.ai_setup_dialog',
+    'app.utils.ai_runtime',
 ]
 hiddenimports += collect_submodules('sqlalchemy.dialects.sqlite')
 hiddenimports += collect_submodules('onnxruntime')
+hiddenimports += _pip_h
 
 a = Analysis(
     ['main.py'],
@@ -44,7 +56,14 @@ a = Analysis(
         },
     },
     runtime_hooks=[],
-    excludes=['tkinter', 'matplotlib', 'scipy'],
+    # AI tagging packages are NOT bundled — they are downloaded on first use
+    # by AISetupDialog into <data_dir>/ai_packages/.  Listing them here
+    # prevents accidental bundling when building on a dev machine that already
+    # has them installed.
+    excludes=[
+        'tkinter', 'matplotlib', 'scipy',
+        'torch', 'torchvision', 'transformers', 'accelerate', 'qwen_vl_utils',
+    ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,

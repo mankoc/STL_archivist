@@ -142,6 +142,9 @@ def main() -> None:
     _update_splash(splash, "Loading configuration…")
     from app.ui.config_dialog import get_db_path, get_color_scheme, apply_color_scheme, get_language
 
+    from app.utils.ai_runtime import activate_ai_packages
+    activate_ai_packages()
+
     from app.utils import i18n
     i18n.install_language(get_language())
 
