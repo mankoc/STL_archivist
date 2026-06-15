@@ -39,20 +39,37 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller pyinstaller-hooks-contrib
-          # Swap onnxruntime for DirectML variant: works with NVIDIA / AMD / Intel
-          # via Windows-native DirectML API — no CUDA install required on user machines.
+          # Swap onnxruntime for the DirectML variant: works with NVIDIA / AMD / Intel
+          # via the Windows-native DirectML API — no CUDA install required on end-user machines.
           pip uninstall -y onnxruntime
           pip install onnxruntime-directml
+          # Use Python to safely uninstall optional/dev packages that must not enter the exe.
+          # subprocess with check=False silently skips packages that were never installed.
+          python -c "
+          import subprocess, sys
+          for pkg in ['torch', 'torchvision', 'torchaudio', 'pytest', 'pytest-cov']:
+              subprocess.run(
+                  [sys.executable, '-m', 'pip', 'uninstall', '-y', pkg],
+                  check=False, capture_output=True,
+              )
+          "
 
       - name: Verify AI runtime imports
         run: |
           python -c "
           import onnxruntime as ort
           print('onnxruntime', ort.__version__, '| providers:', ort.get_available_providers())
+          assert 'DmlExecutionProvider' in ort.get_available_providers(), 'DmlExecutionProvider missing'
           from transformers import AutoProcessor
           from transformers.models.qwen2_vl.image_processing_qwen2_vl import Qwen2VLImageProcessor
           import numpy as np
-          print('transformers + numpy OK')
+          # Confirm torch was not accidentally pulled in
+          try:
+              import torch
+              raise SystemExit('ERROR: torch must not be installed in the build environment')
+          except ImportError:
+              pass
+          print('All checks passed — onnxruntime-directml + transformers + numpy OK, no torch')
           "
 
       - name: Build executable
