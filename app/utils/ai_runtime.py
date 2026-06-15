@@ -121,7 +121,7 @@ def is_ai_ready() -> bool:
 
     try:
         import onnxruntime       # noqa: F401
-        from transformers import AutoProcessor  # noqa: F401
+        from transformers import AutoTokenizer  # noqa: F401
     except ImportError:
         return False
 

@@ -60,8 +60,7 @@ jobs:
           import onnxruntime as ort
           print('onnxruntime', ort.__version__, '| providers:', ort.get_available_providers())
           assert 'DmlExecutionProvider' in ort.get_available_providers(), 'DmlExecutionProvider missing'
-          from transformers import AutoProcessor
-          from transformers.models.qwen2_vl.image_processing_qwen2_vl import Qwen2VLImageProcessor
+          from transformers import AutoTokenizer
           import numpy as np
           # Confirm torch was not accidentally pulled in
           try:
