@@ -11,13 +11,9 @@ lmdb>=1.4
 onnxruntime>=1.17
 numpy>=1.24
 
-# AI tagging — Qwen2-VL inference
-# Install torch FIRST with the right variant, then run pip install -r requirements.txt:
-#   CPU:         pip install torch torchvision
-#   NVIDIA GPU:  pip install torch==2.11.0+cu128 torchvision==0.26.0+cu128 --index-url https://download.pytorch.org/whl/cu128 --no-deps
+# AI tagger — raw onnxruntime sessions (no PyTorch required at runtime).
+# The ONNX model is downloaded once with: python tools/create_ai_model.py --output <data_dir>/ai_cache
 transformers>=4.48.0
-accelerate>=0.26.0
-qwen-vl-utils>=0.0.8
 
 # Dev / test
 pytest>=8.0
