@@ -6,6 +6,7 @@
 - Fixed: AI Tagging could crash with `QThread: Destroyed while thread is still running` when navigating between models (Save & Next), finishing a Process All run, or closing the dialog while inference was still in progress. The dialog now waits for the model's `generate()` to finish before releasing the worker thread.
 - Fixed: crawling a large library could abort upserts with `MDB_MAP_FULL: Environment mapsize limit reached` once the thumbnail store grew past its fixed 10 GB cap. The LMDB map now grows automatically when full and reopens sized to the existing data, so the store is no longer capped.
 - Database Maintenance: new **Compact Thumbnail Store** button reclaims disk space from deleted thumbnails by rewriting the LMDB store (which never shrinks on its own). Run it after removing many models or images.
+- Fixed: the packaged `.exe` could not install the optional AI packages ("Setup incomplete — packages not found"). It previously shelled out to a system Python on `PATH`, which is absent on a clean machine and produced ABI-mismatched wheels otherwise. The exe now bundles `pip` and re-invokes itself (`--run-pip`) to install with its own interpreter, so no host Python is required. **Note:** the exe must be built with a torch-supported Python (3.12 or 3.13) — torch has no wheels for 3.14.
 
 ## 2026.24 — 2026-06-15
 

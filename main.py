@@ -5,6 +5,22 @@ import shutil
 import sys
 from pathlib import Path
 
+
+def _maybe_run_pip() -> None:
+    """When launched as ``stlLibrary.exe --run-pip <args>``, act as a pip runner.
+
+    The optional AI packages are installed at runtime with this frozen
+    interpreter (via ``ai_runtime._run_pip``) so the downloaded wheels match the
+    bundled Python's ABI and no separate Python install is required on the host.
+    Must run before any Qt/app imports so the subprocess stays lightweight.
+    """
+    if len(sys.argv) >= 2 and sys.argv[1] == "--run-pip":
+        from pip._internal.cli.main import main as pip_main
+        raise SystemExit(pip_main(sys.argv[2:]))
+
+
+_maybe_run_pip()
+
 from PyQt6.QtGui import QIcon, QPalette
 from PyQt6.QtWidgets import QApplication, QSplashScreen
 from PyQt6.QtCore import QCoreApplication, Qt
