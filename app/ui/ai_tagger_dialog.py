@@ -18,7 +18,7 @@ from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QPushButton, QScrollArea, QWidget,
-    QSizePolicy, QFrame, QLayout, QTextEdit,
+    QSizePolicy, QFrame, QLayout, QTextEdit, QMessageBox,
 )
 
 from app.database.db import session_scope, get_session
@@ -86,6 +86,225 @@ def _build_meta_prompt(archive_path: str) -> str:
         "DESCRIPTION: <one sentence describing the model>\n"
         "Output ONLY these 8 lines."
     )
+
+
+# ---------------------------------------------------------------------------
+# Inference / commit core (shared by the interactive dialog and batch mode)
+# ---------------------------------------------------------------------------
+
+def _generate_suggestions(
+    image_bytes_list: list[bytes],
+    stems: list[str],
+    archive_path: str,
+    status_cb=None,
+    on_tags=None,
+    on_meta=None,
+) -> "tuple[list[str], dict[str, str]]":
+    """Run Qwen2-VL and return ``(tags, metadata)`` for one model.
+
+    *status_cb(text, css_color)* is called with progress updates when provided.
+    *on_tags(list)* / *on_meta(dict)* are called as soon as each result is ready
+    so callers can stream them to the UI. Raises ``RuntimeError`` with a
+    user-facing message if the AI packages are not installed.
+    """
+    global _cached_model, _cached_proc, _cached_device
+
+    warnings.filterwarnings("ignore", category=FutureWarning)
+    warnings.filterwarnings("ignore", category=UserWarning)
+
+    from app.utils.ai_runtime import activate_ai_packages
+    activate_ai_packages()
+
+    try:
+        import torch
+        from PIL import Image
+        from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
+        from qwen_vl_utils import process_vision_info
+    except ModuleNotFoundError as missing:
+        raise RuntimeError(
+            f"AI tagging requires additional packages ({missing.name} is not installed).\n\n"
+            "Click 'Generate' again to open the install dialog, or run\n"
+            "  pip install torch torchvision transformers accelerate qwen-vl-utils\n"
+            "and restart the application."
+        ) from None
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    if _cached_model is None or _cached_device != device:
+        if status_cb:
+            status_cb("Loading Qwen model…", "#f59e0b")
+        _cached_proc = AutoProcessor.from_pretrained(QWEN_MODEL)
+        _cached_model = Qwen2VLForConditionalGeneration.from_pretrained(
+            QWEN_MODEL,
+            torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+            device_map=device,
+        )
+        _cached_model.eval()
+        _cached_device = device
+
+    proc, model = _cached_proc, _cached_model
+
+    pil_images: list = []
+    if image_bytes_list:
+        size = _image_size_for(len(image_bytes_list))
+        for b in image_bytes_list:
+            img = Image.open(io.BytesIO(b)).convert("RGB")
+            img.thumbnail((size, size), Image.LANCZOS)
+            pil_images.append(img)
+
+    def _infer(prompt_text: str, max_tokens: int = 150) -> str:
+        content = [{"type": "image", "image": img} for img in pil_images]
+        content.append({"type": "text", "text": prompt_text})
+        messages = [{"role": "user", "content": content}]
+        text = proc.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        img_in, vid_in = process_vision_info(messages)
+        inputs = proc(
+            text=[text],
+            images=img_in if img_in else None,
+            videos=vid_in if vid_in else None,
+            padding=True,
+            return_tensors="pt",
+        ).to(device)
+        with torch.no_grad():
+            ids = model.generate(**inputs, max_new_tokens=max_tokens)
+        trimmed = ids[0][inputs.input_ids.shape[1]:]
+        result = proc.decode(trimmed, skip_special_tokens=True).strip()
+        del inputs, ids, trimmed
+        if device == "cuda":
+            torch.cuda.empty_cache()
+        return result
+
+    if status_cb:
+        status_cb("Generating tags…", "#f59e0b")
+    raw_tags = _infer(_build_tags_prompt(stems, archive_path), max_tokens=120)
+    seen: set[str] = set()
+    tags = [
+        t
+        for raw in raw_tags.split(",")
+        if (t := raw.strip()) and t.lower() not in seen and not seen.add(t.lower())
+    ]
+    if on_tags:
+        on_tags(tags)
+
+    if status_cb:
+        status_cb("Extracting metadata…", "#f59e0b")
+    raw_meta = _infer(_build_meta_prompt(archive_path), max_tokens=200)
+    meta: dict[str, str] = {}
+    for line in raw_meta.splitlines():
+        if ":" in line:
+            key, _, val = line.partition(":")
+            key = key.strip().upper()
+            val = val.strip()
+            if val and val.lower() not in ("n/a", "none", "unknown", ""):
+                meta[key] = val
+    if on_meta:
+        on_meta(meta)
+
+    return tags, meta
+
+
+def _load_model_inputs(model_id: int) -> "tuple[list[bytes], list[str], str, str]":
+    """Return ``(image_bytes, stems, archive_path, display_title)`` for *model_id*."""
+    session = get_session()
+    try:
+        m = session.get(STLModel, model_id)
+        if m is None:
+            return [], [], "", f"#{model_id}"
+        archive_path = m.archive_path or ""
+        title = m.title or Path(archive_path).stem
+        images: list[bytes] = []
+        stems: list[str] = []
+        for img in m.images:
+            b = get_thumbnail_bytes(img.id)
+            if b:
+                images.append(b)
+                stems.append(Path(img.filename).stem if img.filename else f"img{img.id}")
+        return images, stems, archive_path, title
+    finally:
+        session.close()
+
+
+def _normalize_meta(meta: dict[str, str]) -> dict:
+    """Convert a raw Qwen metadata dict into validated, normalized field values."""
+    fields = {
+        "title":       meta.get("TITLE", "").strip(),
+        "creator":     meta.get("CREATOR", "").strip(),
+        "sculptor":    meta.get("SCULPTOR", "").strip(),
+        "category":    meta.get("CATEGORY", "").strip(),
+        "scale":       meta.get("SCALE", "").strip(),
+        "description": meta.get("DESCRIPTION", "").strip(),
+        "source":      "",
+        "year":        None,
+    }
+    src = meta.get("SOURCE", "").strip().lower()
+    if src in _VALID_SOURCES:
+        fields["source"] = src
+    year = meta.get("YEAR", "").strip()[:4]
+    if year.isdigit() and 1900 <= int(year) <= 2100:
+        fields["year"] = int(year)
+    return fields
+
+
+def _commit_model_data(model_id: int, fields: dict, tags: list[str]) -> bool:
+    """Write normalized *fields* and *tags* to *model_id*.
+
+    Existing values are preserved: scalar fields are only set when non-empty and
+    tags are merged (never removed). Returns True if the model existed.
+    """
+    with session_scope() as session:
+        model: Optional[STLModel] = session.get(STLModel, model_id)
+        if model is None:
+            return False
+
+        if fields["title"]:
+            model.title = fields["title"]
+        if fields["creator"]:
+            model.creator = fields["creator"]
+        if fields["year"] is not None:
+            model.release_year = fields["year"]
+        if fields["description"]:
+            model.description = fields["description"]
+        if fields["source"]:
+            model.source = fields["source"]
+
+        if fields["sculptor"]:
+            sc = session.query(Sculptor).filter_by(name=fields["sculptor"]).first()
+            if sc is None:
+                sc = Sculptor(name=fields["sculptor"])
+                session.add(sc)
+                session.flush()
+            model.sculptor = sc
+
+        if fields["category"]:
+            cat = session.query(Category).filter_by(name=fields["category"]).first()
+            if cat is None:
+                cat = Category(name=fields["category"])
+                session.add(cat)
+                session.flush()
+            model.category = cat
+
+        if fields["scale"]:
+            scl = session.query(Scale).filter_by(name=fields["scale"]).first()
+            if scl is None:
+                scl = Scale(name=fields["scale"])
+                session.add(scl)
+                session.flush()
+            model.scale = scl
+
+        existing_lower = {t.name.lower() for t in model.tags}
+        for tag_name in tags:
+            tn = tag_name.strip().lower()
+            if tn and tn not in existing_lower:
+                tag_obj = session.query(Tag).filter_by(name=tn).first()
+                if tag_obj is None:
+                    tag_obj = Tag(name=tn)
+                    session.add(tag_obj)
+                    session.flush()
+                model.tags.append(tag_obj)
+                existing_lower.add(tn)
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -176,102 +395,68 @@ class _InferenceThread(QThread):
         self._archive_path = archive_path
 
     def run(self) -> None:
-        global _cached_model, _cached_proc, _cached_device
         try:
-            warnings.filterwarnings("ignore", category=FutureWarning)
-            warnings.filterwarnings("ignore", category=UserWarning)
-
-            try:
-                import torch
-                from PIL import Image
-                from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
-                from qwen_vl_utils import process_vision_info
-            except ModuleNotFoundError as missing:
-                raise RuntimeError(
-                    f"AI tagging requires additional packages ({missing.name} is not installed).\n\n"
-                    "Install them with:\n"
-                    "  pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124\n"
-                    "  pip install transformers accelerate qwen-vl-utils"
-                ) from None
-
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-
-            if _cached_model is None or _cached_device != device:
-                self.status.emit("Loading Qwen model…", "#f59e0b")
-                _cached_proc = AutoProcessor.from_pretrained(QWEN_MODEL)
-                _cached_model = Qwen2VLForConditionalGeneration.from_pretrained(
-                    QWEN_MODEL,
-                    torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-                    device_map=device,
-                )
-                _cached_model.eval()
-                _cached_device = device
-
-            proc  = _cached_proc
-            model = _cached_model
-
-            pil_images: list[Image.Image] = []
-            if self._images:
-                size = _image_size_for(len(self._images))
-                for b in self._images:
-                    img = Image.open(io.BytesIO(b)).convert("RGB")
-                    img.thumbnail((size, size), Image.LANCZOS)
-                    pil_images.append(img)
-
-            def _infer(prompt_text: str, max_tokens: int = 150) -> str:
-                content = [{"type": "image", "image": img} for img in pil_images]
-                content.append({"type": "text", "text": prompt_text})
-                messages = [{"role": "user", "content": content}]
-                text = proc.apply_chat_template(
-                    messages, tokenize=False, add_generation_prompt=True
-                )
-                img_in, vid_in = process_vision_info(messages)
-                inputs = proc(
-                    text=[text],
-                    images=img_in if img_in else None,
-                    videos=vid_in if vid_in else None,
-                    padding=True,
-                    return_tensors="pt",
-                ).to(device)
-                with torch.no_grad():
-                    ids = model.generate(**inputs, max_new_tokens=max_tokens)
-                trimmed = ids[0][inputs.input_ids.shape[1]:]
-                result = proc.decode(trimmed, skip_special_tokens=True).strip()
-                del inputs, ids, trimmed
-                if device == "cuda":
-                    torch.cuda.empty_cache()
-                return result
-
-            # Tags
-            self.status.emit("Generating tags…", "#f59e0b")
-            raw_tags = _infer(
-                _build_tags_prompt(self._stems, self._archive_path), max_tokens=120
+            _generate_suggestions(
+                self._images, self._stems, self._archive_path,
+                self.status.emit, self.tags_ready.emit, self.meta_ready.emit,
             )
-            seen: set[str] = set()
-            tags = [
-                t
-                for raw in raw_tags.split(",")
-                if (t := raw.strip()) and t.lower() not in seen and not seen.add(t.lower())
-            ]
-            self.tags_ready.emit(tags)
-
-            # Metadata
-            self.status.emit("Extracting metadata…", "#f59e0b")
-            raw_meta = _infer(_build_meta_prompt(self._archive_path), max_tokens=200)
-            meta: dict[str, str] = {}
-            for line in raw_meta.splitlines():
-                if ":" in line:
-                    key, _, val = line.partition(":")
-                    key = key.strip().upper()
-                    val = val.strip()
-                    if val and val.lower() not in ("n/a", "none", "unknown", ""):
-                        meta[key] = val
-            self.meta_ready.emit(meta)
-
             self.status.emit("Done", "#22c55e")
-
         except Exception as exc:
             self.error.emit(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Batch worker — process every model and commit automatically
+# ---------------------------------------------------------------------------
+
+class _BatchThread(QThread):
+    # model_started carries an opaque payload (dict) so the dialog can display
+    # the current model's thumbnails without re-querying the database.
+    model_started = pyqtSignal(int, int, object)   # (current, total, payload)
+    status        = pyqtSignal(str, str)           # (text, css_color)
+    tags_ready    = pyqtSignal(list)
+    meta_ready    = pyqtSignal(dict)
+    error         = pyqtSignal(str)
+    completed     = pyqtSignal(int, int)           # (saved, total)
+
+    def __init__(self, model_ids: list[int]) -> None:
+        super().__init__()
+        self._model_ids = list(model_ids)
+        self._stop_requested = False
+
+    def stop(self) -> None:
+        self._stop_requested = True
+
+    def run(self) -> None:
+        saved = 0
+        total = len(self._model_ids)
+        for i, model_id in enumerate(self._model_ids, 1):
+            if self._stop_requested:
+                break
+            images, stems, archive_path, title = _load_model_inputs(model_id)
+            self.model_started.emit(i, total, {
+                "index":        i - 1,
+                "model_id":     model_id,
+                "images":       images,
+                "stems":        stems,
+                "archive_path": archive_path,
+                "title":        title,
+            })
+            try:
+                tags, meta = _generate_suggestions(
+                    images, stems, archive_path,
+                    self.status.emit, self.tags_ready.emit, self.meta_ready.emit,
+                )
+            except Exception as exc:
+                self.error.emit(f"{title}: {exc}")
+                if i == 1:
+                    # First model failed — almost certainly a setup/package
+                    # problem that would repeat for every model, so abort.
+                    break
+                continue
+            if _commit_model_data(model_id, _normalize_meta(meta), tags):
+                saved += 1
+        self.completed.emit(saved, total)
 
 
 # ---------------------------------------------------------------------------
@@ -294,6 +479,7 @@ class AITaggerDialog(QDialog):
         self._model_ids      = list(model_ids)
         self._current_index  = 0
         self._thread: Optional[_InferenceThread] = None
+        self._batch_thread: Optional[_BatchThread] = None
         self._current_tags: list[str] = []
         self._any_saved      = False   # whether at least one model was saved
 
@@ -447,6 +633,15 @@ class AITaggerDialog(QDialog):
         self._cancel_btn.clicked.connect(self.reject)
         btn_row.addWidget(self._cancel_btn)
 
+        self._process_all_btn = QPushButton(
+            f"Process All ({len(self._model_ids)})"
+        )
+        self._process_all_btn.setToolTip(
+            "Run AI on every model and save the results automatically, without review"
+        )
+        self._process_all_btn.clicked.connect(self._on_process_all_clicked)
+        btn_row.addWidget(self._process_all_btn)
+
         btn_row.addStretch()
 
         # "Skip" only shown in multi-model mode and not on last model
@@ -467,12 +662,8 @@ class AITaggerDialog(QDialog):
     # Per-model loading
     # ------------------------------------------------------------------
 
-    def _load_model(self, index: int) -> None:
-        """Stop any running inference, clear the form, and populate it with
-        the model at *index* in self._model_ids."""
-        self._stop_thread()
-
-        # Clear fields
+    def _clear_form(self) -> None:
+        """Empty every metadata field and clear the tag pills."""
         for edit in (
             self._title_edit, self._creator_edit, self._sculptor_edit,
             self._category_edit, self._scale_edit, self._source_edit,
@@ -482,6 +673,13 @@ class AITaggerDialog(QDialog):
         self._desc_edit.clear()
         self._current_tags.clear()
         self._rebuild_pills()
+
+    def _load_model(self, index: int) -> None:
+        """Stop any running inference, clear the form, and populate it with
+        the model at *index* in self._model_ids."""
+        self._stop_thread()
+
+        self._clear_form()
         self._set_status("Click 'Generate' to run AI analysis", "#6b7280")
         self._gen_btn.setEnabled(True)
 
@@ -640,9 +838,20 @@ class AITaggerDialog(QDialog):
         self._thread.start()
 
     def _stop_thread(self) -> None:
-        if self._thread and self._thread.isRunning():
-            self._thread.quit()
-            self._thread.wait(3000)
+        if self._thread is not None:
+            # Drop the slot connections first so a result arriving from the
+            # outgoing run does not land in the now-current model's fields.
+            try:
+                self._thread.tags_ready.disconnect()
+                self._thread.meta_ready.disconnect()
+                self._thread.status.disconnect()
+                self._thread.error.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+            # generate() cannot be interrupted — wait for it to finish rather
+            # than destroying a still-running QThread (which crashes the app).
+            if self._thread.isRunning():
+                self._thread.wait()
         self._thread = None
 
     def _on_tags_ready(self, tags: list[str]) -> None:
@@ -728,74 +937,24 @@ class AITaggerDialog(QDialog):
     # ------------------------------------------------------------------
     def _commit_current(self) -> None:
         """Write the current form values to the database."""
-        title         = self._title_edit.text().strip()
-        creator       = self._creator_edit.text().strip()
-        sculptor_name = self._sculptor_edit.text().strip()
-        category_name = self._category_edit.text().strip()
-        scale_name    = self._scale_edit.text().strip()
-        source        = self._source_edit.text().strip().lower()
-        year_str      = self._year_edit.text().strip()
-        description   = self._desc_edit.toPlainText().strip()
-
+        source = self._source_edit.text().strip().lower()
+        year_str = self._year_edit.text().strip()
         year: Optional[int] = None
-        if year_str.isdigit():
-            y = int(year_str)
-            if 1900 <= y <= 2100:
-                year = y
-        if source not in _VALID_SOURCES:
-            source = ""
+        if year_str.isdigit() and 1900 <= int(year_str) <= 2100:
+            year = int(year_str)
 
-        with session_scope() as session:
-            model: Optional[STLModel] = session.get(STLModel, self._model_id)
-            if model is None:
-                return
-
-            if title:
-                model.title = title
-            if creator:
-                model.creator = creator
-            if year is not None:
-                model.release_year = year
-            if description:
-                model.description = description
-            if source:
-                model.source = source
-
-            if sculptor_name:
-                sc = session.query(Sculptor).filter_by(name=sculptor_name).first()
-                if sc is None:
-                    sc = Sculptor(name=sculptor_name)
-                    session.add(sc)
-                    session.flush()
-                model.sculptor = sc
-
-            if category_name:
-                cat = session.query(Category).filter_by(name=category_name).first()
-                if cat is None:
-                    cat = Category(name=category_name)
-                    session.add(cat)
-                    session.flush()
-                model.category = cat
-
-            if scale_name:
-                scl = session.query(Scale).filter_by(name=scale_name).first()
-                if scl is None:
-                    scl = Scale(name=scale_name)
-                    session.add(scl)
-                    session.flush()
-                model.scale = scl
-
-            existing_lower = {t.name.lower() for t in model.tags}
-            for tag_name in self._current_tags:
-                if tag_name not in existing_lower:
-                    tag_obj = session.query(Tag).filter_by(name=tag_name).first()
-                    if tag_obj is None:
-                        tag_obj = Tag(name=tag_name)
-                        session.add(tag_obj)
-                        session.flush()
-                    model.tags.append(tag_obj)
-
-        self._any_saved = True
+        fields = {
+            "title":       self._title_edit.text().strip(),
+            "creator":     self._creator_edit.text().strip(),
+            "sculptor":    self._sculptor_edit.text().strip(),
+            "category":    self._category_edit.text().strip(),
+            "scale":       self._scale_edit.text().strip(),
+            "description": self._desc_edit.toPlainText().strip(),
+            "source":      source if source in _VALID_SOURCES else "",
+            "year":        year,
+        }
+        if _commit_model_data(self._model_id, fields, self._current_tags):
+            self._any_saved = True
 
     def _save_and_advance(self) -> None:
         """Save the current model then move to the next, or close if finished."""
@@ -815,9 +974,104 @@ class AITaggerDialog(QDialog):
             self._load_model(next_index)
 
     # ------------------------------------------------------------------
+    # Batch "Process All"
+    # ------------------------------------------------------------------
+    def _on_process_all_clicked(self) -> None:
+        # While a batch is running this button acts as "Stop".
+        if self._batch_thread and self._batch_thread.isRunning():
+            self._batch_thread.stop()
+            self._set_status("Stopping after current model…", "#f59e0b")
+            self._process_all_btn.setEnabled(False)
+            return
+
+        from app.utils.ai_runtime import is_ai_ready
+        if not is_ai_ready():
+            from app.ui.ai_setup_dialog import AISetupDialog
+            dlg = AISetupDialog(parent=self)
+            if dlg.exec() != QDialog.DialogCode.Accepted or not is_ai_ready():
+                self._set_status("Setup incomplete — packages not found.", "#ef4444")
+                return
+
+        n = len(self._model_ids)
+        reply = QMessageBox.question(
+            self, "Process All",
+            f"Run AI tagging on all {n} model(s) and save the results automatically, "
+            "without reviewing each one?\n\n"
+            "Existing values are kept — only empty fields are filled and new tags added.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        # Wait for any in-flight single-model inference to fully finish before
+        # starting the batch — two concurrent generate() calls on the shared
+        # cached model would corrupt its state. This briefly blocks the UI.
+        if self._thread and self._thread.isRunning():
+            self._set_status("Waiting for current analysis to finish…", "#f59e0b")
+        self._stop_thread()
+
+        self._set_batch_busy(True)
+        self._progress_lbl.setVisible(True)
+
+        self._batch_thread = _BatchThread(self._model_ids)
+        self._batch_thread.model_started.connect(self._on_batch_model_started)
+        self._batch_thread.status.connect(self._set_status)
+        self._batch_thread.tags_ready.connect(self._on_tags_ready)
+        self._batch_thread.meta_ready.connect(self._on_meta_ready)
+        self._batch_thread.error.connect(self._on_batch_error)
+        self._batch_thread.completed.connect(self._on_batch_finished)
+        self._batch_thread.start()
+
+    def _set_batch_busy(self, busy: bool) -> None:
+        """Enable/disable controls while a batch run is in progress."""
+        self._gen_btn.setEnabled(not busy)
+        self._save_btn.setEnabled(not busy)
+        self._skip_btn.setEnabled(not busy and self._skip_btn.isVisible())
+        self._cancel_btn.setEnabled(not busy)
+        self._process_all_btn.setText("Stop" if busy else f"Process All ({len(self._model_ids)})")
+        self._process_all_btn.setEnabled(True)
+
+    def _on_batch_model_started(self, current: int, total: int, payload: dict) -> None:
+        """Display the model the batch is about to analyse (thumbnails + clear form)."""
+        self._current_index = payload["index"]
+        self._model_id      = payload["model_id"]
+        self._archive_path  = payload["archive_path"]
+        self._image_data    = list(zip(payload["images"], payload["stems"]))
+
+        self._clear_form()
+        self._rebuild_thumbs()
+
+        title = payload["title"]
+        self.setWindowTitle(f"AI Tagging ({current}/{total}) — {title}")
+        self._progress_lbl.setVisible(True)
+        self._progress_lbl.setText(f"Processing {current} of {total}:  {title}")
+
+    def _on_batch_error(self, msg: str) -> None:
+        self._set_status(f"Error: {msg}", "#ef4444")
+
+    def _on_batch_finished(self, saved: int, total: int) -> None:
+        # This slot runs (queued) as run() returns; wait() lets the thread fully
+        # terminate before we drop the reference, avoiding a destroy-while-running.
+        if self._batch_thread is not None:
+            self._batch_thread.wait()
+        self._batch_thread = None
+        self._set_batch_busy(False)
+        if saved:
+            self._any_saved = True
+        self._set_status(f"Processed {saved} of {total} model(s).", "#22c55e")
+        QMessageBox.information(
+            self, "Process All",
+            f"Saved AI suggestions for {saved} of {total} model(s)."
+        )
+
+    # ------------------------------------------------------------------
     def closeEvent(self, event) -> None:
         global _cached_model, _cached_proc, _cached_device
         self._stop_thread()
+        if self._batch_thread and self._batch_thread.isRunning():
+            self._batch_thread.stop()
+            self._batch_thread.wait(60000)
         try:
             import gc
             import torch

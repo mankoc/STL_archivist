@@ -494,6 +494,37 @@ class EmbeddingWorker(QThread):
         self.finished.emit(computed, skipped)
 
 
+class CompactWorker(QThread):
+    """Rewrite the LMDB thumbnail store defragmented to reclaim disk space.
+
+    Signals:
+        log(message): Human-readable status line for the UI log panel.
+        finished(size_before, size_after): On-disk sizes in bytes (both -1 on error).
+    """
+
+    log      = pyqtSignal(str)
+    finished = pyqtSignal(int, int)   # (size_before, size_after); (-1, -1) on error
+
+    def run(self) -> None:
+        from app.utils.thumbnailer import compact_store
+
+        self.log.emit("Compacting thumbnail store — this may take a while…")
+        try:
+            before, after = compact_store()
+        except Exception as exc:
+            self.log.emit(f"ERROR compacting thumbnail store: {exc}")
+            logger.error("Thumbnail store compaction failed: %s", exc, exc_info=True)
+            self.finished.emit(-1, -1)
+            return
+
+        saved = before - after
+        self.log.emit(
+            f"Done — store went from {before / 1024**2:.1f} MB to {after / 1024**2:.1f} MB "
+            f"({saved / 1024**2:.1f} MB reclaimed)."
+        )
+        self.finished.emit(before, after)
+
+
 class FindDuplicateEntriesWorker(QThread):
     """Find DB records that share the same archive content (hash) or the same
     filename + file size, indicating the same physical file has been catalogued
@@ -686,6 +717,7 @@ class DbMaintenanceDialog(QDialog):
         self._embed_worker:     EmbeddingWorker              | None = None
         self._moved_db_worker:  MovedInDbWorker              | None = None
         self._dup_entry_worker: FindDuplicateEntriesWorker   | None = None
+        self._compact_worker:   CompactWorker                | None = None
         self._results: list[dict] = []
         self._build_ui()
 
@@ -779,6 +811,17 @@ class DbMaintenanceDialog(QDialog):
         self._embed_btn.clicked.connect(lambda: self._start_embeddings(recompute_all=True))
         btn_row.addWidget(self._embed_btn)
 
+        self._compact_btn = QPushButton(
+            style.standardIcon(SP.SP_DriveHDIcon), self.tr("Compact Thumbnail Store")
+        )
+        self._compact_btn.setToolTip(
+            self.tr("Reclaim disk space from deleted thumbnails by rewriting the "
+            "thumbnail store. LMDB never shrinks on its own, so run this after "
+            "removing many models or images.")
+        )
+        self._compact_btn.clicked.connect(self._start_compact)
+        btn_row.addWidget(self._compact_btn)
+
         self._merge_moved_btn = QPushButton(
             style.standardIcon(SP.SP_ArrowRight), self.tr("Merge Moved")
         )
@@ -869,6 +912,7 @@ class DbMaintenanceDialog(QDialog):
         self._find_dup_entries_btn.setEnabled(not busy)
         self._recompute_dhash_btn.setEnabled(not busy)
         self._embed_btn.setEnabled(not busy and self._embed_available)
+        self._compact_btn.setEnabled(not busy)
         self._merge_moved_btn.setEnabled(False)
         self._remove_sel_btn.setEnabled(False)
         self._remove_all_btn.setEnabled(False)
@@ -887,6 +931,7 @@ class DbMaintenanceDialog(QDialog):
         self._find_dup_entries_btn.setEnabled(True)
         self._recompute_dhash_btn.setEnabled(True)
         self._embed_btn.setEnabled(self._embed_available)
+        self._compact_btn.setEnabled(True)
         self._merge_moved_btn.setEnabled(has_moved_db)
         self._remove_sel_btn.setEnabled(has_any)
         self._remove_all_btn.setEnabled(has_missing)
@@ -957,6 +1002,34 @@ class DbMaintenanceDialog(QDialog):
 
     def _on_embed_finished(self, computed: int, skipped: int) -> None:
         self._embed_worker = None
+        self._set_idle()
+        from app.utils.sound import play_notification
+        play_notification("maintenance")
+
+    # ------------------------------------------------------------------
+    def _start_compact(self) -> None:
+        reply = QMessageBox.question(
+            self, self.tr("Compact Thumbnail Store"),
+            self.tr("Rewrite the thumbnail store to reclaim disk space from deleted "
+            "thumbnails?\n\nThe store is briefly closed and rebuilt; avoid browsing "
+            "thumbnails until it finishes."),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self._log.clear()
+        self._progress.setValue(0)
+        self._set_busy(True)
+
+        self._compact_worker = CompactWorker()
+        self._compact_worker.log.connect(self._on_log)
+        self._compact_worker.finished.connect(self._on_compact_finished)
+        self._compact_worker.start()
+
+    def _on_compact_finished(self, size_before: int, size_after: int) -> None:
+        self._compact_worker = None
         self._set_idle()
         from app.utils.sound import play_notification
         play_notification("maintenance")
@@ -1356,6 +1429,7 @@ class DbMaintenanceDialog(QDialog):
         self._find_dup_entries_btn.setEnabled(True)
         self._recompute_dhash_btn.setEnabled(True)
         self._embed_btn.setEnabled(self._embed_available)
+        self._compact_btn.setEnabled(True)
         self._merge_moved_btn.setEnabled(has_moved_db)
         self._remove_all_btn.setEnabled(has_missing)
         self._remove_flagged_btn.setEnabled(has_flagged)
@@ -1381,4 +1455,7 @@ class DbMaintenanceDialog(QDialog):
                 worker.wait(3000)
         if self._dup_entry_worker and self._dup_entry_worker.isRunning():
             self._dup_entry_worker.wait(3000)
+        # Compaction must not be interrupted mid-swap — wait for it to finish.
+        if self._compact_worker and self._compact_worker.isRunning():
+            self._compact_worker.wait(60000)
         super().closeEvent(event)

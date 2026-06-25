@@ -1129,6 +1129,10 @@ archives&rsquo; first thumbnails, making it easy to judge whether the match is g
       <td>Permanently deletes every record with status <em>Flagged Missing</em> — archives
           that the crawler could not locate over multiple sessions. Use this to clean up
           records for files you know have been permanently removed.</td></tr>
+  <tr><td><b>Compact Thumbnail Store</b></td>
+      <td>Rewrites the LMDB thumbnail store to reclaim disk space left behind by deleted
+          thumbnails. LMDB reuses freed space but never shrinks the file on its own, so run
+          this after removing many models or images. The store is briefly closed and rebuilt.</td></tr>
   <tr><td><b>Show only problems</b> checkbox</td>
       <td>Hides <em>OK</em> and <em>Relocated</em> rows so you can focus on records that
           need attention.</td></tr>
