@@ -138,26 +138,18 @@ def install_ai_packages(
         raise ValueError(f"Unknown variant: {variant!r}")
 
     def _run_pip(*args: str) -> None:
-        import shutil
         import subprocess as _sp
 
-        # Inside a PyInstaller bundle sys.executable is the app exe, not Python.
-        # pip._internal is also partially frozen and unreliable there.
-        # Always resolve the real Python interpreter via PATH.
+        # In a PyInstaller bundle sys.executable is the app exe, which re-invokes
+        # itself as a pip runner via the `--run-pip` entry point (see main.py).
+        # This uses the *bundled* interpreter, so the downloaded wheels match its
+        # ABI and no separate Python install is required on the host machine.
         if getattr(sys, "frozen", False):
-            python = shutil.which("python") or shutil.which("python3")
-            if python is None:
-                raise RuntimeError(
-                    "Python not found on PATH.\n"
-                    "Please ensure Python is installed and added to your PATH."
-                )
+            cmd = [sys.executable, "--run-pip"] + list(args)
         else:
-            python = sys.executable
+            cmd = [sys.executable, "-m", "pip"] + list(args)
 
-        result = _sp.run(
-            [python, "-m", "pip"] + list(args),
-            capture_output=True, text=True,
-        )
+        result = _sp.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             raise RuntimeError(result.stderr or result.stdout)
 
