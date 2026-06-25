@@ -8,11 +8,11 @@ qt-material>=2.14
 xxhash>=3.4
 lmdb>=1.4
 
-onnxruntime>=1.17
-numpy>=1.24
-
-# AI tagger — raw onnxruntime sessions (no PyTorch required at runtime).
-# The ONNX model is downloaded once with: python tools/create_ai_model.py --output <data_dir>/ai_cache
+# AI tagger — installed on demand into <data_dir>/ai_packages/ at first use.
+# Listed here for development convenience only; NOT bundled in the exe.
+# torch and qwen-vl-utils must be installed manually for local dev:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+#   pip install qwen-vl-utils accelerate
 transformers>=4.48.0
 
 # Dev / test

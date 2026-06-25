@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- AI Tagging: new **Process All** button runs AI analysis on every selected model unattended and saves the results automatically — no per-model review. The dialog shows each model live as it is processed (thumbnails, then tags and metadata fill in) so you can watch progress. Existing values are preserved (only empty fields are filled and new tags merged in); the run can be stopped mid-way.
+- Fixed: AI Tagging could crash with `QThread: Destroyed while thread is still running` when navigating between models (Save & Next), finishing a Process All run, or closing the dialog while inference was still in progress. The dialog now waits for the model's `generate()` to finish before releasing the worker thread.
+- Fixed: crawling a large library could abort upserts with `MDB_MAP_FULL: Environment mapsize limit reached` once the thumbnail store grew past its fixed 10 GB cap. The LMDB map now grows automatically when full and reopens sized to the existing data, so the store is no longer capped.
+- Database Maintenance: new **Compact Thumbnail Store** button reclaims disk space from deleted thumbnails by rewriting the LMDB store (which never shrinks on its own). Run it after removing many models or images.
+
 ## 2026.24 — 2026-06-15
 
 - **AI Tagging**: new right-click "AI Tagging…" option (any column, single row) opens a dialog that uses Qwen2-VL-2B-Instruct to suggest tags and fill all editable metadata fields (title, creator, sculptor, category, scale, source, year, description). Each suggestion is editable inline; tags appear as removable pill buttons. OK merges suggestions into the database without overwriting existing tags.
