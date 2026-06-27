@@ -1,3 +1,11 @@
+"""SQLAlchemy ORM models for the STL library.
+
+``STLModel`` is the central entity; it relates many-to-one to ``Sculptor``,
+``Release``, ``Category``, ``Subcategory``, ``Collection``/``Subcollection`` and
+many-to-many to ``Tag``, ``Scale`` and its ``Image`` thumbnails. Lookup tables
+(tags, categories, etc.) are deduplicated via get-or-create helpers in
+:mod:`app.database.helpers`.
+"""
 from datetime import datetime, timezone
 
 
