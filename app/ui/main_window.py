@@ -594,10 +594,13 @@ class MainWindow(QMainWindow):
         ColumnStatsDialog(parent=self).exec()
 
     def _apply_debug_menu_visibility(self) -> None:
-        """Show or hide the Debug menu and sidecar action based on current settings."""
-        from app.ui.config_dialog import get_debug_menu_enabled, get_metadata_sidecar_enabled
+        """Show or hide settings-driven actions based on current configuration."""
+        from app.ui.config_dialog import (
+            get_debug_menu_enabled, get_metadata_sidecar_enabled, get_ai_tagging_enabled,
+        )
         self._debug_menu.menuAction().setVisible(get_debug_menu_enabled())
         self._act_gen_metadata.setVisible(get_metadata_sidecar_enabled())
+        self._act_ai_tagging.setVisible(get_ai_tagging_enabled())
 
     def _clear_database(self) -> None:
         reply = QMessageBox.warning(

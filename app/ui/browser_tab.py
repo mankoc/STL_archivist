@@ -23,7 +23,10 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import QSettings
 
-from sqlalchemy import func, or_, and_, select as sa_select
+from sqlalchemy import (
+    func, or_, and_, select as sa_select,
+    Table as _Table, MetaData as _MetaData, Column as _Column, Integer as _Integer,
+)
 from sqlalchemy.orm import selectinload
 
 from app.database.db import get_session, session_scope, get_models_view
@@ -85,6 +88,16 @@ def _prune_ancestor_paths(paths: list[str]) -> list[str]:
 
 
 MODEL_ID_ROLE = Qt.ItemDataRole.UserRole + 1
+
+# Connection-local TEMP table holding the IDs that match the active path filter.
+# The filter-tree worker populates it once per rebuild, then every per-section
+# scoped-count subquery references it — so the un-indexable archive_path LIKE scan
+# runs a single time and is never expanded into a giant ``IN (?, …)`` list.
+_FILTER_PATH_IDS_NAME = "_filter_path_ids"
+_FILTER_PATH_IDS = _Table(
+    _FILTER_PATH_IDS_NAME, _MetaData(),
+    _Column("id", _Integer, primary_key=True),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -378,14 +391,14 @@ class _SqlTableModel(QAbstractTableModel):
         tag_sub = (
             sa_sel(_mt_global.c.model_id)
             .join(Tag, _mt_global.c.tag_id == Tag.id)
-            .where(Tag.name.like(pat))
+            .where(Tag.name.ilike(pat))
         )
         return stmt.where(or_(
-            mv.c.title.like(pat),
-            mv.c.creator.like(pat),
-            mv.c.sculptor_name.like(pat),
-            mv.c.collection_name.like(pat),
-            mv.c.archive_path.like(pat),
+            mv.c.title.ilike(pat),
+            mv.c.creator.ilike(pat),
+            mv.c.sculptor_name.ilike(pat),
+            mv.c.collection_name.ilike(pat),
+            mv.c.archive_path.ilike(pat),
             mv.c.id.in_(tag_sub),
         ))
 
@@ -1230,7 +1243,9 @@ class _FilterTreeWorker(QRunnable):
     def __init__(self, gen: int, scope_by_section, show_flags: dict,
                  show_counts: bool, alpha_enabled: bool, alpha_threshold: int,
                  checked_data: set, excluded_data: set,
-                 expanded_sections: "set | None") -> None:
+                 expanded_sections: "set | None",
+                 path_inc_pruned: "list[str] | None" = None,
+                 path_exc_pruned: "list[str] | None" = None) -> None:
         super().__init__()
         self.signals = self._Signals()
         self._gen = gen
@@ -1242,6 +1257,8 @@ class _FilterTreeWorker(QRunnable):
         self._checked = checked_data
         self._excluded = excluded_data
         self._expanded = expanded_sections
+        self._path_inc = path_inc_pruned or []
+        self._path_exc = path_exc_pruned or []
 
     def run(self) -> None:  # noqa: C901 (complexity is inherent; each section is independent)
         from app.database.db import get_session
@@ -1279,6 +1296,26 @@ class _FilterTreeWorker(QRunnable):
 
         session = get_session()
         try:
+            # ── Path filter: materialise matching IDs once into a connection-local
+            # TEMP table that the scoped subqueries reference (see _FILTER_PATH_IDS).
+            # The archive_path LIKE scan runs a single time; every subsequent lookup
+            # is an indexed primary-key probe. ──────────────────────────────────────
+            if self._path_inc or self._path_exc:
+                from sqlalchemy import insert as _insert
+                conn = session.connection()
+                conn.exec_driver_sql(
+                    f"CREATE TEMP TABLE IF NOT EXISTS {_FILTER_PATH_IDS_NAME} "
+                    f"(id INTEGER PRIMARY KEY)"
+                )
+                conn.exec_driver_sql(f"DELETE FROM {_FILTER_PATH_IDS_NAME}")
+                _pnorm = _func.replace(STLModel.archive_path, "\\", "/")
+                _psel = sa_select(STLModel.id)
+                if self._path_inc:
+                    _psel = _psel.where(or_(*(_pnorm.like(p.rstrip("/") + "/%") for p in self._path_inc)))
+                if self._path_exc:
+                    _psel = _psel.where(~or_(*(_pnorm.like(p.rstrip("/") + "/%") for p in self._path_exc)))
+                session.execute(_insert(_FILTER_PATH_IDS).from_select(["id"], _psel))
+
             # ── Counts ─────────────────────────────────────────────────────────
             _counts: dict = {}
             _path_counts: "dict[str, int] | None" = None
@@ -2115,6 +2152,8 @@ class BrowserTab(QWidget):
     def _populate_filter_tree(
         self,
         scope_by_section: dict | None = None,
+        path_inc_pruned: list[str] | None = None,
+        path_exc_pruned: list[str] | None = None,
     ) -> None:
         """Kick off a background worker to rebuild the filter tree.
 
@@ -2185,6 +2224,8 @@ class BrowserTab(QWidget):
             checked_data=checked_data,
             excluded_data=excluded_data,
             expanded_sections=expanded_sections,
+            path_inc_pruned=path_inc_pruned,
+            path_exc_pruned=path_exc_pruned,
         )
         worker.signals.ready.connect(self._on_filter_data_ready)
         QThreadPool.globalInstance().start(worker)
@@ -2602,9 +2643,9 @@ class BrowserTab(QWidget):
             stmt = stmt.where(mv.c.id.in_(id_filters))
         # --- include filters ---
         if author_filters:
-            stmt = stmt.where(mv.c.creator.in_(author_filters))
+            stmt = stmt.where(func.lower(mv.c.creator).in_([a.lower() for a in author_filters]))
         if type_filters:
-            stmt = stmt.where(mv.c.source.in_(type_filters))
+            stmt = stmt.where(func.lower(mv.c.source).in_([t.lower() for t in type_filters]))
         if tag_filters:
             stmt = stmt.where(mv.c.id.in_(_tag_sub.where(Tag.name.in_(tag_filters))))
         if path_filters:
@@ -2634,9 +2675,9 @@ class BrowserTab(QWidget):
             stmt = stmt.where(or_(*(_ap_lc.like("%" + ext) for ext in filetype_filters)))
         # --- exclude filters ---
         if author_exc_filters:
-            stmt = stmt.where(~mv.c.creator.in_(author_exc_filters))
+            stmt = stmt.where(~func.lower(mv.c.creator).in_([a.lower() for a in author_exc_filters]))
         if type_exc_filters:
-            stmt = stmt.where(~mv.c.source.in_(type_exc_filters))
+            stmt = stmt.where(~func.lower(mv.c.source).in_([t.lower() for t in type_exc_filters]))
         if tag_exc_filters:
             stmt = stmt.where(mv.c.id.notin_(_tag_sub.where(Tag.name.in_(tag_exc_filters))))
         if path_exc_filters:
@@ -3015,6 +3056,8 @@ class BrowserTab(QWidget):
         ])
 
         scope_by_section: dict | None = None
+        _path_inc_pruned: list[str] | None = None
+        _path_exc_pruned: list[str] | None = None
 
         if _has_any:
             # Build a subquery for each filter section (all filters except that
@@ -3022,20 +3065,17 @@ class BrowserTab(QWidget):
             # "WHERE id IN (SELECT id FROM models WHERE …)" — a proper SQL
             # subquery — instead of a huge IN (?, ?, …) parameter list.
 
-            # Materialise path-filter IDs once: replace(archive_path) LIKE can't
-            # use an index, so repeating the scan once per scoped-count query is
-            # expensive (~37 ms × 26 queries).  A single LIKE pass gives us a
-            # plain integer list; subsequent queries use the primary-key index.
-            _path_ids_mat: list[int] | None = None
+            # Path filter: the archive_path LIKE scan can't use an index, and a
+            # large library matches too many rows to inline as IN (?, …).  So the
+            # worker materialises the matching IDs ONCE into a connection-local
+            # TEMP table (_filter_path_ids); every scoped subquery references it as
+            # a fast primary-key lookup. We just capture the pruned LIKE patterns
+            # here and reference the temp table.
+            _path_sel = None
             if _has_path:
-                _norm_m = func.replace(STLModel.archive_path, "\\", "/")
-                _pq = sa_select(STLModel.id)
-                if path_inc:
-                    _pq = _pq.where(or_(*(_norm_m.like(p.rstrip("/") + "/%") for p in _prune_ancestor_paths(path_inc))))
-                if path_exc:
-                    _pq = _pq.where(~or_(*(_norm_m.like(p.rstrip("/") + "/%") for p in _prune_ancestor_paths(path_exc))))
-                with session_scope() as _ms:
-                    _path_ids_mat = [r[0] for r in _ms.execute(_pq).all()]
+                _path_inc_pruned = _prune_ancestor_paths(path_inc) if path_inc else []
+                _path_exc_pruned = _prune_ancestor_paths(path_exc) if path_exc else []
+                _path_sel = sa_select(_FILTER_PATH_IDS.c.id)
 
             def _run_id_subquery(
                 skip_creator=False, skip_type=False, skip_path=False,
@@ -3051,23 +3091,16 @@ class BrowserTab(QWidget):
                     q = q.where(cond)
                     _has_condition = True
                 if not skip_creator:
-                    if author_inc:  _w(STLModel.creator.in_(author_inc))
-                    if author_exc:  _w(~STLModel.creator.in_(author_exc))
+                    if author_inc:  _w(func.lower(STLModel.creator).in_([a.lower() for a in author_inc]))
+                    if author_exc:  _w(~func.lower(STLModel.creator).in_([a.lower() for a in author_exc]))
                 if not skip_type:
-                    if type_inc:    _w(STLModel.source.in_(type_inc))
-                    if type_exc:    _w(~STLModel.source.in_(type_exc))
+                    if type_inc:    _w(func.lower(STLModel.source).in_([t.lower() for t in type_inc]))
+                    if type_exc:    _w(~func.lower(STLModel.source).in_([t.lower() for t in type_exc]))
                 if not skip_tag:
                     if tag_inc:     _w(STLModel.tags.any(Tag.name.in_(tag_inc)))
                     if tag_exc:     _w(~STLModel.tags.any(Tag.name.in_(tag_exc)))
-                if not skip_path:
-                    if _path_ids_mat is not None:
-                        _w(STLModel.id.in_(_path_ids_mat))
-                    else:
-                        _n = func.replace(STLModel.archive_path, "\\", "/")
-                        if path_inc:
-                            _w(or_(*(_n.like(p.rstrip("/") + "/%") for p in _prune_ancestor_paths(path_inc))))
-                        if path_exc:
-                            _w(~or_(*(_n.like(p.rstrip("/") + "/%") for p in _prune_ancestor_paths(path_exc))))
+                if not skip_path and _path_sel is not None:
+                    _w(STLModel.id.in_(_path_sel))
                 if not skip_date:
                     def _dc(pairs):
                         return [and_(STLModel.release_year == y, STLModel.release_month == mo) if mo is not None else (STLModel.release_year == y) for y, mo in pairs]
@@ -3142,7 +3175,11 @@ class BrowserTab(QWidget):
                 "filetype":      _run_id_subquery(skip_filetype=True),
             }
 
-        self._populate_filter_tree(scope_by_section=scope_by_section)
+        self._populate_filter_tree(
+            scope_by_section=scope_by_section,
+            path_inc_pruned=_path_inc_pruned,
+            path_exc_pruned=_path_exc_pruned,
+        )
 
     def _clear_filters(self) -> None:
         """Uncheck all filter items and reload the full table."""
@@ -3498,8 +3535,9 @@ class BrowserTab(QWidget):
         edit_act.setVisible(len(selected_ids) == 1)
         mass_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), f"Mass Edit {len(selected_ids)} model(s)…")
         mass_act.setVisible(len(selected_ids) > 1)
+        from app.ui.config_dialog import get_ai_tagging_enabled
         ai_tag_act = menu.addAction(self.tr("AI Tagging…"))
-        ai_tag_act.setVisible(len(selected_ids) >= 1)
+        ai_tag_act.setVisible(len(selected_ids) >= 1 and get_ai_tagging_enabled())
         menu.addSeparator()
 
         _warn_px = style.standardIcon(SP.SP_MessageBoxWarning).pixmap(16, 16)

@@ -11,19 +11,22 @@ only when the user clicks "Save" / "Save & Next".
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QRect, QPoint, QSize
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QRect, QPoint, QSize, QSettings
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QPushButton, QScrollArea, QWidget,
-    QSizePolicy, QFrame, QLayout, QTextEdit, QMessageBox, QCheckBox,
+    QSizePolicy, QFrame, QLayout, QTextEdit, QMessageBox, QCheckBox, QSpinBox,
 )
 
+_MAX_TAGS_KEY = "ai_tagger/max_tags"   # QSettings key; 0 = no limit
+
 from app.database.db import session_scope, get_session
-from app.database.models import STLModel, Tag, Category, Sculptor, Scale
+from app.database.models import STLModel, Tag, Category, Sculptor, Scale, Collection, Subcollection
 from app.utils.thumbnailer import get_thumbnail_bytes
 
 
@@ -51,21 +54,49 @@ def _dedupe_words(tag: str) -> str:
     return " ".join(words)
 
 
-def _ground_scales(raw_value: str, context_parts: list[str]) -> str:
-    """Drop AI-suggested scales that are not backed by the textual context.
+# Connective words / punctuation used to split run-on, cumulative tags
+# (e.g. "ghostly figure in suit with bow tie and gloves") into atomic ones.
+_TAG_SPLIT_RE = re.compile(r"\s+(?:with|and|in|featuring|wearing|holding)\s+|[,;&/+]",
+                           re.IGNORECASE)
 
-    Scale cannot be seen in an image, so any scale the model returns must appear
-    in the archive path, filenames, or existing metadata — otherwise it is a
-    hallucination. Matching is space/dash insensitive (so ``"1/35"`` matches a
-    path containing ``1-35`` and ``"32 mm"`` matches ``32mm``).
+
+def _atomize_tag(tag: str) -> list[str]:
+    """Split a descriptive phrase into atomic tags on connectives/punctuation.
+
+    The model often emits cumulative phrases ("x", "x with y", "x with y and z");
+    splitting on ``with`` / ``and`` / ``in`` / etc. turns them into the component
+    concepts so they collapse to a clean set after de-duplication. Short noun
+    phrases without a connective (e.g. "bow tie", "ghostly figure") are kept whole.
     """
-    def _norm(s: str) -> str:
-        return s.lower().replace(" ", "").replace("-", "/")
+    return [p.strip() for p in _TAG_SPLIT_RE.split(tag) if p.strip()]
 
-    ctx = _norm(" ".join(context_parts))
-    kept = [tok.strip() for tok in raw_value.split(",")
-            if tok.strip() and _norm(tok.strip()) in ctx]
-    return ", ".join(kept)
+
+def _split_cumulative_tags(tags: list[str]) -> list[str]:
+    """Break cumulative tag chains into the words each step adds.
+
+    Even without connectives the model emits chains where each tag appends words
+    to the previous one ("spectral", "spectral warrior", "spectral warrior
+    gothic metal", …). Each tag is reduced to the words it adds over the longest
+    *other* tag that is a contiguous word-prefix of it, so the chain becomes its
+    individual additions ("spectral", "warrior", "gothic metal", …). Tags that no
+    other tag prefixes (e.g. "dark fantasy") are kept whole.
+    """
+    word_seqs = [t.lower().split() for t in tags]
+    result: list[str] = []
+    seen: set[str] = set()
+    for idx, (tag, words) in enumerate(zip(tags, word_seqs)):
+        # longest other tag whose words are a strict prefix of this tag
+        best = 0
+        for j, ow in enumerate(word_seqs):
+            n = len(ow)
+            if j != idx and n < len(words) and words[:n] == ow and n > best:
+                best = n
+        new_tag = " ".join(tag.split()[best:])   # delta, original casing
+        key = new_tag.lower()
+        if new_tag and key not in seen:
+            seen.add(key)
+            result.append(new_tag)
+    return result
 
 
 def _format_known_meta(known_meta: dict[str, str] | None) -> str:
@@ -102,6 +133,10 @@ def _build_tags_prompt(stems: list[str], archive_path: str,
         "vehicles, companions, or items from the same franchise that do not appear "
         "(for example, do not tag other Star Wars characters just because a ship is from Star Wars). "
         "Output ONLY a comma-separated list of descriptive tags. "
+        "Each tag must be a single, atomic concept — do NOT output cumulative or "
+        "overlapping phrases. For example, output 'suit', 'bow tie', 'gloves' as "
+        "separate tags, NOT 'figure in a suit with a bow tie and gloves'. Avoid the "
+        "connecting words 'with', 'and', and 'in' inside a tag. "
         "Include: character name (if recognizable), franchise or source material, "
         "character type, genre, visual style, and any other relevant descriptors. "
         "Output ONLY the comma-separated tags, no other text."
@@ -122,14 +157,21 @@ def _build_meta_prompt(archive_path: str,
         "TITLE: <model title>\n"
         "CREATOR: <publisher, brand or author name>\n"
         "SCULPTOR: <artist or sculptor name>\n"
-        "CATEGORY: <one of: Fantasy, SciFi, Historical, Modern, Animals, Vehicle, Other>\n"
+        "COLLECTION: <the MOST SPECIFIC applicable from: fantasy, sci-fi, comics, tv, movies, "
+        "games, books, anime, real life, historic, cartoons, music and musicians, modelling, "
+        "props, pin-ups. Prefer specific over generic — e.g. Batman is 'comics' (not 'fantasy'), "
+        "a Star Wars trooper is 'movies', a Witcher figure is 'games'. Use 'fantasy'/'sci-fi' "
+        "only for original/generic creatures with no known franchise.>\n"
+        "SUBCOLLECTION: <the specific franchise, publisher, series or universe within the "
+        "collection — e.g. DC or Marvel for comics, Star Wars for movies, Warhammer 40k for "
+        "games. Empty if none/unknown.>\n"
         "SCALE: <ONLY if a scale such as 28mm, 32mm, 1/35 or 54mm is explicitly written in the path, "
         "filenames, or existing metadata above. A scale CANNOT be seen in an image — never guess or "
         "infer it. Leave empty if it is not stated in text.>\n"
         "SOURCE: <one of: patreon, kickstarter, myminifactory — or empty>\n"
         "YEAR: <4-digit release year — or empty>\n"
         "DESCRIPTION: <one sentence describing the model>\n"
-        "Output ONLY these 8 lines."
+        "Output ONLY these 9 lines."
     )
 
 
@@ -142,6 +184,8 @@ def _generate_suggestions(
     stems: list[str],
     archive_path: str,
     known_meta: dict[str, str] | None = None,
+    file_list: list[str] | None = None,
+    max_tags: int = 0,
     status_cb=None,
     on_tags=None,
     on_meta=None,
@@ -169,11 +213,16 @@ def _generate_suggestions(
         max_tokens=120, temperature=temperature,
     )
     seen: set[str] = set()
-    tags = [
-        t
-        for raw in raw_tags.split(",")
-        if (t := _dedupe_words(raw.strip())) and t.lower() not in seen and not seen.add(t.lower())
-    ]
+    tags: list[str] = []
+    for raw in raw_tags.split(","):
+        for piece in _atomize_tag(raw):
+            t = _dedupe_words(piece)
+            if t and t.lower() not in seen:
+                seen.add(t.lower())
+                tags.append(t)
+    tags = _split_cumulative_tags(tags)
+    if max_tags and max_tags > 0:
+        tags = tags[:max_tags]
     if on_tags:
         on_tags(tags)
 
@@ -192,17 +241,32 @@ def _generate_suggestions(
             if val and val.lower() not in ("n/a", "none", "unknown", ""):
                 meta[key] = val
 
-    # Scale can't be seen in an image — keep only scales backed by the path,
-    # filenames, or existing metadata; drop anything the model hallucinated.
-    if "SCALE" in meta:
-        context = [archive_path, *stems]
-        if known_meta:
-            context.append(known_meta.get("Scale", ""))
-        grounded = _ground_scales(meta["SCALE"], context)
-        if grounded:
-            meta["SCALE"] = grounded
-        else:
-            meta.pop("SCALE", None)
+    # Scale is text-derived, not visible in an image. Detect it deterministically
+    # from the archive path, image filenames, and the file list so ALL scales are
+    # caught (e.g. both 32mm and 75mm) — the model routinely under-reports them.
+    from app.crawler.rules import detect_scale
+
+    def _norm_scale(s: str) -> str:
+        return s.lower().replace(" ", "").replace("-", "/")
+
+    scale_context = [archive_path, *stems, *(file_list or [])]
+    detected = detect_scale(scale_context)
+    have = {_norm_scale(s) for s in detected}
+    final_scales = list(detected)
+
+    # Keep any model-suggested scale that is backed by the text context but uses a
+    # format the detector misses (e.g. "1:35").
+    nctx = _norm_scale(" ".join(scale_context))
+    for tok in meta.get("SCALE", "").split(","):
+        t = tok.strip()
+        if t and _norm_scale(t) in nctx and _norm_scale(t) not in have:
+            final_scales.append(t)
+            have.add(_norm_scale(t))
+
+    if final_scales:
+        meta["SCALE"] = ", ".join(final_scales)
+    else:
+        meta.pop("SCALE", None)
 
     if on_meta:
         on_meta(meta)
@@ -226,6 +290,8 @@ def _collect_known_meta(m: STLModel) -> dict[str, str]:
     add("Creator", m.creator)
     add("Sculptor", m.sculptor.name if m.sculptor else None)
     add("Category", m.category.name if m.category else None)
+    add("Collection", m.collection.name if m.collection else None)
+    add("Subcollection", m.subcollection.name if m.subcollection else None)
     add("Scale", ", ".join(s.name for s in m.scales) if m.scales else None)
     add("Source", m.source)
     add("Year", m.release_year)
@@ -233,18 +299,29 @@ def _collect_known_meta(m: STLModel) -> dict[str, str]:
     existing_tags = [t.name for t in m.tags]
     if existing_tags:
         meta["Tags"] = ", ".join(existing_tags)
+
+    # The printable files inside the archive — strong hints for the subject and
+    # the scale (filenames often encode "32mm", "1-35", etc.). Capped so the
+    # prompt stays small for archives with hundreds of parts.
+    _FILE_CAP = 60
+    file_names = [Path(sf.filename).name for sf in m.stl_files if sf.filename]
+    if file_names:
+        shown = ", ".join(file_names[:_FILE_CAP])
+        if len(file_names) > _FILE_CAP:
+            shown += f", …(+{len(file_names) - _FILE_CAP} more)"
+        meta["Files"] = shown
     return meta
 
 
 def _load_model_inputs(
     model_id: int,
-) -> "tuple[list[bytes], list[str], str, str, dict[str, str]]":
-    """Return ``(image_bytes, stems, archive_path, display_title, known_meta)``."""
+) -> "tuple[list[bytes], list[str], str, str, dict[str, str], list[str]]":
+    """Return ``(image_bytes, stems, archive_path, display_title, known_meta, file_list)``."""
     session = get_session()
     try:
         m = session.get(STLModel, model_id)
         if m is None:
-            return [], [], "", f"#{model_id}", {}
+            return [], [], "", f"#{model_id}", {}, []
         archive_path = m.archive_path or ""
         title = m.title or Path(archive_path).stem
         images: list[bytes] = []
@@ -254,7 +331,8 @@ def _load_model_inputs(
             if b:
                 images.append(b)
                 stems.append(Path(img.filename).stem if img.filename else f"img{img.id}")
-        return images, stems, archive_path, title, _collect_known_meta(m)
+        file_list = [sf.filename for sf in m.stl_files if sf.filename]
+        return images, stems, archive_path, title, _collect_known_meta(m), file_list
     finally:
         session.close()
 
@@ -262,14 +340,15 @@ def _load_model_inputs(
 def _normalize_meta(meta: dict[str, str]) -> dict:
     """Convert a raw Qwen metadata dict into validated, normalized field values."""
     fields = {
-        "title":       meta.get("TITLE", "").strip(),
-        "creator":     meta.get("CREATOR", "").strip(),
-        "sculptor":    meta.get("SCULPTOR", "").strip(),
-        "category":    meta.get("CATEGORY", "").strip(),
-        "scale":       meta.get("SCALE", "").strip(),
-        "description": meta.get("DESCRIPTION", "").strip(),
-        "source":      "",
-        "year":        None,
+        "title":         meta.get("TITLE", "").strip(),
+        "creator":       meta.get("CREATOR", "").strip(),
+        "sculptor":      meta.get("SCULPTOR", "").strip(),
+        "collection":    meta.get("COLLECTION", "").strip(),
+        "subcollection": meta.get("SUBCOLLECTION", "").strip(),
+        "scale":         meta.get("SCALE", "").strip(),
+        "description":   meta.get("DESCRIPTION", "").strip(),
+        "source":        "",
+        "year":          None,
     }
     src = meta.get("SOURCE", "").strip().lower()
     if src in _VALID_SOURCES:
@@ -313,13 +392,26 @@ def _commit_model_data(model_id: int, fields: dict, tags: list[str],
                 session.flush()
             model.sculptor = sc
 
-        if fields["category"] and (overwrite or model.category is None):
-            cat = session.query(Category).filter_by(name=fields["category"]).first()
-            if cat is None:
-                cat = Category(name=fields["category"])
-                session.add(cat)
+        if fields["collection"] and (overwrite or model.collection is None):
+            col = session.query(Collection).filter_by(name=fields["collection"]).first()
+            if col is None:
+                col = Collection(name=fields["collection"])
+                session.add(col)
                 session.flush()
-            model.category = cat
+            model.collection = col
+
+        # Subcollection is scoped to its parent collection, so only set it when
+        # the model has a collection to hang it under.
+        if (fields["subcollection"] and model.collection is not None
+                and (overwrite or model.subcollection is None)):
+            sub = (session.query(Subcollection)
+                   .filter_by(name=fields["subcollection"], collection_id=model.collection.id)
+                   .first())
+            if sub is None:
+                sub = Subcollection(name=fields["subcollection"], collection_id=model.collection.id)
+                session.add(sub)
+                session.flush()
+            model.subcollection = sub
 
         if fields["scale"] and (overwrite or not model.scales):
             names = [s.strip() for s in fields["scale"].split(",") if s.strip()]
@@ -433,17 +525,22 @@ class _InferenceThread(QThread):
         stems: list[str],
         archive_path: str,
         known_meta: dict[str, str] | None = None,
+        file_list: list[str] | None = None,
+        max_tags: int = 0,
     ) -> None:
         super().__init__()
         self._images       = image_bytes_list
         self._stems        = stems
         self._archive_path = archive_path
         self._known_meta   = known_meta or {}
+        self._file_list    = file_list or []
+        self._max_tags     = max_tags
 
     def run(self) -> None:
         try:
             _generate_suggestions(
                 self._images, self._stems, self._archive_path, self._known_meta,
+                self._file_list, self._max_tags,
                 self.status.emit, self.tags_ready.emit, self.meta_ready.emit,
             )
             self.status.emit("Done", "#22c55e")
@@ -465,10 +562,13 @@ class _BatchThread(QThread):
     error         = pyqtSignal(str)
     completed     = pyqtSignal(int, int)           # (saved, total)
 
-    def __init__(self, model_ids: list[int], overwrite: bool = False) -> None:
+    def __init__(self, model_ids: list[int], overwrite: bool = False,
+                 ignore_meta: bool = False, max_tags: int = 0) -> None:
         super().__init__()
         self._model_ids = list(model_ids)
         self._overwrite = overwrite
+        self._ignore_meta = ignore_meta
+        self._max_tags = max_tags
         self._stop_requested = False
 
     def stop(self) -> None:
@@ -480,7 +580,9 @@ class _BatchThread(QThread):
         for i, model_id in enumerate(self._model_ids, 1):
             if self._stop_requested:
                 break
-            images, stems, archive_path, title, known_meta = _load_model_inputs(model_id)
+            images, stems, archive_path, title, known_meta, file_list = _load_model_inputs(model_id)
+            if self._ignore_meta:
+                known_meta = None
             self.model_started.emit(i, total, {
                 "index":        i - 1,
                 "model_id":     model_id,
@@ -491,7 +593,7 @@ class _BatchThread(QThread):
             })
             try:
                 tags, meta = _generate_suggestions(
-                    images, stems, archive_path, known_meta,
+                    images, stems, archive_path, known_meta, file_list, self._max_tags,
                     self.status.emit, self.tags_ready.emit, self.meta_ready.emit,
                 )
             except Exception as exc:
@@ -536,6 +638,7 @@ class AITaggerDialog(QDialog):
         self._archive_path = ""
         self._image_data: list[tuple[bytes, str]] = []
         self._known_meta: dict[str, str] = {}
+        self._file_list: list[str] = []
 
         self.setMinimumWidth(540)
         self.setMinimumHeight(720)
@@ -615,11 +718,12 @@ class AITaggerDialog(QDialog):
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
         form.setSpacing(6)
 
-        self._title_edit    = self._make_field(form, "Title:")
-        self._creator_edit  = self._make_field(form, "Creator:")
-        self._sculptor_edit = self._make_field(form, "Sculptor:")
-        self._category_edit = self._make_field(form, "Category:")
-        self._scale_edit    = self._make_field(form, "Scale:")
+        self._title_edit         = self._make_field(form, "Title:")
+        self._creator_edit       = self._make_field(form, "Creator:")
+        self._sculptor_edit      = self._make_field(form, "Sculptor:")
+        self._collection_edit    = self._make_field(form, "Collection:")
+        self._subcollection_edit = self._make_field(form, "Subcollection:")
+        self._scale_edit         = self._make_field(form, "Scale:")
         self._source_edit   = self._make_field(
             form, "Source:", placeholder="patreon / kickstarter / myminifactory"
         )
@@ -684,6 +788,31 @@ class AITaggerDialog(QDialog):
         )
         root.addWidget(self._overwrite_chk)
 
+        # Ignore existing metadata option
+        self._ignore_meta_chk = QCheckBox("Ignore existing metadata (use images + path only)")
+        self._ignore_meta_chk.setToolTip(
+            "When checked, the model's existing catalogued metadata and file list are\n"
+            "NOT sent to the AI. Only the images, archive path, and image filenames\n"
+            "are used as input — useful to re-tag from scratch without prior bias."
+        )
+        root.addWidget(self._ignore_meta_chk)
+
+        # Max tags limit
+        max_row = QHBoxLayout()
+        max_row.addWidget(QLabel("Max tags:"))
+        self._max_tags_spin = QSpinBox()
+        self._max_tags_spin.setRange(0, 100)
+        self._max_tags_spin.setSpecialValueText("No limit")   # shown when value == 0
+        self._max_tags_spin.setValue(int(QSettings().value(_MAX_TAGS_KEY, 20)))
+        self._max_tags_spin.setToolTip(
+            "Keep at most this many AI-generated tags (the first N after cleanup).\n"
+            "Set to 0 (No limit) to keep all. You can still add tags manually."
+        )
+        self._max_tags_spin.valueChanged.connect(self._on_max_tags_changed)
+        max_row.addWidget(self._max_tags_spin)
+        max_row.addStretch()
+        root.addLayout(max_row)
+
         # Button row
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
@@ -725,8 +854,8 @@ class AITaggerDialog(QDialog):
         """Empty every metadata field and clear the tag pills."""
         for edit in (
             self._title_edit, self._creator_edit, self._sculptor_edit,
-            self._category_edit, self._scale_edit, self._source_edit,
-            self._year_edit,
+            self._collection_edit, self._subcollection_edit, self._scale_edit,
+            self._source_edit, self._year_edit,
         ):
             edit.clear()
         self._desc_edit.clear()
@@ -757,6 +886,7 @@ class AITaggerDialog(QDialog):
                     stem = Path(img.filename).stem if img.filename else f"img{img.id}"
                     self._image_data.append((b, stem))
             self._known_meta = _collect_known_meta(m)
+            self._file_list = [sf.filename for sf in m.stl_files if sf.filename]
         finally:
             session.close()
 
@@ -889,7 +1019,9 @@ class AITaggerDialog(QDialog):
             [b for b, _ in self._image_data],
             [s for _, s in self._image_data],
             self._archive_path,
-            self._known_meta,
+            None if self._ignore_meta_chk.isChecked() else self._known_meta,
+            self._file_list,
+            self._max_tags_spin.value(),
         )
         self._thread.status.connect(self._set_status)
         self._thread.tags_ready.connect(self._on_tags_ready)
@@ -924,11 +1056,12 @@ class AITaggerDialog(QDialog):
             if key in meta and not edit.text().strip():
                 edit.setText(meta[key])
 
-        _fill(self._title_edit,    "TITLE")
-        _fill(self._creator_edit,  "CREATOR")
-        _fill(self._sculptor_edit, "SCULPTOR")
-        _fill(self._category_edit, "CATEGORY")
-        _fill(self._scale_edit,    "SCALE")
+        _fill(self._title_edit,         "TITLE")
+        _fill(self._creator_edit,       "CREATOR")
+        _fill(self._sculptor_edit,      "SCULPTOR")
+        _fill(self._collection_edit,    "COLLECTION")
+        _fill(self._subcollection_edit, "SUBCOLLECTION")
+        _fill(self._scale_edit,         "SCALE")
 
         if "SOURCE" in meta and not self._source_edit.text().strip():
             src = meta["SOURCE"].strip().lower()
@@ -948,6 +1081,13 @@ class AITaggerDialog(QDialog):
         self._gen_btn.setEnabled(True)
 
     # ------------------------------------------------------------------
+    def _on_max_tags_changed(self, value: int) -> None:
+        """Persist the limit and immediately prune the shown tags to match."""
+        QSettings().setValue(_MAX_TAGS_KEY, value)
+        if value > 0 and len(self._current_tags) > value:
+            del self._current_tags[value:]
+            self._rebuild_pills()
+
     def _add_tag(self, tag: str) -> None:
         tag = tag.strip().lower()
         if not tag or tag in self._current_tags:
@@ -1005,14 +1145,15 @@ class AITaggerDialog(QDialog):
             year = int(year_str)
 
         fields = {
-            "title":       self._title_edit.text().strip(),
-            "creator":     self._creator_edit.text().strip(),
-            "sculptor":    self._sculptor_edit.text().strip(),
-            "category":    self._category_edit.text().strip(),
-            "scale":       self._scale_edit.text().strip(),
-            "description": self._desc_edit.toPlainText().strip(),
-            "source":      source if source in _VALID_SOURCES else "",
-            "year":        year,
+            "title":         self._title_edit.text().strip(),
+            "creator":       self._creator_edit.text().strip(),
+            "sculptor":      self._sculptor_edit.text().strip(),
+            "collection":    self._collection_edit.text().strip(),
+            "subcollection": self._subcollection_edit.text().strip(),
+            "scale":         self._scale_edit.text().strip(),
+            "description":   self._desc_edit.toPlainText().strip(),
+            "source":        source if source in _VALID_SOURCES else "",
+            "year":          year,
         }
         if _commit_model_data(self._model_id, fields, self._current_tags,
                               self._overwrite_chk.isChecked()):
@@ -1082,7 +1223,10 @@ class AITaggerDialog(QDialog):
         self._set_batch_busy(True)
         self._progress_lbl.setVisible(True)
 
-        self._batch_thread = _BatchThread(self._model_ids, overwrite)
+        self._batch_thread = _BatchThread(
+            self._model_ids, overwrite, self._ignore_meta_chk.isChecked(),
+            self._max_tags_spin.value(),
+        )
         self._batch_thread.model_started.connect(self._on_batch_model_started)
         self._batch_thread.status.connect(self._set_status)
         self._batch_thread.tags_ready.connect(self._on_tags_ready)
@@ -1098,6 +1242,8 @@ class AITaggerDialog(QDialog):
         self._skip_btn.setEnabled(not busy and self._skip_btn.isVisible())
         self._cancel_btn.setEnabled(not busy)
         self._overwrite_chk.setEnabled(not busy)
+        self._ignore_meta_chk.setEnabled(not busy)
+        self._max_tags_spin.setEnabled(not busy)
         self._process_all_btn.setText("Stop" if busy else f"Process All ({len(self._model_ids)})")
         self._process_all_btn.setEnabled(True)
 
