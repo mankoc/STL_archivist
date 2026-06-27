@@ -2,7 +2,6 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QTableWidget, QTableWidgetItem, QHBoxLayout,
     QPushButton, QLabel, QHeaderView,
 )
-from PyQt6.QtCore import Qt
 
 
 class RecrawlPreviewDialog(QDialog):
