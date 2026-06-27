@@ -4041,6 +4041,17 @@ class BrowserTab(QWidget):
         TagEditorDialog(parent=self).exec()
         self.refresh()
 
+    def open_ai_tagger_for_selection(self) -> None:
+        """Open AI Tagging for the currently selected rows (toolbar/menu entry)."""
+        ids = self._selected_model_ids()
+        if not ids:
+            QMessageBox.information(
+                self, self.tr("AI Tagging"),
+                self.tr("Select one or more models in the table first."),
+            )
+            return
+        self._open_ai_tagger(ids)
+
     def _open_ai_tagger(self, model_ids: list) -> None:
         from app.ui.ai_tagger_dialog import AITaggerDialog
         dlg = AITaggerDialog(model_ids, parent=self)

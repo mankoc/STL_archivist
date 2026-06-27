@@ -1,6 +1,9 @@
 """
-AI Tagger dialog — uses Qwen2-VL to suggest tags and metadata for a model.
-Images are read from LMDB; inference runs on a background QThread.
+AI Tagger dialog — uses Qwen2.5-VL to suggest tags and metadata for a model.
+
+Inference runs locally via llama.cpp's ``llama-server`` (a native subprocess,
+no torch / Python AI packages) — see :mod:`app.utils.ai_server`.  Images are
+read from LMDB and sent as base64 to the server's OpenAI-compatible API.
 
 Supports single or multiple models: when multiple model IDs are passed the
 dialog navigates through them one by one.  Changes are written to the database
@@ -8,8 +11,6 @@ only when the user clicks "Save" / "Save & Next".
 """
 from __future__ import annotations
 
-import io
-import warnings
 from pathlib import Path
 from typing import Optional
 
@@ -18,7 +19,7 @@ from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QPushButton, QScrollArea, QWidget,
-    QSizePolicy, QFrame, QLayout, QTextEdit, QMessageBox,
+    QSizePolicy, QFrame, QLayout, QTextEdit, QMessageBox, QCheckBox,
 )
 
 from app.database.db import session_scope, get_session
@@ -26,34 +27,51 @@ from app.database.models import STLModel, Tag, Category, Sculptor, Scale
 from app.utils.thumbnailer import get_thumbnail_bytes
 
 
-QWEN_MODEL = "Qwen/Qwen2-VL-2B-Instruct"
-MAX_VISUAL_TOKENS = 600
-PATCH = 28
-
 _VALID_SOURCES = {"patreon", "kickstarter", "myminifactory", "unknown"}
-
-# Module-level model cache: keyed by device string.
-# Keeping the model alive here prevents CUDA tensor destructors from running
-# off the main thread (which causes glibc double-free / heap corruption).
-_cached_model = None
-_cached_proc  = None
-_cached_device: str | None = None
 
 
 # ---------------------------------------------------------------------------
 # Prompt helpers
 # ---------------------------------------------------------------------------
 
-def _image_size_for(n: int) -> int:
-    tokens_each = MAX_VISUAL_TOKENS // max(n, 1)
-    side = int((tokens_each ** 0.5) * PATCH)
-    return max(224, min(512, (side // PATCH) * PATCH))
+def _dedupe_words(tag: str) -> str:
+    """Drop repeated words within a single tag.
+
+    Models sometimes stutter (e.g. ``"gothic gothic gothic horror"``); this
+    keeps the first occurrence of each word (case-insensitive) in order, so the
+    example collapses to ``"gothic horror"``.
+    """
+    seen: set[str] = set()
+    words: list[str] = []
+    for w in tag.split():
+        key = w.lower()
+        if key not in seen:
+            seen.add(key)
+            words.append(w)
+    return " ".join(words)
 
 
-def _build_tags_prompt(stems: list[str], archive_path: str) -> str:
+def _format_known_meta(known_meta: dict[str, str] | None) -> str:
+    """Render the model's existing catalogued metadata as a prompt hint block."""
+    if not known_meta:
+        return ""
+    lines = "\n".join(f"- {k}: {v}" for k, v in known_meta.items())
+    return (
+        "Existing catalogued metadata for this model (extracted when the archive "
+        "was added — it may be incomplete or inaccurate, so use it as a hint and "
+        "correct it if the images or path clearly contradict it):\n"
+        f"{lines}\n"
+    )
+
+
+def _build_tags_prompt(stems: list[str], archive_path: str,
+                       known_meta: dict[str, str] | None = None) -> str:
     filenames_str = ", ".join(f'"{s}"' for s in stems) if stems else "(none)"
     intro = (
-        f"These {len(stems)} images all show the same 3D printable miniature model from different angles. "
+        f"These {len(stems)} images come from a single archive of 3D printable miniatures. "
+        "They usually show the same model from different angles, but some may show a "
+        "different model, separate parts or accessories, packaging, or promotional art. "
+        "Identify and describe the main miniature; ignore unrelated images. "
         if len(stems) > 1 else
         "This image shows a 3D printable miniature model. "
     )
@@ -61,7 +79,11 @@ def _build_tags_prompt(stems: list[str], archive_path: str) -> str:
         intro
         + f'Full archive path: "{archive_path}". '
         + f"Image file names: {filenames_str}. "
-        "Use the full path and filenames as hints alongside the images to identify the character or subject. "
+        + _format_known_meta(known_meta)
+        + "Use the full path, filenames, and any existing metadata as hints alongside the images to identify the character or subject. "
+        "Tag ONLY what is actually shown in the images. Do NOT add related characters, "
+        "vehicles, companions, or items from the same franchise that do not appear "
+        "(for example, do not tag other Star Wars characters just because a ship is from Star Wars). "
         "Output ONLY a comma-separated list of descriptive tags. "
         "Include: character name (if recognizable), franchise or source material, "
         "character type, genre, visual style, and any other relevant descriptors. "
@@ -69,12 +91,16 @@ def _build_tags_prompt(stems: list[str], archive_path: str) -> str:
     )
 
 
-def _build_meta_prompt(archive_path: str) -> str:
+def _build_meta_prompt(archive_path: str,
+                       known_meta: dict[str, str] | None = None) -> str:
     return (
         "This is a 3D printable miniature model. "
         f'Full archive path: "{archive_path}". '
-        "Based on the images and the full path (folder structure encodes sculptor, "
-        "series, and source information), output metadata in this EXACT format "
+        + _format_known_meta(known_meta)
+        + "The archive may contain several images; some may show a different model, "
+        "separate parts, packaging, or promotional art — base the metadata on the main miniature. "
+        + "Based on the images, the full path (folder structure encodes sculptor, "
+        "series, and source information), and any existing metadata above, output metadata in this EXACT format "
         "(one line per field, leave the value empty if unknown, no extra text):\n"
         "TITLE: <model title>\n"
         "CREATOR: <publisher, brand or author name>\n"
@@ -96,101 +122,48 @@ def _generate_suggestions(
     image_bytes_list: list[bytes],
     stems: list[str],
     archive_path: str,
+    known_meta: dict[str, str] | None = None,
     status_cb=None,
     on_tags=None,
     on_meta=None,
 ) -> "tuple[list[str], dict[str, str]]":
-    """Run Qwen2-VL and return ``(tags, metadata)`` for one model.
+    """Run Qwen2.5-VL via llama-server and return ``(tags, metadata)``.
 
     *status_cb(text, css_color)* is called with progress updates when provided.
     *on_tags(list)* / *on_meta(dict)* are called as soon as each result is ready
-    so callers can stream them to the UI. Raises ``RuntimeError`` with a
-    user-facing message if the AI packages are not installed.
+    so callers can stream them to the UI. Raises ``RuntimeError`` (with a
+    user-facing message) if the AI components are not installed or the server
+    cannot be started.
     """
-    global _cached_model, _cached_proc, _cached_device
+    from app.utils import ai_server
+    from app.ui.config_dialog import get_ai_temperature
 
-    warnings.filterwarnings("ignore", category=FutureWarning)
-    warnings.filterwarnings("ignore", category=UserWarning)
+    temperature = get_ai_temperature()
 
-    from app.utils.ai_runtime import activate_ai_packages
-    activate_ai_packages()
-
-    try:
-        import torch
-        from PIL import Image
-        from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
-        from qwen_vl_utils import process_vision_info
-    except ModuleNotFoundError as missing:
-        raise RuntimeError(
-            f"AI tagging requires additional packages ({missing.name} is not installed).\n\n"
-            "Click 'Generate' again to open the install dialog, or run\n"
-            "  pip install torch torchvision transformers accelerate qwen-vl-utils\n"
-            "and restart the application."
-        ) from None
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    if _cached_model is None or _cached_device != device:
-        if status_cb:
-            status_cb("Loading Qwen model…", "#f59e0b")
-        _cached_proc = AutoProcessor.from_pretrained(QWEN_MODEL)
-        _cached_model = Qwen2VLForConditionalGeneration.from_pretrained(
-            QWEN_MODEL,
-            torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-            device_map=device,
-        )
-        _cached_model.eval()
-        _cached_device = device
-
-    proc, model = _cached_proc, _cached_model
-
-    pil_images: list = []
-    if image_bytes_list:
-        size = _image_size_for(len(image_bytes_list))
-        for b in image_bytes_list:
-            img = Image.open(io.BytesIO(b)).convert("RGB")
-            img.thumbnail((size, size), Image.LANCZOS)
-            pil_images.append(img)
-
-    def _infer(prompt_text: str, max_tokens: int = 150) -> str:
-        content = [{"type": "image", "image": img} for img in pil_images]
-        content.append({"type": "text", "text": prompt_text})
-        messages = [{"role": "user", "content": content}]
-        text = proc.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
-        )
-        img_in, vid_in = process_vision_info(messages)
-        inputs = proc(
-            text=[text],
-            images=img_in if img_in else None,
-            videos=vid_in if vid_in else None,
-            padding=True,
-            return_tensors="pt",
-        ).to(device)
-        with torch.no_grad():
-            ids = model.generate(**inputs, max_new_tokens=max_tokens)
-        trimmed = ids[0][inputs.input_ids.shape[1]:]
-        result = proc.decode(trimmed, skip_special_tokens=True).strip()
-        del inputs, ids, trimmed
-        if device == "cuda":
-            torch.cuda.empty_cache()
-        return result
+    # Starts llama-server (loading the model) on first use; reused afterwards.
+    ai_server.ensure_running(status_cb)
 
     if status_cb:
         status_cb("Generating tags…", "#f59e0b")
-    raw_tags = _infer(_build_tags_prompt(stems, archive_path), max_tokens=120)
+    raw_tags = ai_server.chat(
+        image_bytes_list, _build_tags_prompt(stems, archive_path, known_meta),
+        max_tokens=120, temperature=temperature,
+    )
     seen: set[str] = set()
     tags = [
         t
         for raw in raw_tags.split(",")
-        if (t := raw.strip()) and t.lower() not in seen and not seen.add(t.lower())
+        if (t := _dedupe_words(raw.strip())) and t.lower() not in seen and not seen.add(t.lower())
     ]
     if on_tags:
         on_tags(tags)
 
     if status_cb:
         status_cb("Extracting metadata…", "#f59e0b")
-    raw_meta = _infer(_build_meta_prompt(archive_path), max_tokens=200)
+    raw_meta = ai_server.chat(
+        image_bytes_list, _build_meta_prompt(archive_path, known_meta),
+        max_tokens=200, temperature=temperature,
+    )
     meta: dict[str, str] = {}
     for line in raw_meta.splitlines():
         if ":" in line:
@@ -205,13 +178,41 @@ def _generate_suggestions(
     return tags, meta
 
 
-def _load_model_inputs(model_id: int) -> "tuple[list[bytes], list[str], str, str]":
-    """Return ``(image_bytes, stems, archive_path, display_title)`` for *model_id*."""
+def _collect_known_meta(m: STLModel) -> dict[str, str]:
+    """Existing catalogued metadata for *m* as an ordered {label: value} dict.
+
+    Only non-empty fields are included. Must be called while *m*'s session is
+    still open (it touches the sculptor/category/scale/tags relationships).
+    """
+    meta: dict[str, str] = {}
+
+    def add(label: str, value) -> None:
+        if value not in (None, ""):
+            meta[label] = str(value).strip()
+
+    add("Title", m.title)
+    add("Creator", m.creator)
+    add("Sculptor", m.sculptor.name if m.sculptor else None)
+    add("Category", m.category.name if m.category else None)
+    add("Scale", m.scale.name if m.scale else None)
+    add("Source", m.source)
+    add("Year", m.release_year)
+    add("Description", m.description)
+    existing_tags = [t.name for t in m.tags]
+    if existing_tags:
+        meta["Tags"] = ", ".join(existing_tags)
+    return meta
+
+
+def _load_model_inputs(
+    model_id: int,
+) -> "tuple[list[bytes], list[str], str, str, dict[str, str]]":
+    """Return ``(image_bytes, stems, archive_path, display_title, known_meta)``."""
     session = get_session()
     try:
         m = session.get(STLModel, model_id)
         if m is None:
-            return [], [], "", f"#{model_id}"
+            return [], [], "", f"#{model_id}", {}
         archive_path = m.archive_path or ""
         title = m.title or Path(archive_path).stem
         images: list[bytes] = []
@@ -221,7 +222,7 @@ def _load_model_inputs(model_id: int) -> "tuple[list[bytes], list[str], str, str
             if b:
                 images.append(b)
                 stems.append(Path(img.filename).stem if img.filename else f"img{img.id}")
-        return images, stems, archive_path, title
+        return images, stems, archive_path, title, _collect_known_meta(m)
     finally:
         session.close()
 
@@ -247,29 +248,32 @@ def _normalize_meta(meta: dict[str, str]) -> dict:
     return fields
 
 
-def _commit_model_data(model_id: int, fields: dict, tags: list[str]) -> bool:
+def _commit_model_data(model_id: int, fields: dict, tags: list[str],
+                       overwrite: bool = False) -> bool:
     """Write normalized *fields* and *tags* to *model_id*.
 
-    Existing values are preserved: scalar fields are only set when non-empty and
-    tags are merged (never removed). Returns True if the model existed.
+    When *overwrite* is False (the default) existing values are preserved: a
+    scalar / relationship field is only set when it is currently empty. When
+    *overwrite* is True any non-empty suggested value replaces the current one.
+    Tags are always merged (never removed). Returns True if the model existed.
     """
     with session_scope() as session:
         model: Optional[STLModel] = session.get(STLModel, model_id)
         if model is None:
             return False
 
-        if fields["title"]:
+        if fields["title"] and (overwrite or not model.title):
             model.title = fields["title"]
-        if fields["creator"]:
+        if fields["creator"] and (overwrite or not model.creator):
             model.creator = fields["creator"]
-        if fields["year"] is not None:
+        if fields["year"] is not None and (overwrite or model.release_year is None):
             model.release_year = fields["year"]
-        if fields["description"]:
+        if fields["description"] and (overwrite or not model.description):
             model.description = fields["description"]
-        if fields["source"]:
+        if fields["source"] and (overwrite or not model.source):
             model.source = fields["source"]
 
-        if fields["sculptor"]:
+        if fields["sculptor"] and (overwrite or model.sculptor is None):
             sc = session.query(Sculptor).filter_by(name=fields["sculptor"]).first()
             if sc is None:
                 sc = Sculptor(name=fields["sculptor"])
@@ -277,7 +281,7 @@ def _commit_model_data(model_id: int, fields: dict, tags: list[str]) -> bool:
                 session.flush()
             model.sculptor = sc
 
-        if fields["category"]:
+        if fields["category"] and (overwrite or model.category is None):
             cat = session.query(Category).filter_by(name=fields["category"]).first()
             if cat is None:
                 cat = Category(name=fields["category"])
@@ -285,7 +289,7 @@ def _commit_model_data(model_id: int, fields: dict, tags: list[str]) -> bool:
                 session.flush()
             model.category = cat
 
-        if fields["scale"]:
+        if fields["scale"] and (overwrite or model.scale is None):
             scl = session.query(Scale).filter_by(name=fields["scale"]).first()
             if scl is None:
                 scl = Scale(name=fields["scale"])
@@ -388,16 +392,18 @@ class _InferenceThread(QThread):
         image_bytes_list: list[bytes],
         stems: list[str],
         archive_path: str,
+        known_meta: dict[str, str] | None = None,
     ) -> None:
         super().__init__()
         self._images       = image_bytes_list
         self._stems        = stems
         self._archive_path = archive_path
+        self._known_meta   = known_meta or {}
 
     def run(self) -> None:
         try:
             _generate_suggestions(
-                self._images, self._stems, self._archive_path,
+                self._images, self._stems, self._archive_path, self._known_meta,
                 self.status.emit, self.tags_ready.emit, self.meta_ready.emit,
             )
             self.status.emit("Done", "#22c55e")
@@ -419,9 +425,10 @@ class _BatchThread(QThread):
     error         = pyqtSignal(str)
     completed     = pyqtSignal(int, int)           # (saved, total)
 
-    def __init__(self, model_ids: list[int]) -> None:
+    def __init__(self, model_ids: list[int], overwrite: bool = False) -> None:
         super().__init__()
         self._model_ids = list(model_ids)
+        self._overwrite = overwrite
         self._stop_requested = False
 
     def stop(self) -> None:
@@ -433,7 +440,7 @@ class _BatchThread(QThread):
         for i, model_id in enumerate(self._model_ids, 1):
             if self._stop_requested:
                 break
-            images, stems, archive_path, title = _load_model_inputs(model_id)
+            images, stems, archive_path, title, known_meta = _load_model_inputs(model_id)
             self.model_started.emit(i, total, {
                 "index":        i - 1,
                 "model_id":     model_id,
@@ -444,7 +451,7 @@ class _BatchThread(QThread):
             })
             try:
                 tags, meta = _generate_suggestions(
-                    images, stems, archive_path,
+                    images, stems, archive_path, known_meta,
                     self.status.emit, self.tags_ready.emit, self.meta_ready.emit,
                 )
             except Exception as exc:
@@ -454,7 +461,8 @@ class _BatchThread(QThread):
                     # problem that would repeat for every model, so abort.
                     break
                 continue
-            if _commit_model_data(model_id, _normalize_meta(meta), tags):
+            if _commit_model_data(model_id, _normalize_meta(meta), tags,
+                                  self._overwrite):
                 saved += 1
         self.completed.emit(saved, total)
 
@@ -487,6 +495,7 @@ class AITaggerDialog(QDialog):
         self._model_id    = 0
         self._archive_path = ""
         self._image_data: list[tuple[bytes, str]] = []
+        self._known_meta: dict[str, str] = {}
 
         self.setMinimumWidth(540)
         self.resize(660, 640)
@@ -625,6 +634,15 @@ class AITaggerDialog(QDialog):
         sep3.setFrameShadow(QFrame.Shadow.Sunken)
         root.addWidget(sep3)
 
+        # Overwrite option
+        self._overwrite_chk = QCheckBox("Overwrite existing values")
+        self._overwrite_chk.setToolTip(
+            "When checked, AI suggestions replace the current field values.\n"
+            "When unchecked, only empty fields are filled.\n"
+            "Tags are always merged (never removed)."
+        )
+        root.addWidget(self._overwrite_chk)
+
         # Button row
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
@@ -697,6 +715,7 @@ class AITaggerDialog(QDialog):
                 if b:
                     stem = Path(img.filename).stem if img.filename else f"img{img.id}"
                     self._image_data.append((b, stem))
+            self._known_meta = _collect_known_meta(m)
         finally:
             session.close()
 
@@ -829,6 +848,7 @@ class AITaggerDialog(QDialog):
             [b for b, _ in self._image_data],
             [s for _, s in self._image_data],
             self._archive_path,
+            self._known_meta,
         )
         self._thread.status.connect(self._set_status)
         self._thread.tags_ready.connect(self._on_tags_ready)
@@ -953,7 +973,8 @@ class AITaggerDialog(QDialog):
             "source":      source if source in _VALID_SOURCES else "",
             "year":        year,
         }
-        if _commit_model_data(self._model_id, fields, self._current_tags):
+        if _commit_model_data(self._model_id, fields, self._current_tags,
+                              self._overwrite_chk.isChecked()):
             self._any_saved = True
 
     def _save_and_advance(self) -> None:
@@ -993,11 +1014,17 @@ class AITaggerDialog(QDialog):
                 return
 
         n = len(self._model_ids)
+        overwrite = self._overwrite_chk.isChecked()
+        policy = (
+            "Existing values are replaced by the AI suggestions (tags are merged)."
+            if overwrite else
+            "Existing values are kept — only empty fields are filled and new tags added."
+        )
         reply = QMessageBox.question(
             self, "Process All",
             f"Run AI tagging on all {n} model(s) and save the results automatically, "
             "without reviewing each one?\n\n"
-            "Existing values are kept — only empty fields are filled and new tags added.",
+            + policy,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
         )
@@ -1014,7 +1041,7 @@ class AITaggerDialog(QDialog):
         self._set_batch_busy(True)
         self._progress_lbl.setVisible(True)
 
-        self._batch_thread = _BatchThread(self._model_ids)
+        self._batch_thread = _BatchThread(self._model_ids, overwrite)
         self._batch_thread.model_started.connect(self._on_batch_model_started)
         self._batch_thread.status.connect(self._set_status)
         self._batch_thread.tags_ready.connect(self._on_tags_ready)
@@ -1029,6 +1056,7 @@ class AITaggerDialog(QDialog):
         self._save_btn.setEnabled(not busy)
         self._skip_btn.setEnabled(not busy and self._skip_btn.isVisible())
         self._cancel_btn.setEnabled(not busy)
+        self._overwrite_chk.setEnabled(not busy)
         self._process_all_btn.setText("Stop" if busy else f"Process All ({len(self._model_ids)})")
         self._process_all_btn.setEnabled(True)
 
@@ -1064,32 +1092,20 @@ class AITaggerDialog(QDialog):
             self, "Process All",
             f"Saved AI suggestions for {saved} of {total} model(s)."
         )
+        # Batch run is done — close the dialog once the user dismisses the notice.
+        self.accept()
 
     # ------------------------------------------------------------------
     def closeEvent(self, event) -> None:
-        global _cached_model, _cached_proc, _cached_device
         self._stop_thread()
         if self._batch_thread and self._batch_thread.isRunning():
             self._batch_thread.stop()
             self._batch_thread.wait(60000)
+        # Shut the llama-server down to free the memory the model holds; it is
+        # relaunched (model reload) the next time the dialog is opened.
         try:
-            import gc
-            import torch
-            cuda = torch.cuda.is_available()
-            if _cached_model is not None and cuda:
-                # Move all parameters off the GPU before dropping the reference
-                # so VRAM is reclaimed immediately rather than waiting for the
-                # Python GC to get around to it.
-                _cached_model.cpu()
-                if hasattr(_cached_model, 'visual'):
-                    _cached_model.visual.cpu()
-            _cached_model  = None
-            _cached_proc   = None
-            _cached_device = None
-            gc.collect()
-            if cuda:
-                torch.cuda.synchronize()
-                torch.cuda.empty_cache()
+            from app.utils import ai_server
+            ai_server.stop()
         except Exception:
             pass
         super().closeEvent(event)

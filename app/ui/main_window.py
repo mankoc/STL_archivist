@@ -25,6 +25,22 @@ class MainWindow(QMainWindow):
         self._build_ui()
 
     # ------------------------------------------------------------------
+    def closeEvent(self, event) -> None:
+        """Shut the local AI model server (llama-server) down on app close.
+
+        The AI Tagging dialog already stops the server when it closes, and
+        ``ai_server`` registers an ``atexit`` handler, but ``atexit`` can be
+        skipped on a hard exit — so stop it here too to make sure the
+        subprocess never lingers after the window is closed.
+        """
+        try:
+            from app.utils import ai_server
+            ai_server.stop()
+        except Exception:
+            pass
+        super().closeEvent(event)
+
+    # ------------------------------------------------------------------
     def _build_ui(self) -> None:
         style = QApplication.style()
         SP    = style.StandardPixmap
@@ -110,6 +126,12 @@ class MainWindow(QMainWindow):
         self._act_help.setStatusTip(self.tr("Open the help page"))
         self._act_help.triggered.connect(self._show_help)
 
+        self._act_ai_tagging = QAction(
+            _icon("icon_tag"), self.tr("AI Tagging"), self)
+        self._act_ai_tagging.setStatusTip(
+            self.tr("Run AI tagging on the models selected in the table"))
+        self._act_ai_tagging.triggered.connect(self._browser.open_ai_tagger_for_selection)
+
         # ---- Menu bar ----
         mb = self.menuBar()
 
@@ -152,6 +174,8 @@ class MainWindow(QMainWindow):
         )
         act_gen_thumbs.triggered.connect(self._browser.generate_thumbnails_for_selected)
         tools_menu.addAction(act_gen_thumbs)
+
+        tools_menu.addAction(self._act_ai_tagging)
 
         tools_menu.addSeparator()
 
@@ -264,6 +288,8 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self._act_find_dupes)
         toolbar.addAction(self._act_find_content_dupes)
         toolbar.addAction(self._act_find_by_image)
+        toolbar.addSeparator()
+        toolbar.addAction(self._act_ai_tagging)
         toolbar.addSeparator()
         toolbar.addAction(self._act_image_grid)
         toolbar.addAction(self._act_toggle_images)

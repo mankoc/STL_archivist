@@ -28,6 +28,7 @@ UNRAR_TOOL_KEY         = "config/unrar_tool"
 MAX_THUMBS_DEFAULT      = 5
 MAX_THUMB_SIZE_DEFAULT  = 512
 THUMB_PAGE_SIZE_DEFAULT = 200
+AI_TEMPERATURE_DEFAULT  = 0.2
 
 # ── File manager presets ──────────────────────────────────────────────────────
 FILE_MANAGER_SYSTEM           = "system"
@@ -455,6 +456,16 @@ def get_ai_embeddings_during_crawl() -> bool:
 def get_ai_embeddings_batch_size() -> int:
     """Number of images per CLIP inference call (higher = better GPU utilisation)."""
     return int(_load_library_settings().get("ai_embeddings_batch_size", 32))
+
+
+def get_ai_temperature() -> float:
+    """Sampling temperature for the AI tagging model.
+
+    Lower values (0.0–0.2) keep tags/metadata literal and grounded in the
+    images; higher values make the model more creative but more prone to
+    hallucinated, by-association results.
+    """
+    return float(_load_library_settings().get("ai_temperature", AI_TEMPERATURE_DEFAULT))
 
 
 def get_file_manager() -> str:
@@ -1272,6 +1283,28 @@ class ConfigDialog(QDialog):
         self._refresh_clip_dl_button()
 
         layout.addWidget(sim_group)
+
+        ai_tag_group = QGroupBox(self.tr("AI Tagging"))
+        ai_tag_form = QFormLayout(ai_tag_group)
+
+        self._ai_temperature_spin = QDoubleSpinBox()
+        self._ai_temperature_spin.setRange(0.0, 2.0)
+        self._ai_temperature_spin.setSingleStep(0.05)
+        self._ai_temperature_spin.setDecimals(2)
+        self._ai_temperature_spin.setToolTip(self.tr(
+            "Sampling temperature passed to the AI tagging model. "
+            "Lower values (0.0–0.2) make tags and metadata more literal and "
+            "grounded in the images; higher values make the model more creative "
+            "but more prone to hallucinated, by-association results."
+        ))
+        ai_tag_form.addRow(self.tr("Model temperature:"), self._ai_temperature_spin)
+        ai_tag_form.addRow(
+            "",
+            QLabel(self.tr("<small>Used when generating tags and metadata in the AI Tagging dialog. "
+                   "Default: 0.2.</small>")),
+        )
+
+        layout.addWidget(ai_tag_group)
         layout.addStretch()
         return page
 
@@ -1970,6 +2003,7 @@ class ConfigDialog(QDialog):
         self._ai_embeddings_crawl_check.setEnabled(ai_embed_enabled)
         self._ai_batch_size_spin.setValue(get_ai_embeddings_batch_size())
         self._ai_batch_size_spin.setEnabled(ai_embed_enabled)
+        self._ai_temperature_spin.setValue(get_ai_temperature())
         self._refresh_clip_dl_button()
 
         self._notif_enabled_check.setChecked(get_notifications_enabled())
@@ -2060,6 +2094,7 @@ class ConfigDialog(QDialog):
                 "ai_embeddings_enabled":      self._ai_embeddings_check.isChecked(),
                 "ai_embeddings_during_crawl": self._ai_embeddings_crawl_check.isChecked(),
                 "ai_embeddings_batch_size":   self._ai_batch_size_spin.value(),
+                "ai_temperature":             self._ai_temperature_spin.value(),
                 "hotkeys": {
                     action_id: editor.keySequence().toString()
                     for action_id, editor in self._hotkey_edits.items()

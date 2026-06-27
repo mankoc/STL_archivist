@@ -55,7 +55,8 @@ jobs:
       - name: Verify build environment
         run: |
           python -c "
-          # Confirm AI packages were NOT accidentally pulled in
+          # Confirm AI packages were NOT accidentally pulled in (AI runs via the
+          # external llama.cpp llama-server binary, not Python packages).
           for pkg in ('torch', 'transformers', 'qwen_vl_utils', 'onnxruntime'):
               try:
                   __import__(pkg)
@@ -63,9 +64,10 @@ jobs:
               except ImportError:
                   pass
           # Confirm core app imports work
-          from app.utils.ai_runtime import is_ai_ready, ai_packages_dir, INSTALL_VARIANTS
+          from app.utils.ai_runtime import is_ai_ready, ai_dir, INSTALL_VARIANTS
           assert 'cpu' in INSTALL_VARIANTS
-          assert 'cu128' in INSTALL_VARIANTS
+          assert 'cuda' in INSTALL_VARIANTS
+          from app.utils import ai_server  # noqa: F401
           print('Build environment OK — no AI packages bundled, ai_runtime imports clean')
           "
 

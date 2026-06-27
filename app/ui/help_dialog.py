@@ -1133,6 +1133,11 @@ archives&rsquo; first thumbnails, making it easy to judge whether the match is g
       <td>Rewrites the LMDB thumbnail store to reclaim disk space left behind by deleted
           thumbnails. LMDB reuses freed space but never shrinks the file on its own, so run
           this after removing many models or images. The store is briefly closed and rebuilt.</td></tr>
+  <tr><td><b>Prune Images per Model&hellip;</b></td>
+      <td>Reduces the number of stored images per model to a maximum you choose (e.g. keep
+          3 of 10). The oldest images are kept; the extras and their thumbnails are deleted
+          from the database. Run <b>Compact Thumbnail Store</b> afterwards to reclaim the
+          freed disk space.</td></tr>
   <tr><td><b>Show only problems</b> checkbox</td>
       <td>Hides <em>OK</em> and <em>Relocated</em> rows so you can focus on records that
           need attention.</td></tr>
