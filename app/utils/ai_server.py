@@ -42,7 +42,35 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+def _parse_chat_response(raw: str) -> str:
+    """Extract the assistant message text from a chat-completions JSON body.
+
+    Validates the structure of an OpenAI-compatible response so that a malformed
+    or error payload raises a clear :class:`RuntimeError` instead of a bare
+    ``KeyError``/``IndexError``/``JSONDecodeError`` deep in the caller.
+    """
+    try:
+        resp = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"AI server returned malformed JSON: {exc}") from exc
+    choices = resp.get("choices") if isinstance(resp, dict) else None
+    if not choices:
+        raise RuntimeError(f"AI server returned no choices: {resp!r}")
+    message = choices[0].get("message") if isinstance(choices[0], dict) else None
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, str):
+        raise RuntimeError("AI server response missing message content.")
+    return content.strip()
+
+
 class _Server:
+    """Lifecycle wrapper around a single ``llama-server`` subprocess.
+
+    Lazily launched via :meth:`ensure_running`, kept alive across requests, and
+    shut down by :meth:`stop` (also registered with :mod:`atexit`). A module-level
+    singleton ``_server`` is exposed through the convenience wrappers below.
+    """
+
     def __init__(self) -> None:
         self._proc: Optional[subprocess.Popen] = None
         self._port: Optional[int] = None
@@ -104,17 +132,25 @@ class _Server:
     def _wait_ready(self) -> None:
         deadline = time.time() + _STARTUP_TIMEOUT
         url = f"{self.base_url}/health"
+        last_error: str | None = None
         while time.time() < deadline:
             if not self.is_running():
                 raise RuntimeError("AI server process exited during startup.")
             try:
                 with urllib.request.urlopen(url, timeout=3) as r:
                     if r.status == 200:
+                        log.info("AI server ready on %s", self.base_url)
                         return
-            except Exception:
-                pass
+                    last_error = f"HTTP {r.status}"
+            except Exception as exc:
+                # The server is still loading the model; keep polling but remember
+                # the most recent failure so a timeout reports something useful.
+                last_error = f"{type(exc).__name__}: {exc}"
             time.sleep(1.0)
-        raise RuntimeError("AI server did not become ready in time.")
+        raise RuntimeError(
+            f"AI server did not become ready within {_STARTUP_TIMEOUT}s. "
+            f"Last error: {last_error or 'no response'}"
+        )
 
     # ------------------------------------------------------------------
     def chat(self, image_bytes_list: list[bytes], prompt: str,
@@ -145,8 +181,10 @@ class _Server:
             headers={"Content-Type": "application/json"},
         )
         with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT) as r:
-            resp = json.loads(r.read().decode("utf-8"))
-        return resp["choices"][0]["message"]["content"].strip()
+            if r.status != 200:
+                raise RuntimeError(f"AI server returned HTTP {r.status}.")
+            raw = r.read().decode("utf-8")
+        return _parse_chat_response(raw)
 
     # ------------------------------------------------------------------
     def stop(self) -> None:
@@ -155,10 +193,13 @@ class _Server:
                 self._proc.terminate()
                 self._proc.wait(10)
             except Exception:
+                # Graceful shutdown failed or timed out — force-kill and confirm
+                # the process actually died so we don't leak a zombie.
                 try:
                     self._proc.kill()
-                except Exception:
-                    pass
+                    self._proc.wait(5)
+                except Exception as exc:
+                    log.error("Failed to kill AI server process: %s", exc)
         self._proc = None
         self._port = None
 

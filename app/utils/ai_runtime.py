@@ -150,22 +150,27 @@ def _download(url: str, dest: Path,
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(dest.name + ".part")
     req = urllib.request.Request(url, headers={"User-Agent": "stlLibrary"})
-    with urllib.request.urlopen(req) as resp:
-        total = int(resp.headers.get("Content-Length", 0) or 0)
-        done = 0
-        with open(tmp, "wb") as f:
-            while True:
-                buf = resp.read(1 << 20)  # 1 MB chunks
-                if not buf:
-                    break
-                f.write(buf)
-                done += len(buf)
-                if progress:
-                    if total:
-                        progress(f"{label}: {done / 1e6:.0f} / {total / 1e6:.0f} MB")
-                    else:
-                        progress(f"{label}: {done / 1e6:.0f} MB")
-    tmp.replace(dest)
+    try:
+        with urllib.request.urlopen(req) as resp:
+            total = int(resp.headers.get("Content-Length", 0) or 0)
+            done = 0
+            with open(tmp, "wb") as f:
+                while True:
+                    buf = resp.read(1 << 20)  # 1 MB chunks
+                    if not buf:
+                        break
+                    f.write(buf)
+                    done += len(buf)
+                    if progress:
+                        if total:
+                            progress(f"{label}: {done / 1e6:.0f} / {total / 1e6:.0f} MB")
+                        else:
+                            progress(f"{label}: {done / 1e6:.0f} MB")
+        tmp.replace(dest)
+    except BaseException:
+        # Don't leave a partial .part file behind on network error or cancel.
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def install_ai(variant: str = "cpu",
