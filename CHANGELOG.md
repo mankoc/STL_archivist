@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Code quality pass: hardened error handling and removed dead code with no change to normal behaviour.
+  - AI server: a malformed, empty, or error response from `llama-server` now raises a clear, descriptive error instead of crashing with a low-level `KeyError`/`JSONDecodeError`; a startup that never becomes ready reports the last underlying error; and a force-killed server process is now waited on so it can't linger as a zombie.
+  - AI setup: a failed or cancelled model/binary download no longer leaves a partial `.part` file behind.
+  - Crawler: thumbnail/LMDB and `info.json` failures that were previously swallowed silently are now logged; a catalogued-but-unextracted image is skipped with a warning instead of risking a crash.
+  - The AI tag-cleanup and prompt-building logic moved to a new `app/utils/ai_tagging.py` module with unit-test coverage; behaviour is unchanged.
+  - Minor: removed unused imports and dead code, added missing docstrings, and made the crawler's warning scan and the `archive_folder` backfill slightly faster.
+
 - Configuration: all AI settings now live in a dedicated **AI** section (previously split between *Browser* and *Debug*). It gathers **AI Tagging** (model temperature) and **Image similarity (embeddings)** — the CLIP enable/crawl/batch-size controls, the model download button, and the embedding *Search batch* that used to sit under *Debug*. A new **Enable AI tagging** checkbox at the top of the section switches the whole feature on or off; when disabled, the *AI Tagging* action is hidden from the toolbar, the Tools menu, and the table's right-click menu.
 
 - Fixed & faster: applying filters (or refreshing after AI Tagging) with a **path filter** active no longer crashes with `OperationalError: too many SQL variables` on large libraries, and the filter pane rebuilds faster. The path filter's matching IDs are materialised once per rebuild into a connection-local TEMP table in the filter-tree worker; every per-section scoped count then references it as an indexed primary-key lookup, so the un-indexable `archive_path` LIKE scan runs a single time instead of ~once per section — and is never expanded into a giant `IN (?, …)` parameter list.
