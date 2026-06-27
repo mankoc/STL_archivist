@@ -1,22 +1,66 @@
 """
 Runtime utilities for the optional AI tagging feature.
 
-torch + torchvision + transformers + qwen-vl-utils are NOT bundled in the
-exe.  On first use the user is prompted to download them via AISetupDialog,
-which installs them into <data_dir>/ai_packages/ using pip.
-activate_ai_packages() adds that directory to sys.path so imports work
-transparently afterwards.
+AI tagging runs Qwen2.5-VL locally through llama.cpp's ``llama-server`` — a
+native binary.  That means there are **no Python AI packages** (no torch, no
+transformers) and therefore no Python-version / ABI constraints on the packaged
+exe.  On first use the user downloads two things into the data directory:
 
-Supported variants:
-  "cpu"   — plain torch from PyPI (~1.5 GB total with transformers)
-  "cu128" — CUDA 12.8 wheels from download.pytorch.org (~3 GB total)
+  1. Prebuilt llama.cpp binaries (CPU or CUDA)   -> ``<data_dir>/ai/bin/``
+  2. A Qwen2.5-VL GGUF model + vision projector   -> ``<data_dir>/ai/models/``
+
+The app then launches ``llama-server`` as a subprocess and talks to its
+OpenAI-compatible HTTP API — see :mod:`app.utils.ai_server`.
 """
 from __future__ import annotations
 
-import os
-import sys
+import logging
+import tempfile
+import urllib.request
+import zipfile
 from pathlib import Path
 from typing import Callable, Optional
+
+log = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Pinned versions — bump these to upgrade the runtime or model.
+# ---------------------------------------------------------------------------
+
+#: llama.cpp release tag for the prebuilt binaries.
+LLAMACPP_BUILD = "b9789"
+_LLAMACPP_BASE = f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMACPP_BUILD}"
+
+#: Hugging Face GGUF repo (maintained by the llama.cpp team) and the two files
+#: we need: the quantized model and the f16 vision projector.
+MODEL_REPO  = "ggml-org/Qwen2.5-VL-3B-Instruct-GGUF"
+MODEL_FILE  = "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf"
+MMPROJ_FILE = "mmproj-Qwen2.5-VL-3B-Instruct-f16.gguf"
+_HF_BASE = f"https://huggingface.co/{MODEL_REPO}/resolve/main"
+
+#: Human-readable model name (shown in the UI).
+MODEL_LABEL = "Qwen2.5-VL-3B-Instruct (GGUF)"
+
+#: Supported install variants and their llama.cpp binary assets.
+INSTALL_VARIANTS: dict[str, dict] = {
+    "cpu": {
+        "label": "CPU",
+        "size":  "~50 MB runtime + ~3 GB model",
+        "note":  "Works on any machine. Inference is slower.",
+        "binary": f"llama-{LLAMACPP_BUILD}-bin-win-cpu-x64.zip",
+        "extra":  [],
+    },
+    "cuda": {
+        "label": "GPU — NVIDIA (CUDA 12.4)",
+        "size":  "~500 MB runtime + ~3 GB model",
+        "note":  "Requires an NVIDIA GPU and a recent driver. Much faster.",
+        "binary": f"llama-{LLAMACPP_BUILD}-bin-win-cuda-12.4-x64.zip",
+        "extra":  [f"cudart-llama-bin-win-cuda-12.4-x64.zip"],
+    },
+}
+
+_VARIANT_MARKER = "variant.txt"
 
 
 # ---------------------------------------------------------------------------
@@ -32,35 +76,53 @@ def _get_data_dir() -> Optional[Path]:
         return None
 
 
-def ai_packages_dir() -> Optional[Path]:
+def ai_dir() -> Optional[Path]:
     d = _get_data_dir()
-    return (d / "ai_packages") if d else None
+    return (d / "ai") if d else None
 
 
-def ai_cache_dir() -> Optional[Path]:
-    d = _get_data_dir()
-    return (d / "ai_cache") if d else None
+def bin_dir() -> Optional[Path]:
+    d = ai_dir()
+    return (d / "bin") if d else None
 
 
-# ---------------------------------------------------------------------------
-# Activation — called once at startup and before every import of torch
-# ---------------------------------------------------------------------------
+def models_dir() -> Optional[Path]:
+    d = ai_dir()
+    return (d / "models") if d else None
 
-def activate_ai_packages() -> None:
-    """Add <data_dir>/ai_packages to sys.path and set HF_HOME.
 
-    Safe to call before packages are installed — no-op in that case.
-    Must be called before any `import torch`.
-    """
-    pkg = ai_packages_dir()
-    if pkg and pkg.exists():
-        p = str(pkg)
-        if p not in sys.path:
-            sys.path.insert(0, p)
+def llama_server_exe() -> Optional[Path]:
+    """Return the path to ``llama-server.exe`` if installed, else ``None``."""
+    b = bin_dir()
+    if not b:
+        return None
+    direct = b / "llama-server.exe"
+    if direct.exists():
+        return direct
+    # Some release zips nest the binaries in a subfolder.
+    for p in b.rglob("llama-server.exe"):
+        return p
+    return None
 
-    cache = ai_cache_dir()
-    if cache:
-        os.environ.setdefault("HF_HOME", str(cache))
+
+def model_paths() -> "tuple[Optional[Path], Optional[Path]]":
+    """Return ``(model_gguf, mmproj_gguf)`` paths (which may not exist yet)."""
+    m = models_dir()
+    if not m:
+        return None, None
+    return m / MODEL_FILE, m / MMPROJ_FILE
+
+
+def installed_variant() -> Optional[str]:
+    """Return the variant ("cpu"/"cuda") recorded at install time, or ``None``."""
+    b = bin_dir()
+    if not b:
+        return None
+    marker = b / _VARIANT_MARKER
+    try:
+        return marker.read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -68,114 +130,95 @@ def activate_ai_packages() -> None:
 # ---------------------------------------------------------------------------
 
 def is_ai_ready() -> bool:
-    """Return True if torch, transformers, and qwen_vl_utils are importable."""
-    activate_ai_packages()
-    try:
-        import torch          # noqa: F401
-        import transformers   # noqa: F401
-        import qwen_vl_utils  # noqa: F401
-        return True
-    except ImportError:
-        return False
+    """True when the llama-server binary and both GGUF files are present."""
+    exe = llama_server_exe()
+    model, mmproj = model_paths()
+    return bool(
+        exe
+        and model and model.exists()
+        and mmproj and mmproj.exists()
+    )
 
 
 # ---------------------------------------------------------------------------
-# On-demand installer
+# Installer
 # ---------------------------------------------------------------------------
 
-#: Supported install variants and their metadata.
-INSTALL_VARIANTS: dict[str, dict] = {
-    "cpu": {
-        "label":    "CPU",
-        "size":     "~1.5 GB",
-        "note":     "Works on any machine. Inference is slower.",
-        "torch_index": None,
-        "torch":    "torch",
-        "tv":       "torchvision",
-    },
-    "cu128": {
-        "label":    "GPU — CUDA 12.8 (NVIDIA)",
-        "size":     "~3 GB",
-        "note":     "Requires an NVIDIA GPU and driver ≥ 527.41.",
-        "torch_index": "https://download.pytorch.org/whl/cu128",
-        "torch":    "torch==2.11.0+cu128",
-        "tv":       "torchvision==0.26.0+cu128",
-    },
-}
-
-# Packages installed from PyPI for all variants
-_COMMON_PACKAGES = [
-    "transformers>=4.48.0",
-    "accelerate>=0.33.0",
-    "qwen-vl-utils",
-]
+def _download(url: str, dest: Path,
+              progress: Callable[[str], None] | None, label: str) -> None:
+    """Stream *url* to *dest* (atomic via a .part file) with progress updates."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + ".part")
+    req = urllib.request.Request(url, headers={"User-Agent": "stlLibrary"})
+    with urllib.request.urlopen(req) as resp:
+        total = int(resp.headers.get("Content-Length", 0) or 0)
+        done = 0
+        with open(tmp, "wb") as f:
+            while True:
+                buf = resp.read(1 << 20)  # 1 MB chunks
+                if not buf:
+                    break
+                f.write(buf)
+                done += len(buf)
+                if progress:
+                    if total:
+                        progress(f"{label}: {done / 1e6:.0f} / {total / 1e6:.0f} MB")
+                    else:
+                        progress(f"{label}: {done / 1e6:.0f} MB")
+    tmp.replace(dest)
 
 
-def install_ai_packages(
-    variant: str = "cpu",
-    progress: Callable[[str], None] | None = None,
-) -> None:
-    """Download and install torch + AI packages into <data_dir>/ai_packages/.
-
-    Installs:
-      - torch + torchvision (CPU or CUDA 12.8)
-      - transformers, accelerate, qwen-vl-utils
+def install_ai(variant: str = "cpu",
+               progress: Callable[[str], None] | None = None) -> None:
+    """Download llama.cpp binaries and the Qwen2.5-VL GGUF model.
 
     Args:
-        variant:  One of the keys in INSTALL_VARIANTS ("cpu" or "cu128").
+        variant:  One of the keys in :data:`INSTALL_VARIANTS` ("cpu" or "cuda").
         progress: Optional callback(message) for status updates.
-    """
-    pkg_dir = ai_packages_dir()
-    if pkg_dir is None:
-        raise RuntimeError(
-            "Data directory is not configured.\n"
-            "Open Settings and set a data directory first."
-        )
-    pkg_dir.mkdir(parents=True, exist_ok=True)
 
+    Raises:
+        RuntimeError: If the data directory is not configured.
+        ValueError:   If *variant* is unknown.
+    """
     meta = INSTALL_VARIANTS.get(variant)
     if meta is None:
         raise ValueError(f"Unknown variant: {variant!r}")
 
-    def _run_pip(*args: str) -> None:
-        import subprocess as _sp
+    bd, md = bin_dir(), models_dir()
+    if bd is None or md is None:
+        raise RuntimeError(
+            "Data directory is not configured.\n"
+            "Open Settings and set a data directory first."
+        )
+    bd.mkdir(parents=True, exist_ok=True)
+    md.mkdir(parents=True, exist_ok=True)
 
-        # In a PyInstaller bundle sys.executable is the app exe, which re-invokes
-        # itself as a pip runner via the `--run-pip` entry point (see main.py).
-        # This uses the *bundled* interpreter, so the downloaded wheels match its
-        # ABI and no separate Python install is required on the host machine.
-        if getattr(sys, "frozen", False):
-            cmd = [sys.executable, "--run-pip"] + list(args)
-        else:
-            cmd = [sys.executable, "-m", "pip"] + list(args)
+    # 1. llama.cpp binaries (+ optional CUDA runtime) extracted into bin/
+    for asset in [meta["binary"], *meta["extra"]]:
+        url = f"{_LLAMACPP_BASE}/{asset}"
+        with tempfile.TemporaryDirectory() as td:
+            zpath = Path(td) / asset
+            if progress:
+                progress(f"Downloading {asset}…")
+            _download(url, zpath, progress, asset)
+            if progress:
+                progress(f"Extracting {asset}…")
+            with zipfile.ZipFile(zpath) as zf:
+                zf.extractall(bd)
 
-        result = _sp.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise RuntimeError(result.stderr or result.stdout)
+    # Record which variant is installed so the server knows whether to offload
+    # layers to the GPU.
+    (bd / _VARIANT_MARKER).write_text(variant, encoding="utf-8")
 
-    target = str(pkg_dir)
-    base_args = ["install", "--target", target, "--quiet", "--no-warn-script-location"]
-
-    label = meta["label"]
-
-    # Step 1: torch + torchvision
-    if progress:
-        progress(f"Downloading torch ({label})…")
-
-    torch_args = list(base_args) + [meta["torch"], meta["tv"]]
-    if meta["torch_index"]:
-        # --no-deps avoids pulling CPU torch as a transitive dep on the cu128 index
-        torch_args += ["--index-url", meta["torch_index"], "--no-deps"]
-
-    _run_pip(*torch_args)
-
-    # Step 2: transformers + accelerate + qwen-vl-utils (always from PyPI)
-    if progress:
-        progress("Downloading transformers and AI utilities…")
-
-    _run_pip(*base_args, *_COMMON_PACKAGES)
+    # 2. model files into models/ (skip any already present)
+    model, mmproj = model_paths()
+    for fname, dest in ((MODEL_FILE, model), (MMPROJ_FILE, mmproj)):
+        if dest.exists():
+            continue
+        url = f"{_HF_BASE}/{fname}"
+        if progress:
+            progress(f"Downloading {fname}…")
+        _download(url, dest, progress, fname)
 
     if progress:
         progress("Done.")
-
-    activate_ai_packages()

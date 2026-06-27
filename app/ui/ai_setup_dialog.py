@@ -1,9 +1,9 @@
 """
 Setup dialog for the AI tagging feature.
 
-Shown on the first "Generate" click when torch is not yet installed.
-Lets the user choose CPU or GPU (CUDA 12.8) and downloads torch +
-transformers + qwen-vl-utils into <data_dir>/ai_packages/ via pip.
+Shown on the first "Generate" click when the AI runtime is not yet present.
+Lets the user choose CPU or GPU and downloads the llama.cpp binaries plus the
+Qwen2.5-VL GGUF model into <data_dir>/ai/.
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QRadioButton, QVBoxLayout, QButtonGroup,
 )
 
-from app.utils.ai_runtime import INSTALL_VARIANTS, install_ai_packages, ai_packages_dir
+from app.utils.ai_runtime import INSTALL_VARIANTS, install_ai, ai_dir, MODEL_LABEL
 
 
 # ---------------------------------------------------------------------------
@@ -35,7 +35,7 @@ class _InstallWorker(QThread):
 
     def run(self) -> None:
         try:
-            install_ai_packages(
+            install_ai(
                 variant=self._variant,
                 progress=lambda msg: self.progress.emit(msg),
             )
@@ -49,10 +49,10 @@ class _InstallWorker(QThread):
 # ---------------------------------------------------------------------------
 
 class AISetupDialog(QDialog):
-    """Shown when AI packages have not been installed yet.
+    """Shown when the AI runtime has not been installed yet.
 
-    Lets the user choose CPU or GPU and installs torch + transformers +
-    qwen-vl-utils into the ai_packages directory.
+    Lets the user choose CPU or GPU and downloads the llama.cpp binaries plus
+    the Qwen2.5-VL GGUF model into the ``<data_dir>/ai/`` directory.
     """
 
     def __init__(self, parent=None) -> None:
@@ -60,7 +60,7 @@ class AISetupDialog(QDialog):
         self.setWindowTitle("AI Tagging — Install Packages")
         self.setMinimumWidth(500)
         self._worker: Optional[_InstallWorker] = None
-        self._pkg_dir = ai_packages_dir()
+        self._pkg_dir = ai_dir()
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -68,13 +68,14 @@ class AISetupDialog(QDialog):
         root = QVBoxLayout(self)
         root.setSpacing(10)
 
-        title_lbl = QLabel("<b>AI packages are not installed yet.</b>")
+        title_lbl = QLabel("<b>The AI runtime is not installed yet.</b>")
         root.addWidget(title_lbl)
 
         desc = QLabel(
-            "The AI tagger needs torch, transformers, and qwen-vl-utils. "
-            "Choose a variant and click <b>Install</b> — packages are "
-            "downloaded once into your data directory."
+            f"The AI tagger runs <b>{MODEL_LABEL}</b> locally via llama.cpp. "
+            "Choose a variant and click <b>Install</b> — the runtime and model "
+            "(~3 GB) are downloaded once into your data directory. "
+            "No Python packages or admin rights are required."
         )
         desc.setWordWrap(True)
         root.addWidget(desc)

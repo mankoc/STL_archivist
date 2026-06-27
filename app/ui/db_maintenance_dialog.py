@@ -13,8 +13,10 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
     QFileDialog,
+    QGridLayout,
     QHBoxLayout,
     QHeaderView,
+    QInputDialog,
     QLabel,
     QMessageBox,
     QPlainTextEdit,
@@ -525,6 +527,86 @@ class CompactWorker(QThread):
         self.finished.emit(before, after)
 
 
+class PruneImagesWorker(QThread):
+    """Reduce the number of images stored per model down to a target maximum.
+
+    For every model that has more than *keep* images, the oldest *keep* images
+    (lowest id = insertion order) are retained and the rest are deleted from the
+    database along with their LMDB thumbnails. Run *Compact Thumbnail Store*
+    afterwards to reclaim the freed disk space (LMDB never shrinks on its own).
+
+    Signals:
+        progress(current, total): Index of the model being pruned and total count.
+        log(message): Human-readable status line for the UI log panel.
+        finished(models_pruned, images_removed): Counts once the run completes.
+    """
+
+    progress = pyqtSignal(int, int)
+    log      = pyqtSignal(str)
+    finished = pyqtSignal(int, int)   # (models_pruned, images_removed)
+
+    def __init__(self, keep: int, parent=None) -> None:
+        super().__init__(parent)
+        self._keep = max(0, int(keep))
+        self._stop_requested = False
+
+    def stop(self) -> None:
+        self._stop_requested = True
+
+    def run(self) -> None:
+        from sqlalchemy import func
+        from app.database.db import session_scope
+        from app.database.models import Image as DBImage
+        from app.utils.thumbnailer import delete_thumbnail
+
+        self._stop_requested = False
+        keep = self._keep
+
+        with session_scope() as session:
+            over = (
+                session.query(DBImage.model_id)
+                .group_by(DBImage.model_id)
+                .having(func.count(DBImage.id) > keep)
+                .all()
+            )
+        model_ids = [mid for (mid,) in over]
+
+        total = len(model_ids)
+        if total == 0:
+            self.log.emit(f"No models have more than {keep} image(s).")
+            self.finished.emit(0, 0)
+            return
+
+        self.log.emit(f"Pruning {total} model(s) to at most {keep} image(s) each…")
+        models_pruned  = 0
+        images_removed = 0
+
+        for idx, model_id in enumerate(model_ids, 1):
+            if self._stop_requested:
+                self.log.emit("Stopped by user.")
+                break
+            self.progress.emit(idx, total)
+            with session_scope() as session:
+                excess = (
+                    session.query(DBImage)
+                    .filter(DBImage.model_id == model_id)
+                    .order_by(DBImage.id.asc())
+                    .all()[keep:]
+                )
+                for img in excess:
+                    delete_thumbnail(img.id)
+                    session.delete(img)
+                if excess:
+                    models_pruned  += 1
+                    images_removed += len(excess)
+
+        self.log.emit(
+            f"Done — removed {images_removed} image(s) from {models_pruned} model(s). "
+            "Run 'Compact Thumbnail Store' to reclaim the freed disk space."
+        )
+        self.finished.emit(models_pruned, images_removed)
+
+
 class FindDuplicateEntriesWorker(QThread):
     """Find DB records that share the same archive content (hash) or the same
     filename + file size, indicating the same physical file has been catalogued
@@ -718,6 +800,7 @@ class DbMaintenanceDialog(QDialog):
         self._moved_db_worker:  MovedInDbWorker              | None = None
         self._dup_entry_worker: FindDuplicateEntriesWorker   | None = None
         self._compact_worker:   CompactWorker                | None = None
+        self._prune_worker:     PruneImagesWorker            | None = None
         self._results: list[dict] = []
         self._build_ui()
 
@@ -736,19 +819,25 @@ class DbMaintenanceDialog(QDialog):
 
         style = QApplication.style()
         SP = style.StandardPixmap
-        btn_row = QHBoxLayout()
+
+        # Action buttons laid out in a 3-column grid (filled row by row).
+        btn_grid = QGridLayout()
+        self._action_buttons: list[QPushButton] = []
+
+        def _add_btn(b: QPushButton) -> None:
+            idx = len(self._action_buttons)
+            self._action_buttons.append(b)
+            btn_grid.addWidget(b, idx // 3, idx % 3)
 
         self._verify_btn = QPushButton(style.standardIcon(SP.SP_BrowserReload), self.tr("Verify"))
         self._verify_btn.setToolTip(self.tr("Check all archive paths for existence on disk"))
         self._verify_btn.clicked.connect(self._start_verify)
-        btn_row.addWidget(self._verify_btn)
+        _add_btn(self._verify_btn)
 
         self._stop_btn = QPushButton(style.standardIcon(SP.SP_MediaStop), self.tr("Stop"))
         self._stop_btn.setEnabled(False)
         self._stop_btn.clicked.connect(self._stop)
-        btn_row.addWidget(self._stop_btn)
-
-        btn_row.addStretch()
+        _add_btn(self._stop_btn)
 
         self._search_btn = QPushButton(style.standardIcon(SP.SP_DirOpenIcon), self.tr("Search in Folder…"))
         self._search_btn.setToolTip(
@@ -756,7 +845,7 @@ class DbMaintenanceDialog(QDialog):
         )
         self._search_btn.setEnabled(False)
         self._search_btn.clicked.connect(self._start_search)
-        btn_row.addWidget(self._search_btn)
+        _add_btn(self._search_btn)
 
         self._find_moved_btn = QPushButton(
             style.standardIcon(SP.SP_FileDialogContentsView), self.tr("Find Moved in DB…")
@@ -767,7 +856,7 @@ class DbMaintenanceDialog(QDialog):
         )
         self._find_moved_btn.setEnabled(False)
         self._find_moved_btn.clicked.connect(self._start_find_moved_in_db)
-        btn_row.addWidget(self._find_moved_btn)
+        _add_btn(self._find_moved_btn)
 
         self._find_dup_entries_btn = QPushButton(
             style.standardIcon(SP.SP_FileDialogDetailedView), self.tr("Find Duplicate Entries…")
@@ -777,7 +866,7 @@ class DbMaintenanceDialog(QDialog):
             "filename + file size, indicating the same file is catalogued more than once")
         )
         self._find_dup_entries_btn.clicked.connect(self._start_find_duplicate_entries)
-        btn_row.addWidget(self._find_dup_entries_btn)
+        _add_btn(self._find_dup_entries_btn)
 
         self._recompute_dhash_btn = QPushButton(
             style.standardIcon(SP.SP_BrowserReload), self.tr("Recompute Image Hashes")
@@ -788,7 +877,7 @@ class DbMaintenanceDialog(QDialog):
             "128-bit algorithm.")
         )
         self._recompute_dhash_btn.clicked.connect(lambda: self._start_dhash(recompute_all=True))
-        btn_row.addWidget(self._recompute_dhash_btn)
+        _add_btn(self._recompute_dhash_btn)
 
         from app.utils import image_embedding as _emb
         from app.ui.config_dialog import get_ai_embeddings_enabled
@@ -809,7 +898,7 @@ class DbMaintenanceDialog(QDialog):
                 else self.tr("AI embeddings are disabled in Configuration → Browser")
             )
         self._embed_btn.clicked.connect(lambda: self._start_embeddings(recompute_all=True))
-        btn_row.addWidget(self._embed_btn)
+        _add_btn(self._embed_btn)
 
         self._compact_btn = QPushButton(
             style.standardIcon(SP.SP_DriveHDIcon), self.tr("Compact Thumbnail Store")
@@ -820,7 +909,17 @@ class DbMaintenanceDialog(QDialog):
             "removing many models or images.")
         )
         self._compact_btn.clicked.connect(self._start_compact)
-        btn_row.addWidget(self._compact_btn)
+        _add_btn(self._compact_btn)
+
+        self._prune_images_btn = QPushButton(
+            style.standardIcon(SP.SP_TrashIcon), self.tr("Prune Images per Model…")
+        )
+        self._prune_images_btn.setToolTip(
+            self.tr("Reduce the number of stored images per model to a chosen maximum. "
+            "The oldest images are kept; the extra ones and their thumbnails are deleted.")
+        )
+        self._prune_images_btn.clicked.connect(self._start_prune_images)
+        _add_btn(self._prune_images_btn)
 
         self._merge_moved_btn = QPushButton(
             style.standardIcon(SP.SP_ArrowRight), self.tr("Merge Moved")
@@ -830,13 +929,13 @@ class DbMaintenanceDialog(QDialog):
         )
         self._merge_moved_btn.setEnabled(False)
         self._merge_moved_btn.clicked.connect(self._merge_moved_records)
-        btn_row.addWidget(self._merge_moved_btn)
+        _add_btn(self._merge_moved_btn)
 
         self._remove_sel_btn = QPushButton(style.standardIcon(SP.SP_TrashIcon), self.tr("Remove Selected"))
         self._remove_sel_btn.setToolTip(self.tr("Remove the selected records from the database"))
         self._remove_sel_btn.setEnabled(False)
         self._remove_sel_btn.clicked.connect(self._remove_selected)
-        btn_row.addWidget(self._remove_sel_btn)
+        _add_btn(self._remove_sel_btn)
 
         self._remove_all_btn = QPushButton(
             style.standardIcon(SP.SP_TrashIcon), self.tr("Remove All Missing")
@@ -846,7 +945,7 @@ class DbMaintenanceDialog(QDialog):
         )
         self._remove_all_btn.setEnabled(False)
         self._remove_all_btn.clicked.connect(self._remove_all_missing)
-        btn_row.addWidget(self._remove_all_btn)
+        _add_btn(self._remove_all_btn)
 
         self._remove_flagged_btn = QPushButton(
             style.standardIcon(SP.SP_TrashIcon), self.tr("Remove Flagged Missing")
@@ -856,17 +955,17 @@ class DbMaintenanceDialog(QDialog):
         )
         self._remove_flagged_btn.setEnabled(False)
         self._remove_flagged_btn.clicked.connect(self._remove_flagged_missing)
-        btn_row.addWidget(self._remove_flagged_btn)
-
-        btn_row.addStretch()
+        _add_btn(self._remove_flagged_btn)
 
         self._close_btn = QPushButton(
             style.standardIcon(SP.SP_DialogCloseButton), self.tr("Close")
         )
         self._close_btn.clicked.connect(self.reject)
-        btn_row.addWidget(self._close_btn)
+        _add_btn(self._close_btn)
 
-        root.addLayout(btn_row)
+        for _col in range(3):
+            btn_grid.setColumnStretch(_col, 1)
+        root.addLayout(btn_grid)
 
         self._progress = QProgressBar()
         self._progress.setValue(0)
@@ -913,6 +1012,7 @@ class DbMaintenanceDialog(QDialog):
         self._recompute_dhash_btn.setEnabled(not busy)
         self._embed_btn.setEnabled(not busy and self._embed_available)
         self._compact_btn.setEnabled(not busy)
+        self._prune_images_btn.setEnabled(not busy)
         self._merge_moved_btn.setEnabled(False)
         self._remove_sel_btn.setEnabled(False)
         self._remove_all_btn.setEnabled(False)
@@ -932,6 +1032,7 @@ class DbMaintenanceDialog(QDialog):
         self._recompute_dhash_btn.setEnabled(True)
         self._embed_btn.setEnabled(self._embed_available)
         self._compact_btn.setEnabled(True)
+        self._prune_images_btn.setEnabled(True)
         self._merge_moved_btn.setEnabled(has_moved_db)
         self._remove_sel_btn.setEnabled(has_any)
         self._remove_all_btn.setEnabled(has_missing)
@@ -942,6 +1043,7 @@ class DbMaintenanceDialog(QDialog):
         for worker in (
             self._verify_worker, self._search_worker,
             self._dhash_worker, self._embed_worker, self._moved_db_worker,
+            self._prune_worker,
         ):
             if worker and worker.isRunning():
                 worker.stop()
@@ -1030,6 +1132,47 @@ class DbMaintenanceDialog(QDialog):
 
     def _on_compact_finished(self, size_before: int, size_after: int) -> None:
         self._compact_worker = None
+        self._set_idle()
+        from app.utils.sound import play_notification
+        play_notification("maintenance")
+
+    # ------------------------------------------------------------------
+    def _start_prune_images(self) -> None:
+        from app.ui.config_dialog import get_max_thumbnails
+
+        keep, ok = QInputDialog.getInt(
+            self, self.tr("Prune Images per Model"),
+            self.tr("Maximum number of images to keep per model\n"
+                    "(the oldest images are kept; extras are deleted):"),
+            value=get_max_thumbnails(), min=1, max=1000,
+        )
+        if not ok:
+            return
+
+        reply = QMessageBox.warning(
+            self, self.tr("Prune Images per Model"),
+            f"Permanently delete all but the first <b>{keep}</b> image(s) of every model "
+            "that has more?<br><br>"
+            "The extra images and their thumbnails are removed from the database. "
+            "This cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self._log.clear()
+        self._progress.setValue(0)
+        self._set_busy(True)
+
+        self._prune_worker = PruneImagesWorker(keep)
+        self._prune_worker.log.connect(self._on_log)
+        self._prune_worker.progress.connect(self._on_progress)
+        self._prune_worker.finished.connect(self._on_prune_finished)
+        self._prune_worker.start()
+
+    def _on_prune_finished(self, models_pruned: int, images_removed: int) -> None:
+        self._prune_worker = None
         self._set_idle()
         from app.utils.sound import play_notification
         play_notification("maintenance")
@@ -1430,6 +1573,7 @@ class DbMaintenanceDialog(QDialog):
         self._recompute_dhash_btn.setEnabled(True)
         self._embed_btn.setEnabled(self._embed_available)
         self._compact_btn.setEnabled(True)
+        self._prune_images_btn.setEnabled(True)
         self._merge_moved_btn.setEnabled(has_moved_db)
         self._remove_all_btn.setEnabled(has_missing)
         self._remove_flagged_btn.setEnabled(has_flagged)
@@ -1449,6 +1593,7 @@ class DbMaintenanceDialog(QDialog):
         for worker in (
             self._verify_worker, self._search_worker,
             self._dhash_worker, self._embed_worker, self._moved_db_worker,
+            self._prune_worker,
         ):
             if worker and worker.isRunning():
                 worker.stop()

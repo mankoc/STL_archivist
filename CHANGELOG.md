@@ -2,11 +2,24 @@
 
 ## Unreleased
 
+- AI Tagging: the local model server (`llama-server`) is now also shut down when the main window closes, not just when the AI Tagging dialog closes, so the background process never lingers after the app exits.
+- AI Tagging: repeated words within a single tag are now collapsed (e.g. "gothic gothic gothic horror" → "gothic horror"), cleaning up the model's occasional stutter.
+- Database Maintenance: new **Prune Images per Model…** button reduces the number of stored images per model to a chosen maximum (e.g. keep 3 of 10). The oldest images are kept; the extras and their thumbnails are deleted from the database. Run **Compact Thumbnail Store** afterwards to reclaim the freed disk space.
+- Database Maintenance: action buttons are now arranged in a 3-column grid instead of a single row.
+- Configuration → Browser: new **AI Tagging → Model temperature** setting (default 0.2) controls the sampling temperature passed to the AI tagging model. Lower values keep tags/metadata literal and grounded in the images; higher values are more creative but more prone to hallucinated results.
+- AI Tagging: the tag prompt now tells the AI to tag only what is actually shown and not to add related characters, vehicles, or items from the same franchise that don't appear (e.g. tagging C-3PO on an X-Wing), cutting down hallucinated by-association tags.
+- AI Tagging: the prompt no longer assumes every image in an archive shows the same model. The AI is told some images may be a different model, separate parts, packaging, or promo art, and to focus on the main miniature — reducing tag/metadata pollution from mixed-content archives.
+- AI Tagging: the model's existing catalogued metadata (title, creator, sculptor, category, scale, source, year, description, and tags) is now included in the prompt as a hint, so the AI can build on and correct what the archive already had instead of guessing from scratch.
+- AI Tagging: new **Overwrite existing values** checkbox. Unchecked (default), AI suggestions only fill empty fields; checked, they replace the current values. Applies to both single-model Save and **Process All**. Tags are always merged (never removed).
 - AI Tagging: new **Process All** button runs AI analysis on every selected model unattended and saves the results automatically — no per-model review. The dialog shows each model live as it is processed (thumbnails, then tags and metadata fill in) so you can watch progress. Existing values are preserved (only empty fields are filled and new tags merged in); the run can be stopped mid-way.
 - Fixed: AI Tagging could crash with `QThread: Destroyed while thread is still running` when navigating between models (Save & Next), finishing a Process All run, or closing the dialog while inference was still in progress. The dialog now waits for the model's `generate()` to finish before releasing the worker thread.
 - Fixed: crawling a large library could abort upserts with `MDB_MAP_FULL: Environment mapsize limit reached` once the thumbnail store grew past its fixed 10 GB cap. The LMDB map now grows automatically when full and reopens sized to the existing data, so the store is no longer capped.
 - Database Maintenance: new **Compact Thumbnail Store** button reclaims disk space from deleted thumbnails by rewriting the LMDB store (which never shrinks on its own). Run it after removing many models or images.
-- Fixed: the packaged `.exe` could not install the optional AI packages ("Setup incomplete — packages not found"). It previously shelled out to a system Python on `PATH`, which is absent on a clean machine and produced ABI-mismatched wheels otherwise. The exe now bundles `pip` and re-invokes itself (`--run-pip`) to install with its own interpreter, so no host Python is required. **Note:** the exe must be built with a torch-supported Python (3.12 or 3.13) — torch has no wheels for 3.14.
+- **AI tagging no longer uses PyTorch.** It now runs **Qwen2.5-VL-3B** through the bundled-on-demand [llama.cpp](https://github.com/ggml-org/llama.cpp) `llama-server` binary instead of torch + transformers. Benefits:
+  - **No Python AI packages** — this removes the torch download (1.5–3 GB), the "Setup incomplete — packages not found" failure, and the requirement to build the exe with a specific Python version (the old approach broke on Python 3.14, which torch has no wheels for).
+  - On first use the app downloads the small llama.cpp runtime (~17 MB CPU / ~650 MB CUDA) and the Qwen2.5-VL GGUF model (~3.3 GB) into `<data_dir>/ai/`. A setup dialog offers a **CPU** or **NVIDIA GPU (CUDA)** build and shows download progress.
+  - Works on any machine for CPU; GPU acceleration is automatic when the CUDA variant is installed.
+  - The model runs as a local background process (`llama-server`) that the app starts on demand and shuts down when the AI Tagging dialog closes.
 
 ## 2026.24 — 2026-06-15
 

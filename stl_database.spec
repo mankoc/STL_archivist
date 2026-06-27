@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 block_cipher = None
 
@@ -27,20 +27,10 @@ hiddenimports = [
 ]
 hiddenimports += collect_submodules('sqlalchemy.dialects.sqlite')
 
-# Bundle pip (and certifi for TLS) so the frozen exe can install the optional
-# AI packages at runtime with its own interpreter — no host Python required.
-# See main.py `--run-pip` entry point and ai_runtime._run_pip.
-binaries = []
-for _pkg in ('pip', 'certifi'):
-    _d, _b, _h = collect_all(_pkg)
-    datas += _d
-    binaries += _b
-    hiddenimports += _h
-
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=binaries,
+    binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
@@ -52,7 +42,9 @@ a = Analysis(
     runtime_hooks=[],
     excludes=[
         'tkinter', 'matplotlib', 'scipy',
-        # AI packages are downloaded on demand into ai_packages/ — not bundled
+        # AI tagging runs via the external llama.cpp llama-server binary
+        # (downloaded on demand) — no Python AI packages are bundled. The CLIP
+        # image-embedding feature uses onnxruntime/numpy, also downloaded.
         'torch', 'torchvision', 'torchaudio', 'accelerate',
         'transformers', 'tokenizers', 'qwen_vl_utils', 'optimum',
         'onnxruntime', 'numpy',
