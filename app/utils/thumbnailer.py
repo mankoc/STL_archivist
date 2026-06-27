@@ -6,6 +6,7 @@ Keys:           image_id as big-endian 8-byte integer
 Values:         JPEG bytes
 """
 import io
+import logging
 import os
 import shutil
 from pathlib import Path
@@ -13,6 +14,8 @@ from typing import Optional
 
 import lmdb
 from PIL import Image
+
+log = logging.getLogger(__name__)
 
 THUMB_SIZE_DEFAULT = 512
 THUMB_QUALITY = 75
@@ -280,8 +283,8 @@ def write_raw_thumbnails_batch(items: "list[tuple[int, bytes]]") -> None:
                 txn.put(_key(image_id), jpeg_bytes)
     try:
         _write(_put)
-    except lmdb.Error:
-        pass
+    except lmdb.Error as exc:
+        log.error("Failed to write %d thumbnails to LMDB: %s", len(items), exc)
 
 
 def write_raw_thumbnail(image_id: int, jpeg_bytes: bytes) -> Optional[str]:

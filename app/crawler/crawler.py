@@ -1225,7 +1225,12 @@ class CrawlerWorker(QThread):
                 from app.utils.thumbnailer import pdf_first_page_to_image_bytes
                 resolved_raw: list[tuple[Image, bytes]] = []
                 for img in img_records:
-                    raw = contents[img.filename]
+                    raw = contents.get(img.filename)
+                    if raw is None:
+                        session.delete(img)
+                        logger.warning("Image catalogued but not extracted: %s in %s",
+                                       img.filename, archive_path.name)
+                        continue
                     if Path(img.filename.replace("\\", "/")).suffix.lower() == ".pdf":
                         raw = pdf_first_page_to_image_bytes(raw)
                         if raw is None:
