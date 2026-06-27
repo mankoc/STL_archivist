@@ -23,6 +23,7 @@ folder_has_db_records(folder, session)
 import io
 import json
 import logging
+import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -103,10 +104,13 @@ def export_folder_metadata(
     folder = Path(folder)
     thumb_base_dir = Path(thumb_base_dir)
 
-    # Collect all STLModel records whose archive file lives directly in folder
+    # Collect all STLModel records whose archive file lives directly in folder.
+    # archive_path is stored with OS-native separators, so the LIKE prefilter must
+    # use os.sep too (a hardcoded "/" never matches backslash paths on Windows);
+    # the exact parent check below is authoritative.
     all_models = (
         session.query(STLModel)
-        .filter(STLModel.archive_path.like(str(folder) + "/%"))
+        .filter(STLModel.archive_path.like(str(folder) + os.sep + "%"))
         .all()
     )
     models = [m for m in all_models if Path(m.archive_path).parent == folder]
