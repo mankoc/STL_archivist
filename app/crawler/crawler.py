@@ -1210,8 +1210,8 @@ class CrawlerWorker(QThread):
                     if dhash_int is not None:
                         img.dhash = format_dhash(dhash_int)
                     if embed_vecs:
+                        # _emb is already imported above where embed_vecs was built.
                         try:
-                            from app.utils import image_embedding as _emb
                             vec = embed_vecs[i]
                             if vec is not None:
                                 img.embedding = _emb.to_blob(vec)
@@ -1270,8 +1270,8 @@ class CrawlerWorker(QThread):
                         except Exception:
                             logger.debug("  Failed to compute dHash for image id %s", img.id)
                         if embed_vecs:
+                            # _emb is already imported above where embed_vecs was built.
                             try:
-                                from app.utils import image_embedding as _emb
                                 vec = embed_vecs[i]
                                 if vec is not None:
                                     img.embedding = _emb.to_blob(vec)

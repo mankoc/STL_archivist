@@ -417,6 +417,7 @@ def backfill_archive_folder() -> int:
     Runs at most once per app session (a no-op when all rows already have the
     column populated).  Returns the number of rows updated.
     """
+    from collections import defaultdict
     from app.database.models import STLModel
     from pathlib import PurePosixPath
     with session_scope() as session:
@@ -427,9 +428,14 @@ def backfill_archive_folder() -> int:
         )
         if not rows:
             return 0
+        # Group ids by their computed folder so each distinct folder needs only a
+        # single bulk UPDATE instead of one statement per row.
+        ids_by_folder: dict[str, list[int]] = defaultdict(list)
         for model_id, ap in rows:
             folder = PurePosixPath(ap.replace("\\", "/")).parent.as_posix()
-            session.query(STLModel).filter(STLModel.id == model_id).update(
+            ids_by_folder[folder].append(model_id)
+        for folder, ids in ids_by_folder.items():
+            session.query(STLModel).filter(STLModel.id.in_(ids)).update(
                 {STLModel.archive_folder: folder}, synchronize_session=False
             )
         return len(rows)
