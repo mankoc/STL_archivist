@@ -11,7 +11,7 @@ import subprocess
 import sys
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog, QHBoxLayout, QLabel, QProgressBar,
     QPushButton, QRadioButton, QVBoxLayout, QButtonGroup,

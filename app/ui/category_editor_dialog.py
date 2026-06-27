@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.database.db import session_scope, get_session
-from app.database.models import Category, STLModel
+from app.database.models import Category
 from app.utils.string_utils import levenshtein as _levenshtein, soundex as _soundex
 
 
