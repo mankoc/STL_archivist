@@ -29,7 +29,7 @@ from sqlalchemy.orm import selectinload
 from app.database.db import get_session, session_scope, get_models_view
 from app.ui import lookup_cache as _lookup_cache
 from app.ui.thumb_loader import ThumbnailLoaderWorker
-from app.database.models import STLModel, Tag, Sculptor, Collection, Subcollection, Category, Release, Scale, Image, model_tags as _mt_global
+from app.database.models import STLModel, Tag, Sculptor, Collection, Subcollection, Category, Release, Scale, Image, model_tags as _mt_global, model_scales as _ms_global
 from app.utils.thumbnailer import pixmap_from_path, save_thumbnail
 from app.utils.path_pattern import parse_release_date, format_release_date
 
@@ -91,14 +91,14 @@ MODEL_ID_ROLE = Qt.ItemDataRole.UserRole + 1
 # SQL-backed paged model helpers
 # ---------------------------------------------------------------------------
 
-def _pack_row(row, tags_for: dict, pair_for_id: dict) -> tuple:
+def _pack_row(row, tags_for: dict, scales_for: dict, pair_for_id: dict) -> tuple:
     return (
         row.id, row.title, row.creator, row.source,
         row.release_year, row.release_month, row.archive_path,
         row.presupports, row.warning, row.archive_size,
         row.compression_rate, row.sequence, row.created_at,
         row.sculptor_name, row.collection_name, row.subcollection_name,
-        row.category_name, row.release_name, row.scale_name,
+        row.category_name, row.release_name, scales_for.get(row.id, ""),
         tags_for.get(row.id, ""), pair_for_id.get(row.id, -1),
     )
 
@@ -153,7 +153,7 @@ class _PageFetchRunnable(QRunnable):
 
     def run(self):
         from app.database.db import get_session, get_models_view
-        from app.database.models import Tag
+        from app.database.models import Tag, Scale, model_scales as _ms
         from sqlalchemy import select as sa_sel, func
         session = get_session()
         try:
@@ -167,7 +167,7 @@ class _PageFetchRunnable(QRunnable):
                 mv.c.sequence, mv.c.created_at,
                 mv.c.sculptor_name, mv.c.collection_name,
                 mv.c.subcollection_name, mv.c.category_name,
-                mv.c.release_name, mv.c.scale_name,
+                mv.c.release_name,
             ).select_from(mv).where(mv.c.id.in_(ids))
             rows_by_id = {row.id: row for row in session.execute(stmt).all()}
 
@@ -178,9 +178,18 @@ class _PageFetchRunnable(QRunnable):
                 .group_by(_mt_global.c.model_id)
             )
             tags_for = {mid: ts or "" for mid, ts in session.execute(tags_stmt).all()}
+
+            scales_stmt = (
+                sa_sel(_ms.c.model_id, func.group_concat(Scale.name, ", "))
+                .join(Scale, _ms.c.scale_id == Scale.id)
+                .where(_ms.c.model_id.in_(ids))
+                .group_by(_ms.c.model_id)
+            )
+            scales_for = {mid: ss or "" for mid, ss in session.execute(scales_stmt).all()}
+
             pair_for_id = self._pair_for_id
             packed = [
-                _pack_row(rows_by_id[mid], tags_for, pair_for_id)
+                _pack_row(rows_by_id[mid], tags_for, scales_for, pair_for_id)
                 for mid in ids if mid in rows_by_id
             ]
             self.signals.page_ready.emit(self._page_idx, packed)
@@ -392,7 +401,7 @@ class _SqlTableModel(QAbstractTableModel):
             COL_SEQUENCE:      mv.c.sequence,
             COL_RELEASE:       mv.c.release_name,
             COL_PATH:          mv.c.archive_path,
-            COL_SCALE:         mv.c.scale_name,
+            # COL_SCALE is many-to-many (not in the view) — not sortable, like Tags.
             COL_PRESUPPORTED:  mv.c.presupports,
             COL_ADDED:         mv.c.created_at,
             COL_FILESIZE:      mv.c.archive_size,
@@ -449,7 +458,7 @@ class _SqlTableModel(QAbstractTableModel):
         #           7=presupports,8=warning,9=archive_size,10=compression_rate,
         #           11=sequence,12=created_at,13=sculptor_name,14=collection_name,
         #           15=subcollection_name,16=category_name,17=release_name,
-        #           18=scale_name,19=tags_str,20=pair_idx
+        #           18=scales_str,19=tags_str,20=pair_idx
         if role == Qt.ItemDataRole.DisplayRole:
             if col == COL_THUMB:         return None
             if col == COL_TITLE:         return t[1] or ""
@@ -653,7 +662,7 @@ class RescanWorker(QThread):
 
                     scales = detect_scale([p.name] + all_names)
                     if scales:
-                        m.scale = get_or_create_scale(session, scales[0])
+                        m.scales = [get_or_create_scale(session, s) for s in scales]
 
                     if get_store_stl_file_list():
                         for old in list(m.stl_files):
@@ -799,11 +808,25 @@ class ReleaseDelegate(_ComboDelegate):
         return _lookup_cache.get("release")
 
 
-class ScaleDelegate(_ComboDelegate):
-    """QComboBox of all Scale names."""
+class ScaleDelegate(QStyledItemDelegate):
+    """QLineEdit that autocompletes each comma-separated token from the scale pool.
 
-    def _get_items(self) -> list[str]:
-        return _lookup_cache.get("scale")
+    Scale is many-to-many, so a cell holds a comma-separated list and is edited
+    the same way as the Tags column.
+    """
+
+    def createEditor(self, parent, option, index) -> "_TagLineEdit":
+        return _TagLineEdit(_lookup_cache.get("scale"), parent)
+
+    def setEditorData(self, editor, index) -> None:
+        editor.setText(index.data() or "")
+        editor.setCursorPosition(len(editor.text()))
+
+    def setModelData(self, editor, model, index) -> None:
+        model.setData(index, editor.text().strip())
+
+    def updateEditorGeometry(self, editor, option, index) -> None:
+        editor.setGeometry(option.rect)
 
 
 _PRESUPPORTS_OPTIONS = ["", "No", "Lychee", "Chitubox", "Presupported"]
@@ -1224,7 +1247,7 @@ class _FilterTreeWorker(QRunnable):
         from app.database.db import get_session
         from app.database.models import (
             STLModel, Tag, Sculptor, Collection, Subcollection,
-            Category, Release, Scale, model_tags as _mt,
+            Category, Release, Scale, model_tags as _mt, model_scales as _ms,
         )
         from sqlalchemy import func as _func
         from pathlib import Path as _P
@@ -1282,7 +1305,6 @@ class _FilterTreeWorker(QRunnable):
                 _count_col(STLModel.subcollection_id, "subcollection_id")
                 _count_col(STLModel.category_id,      "category_id")
                 _count_col(STLModel.release_id,       "release_id")
-                _count_col(STLModel.scale_id,         "scale_id")
                 _count_col(STLModel.presupports,      "presupports")
 
                 _year_cnt: dict = {}
@@ -1352,6 +1374,18 @@ class _FilterTreeWorker(QRunnable):
                     session.query(_func.count(_mt.c.model_id.distinct())).scalar() or 0
                 )
 
+                # Scale is many-to-many (model_scales); count like tags but keep
+                # the id-based leaf keys the tree uses (("scale_id", sid)).
+                for sid, c in (
+                    session.query(_ms.c.scale_id, _func.count(_ms.c.model_id))
+                    .group_by(_ms.c.scale_id)
+                    .all()
+                ):
+                    _counts[("scale_id", sid)] = c
+                _counts[("group", "scale")] = (
+                    session.query(_func.count(_ms.c.model_id.distinct())).scalar() or 0
+                )
+
                 _path_counts = {}
                 for folder, _c in _direct.items():
                     _path_counts[folder] = _path_counts.get(folder, 0) + _c
@@ -1389,12 +1423,26 @@ class _FilterTreeWorker(QRunnable):
                         ("subcollection", STLModel.subcollection_id, "subcollection_id"),
                         ("category",      STLModel.category_id,      "category_id"),
                         ("release",       STLModel.release_id,       "release_id"),
-                        ("scale",         STLModel.scale_id,         "scale_id"),
                         ("presupports",   STLModel.presupports,      "presupports"),
                     ):
                         sc_ids = _s(section)
                         if sc_ids is not None:
                             _sc_count_col(col, kind, sc_ids)
+
+                    _scale_sc = _s("scale")
+                    if _scale_sc is not None:
+                        for sid, c in (
+                            session.query(_ms.c.scale_id, _func.count(_ms.c.model_id))
+                            .filter(_ms.c.model_id.in_(_scale_sc))
+                            .group_by(_ms.c.scale_id)
+                            .all()
+                        ):
+                            _scoped_counts[("scale_id", sid)] = c
+                        _scoped_counts[("group", "scale")] = (
+                            session.query(_func.count(_ms.c.model_id.distinct()))
+                            .filter(_ms.c.model_id.in_(_scale_sc))
+                            .scalar() or 0
+                        )
 
                     _tag_sc = _s("tag")
                     if _tag_sc is not None:
@@ -1627,9 +1675,8 @@ class _FilterTreeWorker(QRunnable):
                 if _sls is not None:
                     _scale_ids = {
                         sid for (sid,) in
-                        session.query(STLModel.scale_id)
-                        .filter(STLModel.id.in_(_sls))
-                        .filter(STLModel.scale_id.isnot(None))
+                        session.query(_ms.c.scale_id)
+                        .filter(_ms.c.model_id.in_(_sls))
                         .distinct()
                     }
                     q = q.filter(Scale.id.in_(_scale_ids))
@@ -2545,10 +2592,10 @@ class BrowserTab(QWidget):
             mv.c.subcollection_name,
             mv.c.category_name,
             mv.c.release_name,
-            mv.c.scale_name,
         ).select_from(mv)
 
         _tag_sub = sa_select(_mt_global.c.model_id).join(Tag, _mt_global.c.tag_id == Tag.id)
+        _scale_sub = sa_select(_ms_global.c.model_id)
 
         # --- explicit ID set ---
         if id_filters:
@@ -2577,7 +2624,7 @@ class BrowserTab(QWidget):
         if release_filters:
             stmt = stmt.where(mv.c.release_id.in_(release_filters))
         if scale_filters:
-            stmt = stmt.where(mv.c.scale_id.in_(scale_filters))
+            stmt = stmt.where(mv.c.id.in_(_scale_sub.where(_ms_global.c.scale_id.in_(scale_filters))))
         if presupports_filters:
             stmt = stmt.where(mv.c.presupports.in_(presupports_filters))
         if warning_filters:
@@ -2609,7 +2656,7 @@ class BrowserTab(QWidget):
         if release_exc_filters:
             stmt = stmt.where(~mv.c.release_id.in_(release_exc_filters))
         if scale_exc_filters:
-            stmt = stmt.where(~mv.c.scale_id.in_(scale_exc_filters))
+            stmt = stmt.where(mv.c.id.notin_(_scale_sub.where(_ms_global.c.scale_id.in_(scale_exc_filters))))
         if presupports_exc_filters:
             stmt = stmt.where(~mv.c.presupports.in_(presupports_exc_filters))
         if warning_exc_filters:
@@ -2620,6 +2667,7 @@ class BrowserTab(QWidget):
 
         # --- group-level has/no-value filters ---
         _has_tag_sub = sa_select(_mt_global.c.model_id).distinct()
+        _has_scale_sub = sa_select(_ms_global.c.model_id).distinct()
         _group_has_value = {
             "creator":       lambda: and_(mv.c.creator.isnot(None),       mv.c.creator != ""),
             "tag":           lambda: mv.c.id.in_(_has_tag_sub),
@@ -2630,7 +2678,7 @@ class BrowserTab(QWidget):
             "subcollection": lambda: mv.c.subcollection_id.isnot(None),
             "category":      lambda: mv.c.category_id.isnot(None),
             "release":       lambda: mv.c.release_id.isnot(None),
-            "scale":         lambda: mv.c.scale_id.isnot(None),
+            "scale":         lambda: mv.c.id.in_(_has_scale_sub),
             "presupports":   lambda: and_(mv.c.presupports.isnot(None),   mv.c.presupports != ""),
             "warning":       lambda: and_(mv.c.warning.isnot(None),       mv.c.warning != ""),
             "path":          lambda: and_(mv.c.archive_path.isnot(None),  mv.c.archive_path != ""),
@@ -2780,15 +2828,15 @@ class BrowserTab(QWidget):
                 else:
                     stl.release = None
             elif col == COL_SCALE:
-                if value:
-                    sc = session.query(Scale).filter_by(name=value).first()
+                stl.scales.clear()
+                for name in [s.strip() for s in (value or "").split(",") if s.strip()]:
+                    sc = session.query(Scale).filter_by(name=name).first()
                     if sc is None:
-                        sc = Scale(name=value)
+                        sc = Scale(name=name)
                         session.add(sc)
                         session.flush()
-                    stl.scale = sc
-                else:
-                    stl.scale = None
+                    if sc not in stl.scales:
+                        stl.scales.append(sc)
             elif col == COL_PRESUPPORTED:
                 stl.presupports = value.strip() or None
 
@@ -3041,8 +3089,8 @@ class BrowserTab(QWidget):
                     if release_inc:  _w(STLModel.release_id.in_(release_inc))
                     if release_exc:  _w(~STLModel.release_id.in_(release_exc))
                 if not skip_scale:
-                    if scale_inc:    _w(STLModel.scale_id.in_(scale_inc))
-                    if scale_exc:    _w(~STLModel.scale_id.in_(scale_exc))
+                    if scale_inc:    _w(STLModel.scales.any(Scale.id.in_(scale_inc)))
+                    if scale_exc:    _w(~STLModel.scales.any(Scale.id.in_(scale_exc)))
                 if not skip_presupports:
                     if presupports_inc: _w(STLModel.presupports.in_(presupports_inc))
                     if presupports_exc: _w(~STLModel.presupports.in_(presupports_exc))
@@ -3065,7 +3113,7 @@ class BrowserTab(QWidget):
                     "subcollection": lambda: STLModel.subcollection_id.isnot(None),
                     "category":      lambda: STLModel.category_id.isnot(None),
                     "release":       lambda: STLModel.release_id.isnot(None),
-                    "scale":         lambda: STLModel.scale_id.isnot(None),
+                    "scale":         lambda: STLModel.scales.any(),
                     "presupports":   lambda: and_(STLModel.presupports.isnot(None),   STLModel.presupports != ""),
                     "warning":       lambda: and_(STLModel.warning.isnot(None),       STLModel.warning != ""),
                 }

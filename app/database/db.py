@@ -54,6 +54,7 @@ def init_db(db_path: str = "stlLibrary.db") -> None:
     _migrate_schema(_engine)
     Base.metadata.create_all(_engine)
     _ensure_columns(_engine)
+    _migrate_scales(_engine)
     _ensure_views(_engine)
     _attach_query_profiler(_engine)
 
@@ -135,6 +136,27 @@ def _migrate_schema(engine) -> None:
                 ))
         finally:
             conn.execute(text("PRAGMA foreign_keys=ON"))
+
+
+def _migrate_scales(engine) -> None:
+    """Migrate the legacy single-scale FK (``models.scale_id``) to the
+    ``model_scales`` many-to-many join table.
+
+    Scale became multi-valued: a model can carry several scales. Old databases
+    stored one scale per model in ``models.scale_id``; copy each non-null value
+    into the join table. Idempotent (``INSERT OR IGNORE``) and a no-op once the
+    legacy column is gone (fresh databases never have it). The orphaned
+    ``scale_id`` column is left in place — it is harmless and dropping it would
+    require an expensive table rebuild.
+    """
+    with engine.begin() as conn:
+        cols = {r[1] for r in conn.execute(text("PRAGMA table_info(models)")).fetchall()}
+        if "scale_id" not in cols:
+            return
+        conn.execute(text(
+            "INSERT OR IGNORE INTO model_scales (model_id, scale_id) "
+            "SELECT id, scale_id FROM models WHERE scale_id IS NOT NULL"
+        ))
 
 
 def _ensure_columns(engine) -> None:
@@ -248,10 +270,16 @@ def _ensure_views(engine) -> None:
 
     If the view definition ever changes (new columns, renamed tables) it must
     be dropped and recreated; bump this function to handle that migration.
+
+    Scale is no longer part of the view: it became many-to-many (``model_scales``)
+    so it cannot be a single column per model. Scale is read/filtered via the
+    join table instead, like tags. The view is dropped and recreated on every
+    startup so this definition change propagates to existing databases.
     """
     with engine.begin() as conn:
+        conn.execute(text("DROP VIEW IF EXISTS models_view"))
         conn.execute(text("""
-            CREATE VIEW IF NOT EXISTS models_view AS
+            CREATE VIEW models_view AS
             SELECT
                 m.id, m.title, m.creator, m.source,
                 m.release_year, m.release_month,
@@ -259,21 +287,19 @@ def _ensure_views(engine) -> None:
                 m.archive_size, m.compression_rate,
                 m.sequence, m.created_at,
                 m.sculptor_id, m.collection_id, m.subcollection_id,
-                m.category_id, m.release_id, m.scale_id,
+                m.category_id, m.release_id,
                 m.is_missing, m.archive_hash,
                 scu.name AS sculptor_name,
                 col.name AS collection_name,
                 sub.name AS subcollection_name,
                 cat.name AS category_name,
-                rel.name AS release_name,
-                scl.name AS scale_name
+                rel.name AS release_name
             FROM models m
             LEFT JOIN sculptors      scu ON m.sculptor_id      = scu.id
             LEFT JOIN collections    col ON m.collection_id    = col.id
             LEFT JOIN subcollections sub ON m.subcollection_id = sub.id
             LEFT JOIN categories     cat ON m.category_id      = cat.id
             LEFT JOIN releases       rel ON m.release_id       = rel.id
-            LEFT JOIN scales         scl ON m.scale_id         = scl.id
         """))
 
 

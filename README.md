@@ -14,7 +14,7 @@ Version: 2026.24
 - **Metadata overrides** — force a specific Creator or Type/Source value for every archive in a crawl, overriding whatever is auto-detected
 - **Thumbnail browser** — stores JPEG previews in LMDB and displays them in a scrollable image pane; supports drag-and-drop to add new images
 - **Image grid** — scrollable grid of thumbnails for the currently filtered set of models, with a resizable thumbnail slider (60–300 px)
-- **Scale detection** — automatically detects miniature scale (e.g. `28mm`, `32mm`, `1/35`) from archive and file names
+- **Scale detection** — automatically detects miniature scale (e.g. `28mm`, `32mm`, `1/35`) from archive and file names; a model can hold **multiple scales** (e.g. a 180 mm bust and a 32 mm version in one archive)
 - **Presupport detection** — identifies whether an archive contains Lychee, Chitubox, or presupported STL files
 - **Crawler warnings** — flags archives that contain presupported STLs, no images, no printable files (`.stl`/`.obj`/`.lys`/`.chitubox`), or nested archives
 - **Rich model catalog** — tracks sculptors, categories, subcategories, releases, scales, tags, and warnings per model
@@ -148,7 +148,7 @@ Managed through dedicated editor dialogs accessible from the browser's right-cli
 
 ### 6. Scales
 
-Scale values (e.g. `28mm`, `32mm`, `1/35`) are detected automatically during crawl and can also be set manually per model through the editor or the **Scale** inline cell in the browser.
+Scale values (e.g. `28mm`, `32mm`, `1/35`) are detected automatically during crawl and can also be set manually per model through the editor or the **Scale** inline cell in the browser. A model can carry **several scales at once** — enter them as a comma-separated list (with autocomplete); each is filterable individually in the filter pane, and a model appears under every scale it has.
 
 ## Path Patterns
 

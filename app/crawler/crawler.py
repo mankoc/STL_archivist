@@ -970,7 +970,7 @@ class CrawlerWorker(QThread):
         if cfg.force_release:
             model.release = get_or_create_release(session, cfg.force_release, cache=cache)
         if cfg.force_scale:
-            model.scale = get_or_create_scale(session, cfg.force_scale, cache=cache)
+            model.scales = [get_or_create_scale(session, cfg.force_scale, cache=cache)]
         if cfg.force_date:
             _year, _month = parse_release_date(cfg.force_date)
             if _year:
@@ -1102,7 +1102,7 @@ class CrawlerWorker(QThread):
         logger.debug("  Scales detected: %s", scales or "none")
         if scales:
             cache = getattr(self, "_lookup_cache", None)
-            model.scale = get_or_create_scale(session, scales[0], cache=cache)
+            model.scales = [get_or_create_scale(session, s, cache=cache) for s in scales]
 
     def _assign_metadata(
         self,
