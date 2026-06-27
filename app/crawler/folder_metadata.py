@@ -310,7 +310,7 @@ def _serialize_models(models: list, thumb_base_dir: Path, include_thumbnails: bo
             "subcollection": model.subcollection.name if model.subcollection else None,
             "category":      model.category.name     if model.category     else None,
             "release":       model.release.name      if model.release      else None,
-            "scale":         model.scale.name        if model.scale        else None,
+            "scales":        [s.name for s in model.scales],
             "tags":          [t.name for t in model.tags],
             "images":        images_list,
             "stl_files":     [
@@ -464,6 +464,11 @@ def _restore_fk(session: Session, model, model_data: dict) -> None:
     if release_name:
         model.release = get_or_create_release(session, release_name)
 
-    scale_name = model_data.get("scale")
-    if scale_name:
-        model.scale = get_or_create_scale(session, scale_name)
+    # Scale is many-to-many; read the new "scales" list and fall back to the
+    # legacy single "scale" key for sidecars written before multi-scale support.
+    scale_names = model_data.get("scales")
+    if scale_names is None:
+        _legacy = model_data.get("scale")
+        scale_names = [_legacy] if _legacy else []
+    if scale_names:
+        model.scales = [get_or_create_scale(session, s) for s in scale_names if s]

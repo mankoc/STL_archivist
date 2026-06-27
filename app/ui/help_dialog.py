@@ -225,7 +225,7 @@ with a filter panel on the left and an image preview pane on the right.</p>
   <tr><td>Sequence</td><td>Sequence number within a release</td></tr>
   <tr><td>Release</td><td>Release name or collection title</td></tr>
   <tr><td>Path</td><td>Absolute path to the archive file — double-click to open the Model Editor</td></tr>
-  <tr><td>Scale</td><td>Print scale (e.g. <code>28mm</code>, <code>32mm</code>, <code>75mm</code>)</td></tr>
+  <tr><td>Scale</td><td>Print scale(s) — one or more, comma-separated (e.g. <code>28mm</code>, <code>32mm</code>, <code>180mm</code>)</td></tr>
   <tr><td>Presupports</td><td>Support status: No / Lychee / Chitubox / Presupported</td></tr>
   <tr><td>Added</td><td>Date the record was added to the database</td></tr>
   <tr><td>Warnings</td><td>Flags raised during crawl (nested archive, no images, &hellip;)</td></tr>
@@ -676,7 +676,7 @@ def _page_editor() -> str:
   <tr><td>Category</td><td>Dropdown populated from the existing category list</td></tr>
   <tr><td>Subcategory</td><td>Dropdown filtered to the selected category</td></tr>
   <tr><td>Release</td><td>Dropdown populated from the existing release list</td></tr>
-  <tr><td>Scale</td><td>Dropdown (e.g. 28 mm, 32 mm, 75 mm, 1:35)</td></tr>
+  <tr><td>Scale</td><td>One or more scales, comma-separated with autocomplete (e.g. 28mm, 32mm, 180mm)</td></tr>
   <tr><td>Presupports</td><td>Dropdown: No / Lychee / Chitubox / Presupported</td></tr>
   <tr><td>Tags</td><td>Comma-separated tag names; auto-complete on each token</td></tr>
   <tr><td>Notes</td><td>Free-form notes; not displayed in the browser table</td></tr>

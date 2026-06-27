@@ -51,6 +51,23 @@ def _dedupe_words(tag: str) -> str:
     return " ".join(words)
 
 
+def _ground_scales(raw_value: str, context_parts: list[str]) -> str:
+    """Drop AI-suggested scales that are not backed by the textual context.
+
+    Scale cannot be seen in an image, so any scale the model returns must appear
+    in the archive path, filenames, or existing metadata — otherwise it is a
+    hallucination. Matching is space/dash insensitive (so ``"1/35"`` matches a
+    path containing ``1-35`` and ``"32 mm"`` matches ``32mm``).
+    """
+    def _norm(s: str) -> str:
+        return s.lower().replace(" ", "").replace("-", "/")
+
+    ctx = _norm(" ".join(context_parts))
+    kept = [tok.strip() for tok in raw_value.split(",")
+            if tok.strip() and _norm(tok.strip()) in ctx]
+    return ", ".join(kept)
+
+
 def _format_known_meta(known_meta: dict[str, str] | None) -> str:
     """Render the model's existing catalogued metadata as a prompt hint block."""
     if not known_meta:
@@ -106,7 +123,9 @@ def _build_meta_prompt(archive_path: str,
         "CREATOR: <publisher, brand or author name>\n"
         "SCULPTOR: <artist or sculptor name>\n"
         "CATEGORY: <one of: Fantasy, SciFi, Historical, Modern, Animals, Vehicle, Other>\n"
-        "SCALE: <miniature scale, e.g. 28mm, 32mm, 1/35, 54mm — or empty>\n"
+        "SCALE: <ONLY if a scale such as 28mm, 32mm, 1/35 or 54mm is explicitly written in the path, "
+        "filenames, or existing metadata above. A scale CANNOT be seen in an image — never guess or "
+        "infer it. Leave empty if it is not stated in text.>\n"
         "SOURCE: <one of: patreon, kickstarter, myminifactory — or empty>\n"
         "YEAR: <4-digit release year — or empty>\n"
         "DESCRIPTION: <one sentence describing the model>\n"
@@ -172,6 +191,19 @@ def _generate_suggestions(
             val = val.strip()
             if val and val.lower() not in ("n/a", "none", "unknown", ""):
                 meta[key] = val
+
+    # Scale can't be seen in an image — keep only scales backed by the path,
+    # filenames, or existing metadata; drop anything the model hallucinated.
+    if "SCALE" in meta:
+        context = [archive_path, *stems]
+        if known_meta:
+            context.append(known_meta.get("Scale", ""))
+        grounded = _ground_scales(meta["SCALE"], context)
+        if grounded:
+            meta["SCALE"] = grounded
+        else:
+            meta.pop("SCALE", None)
+
     if on_meta:
         on_meta(meta)
 
@@ -194,7 +226,7 @@ def _collect_known_meta(m: STLModel) -> dict[str, str]:
     add("Creator", m.creator)
     add("Sculptor", m.sculptor.name if m.sculptor else None)
     add("Category", m.category.name if m.category else None)
-    add("Scale", m.scale.name if m.scale else None)
+    add("Scale", ", ".join(s.name for s in m.scales) if m.scales else None)
     add("Source", m.source)
     add("Year", m.release_year)
     add("Description", m.description)
@@ -289,13 +321,21 @@ def _commit_model_data(model_id: int, fields: dict, tags: list[str],
                 session.flush()
             model.category = cat
 
-        if fields["scale"] and (overwrite or model.scale is None):
-            scl = session.query(Scale).filter_by(name=fields["scale"]).first()
-            if scl is None:
-                scl = Scale(name=fields["scale"])
-                session.add(scl)
-                session.flush()
-            model.scale = scl
+        if fields["scale"] and (overwrite or not model.scales):
+            names = [s.strip() for s in fields["scale"].split(",") if s.strip()]
+            if overwrite:
+                model.scales.clear()
+            existing_scales = {s.name.lower() for s in model.scales}
+            for name in names:
+                if name.lower() in existing_scales:
+                    continue
+                scl = session.query(Scale).filter_by(name=name).first()
+                if scl is None:
+                    scl = Scale(name=name)
+                    session.add(scl)
+                    session.flush()
+                model.scales.append(scl)
+                existing_scales.add(name.lower())
 
         existing_lower = {t.name.lower() for t in model.tags}
         for tag_name in tags:
@@ -498,7 +538,8 @@ class AITaggerDialog(QDialog):
         self._known_meta: dict[str, str] = {}
 
         self.setMinimumWidth(540)
-        self.resize(660, 640)
+        self.setMinimumHeight(720)
+        self.resize(660, 900)
         self._build_ui()
         self._load_model(0)
 

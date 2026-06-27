@@ -24,6 +24,15 @@ model_tags = Table(
     Column("tag_id",   Integer, ForeignKey("tags.id",   ondelete="CASCADE"), primary_key=True),
 )
 
+# Many-to-many join table for model <-> scales (a model can have several scales,
+# e.g. a 180 mm bust and a 32 mm tabletop version in the same archive)
+model_scales = Table(
+    "model_scales",
+    Base.metadata,
+    Column("model_id", Integer, ForeignKey("models.id", ondelete="CASCADE"), primary_key=True),
+    Column("scale_id", Integer, ForeignKey("scales.id", ondelete="CASCADE"), primary_key=True),
+)
+
 
 class Sculptor(Base):
     """An artist or creator associated with one or more STL models."""
@@ -114,7 +123,7 @@ class Scale(Base):
     id   = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(64), unique=True, nullable=False)
 
-    models = relationship("STLModel", back_populates="scale")
+    models = relationship("STLModel", secondary=model_scales, back_populates="scales")
 
     def __repr__(self) -> str:
         return f"<Scale {self.name!r}>"
@@ -184,13 +193,14 @@ class STLModel(Base):
     subcollection_id  = Column(Integer, ForeignKey("subcollections.id",ondelete="SET NULL"), nullable=True, index=True)
     category_id       = Column(Integer, ForeignKey("categories.id",    ondelete="SET NULL"), nullable=True, index=True)
     release_id        = Column(Integer, ForeignKey("releases.id",      ondelete="SET NULL"), nullable=True, index=True)
-    scale_id          = Column(Integer, ForeignKey("scales.id",        ondelete="SET NULL"), nullable=True, index=True)
+    # Scale is many-to-many (see model_scales); no scale_id FK column.
 
     __table_args__ = (
         Index("ix_models_release_date", "release_year", "release_month"),
     )
 
     tags          = relationship("Tag",          secondary=model_tags, back_populates="models")
+    scales        = relationship("Scale",        secondary=model_scales, back_populates="models")
     images        = relationship("Image",        back_populates="model", cascade="all, delete-orphan")
     stl_files     = relationship("STLFile",      back_populates="model", cascade="all, delete-orphan")
     sculptor      = relationship("Sculptor",     back_populates="models")
@@ -198,7 +208,6 @@ class STLModel(Base):
     subcollection = relationship("Subcollection",back_populates="models")
     category      = relationship("Category",     back_populates="models")
     release       = relationship("Release",      back_populates="models")
-    scale         = relationship("Scale",        back_populates="models")
 
     def __repr__(self) -> str:
         return f"<STLModel id={self.id} title={self.title!r}>"

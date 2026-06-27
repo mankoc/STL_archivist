@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Scale is now multi-valued.** A model can have several scales at once (e.g. a 180 mm bust and a 32 mm tabletop version in the same archive). Enter scales as a comma-separated list (with autocomplete) in the editor, mass editor, and the table's Scale cell; the filter pane lists each scale and a model appears under every scale it has. The crawler now stores *all* detected scales, AI Tagging can suggest several, and METADATA.7z sidecars round-trip the full list (old single-scale sidecars still import). Existing single scales are migrated automatically on first launch.
+- AI Tagging: scale is no longer hallucinated. Scale can't be seen in a photo, so the model is now told never to guess it, and any suggested scale that doesn't actually appear in the archive path, filenames, or existing metadata is discarded (space/dash-insensitive, so `1/35` still matches `1-35`).
 - AI Tagging: the local model server (`llama-server`) is now also shut down when the main window closes, not just when the AI Tagging dialog closes, so the background process never lingers after the app exits.
 - AI Tagging: repeated words within a single tag are now collapsed (e.g. "gothic gothic gothic horror" → "gothic horror"), cleaning up the model's occasional stutter.
 - Database Maintenance: new **Prune Images per Model…** button reduces the number of stored images per model to a chosen maximum (e.g. keep 3 of 10). The oldest images are kept; the extras and their thumbnails are deleted from the database. Run **Compact Thumbnail Store** afterwards to reclaim the freed disk space.

@@ -264,7 +264,7 @@ class MassEditorDialog(QDialog):
         self._release_edit = self._make_ac_edit(releases, "Release name  or  {folder}")
         self._tags_edit    = self._make_ac_edit(all_tags, "tag1, tag2, …  (replaces existing tags)")
 
-        self._scale_combo  = self._make_combo(scales, placeholder="— no change —")
+        self._scale_edit   = self._make_ac_edit(scales, "28mm, 32mm, …  (replaces existing scales)")
         self._presupports_combo = QComboBox()
         self._presupports_combo.addItems(["— no change —", "No", "Lychee", "Chitubox", "Presupported"])
 
@@ -284,7 +284,7 @@ class MassEditorDialog(QDialog):
             ("url",            self._url_edit),
             ("release",        self._release_edit),
             ("tags",           self._tags_edit),
-            ("scale",          self._scale_combo),
+            ("scale",          self._scale_edit),
             ("presupports",    self._presupports_combo),
             ("collection",     self._collection_edit),
             ("subcollection",  self._subcollection_edit),
@@ -320,7 +320,7 @@ class MassEditorDialog(QDialog):
         _cell(3, 1, "Category:",     "category",      self._category_edit)
         _cell(4, 0, "Collection:",   "collection",    self._collection_edit)
         _cell(4, 1, "Subcollection:","subcollection", self._subcollection_edit)
-        _cell(5, 0, "Scale:",        "scale",         self._scale_combo)
+        _cell(5, 0, "Scale:",        "scale",         self._scale_edit)
         _cell(5, 1, "Presupports:",  "presupports",   self._presupports_combo)
 
         # Tags spans the full width
@@ -612,9 +612,8 @@ class MassEditorDialog(QDialog):
             elif edit.text().strip():
                 manual[field] = edit.text().strip()
 
-        scale_name   = self._scale_combo.currentText().strip()
-        apply_scale  = "scale" in clearing or (bool(scale_name) and scale_name != "— no change —")
-        scale_value  = None if "scale" in clearing else scale_name
+        scale_tmpl   = self._scale_edit.text().strip()
+        apply_scale  = "scale" in clearing or bool(scale_tmpl)
 
         presup_choice     = self._presupports_combo.currentText()
         apply_presupports = "presupports" in clearing or presup_choice != "— no change —"
@@ -691,10 +690,14 @@ class MassEditorDialog(QDialog):
                     model.sculptor = get_or_create_sculptor(session, sculptor_name, cache=_cache)
 
                 if apply_scale:
-                    if scale_value:
-                        model.scale = get_or_create_scale(session, scale_value, cache=_cache)
-                    else:
-                        model.scale = None
+                    model.scales.clear()
+                    if "scale" not in clearing or scale_tmpl:
+                        _seen_scales: set[str] = set()
+                        for name in [s.strip() for s in scale_tmpl.split(",") if s.strip()]:
+                            if name.lower() in _seen_scales:
+                                continue
+                            model.scales.append(get_or_create_scale(session, name, cache=_cache))
+                            _seen_scales.add(name.lower())
 
                 if apply_presupports:
                     model.presupports = presupports_value or None

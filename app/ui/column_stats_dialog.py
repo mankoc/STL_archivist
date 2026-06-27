@@ -57,7 +57,7 @@ def _query_column(session, key: str, top_n: int | None) -> tuple[list[tuple[str,
     from sqlalchemy import func
     from app.database.models import (
         STLModel, Sculptor, Collection, Subcollection, Category,
-        Release, Scale, Tag, model_tags,
+        Release, Scale, Tag, model_tags, model_scales,
     )
 
     total: int = session.query(func.count(STLModel.id)).scalar() or 0
@@ -127,10 +127,10 @@ def _query_column(session, key: str, top_n: int | None) -> tuple[list[tuple[str,
         data = list(_cap(q).all())
 
     elif key == "scale":
-        q = (session.query(Scale.name, func.count(STLModel.id).label("n"))
-             .join(STLModel, STLModel.scale_id == Scale.id)
+        q = (session.query(Scale.name, func.count(model_scales.c.model_id).label("n"))
+             .join(model_scales, model_scales.c.scale_id == Scale.id)
              .group_by(Scale.id)
-             .order_by(func.count(STLModel.id).desc()))
+             .order_by(func.count(model_scales.c.model_id).desc()))
         data = list(_cap(q).all())
 
     elif key == "tag":
