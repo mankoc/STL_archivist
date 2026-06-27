@@ -146,16 +146,23 @@ def detect_warnings(
 
     compiled_supports: list[re.Pattern] = []
     if check_supports:
-        patterns = supports_patterns if supports_patterns is not None else DEFAULT_SUPPORTS_PATTERNS
-        for p in patterns:
-            try:
-                compiled_supports.append(re.compile(p, re.IGNORECASE))
-            except re.error:
-                logger.warning("Invalid supports pattern %r — skipped", p)
+        if supports_patterns is None:
+            # Reuse the module-level compiled alternation of the default patterns
+            # instead of recompiling them on every call.
+            compiled_supports.append(SUPPORTED_STL_RE)
+        else:
+            for p in supports_patterns:
+                try:
+                    compiled_supports.append(re.compile(p, re.IGNORECASE))
+                except re.error:
+                    logger.warning("Invalid supports pattern %r — skipped", p)
 
     for name in names:
-        fname = Path(name.replace("\\", "/")).name
-        suffix = Path(fname).suffix.lower()
+        # Build the Path once and read both name and suffix from it; constructing
+        # Path twice per member is a measurable cost across large archives.
+        p = Path(name.replace("\\", "/"))
+        fname = p.name
+        suffix = p.suffix.lower()
         if check_no_images and suffix in IMAGE_SUFFIXES:
             has_image = True
         if check_presupported and not has_presupported:
