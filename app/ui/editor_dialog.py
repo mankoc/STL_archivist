@@ -10,11 +10,10 @@ from PyQt6.QtWidgets import (
     QPushButton, QScrollArea, QWidget, QCompleter, QComboBox,
     QFrame, QGroupBox, QInputDialog, QMessageBox, QSplitter, QSpinBox, QToolButton, QToolTip,
 )
-from PyQt6.QtGui import QCursor
+from PyQt6.QtGui import QCursor, QPixmap
 
 from app.database.db import session_scope, get_session
 from app.database.models import STLModel, Tag, Release, Sculptor, Collection, Subcollection, Category, Scale
-from app.utils.thumbnailer import pixmap_from_path
 from app.utils.path_pattern import parse_path, ATTR_LABEL, PATTERN_HELP, parse_release_date, format_release_date
 
 
@@ -373,10 +372,20 @@ class EditorDialog(QDialog):
             if item.widget():
                 item.widget().deleteLater()
 
+        # Read all of this model's thumbnails in a single LMDB transaction rather
+        # than one round-trip per image. JPEG→QPixmap decoding stays on the GUI
+        # thread (QPixmap requires it) and is cheap for a single model's images.
+        from app.utils.thumbnailer import get_thumbnail_bytes_many
+        ids = [img.id for img in model.images if img.thumbnail_path]
+        blobs = get_thumbnail_bytes_many(ids) if ids else {}
+
         sidebar_width = 200
         for img in model.images:
             lbl = QLabel()
-            px = pixmap_from_path(img.thumbnail_path)
+            px = QPixmap()
+            data = blobs.get(img.id) if img.thumbnail_path else None
+            if data:
+                px.loadFromData(data)
             px = px.scaled(sidebar_width, sidebar_width,
                            Qt.AspectRatioMode.KeepAspectRatio,
                            Qt.TransformationMode.SmoothTransformation)

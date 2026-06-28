@@ -33,7 +33,7 @@ from app.database.db import get_session, session_scope, get_models_view
 from app.ui import lookup_cache as _lookup_cache
 from app.ui.thumb_loader import ThumbnailLoaderWorker
 from app.database.models import STLModel, Tag, Sculptor, Collection, Subcollection, Category, Release, Scale, Image, model_tags as _mt_global, model_scales as _ms_global
-from app.utils.thumbnailer import pixmap_from_path, save_thumbnail
+from app.utils.thumbnailer import pixmap_from_path
 from app.utils.path_pattern import parse_release_date, format_release_date
 
 _IMAGE_DROP_EXTS = frozenset({'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif'})
@@ -210,6 +210,42 @@ class _PageFetchRunnable(QRunnable):
             self.signals.page_ready.emit(self._page_idx, [])
         finally:
             session.close()
+
+
+class _ImageDropRunnable(QRunnable):
+    """Read dropped image files and encode thumbnails off the GUI thread.
+
+    File reads and JPEG resize/encode (the slow part that scales with the number
+    and size of dropped files) run here. The resulting pre-encoded JPEGs are sent
+    back to the GUI thread, where the DB inserts and LMDB writes happen — keeping
+    those on the single existing writer and avoiding SQLite contention.
+    """
+    class _Signals(QObject):
+        ready = pyqtSignal(int, list, list)  # model_id, [(filename, jpeg)], [error_name]
+
+    def __init__(self, model_id: int, paths: list):
+        super().__init__()
+        self.signals   = self._Signals()
+        self._model_id = model_id
+        self._paths    = paths
+        self.setAutoDelete(True)
+
+    def run(self):
+        from app.utils.thumbnailer import make_thumbnail
+        encoded: list = []
+        errors:  list = []
+        for path in self._paths:
+            try:
+                raw = path.read_bytes()
+            except OSError:
+                errors.append(path.name)
+                continue
+            jpeg = make_thumbnail(raw)
+            if jpeg is None:
+                errors.append(path.name)
+                continue
+            encoded.append((path.name, jpeg))
+        self.signals.ready.emit(self._model_id, encoded, errors)
 
 
 class _SqlTableModel(QAbstractTableModel):
@@ -3913,7 +3949,12 @@ class BrowserTab(QWidget):
         return super().eventFilter(obj, event)
 
     def _handle_image_drop(self, event) -> None:
-        """Import dropped image files as thumbnails for the currently selected model."""
+        """Import dropped image files as thumbnails for the currently selected model.
+
+        The slow part — reading each file and encoding its thumbnail — runs in a
+        background ``_ImageDropRunnable``; the DB inserts and LMDB writes happen
+        back on the GUI thread in :meth:`_on_image_drop_ready`.
+        """
         if self._current_model_id is None:
             return
         paths = [
@@ -3924,27 +3965,29 @@ class BrowserTab(QWidget):
         ]
         if not paths:
             return
-        errors: list[str] = []
+        runnable = _ImageDropRunnable(self._current_model_id, paths)
+        runnable.signals.ready.connect(self._on_image_drop_ready)
+        QThreadPool.globalInstance().start(runnable)
+
+    def _on_image_drop_ready(self, model_id: int, encoded: list, errors: list) -> None:
+        """Persist thumbnails encoded by ``_ImageDropRunnable`` (GUI thread)."""
+        from app.utils.thumbnailer import write_raw_thumbnail
         added = 0
-        with session_scope() as session:
-            for path in paths:
-                try:
-                    raw = path.read_bytes()
-                except OSError:
-                    errors.append(path.name)
-                    continue
-                img_rec = Image(model_id=self._current_model_id, filename=path.name)
-                session.add(img_rec)
-                session.flush()
-                thumb_path = save_thumbnail(raw, img_rec.id)
-                if thumb_path is None:
-                    errors.append(path.name)
-                    session.delete(img_rec)
-                    continue
-                img_rec.thumbnail_path = thumb_path
-                added += 1
-        if added:
-            self._show_thumbnails(self._current_model_id)
+        if encoded:
+            with session_scope() as session:
+                for filename, jpeg in encoded:
+                    img_rec = Image(model_id=model_id, filename=filename)
+                    session.add(img_rec)
+                    session.flush()
+                    thumb_path = write_raw_thumbnail(img_rec.id, jpeg)
+                    if thumb_path is None:
+                        errors.append(filename)
+                        session.delete(img_rec)
+                        continue
+                    img_rec.thumbnail_path = thumb_path
+                    added += 1
+        if added and self._current_model_id == model_id:
+            self._show_thumbnails(model_id)
         if errors:
             QMessageBox.warning(
                 self, self.tr("Image import"),
