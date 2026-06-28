@@ -135,13 +135,38 @@ broken code** — it imported a `Subcategory` model that no longer exists (repla
 by `Subcollection`), so it could not even be imported, and nothing referenced it.
 Deleted.
 
+### BrowserTab file split (done)
+
+`app/ui/browser_tab.py` was reduced from **~4,361 to ~2,540 lines** by moving its
+~17 independent helper classes into six focused sibling modules — **leaf classes
+only**; the `BrowserTab` class itself was not touched (no methods moved, no
+shared-state plumbing), so the change is pure cut-paste + imports:
+
+- `browser_common.py` — shared column constants, `_HEADERS`, `_pack_row`,
+  `_FILTER_PATH_IDS`, `_fmt_size`, `_prune_ancestor_paths`.
+- `browser_dialogs.py` — `ClickableLabel`, `ImageViewerDialog`.
+- `browser_delegates.py` — the cell-editor delegates + `_TagLineEdit`.
+- `browser_table_model.py` — `_IdLoaderThread`, `_PageFetchRunnable`, `_SqlTableModel`.
+- `browser_filter_tree.py` — `FilterItemDelegate`, `FilterTreeWidget`, the
+  ~600-line `_FilterTreeWorker`.
+- `browser_jobs.py` — `RescanWorker`, `RescanProgressDialog`,
+  `ThumbnailGeneratorWorker`, `_ImageDropRunnable`.
+
+Done one module per commit, each verified (import graph + 273-test suite) before
+the next. None of the new modules import `browser_tab` (no circular-import risk).
+A final pass removed ~33 now-unused imports from `browser_tab.py` (proven unused
+by AST + grep). Added `tests/test_ui_module_imports.py` as a cheap import guard,
+and a headless (offscreen) smoke test confirmed `BrowserTab` still constructs and
+`refresh()` runs.
+
 ### Still deferred
 
-- **BrowserTab split** (~4,300 lines, ~8 inner worker classes) — the largest and
-  riskiest refactor, in the least-testable file. Held for a dedicated effort.
+- **Extracting `BrowserTab`'s own method clusters** (thumbnail pane, filter-tree
+  management, editing) into controller objects — touches shared state
+  (`_current_model_id`, `_model`, `_table`); the higher-risk follow-up.
 
 ## Verification
 
-- `python -m pytest tests/ -v` → 265 passed, 0 failed.
+- `python -m pytest tests/ -v` → 282 passed, 0 failed.
 - Import smoke check across `main_window`, `crawler`, `db`, and the AI/util
   modules.
