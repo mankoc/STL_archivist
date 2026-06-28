@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
 
 from app.database.db import session_scope, get_session
 from app.database.models import Collection, Subcollection
-from app.utils.string_utils import levenshtein as _levenshtein, soundex as _soundex
+from app.utils.name_dedup import find_similar_pairs_grouped
 
 
 class SubcollectionEditorDialog(QDialog):
@@ -298,31 +298,8 @@ class _MergeSubcollectionsDialog(QDialog):
         finally:
             session.close()
 
-        pairs: list[tuple] = []
-        if method == "Levenshtein":
-            threshold = self._thresh_spin.value()
-            for col_name, subcollections in col_groups.values():
-                for i in range(len(subcollections)):
-                    for j in range(i + 1, len(subcollections)):
-                        d = _levenshtein(subcollections[i][1], subcollections[j][1])
-                        if d <= threshold:
-                            pairs.append((subcollections[i], subcollections[j],
-                                          col_name, str(d)))
-            pairs.sort(key=lambda x: int(x[3]))
-            col_header = "Distance"
-        else:  # Soundex
-            for col_name, subcollections in col_groups.values():
-                groups: dict[str, list] = {}
-                for sc in subcollections:
-                    groups.setdefault(_soundex(sc[1]), []).append(sc)
-                for members in groups.values():
-                    for i in range(len(members)):
-                        for j in range(i + 1, len(members)):
-                            code = _soundex(members[i][1])
-                            pairs.append((members[i], members[j],
-                                          col_name, code))
-            pairs.sort(key=lambda x: x[3])
-            col_header = "Soundex"
+        pairs = find_similar_pairs_grouped(col_groups, method, self._thresh_spin.value())
+        col_header = "Distance" if method == "Levenshtein" else "Soundex"
 
         self._table.setHorizontalHeaderItem(3, QTableWidgetItem(col_header))
         self._table.setSortingEnabled(False)
