@@ -9,16 +9,15 @@ from pathlib import Path as FSPath, Path
 
 _ICONS_DIR = FSPath(__file__).parent.parent.parent / "resources" / "icons"
 
-from PyQt6.QtCore import Qt, QSortFilterProxyModel, QSize, QStringListModel, QEvent, pyqtSignal, QItemSelection, QTimer, QThread, QThreadPool, QRunnable, QRect, QPointF, QRectF, QUrl, QObject, QAbstractTableModel, QModelIndex
-from PyQt6.QtGui import QStandardItemModel, QStandardItem, QPixmap, QPixmapCache, QIcon, QKeySequence, QShortcut, QColor, QFont, QPainter, QPen, QDesktopServices
+from PyQt6.QtCore import Qt, QEvent, pyqtSignal, QTimer, QThread, QThreadPool
+from PyQt6.QtGui import QPixmap, QPixmapCache, QIcon, QKeySequence, QShortcut, QColor, QPainter
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
-    QTreeWidget, QTreeWidgetItem, QTableView,
+    QTreeWidgetItem, QTableView,
     QLineEdit, QLabel, QHeaderView, QAbstractItemView,
     QMenu, QScrollArea, QFrame, QInputDialog, QMessageBox,
-    QStyledItemDelegate, QComboBox, QCompleter,
-    QDialog, QSizePolicy, QApplication, QPushButton,
-    QProgressBar, QProgressDialog, QStyle, QStyleOptionViewItem,
+    QDialog, QApplication, QPushButton,
+    QProgressBar,
     QTextEdit, QDialogButtonBox,
 )
 from PyQt6.QtCore import QSettings
@@ -26,13 +25,12 @@ from PyQt6.QtCore import QSettings
 from sqlalchemy import (
     func, or_, and_, select as sa_select,
 )
-from sqlalchemy.orm import selectinload
 
-from app.database.db import get_session, session_scope, get_models_view
+from app.database.db import session_scope, get_models_view
 from app.ui import lookup_cache as _lookup_cache
 from app.ui.thumb_loader import ThumbnailLoaderWorker
 from app.ui.browser_table_model import _SqlTableModel
-from app.ui.browser_filter_tree import FilterItemDelegate, FilterTreeWidget, _FilterTreeWorker
+from app.ui.browser_filter_tree import FilterTreeWidget, _FilterTreeWorker
 from app.ui.browser_jobs import (
     _ImageDropRunnable, RescanWorker, RescanProgressDialog, ThumbnailGeneratorWorker,
 )
@@ -47,11 +45,9 @@ from app.ui.browser_common import (
     COL_SCULPTOR, COL_COLLECTION, COL_SUBCOLLECTION, COL_SEQUENCE, COL_RELEASE,
     COL_PATH, COL_SCALE, COL_PRESUPPORTED, COL_ADDED, COL_WARNING, COL_FILESIZE,
     COL_CATEGORY, COL_COMPRESSION, _HEADERS,
-    _fmt_size, _prune_ancestor_paths, MODEL_ID_ROLE,
-    _FILTER_PATH_IDS_NAME, _FILTER_PATH_IDS, _pack_row,
+    _prune_ancestor_paths, _FILTER_PATH_IDS,
 )
 from app.database.models import STLModel, Tag, Sculptor, Collection, Subcollection, Category, Release, Scale, Image, model_tags as _mt_global, model_scales as _ms_global
-from app.utils.thumbnailer import pixmap_from_path
 from app.utils.path_pattern import parse_release_date, format_release_date
 
 
