@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
 
 from app.database.db import session_scope, get_session
 from app.database.models import Category
-from app.utils.string_utils import levenshtein as _levenshtein, soundex as _soundex
+from app.utils.name_dedup import find_similar_pairs
 
 
 class CategoryEditorDialog(QDialog):
@@ -242,27 +242,8 @@ class _MergeCategoriesDialog(QDialog):
         finally:
             session.close()
 
-        pairs: list[tuple] = []
-        if method == "Levenshtein":
-            threshold = self._thresh_spin.value()
-            for i in range(len(categories)):
-                for j in range(i + 1, len(categories)):
-                    d = _levenshtein(categories[i][1], categories[j][1])
-                    if d <= threshold:
-                        pairs.append((categories[i], categories[j], str(d)))
-            pairs.sort(key=lambda x: int(x[2]))
-            col_header = "Distance"
-        else:  # Soundex
-            codes = {cid: _soundex(name) for cid, name, _ in categories}
-            groups: dict[str, list] = {}
-            for cid, name, count in categories:
-                groups.setdefault(codes[cid], []).append((cid, name, count))
-            for code, members in groups.items():
-                for i in range(len(members)):
-                    for j in range(i + 1, len(members)):
-                        pairs.append((members[i], members[j], code))
-            pairs.sort(key=lambda x: x[2])
-            col_header = "Soundex"
+        pairs = find_similar_pairs(categories, method, self._thresh_spin.value())
+        col_header = "Distance" if method == "Levenshtein" else "Soundex"
 
         self._table.setHorizontalHeaderItem(2, QTableWidgetItem(col_header))
         self._table.setSortingEnabled(False)
