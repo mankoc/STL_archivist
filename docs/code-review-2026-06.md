@@ -100,19 +100,45 @@ were verified and **rejected** before any edit:
 - **"`DEFAULT_SUPPORTS_PATTERNS` is dead/single-use"** — it is imported by
   `test_rules.py` and used as the default in `detect_warnings`. Kept.
 
-## Deferred (intentionally not done)
+## Follow-up pass — deferred items
 
-These were flagged but left for a dedicated refactor pass; doing them in a
-low-risk sweep would have added churn and regression risk to untested code:
+A later pass tackled two of the three deferred items (the BrowserTab split is
+still held back). Commits `a5de980` and `20a0aa8`.
 
-- **GUI-thread I/O** — `browser_tab._handle_image_drop` and
-  `editor_dialog._load_model` do file/LMDB/DB work on the GUI thread. These are
-  user-initiated, bounded-size operations, and moving DB writes off the main
-  thread collides with the app's single-writer SQLite model (the crawler uses a
-  dedicated writer thread). Needs a proper threading design, not a quick move.
-- **Structural refactors** — splitting the ~4,300-line `BrowserTab` god class,
-  and a shared base class for the seven near-duplicate editor dialogs
-  (~1,700 lines of boilerplate).
+### GUI-thread I/O (done)
+
+- **`browser_tab._handle_image_drop`** — file reads and thumbnail encoding now
+  run in a background `_ImageDropRunnable`; the DB inserts and LMDB writes
+  marshal back to the GUI thread (`_on_image_drop_ready`). This keeps writes on
+  the single existing writer — no new SQLite contention — while the UI no longer
+  freezes when many/large files are dropped.
+- **`editor_dialog._populate_thumbnails`** — reads a model's thumbnails in a
+  single LMDB transaction (`get_thumbnail_bytes_many`) instead of one round-trip
+  per image. The model-field load stays synchronous: it is a bounded, single-row
+  read on an explicit user action, so full async population of a short-lived
+  modal dialog would be over-engineering.
+
+### Editor-dialog dedup (done, scoped)
+
+The duplicated Levenshtein/Soundex merge-scan logic across the
+Category/Collection/Subcollection editors moved into a pure, unit-tested
+**`app/utils/name_dedup.py`** (`find_similar_pairs` / `find_similar_pairs_grouped`).
+
+A full widget base class was **deliberately not built**: the per-dialog strings
+are fully translated in `resources/i18n/es.ts`, and collapsing them behind
+dynamic labels (`f"{label} Editor"`) would stop `pylupdate6` extracting them and
+regress those translations to English. Sharing only the string-free algorithm
+captures the real duplication with zero i18n impact and adds test coverage.
+
+While migrating, **`app/ui/subcategory_editor_dialog.py` was found to be dead,
+broken code** — it imported a `Subcategory` model that no longer exists (replaced
+by `Subcollection`), so it could not even be imported, and nothing referenced it.
+Deleted.
+
+### Still deferred
+
+- **BrowserTab split** (~4,300 lines, ~8 inner worker classes) — the largest and
+  riskiest refactor, in the least-testable file. Held for a dedicated effort.
 
 ## Verification
 
