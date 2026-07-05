@@ -73,6 +73,31 @@ def split_cumulative_tags(tags: list[str]) -> list[str]:
     return result
 
 
+def is_corrupted_output(text: str) -> bool:
+    """Detect if the model output is corrupted (mostly garbage/question marks).
+
+    Returns True if the output appears to be corrupted state (many question marks,
+    very few valid characters, etc.).
+    """
+    if not text or len(text) < 3:
+        return False
+
+    # Count question marks and other non-word characters
+    text_lower = text.lower()
+    question_count = text_lower.count("?")
+
+    # If more than 30% of the content is question marks, it's corrupted
+    if text and question_count / len(text) > 0.3:
+        return True
+
+    # If the output is mostly non-ASCII or control characters, it's corrupted
+    valid_chars = sum(1 for c in text if c.isalnum() or c in " ,-./")
+    if text and valid_chars / len(text) < 0.2:
+        return True
+
+    return False
+
+
 def clean_tags(raw_tags: str, max_tags: int = 0) -> list[str]:
     """Turn the model's raw comma-separated tag string into a clean tag list.
 
