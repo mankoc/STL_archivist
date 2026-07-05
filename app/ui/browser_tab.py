@@ -8,1744 +8,46 @@ Right-click or double-click: Edit Model.
 from pathlib import Path as FSPath, Path
 
 from app.utils.material_icons import lookup_icon
-from PyQt6.QtCore import Qt, QSortFilterProxyModel, QSize, QStringListModel, QEvent, pyqtSignal, QItemSelection, QTimer, QThread, QThreadPool, QRunnable, QRect, QPointF, QRectF, QUrl, QObject, QAbstractTableModel, QModelIndex
-from PyQt6.QtGui import QStandardItemModel, QStandardItem, QPixmap, QPixmapCache, QIcon, QKeySequence, QShortcut, QColor, QFont, QPainter, QPen, QDesktopServices
+from PyQt6.QtCore import Qt, QEvent, pyqtSignal, QTimer, QThread, QThreadPool
+from PyQt6.QtGui import QPixmap, QPixmapCache, QIcon, QKeySequence, QShortcut, QColor, QPainter
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
-    QTreeWidget, QTreeWidgetItem, QTableView,
+    QTreeWidgetItem, QTableView,
     QLineEdit, QLabel, QHeaderView, QAbstractItemView,
     QMenu, QScrollArea, QFrame, QInputDialog, QMessageBox,
-    QStyledItemDelegate, QComboBox, QCompleter,
-    QDialog, QSizePolicy, QApplication, QPushButton,
-    QProgressBar, QProgressDialog, QStyle, QStyleOptionViewItem,
+    QDialog, QApplication, QPushButton,
+    QProgressBar,
     QTextEdit, QDialogButtonBox,
 )
 from PyQt6.QtCore import QSettings
 
-from sqlalchemy import func, or_, and_, select as sa_select
-from sqlalchemy.orm import selectinload
+from sqlalchemy import (
+    func, or_, and_, select as sa_select,
+)
 
-from app.database.db import get_session, session_scope, get_models_view
+from app.database.db import session_scope, get_models_view
 from app.ui import lookup_cache as _lookup_cache
 from app.ui.thumb_loader import ThumbnailLoaderWorker
-from app.database.models import STLModel, Tag, Sculptor, Collection, Subcollection, Category, Release, Scale, Image, model_tags as _mt_global
-from app.utils.thumbnailer import pixmap_from_path, save_thumbnail
+from app.ui.browser_table_model import _SqlTableModel
+from app.ui.browser_filter_tree import FilterTreeWidget, _FilterTreeWorker
+from app.ui.browser_jobs import (
+    _ImageDropRunnable, RescanWorker, RescanProgressDialog, ThumbnailGeneratorWorker,
+)
+from app.ui.browser_dialogs import ClickableLabel, ImageViewerDialog
+from app.ui.browser_delegates import (
+    SourceDelegate, SculptorDelegate, CollectionDelegate, SubcollectionDelegate,
+    CategoryDelegate, ReleaseDelegate, ScaleDelegate, PresupportsDelegate, TagDelegate,
+)
+from app.ui.browser_common import (
+    _IMAGE_DROP_EXTS,
+    COL_THUMB, COL_TITLE, COL_CREATOR, COL_SOURCE, COL_DATE, COL_TAGS,
+    COL_SCULPTOR, COL_COLLECTION, COL_SUBCOLLECTION, COL_SEQUENCE, COL_RELEASE,
+    COL_PATH, COL_SCALE, COL_PRESUPPORTED, COL_ADDED, COL_WARNING, COL_FILESIZE,
+    COL_CATEGORY, COL_COMPRESSION, _HEADERS,
+    _prune_ancestor_paths, _FILTER_PATH_IDS,
+)
+from app.database.models import STLModel, Tag, Sculptor, Collection, Subcollection, Category, Release, Scale, Image, model_tags as _mt_global, model_scales as _ms_global
 from app.utils.path_pattern import parse_release_date, format_release_date
-
-_IMAGE_DROP_EXTS = frozenset({'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif'})
-
-# Column indices
-COL_THUMB         = 0
-COL_TITLE         = 1
-COL_CREATOR       = 2
-COL_SOURCE        = 3
-COL_DATE          = 4
-COL_TAGS          = 5
-COL_SCULPTOR      = 6
-COL_COLLECTION    = 7
-COL_SUBCOLLECTION = 8
-COL_SEQUENCE      = 9
-COL_RELEASE       = 10
-COL_PATH          = 11
-COL_SCALE         = 12
-COL_PRESUPPORTED  = 13
-COL_ADDED         = 14
-COL_WARNING       = 15
-COL_FILESIZE      = 16
-COL_CATEGORY      = 17
-COL_COMPRESSION   = 18
-_HEADERS = ["", "Title", "Creator", "Source", "Date", "Tags",
-            "Sculptor", "Collection", "Subcollection", "Sequence", "Release", "Path",
-             "Scale", "Presupports", "Added", "Warnings", "File Size", "Category",
-             "Compression"]
-
-
-
-def _fmt_size(nbytes: int) -> str:
-    for unit in ("B", "KB", "MB", "GB"):
-        if nbytes < 1024:
-            return f"{nbytes} {unit}" if unit == "B" else f"{nbytes:.1f} {unit}"
-        nbytes /= 1024
-    return f"{nbytes:.1f} TB"
-
-
-def _prune_ancestor_paths(paths: list[str]) -> list[str]:
-    """Return a minimal covering subset: drop paths whose ancestor is already present.
-
-    Prevents SQLite "Expression tree is too large" when a high-level folder is
-    checked in the tree and hundreds of descendant paths are also collected.
-    """
-    normalized = sorted(p.replace("\\", "/").rstrip("/") for p in paths)
-    result: list[str] = []
-    for p in normalized:
-        if not any(p.startswith(kept + "/") for kept in result):
-            result.append(p)
-    return result
-
-
-MODEL_ID_ROLE = Qt.ItemDataRole.UserRole + 1
-
-
-# ---------------------------------------------------------------------------
-# SQL-backed paged model helpers
-# ---------------------------------------------------------------------------
-
-def _pack_row(row, tags_for: dict, pair_for_id: dict) -> tuple:
-    return (
-        row.id, row.title, row.creator, row.source,
-        row.release_year, row.release_month, row.archive_path,
-        row.presupports, row.warning, row.archive_size,
-        row.compression_rate, row.sequence, row.created_at,
-        row.sculptor_name, row.collection_name, row.subcollection_name,
-        row.category_name, row.release_name, row.scale_name,
-        tags_for.get(row.id, ""), pair_for_id.get(row.id, -1),
-    )
-
-
-class _IdLoaderThread(QThread):
-    ids_ready       = pyqtSignal(list)   # complete sorted list[int]
-    finished_signal = pyqtSignal(int)    # total count
-
-    def __init__(self, id_stmt, pair_order=None, parent=None):
-        super().__init__(parent)
-        self._id_stmt    = id_stmt
-        self._pair_order = pair_order
-        self._stop       = False
-
-    def stop(self):
-        self._stop = True
-
-    def run(self):
-        from app.database.db import get_session
-        session = get_session()
-        try:
-            if self._pair_order is not None:
-                all_ids = [row[0] for row in session.execute(self._id_stmt).all()]
-                all_ids.sort(key=lambda i: self._pair_order.get(i, len(self._pair_order)))
-            else:
-                all_ids = []
-                result = session.execute(
-                    self._id_stmt.execution_options(yield_per=2000)
-                )
-                for row in result:
-                    if self._stop:
-                        break
-                    all_ids.append(row[0])
-            if not self._stop:
-                self.ids_ready.emit(all_ids)
-                self.finished_signal.emit(len(all_ids))
-        finally:
-            session.close()
-
-
-class _PageFetchRunnable(QRunnable):
-    class _Signals(QObject):
-        page_ready = pyqtSignal(int, list)   # page_idx, rows
-
-    def __init__(self, page_idx: int, ids: list, pair_for_id: dict):
-        super().__init__()
-        self.signals      = self._Signals()
-        self._page_idx    = page_idx
-        self._ids         = ids
-        self._pair_for_id = pair_for_id
-        self.setAutoDelete(True)
-
-    def run(self):
-        from app.database.db import get_session, get_models_view
-        from app.database.models import Tag
-        from sqlalchemy import select as sa_sel, func
-        session = get_session()
-        try:
-            mv   = get_models_view()
-            ids  = self._ids
-            stmt = sa_sel(
-                mv.c.id, mv.c.title, mv.c.creator, mv.c.source,
-                mv.c.release_year, mv.c.release_month,
-                mv.c.archive_path, mv.c.presupports, mv.c.warning,
-                mv.c.archive_size, mv.c.compression_rate,
-                mv.c.sequence, mv.c.created_at,
-                mv.c.sculptor_name, mv.c.collection_name,
-                mv.c.subcollection_name, mv.c.category_name,
-                mv.c.release_name, mv.c.scale_name,
-            ).select_from(mv).where(mv.c.id.in_(ids))
-            rows_by_id = {row.id: row for row in session.execute(stmt).all()}
-
-            tags_stmt = (
-                sa_sel(_mt_global.c.model_id, func.group_concat(Tag.name, ", "))
-                .join(Tag, _mt_global.c.tag_id == Tag.id)
-                .where(_mt_global.c.model_id.in_(ids))
-                .group_by(_mt_global.c.model_id)
-            )
-            tags_for = {mid: ts or "" for mid, ts in session.execute(tags_stmt).all()}
-            pair_for_id = self._pair_for_id
-            packed = [
-                _pack_row(rows_by_id[mid], tags_for, pair_for_id)
-                for mid in ids if mid in rows_by_id
-            ]
-            self.signals.page_ready.emit(self._page_idx, packed)
-        except Exception:
-            self.signals.page_ready.emit(self._page_idx, [])
-        finally:
-            session.close()
-
-
-class _SqlTableModel(QAbstractTableModel):
-    """Memory-efficient paged table model backed by SQLite.
-
-    Keeps sorted model IDs in memory (~4 MB for 500K models) and fetches
-    row data in pages via QThreadPool on demand.  Only _MAX_PAGES pages are
-    resident at once; older pages are evicted via LRU.
-    """
-    _PAGE_SIZE = 200
-    _MAX_PAGES = 60   # 60 x 200 = 12 000 rows resident at most
-
-    load_started  = pyqtSignal()
-    load_finished = pyqtSignal(int)        # total visible rows
-    cell_edited   = pyqtSignal(int, int, str)  # row, col, new_text
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._ordered_ids: list              = []
-        self._page_cache:  dict              = {}
-        self._page_lru:    list              = []
-        self._pending_pages: set             = set()
-        self._pair_for_id: dict              = {}
-        self._pair_colors                    = None
-        self._warn_bg                        = None
-        self._warn_fg                        = None
-        self._warn_font                      = None
-        self._main_stmt                      = None
-        self._pair_order                     = None
-        self._sort_col: int                  = COL_TITLE
-        self._sort_order                     = Qt.SortOrder.AscendingOrder
-        self._search_text: str               = ""
-        self._id_loader                      = None
-
-    # -- QAbstractTableModel interface ------------------------------------
-
-    def rowCount(self, parent=QModelIndex()) -> int:
-        return 0 if parent.isValid() else len(self._ordered_ids)
-
-    def columnCount(self, parent=QModelIndex()) -> int:
-        return 0 if parent.isValid() else len(_HEADERS)
-
-    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
-        if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
-            return _HEADERS[section]
-        return None
-
-    def flags(self, index):
-        if not index.isValid():
-            return Qt.ItemFlag.NoItemFlags
-        base = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
-        if index.column() not in (COL_THUMB, COL_ADDED, COL_WARNING,
-                                  COL_FILESIZE, COL_COMPRESSION):
-            base |= Qt.ItemFlag.ItemIsEditable
-        return base
-
-    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
-        if not index.isValid():
-            return None
-        row, col = index.row(), index.column()
-        if row >= len(self._ordered_ids):
-            return None
-        if role == MODEL_ID_ROLE:
-            return self._ordered_ids[row]
-        page_idx = row // self._PAGE_SIZE
-        page = self._page_cache.get(page_idx)
-        if page is None:
-            self._request_page(page_idx)
-            return "" if role == Qt.ItemDataRole.DisplayRole and col != COL_THUMB else None
-        offset = row % self._PAGE_SIZE
-        if offset >= len(page):
-            return None
-        return self._role_data(page[offset], col, role)
-
-    def setData(self, index, value, role=Qt.ItemDataRole.EditRole):
-        if not index.isValid() or role != Qt.ItemDataRole.EditRole:
-            return False
-        row, col = index.row(), index.column()
-        if col in (COL_THUMB, COL_ADDED, COL_WARNING, COL_FILESIZE, COL_COMPRESSION):
-            return False
-        text = str(value).strip() if value is not None else ""
-        # Optimistically update cache
-        page_idx = row // self._PAGE_SIZE
-        offset   = row % self._PAGE_SIZE
-        page = self._page_cache.get(page_idx)
-        if page is not None and offset < len(page):
-            _TI = {
-                COL_TITLE: 1, COL_CREATOR: 2, COL_SOURCE: 3, COL_TAGS: 19,
-                COL_SCULPTOR: 13, COL_COLLECTION: 14, COL_SUBCOLLECTION: 15,
-                COL_CATEGORY: 16, COL_SEQUENCE: 11, COL_RELEASE: 17,
-                COL_PATH: 6, COL_SCALE: 18, COL_PRESUPPORTED: 7,
-            }
-            ti = _TI.get(col)
-            if ti is not None:
-                t = list(page[offset])
-                t[ti] = text if text else None
-                page[offset] = tuple(t)
-        self.dataChanged.emit(index, index, [Qt.ItemDataRole.DisplayRole])
-        self.cell_edited.emit(row, col, text)
-        return True
-
-    def sort(self, column: int, order) -> None:
-        if self._main_stmt is None or self._pair_order is not None:
-            return
-        self._sort_col   = column
-        self._sort_order = order
-        self._do_reload()
-
-    # -- Public API -------------------------------------------------------
-
-    def model_id_for_row(self, row: int):
-        return self._ordered_ids[row] if 0 <= row < len(self._ordered_ids) else None
-
-    def all_visible_ids(self) -> list:
-        return list(self._ordered_ids)
-
-    def load(self, main_stmt, pair_order=None, pair_for_id=None, pair_colors=None) -> None:
-        self._main_stmt   = main_stmt
-        self._pair_order  = pair_order
-        self._pair_for_id = pair_for_id or {}
-        self._pair_colors = pair_colors
-        from app.ui.config_dialog import get_warn_row_bg_color, get_warn_row_fg_color
-        self._warn_bg   = QColor(get_warn_row_bg_color())
-        self._warn_fg   = QColor(get_warn_row_fg_color())
-        self._warn_font = QFont()
-        self._warn_font.setPointSize(16)
-        self._warn_font.setBold(True)
-        self._do_reload()
-
-    def set_search(self, text: str) -> None:
-        if text == self._search_text:
-            return
-        self._search_text = text
-        if self._main_stmt is not None:
-            self._do_reload()
-
-    def stop(self) -> None:
-        if self._id_loader is not None:
-            self._id_loader.stop()
-            self._id_loader = None
-
-    # -- Internal ---------------------------------------------------------
-
-    def _do_reload(self) -> None:
-        if self._id_loader is not None:
-            self._id_loader.stop()
-            self._id_loader = None
-        self._pending_pages.clear()
-        self.beginResetModel()
-        self._ordered_ids = []
-        self._page_cache  = {}
-        self._page_lru    = []
-        self.endResetModel()
-        self.load_started.emit()
-        id_stmt = self._build_id_stmt()
-        loader  = _IdLoaderThread(id_stmt, self._pair_order, parent=self)
-        loader.ids_ready.connect(self._on_ids_ready)
-        loader.finished_signal.connect(self._on_load_finished)
-        self._id_loader = loader
-        loader.start()
-
-    def _build_id_stmt(self):
-        from app.database.db import get_models_view
-        from sqlalchemy import select as sa_sel
-        mv      = get_models_view()
-        id_stmt = sa_sel(mv.c.id).select_from(mv)
-        if self._main_stmt is not None and self._main_stmt.whereclause is not None:
-            id_stmt = id_stmt.where(self._main_stmt.whereclause)
-        if self._search_text and self._pair_order is None:
-            id_stmt = self._apply_search_where(id_stmt, mv)
-        if self._pair_order is None:
-            id_stmt = id_stmt.order_by(self._sort_expr(mv))
-        return id_stmt
-
-    def _apply_search_where(self, stmt, mv):
-        from sqlalchemy import or_, select as sa_sel
-        from app.database.models import Tag
-        pat     = f"%{self._search_text}%"
-        tag_sub = (
-            sa_sel(_mt_global.c.model_id)
-            .join(Tag, _mt_global.c.tag_id == Tag.id)
-            .where(Tag.name.like(pat))
-        )
-        return stmt.where(or_(
-            mv.c.title.like(pat),
-            mv.c.creator.like(pat),
-            mv.c.sculptor_name.like(pat),
-            mv.c.collection_name.like(pat),
-            mv.c.archive_path.like(pat),
-            mv.c.id.in_(tag_sub),
-        ))
-
-    def _sort_expr(self, mv):
-        from sqlalchemy import asc, desc, nullslast
-        _COLS = {
-            COL_TITLE:         mv.c.title,
-            COL_CREATOR:       mv.c.creator,
-            COL_SOURCE:        mv.c.source,
-            COL_SCULPTOR:      mv.c.sculptor_name,
-            COL_COLLECTION:    mv.c.collection_name,
-            COL_SUBCOLLECTION: mv.c.subcollection_name,
-            COL_SEQUENCE:      mv.c.sequence,
-            COL_RELEASE:       mv.c.release_name,
-            COL_PATH:          mv.c.archive_path,
-            COL_SCALE:         mv.c.scale_name,
-            COL_PRESUPPORTED:  mv.c.presupports,
-            COL_ADDED:         mv.c.created_at,
-            COL_FILESIZE:      mv.c.archive_size,
-            COL_COMPRESSION:   mv.c.compression_rate,
-            COL_CATEGORY:      mv.c.category_name,
-        }
-        col_expr = _COLS.get(self._sort_col, mv.c.title)
-        fn = desc if self._sort_order == Qt.SortOrder.DescendingOrder else asc
-        return nullslast(fn(col_expr))
-
-    def _request_page(self, page_idx: int) -> None:
-        if page_idx in self._pending_pages:
-            return
-        self._pending_pages.add(page_idx)
-        start    = page_idx * self._PAGE_SIZE
-        end      = min(start + self._PAGE_SIZE, len(self._ordered_ids))
-        ids      = self._ordered_ids[start:end]
-        runnable = _PageFetchRunnable(page_idx, ids, self._pair_for_id)
-        runnable.signals.page_ready.connect(self._on_page_ready)
-        QThreadPool.globalInstance().start(runnable)
-
-    def _on_ids_ready(self, ids: list) -> None:
-        if ids:
-            self.beginInsertRows(QModelIndex(), 0, len(ids) - 1)
-            self._ordered_ids = ids
-            self.endInsertRows()
-            self._request_page(0)
-        else:
-            self._ordered_ids = []
-
-    def _on_load_finished(self, total: int) -> None:
-        self._id_loader = None
-        self.load_finished.emit(total)
-
-    def _on_page_ready(self, page_idx: int, rows: list) -> None:
-        self._pending_pages.discard(page_idx)
-        if page_idx in self._page_lru:
-            self._page_lru.remove(page_idx)
-        self._page_lru.append(page_idx)
-        while len(self._page_lru) > self._MAX_PAGES:
-            old = self._page_lru.pop(0)
-            self._page_cache.pop(old, None)
-        self._page_cache[page_idx] = rows
-        start = page_idx * self._PAGE_SIZE
-        end   = start + len(rows) - 1
-        if start <= end:
-            self.dataChanged.emit(
-                self.index(start, 0),
-                self.index(end, self.columnCount() - 1),
-            )
-
-    def _role_data(self, t: tuple, col: int, role: int):
-        # t layout: 0=id,1=title,2=creator,3=source,4=yr,5=mo,6=archive_path,
-        #           7=presupports,8=warning,9=archive_size,10=compression_rate,
-        #           11=sequence,12=created_at,13=sculptor_name,14=collection_name,
-        #           15=subcollection_name,16=category_name,17=release_name,
-        #           18=scale_name,19=tags_str,20=pair_idx
-        if role == Qt.ItemDataRole.DisplayRole:
-            if col == COL_THUMB:         return None
-            if col == COL_TITLE:         return t[1] or ""
-            if col == COL_CREATOR:       return t[2] or ""
-            if col == COL_SOURCE:        return t[3] or ""
-            if col == COL_DATE:          return format_release_date(t[4], t[5])
-            if col == COL_TAGS:          return t[19] or ""
-            if col == COL_SCULPTOR:      return t[13] or ""
-            if col == COL_COLLECTION:    return t[14] or ""
-            if col == COL_SUBCOLLECTION: return t[15] or ""
-            if col == COL_SEQUENCE:      return str(t[11]) if t[11] is not None else ""
-            if col == COL_RELEASE:       return t[17] or ""
-            if col == COL_PATH:          return t[6] or ""
-            if col == COL_SCALE:         return t[18] or ""
-            if col == COL_PRESUPPORTED:  return t[7] or ""
-            if col == COL_ADDED:         return t[12].strftime("%Y-%m-%d %H:%M") if t[12] else ""
-            if col == COL_WARNING:       return "⚠" if t[8] else ""
-            if col == COL_FILESIZE:
-                raw = t[9] if t[9] is not None else -1
-                return _fmt_size(raw) if raw >= 0 else ""
-            if col == COL_CATEGORY:      return t[16] or ""
-            if col == COL_COMPRESSION:
-                cr = t[10]
-                return f"{1/cr:.1f}x" if cr and cr > 0 else ""
-            return ""
-        if role == Qt.ItemDataRole.UserRole:
-            if col == COL_SEQUENCE:
-                try:    return int(t[11]) if t[11] is not None else -1
-                except: return -1
-            if col == COL_FILESIZE:
-                return t[9] if t[9] is not None else -1
-            if col == COL_COMPRESSION:
-                return t[10] if t[10] else -1.0
-            return None
-        if role == Qt.ItemDataRole.ToolTipRole:
-            return t[8] or None if col == COL_WARNING else None
-        if role == Qt.ItemDataRole.TextAlignmentRole:
-            if col in (COL_WARNING, COL_COMPRESSION):
-                return Qt.AlignmentFlag.AlignCenter
-            return None
-        if role == Qt.ItemDataRole.BackgroundRole:
-            if self._pair_colors is not None and t[20] >= 0:
-                return self._pair_colors[t[20] % 2]
-            if t[8]:
-                return self._warn_bg
-            return None
-        if role == Qt.ItemDataRole.ForegroundRole:
-            return self._warn_fg if t[8] else None
-        if role == Qt.ItemDataRole.FontRole:
-            return self._warn_font if (t[8] and col == COL_WARNING) else None
-        if role == MODEL_ID_ROLE:
-            return t[0]
-        return None
-
-
-class ClickableLabel(QLabel):
-    """QLabel that emits a *clicked* signal on left mouse button press."""
-
-    clicked = pyqtSignal()
-
-    def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit()
-        super().mousePressEvent(event)
-
-
-class ImageViewerDialog(QDialog):
-    """Full-screen image viewer — click anywhere to close."""
-
-    def __init__(self, pixmap: QPixmap, parent=None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle(self.tr("Image"))
-        self.setModal(True)
-        self._pixmap = pixmap
-
-        screen = self.screen().availableGeometry()
-        max_w = int(screen.width() * 0.9)
-        max_h = int(screen.height() * 0.9)
-
-        scaled = pixmap.scaled(max_w, max_h,
-                               Qt.AspectRatioMode.KeepAspectRatio,
-                               Qt.TransformationMode.SmoothTransformation)
-
-        label = QLabel()
-        label.setPixmap(scaled)
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        label.setCursor(Qt.CursorShape.PointingHandCursor)
-        label.mousePressEvent = lambda _: self.accept()
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(label)
-
-        self.resize(scaled.width(), scaled.height())
-
-
-class RescanWorker(QThread):
-    """Background thread that re-extracts metadata for a list of model IDs."""
-
-    progress    = pyqtSignal(int, int, str)  # (current_index, total, filename)
-    file_error  = pyqtSignal(str, str)       # (filename, error_message)
-    finished_ok = pyqtSignal(int)            # updated_count
-
-    def __init__(self, model_ids: list[int], parent=None) -> None:
-        super().__init__(parent)
-        self._model_ids = model_ids
-        self._stop = False
-
-    def stop(self) -> None:
-        self._stop = True
-
-    def run(self) -> None:
-        import logging
-        from pathlib import Path
-        from app.crawler.archive import archive_hash, extract_archive_contents
-        from app.crawler.metadata import extract_metadata
-        from app.crawler.rules import detect_warnings, detect_presupport, detect_scale
-        from app.config import CrawlerConfig
-        from app.database.db import session_scope
-        from app.database.models import STLModel, STLFile
-        from app.database.helpers import get_or_create_scale
-        from app.ui.config_dialog import (
-            get_warn_presupported_stl, get_warn_no_images, get_warn_nested_archive,
-            get_store_stl_file_list, get_presupport_patterns,
-        )
-        from app.utils.path_pattern import parse_release_date
-
-        _log = logging.getLogger(__name__)
-        config = CrawlerConfig()
-        total = len(self._model_ids)
-        updated = 0
-
-        for i, mid in enumerate(self._model_ids, start=1):
-            if self._stop:
-                break
-            with session_scope() as session:
-                m = session.get(STLModel, mid)
-                if not m or not m.archive_path:
-                    self.progress.emit(i, total, "")
-                    continue
-                p = Path(m.archive_path)
-                self.progress.emit(i, total, p.name)
-                try:
-                    if not p.exists():
-                        self.file_error.emit(p.name, "Archive not found")
-                        continue
-
-                    try:
-                        st = p.stat()
-                        fs_size  = int(st.st_size)
-                        fs_mtime = int(st.st_mtime_ns)
-                    except Exception:
-                        fs_size = fs_mtime = None
-
-                    need_hash = not (
-                        fs_size is not None and fs_mtime is not None
-                        and m.archive_size is not None and m.archive_mtime_ns is not None
-                        and fs_size == m.archive_size and fs_mtime == m.archive_mtime_ns
-                    )
-                    new_hash = archive_hash(p, unrar_path=config.unrar_path) if need_hash else m.archive_hash
-
-                    all_names: list[str] = []
-                    uncompressed_out: list[int] = []
-                    contents = extract_archive_contents(
-                        p,
-                        unrar_path=config.unrar_path,
-                        all_names_out=all_names,
-                        stl_info_out=None,
-                        uncompressed_size_out=uncompressed_out,
-                    )
-                    uncompressed = uncompressed_out[0] if uncompressed_out else None
-                    meta = extract_metadata(p, contents=contents, source_dir=p.parent)
-
-                    m.archive_hash    = new_hash
-                    m.archive_size    = fs_size
-                    m.archive_mtime_ns = fs_mtime
-                    if uncompressed and uncompressed > 0 and fs_size is not None:
-                        m.compression_rate = round(fs_size / uncompressed, 4)
-
-                    m.title       = meta.title       or m.title
-                    m.creator     = meta.creator     or m.creator
-                    m.source      = meta.distributor or m.source
-                    if meta.release_date:
-                        ry, rm = parse_release_date(meta.release_date)
-                        if ry is not None:
-                            m.release_year  = ry
-                            m.release_month = rm
-                    m.url         = meta.url         or m.url
-                    m.description = meta.description or m.description
-
-                    m.presupports = detect_presupport(all_names)
-                    warnings = detect_warnings(
-                        all_names,
-                        check_presupported=get_warn_presupported_stl(),
-                        check_no_images=get_warn_no_images(),
-                        check_nested_archive=get_warn_nested_archive(),
-                        check_supports=get_warn_presupported_stl(),
-                        supports_patterns=get_presupport_patterns(),
-                    )
-                    m.warning = warnings or None
-
-                    scales = detect_scale([p.name] + all_names)
-                    if scales:
-                        m.scale = get_or_create_scale(session, scales[0])
-
-                    if get_store_stl_file_list():
-                        for old in list(m.stl_files):
-                            session.delete(old)
-                        session.flush()
-                        _stl_exts = {'.stl', '.obj', '.lys', '.chitubox'}
-                        for fname in all_names:
-                            if Path(fname.replace('\\', '/')).suffix.lower() in _stl_exts:
-                                session.add(STLFile(model=m, filename=fname,
-                                                    file_size=None, archive_hash=new_hash))
-
-                    updated += 1
-                except Exception as exc:
-                    _log.exception("Rescan failed for %s", p)
-                    self.file_error.emit(p.name, str(exc))
-
-        self.finished_ok.emit(updated)
-
-
-class RescanProgressDialog(QDialog):
-    """Progress window for a running RescanWorker; supports 'Send to Background'."""
-
-    def __init__(self, worker: RescanWorker, total: int, parent=None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle(self.tr("Rescan Files"))
-        self.setMinimumWidth(440)
-        self.setModal(True)
-        self._worker = worker
-        self._in_background = False
-
-        layout = QVBoxLayout(self)
-
-        self._label = QLabel(f"Rescanning 0 / {total}…")
-        self._label.setWordWrap(True)
-        layout.addWidget(self._label)
-
-        self._bar = QProgressBar()
-        self._bar.setRange(0, total)
-        self._bar.setValue(0)
-        self._bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        layout.addWidget(self._bar)
-
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        self._bg_btn     = QPushButton(self.tr("Send to Background"))
-        self._cancel_btn = QPushButton(self.tr("Cancel"))
-        btn_row.addWidget(self._bg_btn)
-        btn_row.addWidget(self._cancel_btn)
-        layout.addLayout(btn_row)
-
-        worker.progress.connect(self._on_progress)
-        worker.finished_ok.connect(self._on_worker_done)
-        self._bg_btn.clicked.connect(self._send_to_bg)
-        self._cancel_btn.clicked.connect(self._cancel)
-
-    def _on_progress(self, current: int, total: int, filename: str) -> None:
-        self._bar.setValue(current)
-        name = filename or "…"
-        self._label.setText(f"Rescanning {current} / {total}: {name}")
-
-    def _on_worker_done(self, _updated: int) -> None:
-        if not self._in_background:
-            self.accept()
-
-    def _send_to_bg(self) -> None:
-        self._in_background = True
-        self.accept()
-
-    def _cancel(self) -> None:
-        self._worker.stop()
-        self.reject()
-
-    @property
-    def in_background(self) -> bool:
-        return self._in_background
-
-
-class _ComboDelegate(QStyledItemDelegate):
-    """Base delegate that shows an editable QComboBox populated by a query callable."""
-
-    def _get_items(self) -> list[str]:
-        raise NotImplementedError
-
-    def createEditor(self, parent, option, index) -> QComboBox:
-        combo = QComboBox(parent)
-        combo.setEditable(True)
-        combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        combo.addItems(self._get_items())
-        combo.setCurrentIndex(-1)
-        combo.completer().setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        combo.completer().setFilterMode(Qt.MatchFlag.MatchContains)
-        return combo
-
-    def setEditorData(self, editor, index) -> None:
-        editor.setCurrentText(index.data() or "")
-
-    def setModelData(self, editor, model, index) -> None:
-        model.setData(index, editor.currentText().strip())
-
-    def updateEditorGeometry(self, editor, option, index) -> None:
-        editor.setGeometry(option.rect)
-
-
-class SourceDelegate(_ComboDelegate):
-    """QComboBox of distinct source/distributor strings."""
-
-    def _get_items(self) -> list[str]:
-        return _lookup_cache.get("source")
-
-
-class SculptorDelegate(_ComboDelegate):
-    """QComboBox of all sculptor names."""
-
-    def _get_items(self) -> list[str]:
-        return _lookup_cache.get("sculptor")
-
-
-class CollectionDelegate(_ComboDelegate):
-    """QComboBox of all Collection names."""
-
-    def _get_items(self) -> list[str]:
-        return _lookup_cache.get("collection")
-
-
-class SubcollectionDelegate(_ComboDelegate):
-    """QComboBox of all Subcollection names."""
-
-    def _get_items(self) -> list[str]:
-        return _lookup_cache.get("subcollection")
-
-
-class CategoryDelegate(_ComboDelegate):
-    """QComboBox of all Category names."""
-
-    def _get_items(self) -> list[str]:
-        return _lookup_cache.get("category")
-
-
-class ReleaseDelegate(_ComboDelegate):
-    """QComboBox of all Release names."""
-
-    def _get_items(self) -> list[str]:
-        return _lookup_cache.get("release")
-
-
-class ScaleDelegate(_ComboDelegate):
-    """QComboBox of all Scale names."""
-
-    def _get_items(self) -> list[str]:
-        return _lookup_cache.get("scale")
-
-
-_PRESUPPORTS_OPTIONS = ["", "No", "Lychee", "Chitubox", "Presupported"]
-
-
-class PresupportsDelegate(QStyledItemDelegate):
-    """Fixed-option combo for the presupports column."""
-
-    def createEditor(self, parent, option, index) -> QComboBox:
-        combo = QComboBox(parent)
-        combo.addItems(_PRESUPPORTS_OPTIONS)
-        return combo
-
-    def setEditorData(self, editor, index) -> None:
-        editor.setCurrentText(index.data() or "")
-
-    def setModelData(self, editor, model, index) -> None:
-        model.setData(index, editor.currentText())
-
-
-class TagDelegate(QStyledItemDelegate):
-    """QLineEdit that autocompletes each comma-separated token from the tag pool."""
-
-    def createEditor(self, parent, option, index) -> "_TagLineEdit":
-        with session_scope() as session:
-            all_tags = [t.name for t in session.query(Tag).order_by(Tag.name).all()]
-        edit = _TagLineEdit(all_tags, parent)
-        return edit
-
-    def setEditorData(self, editor, index) -> None:
-        editor.setText(index.data() or "")
-        editor.setCursorPosition(len(editor.text()))
-
-    def setModelData(self, editor, model, index) -> None:
-        model.setData(index, editor.text().strip())
-
-    def updateEditorGeometry(self, editor, option, index) -> None:
-        editor.setGeometry(option.rect)
-
-
-class _TagLineEdit(QLineEdit):
-    """QLineEdit with per-token autocomplete for comma-separated tag lists."""
-
-    def __init__(self, all_tags: list[str], parent=None) -> None:
-        super().__init__(parent)
-        self._completer = QCompleter(self)
-        self._completer.setModel(QStringListModel(all_tags, self._completer))
-        self._completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        self._completer.setFilterMode(Qt.MatchFlag.MatchContains)
-        self._completer.setWidget(self)
-        self._completer.activated.connect(self._insert_completion)
-        self.textEdited.connect(self._on_text_edited)
-
-    def _current_token(self) -> str:
-        return self.text()[:self.cursorPosition()].rsplit(",", 1)[-1].lstrip()
-
-    def focusInEvent(self, event) -> None:
-        super().focusInEvent(event)
-        self._show_completions()
-
-    def _on_text_edited(self, _text: str) -> None:
-        self._show_completions()
-
-    def _show_completions(self) -> None:
-        token = self._current_token()
-        self._completer.setCompletionPrefix(token)
-        self._completer.complete()
-
-    def _insert_completion(self, chosen: str) -> None:
-        text = self.text()
-        cursor = self.cursorPosition()
-        before = text[:cursor].rsplit(",", 1)
-        prefix = (before[0] + ", ") if len(before) == 2 else ""
-        after = text[cursor:]
-        new_text = prefix + chosen + (", " if after.lstrip(",").strip() else ", ")
-        self.setText(new_text)
-        self.setCursorPosition(len(new_text))
-
-
-class ThumbnailGeneratorWorker(QThread):
-    """Background worker that (re-)generates thumbnails for a list of model IDs."""
-
-    progress = pyqtSignal(int, int)   # (current, total)
-    log      = pyqtSignal(str)
-    finished = pyqtSignal()
-
-    def __init__(self, model_ids: list[int], max_thumbnails: int, parent=None) -> None:
-        super().__init__(parent)
-        self._model_ids = model_ids
-        self._max_thumbnails = max_thumbnails
-        self._stop = False
-
-    def stop(self) -> None:
-        """Request the worker to stop as soon as possible."""
-        self._stop = True
-
-    def run(self) -> None:
-        """Re-extract and save thumbnails for every model in *model_ids*, then update sidecars."""
-        from pathlib import Path
-        from app.database.db import session_scope
-        from app.database.models import STLModel, Image as DBImage
-        from app.crawler.archive import extract_archive_contents, IMAGE_SUFFIXES
-        from app.utils.thumbnailer import save_thumbnail, delete_thumbnail, get_thumbnail_base_dir
-        from app.ui.config_dialog import get_max_thumb_size, get_unrar_path
-
-        max_size  = get_max_thumb_size()
-        unrar     = get_unrar_path()
-        total     = len(self._model_ids)
-        modified_folders: set[Path] = set()
-
-        for idx, model_id in enumerate(self._model_ids, start=1):
-            if self._stop:
-                self.log.emit("Thumbnail generation cancelled")
-                break
-            self.progress.emit(idx, total)
-
-            with session_scope() as session:
-                stl: STLModel = session.get(STLModel, model_id)
-                if stl is None:
-                    continue
-
-                archive_path = Path(stl.archive_path)
-                self.log.emit(f"[{idx}/{total}] {archive_path.name}")
-
-                if not archive_path.exists():
-                    self.log.emit(f"  WARNING: archive not found, skipping")
-                    continue
-
-                # Delete existing thumbnails
-                for old_img in list(stl.images):
-                    if old_img.thumbnail_path:
-                        delete_thumbnail(old_img.thumbnail_path)
-                    session.delete(old_img)
-                session.flush()
-
-                # Extract and generate new thumbnails
-                from app.crawler.rules import detect_warnings
-                from app.ui.config_dialog import get_warn_presupported_stl, get_warn_no_images, get_warn_nested_archive, get_presupport_patterns
-
-                all_names: list[str] = []
-                contents = extract_archive_contents(
-                    archive_path, unrar_path=unrar, all_names_out=all_names,
-                )
-                image_names = sorted(
-                    name for name in contents
-                    if Path(name.replace("\\", "/")).suffix.lower() in IMAGE_SUFFIXES
-                )
-
-                count = 0
-                for filename in image_names:
-                    if self._stop:
-                        break
-                    if count >= self._max_thumbnails:
-                        break
-                    raw_bytes = contents[filename]
-                    img = DBImage(model=stl, filename=filename)
-                    session.add(img)
-                    session.flush()
-                    rel_path = save_thumbnail(raw_bytes, img.id, max_size=max_size)
-                    if rel_path:
-                        img.thumbnail_path = rel_path
-                        count += 1
-                    else:
-                        session.delete(img)
-                        self.log.emit(f"  WARNING: thumbnail conversion failed for {filename}")
-
-                self.log.emit(f"  {count} thumbnail(s) stored")
-
-                warnings = detect_warnings(
-                    all_names,
-                    check_presupported=get_warn_presupported_stl(),
-                    check_no_images=get_warn_no_images(),
-                    check_nested_archive=get_warn_nested_archive(),
-                    check_supports=get_warn_presupported_stl(),
-                    supports_patterns=get_presupport_patterns(),
-                )
-                stl.warning = warnings or None
-                if warnings:
-                    self.log.emit(f"  WARNING: {warnings.replace(chr(10), '; ')}")
-
-                modified_folders.add(archive_path.parent)
-
-        # Update METADATA.7z for all affected folders (if option is enabled)
-        thumb_base = get_thumbnail_base_dir()
-        if modified_folders and thumb_base is not None:
-            from app.ui.config_dialog import get_metadata_thumbnails_enabled, get_metadata_sidecar_enabled
-            from app.crawler.folder_metadata import export_folder_metadata
-            include_thumbs = get_metadata_thumbnails_enabled()
-            if get_metadata_sidecar_enabled():
-                self.log.emit(f"Updating METADATA.7z in {len(modified_folders)} folder(s)…")
-                with session_scope() as session:
-                    for folder in sorted(modified_folders):
-                        export_folder_metadata(folder, session, thumb_base,
-                                               include_thumbnails=True)
-                        self.log.emit(f"  Updated METADATA.7z in {folder.name}")
-
-        self.finished.emit()
-
-
-class FilterItemDelegate(QStyledItemDelegate):
-    """Replaces Qt's default tristate checkbox with colored circle indicators:
-        Unchecked        — gray outline circle  (not selected)
-        Checked          — green filled circle with white +  (include)
-        PartiallyChecked — red filled circle with white −  (exclude)
-    """
-
-    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
-        is_checkable = bool(index.flags() & Qt.ItemFlag.ItemIsUserCheckable)
-        check_state  = index.data(Qt.ItemDataRole.CheckStateRole)
-
-        if not is_checkable or check_state is None:
-            super().paint(painter, option, index)
-            return
-
-        opt = QStyleOptionViewItem(option)
-        self.initStyleOption(opt, index)
-
-        widget = option.widget
-        style  = widget.style() if widget else QApplication.style()
-
-        check_rect = style.subElementRect(
-            QStyle.SubElement.SE_ItemViewItemCheckIndicator, opt, widget
-        )
-
-        # Let the style draw the full item (icon + text + selection background).
-        # Then overdraw the default checkbox indicator with our custom circle.
-        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, widget)
-
-        if check_rect.isValid():
-            self._draw_indicator(painter, check_rect, Qt.CheckState(check_state))
-
-    @staticmethod
-    def _draw_indicator(painter: QPainter, rect: QRect, state: Qt.CheckState) -> None:
-        size = (min(rect.width(), rect.height()) - 4) * 1.5
-        if size < 4:
-            return
-        cx   = rect.center().x()
-        cy   = rect.center().y()
-        half = size / 2.0
-        rf   = QRectF(cx - half, cy - half, size, size)
-        pw   = max(1.5, size * 0.14)
-
-        painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        if state == Qt.CheckState.Unchecked:
-            # Neutral gray circle — "parent / not selected"
-            from app.ui.config_dialog import get_status_neutral_color
-            painter.setPen(QPen(QColor(get_status_neutral_color()), 1.5))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawEllipse(rf)
-
-        elif state == Qt.CheckState.Checked:
-            # Green filled circle with white "+"
-            from app.ui.config_dialog import get_status_ok_color
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(get_status_ok_color()))
-            painter.drawEllipse(rf)
-            pen = QPen(QColor("white"), pw, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
-            painter.setPen(pen)
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            pad = 0.25
-            painter.drawLine(QPointF(cx, cy - half * (1 - pad * 2)),
-                             QPointF(cx, cy + half * (1 - pad * 2)))
-            painter.drawLine(QPointF(cx - half * (1 - pad * 2), cy),
-                             QPointF(cx + half * (1 - pad * 2), cy))
-
-        elif state == Qt.CheckState.PartiallyChecked:
-            # Red filled circle with white "−"
-            from app.ui.config_dialog import get_status_warn_color
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(get_status_warn_color()))
-            painter.drawEllipse(rf)
-            pen = QPen(QColor("white"), pw, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
-            painter.setPen(pen)
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            pad = 0.25
-            painter.drawLine(QPointF(cx - half * (1 - pad * 2), cy),
-                             QPointF(cx + half * (1 - pad * 2), cy))
-
-        painter.restore()
-
-
-class FilterTreeWidget(QTreeWidget):
-    """QTreeWidget whose checkable items cycle through three states on every click
-    (Unchecked → Checked → PartiallyChecked → Unchecked), whether the click lands
-    on the checkbox indicator or the item text.
-
-    State semantics:
-        Unchecked       — no filter applied for this value
-        Checked         — include items that match this value
-        PartiallyChecked — exclude items that match this value
-    """
-
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self.setItemDelegate(FilterItemDelegate(self))
-        # Maps id(item) → state before the last checkbox click so _on_filter_item_changed
-        # can decide which state comes next in the cycle.
-        self._pre_click_states: dict[int, Qt.CheckState] = {}
-
-    # ------------------------------------------------------------------
-    def mousePressEvent(self, event) -> None:
-        if event.button() != Qt.MouseButton.LeftButton:
-            super().mousePressEvent(event)
-            return
-
-        item = self.itemAt(event.pos())
-        if item is None or not (item.flags() & Qt.ItemFlag.ItemIsUserCheckable):
-            super().mousePressEvent(event)
-            return
-
-        data = item.data(0, Qt.ItemDataRole.UserRole)
-        if data is None:
-            super().mousePressEvent(event)
-            return
-
-        # Determine whether the click landed on the checkbox widget.
-        vis_rect = self.visualItemRect(item)
-        indicator_w = self.style().pixelMetric(
-            QStyle.PixelMetric.PM_IndicatorWidth, None, self
-        )
-        is_checkbox_click = event.pos().x() <= vis_rect.left() + indicator_w + 4
-
-        if is_checkbox_click:
-            # Store pre-click state; let Qt perform its normal Unchecked↔Checked toggle,
-            # then _on_filter_item_changed will complete the 3-step cycle.
-            self._pre_click_states[id(item)] = item.checkState(0)
-            super().mousePressEvent(event)
-        else:
-            # Text click on any item → default Qt behaviour (select / expand-collapse).
-            super().mousePressEvent(event)
-
-    def mouseDoubleClickEvent(self, event) -> None:
-        if event.button() != Qt.MouseButton.LeftButton:
-            super().mouseDoubleClickEvent(event)
-            return
-
-        item = self.itemAt(event.pos())
-        if item is None:
-            super().mouseDoubleClickEvent(event)
-            return
-
-        data = item.data(0, Qt.ItemDataRole.UserRole)
-        if data is None:
-            super().mouseDoubleClickEvent(event)
-            return
-
-        # Ignore double-clicks on the checkbox area and on group headers.
-        vis_rect = self.visualItemRect(item)
-        indicator_w = self.style().pixelMetric(
-            QStyle.PixelMetric.PM_IndicatorWidth, None, self
-        )
-        is_checkbox_click = event.pos().x() <= vis_rect.left() + indicator_w + 4
-        is_group = isinstance(data, tuple) and data[0] == "group"
-
-        if is_checkbox_click or is_group:
-            super().mouseDoubleClickEvent(event)
-            return
-
-        # Double-click on a leaf item's text → solo this filter.
-        self._solo_item(item)
-        event.accept()
-
-    @staticmethod
-    def _next_check_state(state: Qt.CheckState) -> Qt.CheckState:
-        if state == Qt.CheckState.Unchecked:
-            return Qt.CheckState.Checked
-        if state == Qt.CheckState.Checked:
-            return Qt.CheckState.PartiallyChecked
-        return Qt.CheckState.Unchecked
-
-    def _solo_item(self, target: QTreeWidgetItem) -> None:
-        """Check only *target*, clearing every other checkable item in the tree."""
-        self.blockSignals(True)
-        self._clear_all(self.invisibleRootItem())
-        target.setCheckState(0, Qt.CheckState.Checked)
-        self.blockSignals(False)
-        self.itemChanged.emit(target, 0)
-
-    def _clear_all(self, root: QTreeWidgetItem) -> None:
-        d = root.data(0, Qt.ItemDataRole.UserRole)
-        if d is not None and (root.flags() & Qt.ItemFlag.ItemIsUserCheckable):
-            root.setCheckState(0, Qt.CheckState.Unchecked)
-        for i in range(root.childCount()):
-            self._clear_all(root.child(i))
-
-
-class _FilterTreeWorker(QRunnable):
-    """Runs all DB queries for the filter tree off the GUI thread.
-
-    Emits ``signals.ready(gen, payload)`` when done; the GUI thread slot
-    checks *gen* against the current generation counter and discards stale
-    results.  The *payload* dict contains only Python primitives (no ORM
-    objects or Qt types) so it is safe to pass across the thread boundary.
-    """
-
-    class _Signals(QObject):
-        ready = pyqtSignal(int, object)  # (gen, payload dict)
-
-    def __init__(self, gen: int, scope_by_section, show_flags: dict,
-                 show_counts: bool, alpha_enabled: bool, alpha_threshold: int,
-                 checked_data: set, excluded_data: set,
-                 expanded_sections: "set | None") -> None:
-        super().__init__()
-        self.signals = self._Signals()
-        self._gen = gen
-        self._scope = scope_by_section
-        self._show = show_flags
-        self._show_counts = show_counts
-        self._alpha_enabled = alpha_enabled
-        self._alpha_threshold = alpha_threshold
-        self._checked = checked_data
-        self._excluded = excluded_data
-        self._expanded = expanded_sections
-
-    def run(self) -> None:  # noqa: C901 (complexity is inherent; each section is independent)
-        from app.database.db import get_session
-        from app.database.models import (
-            STLModel, Tag, Sculptor, Collection, Subcollection,
-            Category, Release, Scale, model_tags as _mt,
-        )
-        from sqlalchemy import func as _func
-        from pathlib import Path as _P
-
-        scope = self._scope
-        show = self._show
-
-        # ── Serve from cache for unscoped (no active filters) requests ─────────
-        if scope is None:
-            from app.database.filter_cache import load_filter_cache
-            cached = load_filter_cache()
-            if cached is not None:
-                payload = {
-                    **cached,
-                    "checked_data":     self._checked,
-                    "excluded_data":    self._excluded,
-                    "expanded_sections": self._expanded,
-                    "show":             self._show,
-                    "show_counts":      self._show_counts,
-                    "alpha_enabled":    self._alpha_enabled,
-                    "alpha_threshold":  self._alpha_threshold,
-                    "scope_by_section": self._scope,
-                }
-                self.signals.ready.emit(self._gen, payload)
-                return
-
-        def _s(section):
-            return scope.get(section) if scope else None
-
-        session = get_session()
-        try:
-            # ── Counts ─────────────────────────────────────────────────────────
-            _counts: dict = {}
-            _path_counts: "dict[str, int] | None" = None
-            _scoped_counts: dict = {}
-            _sc_path_counts: "dict[str, int] | None" = None
-
-            if self._show_counts:
-                _grp: dict = {}
-
-                def _count_col(col, kind: str, *, none_filter: bool = True) -> None:
-                    q = session.query(col, _func.count(STLModel.id))
-                    if none_filter:
-                        q = q.filter(col.isnot(None))
-                    total = 0
-                    for v, c in q.group_by(col).all():
-                        _counts[(kind, v)] = c
-                        total += c
-                    _grp[kind] = total
-
-                _count_col(STLModel.creator,          "creator")
-                _count_col(STLModel.source,           "source")
-                _count_col(STLModel.sculptor_id,      "sculptor_id")
-                _count_col(STLModel.collection_id,    "collection_id")
-                _count_col(STLModel.subcollection_id, "subcollection_id")
-                _count_col(STLModel.category_id,      "category_id")
-                _count_col(STLModel.release_id,       "release_id")
-                _count_col(STLModel.scale_id,         "scale_id")
-                _count_col(STLModel.presupports,      "presupports")
-
-                _year_cnt: dict = {}
-                _date_total = 0
-                for yr, mo, c in (
-                    session.query(STLModel.release_year, STLModel.release_month, _func.count(STLModel.id))
-                    .filter(STLModel.release_year.isnot(None))
-                    .group_by(STLModel.release_year, STLModel.release_month)
-                    .all()
-                ):
-                    _counts[("date_month", (yr, mo))] = c
-                    _year_cnt[yr] = _year_cnt.get(yr, 0) + c
-                    _date_total += c
-                for yr, c in _year_cnt.items():
-                    _counts[("date_year", yr)] = c
-                _grp["date"] = _date_total
-
-                _all_warnings = [
-                    w for (w,) in session.query(STLModel.warning)
-                    .filter(STLModel.warning.isnot(None)).all()
-                ]
-                for _wt in ("Models with presupported stl", "Archive without images",
-                            "Nested archives", "Archive with supports",
-                            "Archive without printable files", "Unreadable archive"):
-                    _counts[("warning", _wt)] = sum(1 for w in _all_warnings if _wt in w)
-                _grp["warning"] = sum(1 for w in _all_warnings if w)
-
-                # File type counts (derived from archive_path extension).
-                _ft_raw = [
-                    _P(ap).suffix.lower()
-                    for (ap,) in session.query(STLModel.archive_path)
-                    .filter(STLModel.archive_path.isnot(None)).all()
-                    if ap
-                ]
-                for _ft in set(_ft_raw):
-                    _counts[("filetype", _ft)] = _ft_raw.count(_ft)
-                _grp["filetype"] = len(_ft_raw)
-
-                # Use pre-computed archive_folder when available (SQL GROUP BY),
-                # falling back to Python path parsing for older rows where it is NULL.
-                _direct: dict = {}
-                for (folder, cnt) in (
-                    session.query(STLModel.archive_folder, _func.count(STLModel.id))
-                    .filter(STLModel.archive_folder.isnot(None))
-                    .group_by(STLModel.archive_folder)
-                    .all()
-                ):
-                    _direct[folder] = _direct.get(folder, 0) + cnt
-                for (ap,) in session.query(STLModel.archive_path).filter(
-                    STLModel.archive_folder.is_(None),
-                    STLModel.archive_path.isnot(None),
-                ).all():
-                    folder = _P(ap).parent.as_posix()
-                    _direct[folder] = _direct.get(folder, 0) + 1
-
-                for k, v in _grp.items():
-                    _counts[("group", k)] = v
-
-                for tn, c in (
-                    session.query(Tag.name, _func.count(_mt.c.model_id))
-                    .join(_mt, Tag.id == _mt.c.tag_id)
-                    .group_by(Tag.name)
-                    .all()
-                ):
-                    _counts[("tag", tn)] = c
-                _counts[("group", "tag")] = (
-                    session.query(_func.count(_mt.c.model_id.distinct())).scalar() or 0
-                )
-
-                _path_counts = {}
-                for folder, _c in _direct.items():
-                    _path_counts[folder] = _path_counts.get(folder, 0) + _c
-                    _f = _P(folder)
-                    while True:
-                        _p = _f.parent
-                        if _p == _f:
-                            break
-                        _ps = _p.as_posix()
-                        _path_counts[_ps] = _path_counts.get(_ps, 0) + _c
-                        _f = _p
-                _counts[("group", "path")] = sum(_direct.values())
-
-                # Scoped counts
-                if scope is not None:
-                    from app.database.models import model_tags as _mt2
-
-                    def _sc_count_col(col, kind: str, sc_ids, *, none_filter=True) -> None:
-                        rows = (
-                            session.query(col, _func.count(STLModel.id))
-                            .filter(STLModel.id.in_(sc_ids))
-                        )
-                        if none_filter:
-                            rows = rows.filter(col.isnot(None))
-                        rows = rows.group_by(col).all()
-                        for v, c in rows:
-                            _scoped_counts[(kind, v)] = c
-                        _scoped_counts[("group", kind.rstrip("_id"))] = sum(c for _, c in rows)
-
-                    for section, col, kind in (
-                        ("creator",       STLModel.creator,          "creator"),
-                        ("source",        STLModel.source,           "source"),
-                        ("sculptor",      STLModel.sculptor_id,      "sculptor_id"),
-                        ("collection",    STLModel.collection_id,    "collection_id"),
-                        ("subcollection", STLModel.subcollection_id, "subcollection_id"),
-                        ("category",      STLModel.category_id,      "category_id"),
-                        ("release",       STLModel.release_id,       "release_id"),
-                        ("scale",         STLModel.scale_id,         "scale_id"),
-                        ("presupports",   STLModel.presupports,      "presupports"),
-                    ):
-                        sc_ids = _s(section)
-                        if sc_ids is not None:
-                            _sc_count_col(col, kind, sc_ids)
-
-                    _tag_sc = _s("tag")
-                    if _tag_sc is not None:
-                        for tn, c in (
-                            session.query(Tag.name, _func.count(_mt2.c.model_id))
-                            .join(_mt2, Tag.id == _mt2.c.tag_id)
-                            .filter(_mt2.c.model_id.in_(_tag_sc))
-                            .group_by(Tag.name)
-                            .all()
-                        ):
-                            _scoped_counts[("tag", tn)] = c
-                        _scoped_counts[("group", "tag")] = (
-                            session.query(_func.count(_mt2.c.model_id.distinct()))
-                            .filter(_mt2.c.model_id.in_(_tag_sc))
-                            .scalar() or 0
-                        )
-
-                    _date_sc = _s("date")
-                    if _date_sc is not None:
-                        _sc_year: dict = {}
-                        _drows = (
-                            session.query(STLModel.release_year, STLModel.release_month, _func.count(STLModel.id))
-                            .filter(STLModel.id.in_(_date_sc))
-                            .filter(STLModel.release_year.isnot(None))
-                            .group_by(STLModel.release_year, STLModel.release_month)
-                            .all()
-                        )
-                        for yr, mo, c in _drows:
-                            _scoped_counts[("date_month", (yr, mo))] = c
-                            _sc_year[yr] = _sc_year.get(yr, 0) + c
-                        for yr, c in _sc_year.items():
-                            _scoped_counts[("date_year", yr)] = c
-                        _scoped_counts[("group", "date")] = sum(c for _, _, c in _drows)
-
-                    _warn_sc = _s("warning")
-                    if _warn_sc is not None:
-                        _sc_warns = [
-                            w for (w,) in session.query(STLModel.warning)
-                            .filter(STLModel.id.in_(_warn_sc))
-                            .filter(STLModel.warning.isnot(None))
-                            .all()
-                        ]
-                        for _wt in ("Models with presupported stl", "Archive without images",
-                                    "Nested archives", "Archive with supports",
-                                    "Archive without printable files"):
-                            _scoped_counts[("warning", _wt)] = sum(1 for w in _sc_warns if _wt in w)
-                        _scoped_counts[("group", "warning")] = sum(1 for w in _sc_warns if w)
-
-                    _ft_sc = _s("filetype")
-                    if _ft_sc is not None:
-                        _sc_ft = [
-                            _P(ap).suffix.lower()
-                            for (ap,) in session.query(STLModel.archive_path)
-                            .filter(STLModel.id.in_(_ft_sc))
-                            .filter(STLModel.archive_path.isnot(None)).all()
-                            if ap
-                        ]
-                        for _ft in set(_sc_ft):
-                            _scoped_counts[("filetype", _ft)] = _sc_ft.count(_ft)
-                        _scoped_counts[("group", "filetype")] = len(_sc_ft)
-
-                    _path_sc = _s("path")
-                    if _path_sc is not None:
-                        _sc_direct: dict = {}
-                        for (folder, cnt) in (
-                            session.query(STLModel.archive_folder, _func.count(STLModel.id))
-                            .filter(STLModel.id.in_(_path_sc))
-                            .filter(STLModel.archive_folder.isnot(None))
-                            .group_by(STLModel.archive_folder)
-                            .all()
-                        ):
-                            _sc_direct[folder] = _sc_direct.get(folder, 0) + cnt
-                        for (ap,) in (
-                            session.query(STLModel.archive_path)
-                            .filter(STLModel.id.in_(_path_sc))
-                            .filter(STLModel.archive_folder.is_(None))
-                            .filter(STLModel.archive_path.isnot(None))
-                            .all()
-                        ):
-                            folder = _P(ap).parent.as_posix()
-                            _sc_direct[folder] = _sc_direct.get(folder, 0) + 1
-                        _sc_path_counts = {}
-                        for folder, _c in _sc_direct.items():
-                            _sc_path_counts[folder] = _sc_path_counts.get(folder, 0) + _c
-                            _f = _P(folder)
-                            while True:
-                                _p = _f.parent
-                                if _p == _f:
-                                    break
-                                _ps = _p.as_posix()
-                                _sc_path_counts[_ps] = _sc_path_counts.get(_ps, 0) + _c
-                                _f = _p
-                        _scoped_counts[("group", "path")] = sum(_sc_direct.values())
-
-            # ── Distinct value lists for each visible section ───────────────────
-            def _scoped_ids(section: str):
-                return _s(section)
-
-            creators: list[str] = []
-            if show.get("author"):
-                _cs = _scoped_ids("creator")
-                q = session.query(STLModel.creator).distinct().order_by(STLModel.creator)
-                if _cs is not None:
-                    q = q.filter(STLModel.id.in_(_cs))
-                creators = [c for (c,) in q.all() if c]
-
-            tags: list[str] = []
-            if show.get("tags"):
-                _ts = _scoped_ids("tag")
-                q = session.query(Tag).order_by(Tag.name)
-                if _ts is not None:
-                    q = (
-                        q.join(_mt, Tag.id == _mt.c.tag_id)
-                        .filter(_mt.c.model_id.in_(_ts))
-                        .distinct()
-                    )
-                tags = [t.name for t in q.all()]
-
-            sources: list[str] = []
-            if show.get("source"):
-                _ss = _scoped_ids("source")
-                q = session.query(STLModel.source).distinct().order_by(STLModel.source)
-                if _ss is not None:
-                    q = q.filter(STLModel.id.in_(_ss))
-                sources = [s for (s,) in q.all() if s]
-
-            dates: list = []
-            if show.get("date"):
-                _ds = _scoped_ids("date")
-                q = (
-                    session.query(STLModel.release_year, STLModel.release_month)
-                    .filter(STLModel.release_year.isnot(None))
-                    .distinct()
-                    .order_by(STLModel.release_year.desc(), STLModel.release_month)
-                )
-                if _ds is not None:
-                    q = q.filter(STLModel.id.in_(_ds))
-                dates = list(q.all())
-
-            sculptors: list = []
-            if show.get("sculptor"):
-                _scs = _scoped_ids("sculptor")
-                q = session.query(Sculptor).order_by(Sculptor.name)
-                if _scs is not None:
-                    _sc_ids = {
-                        sid for (sid,) in
-                        session.query(STLModel.sculptor_id)
-                        .filter(STLModel.id.in_(_scs))
-                        .filter(STLModel.sculptor_id.isnot(None))
-                        .distinct()
-                    }
-                    q = q.filter(Sculptor.id.in_(_sc_ids))
-                sculptors = [(sc.name, sc.id) for sc in q.all()]
-
-            collections: list = []
-            if show.get("collection"):
-                _cos = _scoped_ids("collection")
-                q = session.query(Collection).order_by(Collection.name)
-                if _cos is not None:
-                    _col_ids = {
-                        cid for (cid,) in
-                        session.query(STLModel.collection_id)
-                        .filter(STLModel.id.in_(_cos))
-                        .filter(STLModel.collection_id.isnot(None))
-                        .distinct()
-                    }
-                    q = q.filter(Collection.id.in_(_col_ids))
-                collections = [(col.name, col.id) for col in q.all()]
-
-            sub_by_col: list = []  # list[(col_name, col_id, [(sub_name, sub_id)])]
-            if show.get("subcollection"):
-                _subs = _scoped_ids("subcollection")
-                _scoped_sub_ids = None
-                if _subs is not None:
-                    _scoped_sub_ids = {
-                        sid for (sid,) in
-                        session.query(STLModel.subcollection_id)
-                        .filter(STLModel.id.in_(_subs))
-                        .filter(STLModel.subcollection_id.isnot(None))
-                        .distinct()
-                    }
-                _col_map: dict = {}
-                for col_name, col_id, sub_name, sub_id in (
-                    session.query(Collection.name, Collection.id, Subcollection.name, Subcollection.id)
-                    .join(Subcollection, Subcollection.collection_id == Collection.id)
-                    .order_by(Collection.name, Subcollection.name)
-                    .all()
-                ):
-                    if _scoped_sub_ids is not None and sub_id not in _scoped_sub_ids:
-                        continue
-                    if col_id not in _col_map:
-                        _col_map[col_id] = (col_name, [])
-                    _col_map[col_id][1].append((sub_name, sub_id))
-                sub_by_col = [(name, col_id, subs) for col_id, (name, subs) in _col_map.items()]
-
-            categories: list = []
-            if show.get("category"):
-                _cas = _scoped_ids("category")
-                q = session.query(Category).order_by(Category.name)
-                if _cas is not None:
-                    _cat_ids = {
-                        cid for (cid,) in
-                        session.query(STLModel.category_id)
-                        .filter(STLModel.id.in_(_cas))
-                        .filter(STLModel.category_id.isnot(None))
-                        .distinct()
-                    }
-                    q = q.filter(Category.id.in_(_cat_ids))
-                categories = [(cat.name, cat.id) for cat in q.all()]
-
-            releases: list = []
-            if show.get("release"):
-                _rs = _scoped_ids("release")
-                q = session.query(Release).order_by(Release.name)
-                if _rs is not None:
-                    _rel_ids = {
-                        rid for (rid,) in
-                        session.query(STLModel.release_id)
-                        .filter(STLModel.id.in_(_rs))
-                        .filter(STLModel.release_id.isnot(None))
-                        .distinct()
-                    }
-                    q = q.filter(Release.id.in_(_rel_ids))
-                releases = [(r.name, r.id) for r in q.all()]
-
-            scales: list = []
-            if show.get("scale"):
-                _sls = _scoped_ids("scale")
-                q = session.query(Scale).order_by(Scale.name)
-                if _sls is not None:
-                    _scale_ids = {
-                        sid for (sid,) in
-                        session.query(STLModel.scale_id)
-                        .filter(STLModel.id.in_(_sls))
-                        .filter(STLModel.scale_id.isnot(None))
-                        .distinct()
-                    }
-                    q = q.filter(Scale.id.in_(_scale_ids))
-                scales = [(sc.name, sc.id) for sc in q.all()]
-
-            presupports: list[str] = []
-            if show.get("presupports"):
-                _ps2 = _scoped_ids("presupports")
-                q = (
-                    session.query(STLModel.presupports)
-                    .filter(STLModel.presupports.isnot(None))
-                    .distinct()
-                    .order_by(STLModel.presupports)
-                )
-                if _ps2 is not None:
-                    q = q.filter(STLModel.id.in_(_ps2))
-                presupports = [v for (v,) in q.all() if v]
-
-            # ── File types ─────────────────────────────────────────────────────
-            filetypes: list[str] = []
-            _ft_sc2 = _scoped_ids("filetype")
-            _ft_q = session.query(STLModel.archive_path).filter(STLModel.archive_path.isnot(None))
-            if _ft_sc2 is not None:
-                _ft_q = _ft_q.filter(STLModel.id.in_(_ft_sc2))
-            filetypes = sorted({
-                _P(ap).suffix.lower()
-                for (ap,) in _ft_q.all()
-                if ap and _P(ap).suffix
-            })
-
-            # ── Path dirs ──────────────────────────────────────────────────────
-            sorted_dirs: list[str] = []
-            scoped_dirs: "list[str] | None" = None
-            new_dirs_frozen: "frozenset | None" = None
-            if show.get("path"):
-                _path_sc2 = _scoped_ids("path")
-                if _path_sc2 is not None:
-                    _sd: set[str] = set()
-                    for (folder,) in (
-                        session.query(STLModel.archive_folder)
-                        .filter(STLModel.id.in_(_path_sc2))
-                        .filter(STLModel.archive_folder.isnot(None))
-                        .distinct()
-                        .all()
-                    ):
-                        _sd.add(folder)
-                    # fallback for rows without archive_folder
-                    for (ap,) in (
-                        session.query(STLModel.archive_path)
-                        .filter(STLModel.id.in_(_path_sc2))
-                        .filter(STLModel.archive_folder.is_(None))
-                        .filter(STLModel.archive_path.isnot(None))
-                        .distinct()
-                        .all()
-                    ):
-                        _sd.add(_P(ap).parent.as_posix())
-                    scoped_dirs = sorted(_sd)
-                else:
-                    _all_dirs: set[str] = set()
-                    for (folder,) in (
-                        session.query(STLModel.archive_folder)
-                        .filter(STLModel.archive_folder.isnot(None))
-                        .distinct()
-                        .all()
-                    ):
-                        _all_dirs.add(folder)
-                    # fallback for rows without archive_folder
-                    for (ap,) in (
-                        session.query(STLModel.archive_path)
-                        .filter(STLModel.archive_folder.is_(None))
-                        .distinct()
-                        .all()
-                    ):
-                        if ap:
-                            _all_dirs.add(_P(ap).parent.as_posix())
-                    new_dirs_frozen = frozenset(_all_dirs)
-                    sorted_dirs = sorted(_all_dirs)
-
-        finally:
-            session.close()
-
-        payload = {
-            "counts": _counts,
-            "path_counts": _path_counts,
-            "scoped_counts": _scoped_counts,
-            "sc_path_counts": _sc_path_counts,
-            "creators": creators,
-            "tags": tags,
-            "sources": sources,
-            "dates": dates,
-            "sculptors": sculptors,
-            "collections": collections,
-            "sub_by_col": sub_by_col,
-            "categories": categories,
-            "releases": releases,
-            "scales": scales,
-            "presupports": presupports,
-            "filetypes":   filetypes,
-            "sorted_dirs": sorted_dirs,
-            "scoped_dirs": scoped_dirs,
-            "new_dirs_frozen": new_dirs_frozen,
-            "checked_data": self._checked,
-            "excluded_data": self._excluded,
-            "expanded_sections": self._expanded,
-            "show": self._show,
-            "show_counts": self._show_counts,
-            "alpha_enabled": self._alpha_enabled,
-            "alpha_threshold": self._alpha_threshold,
-            "scope_by_section": self._scope,
-        }
-
-        # Persist unscoped results so subsequent loads skip the DB queries.
-        if scope is None:
-            from app.database.filter_cache import save_filter_cache
-            save_filter_cache(payload)
-
-        self.signals.ready.emit(self._gen, payload)
 
 
 class BrowserTab(QWidget):
@@ -2067,6 +369,8 @@ class BrowserTab(QWidget):
     def _populate_filter_tree(
         self,
         scope_by_section: dict | None = None,
+        path_inc_pruned: list[str] | None = None,
+        path_exc_pruned: list[str] | None = None,
     ) -> None:
         """Kick off a background worker to rebuild the filter tree.
 
@@ -2137,6 +441,8 @@ class BrowserTab(QWidget):
             checked_data=checked_data,
             excluded_data=excluded_data,
             expanded_sections=expanded_sections,
+            path_inc_pruned=path_inc_pruned,
+            path_exc_pruned=path_exc_pruned,
         )
         worker.signals.ready.connect(self._on_filter_data_ready)
         QThreadPool.globalInstance().start(worker)
@@ -2543,19 +849,19 @@ class BrowserTab(QWidget):
             mv.c.subcollection_name,
             mv.c.category_name,
             mv.c.release_name,
-            mv.c.scale_name,
         ).select_from(mv)
 
         _tag_sub = sa_select(_mt_global.c.model_id).join(Tag, _mt_global.c.tag_id == Tag.id)
+        _scale_sub = sa_select(_ms_global.c.model_id)
 
         # --- explicit ID set ---
         if id_filters:
             stmt = stmt.where(mv.c.id.in_(id_filters))
         # --- include filters ---
         if author_filters:
-            stmt = stmt.where(mv.c.creator.in_(author_filters))
+            stmt = stmt.where(func.lower(mv.c.creator).in_([a.lower() for a in author_filters]))
         if type_filters:
-            stmt = stmt.where(mv.c.source.in_(type_filters))
+            stmt = stmt.where(func.lower(mv.c.source).in_([t.lower() for t in type_filters]))
         if tag_filters:
             stmt = stmt.where(mv.c.id.in_(_tag_sub.where(Tag.name.in_(tag_filters))))
         if path_filters:
@@ -2575,7 +881,7 @@ class BrowserTab(QWidget):
         if release_filters:
             stmt = stmt.where(mv.c.release_id.in_(release_filters))
         if scale_filters:
-            stmt = stmt.where(mv.c.scale_id.in_(scale_filters))
+            stmt = stmt.where(mv.c.id.in_(_scale_sub.where(_ms_global.c.scale_id.in_(scale_filters))))
         if presupports_filters:
             stmt = stmt.where(mv.c.presupports.in_(presupports_filters))
         if warning_filters:
@@ -2585,9 +891,9 @@ class BrowserTab(QWidget):
             stmt = stmt.where(or_(*(_ap_lc.like("%" + ext) for ext in filetype_filters)))
         # --- exclude filters ---
         if author_exc_filters:
-            stmt = stmt.where(~mv.c.creator.in_(author_exc_filters))
+            stmt = stmt.where(~func.lower(mv.c.creator).in_([a.lower() for a in author_exc_filters]))
         if type_exc_filters:
-            stmt = stmt.where(~mv.c.source.in_(type_exc_filters))
+            stmt = stmt.where(~func.lower(mv.c.source).in_([t.lower() for t in type_exc_filters]))
         if tag_exc_filters:
             stmt = stmt.where(mv.c.id.notin_(_tag_sub.where(Tag.name.in_(tag_exc_filters))))
         if path_exc_filters:
@@ -2607,7 +913,7 @@ class BrowserTab(QWidget):
         if release_exc_filters:
             stmt = stmt.where(~mv.c.release_id.in_(release_exc_filters))
         if scale_exc_filters:
-            stmt = stmt.where(~mv.c.scale_id.in_(scale_exc_filters))
+            stmt = stmt.where(mv.c.id.notin_(_scale_sub.where(_ms_global.c.scale_id.in_(scale_exc_filters))))
         if presupports_exc_filters:
             stmt = stmt.where(~mv.c.presupports.in_(presupports_exc_filters))
         if warning_exc_filters:
@@ -2618,6 +924,7 @@ class BrowserTab(QWidget):
 
         # --- group-level has/no-value filters ---
         _has_tag_sub = sa_select(_mt_global.c.model_id).distinct()
+        _has_scale_sub = sa_select(_ms_global.c.model_id).distinct()
         _group_has_value = {
             "creator":       lambda: and_(mv.c.creator.isnot(None),       mv.c.creator != ""),
             "tag":           lambda: mv.c.id.in_(_has_tag_sub),
@@ -2628,7 +935,7 @@ class BrowserTab(QWidget):
             "subcollection": lambda: mv.c.subcollection_id.isnot(None),
             "category":      lambda: mv.c.category_id.isnot(None),
             "release":       lambda: mv.c.release_id.isnot(None),
-            "scale":         lambda: mv.c.scale_id.isnot(None),
+            "scale":         lambda: mv.c.id.in_(_has_scale_sub),
             "presupports":   lambda: and_(mv.c.presupports.isnot(None),   mv.c.presupports != ""),
             "warning":       lambda: and_(mv.c.warning.isnot(None),       mv.c.warning != ""),
             "path":          lambda: and_(mv.c.archive_path.isnot(None),  mv.c.archive_path != ""),
@@ -2778,15 +1085,15 @@ class BrowserTab(QWidget):
                 else:
                     stl.release = None
             elif col == COL_SCALE:
-                if value:
-                    sc = session.query(Scale).filter_by(name=value).first()
+                stl.scales.clear()
+                for name in [s.strip() for s in (value or "").split(",") if s.strip()]:
+                    sc = session.query(Scale).filter_by(name=name).first()
                     if sc is None:
-                        sc = Scale(name=value)
+                        sc = Scale(name=name)
                         session.add(sc)
                         session.flush()
-                    stl.scale = sc
-                else:
-                    stl.scale = None
+                    if sc not in stl.scales:
+                        stl.scales.append(sc)
             elif col == COL_PRESUPPORTED:
                 stl.presupports = value.strip() or None
 
@@ -2965,6 +1272,8 @@ class BrowserTab(QWidget):
         ])
 
         scope_by_section: dict | None = None
+        _path_inc_pruned: list[str] | None = None
+        _path_exc_pruned: list[str] | None = None
 
         if _has_any:
             # Build a subquery for each filter section (all filters except that
@@ -2972,20 +1281,17 @@ class BrowserTab(QWidget):
             # "WHERE id IN (SELECT id FROM models WHERE …)" — a proper SQL
             # subquery — instead of a huge IN (?, ?, …) parameter list.
 
-            # Materialise path-filter IDs once: replace(archive_path) LIKE can't
-            # use an index, so repeating the scan once per scoped-count query is
-            # expensive (~37 ms × 26 queries).  A single LIKE pass gives us a
-            # plain integer list; subsequent queries use the primary-key index.
-            _path_ids_mat: list[int] | None = None
+            # Path filter: the archive_path LIKE scan can't use an index, and a
+            # large library matches too many rows to inline as IN (?, …).  So the
+            # worker materialises the matching IDs ONCE into a connection-local
+            # TEMP table (_filter_path_ids); every scoped subquery references it as
+            # a fast primary-key lookup. We just capture the pruned LIKE patterns
+            # here and reference the temp table.
+            _path_sel = None
             if _has_path:
-                _norm_m = func.replace(STLModel.archive_path, "\\", "/")
-                _pq = sa_select(STLModel.id)
-                if path_inc:
-                    _pq = _pq.where(or_(*(_norm_m.like(p.rstrip("/") + "/%") for p in _prune_ancestor_paths(path_inc))))
-                if path_exc:
-                    _pq = _pq.where(~or_(*(_norm_m.like(p.rstrip("/") + "/%") for p in _prune_ancestor_paths(path_exc))))
-                with session_scope() as _ms:
-                    _path_ids_mat = [r[0] for r in _ms.execute(_pq).all()]
+                _path_inc_pruned = _prune_ancestor_paths(path_inc) if path_inc else []
+                _path_exc_pruned = _prune_ancestor_paths(path_exc) if path_exc else []
+                _path_sel = sa_select(_FILTER_PATH_IDS.c.id)
 
             def _run_id_subquery(
                 skip_creator=False, skip_type=False, skip_path=False,
@@ -3001,23 +1307,16 @@ class BrowserTab(QWidget):
                     q = q.where(cond)
                     _has_condition = True
                 if not skip_creator:
-                    if author_inc:  _w(STLModel.creator.in_(author_inc))
-                    if author_exc:  _w(~STLModel.creator.in_(author_exc))
+                    if author_inc:  _w(func.lower(STLModel.creator).in_([a.lower() for a in author_inc]))
+                    if author_exc:  _w(~func.lower(STLModel.creator).in_([a.lower() for a in author_exc]))
                 if not skip_type:
-                    if type_inc:    _w(STLModel.source.in_(type_inc))
-                    if type_exc:    _w(~STLModel.source.in_(type_exc))
+                    if type_inc:    _w(func.lower(STLModel.source).in_([t.lower() for t in type_inc]))
+                    if type_exc:    _w(~func.lower(STLModel.source).in_([t.lower() for t in type_exc]))
                 if not skip_tag:
                     if tag_inc:     _w(STLModel.tags.any(Tag.name.in_(tag_inc)))
                     if tag_exc:     _w(~STLModel.tags.any(Tag.name.in_(tag_exc)))
-                if not skip_path:
-                    if _path_ids_mat is not None:
-                        _w(STLModel.id.in_(_path_ids_mat))
-                    else:
-                        _n = func.replace(STLModel.archive_path, "\\", "/")
-                        if path_inc:
-                            _w(or_(*(_n.like(p.rstrip("/") + "/%") for p in _prune_ancestor_paths(path_inc))))
-                        if path_exc:
-                            _w(~or_(*(_n.like(p.rstrip("/") + "/%") for p in _prune_ancestor_paths(path_exc))))
+                if not skip_path and _path_sel is not None:
+                    _w(STLModel.id.in_(_path_sel))
                 if not skip_date:
                     def _dc(pairs):
                         return [and_(STLModel.release_year == y, STLModel.release_month == mo) if mo is not None else (STLModel.release_year == y) for y, mo in pairs]
@@ -3039,8 +1338,8 @@ class BrowserTab(QWidget):
                     if release_inc:  _w(STLModel.release_id.in_(release_inc))
                     if release_exc:  _w(~STLModel.release_id.in_(release_exc))
                 if not skip_scale:
-                    if scale_inc:    _w(STLModel.scale_id.in_(scale_inc))
-                    if scale_exc:    _w(~STLModel.scale_id.in_(scale_exc))
+                    if scale_inc:    _w(STLModel.scales.any(Scale.id.in_(scale_inc)))
+                    if scale_exc:    _w(~STLModel.scales.any(Scale.id.in_(scale_exc)))
                 if not skip_presupports:
                     if presupports_inc: _w(STLModel.presupports.in_(presupports_inc))
                     if presupports_exc: _w(~STLModel.presupports.in_(presupports_exc))
@@ -3063,7 +1362,7 @@ class BrowserTab(QWidget):
                     "subcollection": lambda: STLModel.subcollection_id.isnot(None),
                     "category":      lambda: STLModel.category_id.isnot(None),
                     "release":       lambda: STLModel.release_id.isnot(None),
-                    "scale":         lambda: STLModel.scale_id.isnot(None),
+                    "scale":         lambda: STLModel.scales.any(),
                     "presupports":   lambda: and_(STLModel.presupports.isnot(None),   STLModel.presupports != ""),
                     "warning":       lambda: and_(STLModel.warning.isnot(None),       STLModel.warning != ""),
                 }
@@ -3092,7 +1391,11 @@ class BrowserTab(QWidget):
                 "filetype":      _run_id_subquery(skip_filetype=True),
             }
 
-        self._populate_filter_tree(scope_by_section=scope_by_section)
+        self._populate_filter_tree(
+            scope_by_section=scope_by_section,
+            path_inc_pruned=_path_inc_pruned,
+            path_exc_pruned=_path_exc_pruned,
+        )
 
     def _clear_filters(self) -> None:
         """Uncheck all filter items and reload the full table."""
@@ -3448,6 +1751,9 @@ class BrowserTab(QWidget):
         edit_act.setVisible(len(selected_ids) == 1)
         mass_act = menu.addAction(style.standardIcon(SP.SP_FileDialogDetailedView), f"Mass Edit {len(selected_ids)} model(s)…")
         mass_act.setVisible(len(selected_ids) > 1)
+        from app.ui.config_dialog import get_ai_tagging_enabled
+        ai_tag_act = menu.addAction(self.tr("AI Tagging…"))
+        ai_tag_act.setVisible(len(selected_ids) >= 1 and get_ai_tagging_enabled())
         menu.addSeparator()
 
         _warn_px = style.standardIcon(SP.SP_MessageBoxWarning).pixmap(16, 16)
@@ -3557,6 +1863,8 @@ class BrowserTab(QWidget):
             self.add_tag()
         elif edit_tags_act and action == edit_tags_act:
             self._open_tag_editor()
+        elif ai_tag_act and action == ai_tag_act:
+            self._open_ai_tagger(selected_ids)
         elif edit_collections_act and action == edit_collections_act:
             self._open_category_editor()
         elif edit_subcollections_act and action == edit_subcollections_act:
@@ -3821,7 +2129,12 @@ class BrowserTab(QWidget):
         return super().eventFilter(obj, event)
 
     def _handle_image_drop(self, event) -> None:
-        """Import dropped image files as thumbnails for the currently selected model."""
+        """Import dropped image files as thumbnails for the currently selected model.
+
+        The slow part — reading each file and encoding its thumbnail — runs in a
+        background ``_ImageDropRunnable``; the DB inserts and LMDB writes happen
+        back on the GUI thread in :meth:`_on_image_drop_ready`.
+        """
         if self._current_model_id is None:
             return
         paths = [
@@ -3832,27 +2145,29 @@ class BrowserTab(QWidget):
         ]
         if not paths:
             return
-        errors: list[str] = []
+        runnable = _ImageDropRunnable(self._current_model_id, paths)
+        runnable.signals.ready.connect(self._on_image_drop_ready)
+        QThreadPool.globalInstance().start(runnable)
+
+    def _on_image_drop_ready(self, model_id: int, encoded: list, errors: list) -> None:
+        """Persist thumbnails encoded by ``_ImageDropRunnable`` (GUI thread)."""
+        from app.utils.thumbnailer import write_raw_thumbnail
         added = 0
-        with session_scope() as session:
-            for path in paths:
-                try:
-                    raw = path.read_bytes()
-                except OSError:
-                    errors.append(path.name)
-                    continue
-                img_rec = Image(model_id=self._current_model_id, filename=path.name)
-                session.add(img_rec)
-                session.flush()
-                thumb_path = save_thumbnail(raw, img_rec.id)
-                if thumb_path is None:
-                    errors.append(path.name)
-                    session.delete(img_rec)
-                    continue
-                img_rec.thumbnail_path = thumb_path
-                added += 1
-        if added:
-            self._show_thumbnails(self._current_model_id)
+        if encoded:
+            with session_scope() as session:
+                for filename, jpeg in encoded:
+                    img_rec = Image(model_id=model_id, filename=filename)
+                    session.add(img_rec)
+                    session.flush()
+                    thumb_path = write_raw_thumbnail(img_rec.id, jpeg)
+                    if thumb_path is None:
+                        errors.append(filename)
+                        session.delete(img_rec)
+                        continue
+                    img_rec.thumbnail_path = thumb_path
+                    added += 1
+        if added and self._current_model_id == model_id:
+            self._show_thumbnails(model_id)
         if errors:
             QMessageBox.warning(
                 self, self.tr("Image import"),
@@ -4034,6 +2349,24 @@ class BrowserTab(QWidget):
         from app.ui.tag_editor_dialog import TagEditorDialog
         TagEditorDialog(parent=self).exec()
         self.refresh()
+
+    def open_ai_tagger_for_selection(self) -> None:
+        """Open AI Tagging for the currently selected rows (toolbar/menu entry)."""
+        ids = self._selected_model_ids()
+        if not ids:
+            QMessageBox.information(
+                self, self.tr("AI Tagging"),
+                self.tr("Select one or more models in the table first."),
+            )
+            return
+        self._open_ai_tagger(ids)
+
+    def _open_ai_tagger(self, model_ids: list) -> None:
+        from app.ui.ai_tagger_dialog import AITaggerDialog
+        dlg = AITaggerDialog(model_ids, parent=self)
+        dlg.exec()
+        if dlg._any_saved:
+            self.refresh()
 
     def _open_category_editor(self, new_category: bool = False) -> None:
         if new_category:

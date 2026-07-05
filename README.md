@@ -4,7 +4,7 @@
 
 Built with PyQt6 and SQLAlchemy.
 
-Version: 2026.21
+Version: 2026.24
 
 ## Features
 
@@ -14,7 +14,7 @@ Version: 2026.21
 - **Metadata overrides** — force a specific Creator or Type/Source value for every archive in a crawl, overriding whatever is auto-detected
 - **Thumbnail browser** — stores JPEG previews in LMDB and displays them in a scrollable image pane; supports drag-and-drop to add new images
 - **Image grid** — scrollable grid of thumbnails for the currently filtered set of models, with a resizable thumbnail slider (60–300 px)
-- **Scale detection** — automatically detects miniature scale (e.g. `28mm`, `32mm`, `1/35`) from archive and file names
+- **Scale detection** — automatically detects miniature scale (e.g. `28mm`, `32mm`, `1/35`) from archive and file names; a model can hold **multiple scales** (e.g. a 180 mm bust and a 32 mm version in one archive)
 - **Presupport detection** — identifies whether an archive contains Lychee, Chitubox, or presupported STL files
 - **Crawler warnings** — flags archives that contain presupported STLs, no images, no printable files (`.stl`/`.obj`/`.lys`/`.chitubox`), or nested archives
 - **Rich model catalog** — tracks sculptors, categories, subcategories, releases, scales, tags, and warnings per model
@@ -31,6 +31,7 @@ Version: 2026.21
 - **Find Metadata Duplicates** — finds models with identical or phonetically similar field values; supports exact match, Levenshtein (configurable distance), and Soundex; results can be sent directly to the browser table
 - **Find Archives by Content** — two-tab tool: the *STL Files* tab flags archive pairs that share a configurable fraction of identical files; the *Images* tab finds archives with similar thumbnails (selecting a result previews both archives' images); hover any row to see thumbnails in a popup; right-click any result row to open the archive's folder in the configured file manager, compare archive contents, or delete the archive from disk
 - **Image similarity matching** — two methods, selectable in the *Images* tab and *Find by Image*: a built-in **128-bit perceptual hash (dHash)** for near-duplicates, and an optional **AI embedding (CLIP)** for semantic matching of the same model across different renders, angles, and colours. Embeddings are an optional, dependency-light add-on (`onnxruntime` + a CLIP ONNX model); compute them via **Database Maintenance → Compute Image Embeddings**
+- **AI Tagging** — right-click any row and choose *AI Tagging…* to let Qwen2.5-VL analyse the model's thumbnails — along with the archive path, filenames, and any metadata already catalogued — and suggest tags, title, creator, sculptor, collection, subcollection, scale, source, year, and description (it picks the most specific collection — e.g. Batman → *comics* / *DC* — rather than defaulting to a generic genre). Each suggestion is editable before saving; tags are merged with (not replaced by) existing ones. Select several rows for one-by-one review, or click **Process All** to run every selected model unattended and save results automatically. By default existing values are kept (only empty fields filled, new tags added); tick **Overwrite existing values** to let the suggestions replace current field values instead. Tick **Ignore existing metadata** to withhold the catalogued metadata and file list from the prompt, using only the images, archive path, and image filenames (re-tag from scratch). The whole feature can be switched off with **Enable AI tagging** in *Configuration → AI* (which hides the action from the toolbar, Tools menu, and right-click menu). The model's **temperature** is configurable in *Configuration → AI → AI Tagging* (lower = more literal and grounded, higher = more creative). Runs locally via the [llama.cpp](https://github.com/ggml-org/llama.cpp) `llama-server` binary — **no torch, no Python AI packages**. On first use the small runtime and the ~3.3 GB GGUF model are downloaded once into your data folder; pick a **CPU** or **NVIDIA GPU (CUDA)** build in the setup dialog (CPU works on any machine)
 - **Archive content viewer** — list every `.stl` file in an archive, or compare two archives side-by-side with configurable matching by filename, size, or hash
 - **Physical file deletion** — optionally delete or trash archive files from disk via the right-click menu in the browser table or the duplicate-finder results (enable in Configuration → File writing)
 - **Configurable file manager** — choose which program opens archive folders from right-click menus: System Default, Double Commander, or a custom executable (Configuration → Browser)
@@ -38,6 +39,7 @@ Version: 2026.21
 - **Move tracking** — missing archives are flagged rather than deleted so cross-session and cross-folder move detection works across multiple crawl runs; collision guards prevent ambiguous name+size or hash matches from mis-attributing metadata
 - **Backup / Restore** — pack the database, thumbnails, and settings into a single `.7z` archive via **Tools → Backup / Restore Library…**; restore extracts back into the data directory after confirmation
 - **Statistics** — column and aggregated statistics dialogs for a quick numeric overview; database maintenance (vacuum, integrity check)
+- **Database maintenance tools** — verify/relocate missing archives, find duplicate entries, recompute image hashes, compute CLIP embeddings, compact the thumbnail store, and **prune the number of images per model** down to a chosen maximum (keeps the oldest, deletes the extras and their thumbnails)
 - **Themes** — built-in color schemes: System Default, VS Code Dark+, Windows 11 Dark, Windows 11 Light, and nine Material Design themes via qt-material
 - **Localization** — translatable user interface; **English** and **Spanish** ship built-in, and additional language definitions can be added as Qt Linguist `.ts` files in `resources/i18n/`. Pick the language in **Configuration → Appearance**
 
@@ -146,7 +148,7 @@ Managed through dedicated editor dialogs accessible from the browser's right-cli
 
 ### 6. Scales
 
-Scale values (e.g. `28mm`, `32mm`, `1/35`) are detected automatically during crawl and can also be set manually per model through the editor or the **Scale** inline cell in the browser.
+Scale values (e.g. `28mm`, `32mm`, `1/35`) are detected automatically during crawl and can also be set manually per model through the editor or the **Scale** inline cell in the browser. A model can carry **several scales at once** — enter them as a comma-separated list (with autocomplete); each is filterable individually in the filter pane, and a model appears under every scale it has.
 
 ## Path Patterns
 
@@ -275,7 +277,7 @@ The only additional step is providing the model file:
 <data_dir>/models/clip_image_encoder.onnx
 ```
 
-Use **Configuration → Browser → Image similarity → Download CLIP model** to
+Use **Configuration → AI → Image similarity → Download CLIP model** to
 fetch it automatically, or export it manually:
 
 ```bash

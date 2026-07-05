@@ -970,7 +970,7 @@ class CrawlerWorker(QThread):
         if cfg.force_release:
             model.release = get_or_create_release(session, cfg.force_release, cache=cache)
         if cfg.force_scale:
-            model.scale = get_or_create_scale(session, cfg.force_scale, cache=cache)
+            model.scales = [get_or_create_scale(session, cfg.force_scale, cache=cache)]
         if cfg.force_date:
             _year, _month = parse_release_date(cfg.force_date)
             if _year:
@@ -1102,7 +1102,7 @@ class CrawlerWorker(QThread):
         logger.debug("  Scales detected: %s", scales or "none")
         if scales:
             cache = getattr(self, "_lookup_cache", None)
-            model.scale = get_or_create_scale(session, scales[0], cache=cache)
+            model.scales = [get_or_create_scale(session, s, cache=cache) for s in scales]
 
     def _assign_metadata(
         self,
@@ -1210,8 +1210,8 @@ class CrawlerWorker(QThread):
                     if dhash_int is not None:
                         img.dhash = format_dhash(dhash_int)
                     if embed_vecs:
+                        # _emb is already imported above where embed_vecs was built.
                         try:
-                            from app.utils import image_embedding as _emb
                             vec = embed_vecs[i]
                             if vec is not None:
                                 img.embedding = _emb.to_blob(vec)
@@ -1225,7 +1225,12 @@ class CrawlerWorker(QThread):
                 from app.utils.thumbnailer import pdf_first_page_to_image_bytes
                 resolved_raw: list[tuple[Image, bytes]] = []
                 for img in img_records:
-                    raw = contents[img.filename]
+                    raw = contents.get(img.filename)
+                    if raw is None:
+                        session.delete(img)
+                        logger.warning("Image catalogued but not extracted: %s in %s",
+                                       img.filename, archive_path.name)
+                        continue
                     if Path(img.filename.replace("\\", "/")).suffix.lower() == ".pdf":
                         raw = pdf_first_page_to_image_bytes(raw)
                         if raw is None:
@@ -1265,8 +1270,8 @@ class CrawlerWorker(QThread):
                         except Exception:
                             logger.debug("  Failed to compute dHash for image id %s", img.id)
                         if embed_vecs:
+                            # _emb is already imported above where embed_vecs was built.
                             try:
-                                from app.utils import image_embedding as _emb
                                 vec = embed_vecs[i]
                                 if vec is not None:
                                     img.embedding = _emb.to_blob(vec)

@@ -10,11 +10,10 @@ from PyQt6.QtWidgets import (
     QPushButton, QScrollArea, QWidget, QCompleter, QComboBox,
     QFrame, QGroupBox, QInputDialog, QMessageBox, QSplitter, QSpinBox, QToolButton, QToolTip,
 )
-from PyQt6.QtGui import QCursor
+from PyQt6.QtGui import QCursor, QPixmap
 
 from app.database.db import session_scope, get_session
 from app.database.models import STLModel, Tag, Release, Sculptor, Collection, Subcollection, Category, Scale
-from app.utils.thumbnailer import pixmap_from_path
 from app.utils.path_pattern import parse_path, ATTR_LABEL, PATTERN_HELP, parse_release_date, format_release_date
 
 
@@ -165,7 +164,8 @@ class EditorDialog(QDialog):
         self._sequence_spin.setSpecialValueText("")   # 0 shown as blank
         self._sequence_spin.setValue(0)
 
-        self._scale_edit = self._make_combo(scales, blank_first=True)
+        self._scale_edit = TagEdit(scales)
+        self._scale_edit.setPlaceholderText(self.tr("28mm, 32mm, 180mm…"))
         self._presupports_edit = self._make_combo(["No", "Lychee", "Chitubox", "Presupported"], blank_first=True)
 
         _c0 = lambda combo: (lambda: combo.setCurrentIndex(0))
@@ -183,7 +183,7 @@ class EditorDialog(QDialog):
         form.addRow(self.tr("Sequence:"),      self._with_clear_btn(
             self._sequence_spin, lambda: self._sequence_spin.setValue(0)
         ))
-        form.addRow(self.tr("Scale:"),         self._with_clear_btn(self._scale_edit,        _c0(self._scale_edit)))
+        form.addRow(self.tr("Scale:"),         self._with_clear_btn(self._scale_edit,        self._scale_edit.clear))
         form.addRow(self.tr("Presupports:"),   self._with_clear_btn(self._presupports_edit,  _c0(self._presupports_edit)))
         form.addRow(self.tr("URL:"),           self._url_edit)
         form.addRow(self.tr("Description:"),   self._with_clear_btn(
@@ -357,7 +357,7 @@ class EditorDialog(QDialog):
             self._subcollection_edit.setCurrentText(model.subcollection.name if model.subcollection else "")
             self._category_edit.setCurrentText(model.category.name if model.category else "")
             self._sequence_spin.setValue(model.sequence if model.sequence is not None else 0)
-            self._scale_edit.setCurrentText(model.scale.name if model.scale else "")
+            self._scale_edit.setText(", ".join(s.name for s in model.scales))
             self._presupports_edit.setCurrentText(model.presupports or "")
             self._url_edit.setText(model.url or "")
             self._desc_edit.setPlainText(model.description or "")
@@ -372,10 +372,20 @@ class EditorDialog(QDialog):
             if item.widget():
                 item.widget().deleteLater()
 
+        # Read all of this model's thumbnails in a single LMDB transaction rather
+        # than one round-trip per image. JPEG→QPixmap decoding stays on the GUI
+        # thread (QPixmap requires it) and is cheap for a single model's images.
+        from app.utils.thumbnailer import get_thumbnail_bytes_many
+        ids = [img.id for img in model.images if img.thumbnail_path]
+        blobs = get_thumbnail_bytes_many(ids) if ids else {}
+
         sidebar_width = 200
         for img in model.images:
             lbl = QLabel()
-            px = pixmap_from_path(img.thumbnail_path)
+            px = QPixmap()
+            data = blobs.get(img.id) if img.thumbnail_path else None
+            if data:
+                px.loadFromData(data)
             px = px.scaled(sidebar_width, sidebar_width,
                            Qt.AspectRatioMode.KeepAspectRatio,
                            Qt.TransformationMode.SmoothTransformation)
@@ -492,16 +502,18 @@ class EditorDialog(QDialog):
             _year, _month = parse_release_date(self._date_edit.text().strip())
             model.release_year  = _year
             model.release_month = _month
-            scale_name = self._scale_edit.currentText().strip()
-            if scale_name:
+            model.scales.clear()
+            _seen_scales: set[str] = set()
+            for scale_name in self._scale_edit.get_tags():
+                if scale_name.lower() in _seen_scales:
+                    continue
                 sc = session.query(Scale).filter_by(name=scale_name).first()
                 if sc is None:
                     sc = Scale(name=scale_name)
                     session.add(sc)
                     session.flush()
-                model.scale = sc
-            else:
-                model.scale = None
+                model.scales.append(sc)
+                _seen_scales.add(scale_name.lower())
             model.presupports  = self._presupports_edit.currentText().strip() or None
             model.url          = self._url_edit.text().strip() or None
             model.description  = self._desc_edit.toPlainText().strip() or None

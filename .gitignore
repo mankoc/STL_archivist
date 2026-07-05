@@ -6,6 +6,9 @@ __pycache__/
 *.db-wal
 *.sqlite
 thumbnails/
+# LMDB thumbnail store (generated cache — can be multi-GB, never commit)
+*.lmdb/
+*.mdb
 dist/
 build/
 .venv/

@@ -89,6 +89,8 @@ class ArchiveReader(ABC):
 
 
 class _ZipReader(ArchiveReader):
+    """``ArchiveReader`` for ``.zip`` archives, backed by :mod:`zipfile`."""
+
     def __init__(self, path: Path) -> None:
         self._zf = zipfile.ZipFile(str(path), "r")
 
@@ -117,8 +119,14 @@ class _ZipReader(ArchiveReader):
 
 
 class _SevenZReader(ArchiveReader):
+    """``ArchiveReader`` for ``.7z`` archives, backed by :mod:`py7zr`.
+
+    py7zr cannot read individual members at random, so ``read_batch`` extracts
+    the requested members to a temp directory (``/dev/shm`` when available) in
+    one pass, and member metadata is cached after the first ``iter_members``.
+    """
+
     def __init__(self, path: Path) -> None:
-        self._path = path
         self._zf = py7zr.SevenZipFile(str(path), mode="r")
         self._members_cache: list[MemberInfo] | None = None
 
@@ -157,6 +165,12 @@ class _SevenZReader(ArchiveReader):
 
 
 class _RarReader(ArchiveReader):
+    """``ArchiveReader`` for ``.rar`` archives, backed by :mod:`rarfile`.
+
+    Requires an external ``unrar`` binary; *unrar_path* overrides the tool
+    location (configured via ``UNRAR_TOOL_KEY`` in settings).
+    """
+
     def __init__(self, path: Path, unrar_path: str = "") -> None:
         if unrar_path:
             rarfile.UNRAR_TOOL = unrar_path
