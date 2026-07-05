@@ -36,6 +36,51 @@ def levenshtein(a: str, b: str) -> int:
     return prev[-1]
 
 
+def levenshtein_within(a: str, b: str, max_distance: int) -> bool:
+    """Return True if the Levenshtein distance between *a* and *b* is ``<= max_distance``.
+
+    Much faster than computing the full distance when only a threshold check is
+    needed: it bails out early as soon as the distance cannot possibly stay within
+    *max_distance*. Two cheap rejections come first — a length difference greater
+    than *max_distance* already implies a larger distance — then a banded DP that
+    only fills the diagonal of width ``2*max_distance+1`` and aborts the moment the
+    whole current row exceeds the threshold.
+    """
+    if a == b:
+        return True
+    if len(a) < len(b):
+        a, b = b, a
+    la, lb = len(a), len(b)
+    if la - lb > max_distance:
+        return False
+
+    prev = list(range(lb + 1))
+    for i, ca in enumerate(a, 1):
+        curr = [i]
+        # Only cells within the band |i-j| <= max_distance can be <= threshold.
+        lo = max(1, i - max_distance)
+        hi = min(lb, i + max_distance)
+        if lo > 1:
+            curr.extend([max_distance + 1] * (lo - 1))
+        row_min = curr[-1]
+        for j in range(lo, hi + 1):
+            cb = b[j - 1]
+            left = curr[j - 1] + 1
+            up = prev[j] + 1 if j < len(prev) else max_distance + 1
+            diag = prev[j - 1] + (ca != cb)
+            val = min(left, up, diag)
+            curr.append(val)
+            if val < row_min:
+                row_min = val
+        # Pad the remainder of the row so prev[j] lookups stay valid next round.
+        if len(curr) <= lb:
+            curr.extend([max_distance + 1] * (lb + 1 - len(curr)))
+        if row_min > max_distance:
+            return False
+        prev = curr
+    return prev[lb] <= max_distance
+
+
 def soundex(s: str) -> str:
     """Return the American Soundex code for *s* (4-character string).
 

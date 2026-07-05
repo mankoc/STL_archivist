@@ -379,7 +379,7 @@ class ImageGridDialog(QDialog):
                     archive_size = 0
 
                 tags_str    = ", ".join(t.name for t in stl.tags)
-                scale_str   = stl.scale.name if stl.scale else ""
+                scale_str   = ", ".join(s.name for s in stl.scales)
                 presupports = stl.presupports or ""
                 warning     = stl.warning or ""
                 description = stl.description or ""
