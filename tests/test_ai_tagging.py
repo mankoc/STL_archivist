@@ -10,8 +10,41 @@ from app.utils.ai_tagging import (
     clean_tags,
     dedupe_words,
     format_known_meta,
+    is_corrupted_output,
     split_cumulative_tags,
 )
+
+
+# --- is_corrupted_output ---------------------------------------------------
+
+def test_is_corrupted_output_detects_many_question_marks():
+    assert is_corrupted_output("??? ??? ??? ???") is True
+    assert is_corrupted_output("?? ?? ?? ?? ?? ??") is True
+
+
+def test_is_corrupted_output_ignores_few_question_marks():
+    assert is_corrupted_output("dragon? fantasy? magic?") is False
+    assert is_corrupted_output("What is this?") is False
+
+
+def test_is_corrupted_output_detects_mostly_garbage():
+    assert is_corrupted_output("\x00\x01\x02\x03\x04") is True
+    assert is_corrupted_output("███████████") is True
+
+
+def test_is_corrupted_output_handles_valid_output():
+    assert is_corrupted_output("dragon, fantasy, medieval") is False
+    assert is_corrupted_output("warrior in armor with sword") is False
+
+
+def test_is_corrupted_output_empty_or_too_short():
+    assert is_corrupted_output("") is False
+    assert is_corrupted_output("a") is False
+    assert is_corrupted_output("ab") is False
+
+
+def test_is_corrupted_output_mixed_corruption():
+    assert is_corrupted_output("dragon ????????? magic ???????") is True
 
 
 # --- dedupe_words ----------------------------------------------------------

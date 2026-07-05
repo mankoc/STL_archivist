@@ -59,31 +59,59 @@ def _generate_suggestions(
     so callers can stream them to the UI. Raises ``RuntimeError`` (with a
     user-facing message) if the AI components are not installed or the server
     cannot be started.
+
+    If the model output is detected as corrupted (mostly question marks or garbage),
+    the server is restarted and inference is retried once.
     """
     from app.utils import ai_server
     from app.ui.config_dialog import get_ai_temperature
+    from app.utils.ai_tagging import is_corrupted_output
 
     temperature = get_ai_temperature()
 
     # Starts llama-server (loading the model) on first use; reused afterwards.
     ai_server.ensure_running(status_cb)
 
-    if status_cb:
-        status_cb("Generating tags…", "#f59e0b")
-    raw_tags = ai_server.chat(
-        image_bytes_list, _build_tags_prompt(stems, archive_path, known_meta),
-        max_tokens=120, temperature=temperature,
-    )
-    tags = _clean_tags(raw_tags, max_tags)
-    if on_tags:
-        on_tags(tags)
+    max_retries = 1
+    for attempt in range(max_retries + 1):
+        if status_cb:
+            status_cb("Generating tags…", "#f59e0b")
+        raw_tags = ai_server.chat(
+            image_bytes_list, _build_tags_prompt(stems, archive_path, known_meta),
+            max_tokens=120, temperature=temperature,
+        )
+
+        # Check if tags are corrupted; if so and we have retries left, restart and retry
+        if is_corrupted_output(raw_tags) and attempt < max_retries:
+            if status_cb:
+                status_cb("Model in bad state — reloading…", "#f59e0b")
+            ai_server.stop()
+            ai_server.ensure_running(status_cb)
+            continue
+
+        tags = _clean_tags(raw_tags, max_tags)
+        if on_tags:
+            on_tags(tags)
+        break
 
     if status_cb:
         status_cb("Extracting metadata…", "#f59e0b")
-    raw_meta = ai_server.chat(
-        image_bytes_list, _build_meta_prompt(archive_path, known_meta),
-        max_tokens=200, temperature=temperature,
-    )
+
+    for attempt in range(max_retries + 1):
+        raw_meta = ai_server.chat(
+            image_bytes_list, _build_meta_prompt(archive_path, known_meta),
+            max_tokens=200, temperature=temperature,
+        )
+
+        # Check if metadata is corrupted; if so and we have retries left, restart and retry
+        if is_corrupted_output(raw_meta) and attempt < max_retries:
+            if status_cb:
+                status_cb("Model in bad state — reloading…", "#f59e0b")
+            ai_server.stop()
+            ai_server.ensure_running(status_cb)
+            continue
+        break
+
     meta: dict[str, str] = {}
     for line in raw_meta.splitlines():
         if ":" in line:

@@ -71,6 +71,11 @@ class TagEditorDialog(QDialog):
         delete_btn.clicked.connect(self._delete_tag)
         btn_row.addWidget(delete_btn)
 
+        clear_unused_btn = QPushButton(self.tr("Clear Unused…"))
+        clear_unused_btn.setToolTip(self.tr("Delete all tags with 0 models"))
+        clear_unused_btn.clicked.connect(self._clear_unused_tags)
+        btn_row.addWidget(clear_unused_btn)
+
         merge_btn = QPushButton(self.tr("Merge Similar…"))
         merge_btn.clicked.connect(self._merge_similar)
         btn_row.addWidget(merge_btn)
@@ -206,6 +211,39 @@ class TagEditorDialog(QDialog):
         with session_scope() as session:
             tag = session.get(Tag, tag_id)
             session.delete(tag)
+        self._load()
+
+    def _clear_unused_tags(self) -> None:
+        """Delete all tags with 0 models after user confirmation."""
+        session = get_session()
+        try:
+            unused_tags = session.query(Tag).filter(
+                ~Tag.models.any()
+            ).all()
+            unused_count = len(unused_tags)
+        finally:
+            session.close()
+
+        if unused_count == 0:
+            QMessageBox.information(
+                self, self.tr("Clear Unused Tags"),
+                self.tr("No unused tags found.")
+            )
+            return
+
+        reply = QMessageBox.question(
+            self, self.tr("Clear Unused Tags"),
+            self.tr(f"Delete {unused_count} tag(s) with 0 models?"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        with session_scope() as session:
+            session.query(Tag).filter(
+                ~Tag.models.any()
+            ).delete()
         self._load()
 
     def _merge_similar(self) -> None:
