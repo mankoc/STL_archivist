@@ -506,6 +506,7 @@ HOTKEY_DEFAULTS: dict[str, str] = {
     "open_crawler":    "Ctrl+O",
     "update_folders":  "Ctrl+Shift+R",
     "find_duplicates": "Ctrl+D",
+    "archive_browser": "Ctrl+B",
 }
 
 # Values are marked with QT_TRANSLATE_NOOP so pylupdate6 extracts them; they are
@@ -523,6 +524,7 @@ HOTKEY_LABELS: dict[str, str] = {
     "open_crawler":    QT_TRANSLATE_NOOP("config_dialog", "Open Crawler"),
     "update_folders":  QT_TRANSLATE_NOOP("config_dialog", "Update crawled folders"),
     "find_duplicates": QT_TRANSLATE_NOOP("config_dialog", "Find metadata duplicates"),
+    "archive_browser": QT_TRANSLATE_NOOP("config_dialog", "Archive image browser"),
 }
 
 
