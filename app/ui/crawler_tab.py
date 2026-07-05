@@ -15,10 +15,8 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView,
 )
 from PyQt6.QtGui import QIcon, QCursor, QBrush, QColor
-from pathlib import Path as _Path
 
-_ICONS_DIR = _Path(__file__).parent.parent.parent / "resources" / "icons"
-
+from app.utils.material_icons import lookup_icon
 from app.ui.config_dialog import get_max_thumbnails
 from app.ui.settings_loader import build_crawler_config
 from app.utils.path_pattern import parse_path, PATTERN_HELP, ATTR_LABEL
@@ -349,11 +347,10 @@ class CrawlerTab(QWidget):
 
         # --- Control buttons ---
         from app.ui.config_dialog import get_color_scheme as _get_cs
-        _v = "light" if "light" in _get_cs().lower() else "dark"
+        _is_dark = "dark" in _get_cs().lower()
 
         def _icon(name: str) -> QIcon:
-            p = _ICONS_DIR / f"{name}_{_v}.svg"
-            return QIcon(str(p)) if p.exists() else QIcon()
+            return lookup_icon(name, is_dark_mode=_is_dark)
 
         btn_row = QHBoxLayout()
         self._start_btn = QPushButton(_icon("crawler_start"), self.tr("Start Crawl"))

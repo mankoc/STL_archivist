@@ -7,8 +7,7 @@ Right-click or double-click: Edit Model.
 """
 from pathlib import Path as FSPath, Path
 
-_ICONS_DIR = FSPath(__file__).parent.parent.parent / "resources" / "icons"
-
+from app.utils.material_icons import lookup_icon
 from PyQt6.QtCore import Qt, QSortFilterProxyModel, QSize, QStringListModel, QEvent, pyqtSignal, QItemSelection, QTimer, QThread, QThreadPool, QRunnable, QRect, QPointF, QRectF, QUrl, QObject, QAbstractTableModel, QModelIndex
 from PyQt6.QtGui import QStandardItemModel, QStandardItem, QPixmap, QPixmapCache, QIcon, QKeySequence, QShortcut, QColor, QFont, QPainter, QPen, QDesktopServices
 from PyQt6.QtWidgets import (
@@ -2167,11 +2166,10 @@ class BrowserTab(QWidget):
                 self._cached_sorted_dirs  = payload["sorted_dirs"]
 
         from app.ui.config_dialog import get_color_scheme as _get_cs
-        _v = "light" if "light" in _get_cs().lower() else "dark"
+        _is_dark = "dark" in _get_cs().lower()
 
         def _icon(name: str):
-            p = _ICONS_DIR / f"{name}_{_v}.svg"
-            return QIcon(str(p)) if p.exists() else QIcon()
+            return lookup_icon(name, is_dark_mode=_is_dark)
 
         _icon_author      = _icon("icon_author")
         _icon_tag         = _icon("icon_tag")

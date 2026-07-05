@@ -1,8 +1,6 @@
 """
 Main application window — menu bar, toolbar, browser.
 """
-from pathlib import Path as _Path
-
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QAction, QKeySequence, QIcon
 from PyQt6.QtWidgets import (
@@ -11,8 +9,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.ui.browser_tab import BrowserTab
-
-_ICONS_DIR = _Path(__file__).parent.parent.parent / "resources" / "icons"
+from app.utils.material_icons import lookup_icon
 
 
 class MainWindow(QMainWindow):
@@ -43,11 +40,10 @@ class MainWindow(QMainWindow):
 
         # ---- Actions ----
         from app.ui.config_dialog import get_color_scheme as _get_cs
-        _v = "light" if "light" in _get_cs().lower() else "dark"
+        _is_dark = "dark" in _get_cs().lower()
 
         def _icon(name: str) -> QIcon:
-            p = _ICONS_DIR / f"{name}_{_v}.svg"
-            return QIcon(str(p)) if p.exists() else QIcon()
+            return lookup_icon(name, is_dark_mode=_is_dark)
 
         from app.ui.config_dialog import get_hotkeys as _get_hotkeys
         _hk = _get_hotkeys()
