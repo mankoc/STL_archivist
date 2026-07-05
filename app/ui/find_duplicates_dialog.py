@@ -37,7 +37,7 @@ _COLUMNS = [
     ("Subcollection",  "subcollection.name"),
     ("Category",       "category.name"),
     ("Release",        "release.name"),
-    ("Scale",          "scale.name"),
+    ("Scale",          "scales.name"),
 ]
 
 _COL_GROUP  = 0
@@ -54,6 +54,10 @@ def _resolve(obj, chain: str) -> str:
     val = getattr(obj, parts[0], None)
     if val is None:
         return ""
+    if isinstance(val, (list, set)):
+        # Relationship collection (e.g. scales) — join the sub-attribute values.
+        sub = parts[1] if len(parts) == 2 else "name"
+        return ", ".join(sorted(str(getattr(x, sub, x) or "") for x in val))
     if len(parts) == 2:
         return str(getattr(val, parts[1], "") or "")
     return str(val)
@@ -76,7 +80,7 @@ class _SearchWorker(QThread):
         self._stop = True
 
     def run(self) -> None:
-        from sqlalchemy.orm import joinedload
+        from sqlalchemy.orm import joinedload, selectinload
 
         from app.database.db import get_session
         from app.database.models import STLModel
@@ -91,7 +95,7 @@ class _SearchWorker(QThread):
                     joinedload(STLModel.subcollection),
                     joinedload(STLModel.category),
                     joinedload(STLModel.release),
-                    joinedload(STLModel.scale),
+                    selectinload(STLModel.scales),
                 )
                 .all()
             )

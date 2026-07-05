@@ -77,6 +77,7 @@ def _encode_payload(payload: dict) -> str:
         "scales":      payload.get("scales") or [],
         "presupports": payload.get("presupports") or [],
         "sorted_dirs": payload.get("sorted_dirs") or [],
+        "folder_tree": payload.get("folder_tree") or [],
     }
     return json.dumps(cacheable, ensure_ascii=False)
 
@@ -102,6 +103,7 @@ def _decode_payload(raw: str) -> dict:
         "scales":        [tuple(s) for s in (data.get("scales") or [])],
         "presupports":   data.get("presupports") or [],
         "sorted_dirs":   sorted_dirs,
+        "folder_tree":   data.get("folder_tree") or [],
         # Provide new_dirs_frozen so the path-cache logic in the worker stays intact
         "new_dirs_frozen": frozenset(sorted_dirs),
         # Scoped fields are empty — will be filled by live queries when filters are active
@@ -109,6 +111,56 @@ def _decode_payload(raw: str) -> dict:
         "sc_path_counts":  None,
         "scoped_dirs":     None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Folder tree helpers
+# ---------------------------------------------------------------------------
+
+def build_folder_tree(folders: list[str]) -> list[dict]:
+    """Build a hierarchical tree structure from a flat list of folder paths.
+
+    Returns a list of root nodes, each with 'name', 'path', and 'children' keys.
+    """
+    root_nodes = {}
+    all_nodes = {}
+
+    for folder in folders:
+        if not folder:
+            continue
+
+        # Normalize path separators
+        folder = folder.replace("\\", "/")
+        parts = folder.split("/")
+
+        current_path = ""
+        parent_node = None
+
+        for part in parts:
+            if not part:
+                continue
+
+            current_path = current_path + "/" + part if current_path else part
+            key = current_path.lower()
+
+            if key not in all_nodes:
+                node = {
+                    "name": part,
+                    "path": current_path,
+                    "children": [],
+                }
+                all_nodes[key] = node
+
+                if parent_node is None:
+                    root_nodes[key] = node
+                else:
+                    parent_node["children"].append(node)
+            else:
+                node = all_nodes[key]
+
+            parent_node = node
+
+    return list(root_nodes.values())
 
 
 # ---------------------------------------------------------------------------
@@ -166,3 +218,19 @@ def invalidate_filter_cache() -> None:
         logger.debug("Filter cache invalidated.")
     except Exception as exc:
         logger.warning("Failed to invalidate filter cache: %s", exc)
+
+
+def get_folder_tree() -> Optional[list[dict]]:
+    """Load the folder tree from cache, or None if not available.
+
+    Returns a list of root nodes, each with 'name', 'path', and 'children' keys.
+    """
+    cached_payload = load_filter_cache()
+    if cached_payload is None:
+        return None
+
+    folder_tree = cached_payload.get("folder_tree")
+    if not folder_tree:
+        return None
+
+    return folder_tree

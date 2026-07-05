@@ -23,6 +23,7 @@ folder_has_db_records(folder, session)
 import io
 import json
 import logging
+import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -103,10 +104,13 @@ def export_folder_metadata(
     folder = Path(folder)
     thumb_base_dir = Path(thumb_base_dir)
 
-    # Collect all STLModel records whose archive file lives directly in folder
+    # Collect all STLModel records whose archive file lives directly in folder.
+    # archive_path is stored with OS-native separators, so the LIKE prefilter must
+    # use os.sep too (a hardcoded "/" never matches backslash paths on Windows);
+    # the exact parent check below is authoritative.
     all_models = (
         session.query(STLModel)
-        .filter(STLModel.archive_path.like(str(folder) + "/%"))
+        .filter(STLModel.archive_path.like(str(folder) + os.sep + "%"))
         .all()
     )
     models = [m for m in all_models if Path(m.archive_path).parent == folder]
@@ -310,7 +314,7 @@ def _serialize_models(models: list, thumb_base_dir: Path, include_thumbnails: bo
             "subcollection": model.subcollection.name if model.subcollection else None,
             "category":      model.category.name     if model.category     else None,
             "release":       model.release.name      if model.release      else None,
-            "scale":         model.scale.name        if model.scale        else None,
+            "scales":        [s.name for s in model.scales],
             "tags":          [t.name for t in model.tags],
             "images":        images_list,
             "stl_files":     [
@@ -464,6 +468,11 @@ def _restore_fk(session: Session, model, model_data: dict) -> None:
     if release_name:
         model.release = get_or_create_release(session, release_name)
 
-    scale_name = model_data.get("scale")
-    if scale_name:
-        model.scale = get_or_create_scale(session, scale_name)
+    # Scale is many-to-many; read the new "scales" list and fall back to the
+    # legacy single "scale" key for sidecars written before multi-scale support.
+    scale_names = model_data.get("scales")
+    if scale_names is None:
+        _legacy = model_data.get("scale")
+        scale_names = [_legacy] if _legacy else []
+    if scale_names:
+        model.scales = [get_or_create_scale(session, s) for s in scale_names if s]

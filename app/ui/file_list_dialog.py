@@ -2,7 +2,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView,
-    QPushButton, QHBoxLayout, QSplitter, QLabel, QComboBox
+    QPushButton, QHBoxLayout, QLabel, QComboBox
 )
 
 from app.ui.config_dialog import get_match_highlight_color

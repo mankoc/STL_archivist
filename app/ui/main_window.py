@@ -25,6 +25,22 @@ class MainWindow(QMainWindow):
         self._build_ui()
 
     # ------------------------------------------------------------------
+    def closeEvent(self, event) -> None:
+        """Shut the local AI model server (llama-server) down on app close.
+
+        The AI Tagging dialog already stops the server when it closes, and
+        ``ai_server`` registers an ``atexit`` handler, but ``atexit`` can be
+        skipped on a hard exit — so stop it here too to make sure the
+        subprocess never lingers after the window is closed.
+        """
+        try:
+            from app.utils import ai_server
+            ai_server.stop()
+        except Exception:
+            pass
+        super().closeEvent(event)
+
+    # ------------------------------------------------------------------
     def _build_ui(self) -> None:
         style = QApplication.style()
         SP    = style.StandardPixmap
@@ -110,6 +126,19 @@ class MainWindow(QMainWindow):
         self._act_help.setStatusTip(self.tr("Open the help page"))
         self._act_help.triggered.connect(self._show_help)
 
+        self._act_ai_tagging = QAction(
+            _icon("icon_tag"), self.tr("AI Tagging"), self)
+        self._act_ai_tagging.setStatusTip(
+            self.tr("Run AI tagging on the models selected in the table"))
+        self._act_ai_tagging.triggered.connect(self._browser.open_ai_tagger_for_selection)
+
+        self._act_archive_browser = QAction(
+            _icon("image_grid"), self.tr("Image Browsing"), self)
+        self._act_archive_browser.setShortcut(QKeySequence(_hk["archive_browser"]))
+        self._act_archive_browser.setStatusTip(
+            self.tr("Browse and view images organized by crawled directory"))
+        self._act_archive_browser.triggered.connect(self._open_archive_browser)
+
         # ---- Menu bar ----
         mb = self.menuBar()
 
@@ -129,6 +158,7 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self._act_toggle_images)
         view_menu.addAction(self._act_toggle_info)
         view_menu.addAction(self._act_image_grid)
+        view_menu.addAction(self._act_archive_browser)
 
         tools_menu = mb.addMenu("&Tools")
         self._act_gen_metadata = QAction(
@@ -152,6 +182,8 @@ class MainWindow(QMainWindow):
         )
         act_gen_thumbs.triggered.connect(self._browser.generate_thumbnails_for_selected)
         tools_menu.addAction(act_gen_thumbs)
+
+        tools_menu.addAction(self._act_ai_tagging)
 
         tools_menu.addSeparator()
 
@@ -265,7 +297,10 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self._act_find_content_dupes)
         toolbar.addAction(self._act_find_by_image)
         toolbar.addSeparator()
+        toolbar.addAction(self._act_ai_tagging)
+        toolbar.addSeparator()
         toolbar.addAction(self._act_image_grid)
+        toolbar.addAction(self._act_archive_browser)
         toolbar.addAction(self._act_toggle_images)
         toolbar.addAction(self._act_toggle_info)
 
@@ -545,6 +580,17 @@ class MainWindow(QMainWindow):
         dlg.activateWindow()
         dlg.show()
 
+    def _open_archive_browser(self) -> None:
+        """Open the archive image browser dialog (non-modal)."""
+        from app.ui.archive_browser_dialog import ArchiveBrowserDialog
+        dlg = getattr(self, "_archive_browser_dlg", None)
+        if dlg is None or not dlg.isVisible():
+            dlg = ArchiveBrowserDialog(parent=self)
+            self._archive_browser_dlg = dlg
+        dlg.raise_()
+        dlg.activateWindow()
+        dlg.show()
+
     def _open_db_maintenance_dialog(self) -> None:
         """Open the database maintenance dialog."""
         from app.ui.db_maintenance_dialog import DbMaintenanceDialog
@@ -568,10 +614,13 @@ class MainWindow(QMainWindow):
         ColumnStatsDialog(parent=self).exec()
 
     def _apply_debug_menu_visibility(self) -> None:
-        """Show or hide the Debug menu and sidecar action based on current settings."""
-        from app.ui.config_dialog import get_debug_menu_enabled, get_metadata_sidecar_enabled
+        """Show or hide settings-driven actions based on current configuration."""
+        from app.ui.config_dialog import (
+            get_debug_menu_enabled, get_metadata_sidecar_enabled, get_ai_tagging_enabled,
+        )
         self._debug_menu.menuAction().setVisible(get_debug_menu_enabled())
         self._act_gen_metadata.setVisible(get_metadata_sidecar_enabled())
+        self._act_ai_tagging.setVisible(get_ai_tagging_enabled())
 
     def _clear_database(self) -> None:
         reply = QMessageBox.warning(

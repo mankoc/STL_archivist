@@ -63,6 +63,12 @@ def _play_beep() -> None:
 
 
 def _play_file(path: str) -> None:
+    """Play *path* via the first available backend.
+
+    Fallback cascade: ``winsound`` (Windows) → ``QSoundEffect`` (QtMultimedia,
+    cross-platform) → subprocess players (``paplay``/``aplay``/``afplay`` on
+    Linux/macOS) → ``QApplication.beep()`` as a last resort.
+    """
     global _current_effect
     if sys.platform == "win32":
         try:

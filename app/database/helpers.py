@@ -162,7 +162,6 @@ def prune_unused_lookups(session: Session) -> dict[str, int]:
         ("sculptors",  Sculptor, STLModel.sculptor_id),
         ("categories", Category, STLModel.category_id),
         ("releases",   Release,  STLModel.release_id),
-        ("scales",     Scale,    STLModel.scale_id),
     ]:
         used = select(fk_attr).where(fk_attr.isnot(None)).scalar_subquery()
         orphans = session.query(cls).filter(cls.id.not_in(used)).all()
@@ -171,6 +170,16 @@ def prune_unused_lookups(session: Session) -> dict[str, int]:
         if orphans:
             deleted[label] = len(orphans)
             session.flush()
+
+    # 4. Scales are many-to-many (model_scales); prune any not referenced there.
+    from app.database.models import model_scales
+    used_scales = select(model_scales.c.scale_id).scalar_subquery()
+    orphan_scales = session.query(Scale).filter(Scale.id.not_in(used_scales)).all()
+    for row in orphan_scales:
+        session.delete(row)
+    if orphan_scales:
+        deleted["scales"] = len(orphan_scales)
+        session.flush()
 
     return deleted
 
