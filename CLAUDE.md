@@ -32,7 +32,8 @@ stl_database/
 │   ├── icon.ico             # Multi-size ICO (16–256 px) used as the window icon
 │   ├── icon.png             # 256 × 256 PNG for packaging / taskbar
 │   ├── icon.svg             # Scalable vector version
-│   └── icons/               # Toolbar / tree-view SVG icon set (light + dark variants)
+│   ├── icons/               # Toolbar / tree-view SVG icon set (light + dark variants)
+│   └── material-icons/      # Cached Material Design Icons (pre-downloaded for offline use)
 └── tests/                   # pytest test suite
 ```
 
@@ -84,6 +85,9 @@ request it from the existing loader/cache layers (`ThumbnailLoaderWorker`, `_Fil
 - **`thumbnailer.py`** — LMDB key-value store for JPEG thumbnails (keyed by `Image.id`).
   Key API: `save_thumbnail(bytes, image_id)` resizes and writes; `pixmap_from_path(str)` reads
   back a `QPixmap`; `delete_thumbnail(id)` removes an entry.
+- **`material_icons.py`** — Material Design Icons integration. Maps application icon names to
+  Material Icon symbols and caches them locally. Automatically applies light/dark theme coloring.
+  Entry point: `lookup_icon(app_icon_name, is_dark_mode)`. Icons are pre-cached via `setup_material_icons.py`.
 - **`path_pattern.py`** — parses structured folder paths using `{sculptor}/{release}/{title}`
   syntax and maps extracted values onto ORM model fields.
 - **`string_utils.py`** — Levenshtein distance and Soundex (used for fuzzy name matching).

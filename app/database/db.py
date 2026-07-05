@@ -250,8 +250,9 @@ def _ensure_views(engine) -> None:
     be dropped and recreated; bump this function to handle that migration.
     """
     with engine.begin() as conn:
+        conn.execute(text("DROP VIEW IF EXISTS models_view"))
         conn.execute(text("""
-            CREATE VIEW IF NOT EXISTS models_view AS
+            CREATE VIEW models_view AS
             SELECT
                 m.id, m.title, m.creator, m.source,
                 m.release_year, m.release_month,
