@@ -1533,7 +1533,7 @@ class BrowserTab(QWidget):
             rows.append(_row("Description", description))
 
         body = "".join(r for r in rows if r)
-        html = f"<table style='font-size:small'>{body}</table>"
+        html = f"<table style='font-size:120%'>{body}</table>"
         self._info_lbl.setText(html)
         self._creator_panel.setVisible(self._info_pane_enabled)
 
