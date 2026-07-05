@@ -77,7 +77,8 @@ def _parse_info_json(raw: bytes) -> dict:
     """
     try:
         return json.loads(raw.decode("utf-8", errors="replace"))
-    except Exception:
+    except (json.JSONDecodeError, ValueError) as exc:
+        logger.warning("Failed to parse info.json: %s", exc)
         return {}
 
 

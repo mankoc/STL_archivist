@@ -28,6 +28,7 @@ UNRAR_TOOL_KEY         = "config/unrar_tool"
 MAX_THUMBS_DEFAULT      = 5
 MAX_THUMB_SIZE_DEFAULT  = 512
 THUMB_PAGE_SIZE_DEFAULT = 200
+AI_TEMPERATURE_DEFAULT  = 0.2
 
 # ── File manager presets ──────────────────────────────────────────────────────
 FILE_MANAGER_SYSTEM           = "system"
@@ -442,6 +443,15 @@ def get_filter_alpha_threshold() -> int:
     return int(_load_library_settings().get("filter_alpha_threshold", 50))
 
 
+def get_ai_tagging_enabled() -> bool:
+    """Whether the AI Tagging feature is enabled at all.
+
+    When ``False`` the AI Tagging action is hidden from the toolbar, Tools
+    menu, and the table's right-click menu.
+    """
+    return bool(_load_library_settings().get("ai_tagging_enabled", True))
+
+
 def get_ai_embeddings_enabled() -> bool:
     """Whether AI image embeddings (CLIP) are enabled for image similarity search."""
     return bool(_load_library_settings().get("ai_embeddings_enabled", True))
@@ -455,6 +465,16 @@ def get_ai_embeddings_during_crawl() -> bool:
 def get_ai_embeddings_batch_size() -> int:
     """Number of images per CLIP inference call (higher = better GPU utilisation)."""
     return int(_load_library_settings().get("ai_embeddings_batch_size", 32))
+
+
+def get_ai_temperature() -> float:
+    """Sampling temperature for the AI tagging model.
+
+    Lower values (0.0–0.2) keep tags/metadata literal and grounded in the
+    images; higher values make the model more creative but more prone to
+    hallucinated, by-association results.
+    """
+    return float(_load_library_settings().get("ai_temperature", AI_TEMPERATURE_DEFAULT))
 
 
 def get_file_manager() -> str:
@@ -486,6 +506,7 @@ HOTKEY_DEFAULTS: dict[str, str] = {
     "open_crawler":    "Ctrl+O",
     "update_folders":  "Ctrl+Shift+R",
     "find_duplicates": "Ctrl+D",
+    "archive_browser": "Ctrl+B",
 }
 
 # Values are marked with QT_TRANSLATE_NOOP so pylupdate6 extracts them; they are
@@ -503,6 +524,7 @@ HOTKEY_LABELS: dict[str, str] = {
     "open_crawler":    QT_TRANSLATE_NOOP("config_dialog", "Open Crawler"),
     "update_folders":  QT_TRANSLATE_NOOP("config_dialog", "Update crawled folders"),
     "find_duplicates": QT_TRANSLATE_NOOP("config_dialog", "Find metadata duplicates"),
+    "archive_browser": QT_TRANSLATE_NOOP("config_dialog", "Archive image browser"),
 }
 
 
@@ -736,6 +758,7 @@ class ConfigDialog(QDialog):
         # Page indices must match the order pages are added to self._stack below.
         # 0=Database  1=Crawler  2=Warnings(child)  3=File writing  4=Appearance
         # 5=Sidecar(child)  6=Debug  7=Browser  8=Hotkeys  9=Language  10=Notifications
+        # 11=AI
         self._section_tree = QTreeWidget()
         self._section_tree.setFixedWidth(155)
         self._section_tree.setHeaderHidden(True)
@@ -758,6 +781,7 @@ class ConfigDialog(QDialog):
         fw_item = _item(self._section_tree, self.tr("File writing"), sp.SP_DesktopIcon,   3)
         _item(fw_item,                 self.tr("Sidecar"),   sp.SP_DialogSaveButton,       5)
         _item(self._section_tree, self.tr("Browser"),       sp.SP_FileDialogListView,      7)
+        _item(self._section_tree, self.tr("AI"),            sp.SP_FileDialogContentsView, 11)
         _item(self._section_tree, self.tr("Appearance"),    sp.SP_TitleBarNormalButton,    4)
         _item(self._section_tree, self.tr("Hotkeys"),       sp.SP_MediaVolumeMuted,        8)
         _item(self._section_tree, self.tr("Notifications"), sp.SP_MediaVolume,            10)
@@ -787,6 +811,7 @@ class ConfigDialog(QDialog):
         self._stack.addWidget(self._build_hotkeys_page())         # 8
         self._stack.addWidget(self._build_language_page())        # 9
         self._stack.addWidget(self._build_notifications_page())   # 10
+        self._stack.addWidget(self._build_ai_page())              # 11
 
         self._section_tree.setCurrentItem(
             self._section_tree.topLevelItem(0)
@@ -1104,21 +1129,6 @@ class ConfigDialog(QDialog):
             ),
         )
 
-        self._embed_search_batch_spin = QSpinBox()
-        self._embed_search_batch_spin.setRange(100, 10000)
-        self._embed_search_batch_spin.setSingleStep(100)
-        self._embed_search_batch_spin.setSuffix(self.tr(" rows"))
-        form.addRow(self.tr("Embedding search batch:"), self._embed_search_batch_spin)
-        form.addRow(
-            "",
-            QLabel(
-                self.tr("<small>Number of image embeddings scored per batch during "
-                "<i>Find by Image</i> (CLIP). "
-                "Lower values use less RAM; higher values improve BLAS throughput. "
-                "Default: 1000.</small>")
-            ),
-        )
-
         layout.addWidget(group)
         layout.addStretch()
         return page
@@ -1218,8 +1228,53 @@ class ConfigDialog(QDialog):
         img_form.addRow(self.tr("Paginate above:"), self._thumb_page_size_spin)
 
         layout.addWidget(img_group)
+        layout.addStretch()
+        return page
 
-        sim_group = QGroupBox(self.tr("Image similarity"))
+    def _build_ai_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+
+        # ── Master toggle ────────────────────────────────────────────────
+        self._ai_tagging_check = QCheckBox(self.tr("Enable AI tagging"))
+        self._ai_tagging_check.setToolTip(self.tr(
+            "Enable the AI Tagging feature. When disabled, the AI Tagging action "
+            "is hidden from the toolbar, the Tools menu, and the table's "
+            "right-click menu."
+        ))
+        self._ai_tagging_check.toggled.connect(self._update_ai_tagging_enabled)
+        layout.addWidget(self._ai_tagging_check)
+        layout.addWidget(
+            QLabel(self.tr("<small>Generate tags and metadata from a model's images using a "
+                   "local vision-language model (Qwen2.5-VL via llama-server). "
+                   "Disable to hide the feature entirely.</small>"))
+        )
+
+        # ── AI Tagging settings ──────────────────────────────────────────
+        self._ai_tag_group = QGroupBox(self.tr("AI Tagging"))
+        ai_tag_form = QFormLayout(self._ai_tag_group)
+
+        self._ai_temperature_spin = QDoubleSpinBox()
+        self._ai_temperature_spin.setRange(0.0, 2.0)
+        self._ai_temperature_spin.setSingleStep(0.05)
+        self._ai_temperature_spin.setDecimals(2)
+        self._ai_temperature_spin.setToolTip(self.tr(
+            "Sampling temperature passed to the AI tagging model. "
+            "Lower values (0.0–0.2) make tags and metadata more literal and "
+            "grounded in the images; higher values make the model more creative "
+            "but more prone to hallucinated, by-association results."
+        ))
+        ai_tag_form.addRow(self.tr("Model temperature:"), self._ai_temperature_spin)
+        ai_tag_form.addRow(
+            "",
+            QLabel(self.tr("<small>Used when generating tags and metadata in the AI Tagging dialog. "
+                   "Default: 0.2.</small>")),
+        )
+
+        layout.addWidget(self._ai_tag_group)
+
+        # ── Image similarity (embeddings) ────────────────────────────────
+        sim_group = QGroupBox(self.tr("Image similarity (embeddings)"))
         sim_form = QFormLayout(sim_group)
 
         self._ai_embeddings_check = QCheckBox(self.tr("Enable AI image embeddings (CLIP)"))
@@ -1246,6 +1301,17 @@ class ConfigDialog(QDialog):
             "Reduce if you get out-of-memory errors."
         ))
         sim_form.addRow(self.tr("Batch size:"), self._ai_batch_size_spin)
+
+        self._embed_search_batch_spin = QSpinBox()
+        self._embed_search_batch_spin.setRange(100, 10000)
+        self._embed_search_batch_spin.setSingleStep(100)
+        self._embed_search_batch_spin.setSuffix(self.tr(" rows"))
+        self._embed_search_batch_spin.setToolTip(self.tr(
+            "Number of image embeddings scored per batch during Find by Image (CLIP). "
+            "Lower values use less RAM; higher values improve BLAS throughput. "
+            "Default: 1000."
+        ))
+        sim_form.addRow(self.tr("Search batch:"), self._embed_search_batch_spin)
 
         from app.utils import image_embedding as _emb
         self._clip_model_present = _emb.is_available()
@@ -1274,6 +1340,9 @@ class ConfigDialog(QDialog):
         layout.addWidget(sim_group)
         layout.addStretch()
         return page
+
+    def _update_ai_tagging_enabled(self, enabled: bool) -> None:
+        self._ai_tag_group.setEnabled(enabled)
 
     def _refresh_clip_dl_button(self) -> None:
         from app.utils import image_embedding as _emb
@@ -1964,12 +2033,17 @@ class ConfigDialog(QDialog):
         self._file_manager_path_edit.setText(get_file_manager_path())
         self._update_file_manager_path_visibility()
         self._thumb_page_size_spin.setValue(get_thumb_page_size())
+        ai_tagging_enabled = get_ai_tagging_enabled()
+        self._ai_tagging_check.setChecked(ai_tagging_enabled)
+        self._ai_tag_group.setEnabled(ai_tagging_enabled)
         ai_embed_enabled = get_ai_embeddings_enabled()
         self._ai_embeddings_check.setChecked(ai_embed_enabled)
         self._ai_embeddings_crawl_check.setChecked(get_ai_embeddings_during_crawl())
         self._ai_embeddings_crawl_check.setEnabled(ai_embed_enabled)
         self._ai_batch_size_spin.setValue(get_ai_embeddings_batch_size())
         self._ai_batch_size_spin.setEnabled(ai_embed_enabled)
+        self._ai_temperature_spin.setValue(get_ai_temperature())
+        self._embed_search_batch_spin.setValue(get_embed_search_batch_size())
         self._refresh_clip_dl_button()
 
         self._notif_enabled_check.setChecked(get_notifications_enabled())
@@ -1985,7 +2059,6 @@ class ConfigDialog(QDialog):
 
         self._debug_menu_check.setChecked(get_debug_menu_enabled())
         self._logging_enabled_check.setChecked(get_logging_enabled())
-        self._embed_search_batch_spin.setValue(get_embed_search_batch_size())
         from PyQt6.QtCore import QSettings as _QSettings
         self._sql_profiling_check.setChecked(
             _QSettings().value("debug/sql_profiling", False, type=bool)
@@ -2057,9 +2130,11 @@ class ConfigDialog(QDialog):
                 "file_manager":       self._file_manager_combo.currentData(),
                 "file_manager_path":  self._file_manager_path_edit.text().strip(),
                 "thumb_page_size":    self._thumb_page_size_spin.value(),
+                "ai_tagging_enabled":         self._ai_tagging_check.isChecked(),
                 "ai_embeddings_enabled":      self._ai_embeddings_check.isChecked(),
                 "ai_embeddings_during_crawl": self._ai_embeddings_crawl_check.isChecked(),
                 "ai_embeddings_batch_size":   self._ai_batch_size_spin.value(),
+                "ai_temperature":             self._ai_temperature_spin.value(),
                 "hotkeys": {
                     action_id: editor.keySequence().toString()
                     for action_id, editor in self._hotkey_edits.items()

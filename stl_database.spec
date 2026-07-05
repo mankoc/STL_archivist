@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_dynamic_libs
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 block_cipher = None
 
@@ -7,10 +7,6 @@ datas = [
     ('resources', 'resources'),
 ]
 datas += collect_data_files('qt_material')
-datas += collect_data_files('onnxruntime')
-
-# Bundle the onnxruntime native DLLs (includes DirectML provider on Windows).
-binaries = collect_dynamic_libs('onnxruntime')
 
 hiddenimports = [
     'sqlalchemy.dialects.sqlite',
@@ -22,19 +18,19 @@ hiddenimports = [
     'PIL.PngImagePlugin',
     'PIL.BmpImagePlugin',
     'PIL.WebPImagePlugin',
-    'onnxruntime',
-    'onnxruntime.capi._pybind_state',
-    'onnxruntime.capi.onnxruntime_pybind11_state',
-    'numpy',
-    'numpy.core._multiarray_umath',
+    'PIL.GifImagePlugin',
+    'PIL.TiffImagePlugin',
+    # App modules
+    'app.ui.ai_tagger_dialog',
+    'app.ui.ai_setup_dialog',
+    'app.utils.ai_runtime',
 ]
 hiddenimports += collect_submodules('sqlalchemy.dialects.sqlite')
-hiddenimports += collect_submodules('onnxruntime')
 
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=binaries,
+    binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
@@ -44,7 +40,15 @@ a = Analysis(
         },
     },
     runtime_hooks=[],
-    excludes=['tkinter', 'matplotlib', 'scipy'],
+    excludes=[
+        'tkinter', 'matplotlib', 'scipy',
+        # AI tagging runs via the external llama.cpp llama-server binary
+        # (downloaded on demand) — no Python AI packages are bundled. The CLIP
+        # image-embedding feature uses onnxruntime/numpy, also downloaded.
+        'torch', 'torchvision', 'torchaudio', 'accelerate',
+        'transformers', 'tokenizers', 'qwen_vl_utils', 'optimum',
+        'onnxruntime', 'numpy',
+    ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,

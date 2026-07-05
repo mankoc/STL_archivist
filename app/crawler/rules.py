@@ -16,11 +16,15 @@ logger = logging.getLogger(__name__)
 # stem-level test for the "Presupported" classification.
 _PRESUPPORTED_RE     = re.compile(r"[_ -]supported", re.IGNORECASE)
 
-# Captures the integer in patterns like `28mm`, `32 mm`, `75_mm`.
-_SCALE_MM_RE         = re.compile(r"\b(\d+)[_ ]?mm\b", re.IGNORECASE)
+# Captures the integer in patterns like `28mm`, `32 mm`, `75_mm`, and also when
+# bounded by underscores (e.g. `Hero_32mm_Base`). `\b` can't be used because the
+# underscore is a word character, so `_32mm_` has no word boundaries — instead we
+# guard the number start with a non-digit lookbehind and the `mm` end with a
+# non-alphanumeric lookahead.
+_SCALE_MM_RE         = re.compile(r"(?<!\d)(\d+)[_ ]?mm(?![A-Za-z0-9])", re.IGNORECASE)
 
-# Captures the denominator in patterns like `1/35`, `1-72`.
-_SCALE_RATIO_RE      = re.compile(r"\b1[/\-](\d+)\b")
+# Captures the denominator in patterns like `1/35`, `1-72` (also underscore-bounded).
+_SCALE_RATIO_RE      = re.compile(r"(?<!\d)1[/\-](\d+)(?![A-Za-z0-9])")
 
 # Default patterns that identify a "supported" STL file (applied case-insensitively
 # to the bare filename of every archive member):
@@ -142,16 +146,23 @@ def detect_warnings(
 
     compiled_supports: list[re.Pattern] = []
     if check_supports:
-        patterns = supports_patterns if supports_patterns is not None else DEFAULT_SUPPORTS_PATTERNS
-        for p in patterns:
-            try:
-                compiled_supports.append(re.compile(p, re.IGNORECASE))
-            except re.error:
-                logger.warning("Invalid supports pattern %r — skipped", p)
+        if supports_patterns is None:
+            # Reuse the module-level compiled alternation of the default patterns
+            # instead of recompiling them on every call.
+            compiled_supports.append(SUPPORTED_STL_RE)
+        else:
+            for p in supports_patterns:
+                try:
+                    compiled_supports.append(re.compile(p, re.IGNORECASE))
+                except re.error:
+                    logger.warning("Invalid supports pattern %r — skipped", p)
 
     for name in names:
-        fname = Path(name.replace("\\", "/")).name
-        suffix = Path(fname).suffix.lower()
+        # Build the Path once and read both name and suffix from it; constructing
+        # Path twice per member is a measurable cost across large archives.
+        p = Path(name.replace("\\", "/"))
+        fname = p.name
+        suffix = p.suffix.lower()
         if check_no_images and suffix in IMAGE_SUFFIXES:
             has_image = True
         if check_presupported and not has_presupported:

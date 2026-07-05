@@ -33,5 +33,6 @@ def end_job(name: str) -> None:
 
 
 def active_job() -> str | None:
+    """Return the name of the currently active job, or None if idle."""
     with _lock:
         return _active_job
