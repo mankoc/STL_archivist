@@ -132,6 +132,13 @@ class MainWindow(QMainWindow):
             self.tr("Run AI tagging on the models selected in the table"))
         self._act_ai_tagging.triggered.connect(self._browser.open_ai_tagger_for_selection)
 
+        self._act_archive_browser = QAction(
+            _icon("image_grid"), self.tr("Image Browsing"), self)
+        self._act_archive_browser.setShortcut(QKeySequence(_hk["archive_browser"]))
+        self._act_archive_browser.setStatusTip(
+            self.tr("Browse and view images organized by crawled directory"))
+        self._act_archive_browser.triggered.connect(self._open_archive_browser)
+
         # ---- Menu bar ----
         mb = self.menuBar()
 
@@ -151,6 +158,7 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self._act_toggle_images)
         view_menu.addAction(self._act_toggle_info)
         view_menu.addAction(self._act_image_grid)
+        view_menu.addAction(self._act_archive_browser)
 
         tools_menu = mb.addMenu("&Tools")
         self._act_gen_metadata = QAction(
@@ -292,6 +300,7 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self._act_ai_tagging)
         toolbar.addSeparator()
         toolbar.addAction(self._act_image_grid)
+        toolbar.addAction(self._act_archive_browser)
         toolbar.addAction(self._act_toggle_images)
         toolbar.addAction(self._act_toggle_info)
 
@@ -567,6 +576,17 @@ class MainWindow(QMainWindow):
             dlg = FindByImageDialog(parent=self)
             dlg.show_models_requested.connect(self._browser.show_model_ids)
             self._find_by_image_dlg = dlg
+        dlg.raise_()
+        dlg.activateWindow()
+        dlg.show()
+
+    def _open_archive_browser(self) -> None:
+        """Open the archive image browser dialog (non-modal)."""
+        from app.ui.archive_browser_dialog import ArchiveBrowserDialog
+        dlg = getattr(self, "_archive_browser_dlg", None)
+        if dlg is None or not dlg.isVisible():
+            dlg = ArchiveBrowserDialog(parent=self)
+            self._archive_browser_dlg = dlg
         dlg.raise_()
         dlg.activateWindow()
         dlg.show()

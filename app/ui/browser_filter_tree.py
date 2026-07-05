@@ -776,6 +776,10 @@ class _FilterTreeWorker(QRunnable):
         finally:
             session.close()
 
+        # Build folder tree from sorted directories
+        from app.database.filter_cache import build_folder_tree
+        folder_tree = build_folder_tree(sorted_dirs) if sorted_dirs else []
+
         payload = {
             "counts": _counts,
             "path_counts": _path_counts,
@@ -796,6 +800,7 @@ class _FilterTreeWorker(QRunnable):
             "sorted_dirs": sorted_dirs,
             "scoped_dirs": scoped_dirs,
             "new_dirs_frozen": new_dirs_frozen,
+            "folder_tree": folder_tree,
             "checked_data": self._checked,
             "excluded_data": self._excluded,
             "expanded_sections": self._expanded,
