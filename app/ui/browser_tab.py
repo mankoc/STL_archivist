@@ -5,7 +5,10 @@ Centre: sortable table with thumbnail, title, author, category, date, tags, path
 Right panel: image thumbnail sidebar (populated on single-click).
 Right-click or double-click: Edit Model.
 """
+import logging
 from pathlib import Path as FSPath, Path
+
+logger = logging.getLogger(__name__)
 
 from app.utils.material_icons import lookup_icon
 from PyQt6.QtCore import Qt, QEvent, pyqtSignal, QTimer, QThread, QThreadPool
@@ -2238,12 +2241,14 @@ class BrowserTab(QWidget):
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setFrameShape(QFrame.Shape.StyledPanel)
             lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+            lbl.setProperty("image_id", image_id)
             lbl.clicked.connect(
                 lambda _slot=slot: (
                     ImageViewerDialog(self._thumb_pixmaps[_slot], self).exec()
                     if not self._thumb_pixmaps[_slot].isNull() else None
                 )
             )
+            lbl.context_menu_requested.connect(self._on_image_context_menu)
             self._thumb_vlayout.addWidget(lbl)
 
         if need_async and self._current_model_id is not None:
@@ -2331,6 +2336,35 @@ class BrowserTab(QWidget):
         """Stop the background thumbnail thread cleanly on app exit."""
         self._thumb_thread.quit()
         self._thumb_thread.wait(2000)
+
+    def _on_image_context_menu(self, image_id: int) -> None:
+        """Show context menu for thumbnail image with delete option."""
+        from PyQt6.QtGui import QCursor
+        menu = QMenu(self)
+        delete_action = menu.addAction(self.tr("Delete thumbnail"))
+        delete_action.triggered.connect(lambda: self._delete_image(image_id))
+        menu.exec(QCursor.pos())
+
+    def _delete_image(self, image_id: int) -> None:
+        """Delete an image from the database and refresh the thumbnail display."""
+        with session_scope() as session:
+            image = session.query(Image).filter_by(id=image_id).first()
+            if image is None:
+                QMessageBox.warning(self, self.tr("Error"), self.tr("Image not found in database."))
+                return
+
+            from app.utils.thumbnailer import delete_thumbnail
+            try:
+                delete_thumbnail(image_id)
+            except Exception as e:
+                logger.warning("Failed to delete thumbnail from LMDB: %s", e)
+
+            session.delete(image)
+            session.commit()
+
+        QMessageBox.information(self, self.tr("Success"), self.tr("Image deleted successfully."))
+        if self._current_model_id is not None:
+            self._update_thumbnail_pane(self._current_model_id)
 
     def add_tag(self) -> None:
         """Prompt for a new tag name, create it in the DB, and rebuild the filter tree."""
