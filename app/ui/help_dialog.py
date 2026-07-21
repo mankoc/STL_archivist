@@ -292,6 +292,7 @@ Press <span class="kb">Enter</span> to confirm or <span class="kb">Escape</span>
 <h2>Image Preview Pane</h2>
 <p>Click any row to populate the right-hand pane with that model&rsquo;s thumbnails.
 Click a thumbnail to open it in the full-size viewer.
+Right-click a thumbnail to remove it from the database.
 Toggle the pane with <b>View &rarr; Images</b> or the <b>Images</b> toolbar button.</p>
 
 <div class="tip">Tip: Click any column header to sort by that column; click again to reverse the order.</div>

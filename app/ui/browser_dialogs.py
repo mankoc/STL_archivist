@@ -8,13 +8,18 @@ from PyQt6.QtWidgets import QDialog, QLabel, QVBoxLayout
 
 
 class ClickableLabel(QLabel):
-    """QLabel that emits a *clicked* signal on left mouse button press."""
+    """QLabel that emits a *clicked* signal on left mouse button press and *context_menu_requested* on right-click."""
 
     clicked = pyqtSignal()
+    context_menu_requested = pyqtSignal(int)  # image_id
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit()
+        elif event.button() == Qt.MouseButton.RightButton:
+            image_id = self.property("image_id")
+            if image_id is not None:
+                self.context_menu_requested.emit(image_id)
         super().mousePressEvent(event)
 
 
