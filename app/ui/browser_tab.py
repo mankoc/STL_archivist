@@ -2364,7 +2364,7 @@ class BrowserTab(QWidget):
 
         QMessageBox.information(self, self.tr("Success"), self.tr("Image deleted successfully."))
         if self._current_model_id is not None:
-            self._update_thumbnail_pane(self._current_model_id)
+            self._show_thumbnails(self._current_model_id)
 
     def add_tag(self) -> None:
         """Prompt for a new tag name, create it in the DB, and rebuild the filter tree."""
