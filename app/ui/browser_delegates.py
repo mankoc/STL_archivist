@@ -31,6 +31,9 @@ class _ComboDelegate(QStyledItemDelegate):
 
     def setEditorData(self, editor, index) -> None:
         editor.setCurrentText(index.data() or "")
+        # Deselect text to preserve original value and prevent accidental deletion
+        editor.lineEdit().deselect()
+        editor.lineEdit().setCursorPosition(0)
 
     def setModelData(self, editor, model, index) -> None:
         model.setData(index, editor.currentText().strip())
@@ -93,7 +96,9 @@ class ScaleDelegate(QStyledItemDelegate):
 
     def setEditorData(self, editor, index) -> None:
         editor.setText(index.data() or "")
-        editor.setCursorPosition(len(editor.text()))
+        # Position cursor at the beginning and deselect to preserve original value
+        editor.setCursorPosition(0)
+        editor.deselect()
 
     def setModelData(self, editor, model, index) -> None:
         model.setData(index, editor.text().strip())
@@ -131,7 +136,9 @@ class TagDelegate(QStyledItemDelegate):
 
     def setEditorData(self, editor, index) -> None:
         editor.setText(index.data() or "")
-        editor.setCursorPosition(len(editor.text()))
+        # Position cursor at the beginning and deselect to preserve original value
+        editor.setCursorPosition(0)
+        editor.deselect()
 
     def setModelData(self, editor, model, index) -> None:
         model.setData(index, editor.text().strip())
