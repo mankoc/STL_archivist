@@ -52,6 +52,39 @@ _TOKEN_HELP = (
     "Tokens from a parsed path pattern are also available."
 )
 
+_REGEX_HELP = (
+    "Python regular expression syntax for Find & Replace.\n\n"
+    "BASIC PATTERNS:\n"
+    "  .        — any character\n"
+    "  \\d       — digit (0-9)\n"
+    "  \\w       — word character (letter, digit, underscore)\n"
+    "  \\s       — whitespace (space, tab, newline)\n"
+    "  [a-z]    — character range\n"
+    "  [^a-z]   — negated character range\n\n"
+    "QUANTIFIERS:\n"
+    "  *        — zero or more (greedy)\n"
+    "  +        — one or more\n"
+    "  ?        — zero or one\n"
+    "  {n}      — exactly n\n"
+    "  {n,m}    — between n and m\n"
+    "  *?, +?, ??  — non-greedy versions\n\n"
+    "ANCHORS & GROUPS:\n"
+    "  ^        — start of string\n"
+    "  $        — end of string\n"
+    "  (...)    — capture group\n"
+    "  (?:...)  — non-capturing group\n"
+    "  |        — alternation (or)\n\n"
+    "REPLACEMENT:\n"
+    "  \\0 or \\g<0> — entire match\n"
+    "  \\1, \\2, …   — capture groups\n"
+    "  \\g<name>    — named group\n\n"
+    "EXAMPLES:\n"
+    "  Find: (\\w+)-(\\w+)  Replace: \\2-\\1  (swap parts)\n"
+    "  Find: ^\\s+|\\s+$    Replace: (empty)  (trim whitespace)\n"
+    "  Find: (\\d{4})      Replace: [\\1]    (wrap numbers in brackets)\n"
+    "  Find: (?i)^v        Replace: Version (case-insensitive v→Version)\n"
+)
+
 
 def _parse_path(pattern: str, path: str) -> dict[str, str]:
     return parse_path(pattern, path)
@@ -384,6 +417,18 @@ class MassEditorDialog(QDialog):
         )
         options_lay.addWidget(self._fnr_case_check)
         options_lay.addWidget(self._fnr_regex_check)
+
+        regex_help_btn = QToolButton()
+        regex_help_btn.setText("?")
+        regex_help_btn.setToolTip(_REGEX_HELP)
+        regex_help_btn.setStyleSheet(
+            "QToolButton { font-weight: bold; border: 1px solid gray;"
+            " border-radius: 9px; min-width: 18px; min-height: 18px; }"
+        )
+        regex_help_btn.enterEvent = lambda e: QToolTip.showText(
+            QCursor.pos(), _REGEX_HELP, regex_help_btn
+        )
+        options_lay.addWidget(regex_help_btn)
         options_lay.addStretch()
         fnr_layout.addRow("", options_row)
 
