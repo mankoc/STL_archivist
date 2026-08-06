@@ -288,7 +288,7 @@ def _ensure_views(engine) -> None:
                 m.sequence, m.created_at,
                 m.sculptor_id, m.collection_id, m.subcollection_id,
                 m.category_id, m.release_id,
-                m.is_missing, m.archive_hash,
+                m.is_missing, m.archive_hash, m.to_print,
                 scu.name AS sculptor_name,
                 col.name AS collection_name,
                 sub.name AS subcollection_name,

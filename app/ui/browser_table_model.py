@@ -18,7 +18,7 @@ from app.ui.browser_common import (
     COL_THUMB, COL_TITLE, COL_CREATOR, COL_SOURCE, COL_DATE, COL_TAGS,
     COL_SCULPTOR, COL_COLLECTION, COL_SUBCOLLECTION, COL_SEQUENCE, COL_RELEASE,
     COL_PATH, COL_SCALE, COL_PRESUPPORTED, COL_ADDED, COL_WARNING, COL_FILESIZE,
-    COL_CATEGORY, COL_COMPRESSION, _HEADERS, _fmt_size, MODEL_ID_ROLE, _pack_row,
+    COL_CATEGORY, COL_COMPRESSION, COL_TO_PRINT, _HEADERS, _fmt_size, MODEL_ID_ROLE, _pack_row,
 )
 
 
@@ -86,7 +86,7 @@ class _PageFetchRunnable(QRunnable):
                 mv.c.sequence, mv.c.created_at,
                 mv.c.sculptor_name, mv.c.collection_name,
                 mv.c.subcollection_name, mv.c.category_name,
-                mv.c.release_name,
+                mv.c.release_name, mv.c.to_print,
             ).select_from(mv).where(mv.c.id.in_(ids))
             rows_by_id = {row.id: row for row in session.execute(stmt).all()}
 
@@ -143,6 +143,7 @@ class _SqlTableModel(QAbstractTableModel):
         self._warn_bg                        = None
         self._warn_fg                        = None
         self._warn_font                      = None
+        self._highlight_warning_rows         = True
         self._main_stmt                      = None
         self._pair_order                     = None
         self._sort_col: int                  = COL_TITLE
@@ -167,8 +168,10 @@ class _SqlTableModel(QAbstractTableModel):
         if not index.isValid():
             return Qt.ItemFlag.NoItemFlags
         base = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
-        if index.column() not in (COL_THUMB, COL_ADDED, COL_WARNING,
-                                  COL_FILESIZE, COL_COMPRESSION):
+        if index.column() == COL_TO_PRINT:
+            base |= Qt.ItemFlag.ItemIsUserCheckable
+        elif index.column() not in (COL_THUMB, COL_ADDED, COL_WARNING,
+                                    COL_FILESIZE, COL_COMPRESSION):
             base |= Qt.ItemFlag.ItemIsEditable
         return base
 
@@ -180,6 +183,13 @@ class _SqlTableModel(QAbstractTableModel):
             return None
         if role == MODEL_ID_ROLE:
             return self._ordered_ids[row]
+        if role == Qt.ItemDataRole.CheckStateRole and col == COL_TO_PRINT:
+            page_idx = row // self._PAGE_SIZE
+            page = self._page_cache.get(page_idx)
+            if page is not None and row % self._PAGE_SIZE < len(page):
+                t = page[row % self._PAGE_SIZE]
+                return Qt.CheckState.Checked if t[21] else Qt.CheckState.Unchecked
+            return Qt.CheckState.Unchecked
         page_idx = row // self._PAGE_SIZE
         page = self._page_cache.get(page_idx)
         if page is None:
@@ -191,9 +201,25 @@ class _SqlTableModel(QAbstractTableModel):
         return self._role_data(page[offset], col, role)
 
     def setData(self, index, value, role=Qt.ItemDataRole.EditRole):
-        if not index.isValid() or role != Qt.ItemDataRole.EditRole:
+        if not index.isValid():
             return False
         row, col = index.row(), index.column()
+
+        if role == Qt.ItemDataRole.CheckStateRole and col == COL_TO_PRINT:
+            is_checked = value == Qt.CheckState.Checked
+            page_idx = row // self._PAGE_SIZE
+            offset   = row % self._PAGE_SIZE
+            page = self._page_cache.get(page_idx)
+            if page is not None and offset < len(page):
+                t = list(page[offset])
+                t[21] = is_checked
+                page[offset] = tuple(t)
+            self.dataChanged.emit(index, index, [Qt.ItemDataRole.CheckStateRole])
+            self.cell_edited.emit(row, col, "1" if is_checked else "0")
+            return True
+
+        if role != Qt.ItemDataRole.EditRole:
+            return False
         if col in (COL_THUMB, COL_ADDED, COL_WARNING, COL_FILESIZE, COL_COMPRESSION):
             return False
         text = str(value).strip() if value is not None else ""
@@ -237,12 +263,13 @@ class _SqlTableModel(QAbstractTableModel):
         self._pair_order  = pair_order
         self._pair_for_id = pair_for_id or {}
         self._pair_colors = pair_colors
-        from app.ui.config_dialog import get_warn_row_bg_color, get_warn_row_fg_color
+        from app.ui.config_dialog import get_warn_row_bg_color, get_warn_row_fg_color, get_highlight_warning_rows
         self._warn_bg   = QColor(get_warn_row_bg_color())
         self._warn_fg   = QColor(get_warn_row_fg_color())
         self._warn_font = QFont()
         self._warn_font.setPointSize(16)
         self._warn_font.setBold(True)
+        self._highlight_warning_rows = get_highlight_warning_rows()
         self._do_reload()
 
     def set_search(self, text: str) -> None:
@@ -377,7 +404,7 @@ class _SqlTableModel(QAbstractTableModel):
         #           7=presupports,8=warning,9=archive_size,10=compression_rate,
         #           11=sequence,12=created_at,13=sculptor_name,14=collection_name,
         #           15=subcollection_name,16=category_name,17=release_name,
-        #           18=scales_str,19=tags_str,20=pair_idx
+        #           18=scales_str,19=tags_str,20=pair_idx,21=to_print
         if role == Qt.ItemDataRole.DisplayRole:
             if col == COL_THUMB:         return None
             if col == COL_TITLE:         return t[1] or ""
@@ -402,6 +429,7 @@ class _SqlTableModel(QAbstractTableModel):
             if col == COL_COMPRESSION:
                 cr = t[10]
                 return f"{1/cr:.1f}x" if cr and cr > 0 else ""
+            if col == COL_TO_PRINT:      return ""
             return ""
         if role == Qt.ItemDataRole.UserRole:
             if col == COL_SEQUENCE:
@@ -421,13 +449,13 @@ class _SqlTableModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.BackgroundRole:
             if self._pair_colors is not None and t[20] >= 0:
                 return self._pair_colors[t[20] % 2]
-            if t[8]:
+            if t[8] and self._highlight_warning_rows:
                 return self._warn_bg
             return None
         if role == Qt.ItemDataRole.ForegroundRole:
-            return self._warn_fg if t[8] else None
+            return self._warn_fg if (t[8] and self._highlight_warning_rows) else None
         if role == Qt.ItemDataRole.FontRole:
-            return self._warn_font if (t[8] and col == COL_WARNING) else None
+            return self._warn_font if (t[8] and col == COL_WARNING and self._highlight_warning_rows) else None
         if role == MODEL_ID_ROLE:
             return t[0]
         return None

@@ -673,6 +673,24 @@ class MassEditorDialog(QDialog):
         apply_tags = "tags" in clearing or bool(tags_tmpl.strip())
 
         _cache: LookupCache = {}
+
+        # Prepare Find & Replace pattern if needed
+        find_str = self._find_edit.text()
+        target_fields = [f for f, cb in self._fnr_fields.items() if cb.isChecked()]
+        pattern = None
+        if find_str and find_str.strip() and target_fields:
+            replace_str = self._replace_edit.text()
+            flags = 0 if self._fnr_case_check.isChecked() else re.IGNORECASE
+            raw = find_str if self._fnr_regex_check.isChecked() else re.escape(find_str)
+            try:
+                pattern = re.compile(raw, flags)
+            except re.error as exc:
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, self.tr("Invalid Regex"), f"The pattern is not valid:\n{exc}")
+                return
+
+        # Single session for all operations (manual edits + Find & Replace)
+        _fnr_cache: LookupCache = {}
         with session_scope() as session:
             for mid in self._model_ids:
                 model: STLModel = session.get(STLModel, mid)
@@ -757,27 +775,12 @@ class MassEditorDialog(QDialog):
                         for name in tag_names:
                             model.tags.append(get_or_create_tag(session, name, cache=_cache))
 
-        find_str = self._find_edit.text()
-        target_fields = [f for f, cb in self._fnr_fields.items() if cb.isChecked()]
-        if find_str and find_str.strip() and target_fields:
-            replace_str = self._replace_edit.text()
-            flags = 0 if self._fnr_case_check.isChecked() else re.IGNORECASE
-            raw = find_str if self._fnr_regex_check.isChecked() else re.escape(find_str)
-            try:
-                pattern = re.compile(raw, flags)
-            except re.error as exc:
-                from PyQt6.QtWidgets import QMessageBox
-                QMessageBox.warning(self, self.tr("Invalid Regex"), f"The pattern is not valid:\n{exc}")
-                return
-            simple_fields = [f for f in target_fields if f not in ("collection", "subcollection")]
-            do_collection    = "collection"    in target_fields
-            do_subcollection = "subcollection" in target_fields
-            _fnr_cache: LookupCache = {}
-            with session_scope() as session:
-                for mid in self._model_ids:
-                    model = session.get(STLModel, mid)
-                    if model is None:
-                        continue
+                # Apply Find & Replace in the same session
+                if pattern:
+                    simple_fields = [f for f in target_fields if f not in ("collection", "subcollection")]
+                    do_collection    = "collection"    in target_fields
+                    do_subcollection = "subcollection" in target_fields
+
                     for field in simple_fields:
                         old_val = getattr(model, field, None)
                         if not old_val:

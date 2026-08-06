@@ -15,6 +15,10 @@
       "Bash(python -c \"import app.ui.find_content_duplicates_dialog\")",
       "Bash(python -m py_compile /home/mankoc/Projects/stl_database/app/ui/find_content_duplicates_dialog.py)"
     ],
+    "deny": [
+      "Bash(git *)",
+      "PowerShell(git *)"
+    ],
     "additionalDirectories": [
       "/home/mankoc/Projects/stl_database"
     ]

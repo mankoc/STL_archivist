@@ -32,10 +32,11 @@ COL_WARNING       = 15
 COL_FILESIZE      = 16
 COL_CATEGORY      = 17
 COL_COMPRESSION   = 18
+COL_TO_PRINT      = 19
 _HEADERS = ["", "Title", "Creator", "Source", "Date", "Tags",
             "Sculptor", "Collection", "Subcollection", "Sequence", "Release", "Path",
              "Scale", "Presupports", "Added", "Warnings", "File Size", "Category",
-             "Compression"]
+             "Compression", "To Print"]
 
 
 def _fmt_size(nbytes: int) -> str:
@@ -85,5 +86,5 @@ def _pack_row(row, tags_for: dict, scales_for: dict, pair_for_id: dict) -> tuple
         row.compression_rate, row.sequence, row.created_at,
         row.sculptor_name, row.collection_name, row.subcollection_name,
         row.category_name, row.release_name, scales_for.get(row.id, ""),
-        tags_for.get(row.id, ""), pair_for_id.get(row.id, -1),
+        tags_for.get(row.id, ""), pair_for_id.get(row.id, -1), row.to_print,
     )

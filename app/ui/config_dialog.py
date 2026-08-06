@@ -361,6 +361,10 @@ def get_low_compression_threshold() -> float:
     return float(_load_library_settings().get("low_compression_threshold", 0.95))
 
 
+def get_highlight_warning_rows() -> bool:
+    """Whether to highlight rows with warnings in yellow."""
+    return bool(_load_library_settings().get("highlight_warning_rows", True))
+
 
 def get_status_neutral_color() -> str:
     return _get_ui_color("status_neutral")
@@ -1046,6 +1050,16 @@ class ConfigDialog(QDialog):
         )
         self._warn_low_compression_check.toggled.connect(
             self._low_compression_threshold_spin.setEnabled
+        )
+
+        form.addSpacing(12)
+        self._highlight_warning_rows_check = QCheckBox(self.tr("Highlight rows with warnings"))
+        form.addRow("", self._highlight_warning_rows_check)
+        form.addRow(
+            "",
+            QLabel(
+                self.tr("<small>When enabled, rows containing items with warnings are highlighted in yellow.</small>")
+            ),
         )
 
         layout.addWidget(group)
@@ -1978,7 +1992,8 @@ class ConfigDialog(QDialog):
         self._warn_low_compression_check.setChecked(warn_low_compression)
         self._low_compression_threshold_spin.setValue(get_low_compression_threshold())
         self._low_compression_threshold_spin.setEnabled(warn_low_compression)
-        
+        self._highlight_warning_rows_check.setChecked(get_highlight_warning_rows())
+
         self._allow_file_delete_check.setChecked(get_allow_file_delete())
         self._use_trash_folder_check.setChecked(get_use_trash_folder())
         self._trash_folder_edit.setText(get_trash_folder_path())
@@ -2115,6 +2130,7 @@ class ConfigDialog(QDialog):
                 "warn_no_printable": self._warn_no_printable_check.isChecked(),
                 "warn_low_compression": self._warn_low_compression_check.isChecked(),
                 "low_compression_threshold": self._low_compression_threshold_spin.value(),
+                "highlight_warning_rows": self._highlight_warning_rows_check.isChecked(),
                 "metadata_sidecar_enabled": self._metadata_sidecar_check.isChecked(),
                 "metadata_thumbnails": self._metadata_thumbnails_check.isChecked(),
                 "store_stl_file_list": self._store_stl_list_check.isChecked(),

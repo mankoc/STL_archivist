@@ -193,6 +193,7 @@ class STLModel(Base):
     warning          = Column(Text, nullable=True)                  # newline-separated warning strings, NULL if none
     compression_rate = Column(Float, nullable=True)                 # archive_size / total_uncompressed_size (0‥1+)
     is_missing       = Column(Boolean, default=False, nullable=False, server_default="0")
+    to_print         = Column(Boolean, default=False, nullable=False, server_default="0")
     created_at       = Column(DateTime, default=_utcnow)
     updated_at       = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
