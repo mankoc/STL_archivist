@@ -8,6 +8,7 @@ qt-material>=2.14
 xxhash>=3.4
 lmdb>=1.4
 rapidfuzz>=3.0   # fast fuzzy string matching (Tag Editor → Merge Similar)
+numpy>=1.24      # vectorised perceptual-hash scans (Find by Image / Content Duplicates)
 
 # AI tagger — runs Qwen2.5-VL through the external llama.cpp `llama-server`
 # binary, which is downloaded on demand into <data_dir>/ai/ at first use.
