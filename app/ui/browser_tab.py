@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
     QMenu, QScrollArea, QFrame, QInputDialog, QMessageBox,
     QDialog, QApplication, QPushButton,
     QProgressBar,
-    QTextEdit, QDialogButtonBox,
+    QTextEdit, QDialogButtonBox, QComboBox,
 )
 from PyQt6.QtCore import QSettings
 
@@ -46,7 +46,7 @@ from app.ui.browser_common import (
     COL_THUMB, COL_TITLE, COL_CREATOR, COL_SOURCE, COL_DATE, COL_TAGS,
     COL_SCULPTOR, COL_COLLECTION, COL_SUBCOLLECTION, COL_SEQUENCE, COL_RELEASE,
     COL_PATH, COL_SCALE, COL_PRESUPPORTED, COL_ADDED, COL_WARNING, COL_FILESIZE,
-    COL_CATEGORY, COL_COMPRESSION, _HEADERS,
+    COL_CATEGORY, COL_COMPRESSION, COL_TO_PRINT, _HEADERS,
     _prune_ancestor_paths, _FILTER_PATH_IDS,
 )
 from app.database.models import STLModel, Tag, Sculptor, Collection, Subcollection, Category, Release, Scale, Image, model_tags as _mt_global, model_scales as _ms_global
@@ -123,10 +123,10 @@ class BrowserTab(QWidget):
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True)
         self._search_timer.setInterval(250)  # ms
-        self._search_timer.timeout.connect(
-            lambda: self._on_search(self._search_edit.text())
-        )
         self._build_ui()
+        self._search_timer.timeout.connect(
+            lambda: self._on_search(self._search_combo.lineEdit().text())
+        )
         self.refresh()
 
     # ------------------------------------------------------------------
@@ -172,10 +172,18 @@ class BrowserTab(QWidget):
 
         search_row = QHBoxLayout()
         search_row.addWidget(QLabel(self.tr("Search:")))
-        self._search_edit = QLineEdit()
-        self._search_edit.setPlaceholderText(self.tr("Title, creator or tag…"))
-        self._search_edit.textChanged.connect(lambda _: self._search_timer.start())
-        search_row.addWidget(self._search_edit)
+        self._search_combo = QComboBox()
+        self._search_combo.setEditable(True)
+        self._search_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self._search_combo.setPlaceholderText(self.tr("Title, creator or tag…"))
+        self._search_combo.completer().setFilterMode(Qt.MatchFlag.MatchContains)
+        self._search_combo.completer().setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        # Connect both combobox editing and selection
+        self._search_combo.lineEdit().textChanged.connect(lambda _: self._search_timer.start())
+        self._search_combo.activated.connect(self._on_search_selected)
+        self._load_search_history()
+        search_row.addWidget(self._search_combo)
+        search_row.addStretch()
         centre_layout.addLayout(search_row)
 
         self._model = _SqlTableModel(parent=self)
@@ -852,6 +860,7 @@ class BrowserTab(QWidget):
             mv.c.subcollection_name,
             mv.c.category_name,
             mv.c.release_name,
+            mv.c.to_print,
         ).select_from(mv)
 
         _tag_sub = sa_select(_mt_global.c.model_id).join(Tag, _mt_global.c.tag_id == Tag.id)
@@ -1099,6 +1108,8 @@ class BrowserTab(QWidget):
                         stl.scales.append(sc)
             elif col == COL_PRESUPPORTED:
                 stl.presupports = value.strip() or None
+            elif col == COL_TO_PRINT:
+                stl.to_print = value == "1"
 
             # Update per-folder METADATA.7z sidecar with the saved change
             if stl.archive_path:
@@ -1118,8 +1129,48 @@ class BrowserTab(QWidget):
                         pass  # best-effort; never block the edit
 
     # ------------------------------------------------------------------
+    def _load_search_history(self) -> None:
+        """Load search history from settings."""
+        settings = QSettings()
+        history = settings.value("browser/search_history", [])
+        if isinstance(history, str):
+            # Handle old single-value format
+            history = [history] if history else []
+        self._search_combo.addItems(history)
+
+    def _save_search_term(self, text: str) -> None:
+        """Save a search term to history (keep latest 20 unique)."""
+        text = text.strip()
+        if not text:
+            return
+
+        # Remove if already in history (we'll add it at the top)
+        for i in range(self._search_combo.count()):
+            if self._search_combo.itemText(i) == text:
+                self._search_combo.removeItem(i)
+                break
+
+        # Add to top
+        self._search_combo.insertItem(0, text)
+
+        # Keep only 20 unique items
+        while self._search_combo.count() > 20:
+            self._search_combo.removeItem(self._search_combo.count() - 1)
+
+        # Save to settings
+        history = [self._search_combo.itemText(i) for i in range(self._search_combo.count())]
+        settings = QSettings()
+        settings.setValue("browser/search_history", history)
+
     def _on_search(self, text: str) -> None:
         self._model.set_search(text)
+        self._save_search_term(text)
+
+    def _on_search_selected(self, index: int) -> None:
+        """Handle selection from dropdown history."""
+        if index >= 0:
+            text = self._search_combo.itemText(index)
+            self._search_combo.lineEdit().setText(text)
 
     def _on_filter_item_changed(self, item: QTreeWidgetItem, _col: int) -> None:
         """Called when a checkbox in the filter tree changes state."""
@@ -1563,6 +1614,12 @@ class BrowserTab(QWidget):
             self._open_editor(model_id)
 
     def _on_table_click(self, index) -> None:
+        if index.column() == COL_TO_PRINT:
+            r, c = index.row(), index.column()
+            current_state = self._model.data(self._model.index(r, c), Qt.ItemDataRole.CheckStateRole)
+            new_state = Qt.CheckState.Unchecked if current_state == Qt.CheckState.Checked else Qt.CheckState.Checked
+            self._model.setData(self._model.index(r, c), new_state, Qt.ItemDataRole.CheckStateRole)
+            return
         if index.column() != COL_WARNING:
             return
         r = index.row()
