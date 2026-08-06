@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Dependencies: `numpy` is now listed in `requirements.txt`. It was already a hard requirement — Find by Image and Find Content Duplicates import it at module level — but a fresh `pip install -r requirements.txt` did not pull it in.
+
 - Code quality pass: hardened error handling and removed dead code with no change to normal behaviour.
   - AI server: a malformed, empty, or error response from `llama-server` now raises a clear, descriptive error instead of crashing with a low-level `KeyError`/`JSONDecodeError`; a startup that never becomes ready reports the last underlying error; and a force-killed server process is now waited on so it can't linger as a zombie.
   - AI setup: a failed or cancelled model/binary download no longer leaves a partial `.part` file behind.
