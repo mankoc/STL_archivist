@@ -2,8 +2,8 @@
 
 Extracted from ``browser_tab.py``. Qt-only, no app dependencies.
 """
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtCore import Qt, pyqtSignal, QBuffer, QByteArray, QIODevice, QSize
+from PyQt6.QtGui import QPixmap, QMovie
 from PyQt6.QtWidgets import QDialog, QLabel, QVBoxLayout
 
 
@@ -24,9 +24,14 @@ class ClickableLabel(QLabel):
 
 
 class ImageViewerDialog(QDialog):
-    """Full-screen image viewer — click anywhere to close."""
+    """Full-screen image viewer — click anywhere to close.
 
-    def __init__(self, pixmap: QPixmap, parent=None) -> None:
+    Pass *animated_data* (the stored GIF bytes) to play the animation instead of
+    showing a still; *pixmap* is still required, since its dimensions decide how
+    the dialog is sized.
+    """
+
+    def __init__(self, pixmap: QPixmap, parent=None, animated_data: bytes = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(self.tr("Image"))
         self.setModal(True)
@@ -42,6 +47,17 @@ class ImageViewerDialog(QDialog):
 
         label = QLabel()
         label.setPixmap(scaled)
+        if animated_data:
+            self._movie = QMovie(self)
+            buf = QBuffer(self._movie)
+            buf.setData(QByteArray(animated_data))
+            buf.open(QIODevice.OpenModeFlag.ReadOnly)
+            self._movie.setDevice(buf)
+            self._movie.setCacheMode(QMovie.CacheMode.CacheAll)
+            if self._movie.isValid():
+                self._movie.setScaledSize(scaled.size())
+                label.setMovie(self._movie)
+                self._movie.start()
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         label.setCursor(Qt.CursorShape.PointingHandCursor)
         label.mousePressEvent = lambda _: self.accept()

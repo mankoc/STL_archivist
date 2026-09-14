@@ -13,6 +13,8 @@ Version: 2026.24
 - **Path pattern parsing** — extract sculptor, release name, model title, and more from your folder/file naming conventions; an optional toggle lets you disable pattern extraction without clearing the saved pattern
 - **Metadata overrides** — force a specific Creator or Type/Source value for every archive in a crawl, overriding whatever is auto-detected
 - **Thumbnail browser** — stores JPEG previews in LMDB and displays them in a scrollable image pane; supports drag-and-drop to add new images
+- **Image formats** — images are read from archives in `.jpg`, `.jpeg`, `.png`, `.webp`, `.avif`, `.gif`, and `.bmp`; drag-and-drop and *Find by Image* additionally accept `.tif` and `.tiff`. All are transcoded to JPEG for the LMDB thumbnail store
+- **Animated GIFs** — an animated GIF keeps its animation: the thumbnail is stored as a resized GIF and plays in the image preview pane and the full-size viewer. Everywhere a still is needed (table cells, image grid, similarity hashing, AI tagging) the first frame is used. Sources over 60 frames or 2 MB fall back to a static first-frame JPEG
 - **Image grid** — scrollable grid of thumbnails for the currently filtered set of models, with a resizable thumbnail slider (60–300 px)
 - **Scale detection** — automatically detects miniature scale (e.g. `28mm`, `32mm`, `1/35`) from archive and file names; a model can hold **multiple scales** (e.g. a 180 mm bust and a 32 mm version in one archive)
 - **Presupport detection** — identifies whether an archive contains Lychee, Chitubox, or presupported STL files
@@ -37,8 +39,9 @@ Version: 2026.24
 - **Configurable file manager** — choose which program opens archive folders from right-click menus: System Default, Double Commander, or a custom executable (Configuration → Browser)
 - **Background crawl** — dismiss the Crawler dialog without stopping the worker; a status badge in the status bar shows live progress and brings the dialog back when clicked
 - **Move tracking** — missing archives are flagged rather than deleted so cross-session and cross-folder move detection works across multiple crawl runs; collision guards prevent ambiguous name+size or hash matches from mis-attributing metadata
+- **Check Images Warning** — a Database Maintenance action that re-reads every archive's file list and fixes the *Archive without images* warning library-wide, clearing it where images are present and adding it where they are not. Reads archive catalogs only, so it is much faster than rescanning; unreadable or missing archives are skipped rather than flagged
 - **Backup / Restore** — pack the database, thumbnails, and settings into a single `.7z` archive via **Tools → Backup / Restore Library…**; restore extracts back into the data directory after confirmation
-- **Statistics** — column and aggregated statistics dialogs for a quick numeric overview; database maintenance (vacuum, integrity check)
+- **Statistics** — column and aggregated statistics dialogs for a quick numeric overview (counts, compressed/uncompressed library size, storage used); database maintenance (vacuum, integrity check)
 - **Database maintenance tools** — verify/relocate missing archives, find duplicate entries, recompute image hashes, compute CLIP embeddings, compact the thumbnail store, and **prune the number of images per model** down to a chosen maximum (keeps the oldest, deletes the extras and their thumbnails)
 - **Themes** — built-in color schemes: System Default, VS Code Dark+, Windows 11 Dark, Windows 11 Light, and nine Material Design themes via qt-material
 - **Localization** — translatable user interface; **English** and **Spanish** ship built-in, and additional language definitions can be added as Qt Linguist `.ts` files in `resources/i18n/`. Pick the language in **Configuration → Appearance**

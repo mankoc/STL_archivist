@@ -9,7 +9,8 @@ value everywhere.  Module-private values stay in their owning module.
 # ── Archive / file extensions ────────────────────────────────────────────────
 
 ARCHIVE_SUFFIXES: frozenset[str] = frozenset({".7z", ".zip", ".rar"})
-IMAGE_SUFFIXES:   frozenset[str] = frozenset({".jpg", ".jpeg", ".png", ".webp", ".bmp"})
+IMAGE_SUFFIXES:   frozenset[str] = frozenset({".jpg", ".jpeg", ".png", ".webp", ".bmp",
+                                              ".avif", ".gif"})
 SLICER_SUFFIXES:  frozenset[str] = frozenset({".lys", ".lyt", ".chitu", ".chitubox", ".ctp", ".ctb", ".photon"})
 
 METADATA_FILENAME = "METADATA.7z"

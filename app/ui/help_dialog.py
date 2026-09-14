@@ -295,6 +295,16 @@ Click a thumbnail to open it in the full-size viewer.
 Right-click a thumbnail to remove it from the database.
 Toggle the pane with <b>View &rarr; Images</b> or the <b>Images</b> toolbar button.</p>
 
+<p>Drop image files onto the pane to add them to the selected model.  Accepted
+formats are <code>.jpg</code>, <code>.jpeg</code>, <code>.png</code>,
+<code>.webp</code>, <code>.avif</code>, <code>.bmp</code>, <code>.gif</code>,
+<code>.tif</code>, and <code>.tiff</code>.  Thumbnails are stored as resized
+JPEGs, with one exception: an <b>animated GIF</b> is stored as a resized GIF and
+plays in the pane (click it to watch the animation full size).  Anywhere a still
+image is required &mdash; table cells, the image grid, similarity matching, AI
+Tagging &mdash; the first frame is used.  Animations longer than 60 frames, or
+that would exceed 2&nbsp;MB once resized, are stored as a still JPEG instead.</p>
+
 <div class="tip">Tip: Click any column header to sort by that column; click again to reverse the order.</div>
 {_prev_next(PAGE_BROWSER)}"""
 
@@ -804,7 +814,9 @@ The dialog is divided into sections shown in a tree on the left.</p>
   <tr><td>Pre-supported STL detected</td>
       <td>The archive contains pre-supported mesh files alongside the original</td></tr>
   <tr><td>No images found</td>
-      <td>The archive contains no image files — no thumbnail can be shown</td></tr>
+      <td>The archive contains no image files (<code>.jpg</code>, <code>.jpeg</code>,
+          <code>.png</code>, <code>.webp</code>, <code>.avif</code>, <code>.gif</code>,
+          <code>.bmp</code>) — no thumbnail can be shown</td></tr>
   <tr><td>Nested archive detected</td>
       <td>A <code>.zip</code> / <code>.7z</code> / <code>.rar</code> is found inside the archive</td></tr>
   <tr><td>Support files detected</td>
@@ -922,6 +934,9 @@ def _page_stats_tools() -> str:
 <p>Displays aggregate counts and breakdowns about the entire database:</p>
 <ul>
   <li>Total models, total images, total tags, total archives</li>
+  <li>Total size &mdash; compressed (sum of archive sizes) and uncompressed
+      (sum of the catalogued file sizes inside the archives)</li>
+  <li>Storage used by the database file and the thumbnail store</li>
   <li>Models by source, by presupport status, by scale</li>
   <li>Breakdown by top authors, categories, sculptors, and release names</li>
   <li>Bar charts show the distribution of each field visually</li>
@@ -1130,6 +1145,18 @@ archives&rsquo; first thumbnails, making it easy to judge whether the match is g
       <td>Permanently deletes every record with status <em>Flagged Missing</em> — archives
           that the crawler could not locate over multiple sessions. Use this to clean up
           records for files you know have been permanently removed.</td></tr>
+  <tr><td><b>Check Images Warning</b></td>
+      <td>Re-reads every catalogued archive&rsquo;s file list and corrects the
+          <em>Archive without images</em> warning: it is cleared where the archive does
+          contain images and added where it does not. Only the archive catalog is read
+          (nothing is decompressed), so this runs far faster than a full rescan and is the
+          quickest way to refresh the whole library after an update adds support for a new
+          image format. Archives that are missing or cannot be opened are counted as
+          <em>skipped</em> and left untouched. Other warnings on a record are never
+          changed &mdash; use <b>Rescan Files</b> to recompute all of them. Adding the
+          warning requires <em>Archive contains images</em> to be enabled in
+          <b>Configuration &rarr; Crawler warnings</b>; a stale warning is cleared either
+          way.</td></tr>
   <tr><td><b>Compact Thumbnail Store</b></td>
       <td>Rewrites the LMDB thumbnail store to reclaim disk space left behind by deleted
           thumbnails. LMDB reuses freed space but never shrinks the file on its own, so run

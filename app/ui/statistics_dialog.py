@@ -41,13 +41,14 @@ def _dir_size(path: Path) -> int:
 class StatsWorker(QThread):
     """Gather all statistics in a background thread to keep the UI responsive."""
 
-    finished = pyqtSignal(dict)
+    stats_ready = pyqtSignal(dict)
 
     def run(self) -> None:
         from sqlalchemy import func
         from app.database.db import session_scope
         from app.database.models import (
-            STLModel, Image, Sculptor, Collection, Category, Tag, Release, Scale, model_tags,
+            STLModel, STLFile, Image, Sculptor, Collection, Category, Tag, Release, Scale,
+            model_tags,
         )
         from app.ui.config_dialog import get_db_path, get_data_dir
 
@@ -65,7 +66,7 @@ class StatsWorker(QThread):
                 stats["total_scales"]      = s.query(func.count(Scale.id)).scalar() or 0
                 stats["total_tags"]        = s.query(func.count(Tag.id)).scalar() or 0
                 stats["total_archive_size"] = s.query(func.sum(STLModel.archive_size)).scalar() or 0
-                stats["total_file_size"]    = s.query(func.sum(STLModel.file_size)).scalar() or 0
+                stats["total_file_size"]    = s.query(func.sum(STLFile.file_size)).scalar() or 0
 
                 # --- Content quality ---
                 stats["presupported"] = s.query(func.count(STLModel.id)).filter(
@@ -131,7 +132,7 @@ class StatsWorker(QThread):
             logger.error("Failed to gather statistics: %s", exc, exc_info=True)
             stats["error"] = str(exc)
 
-        self.finished.emit(stats)
+        self.stats_ready.emit(stats)
 
 
 # ---------------------------------------------------------------------------
@@ -191,12 +192,15 @@ class StatisticsDialog(QDialog):
         self._status_lbl.setVisible(True)
         self._clear_content()
 
-        self._worker = StatsWorker()
-        self._worker.finished.connect(self._on_finished)
+        # Wait for a previous run so the QThread is never dropped while running.
+        if self._worker is not None:
+            self._worker.wait()
+
+        self._worker = StatsWorker(self)
+        self._worker.stats_ready.connect(self._on_finished)
         self._worker.start()
 
     def _on_finished(self, stats: dict) -> None:
-        self._worker = None
         self._refresh_btn.setEnabled(True)
 
         if "error" in stats:

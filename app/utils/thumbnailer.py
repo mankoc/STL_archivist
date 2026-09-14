@@ -13,12 +13,20 @@ from pathlib import Path
 from typing import Optional
 
 import lmdb
-from PIL import Image
+from PIL import Image, ImageSequence
 
 log = logging.getLogger(__name__)
 
 THUMB_SIZE_DEFAULT = 512
 THUMB_QUALITY = 75
+
+# Animated-GIF thumbnails are stored as GIF rather than JPEG so the preview pane
+# can play them.  Both caps below are safety valves: a long or high-frame-rate
+# source would otherwise put megabytes per image into LMDB and leave the GUI
+# thread decoding frames forever.  Exceeding either one falls back to a static
+# first-frame JPEG, which is what every pre-existing thumbnail already is.
+GIF_MAX_FRAMES = 60
+GIF_MAX_BYTES = 2 * 1024 ** 2
 
 _lmdb_env: Optional[lmdb.Environment] = None
 _lmdb_dir: Optional[Path] = None
@@ -174,18 +182,67 @@ def pdf_first_page_to_image_bytes(pdf_bytes: bytes) -> Optional[bytes]:
         return None
 
 
-def make_thumbnail(image_bytes: bytes, max_size: int = THUMB_SIZE_DEFAULT) -> Optional[bytes]:
-    """Convert raw image bytes to resized JPEG bytes.
+def _make_animated_gif(img: "Image.Image", max_size: int) -> Optional[bytes]:
+    """Downscale an animated GIF, preserving its frames and timing.
+
+    Pillow's GIF reader composites each frame onto the canvas as it seeks, so
+    iterating and converting yields whole frames — partial inter-frame patches
+    and disposal methods are already resolved.  Frames are flattened to RGB for
+    the same reason the JPEG path is: the store has never carried alpha.
+
+    Returns:
+        GIF bytes, or ``None`` if the source is not worth animating (a single
+        frame) or blows past :data:`GIF_MAX_FRAMES` / :data:`GIF_MAX_BYTES`.
+    """
+    frames: list = []
+    durations: list[int] = []
+    for frame in ImageSequence.Iterator(img):
+        if len(frames) >= GIF_MAX_FRAMES:
+            return None
+        rgb = frame.convert("RGB")
+        rgb.thumbnail((max_size, max_size), Image.LANCZOS)
+        frames.append(rgb)
+        durations.append(int(frame.info.get("duration", 100)))
+    if len(frames) < 2:
+        return None
+
+    buf = io.BytesIO()
+    frames[0].save(
+        buf, format="GIF", save_all=True, append_images=frames[1:],
+        duration=durations, loop=int(img.info.get("loop", 0)),
+        disposal=1, optimize=True,
+    )
+    data = buf.getvalue()
+    return data if len(data) <= GIF_MAX_BYTES else None
+
+
+def make_thumbnail(image_bytes: bytes, max_size: int = THUMB_SIZE_DEFAULT,
+                   animate: bool = True) -> Optional[bytes]:
+    """Convert raw image bytes to resized thumbnail bytes.
+
+    Output is JPEG for everything except animated GIFs, which stay GIF so the
+    preview pane can play them.  Callers that only need a still image can treat
+    the result uniformly: ``QPixmap.loadFromData`` and Pillow both read frame 0
+    of a GIF, so dHash, embeddings, and table cells behave as they always have.
 
     Args:
         image_bytes: Raw image data in any format supported by Pillow.
         max_size: Maximum dimension (width *or* height) of the output thumbnail.
+        animate: When ``False``, always emit JPEG — an animated source is
+            flattened to its first frame.  For consumers that must hand the
+            bytes to something expecting a still image.
 
     Returns:
-        JPEG-encoded bytes, or ``None`` if conversion fails for any reason.
+        JPEG bytes, GIF bytes for an animated GIF, or ``None`` if conversion
+        fails for any reason.
     """
     try:
         with Image.open(io.BytesIO(image_bytes)) as img:
+            if animate and getattr(img, "is_animated", False):
+                animated = _make_animated_gif(img, max_size)
+                if animated is not None:
+                    return animated
+                img.seek(0)  # iterating above moved the cursor off frame 0
             img = img.convert("RGB")
             img.thumbnail((max_size, max_size), Image.LANCZOS)
             buf = io.BytesIO()
@@ -193,6 +250,16 @@ def make_thumbnail(image_bytes: bytes, max_size: int = THUMB_SIZE_DEFAULT) -> Op
             return buf.getvalue()
     except Exception:
         return None
+
+
+def is_animated_thumbnail(data: bytes) -> bool:
+    """True when stored thumbnail *data* is a GIF that should be played, not shown.
+
+    Checks the header only — no decode — so it is cheap enough for the GUI
+    thread.  A single-frame GIF never reaches the store (``_make_animated_gif``
+    rejects it), so the magic bytes alone are a sufficient test.
+    """
+    return len(data) >= 6 and data[:4] == b"GIF8"
 
 
 def save_thumbnail(image_bytes: bytes, image_id: int,

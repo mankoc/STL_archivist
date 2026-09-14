@@ -11,8 +11,13 @@ from pathlib import Path as FSPath, Path
 logger = logging.getLogger(__name__)
 
 from app.utils.material_icons import lookup_icon
-from PyQt6.QtCore import Qt, QEvent, pyqtSignal, QTimer, QThread, QThreadPool
-from PyQt6.QtGui import QPixmap, QPixmapCache, QIcon, QKeySequence, QShortcut, QColor, QPainter
+from PyQt6.QtCore import (
+    Qt, QEvent, pyqtSignal, QTimer, QThread, QThreadPool, QBuffer, QByteArray,
+    QIODevice, QSize,
+)
+from PyQt6.QtGui import (
+    QPixmap, QPixmapCache, QIcon, QKeySequence, QShortcut, QColor, QPainter, QMovie,
+)
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
     QTreeWidgetItem, QTableView,
@@ -90,6 +95,8 @@ class BrowserTab(QWidget):
         self._thumb_pixmaps: list[QPixmap] = []      # unscaled pixmaps for current page (by slot)
         self._thumb_all_images: list = []             # list of (image_id, thumbnail_path) tuples
         self._thumb_id_to_slot: dict[int, int] = {}  # image_id → slot index in current page
+        self._thumb_movies: dict[int, QMovie] = {}   # slot → running QMovie (animated GIFs only)
+        self._thumb_gif_data: dict[int, bytes] = {}  # image_id → GIF bytes, so paging back re-animates
         self._thumb_page: int = 0
         self._thumb_show_all: bool = False
 
@@ -2236,6 +2243,8 @@ class BrowserTab(QWidget):
 
     def _clear_thumbnails(self) -> None:
         """Remove all thumbnail widgets from the sidebar and drop the pixmap cache."""
+        self._stop_thumb_movies()
+        self._thumb_gif_data.clear()
         self._thumb_pixmaps.clear()
         self._thumb_all_images.clear()
         self._thumb_id_to_slot.clear()
@@ -2274,6 +2283,7 @@ class BrowserTab(QWidget):
             images_to_show = self._thumb_all_images[start : start + page_size]
 
         # Clear existing widgets without resetting all_images / page state
+        self._stop_thumb_movies()
         self._thumb_pixmaps.clear()
         self._thumb_id_to_slot.clear()
         while self._thumb_vlayout.count():
@@ -2300,13 +2310,23 @@ class BrowserTab(QWidget):
             lbl.setCursor(Qt.CursorShape.PointingHandCursor)
             lbl.setProperty("image_id", image_id)
             lbl.clicked.connect(
-                lambda _slot=slot: (
-                    ImageViewerDialog(self._thumb_pixmaps[_slot], self).exec()
+                lambda _slot=slot, _iid=image_id: (
+                    ImageViewerDialog(
+                        self._thumb_pixmaps[_slot], self,
+                        animated_data=self._thumb_gif_data.get(_iid),
+                    ).exec()
                     if not self._thumb_pixmaps[_slot].isNull() else None
                 )
             )
             lbl.context_menu_requested.connect(self._on_image_context_menu)
             self._thumb_vlayout.addWidget(lbl)
+
+            gif = self._thumb_gif_data.get(image_id)
+            if gif and cached is not None:
+                # Paging back to an already-loaded animated thumbnail: the pixmap
+                # cache only holds frame 0, so rebuild the movie from kept bytes
+                # rather than making the loader re-read LMDB.
+                self._start_thumb_movie(slot, lbl, gif)
 
         if need_async and self._current_model_id is not None:
             self._thumb_load_requested.emit(self._current_model_id, need_async)
@@ -2351,6 +2371,47 @@ class BrowserTab(QWidget):
         self._render_thumb_page()
         self._thumb_scroll.verticalScrollBar().setValue(0)
 
+    def _stop_thumb_movies(self) -> None:
+        """Stop and drop every running thumbnail animation.
+
+        Called before the pane is repopulated: a QMovie keeps decoding on the
+        GUI thread even once its label is gone, so leaving them running would
+        burn CPU per model the user clicks through.
+        """
+        for movie in self._thumb_movies.values():
+            movie.stop()
+        self._thumb_movies.clear()
+
+    def _start_thumb_movie(self, slot: int, label, gif_bytes: bytes) -> None:
+        """Play *gif_bytes* on *label*, registering the movie under *slot*.
+
+        The QBuffer is parented to the QMovie so it outlives this call; QMovie
+        reads from the device lazily and a garbage-collected buffer would leave
+        the animation frozen on frame 0.
+        """
+        movie = QMovie(self)
+        buf = QBuffer(movie)
+        buf.setData(QByteArray(gif_bytes))
+        buf.open(QIODevice.OpenModeFlag.ReadOnly)
+        movie.setDevice(buf)
+        movie.setCacheMode(QMovie.CacheMode.CacheAll)
+        if not movie.isValid():
+            return
+        self._thumb_movies[slot] = movie
+        self._scale_movie(slot, movie)
+        label.setMovie(movie)
+        movie.start()
+
+    def _scale_movie(self, slot: int, movie: QMovie) -> None:
+        """Size *movie* to the pane width, keeping the source aspect ratio."""
+        if slot >= len(self._thumb_pixmaps):
+            return
+        px = self._thumb_pixmaps[slot]
+        if px.isNull() or px.width() == 0:
+            return
+        w = max(self._thumb_scroll.width() - 36, 60)
+        movie.setScaledSize(QSize(w, max(1, round(w * px.height() / px.width()))))
+
     def _rescale_thumbnails(self, force: bool = False) -> None:
         """Scale all sidebar thumbnails to fit the current scroll-area width."""
         # Use the total scroll area width instead of viewport width to avoid
@@ -2364,9 +2425,15 @@ class BrowserTab(QWidget):
 
         for i, px in enumerate(self._thumb_pixmaps):
             item = self._thumb_vlayout.itemAt(i)
-            if item and item.widget():
-                scaled = px.scaledToWidth(w, Qt.TransformationMode.SmoothTransformation)
-                item.widget().setPixmap(scaled)
+            if not (item and item.widget()):
+                continue
+            movie = self._thumb_movies.get(i)
+            if movie is not None:
+                # setPixmap() would detach the movie and freeze the animation.
+                self._scale_movie(i, movie)
+                continue
+            scaled = px.scaledToWidth(w, Qt.TransformationMode.SmoothTransformation)
+            item.widget().setPixmap(scaled)
 
     def _on_thumb_bytes_ready(self, model_id: int, image_id: int, jpeg_bytes: bytes) -> None:
         """Receive JPEG bytes from the background loader and update the matching label."""
@@ -2376,18 +2443,27 @@ class BrowserTab(QWidget):
         if slot is None:
             return
 
+        from app.utils.thumbnailer import is_animated_thumbnail
+
         px = QPixmap()
         if jpeg_bytes:
-            px.loadFromData(jpeg_bytes)
+            px.loadFromData(jpeg_bytes)   # frame 0 for a GIF
             QPixmapCache.insert(f"thumb:{image_id}", px)
 
         self._thumb_pixmaps[slot] = px
 
         item = self._thumb_vlayout.itemAt(slot)
-        if item and item.widget():
-            w = max(self._thumb_scroll.width() - 36, 60)
-            scaled = px.scaledToWidth(w, Qt.TransformationMode.SmoothTransformation)
-            item.widget().setPixmap(scaled)
+        if not (item and item.widget()):
+            return
+
+        if jpeg_bytes and is_animated_thumbnail(jpeg_bytes):
+            self._thumb_gif_data[image_id] = jpeg_bytes
+            self._start_thumb_movie(slot, item.widget(), jpeg_bytes)
+            return
+
+        w = max(self._thumb_scroll.width() - 36, 60)
+        scaled = px.scaledToWidth(w, Qt.TransformationMode.SmoothTransformation)
+        item.widget().setPixmap(scaled)
 
     def _shutdown_thumb_loader(self) -> None:
         """Stop the background thumbnail thread cleanly on app exit."""
@@ -2557,6 +2633,10 @@ class BrowserTab(QWidget):
             self._thumb_worker = None
             from app.utils.background_jobs import end_job
             end_job("thumbnails")
+            # Tell the main window here rather than after dlg.exec() returns: a
+            # short run finishes *during* exec(), which clears _thumb_worker
+            # before any post-exec wiring could reference it.
+            self.thumbnail_finished.emit()
 
         self._thumb_worker.progress.connect(_on_progress)
         self._thumb_worker.finished.connect(_on_finished)
@@ -2582,9 +2662,6 @@ class BrowserTab(QWidget):
         # dlg.exec() will return but the worker continues running; if Cancel was clicked,
         # the worker is requested to stop.
         dlg.exec()
-
-        # Ensure main window knows when the worker finishes
-        self._thumb_worker.finished.connect(lambda: self.thumbnail_finished.emit())
 
     def generate_thumbnails_for_selected(self) -> None:
         """Generate thumbnails for the rows currently selected in the table.

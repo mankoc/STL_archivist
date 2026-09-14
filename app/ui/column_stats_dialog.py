@@ -147,7 +147,7 @@ def _query_column(session, key: str, top_n: int | None) -> tuple[list[tuple[str,
 
 
 class ColumnStatsWorker(QThread):
-    finished = pyqtSignal(list, int)   # data, total
+    data_ready = pyqtSignal(list, int)   # data, total
 
     def __init__(self, column_key: str, top_n: int | None, parent=None) -> None:
         super().__init__(parent)
@@ -159,10 +159,10 @@ class ColumnStatsWorker(QThread):
         try:
             with session_scope() as s:
                 data, total = _query_column(s, self._key, self._top_n)
-            self.finished.emit(data, total)
+            self.data_ready.emit(data, total)
         except Exception as exc:
             logger.error("ColumnStatsWorker error: %s", exc, exc_info=True)
-            self.finished.emit([], 0)
+            self.data_ready.emit([], 0)
 
 
 class ColumnStatsDialog(QDialog):
@@ -254,12 +254,15 @@ class ColumnStatsDialog(QDialog):
         self._status_lbl.setText(f"Loading distribution for '{label}'…")
         self._clear_chart()
 
-        self._worker = ColumnStatsWorker(key, top_n)
-        self._worker.finished.connect(lambda data, total: self._on_finished(data, total, label))
+        # Wait for a previous run so the QThread is never dropped while running.
+        if self._worker is not None:
+            self._worker.wait()
+
+        self._worker = ColumnStatsWorker(key, top_n, self)
+        self._worker.data_ready.connect(lambda data, total: self._on_finished(data, total, label))
         self._worker.start()
 
     def _on_finished(self, data: list, total: int, label: str) -> None:
-        self._worker = None
         self._show_btn.setEnabled(True)
 
         if not data:

@@ -23,7 +23,10 @@ from app.crawler.folder_metadata import (
     import_folder_metadata,
 )
 from app.crawler.metadata import extract_metadata, ModelMetadata
-from app.crawler.rules import detect_presupport, detect_scale, detect_warnings
+from app.crawler.rules import (
+    detect_presupport, detect_scale, detect_warnings,
+    WARNING_LOW_COMPRESSION, WARNING_UNREADABLE,
+)
 from app.database.db import session_scope
 from app.database.helpers import (
     get_or_create_category,
@@ -277,7 +280,7 @@ class CrawlerWorker(QThread):
                 # Mark as unreadable in the DB warning field so it appears in the filter.
                 ex2 = existing_map.get(str(p))
                 if ex2 is not None:
-                    _uw = "Unreadable archive"
+                    _uw = WARNING_UNREADABLE
                     if ex2.warning:
                         if _uw not in ex2.warning:
                             ex2.warning += "\n" + _uw
@@ -938,7 +941,7 @@ class CrawlerWorker(QThread):
         if (self._config.warn_low_compression
                 and model.compression_rate is not None
                 and model.compression_rate >= self._config.low_compression_threshold):
-            _warn_text = "Archive with low compression rate"
+            _warn_text = WARNING_LOW_COMPRESSION
             if model.warning:
                 if _warn_text not in model.warning:
                     model.warning += "\n" + _warn_text
@@ -946,7 +949,7 @@ class CrawlerWorker(QThread):
                 model.warning = _warn_text
 
         if current_hash.startswith("fallback:"):
-            _uw = "Unreadable archive"
+            _uw = WARNING_UNREADABLE
             if model.warning:
                 if _uw not in model.warning:
                     model.warning += "\n" + _uw

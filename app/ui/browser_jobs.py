@@ -72,18 +72,18 @@ class RescanWorker(QThread):
         from app.crawler.archive import archive_hash, extract_archive_contents
         from app.crawler.metadata import extract_metadata
         from app.crawler.rules import detect_warnings, detect_presupport, detect_scale
-        from app.config import CrawlerConfig
         from app.database.db import session_scope
         from app.database.models import STLModel, STLFile
         from app.database.helpers import get_or_create_scale
-        from app.ui.config_dialog import (
-            get_warn_presupported_stl, get_warn_no_images, get_warn_nested_archive,
-            get_store_stl_file_list, get_presupport_patterns,
-        )
+        from app.ui.settings_loader import build_crawler_config
         from app.utils.path_pattern import parse_release_date
 
         _log = logging.getLogger(__name__)
-        config = CrawlerConfig()
+        # Must come from settings, not CrawlerConfig() defaults: a bare config
+        # carries unrar_path="", so every .rar would fail to open here even when
+        # the user has configured the tool — and a failed open used to look like
+        # an archive with no members (see the guard below).
+        config = build_crawler_config()
         total = len(self._model_ids)
         updated = 0
 
@@ -125,6 +125,16 @@ class RescanWorker(QThread):
                         stl_info_out=None,
                         uncompressed_size_out=uncompressed_out,
                     )
+                    if not all_names:
+                        # extract_archive_contents() logs and swallows open failures,
+                        # returning an empty member list.  Rewriting the record from
+                        # that would assert "no images"/"no printable files" on an
+                        # archive we simply could not read, so stop before touching it.
+                        self.file_error.emit(
+                            p.name, "Could not read archive contents — left unchanged"
+                        )
+                        continue
+
                     uncompressed = uncompressed_out[0] if uncompressed_out else None
                     meta = extract_metadata(p, contents=contents, source_dir=p.parent)
 
@@ -148,11 +158,12 @@ class RescanWorker(QThread):
                     m.presupports = detect_presupport(all_names)
                     warnings = detect_warnings(
                         all_names,
-                        check_presupported=get_warn_presupported_stl(),
-                        check_no_images=get_warn_no_images(),
-                        check_nested_archive=get_warn_nested_archive(),
-                        check_supports=get_warn_presupported_stl(),
-                        supports_patterns=get_presupport_patterns(),
+                        check_presupported=config.warn_presupported_stl,
+                        check_no_images=config.warn_no_images,
+                        check_nested_archive=config.warn_nested_archive,
+                        check_supports=config.warn_supports,
+                        check_no_printable=config.warn_no_printable,
+                        supports_patterns=config.support_patterns,
                     )
                     m.warning = warnings or None
 
@@ -160,7 +171,7 @@ class RescanWorker(QThread):
                     if scales:
                         m.scales = [get_or_create_scale(session, s) for s in scales]
 
-                    if get_store_stl_file_list():
+                    if config.store_stl_file_list:
                         for old in list(m.stl_files):
                             session.delete(old)
                         session.flush()
