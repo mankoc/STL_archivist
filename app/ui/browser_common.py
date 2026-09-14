@@ -10,7 +10,8 @@ from sqlalchemy import (
 )
 
 # Image file extensions accepted by the thumbnail-pane drag-and-drop.
-_IMAGE_DROP_EXTS = frozenset({'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif'})
+_IMAGE_DROP_EXTS = frozenset({'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.tif',
+                             '.avif'})
 
 # Column indices
 COL_THUMB         = 0

@@ -1995,8 +1995,8 @@ Run 'Find Moved in DB' first, then select rows to merge.</translation>
     </message>
     <message>
         <location filename="../../app/ui/find_by_image_dialog.py" line="245" />
-        <source>Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.tif *.tiff)</source>
-        <translation>Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.tif *.tiff)</translation>
+        <source>Images (*.png *.jpg *.jpeg *.webp *.avif *.bmp *.gif *.tif *.tiff)</source>
+        <translation>Images (*.png *.jpg *.jpeg *.webp *.avif *.bmp *.gif *.tif *.tiff)</translation>
     </message>
     <message>
         <location filename="../../app/ui/find_by_image_dialog.py" line="263" />

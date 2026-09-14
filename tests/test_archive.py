@@ -83,7 +83,7 @@ def test_is_archive_no_extension():
 # ---------------------------------------------------------------------------
 
 def test_is_wanted_image_suffixes():
-    for ext in (".jpg", ".jpeg", ".png", ".webp", ".bmp"):
+    for ext in (".jpg", ".jpeg", ".png", ".webp", ".bmp", ".avif", ".gif"):
         assert _is_wanted(f"preview{ext}") is True
         assert _is_wanted(f"PREVIEW{ext.upper()}") is True
 
@@ -125,6 +125,8 @@ def test_member_size_limit_image_is_large():
     assert _member_size_limit("preview.jpg") == _SIZE_LIMIT_IMAGE
     assert _member_size_limit("THUMB.PNG") == _SIZE_LIMIT_IMAGE
     assert _member_size_limit("render.webp") == _SIZE_LIMIT_IMAGE
+    assert _member_size_limit("render.avif") == _SIZE_LIMIT_IMAGE
+    assert _member_size_limit("loop.gif") == _SIZE_LIMIT_IMAGE
 
 
 def test_member_size_limit_meta_is_small():

@@ -244,7 +244,7 @@ class FindByImageDialog(QDialog):
     def _browse(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self, self.tr("Select Image"), str(Path.home()),
-            self.tr("Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.tif *.tiff)"),
+            self.tr("Images (*.png *.jpg *.jpeg *.webp *.avif *.bmp *.gif *.tif *.tiff)"),
         )
         if path:
             self._load_image(Path(path))
@@ -276,6 +276,13 @@ class FindByImageDialog(QDialog):
 
         px = QPixmap()
         px.loadFromData(raw)
+        if px.isNull():
+            # Qt has no codec for some formats Pillow reads (AVIF, for one), so
+            # fall back to the Pillow-backed JPEG transcode used for thumbnails.
+            from app.utils.thumbnailer import make_thumbnail
+            jpeg = make_thumbnail(raw)
+            if jpeg:
+                px.loadFromData(jpeg)
         if not px.isNull():
             self._query_img.setPixmap(
                 px.scaled(_THUMB_SIZE, _THUMB_SIZE,

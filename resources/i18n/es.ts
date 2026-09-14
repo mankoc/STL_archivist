@@ -1995,8 +1995,8 @@ Ejecute primero «Buscar movidos en BD» y luego seleccione las filas a combinar
     </message>
     <message>
         <location filename="../../app/ui/find_by_image_dialog.py" line="245" />
-        <source>Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.tif *.tiff)</source>
-        <translation>Imágenes (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.tif *.tiff)</translation>
+        <source>Images (*.png *.jpg *.jpeg *.webp *.avif *.bmp *.gif *.tif *.tiff)</source>
+        <translation>Imágenes (*.png *.jpg *.jpeg *.webp *.avif *.bmp *.gif *.tif *.tiff)</translation>
     </message>
     <message>
         <location filename="../../app/ui/find_by_image_dialog.py" line="263" />

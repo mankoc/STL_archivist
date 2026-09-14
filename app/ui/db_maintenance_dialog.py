@@ -496,6 +496,141 @@ class EmbeddingWorker(QThread):
         self.finished.emit(computed, skipped)
 
 
+class ImageWarningWorker(QThread):
+    """Re-check every catalogued archive for image files and fix its images warning.
+
+    Reads each archive's catalog only — no member is decompressed — so this is
+    far cheaper than a full rescan, and it is the only way to notice images the
+    crawler could not see at the time (a format added to ``IMAGE_SUFFIXES``
+    since the archive was catalogued, for instance).
+
+    Only the "archive without images" line is touched; every other warning on
+    the record is left exactly as it was.  Adding the line requires the warning
+    to be enabled in Configuration, but a stale line is always cleared, so
+    turning the option off and running this cleans up after it.
+
+    Signals:
+        progress(current, total): Archive index and total count.
+        log(message): Human-readable status line for the UI log panel.
+        finished(cleared, added, skipped): Counts once the run completes.
+    """
+
+    progress = pyqtSignal(int, int)
+    log      = pyqtSignal(str)
+    finished = pyqtSignal(int, int, int)   # (cleared, added, skipped)
+
+    _BATCH = 200
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._stop_requested = False
+
+    def stop(self) -> None:
+        self._stop_requested = True
+
+    def run(self) -> None:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        from app.constants import IMAGE_SUFFIXES
+        from app.crawler.archive import list_contents
+        from app.crawler.rules import WARNING_NO_IMAGES, sort_warning_lines
+        from app.database.db import session_scope
+        from app.database.models import STLModel
+        from app.ui.settings_loader import build_crawler_config
+
+        self._stop_requested = False
+        config = build_crawler_config()
+
+        with session_scope() as session:
+            records = session.query(
+                STLModel.id, STLModel.archive_path, STLModel.warning
+            ).all()
+
+        total = len(records)
+        if total == 0:
+            self.log.emit("No records found in the database.")
+            self.finished.emit(0, 0, 0)
+            return
+
+        self.log.emit(f"Checking {total} archive(s) for image files…")
+
+        def _has_images(path_str) -> "bool | None":
+            """True/False, or None when the archive could not be read at all."""
+            if not path_str:
+                return None
+            p = Path(path_str)
+            if not p.is_file():
+                return None
+            names = list_contents(p, config.unrar_path)
+            if not names:
+                # list_contents() logs and swallows open failures, returning [].
+                # Treating that as "no images" would flag archives we never read.
+                return None
+            return any(
+                Path(n.replace("\\", "/")).suffix.lower() in IMAGE_SUFFIXES
+                for n in names
+            )
+
+        cleared = added = skipped = 0
+        pending: list[tuple[int, "str | None"]] = []
+
+        def flush() -> None:
+            if not pending:
+                return
+            with session_scope() as s:
+                for model_id, new_warning in pending:
+                    m = s.get(STLModel, model_id)
+                    if m is not None:
+                        m.warning = new_warning
+            pending.clear()
+
+        with ThreadPoolExecutor(max_workers=config.max_workers) as pool:
+            futures = {
+                pool.submit(_has_images, path): (model_id, warning)
+                for model_id, path, warning in records
+            }
+            for idx, fut in enumerate(as_completed(futures), 1):
+                if self._stop_requested:
+                    self.log.emit("Stopped by user.")
+                    pool.shutdown(wait=False, cancel_futures=True)
+                    break
+
+                self.progress.emit(idx, total)
+                model_id, warning = futures[fut]
+                try:
+                    has_images = fut.result()
+                except Exception as exc:   # defensive: a reader raising anything
+                    logger.warning("Image check failed for model %s: %s", model_id, exc)
+                    has_images = None
+
+                if has_images is None:
+                    skipped += 1
+                    continue
+
+                lines = [l for l in (warning or "").split("\n") if l.strip()]
+                flagged = WARNING_NO_IMAGES in lines
+
+                if has_images and flagged:
+                    lines.remove(WARNING_NO_IMAGES)
+                    cleared += 1
+                elif not has_images and not flagged and config.warn_no_images:
+                    lines.append(WARNING_NO_IMAGES)
+                    added += 1
+                else:
+                    continue
+
+                pending.append((model_id, "\n".join(sort_warning_lines(lines)) or None))
+                if len(pending) >= self._BATCH:
+                    flush()
+
+        flush()
+        self.log.emit(
+            f"Done — {cleared} stale warning(s) cleared, {added} added, "
+            f"{skipped} skipped (archive missing or unreadable)."
+        )
+        self.finished.emit(cleared, added, skipped)
+
+
 class CompactWorker(QThread):
     """Rewrite the LMDB thumbnail store defragmented to reclaim disk space.
 
@@ -801,6 +936,7 @@ class DbMaintenanceDialog(QDialog):
         self._dup_entry_worker: FindDuplicateEntriesWorker   | None = None
         self._compact_worker:   CompactWorker                | None = None
         self._prune_worker:     PruneImagesWorker            | None = None
+        self._img_warn_worker:  ImageWarningWorker           | None = None
         self._results: list[dict] = []
         self._build_ui()
 
@@ -899,6 +1035,18 @@ class DbMaintenanceDialog(QDialog):
             )
         self._embed_btn.clicked.connect(lambda: self._start_embeddings(recompute_all=True))
         _add_btn(self._embed_btn)
+
+        self._check_images_btn = QPushButton(
+            style.standardIcon(SP.SP_FileDialogContentsView), self.tr("Check Images Warning")
+        )
+        self._check_images_btn.setToolTip(
+            self.tr("Re-read every archive's file list and fix the 'Archive without images' "
+            "warning: clear it where the archive does contain images, and add it where it "
+            "does not. Only the archive catalog is read, so this is much faster than a full "
+            "rescan. Useful after an update adds support for a new image format.")
+        )
+        self._check_images_btn.clicked.connect(self._start_check_images)
+        _add_btn(self._check_images_btn)
 
         self._compact_btn = QPushButton(
             style.standardIcon(SP.SP_DriveHDIcon), self.tr("Compact Thumbnail Store")
@@ -1013,6 +1161,7 @@ class DbMaintenanceDialog(QDialog):
         self._embed_btn.setEnabled(not busy and self._embed_available)
         self._compact_btn.setEnabled(not busy)
         self._prune_images_btn.setEnabled(not busy)
+        self._check_images_btn.setEnabled(not busy)
         self._merge_moved_btn.setEnabled(False)
         self._remove_sel_btn.setEnabled(False)
         self._remove_all_btn.setEnabled(False)
@@ -1033,6 +1182,7 @@ class DbMaintenanceDialog(QDialog):
         self._embed_btn.setEnabled(self._embed_available)
         self._compact_btn.setEnabled(True)
         self._prune_images_btn.setEnabled(True)
+        self._check_images_btn.setEnabled(True)
         self._merge_moved_btn.setEnabled(has_moved_db)
         self._remove_sel_btn.setEnabled(has_any)
         self._remove_all_btn.setEnabled(has_missing)
@@ -1043,7 +1193,7 @@ class DbMaintenanceDialog(QDialog):
         for worker in (
             self._verify_worker, self._search_worker,
             self._dhash_worker, self._embed_worker, self._moved_db_worker,
-            self._prune_worker,
+            self._prune_worker, self._img_warn_worker,
         ):
             if worker and worker.isRunning():
                 worker.stop()
@@ -1104,6 +1254,26 @@ class DbMaintenanceDialog(QDialog):
 
     def _on_embed_finished(self, computed: int, skipped: int) -> None:
         self._embed_worker = None
+        self._set_idle()
+        from app.utils.sound import play_notification
+        play_notification("maintenance")
+
+    # ------------------------------------------------------------------
+    def _start_check_images(self) -> None:
+        self._log.clear()
+        self._progress.setValue(0)
+        self._set_busy(True)
+
+        self._img_warn_worker = ImageWarningWorker()
+        self._img_warn_worker.log.connect(self._on_log)
+        self._img_warn_worker.progress.connect(self._on_progress)
+        self._img_warn_worker.finished.connect(self._on_check_images_finished)
+        self._img_warn_worker.start()
+
+    def _on_check_images_finished(self, cleared: int, added: int, skipped: int) -> None:
+        # The browser is refreshed by the caller once this dialog closes, so
+        # there is nothing to notify here.
+        self._img_warn_worker = None
         self._set_idle()
         from app.utils.sound import play_notification
         play_notification("maintenance")
@@ -1574,6 +1744,7 @@ class DbMaintenanceDialog(QDialog):
         self._embed_btn.setEnabled(self._embed_available)
         self._compact_btn.setEnabled(True)
         self._prune_images_btn.setEnabled(True)
+        self._check_images_btn.setEnabled(True)
         self._merge_moved_btn.setEnabled(has_moved_db)
         self._remove_all_btn.setEnabled(has_missing)
         self._remove_flagged_btn.setEnabled(has_flagged)
@@ -1593,7 +1764,7 @@ class DbMaintenanceDialog(QDialog):
         for worker in (
             self._verify_worker, self._search_worker,
             self._dhash_worker, self._embed_worker, self._moved_db_worker,
-            self._prune_worker,
+            self._prune_worker, self._img_warn_worker,
         ):
             if worker and worker.isRunning():
                 worker.stop()

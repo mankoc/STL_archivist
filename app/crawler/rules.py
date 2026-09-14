@@ -102,6 +102,38 @@ def detect_presupport(names: list[str]) -> str:
     return "No"                               # rule 4 – fallback
 
 
+# ── Warning texts ────────────────────────────────────────────────────────────
+# Stored verbatim in ``STLModel.warning`` (newline-separated).  Named here so
+# code that edits an existing warning string — rather than recomputing it from
+# scratch — matches what the crawler wrote.
+WARNING_PRESUPPORTED  = "Models with presupported stl"
+WARNING_NO_IMAGES     = "Archive without images"
+WARNING_NESTED        = "Nested archives"
+WARNING_SUPPORTS      = "Archive with supports"
+WARNING_NO_PRINTABLE  = "Archive without printable files"
+# Appended by the crawler itself rather than by detect_warnings().
+WARNING_LOW_COMPRESSION = "Archive with low compression rate"
+WARNING_UNREADABLE      = "Unreadable archive"
+
+#: Canonical order of warning lines, so a warning edited in place still reads
+#: the same way one written by a fresh crawl does.
+WARNING_ORDER: list[str] = [
+    WARNING_PRESUPPORTED,
+    WARNING_NO_IMAGES,
+    WARNING_NESTED,
+    WARNING_SUPPORTS,
+    WARNING_NO_PRINTABLE,
+    WARNING_LOW_COMPRESSION,
+    WARNING_UNREADABLE,
+]
+
+
+def sort_warning_lines(lines: list[str]) -> list[str]:
+    """Return *lines* in :data:`WARNING_ORDER`, unrecognised ones kept at the end."""
+    return sorted(lines, key=lambda l: (WARNING_ORDER.index(l)
+                                        if l in WARNING_ORDER else len(WARNING_ORDER)))
+
+
 def detect_warnings(
     names: list[str],
     check_presupported: bool = True,
@@ -122,7 +154,8 @@ def detect_warnings(
             labelled as presupported (e.g. ``body_presupported.stl``,
             ``sup_arm.stl``). Uses hardcoded ``_DEFAULT_PRESUPPORTED_PATTERNS``.
         check_no_images: Warn when the archive contains no recognisable image
-            file (``.jpg``, ``.jpeg``, ``.png``, ``.webp``, ``.bmp``).
+            file (``.jpg``, ``.jpeg``, ``.png``, ``.webp``, ``.bmp``, ``.avif``,
+            ``.gif``).
         check_nested_archive: Warn when the archive contains another compressed
             archive (``.zip``, ``.rar``, ``.7z``).
         check_supports: Warn when the archive contains a supported STL file
@@ -177,19 +210,19 @@ def detect_warnings(
             has_printable = True
 
     if check_presupported and has_presupported:
-        warnings.append("Models with presupported stl")
+        warnings.append(WARNING_PRESUPPORTED)
         logger.debug("  Warning: models with presupported stl")
     if check_no_images and not has_image:
-        warnings.append("Archive without images")
+        warnings.append(WARNING_NO_IMAGES)
         logger.debug("  Warning: archive without images")
     if check_nested_archive and has_nested_archive:
-        warnings.append("Nested archives")
+        warnings.append(WARNING_NESTED)
         logger.debug("  Warning: nested archives")
     if check_supports and has_supported_stl:
-        warnings.append("Archive with supports")
+        warnings.append(WARNING_SUPPORTS)
         logger.debug("  Warning: archive with supports")
     if check_no_printable and not has_printable:
-        warnings.append("Archive without printable files")
+        warnings.append(WARNING_NO_PRINTABLE)
         logger.debug("  Warning: archive without printable files")
 
     if not warnings:

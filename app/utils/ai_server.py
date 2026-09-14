@@ -159,8 +159,14 @@ class _Server:
         if not self.is_running():
             raise RuntimeError("AI server is not running.")
 
+        from app.utils.thumbnailer import is_animated_thumbnail, make_thumbnail
+
         content: list[dict] = []
         for b in image_bytes_list:
+            if is_animated_thumbnail(b):
+                # Animated-GIF thumbnails would be sent mislabelled as JPEG below,
+                # and the model only ever looks at one frame — flatten to a still.
+                b = make_thumbnail(b, animate=False) or b
             b64 = base64.b64encode(b).decode("ascii")
             content.append({
                 "type": "image_url",
