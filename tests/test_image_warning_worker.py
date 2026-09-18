@@ -49,7 +49,7 @@ def _run(monkeypatch, config=None):
                         lambda *a, **k: config or CrawlerConfig(max_workers=2))
     worker = ImageWarningWorker()
     result = []
-    worker.finished.connect(lambda c, a, s: result.append((c, a, s)))
+    worker.check_finished.connect(lambda c, a, s: result.append((c, a, s)))
     worker.run()
     return result[0]
 

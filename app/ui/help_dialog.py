@@ -812,7 +812,21 @@ The dialog is divided into sections shown in a tree on the left.</p>
 <table>
   <tr><th>Warning</th><th>Meaning</th></tr>
   <tr><td>Pre-supported STL detected</td>
-      <td>The archive contains pre-supported mesh files alongside the original</td></tr>
+      <td>The archive contains a pre-supported <code>.stl</code> &mdash; either one named as
+          such (<code>body_presupported.stl</code>, <code>sup_arm.stl</code>) or one sitting in
+          a folder that marks its contents as pre-supported (<code>Presupported/</code>,
+          <code>PS/</code>, <code>Supported STL/</code>, <code>Pre-Supported/</code>).
+          Folder names are matched as whole words, so <code>PSD Sources/</code> and
+          <code>Props/</code> do not count. An &ldquo;unsupported&rdquo; marker always wins,
+          wherever it appears &mdash; in any folder above the file or in the mesh&rsquo;s own
+          name. So <code>No_Supported/</code>, <code>Unsupported/</code>,
+          <code>Non-Supported/</code>, <code>Without Supports/</code> and <code>No_PS/</code>
+          are never flagged, and neither is
+          <code>supports/Unsupported/120MM_Unsup_Emerald.stl</code>, where the raw meshes are
+          nested inside the supported tree. A clean sibling in the same folder
+          (<code>supports/120MM_Emerald.stl</code>) is still flagged &mdash; the test is
+          per-file. Only <code>.stl</code> members qualify: images, readmes, slicer files,
+          and the folder entries themselves never raise it</td></tr>
   <tr><td>No images found</td>
       <td>The archive contains no image files (<code>.jpg</code>, <code>.jpeg</code>,
           <code>.png</code>, <code>.webp</code>, <code>.avif</code>, <code>.gif</code>,
@@ -1157,6 +1171,18 @@ archives&rsquo; first thumbnails, making it easy to judge whether the match is g
           warning requires <em>Archive contains images</em> to be enabled in
           <b>Configuration &rarr; Crawler warnings</b>; a stale warning is cleared either
           way.</td></tr>
+  <tr><td><b>Check Presupport Warning</b></td>
+      <td>Re-reads every catalogued archive&rsquo;s file list and corrects the
+          <em>Models with presupported stl</em> warning: it is cleared where the archive holds
+          no presupported <code>.stl</code> and added where it does. Only the archive catalog
+          is read, so this runs far faster than a full rescan &mdash; run it after the
+          presupport rules change to clear warnings raised by an older, looser rule (an image
+          or a folder entry whose name merely contained &ldquo;presupported&rdquo;, or a
+          <code>No_Supported/</code> folder of raw meshes). Archives that are missing or cannot
+          be opened are counted as <em>skipped</em> and left untouched, and no other warning on
+          a record is changed. Adding the warning requires <em>Pre-supported STL</em> to be
+          enabled in <b>Configuration &rarr; Crawler warnings</b>; a stale warning is cleared
+          either way.</td></tr>
   <tr><td><b>Compact Thumbnail Store</b></td>
       <td>Rewrites the LMDB thumbnail store to reclaim disk space left behind by deleted
           thumbnails. LMDB reuses freed space but never shrinks the file on its own, so run
@@ -1170,6 +1196,16 @@ archives&rsquo; first thumbnails, making it easy to judge whether the match is g
       <td>Hides <em>OK</em> and <em>Relocated</em> rows so you can focus on records that
           need attention.</td></tr>
 </table>
+
+<div class="note">Click the <b>&#9888;</b> in the browser&rsquo;s <b>Warnings</b> column to open
+<b>Warning Details</b>, which lists the exact archive members that triggered each warning.
+This is the quickest way to check a warning you doubt. The presupported rule only ever
+matches <code>.stl</code> members &mdash; by their own name or by a pre-supported folder above
+them &mdash; so an image, a readme, or a folder entry whose name contains
+<code>presupported</code> does not raise it, and the file listed is always the mesh that
+qualified rather than its folder.
+Warnings that fire on an absence (no images, no printable files) say so instead of listing
+files, and an archive that is missing or cannot be opened is reported as such.</div>
 
 <div class="warn">Removing records is permanent and cannot be undone. Run <b>Verify</b> first
 and review the list carefully before using any Remove action.</div>

@@ -51,6 +51,65 @@ class _ImageDropRunnable(QRunnable):
         self.signals.ready.emit(self._model_id, encoded, errors)
 
 
+class _WarningDetailRunnable(QRunnable):
+    """Work out which archive members triggered each of a model's warnings.
+
+    Reading the archive catalog is file I/O, so it happens here rather than in
+    the click handler; the GUI thread only renders the result.
+    """
+
+    class _Signals(QObject):
+        # archive_path, [(warning, [member names])], error message ("" when fine)
+        ready = pyqtSignal(str, list, str)
+
+    def __init__(self, archive_path: str, warning_text: str):
+        super().__init__()
+        self.signals  = self._Signals()
+        self._path    = archive_path
+        self._warning = warning_text
+        self.setAutoDelete(True)
+
+    def run(self):
+        from pathlib import Path
+        from app.crawler.archive import list_contents
+        from app.crawler.rules import explain_warnings
+        from app.ui.settings_loader import build_crawler_config
+
+        lines = [w.strip() for w in (self._warning or "").split("\n") if w.strip()]
+        path  = Path(self._path) if self._path else None
+        error = ""
+        matches: dict = {}
+
+        if path is None or not path.is_file():
+            error = "The archive is no longer at the catalogued path, so its files cannot be listed."
+        else:
+            try:
+                config = build_crawler_config()
+                names  = list_contents(path, config.unrar_path)
+                if names:
+                    # Every check is enabled here regardless of configuration: the
+                    # question being answered is "what produced this stored
+                    # warning", not "what would a crawl warn about now".
+                    matches = explain_warnings(
+                        names,
+                        check_presupported=True,
+                        check_no_images=True,
+                        check_nested_archive=True,
+                        check_supports=True,
+                        check_no_printable=True,
+                        supports_patterns=config.support_patterns,
+                    )
+                else:
+                    error = "The archive could not be opened, so its files cannot be listed."
+            except Exception as exc:
+                error = f"The archive could not be read: {exc}"
+
+        # Keep the stored warning's own lines and order — a warning that no longer
+        # reproduces still needs a row, shown as having no current matches.
+        sections = [(line, matches.get(line, [])) for line in lines]
+        self.signals.ready.emit(self._path, sections, error)
+
+
 class RescanWorker(QThread):
     """Background thread that re-extracts metadata for a list of model IDs."""
 
