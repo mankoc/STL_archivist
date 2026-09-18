@@ -28,6 +28,11 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
+from app.constants import IMAGE_SUFFIXES
+from app.crawler.rules import (
+    explain_warnings, WARNING_NO_IMAGES, WARNING_PRESUPPORTED,
+)
+
 logger = logging.getLogger(__name__)
 
 _STATUS_OK             = "OK"
@@ -73,12 +78,12 @@ class VerifyWorker(QThread):
     Signals:
         progress(current, total): Archive index and total count.
         log(message): Human-readable status line for the UI log panel.
-        finished(results): List of result dicts once verification completes.
+        verify_finished(results): List of result dicts once verification completes.
     """
 
     progress = pyqtSignal(int, int)
     log      = pyqtSignal(str)
-    finished = pyqtSignal(list)
+    verify_finished = pyqtSignal(list)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -107,7 +112,7 @@ class VerifyWorker(QThread):
         total = len(records)
         if total == 0:
             self.log.emit("No records found in the database.")
-            self.finished.emit([])
+            self.verify_finished.emit([])
             return
 
         self.log.emit(f"Verifying {total} archive(s)…")
@@ -158,7 +163,7 @@ class VerifyWorker(QThread):
             f"{n_missing} missing, {n_flagged} flagged missing "
             f"out of {total} archive(s)."
         )
-        self.finished.emit(results)
+        self.verify_finished.emit(results)
 
 
 class SearchWorker(QThread):
@@ -173,13 +178,13 @@ class SearchWorker(QThread):
         progress(current, total): Candidate file index and total candidate count.
         log(message): Human-readable status line for the UI log panel.
         found(model_id, new_path): Emitted each time a missing archive is located.
-        finished(): Emitted when the scan completes or is stopped.
+        search_finished(): Emitted when the scan completes or is stopped.
     """
 
     progress = pyqtSignal(int, int)
     log      = pyqtSignal(str)
     found    = pyqtSignal(int, str)
-    finished = pyqtSignal()
+    search_finished = pyqtSignal()
 
     def __init__(self, search_root: Path, targets: dict, parent=None) -> None:
         """
@@ -221,7 +226,7 @@ class SearchWorker(QThread):
         total = len(candidates)
         if total == 0:
             self.log.emit("No archive files found in the selected folder.")
-            self.finished.emit()
+            self.search_finished.emit()
             return
 
         self.log.emit(
@@ -280,7 +285,7 @@ class SearchWorker(QThread):
         self.log.emit(
             f"Search complete — {matched} of {len(self._targets)} missing archive(s) located."
         )
-        self.finished.emit()
+        self.search_finished.emit()
 
 
 class DHashWorker(QThread):
@@ -292,12 +297,12 @@ class DHashWorker(QThread):
     Signals:
         progress(current, total): Image index and total count.
         log(message): Human-readable status line for the UI log panel.
-        finished(computed, skipped): Counts once the run completes.
+        hash_finished(computed, skipped): Counts once the run completes.
     """
 
     progress = pyqtSignal(int, int)
     log      = pyqtSignal(str)
-    finished = pyqtSignal(int, int)   # (computed, skipped)
+    hash_finished = pyqtSignal(int, int)   # (computed, skipped)
 
     _BATCH = 200
 
@@ -329,7 +334,7 @@ class DHashWorker(QThread):
         total = len(rows)
         if total == 0:
             self.log.emit("All images already have a dHash computed.")
-            self.finished.emit(0, 0)
+            self.hash_finished.emit(0, 0)
             return
 
         verb = "Recomputing" if self._recompute_all else "Computing"
@@ -376,7 +381,7 @@ class DHashWorker(QThread):
             f"Done — {computed} dHash(es) computed, "
             f"{skipped} skipped (no thumbnail or decode error)."
         )
-        self.finished.emit(computed, skipped)
+        self.hash_finished.emit(computed, skipped)
 
 
 class EmbeddingWorker(QThread):
@@ -388,12 +393,12 @@ class EmbeddingWorker(QThread):
     Signals:
         progress(current, total): Image index and total count.
         log(message): Human-readable status line for the UI log panel.
-        finished(computed, skipped): Counts once the run completes.
+        embed_finished(computed, skipped): Counts once the run completes.
     """
 
     progress = pyqtSignal(int, int)
     log      = pyqtSignal(str)
-    finished = pyqtSignal(int, int)   # (computed, skipped)
+    embed_finished = pyqtSignal(int, int)   # (computed, skipped)
 
     # Batch size read from config at run time; fallback keeps the class usable in tests.
     _INFER_BATCH = 32  # overridden in run()
@@ -420,7 +425,7 @@ class EmbeddingWorker(QThread):
 
         if not emb.is_available():
             self.log.emit(emb.unavailable_reason())
-            self.finished.emit(0, 0)
+            self.embed_finished.emit(0, 0)
             return
 
         with session_scope() as session:
@@ -435,7 +440,7 @@ class EmbeddingWorker(QThread):
         total = len(rows)
         if total == 0:
             self.log.emit("All images already have a current embedding.")
-            self.finished.emit(0, 0)
+            self.embed_finished.emit(0, 0)
             return
 
         verb = "Recomputing" if self._recompute_all else "Computing"
@@ -493,33 +498,44 @@ class EmbeddingWorker(QThread):
             f"Done — {computed} embedding(s) computed, "
             f"{skipped} skipped (no thumbnail or decode error)."
         )
-        self.finished.emit(computed, skipped)
+        self.embed_finished.emit(computed, skipped)
 
 
-class ImageWarningWorker(QThread):
-    """Re-check every catalogued archive for image files and fix its images warning.
+class _WarningRecheckWorker(QThread):
+    """Re-evaluate one warning line across every catalogued archive.
 
-    Reads each archive's catalog only — no member is decompressed — so this is
-    far cheaper than a full rescan, and it is the only way to notice images the
-    crawler could not see at the time (a format added to ``IMAGE_SUFFIXES``
-    since the archive was catalogued, for instance).
+    Reads each archive's catalog only - no member is decompressed - so this is
+    far cheaper than a full rescan, and it is the only way to pick up a rule
+    that has changed since the archive was catalogued.
 
-    Only the "archive without images" line is touched; every other warning on
-    the record is left exactly as it was.  Adding the line requires the warning
-    to be enabled in Configuration, but a stale line is always cleared, so
-    turning the option off and running this cleans up after it.
+    Only this worker's own warning line is touched; every other warning on the
+    record is left exactly as it was.  Adding the line requires the warning to
+    be enabled in Configuration, but a stale line is always cleared, so turning
+    the option off and running this cleans up after it.
+
+    Subclasses supply four things: :attr:`warning_line`, :meth:`_should_warn`,
+    :meth:`_may_add` and :meth:`_scan_message`.
 
     Signals:
         progress(current, total): Archive index and total count.
         log(message): Human-readable status line for the UI log panel.
-        finished(cleared, added, skipped): Counts once the run completes.
+        check_finished(cleared, added, skipped): Counts once the run completes.
+
+    ``check_finished`` is deliberately not named ``finished``: that would shadow
+    ``QThread.finished``, which is what actually fires when the thread has wound
+    down.  Dropping the worker reference on a same-named custom signal - emitted
+    from inside ``run()``, before the thread has finished - is what produces
+    "QThread: Destroyed while thread is still running".
     """
 
-    progress = pyqtSignal(int, int)
-    log      = pyqtSignal(str)
-    finished = pyqtSignal(int, int, int)   # (cleared, added, skipped)
+    progress       = pyqtSignal(int, int)
+    log            = pyqtSignal(str)
+    check_finished = pyqtSignal(int, int, int)   # (cleared, added, skipped)
 
     _BATCH = 200
+
+    #: Warning text this worker owns, from :mod:`app.crawler.rules`.
+    warning_line: str = ""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -528,12 +544,25 @@ class ImageWarningWorker(QThread):
     def stop(self) -> None:
         self._stop_requested = True
 
+    # -- subclass hooks -------------------------------------------------
+    def _should_warn(self, names: list, config) -> bool:
+        """Whether an archive with these members should carry the warning."""
+        raise NotImplementedError
+
+    def _may_add(self, config) -> bool:
+        """Whether configuration allows *adding* it (clearing is always allowed)."""
+        raise NotImplementedError
+
+    def _scan_message(self, total: int) -> str:
+        """Opening log line."""
+        raise NotImplementedError
+
+    # -------------------------------------------------------------------
     def run(self) -> None:
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        from app.constants import IMAGE_SUFFIXES
         from app.crawler.archive import list_contents
-        from app.crawler.rules import WARNING_NO_IMAGES, sort_warning_lines
+        from app.crawler.rules import sort_warning_lines
         from app.database.db import session_scope
         from app.database.models import STLModel
         from app.ui.settings_loader import build_crawler_config
@@ -549,12 +578,12 @@ class ImageWarningWorker(QThread):
         total = len(records)
         if total == 0:
             self.log.emit("No records found in the database.")
-            self.finished.emit(0, 0, 0)
+            self.check_finished.emit(0, 0, 0)
             return
 
-        self.log.emit(f"Checking {total} archive(s) for image files…")
+        self.log.emit(self._scan_message(total))
 
-        def _has_images(path_str) -> "bool | None":
+        def _evaluate(path_str) -> "bool | None":
             """True/False, or None when the archive could not be read at all."""
             if not path_str:
                 return None
@@ -564,12 +593,9 @@ class ImageWarningWorker(QThread):
             names = list_contents(p, config.unrar_path)
             if not names:
                 # list_contents() logs and swallows open failures, returning [].
-                # Treating that as "no images" would flag archives we never read.
+                # Acting on that would rewrite records we never actually read.
                 return None
-            return any(
-                Path(n.replace("\\", "/")).suffix.lower() in IMAGE_SUFFIXES
-                for n in names
-            )
+            return self._should_warn(names, config)
 
         cleared = added = skipped = 0
         pending: list[tuple[int, "str | None"]] = []
@@ -586,7 +612,7 @@ class ImageWarningWorker(QThread):
 
         with ThreadPoolExecutor(max_workers=config.max_workers) as pool:
             futures = {
-                pool.submit(_has_images, path): (model_id, warning)
+                pool.submit(_evaluate, path): (model_id, warning)
                 for model_id, path, warning in records
             }
             for idx, fut in enumerate(as_completed(futures), 1):
@@ -598,23 +624,23 @@ class ImageWarningWorker(QThread):
                 self.progress.emit(idx, total)
                 model_id, warning = futures[fut]
                 try:
-                    has_images = fut.result()
+                    should_warn = fut.result()
                 except Exception as exc:   # defensive: a reader raising anything
-                    logger.warning("Image check failed for model %s: %s", model_id, exc)
-                    has_images = None
+                    logger.warning("Warning re-check failed for model %s: %s", model_id, exc)
+                    should_warn = None
 
-                if has_images is None:
+                if should_warn is None:
                     skipped += 1
                     continue
 
                 lines = [l for l in (warning or "").split("\n") if l.strip()]
-                flagged = WARNING_NO_IMAGES in lines
+                flagged = self.warning_line in lines
 
-                if has_images and flagged:
-                    lines.remove(WARNING_NO_IMAGES)
+                if not should_warn and flagged:
+                    lines.remove(self.warning_line)
                     cleared += 1
-                elif not has_images and not flagged and config.warn_no_images:
-                    lines.append(WARNING_NO_IMAGES)
+                elif should_warn and not flagged and self._may_add(config):
+                    lines.append(self.warning_line)
                     added += 1
                 else:
                     continue
@@ -625,10 +651,59 @@ class ImageWarningWorker(QThread):
 
         flush()
         self.log.emit(
-            f"Done — {cleared} stale warning(s) cleared, {added} added, "
+            f"Done - {cleared} stale warning(s) cleared, {added} added, "
             f"{skipped} skipped (archive missing or unreadable)."
         )
-        self.finished.emit(cleared, added, skipped)
+        self.check_finished.emit(cleared, added, skipped)
+
+
+class ImageWarningWorker(_WarningRecheckWorker):
+    """Fix the "archive without images" warning across the library.
+
+    Notices images the crawler could not see at the time - a format added to
+    ``IMAGE_SUFFIXES`` since the archive was catalogued, for instance.
+    """
+
+    warning_line = WARNING_NO_IMAGES
+
+    def _should_warn(self, names: list, config) -> bool:
+        return not any(
+            Path(n.replace("\\", "/")).suffix.lower() in IMAGE_SUFFIXES for n in names
+        )
+
+    def _may_add(self, config) -> bool:
+        return config.warn_no_images
+
+    def _scan_message(self, total: int) -> str:
+        return f"Checking {total} archive(s) for image files..."
+
+
+class PresupportWarningWorker(_WarningRecheckWorker):
+    """Fix the "models with presupported stl" warning across the library.
+
+    Re-applies the current rule, which counts only ``.stl`` members - named as
+    presupported, or sitting under a presupport folder - so archives flagged by
+    an older, looser rule (an image, or a folder entry whose name merely
+    contained "presupported") are cleared without a full rescan.
+    """
+
+    warning_line = WARNING_PRESUPPORTED
+
+    def _should_warn(self, names: list, config) -> bool:
+        return WARNING_PRESUPPORTED in explain_warnings(
+            names,
+            check_presupported=True,
+            check_no_images=False,
+            check_nested_archive=False,
+            check_supports=False,
+            check_no_printable=False,
+        )
+
+    def _may_add(self, config) -> bool:
+        return config.warn_presupported_stl
+
+    def _scan_message(self, total: int) -> str:
+        return f"Checking {total} archive(s) for presupported .stl files..."
 
 
 class CompactWorker(QThread):
@@ -636,11 +711,11 @@ class CompactWorker(QThread):
 
     Signals:
         log(message): Human-readable status line for the UI log panel.
-        finished(size_before, size_after): On-disk sizes in bytes (both -1 on error).
+        compact_finished(size_before, size_after): On-disk sizes in bytes (both -1 on error).
     """
 
     log      = pyqtSignal(str)
-    finished = pyqtSignal(int, int)   # (size_before, size_after); (-1, -1) on error
+    compact_finished = pyqtSignal(int, int)   # (size_before, size_after); (-1, -1) on error
 
     def run(self) -> None:
         from app.utils.thumbnailer import compact_store
@@ -651,7 +726,7 @@ class CompactWorker(QThread):
         except Exception as exc:
             self.log.emit(f"ERROR compacting thumbnail store: {exc}")
             logger.error("Thumbnail store compaction failed: %s", exc, exc_info=True)
-            self.finished.emit(-1, -1)
+            self.compact_finished.emit(-1, -1)
             return
 
         saved = before - after
@@ -659,7 +734,7 @@ class CompactWorker(QThread):
             f"Done — store went from {before / 1024**2:.1f} MB to {after / 1024**2:.1f} MB "
             f"({saved / 1024**2:.1f} MB reclaimed)."
         )
-        self.finished.emit(before, after)
+        self.compact_finished.emit(before, after)
 
 
 class PruneImagesWorker(QThread):
@@ -673,12 +748,12 @@ class PruneImagesWorker(QThread):
     Signals:
         progress(current, total): Index of the model being pruned and total count.
         log(message): Human-readable status line for the UI log panel.
-        finished(models_pruned, images_removed): Counts once the run completes.
+        prune_finished(models_pruned, images_removed): Counts once the run completes.
     """
 
     progress = pyqtSignal(int, int)
     log      = pyqtSignal(str)
-    finished = pyqtSignal(int, int)   # (models_pruned, images_removed)
+    prune_finished = pyqtSignal(int, int)   # (models_pruned, images_removed)
 
     def __init__(self, keep: int, parent=None) -> None:
         super().__init__(parent)
@@ -709,7 +784,7 @@ class PruneImagesWorker(QThread):
         total = len(model_ids)
         if total == 0:
             self.log.emit(f"No models have more than {keep} image(s).")
-            self.finished.emit(0, 0)
+            self.prune_finished.emit(0, 0)
             return
 
         self.log.emit(f"Pruning {total} model(s) to at most {keep} image(s) each…")
@@ -739,7 +814,7 @@ class PruneImagesWorker(QThread):
             f"Done — removed {images_removed} image(s) from {models_pruned} model(s). "
             "Run 'Compact Thumbnail Store' to reclaim the freed disk space."
         )
-        self.finished.emit(models_pruned, images_removed)
+        self.prune_finished.emit(models_pruned, images_removed)
 
 
 class FindDuplicateEntriesWorker(QThread):
@@ -759,12 +834,12 @@ class FindDuplicateEntriesWorker(QThread):
     Signals:
         progress(current, total)
         log(message)
-        finished(results): list of result dicts, same schema as VerifyWorker.
+        duplicates_finished(results): list of result dicts, same schema as VerifyWorker.
     """
 
     progress = pyqtSignal(int, int)
     log      = pyqtSignal(str)
-    finished = pyqtSignal(list)
+    duplicates_finished = pyqtSignal(list)
 
     def run(self) -> None:
         from collections import defaultdict
@@ -833,7 +908,7 @@ class FindDuplicateEntriesWorker(QThread):
             self.log.emit(f"Found {n} record(s) in {n // 2 + n % 2} duplicate group(s).")
         else:
             self.log.emit("No duplicate entries found.")
-        self.finished.emit(results)
+        self.duplicates_finished.emit(results)
 
 
 class MovedInDbWorker(QThread):
@@ -846,13 +921,13 @@ class MovedInDbWorker(QThread):
         progress(current, total): Index of missing record being checked.
         log(message): Human-readable status line.
         found(missing_model_id, match_path): Emitted when a match is located.
-        finished(count): Total number of matches found.
+        moved_finished(count): Total number of matches found.
     """
 
     progress = pyqtSignal(int, int)
     log      = pyqtSignal(str)
     found    = pyqtSignal(int, str)   # (missing_model_id, match_archive_path)
-    finished = pyqtSignal(int)
+    moved_finished = pyqtSignal(int)
 
     def __init__(self, missing_records: list[dict], parent=None) -> None:
         super().__init__(parent)
@@ -865,7 +940,7 @@ class MovedInDbWorker(QThread):
 
         if not self._missing:
             self.log.emit("No missing records to check.")
-            self.finished.emit(0)
+            self.moved_finished.emit(0)
             return
 
         self.log.emit(f"Searching {len(self._missing)} missing record(s) in the database…")
@@ -911,7 +986,7 @@ class MovedInDbWorker(QThread):
                     break
 
         self.log.emit(f"Found {matched} potential DB match(es) for missing archive(s).")
-        self.finished.emit(matched)
+        self.moved_finished.emit(matched)
 
 
 class DbMaintenanceDialog(QDialog):
@@ -937,6 +1012,7 @@ class DbMaintenanceDialog(QDialog):
         self._compact_worker:   CompactWorker                | None = None
         self._prune_worker:     PruneImagesWorker            | None = None
         self._img_warn_worker:  ImageWarningWorker           | None = None
+        self._presup_worker:    PresupportWarningWorker      | None = None
         self._results: list[dict] = []
         self._build_ui()
 
@@ -1048,6 +1124,20 @@ class DbMaintenanceDialog(QDialog):
         self._check_images_btn.clicked.connect(self._start_check_images)
         _add_btn(self._check_images_btn)
 
+        self._check_presup_btn = QPushButton(
+            style.standardIcon(SP.SP_FileDialogDetailedView),
+            self.tr("Check Presupport Warning")
+        )
+        self._check_presup_btn.setToolTip(
+            self.tr("Re-read every archive's file list and fix the 'Models with presupported "
+            "stl' warning: clear it where no presupported .stl is present, and add it where "
+            "one is. Only the archive catalog is read, so this is much faster than a full "
+            "rescan. Run it after the presupport rules change to clear warnings raised by "
+            "an older rule.")
+        )
+        self._check_presup_btn.clicked.connect(self._start_check_presupports)
+        _add_btn(self._check_presup_btn)
+
         self._compact_btn = QPushButton(
             style.standardIcon(SP.SP_DriveHDIcon), self.tr("Compact Thumbnail Store")
         )
@@ -1151,6 +1241,30 @@ class DbMaintenanceDialog(QDialog):
         root.addWidget(self._log)
 
     # ------------------------------------------------------------------
+    def _own_worker(self, attr: str, worker: QThread) -> QThread:
+        """Store *worker* on ``self.<attr>`` and manage its lifetime.
+
+        Two things every worker here needs.  The thread is parented to the
+        dialog, so Qt owns it and a cleared Python attribute can never be what
+        destroys a running thread.  And the attribute is cleared from
+        ``QThread.finished`` — the real one, which fires after ``run()`` has
+        returned — rather than from a result handler called mid-``run()``.
+        Doing the latter is what produces "QThread: Destroyed while thread is
+        still running"; every worker in this module names its result signal
+        something other than ``finished`` so the real signal stays reachable.
+        """
+        setattr(self, attr, worker)
+        worker.setParent(self)
+        worker.finished.connect(lambda a=attr: self._release_worker(a))
+        return worker
+
+    def _release_worker(self, attr: str) -> None:
+        """Drop the reference to a worker whose thread has fully stopped."""
+        worker = getattr(self, attr, None)
+        setattr(self, attr, None)
+        if worker is not None:
+            worker.deleteLater()
+
     def _set_busy(self, busy: bool) -> None:
         self._verify_btn.setEnabled(not busy)
         self._stop_btn.setEnabled(busy)
@@ -1162,6 +1276,7 @@ class DbMaintenanceDialog(QDialog):
         self._compact_btn.setEnabled(not busy)
         self._prune_images_btn.setEnabled(not busy)
         self._check_images_btn.setEnabled(not busy)
+        self._check_presup_btn.setEnabled(not busy)
         self._merge_moved_btn.setEnabled(False)
         self._remove_sel_btn.setEnabled(False)
         self._remove_all_btn.setEnabled(False)
@@ -1183,6 +1298,7 @@ class DbMaintenanceDialog(QDialog):
         self._compact_btn.setEnabled(True)
         self._prune_images_btn.setEnabled(True)
         self._check_images_btn.setEnabled(True)
+        self._check_presup_btn.setEnabled(True)
         self._merge_moved_btn.setEnabled(has_moved_db)
         self._remove_sel_btn.setEnabled(has_any)
         self._remove_all_btn.setEnabled(has_missing)
@@ -1193,7 +1309,7 @@ class DbMaintenanceDialog(QDialog):
         for worker in (
             self._verify_worker, self._search_worker,
             self._dhash_worker, self._embed_worker, self._moved_db_worker,
-            self._prune_worker, self._img_warn_worker,
+            self._prune_worker, self._img_warn_worker, self._presup_worker,
         ):
             if worker and worker.isRunning():
                 worker.stop()
@@ -1208,16 +1324,15 @@ class DbMaintenanceDialog(QDialog):
         self._results.clear()
         self._set_busy(True)
 
-        self._verify_worker = VerifyWorker()
+        self._own_worker("_verify_worker", VerifyWorker())
         self._verify_worker.log.connect(self._on_log)
         self._verify_worker.progress.connect(self._on_progress)
-        self._verify_worker.finished.connect(self._on_verify_finished)
+        self._verify_worker.verify_finished.connect(self._on_verify_finished)
         self._verify_worker.start()
 
     def _on_verify_finished(self, results: list) -> None:
         self._results = results
         self._populate_table(results)
-        self._verify_worker = None
         self._set_idle()
         from app.utils.sound import play_notification
         play_notification("maintenance")
@@ -1228,14 +1343,13 @@ class DbMaintenanceDialog(QDialog):
         self._progress.setValue(0)
         self._set_busy(True)
 
-        self._dhash_worker = DHashWorker(recompute_all=recompute_all)
+        self._own_worker("_dhash_worker", DHashWorker(recompute_all=recompute_all))
         self._dhash_worker.log.connect(self._on_log)
         self._dhash_worker.progress.connect(self._on_progress)
-        self._dhash_worker.finished.connect(self._on_dhash_finished)
+        self._dhash_worker.hash_finished.connect(self._on_dhash_finished)
         self._dhash_worker.start()
 
     def _on_dhash_finished(self, computed: int, skipped: int) -> None:
-        self._dhash_worker = None
         self._set_idle()
         from app.utils.sound import play_notification
         play_notification("maintenance")
@@ -1246,34 +1360,51 @@ class DbMaintenanceDialog(QDialog):
         self._progress.setValue(0)
         self._set_busy(True)
 
-        self._embed_worker = EmbeddingWorker(recompute_all=recompute_all)
+        self._own_worker("_embed_worker", EmbeddingWorker(recompute_all=recompute_all))
         self._embed_worker.log.connect(self._on_log)
         self._embed_worker.progress.connect(self._on_progress)
-        self._embed_worker.finished.connect(self._on_embed_finished)
+        self._embed_worker.embed_finished.connect(self._on_embed_finished)
         self._embed_worker.start()
 
     def _on_embed_finished(self, computed: int, skipped: int) -> None:
-        self._embed_worker = None
         self._set_idle()
         from app.utils.sound import play_notification
         play_notification("maintenance")
 
     # ------------------------------------------------------------------
     def _start_check_images(self) -> None:
+        if self._img_warn_worker is not None and self._img_warn_worker.isRunning():
+            return
         self._log.clear()
         self._progress.setValue(0)
         self._set_busy(True)
 
-        self._img_warn_worker = ImageWarningWorker()
+        self._own_worker("_img_warn_worker", ImageWarningWorker())
         self._img_warn_worker.log.connect(self._on_log)
         self._img_warn_worker.progress.connect(self._on_progress)
-        self._img_warn_worker.finished.connect(self._on_check_images_finished)
+        self._img_warn_worker.check_finished.connect(self._on_warning_recheck_finished)
         self._img_warn_worker.start()
 
-    def _on_check_images_finished(self, cleared: int, added: int, skipped: int) -> None:
-        # The browser is refreshed by the caller once this dialog closes, so
-        # there is nothing to notify here.
-        self._img_warn_worker = None
+    def _start_check_presupports(self) -> None:
+        if self._presup_worker is not None and self._presup_worker.isRunning():
+            return
+        self._log.clear()
+        self._progress.setValue(0)
+        self._set_busy(True)
+
+        self._own_worker("_presup_worker", PresupportWarningWorker())
+        self._presup_worker.log.connect(self._on_log)
+        self._presup_worker.progress.connect(self._on_progress)
+        self._presup_worker.check_finished.connect(self._on_warning_recheck_finished)
+        self._presup_worker.start()
+
+    def _on_warning_recheck_finished(self, cleared: int, added: int, skipped: int) -> None:
+        """Shared completion slot for both warning re-check workers.
+
+        The worker reference is released from the real ``QThread.finished`` by
+        ``_own_worker``, not here, and the browser is refreshed by the caller
+        once this dialog closes - so there is nothing to do but go idle.
+        """
         self._set_idle()
         from app.utils.sound import play_notification
         play_notification("maintenance")
@@ -1295,13 +1426,12 @@ class DbMaintenanceDialog(QDialog):
         self._progress.setValue(0)
         self._set_busy(True)
 
-        self._compact_worker = CompactWorker()
+        self._own_worker("_compact_worker", CompactWorker())
         self._compact_worker.log.connect(self._on_log)
-        self._compact_worker.finished.connect(self._on_compact_finished)
+        self._compact_worker.compact_finished.connect(self._on_compact_finished)
         self._compact_worker.start()
 
     def _on_compact_finished(self, size_before: int, size_after: int) -> None:
-        self._compact_worker = None
         self._set_idle()
         from app.utils.sound import play_notification
         play_notification("maintenance")
@@ -1335,14 +1465,13 @@ class DbMaintenanceDialog(QDialog):
         self._progress.setValue(0)
         self._set_busy(True)
 
-        self._prune_worker = PruneImagesWorker(keep)
+        self._own_worker("_prune_worker", PruneImagesWorker(keep))
         self._prune_worker.log.connect(self._on_log)
         self._prune_worker.progress.connect(self._on_progress)
-        self._prune_worker.finished.connect(self._on_prune_finished)
+        self._prune_worker.prune_finished.connect(self._on_prune_finished)
         self._prune_worker.start()
 
     def _on_prune_finished(self, models_pruned: int, images_removed: int) -> None:
-        self._prune_worker = None
         self._set_idle()
         from app.utils.sound import play_notification
         play_notification("maintenance")
@@ -1443,11 +1572,11 @@ class DbMaintenanceDialog(QDialog):
             f"Searching for {len(targets)} missing archive(s) in: {folder}"
         )
 
-        self._search_worker = SearchWorker(Path(folder), targets)
+        self._own_worker("_search_worker", SearchWorker(Path(folder), targets))
         self._search_worker.log.connect(self._on_log)
         self._search_worker.progress.connect(self._on_progress)
         self._search_worker.found.connect(self._on_archive_found)
-        self._search_worker.finished.connect(self._on_search_finished)
+        self._search_worker.search_finished.connect(self._on_search_finished)
         self._search_worker.start()
 
     def _on_archive_found(self, model_id: int, new_path: str) -> None:
@@ -1464,7 +1593,6 @@ class DbMaintenanceDialog(QDialog):
                 break
 
     def _on_search_finished(self) -> None:
-        self._search_worker = None
         self._set_idle()
 
     # ------------------------------------------------------------------
@@ -1479,11 +1607,11 @@ class DbMaintenanceDialog(QDialog):
             f"Searching the database for {len(missing)} missing archive(s)…"
         )
 
-        self._moved_db_worker = MovedInDbWorker(missing)
+        self._own_worker("_moved_db_worker", MovedInDbWorker(missing))
         self._moved_db_worker.log.connect(self._on_log)
         self._moved_db_worker.progress.connect(self._on_progress)
         self._moved_db_worker.found.connect(self._on_moved_in_db_found)
-        self._moved_db_worker.finished.connect(self._on_moved_in_db_finished)
+        self._moved_db_worker.moved_finished.connect(self._on_moved_in_db_finished)
         self._moved_db_worker.start()
 
     def _on_moved_in_db_found(self, missing_id: int, match_path: str) -> None:
@@ -1501,7 +1629,6 @@ class DbMaintenanceDialog(QDialog):
         self._apply_filter()
 
     def _on_moved_in_db_finished(self, count: int) -> None:
-        self._moved_db_worker = None
         self._set_idle()
 
     def _merge_moved_records(self) -> None:
@@ -1676,16 +1803,15 @@ class DbMaintenanceDialog(QDialog):
         self._results.clear()
         self._set_busy(True)
 
-        self._dup_entry_worker = FindDuplicateEntriesWorker()
+        self._own_worker("_dup_entry_worker", FindDuplicateEntriesWorker())
         self._dup_entry_worker.log.connect(self._on_log)
         self._dup_entry_worker.progress.connect(self._on_progress)
-        self._dup_entry_worker.finished.connect(self._on_dup_entries_finished)
+        self._dup_entry_worker.duplicates_finished.connect(self._on_dup_entries_finished)
         self._dup_entry_worker.start()
 
     def _on_dup_entries_finished(self, results: list) -> None:
         self._results = results
         self._populate_table(results)
-        self._dup_entry_worker = None
         self._set_idle()
 
     def _remove_flagged_missing(self) -> None:
@@ -1745,6 +1871,7 @@ class DbMaintenanceDialog(QDialog):
         self._compact_btn.setEnabled(True)
         self._prune_images_btn.setEnabled(True)
         self._check_images_btn.setEnabled(True)
+        self._check_presup_btn.setEnabled(True)
         self._merge_moved_btn.setEnabled(has_moved_db)
         self._remove_all_btn.setEnabled(has_missing)
         self._remove_flagged_btn.setEnabled(has_flagged)
@@ -1764,7 +1891,7 @@ class DbMaintenanceDialog(QDialog):
         for worker in (
             self._verify_worker, self._search_worker,
             self._dhash_worker, self._embed_worker, self._moved_db_worker,
-            self._prune_worker, self._img_warn_worker,
+            self._prune_worker, self._img_warn_worker, self._presup_worker,
         ):
             if worker and worker.isRunning():
                 worker.stop()

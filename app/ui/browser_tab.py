@@ -39,7 +39,8 @@ from app.ui.thumb_loader import ThumbnailLoaderWorker
 from app.ui.browser_table_model import _SqlTableModel
 from app.ui.browser_filter_tree import FilterTreeWidget, _FilterTreeWorker
 from app.ui.browser_jobs import (
-    _ImageDropRunnable, RescanWorker, RescanProgressDialog, ThumbnailGeneratorWorker,
+    _ImageDropRunnable, _WarningDetailRunnable, RescanWorker, RescanProgressDialog,
+    ThumbnailGeneratorWorker,
 )
 from app.ui.browser_dialogs import ClickableLabel, ImageViewerDialog
 from app.ui.browser_delegates import (
@@ -1634,65 +1635,77 @@ class BrowserTab(QWidget):
         if not warning_text:
             return
         archive_path = self._model.data(self._model.index(r, COL_PATH)) or ""
-        self._show_warning_detail(archive_path, warning_text)
+        runnable = _WarningDetailRunnable(str(archive_path), warning_text)
+        runnable.signals.ready.connect(self._show_warning_detail)
+        QThreadPool.globalInstance().start(runnable)
 
-    def _show_warning_detail(self, archive_path: str, warning_text: str) -> None:
-        import re as _re
+    def _show_warning_detail(self, archive_path: str, sections: list, error: str) -> None:
+        """Show which archive members triggered each warning (GUI thread).
+
+        ``sections`` comes from :class:`_WarningDetailRunnable`, which did the
+        archive read; this only renders it.
+        """
+        from html import escape
         from pathlib import Path as _P
-        from app.crawler.archive import list_contents
-        from app.constants import ARCHIVE_SUFFIXES
-        from app.ui.config_dialog import get_presupport_patterns
-
-        path = _P(archive_path)
-        names = list_contents(path) if path.exists() else []
-        warnings = [w.strip() for w in warning_text.split("\n") if w.strip()]
-
-        _presupport_rxs = []
-        for p in get_presupport_patterns():
-            try:
-                _presupport_rxs.append(_re.compile(p, _re.IGNORECASE))
-            except _re.error:
-                pass
-
-        sections: list[tuple[str, list[str]]] = []
-        for w in warnings:
-            if w in ("Models with presupported stl", "Archive with supports"):
-                matched = [n.replace("\\", "/") for n in names
-                           if any(rx.search(_P(n.replace("\\", "/")).name) for rx in _presupport_rxs)]
-                sections.append((w, matched))
-            elif w == "Archive without images":
-                sections.append((w, []))
-            elif w == "Nested archives":
-                matched = [n.replace("\\", "/") for n in names
-                           if _P(n.replace("\\", "/")).suffix.lower() in ARCHIVE_SUFFIXES]
-                sections.append((w, matched))
-            else:
-                sections.append((w, []))
 
         dlg = QDialog(self)
         dlg.setWindowTitle(self.tr("Warning Details"))
-        dlg.setMinimumSize(480, 300)
+        dlg.setMinimumSize(560, 340)
         layout = QVBoxLayout(dlg)
 
-        header = QLabel(f"<b>{path.name}</b>")
+        header = QLabel(f"<b>{escape(_P(archive_path).name)}</b>")
         header.setWordWrap(True)
         layout.addWidget(header)
 
         text = QTextEdit()
         text.setReadOnly(True)
 
+        # Warnings that fire because something is *absent* have no files to list.
+        no_file_notes = {
+            "Archive without images":          self.tr("No image files were found in the archive."),
+            "Archive without printable files": self.tr("No .stl / .obj / .lys / .chitubox files "
+                                                      "were found in the archive."),
+            "Archive with low compression rate": self.tr("Flagged by the archive's compressed / "
+                                                         "uncompressed size ratio, not by any "
+                                                         "particular file."),
+            "Unreadable archive":              self.tr("The archive's catalog could not be read "
+                                                       "when it was crawled."),
+        }
+
         html_parts: list[str] = []
-        for w, files in sections:
+        if error:
             html_parts.append(
-                f'<p><span style="color:#ff4444;font-size:14px;">⚠</span>&nbsp;<b>{w}</b></p>'
+                f'<p style="color:#cc7700"><i>{escape(error)}</i></p>'
+            )
+
+        for warning, files in sections:
+            html_parts.append(
+                f'<p><span style="color:#ff4444;font-size:14px;">&#9888;</span>'
+                f'&nbsp;<b>{escape(warning)}</b></p>'
             )
             if files:
-                items = "".join(f"<li>{f}</li>" for f in files)
-                html_parts.append(f'<ul style="margin-top:0">{items}</ul>')
-            elif w == "Archive without images":
                 html_parts.append(
-                    '<p style="margin-left:20px;color:gray">'
-                    "<i>No image files were found in the archive.</i></p>"
+                    '<p style="margin-left:20px;margin-bottom:2px;color:gray">'
+                    + self.tr("Triggered by {n} file(s):").format(n=len(files))
+                    + "</p>"
+                )
+                items = "".join(
+                    f"<li>{escape(f.replace(chr(92), '/'))}</li>" for f in files
+                )
+                html_parts.append(f'<ul style="margin-top:0">{items}</ul>')
+            elif warning in no_file_notes:
+                html_parts.append(
+                    f'<p style="margin-left:20px;color:gray"><i>{escape(no_file_notes[warning])}'
+                    "</i></p>"
+                )
+            elif not error:
+                # The warning is stored on the record but nothing in the archive
+                # matches it any more — usually the archive changed since the crawl.
+                html_parts.append(
+                    '<p style="margin-left:20px;color:gray"><i>'
+                    + self.tr("No file in the archive matches this warning any more — "
+                              "rescan the file to refresh it.")
+                    + "</i></p>"
                 )
 
         text.setHtml("".join(html_parts))

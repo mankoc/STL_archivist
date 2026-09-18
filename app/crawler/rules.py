@@ -46,6 +46,7 @@ SUPPORTED_STL_RE = re.compile(
 
 # Patterns for the check_presupported warning: files explicitly labelled
 # "presupported" in the filename, or using the "sup_" naming prefix.
+# Applied only to ``.stl`` members — see _is_presupported_member().
 _DEFAULT_PRESUPPORTED_PATTERNS: list[str] = [
     r"[_ -]presupported",
     r"^sup_.*\.stl$",
@@ -54,6 +55,94 @@ _PRESUPPORTED_WARN_RE = re.compile(
     "|".join(f"(?:{p})" for p in _DEFAULT_PRESUPPORTED_PATTERNS),
     re.IGNORECASE,
 )
+
+
+# Folder names that mark their contents as presupported.  Compared as whole
+# tokens, not substrings: a segment is split on non-alphanumerics and flagged
+# when any token appears here.  "Presupported STL" -> {presupported, stl} hits;
+# "PS Files" -> {ps, files} hits; "Props" -> {props} and "PSD" -> {psd} do not,
+# which a plain substring test on "ps" would have got wrong.
+_PRESUPPORT_DIR_TOKENS = frozenset({
+    "ps", "presup", "presups", "presupport", "presupports", "presupported",
+    "sup", "sups", "support", "supports", "supported",
+})
+
+# Words that flip the meaning of the marker that follows them, so "No_Supported",
+# "Un-Supported", "Without Supports" and "No PS" read as raw meshes.
+_PRESUPPORT_NEGATIONS = frozenset({"un", "no", "non", "not", "without", "wo"})
+
+# Merged spellings of the same idea, which tokenise as a single word and so are
+# never preceded by a separate negation: "Unsupported", "NSFW_Unsup", "NoSupports".
+_UNSUPPORTED_TOKENS = frozenset({
+    "unsup", "unsupp", "unsupport", "unsupports", "unsupported",
+    "nosup", "nosupp", "nosupport", "nosupports", "nosupported",
+    "nonsupported", "notsupported", "nops",
+})
+
+_TOKEN_SPLIT_RE = re.compile(r"[^a-z0-9]+")
+
+#: Results of :func:`_segment_support_state`.
+_MARKED = "presupported"
+_NEGATED = "unsupported"
+
+
+def _segment_support_state(segment: str) -> "str | None":
+    """Classify one path segment as :data:`_MARKED`, :data:`_NEGATED` or ``None``.
+
+    The segment is tokenised on non-alphanumerics and read *in order*, which is
+    what separates "Supported" from "No_Supported" while keeping "Dino Supported"
+    working — a blunt "contains no/un" test would reject that. Whole tokens are
+    compared, never substrings, so "PSD" and "Props" are not mistaken for "PS".
+
+    Negation wins within a segment, so an oddity like "supports_unsupported"
+    resolves to :data:`_NEGATED` rather than depending on token order.
+    """
+    tokens = [tok for tok in _TOKEN_SPLIT_RE.split(segment.lower()) if tok]
+    marked = False
+    for i, tok in enumerate(tokens):
+        if tok in _UNSUPPORTED_TOKENS:
+            return _NEGATED
+        if tok in _PRESUPPORT_DIR_TOKENS:
+            if i and tokens[i - 1] in _PRESUPPORT_NEGATIONS:
+                return _NEGATED
+            marked = True
+    return _MARKED if marked else None
+
+
+def _is_presupported_member(member: Path) -> bool:
+    """True when *member* is a presupported mesh file.
+
+    The member must be an ``.stl``; that gate is what keeps the warning honest,
+    since the name patterns match any string. A preview image called
+    ``Dragon - Presupported.jpg``, or the *directory* entry
+    ``Biker Mice from Mars Presupported lys`` that an archive lists as a member
+    of its own, used to raise "Models with presupported stl" on archives holding
+    no presupported mesh at all.
+
+    An "unsupported" marker then vetoes, wherever it appears — in any folder
+    above the file or in the filename itself. Releases routinely nest the raw
+    meshes *inside* the supported tree
+    (``supports/Unsupported/120MM_Unsup_Emerald.stl``), so the outermost marker
+    cannot be the one that decides; a veto anywhere is both simpler to predict
+    than "nearest marker wins" and errs toward not flagging.
+
+    Failing a veto, the member qualifies when a folder above it is marked
+    (``Presupported/body.stl``, ``PS/arm.stl``, ``Supported STL/leg.stl``) or its
+    own filename matches :data:`_DEFAULT_PRESUPPORTED_PATTERNS`
+    (``body_presupported.stl``, ``sup_arm.stl``).
+
+    Args:
+        member: Member path inside the archive, with ``/`` separators.
+    """
+    if member.suffix.lower() != ".stl":
+        return False
+
+    dir_states = [_segment_support_state(part) for part in member.parent.parts]
+    if _NEGATED in dir_states or _segment_support_state(member.stem) == _NEGATED:
+        return False
+    if _MARKED in dir_states:
+        return True
+    return bool(_PRESUPPORTED_WARN_RE.search(member.name))
 
 
 def detect_presupport(names: list[str]) -> str:
@@ -134,6 +223,90 @@ def sort_warning_lines(lines: list[str]) -> list[str]:
                                         if l in WARNING_ORDER else len(WARNING_ORDER)))
 
 
+def _compile_supports(supports_patterns: "list[str] | None") -> list:
+    """Compile the ``check_supports`` patterns, skipping invalid ones.
+
+    ``None`` falls back to the module-level alternation of the defaults, which
+    is already compiled — no need to rebuild it per call.
+    """
+    if supports_patterns is None:
+        return [SUPPORTED_STL_RE]
+    compiled = []
+    for pattern in supports_patterns:
+        try:
+            compiled.append(re.compile(pattern, re.IGNORECASE))
+        except re.error:
+            logger.warning("Invalid supports pattern %r — skipped", pattern)
+    return compiled
+
+
+def explain_warnings(
+    names: list[str],
+    check_presupported: bool = True,
+    check_no_images: bool = True,
+    check_nested_archive: bool = True,
+    check_supports: bool = False,
+    check_no_printable: bool = True,
+    supports_patterns: "list[str] | None" = None,
+) -> "dict[str, list[str]]":
+    """Return ``{warning: [member names that triggered it]}`` for *names*.
+
+    Answers "why is this archive flagged?" using the exact rules
+    :func:`detect_warnings` applies — the two must agree, so the per-rule tests
+    live in one place and both call them.  The keys are the same warning strings
+    ``detect_warnings`` would emit, in :data:`WARNING_ORDER`.
+
+    Warnings that fire on an *absence* (no images, no printable files) map to an
+    empty list: nothing in the archive triggered them, the lack of anything did.
+    Callers should present those differently from "matched nothing".
+
+    Args:
+        names: Archive member names, as passed to :func:`detect_warnings`.
+        check_presupported, check_no_images, check_nested_archive,
+        check_supports, check_no_printable, supports_patterns:
+            Same meanings as in :func:`detect_warnings`.
+
+    Returns:
+        Mapping of warning text to the member names responsible, ordered by
+        :data:`WARNING_ORDER`.  A warning that does not apply is absent.
+    """
+    compiled_supports = _compile_supports(supports_patterns) if check_supports else []
+
+    presupported: list[str] = []
+    supported:    list[str] = []
+    nested:       list[str] = []
+    has_image     = False
+    has_printable = False
+
+    for name in names:
+        p = Path(name.replace("\\", "/"))
+        fname, suffix = p.name, p.suffix.lower()
+
+        if check_no_images and suffix in IMAGE_SUFFIXES:
+            has_image = True
+        if check_no_printable and suffix in _PRINTABLE_SUFFIXES:
+            has_printable = True
+        if check_presupported and _is_presupported_member(p):
+            presupported.append(name)
+        if compiled_supports and any(rx.search(fname) for rx in compiled_supports):
+            supported.append(name)
+        if check_nested_archive and suffix in ARCHIVE_SUFFIXES:
+            nested.append(name)
+
+    result: dict[str, list[str]] = {}
+    if check_presupported and presupported:
+        result[WARNING_PRESUPPORTED] = presupported
+    if check_no_images and not has_image:
+        result[WARNING_NO_IMAGES] = []
+    if check_nested_archive and nested:
+        result[WARNING_NESTED] = nested
+    if check_supports and supported:
+        result[WARNING_SUPPORTS] = supported
+    if check_no_printable and not has_printable:
+        result[WARNING_NO_PRINTABLE] = []
+    return {k: result[k] for k in sort_warning_lines(list(result))}
+
+
 def detect_warnings(
     names: list[str],
     check_presupported: bool = True,
@@ -150,9 +323,13 @@ def detect_warnings(
 
     Args:
         names: Archive member names as returned by ``list_contents``.
-        check_presupported: Warn when the archive contains a file explicitly
-            labelled as presupported (e.g. ``body_presupported.stl``,
-            ``sup_arm.stl``). Uses hardcoded ``_DEFAULT_PRESUPPORTED_PATTERNS``.
+        check_presupported: Warn when the archive contains an ``.stl`` file
+            that is either named as presupported (``body_presupported.stl``,
+            ``sup_arm.stl``) or sits in a folder that marks its contents as
+            presupported (``Presupported/``, ``PS/``, ``Supported STL/``).
+            Only ``.stl`` members qualify, so an image, a readme, or a
+            directory entry with "presupported" in its name never raises it.
+            See :func:`_is_presupported_member`.
         check_no_images: Warn when the archive contains no recognisable image
             file (``.jpg``, ``.jpeg``, ``.png``, ``.webp``, ``.bmp``, ``.avif``,
             ``.gif``).
@@ -177,18 +354,7 @@ def detect_warnings(
     has_nested_archive = False
     has_printable      = False
 
-    compiled_supports: list[re.Pattern] = []
-    if check_supports:
-        if supports_patterns is None:
-            # Reuse the module-level compiled alternation of the default patterns
-            # instead of recompiling them on every call.
-            compiled_supports.append(SUPPORTED_STL_RE)
-        else:
-            for p in supports_patterns:
-                try:
-                    compiled_supports.append(re.compile(p, re.IGNORECASE))
-                except re.error:
-                    logger.warning("Invalid supports pattern %r — skipped", p)
+    compiled_supports = _compile_supports(supports_patterns) if check_supports else []
 
     for name in names:
         # Build the Path once and read both name and suffix from it; constructing
@@ -199,7 +365,7 @@ def detect_warnings(
         if check_no_images and suffix in IMAGE_SUFFIXES:
             has_image = True
         if check_presupported and not has_presupported:
-            if _PRESUPPORTED_WARN_RE.search(fname):
+            if _is_presupported_member(p):
                 has_presupported = True
         if compiled_supports and not has_supported_stl:
             if any(rx.search(fname) for rx in compiled_supports):
