@@ -688,7 +688,6 @@ class BrowserTab(QWidget):
                 "Models with presupported stl",
                 "Archive without images",
                 "Nested archives",
-                "Archive with supports",
                 "Archive without printable files",
                 "Unreadable archive",
             ]

@@ -95,9 +95,8 @@ class _WarningDetailRunnable(QRunnable):
                         check_presupported=True,
                         check_no_images=True,
                         check_nested_archive=True,
-                        check_supports=True,
                         check_no_printable=True,
-                        supports_patterns=config.support_patterns,
+                        presupport_patterns=config.presupport_patterns,
                     )
                 else:
                     error = "The archive could not be opened, so its files cannot be listed."
@@ -220,9 +219,8 @@ class RescanWorker(QThread):
                         check_presupported=config.warn_presupported_stl,
                         check_no_images=config.warn_no_images,
                         check_nested_archive=config.warn_nested_archive,
-                        check_supports=config.warn_supports,
                         check_no_printable=config.warn_no_printable,
-                        supports_patterns=config.support_patterns,
+                        presupport_patterns=config.presupport_patterns,
                     )
                     m.warning = warnings or None
 
@@ -400,8 +398,7 @@ class ThumbnailGeneratorWorker(QThread):
                     check_presupported=get_warn_presupported_stl(),
                     check_no_images=get_warn_no_images(),
                     check_nested_archive=get_warn_nested_archive(),
-                    check_supports=get_warn_presupported_stl(),
-                    supports_patterns=get_presupport_patterns(),
+                    presupport_patterns=get_presupport_patterns(),
                 )
                 stl.warning = warnings or None
                 if warnings:

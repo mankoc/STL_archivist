@@ -5,6 +5,8 @@ Two modes can be combined:
   • Path pattern  — extract field values from each model's archive_path
   • Manual fields — apply the same value to all selected models
 """
+from pathlib import PurePath as _PurePath
+
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout, QGroupBox,
@@ -12,7 +14,7 @@ from PyQt6.QtWidgets import (
     QComboBox, QCompleter, QInputDialog, QMessageBox, QToolButton, QToolTip,
     QWidget,
 )
-from PyQt6.QtGui import QCursor
+from PyQt6.QtGui import QBrush, QColor, QCursor
 
 from app.database.db import session_scope, get_session
 from app.database.models import STLModel, Tag, Release, Collection, Subcollection, Category, Scale, Sculptor, model_tags
@@ -33,6 +35,12 @@ from app.utils.path_pattern import (
     ATTR_LABEL as _ATTR_LABEL, PATTERN_HELP as _PATTERN_HELP,
     parse_release_date, format_release_date,
 )
+
+#: Plain text columns on STLModel that the trim option cleans up.  Deliberately
+#: excludes FK-backed names (sculptor, collection, category, release): those are
+#: shared lookup rows, so trimming one would rename it for every model using it,
+#: and could collide with an existing untrimmed row.
+_TRIMMABLE_ATTRS = ("title", "creator", "source", "url", "description")
 
 _SAVED_PATTERNS_KEY = "mass_editor/saved_patterns"
 _LAST_PATTERN_KEY   = "mass_editor/last_pattern"
@@ -169,8 +177,19 @@ class MassEditorDialog(QDialog):
         self._pattern_edit.textChanged.connect(self._update_preview)
         pattern_row.addWidget(self._pattern_edit)
         parse_btn = QPushButton(self.tr("Parse all paths"))
+        parse_btn.setToolTip(
+            self.tr("Preview how many of the selected paths the pattern matches.\n"
+                    "Optional \u2014 OK parses the paths too.")
+        )
         parse_btn.clicked.connect(self._parse_paths)
         pattern_row.addWidget(parse_btn)
+        show_btn = QPushButton(self.tr("Show parsed values"))
+        show_btn.setToolTip(
+            self.tr("List what the pattern extracts from every selected model's path,\n"
+                    "so you can check it before applying.")
+        )
+        show_btn.clicked.connect(self._show_parsed_values)
+        pattern_row.addWidget(show_btn)
         path_layout.addLayout(pattern_row)
 
         # Live preview of extracted values for the example path
@@ -367,6 +386,17 @@ class MassEditorDialog(QDialog):
         tags_lay.addWidget(self._clear_cbs["tags"])
         grid.addWidget(tags_lbl,       6, 0)
         grid.addWidget(tags_container, 6, 1, 1, 3)
+
+        self._trim_cb = QCheckBox(
+            self.tr("Trim leading/trailing whitespace from text fields")
+        )
+        self._trim_cb.setToolTip(
+            self.tr("Strip spaces and tabs from the start and end of Title, Creator, Source, "
+                    "URL and Description on every selected model.\n"
+                    "Runs last, so values parsed from the path or typed above are trimmed too.\n"
+                    "A field left with nothing but whitespace is emptied.")
+        )
+        grid.addWidget(self._trim_cb, 7, 0, 1, 4)
 
         root.addWidget(manual_group)
 
@@ -636,13 +666,118 @@ class MassEditorDialog(QDialog):
                 f"No paths matched the pattern ({total} model(s) checked)."
             )
 
+    def _parsed_value_rows(self) -> "tuple[list[str], list[tuple[str, dict[str, str]]]]":
+        """Re-parse and return ``(field_attrs, [(archive_path, extracted), ...])``.
+
+        Split out from :meth:`_show_parsed_values` so the table contents can be
+        checked without driving a modal dialog.  Rows follow the selection order
+        and a path that did not match carries an empty dict.
+        """
+        self._parse_paths()   # so the table always reflects the pattern in the box
+
+        session = get_session()
+        try:
+            rows = []
+            for mid in self._model_ids:
+                model = session.get(STLModel, mid)
+                if model is not None:
+                    rows.append((model.archive_path or "", self._path_results.get(mid, {})))
+        finally:
+            session.close()
+
+        # One column per field any path yielded, in the order they first appear.
+        attrs: list[str] = []
+        for _path, extracted in rows:
+            for attr in extracted:
+                if attr not in attrs:
+                    attrs.append(attr)
+        return attrs, rows
+
+    def _show_parsed_values(self) -> None:
+        """Open a read-only table of what the pattern extracts from each path."""
+        from PyQt6.QtWidgets import (
+            QDialog, QDialogButtonBox, QHeaderView, QTableWidget, QTableWidgetItem,
+        )
+
+        pattern = self._pattern_edit.text().strip()
+        if not pattern:
+            self._parse_status.setText(self.tr("Enter a pattern first."))
+            return
+
+        attrs, rows = self._parsed_value_rows()
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(self.tr("Parsed values"))
+        dlg.resize(900, 460)
+        lay = QVBoxLayout(dlg)
+
+        matched = len(self._path_results)
+        summary = QLabel(
+            self.tr("<b>%s</b> &mdash; matched %d of %d path(s)")
+            % (pattern, matched, len(rows))
+        )
+        summary.setTextFormat(Qt.TextFormat.RichText)
+        summary.setWordWrap(True)
+        lay.addWidget(summary)
+
+        table = QTableWidget(len(rows), 1 + len(attrs), dlg)
+        table.setHorizontalHeaderLabels(
+            [self.tr("Archive")] + [_ATTR_LABEL.get(a, a) for a in attrs]
+        )
+        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        table.verticalHeader().setVisible(False)
+
+        for r, (path, extracted) in enumerate(rows):
+            name_item = QTableWidgetItem(_PurePath(path).name if path else "")
+            name_item.setToolTip(path)
+            table.setItem(r, 0, name_item)
+            if not extracted:
+                item = QTableWidgetItem(self.tr("— no match —"))
+                item.setForeground(QBrush(QColor("#c07000")))
+                table.setItem(r, 1 if attrs else 0, item)
+                continue
+            for c, attr in enumerate(attrs, start=1):
+                table.setItem(r, c, QTableWidgetItem(extracted.get(attr, "")))
+
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        table.resizeColumnsToContents()
+        lay.addWidget(table)
+
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        btns.rejected.connect(dlg.reject)
+        lay.addWidget(btns)
+        dlg.exec()
+
     # ------------------------------------------------------------------
     # Save
     # ------------------------------------------------------------------
     def _save(self) -> None:
         self._save_last_pattern()
 
+        # Re-parse here rather than relying on the "Parse all paths" button.
+        # The live preview makes a typed pattern look armed, so clicking OK
+        # without pressing that button used to apply nothing at all, silently.
+        # Re-parsing every time also avoids applying a stale result from before
+        # the pattern was last edited.
+        if self._pattern_edit.text().strip():
+            self._parse_paths()
+            if not self._path_results:
+                from PyQt6.QtWidgets import QMessageBox
+                if QMessageBox.question(
+                    self, self.tr("Pattern matched nothing"),
+                    self.tr("The pattern did not match any of the %d selected path(s), "
+                            "so no values will be parsed from them.\n\n"
+                            "Apply the other changes anyway?") % len(self._model_ids),
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.Cancel,
+                ) != QMessageBox.StandardButton.Yes:
+                    return
+        else:
+            self._path_results.clear()
+
         clearing = {k for k, cb in self._clear_cbs.items() if cb.isChecked()}
+        trim = self._trim_cb.isChecked()
 
         manual: dict[str, str | None] = {}
         for field, edit in (
@@ -802,6 +937,17 @@ class MassEditorDialog(QDialog):
                                 model.subcollection = get_or_create_subcollection(
                                     session, new_name, parent_id, cache=_fnr_cache
                                 )
+
+                # Trim last, so values parsed from the path, typed above, or
+                # produced by Find & Replace are all cleaned up too.
+                if trim:
+                    for attr in _TRIMMABLE_ATTRS:
+                        value = getattr(model, attr, None)
+                        if not isinstance(value, str):
+                            continue
+                        stripped = value.strip()
+                        if stripped != value:
+                            setattr(model, attr, stripped or None)
 
         from app.ui import lookup_cache as _lookup_cache
         _lookup_cache.invalidate()

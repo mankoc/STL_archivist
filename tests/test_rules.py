@@ -4,7 +4,7 @@ Unit tests for presupport / warning / scale detection rules.
 import pytest
 
 from app.crawler.rules import (
-    DEFAULT_SUPPORTS_PATTERNS,
+    DEFAULT_PRESUPPORT_PATTERNS,
     detect_presupport,
     detect_scale,
     detect_warnings,
@@ -13,7 +13,6 @@ from app.crawler.rules import (
     WARNING_NO_IMAGES,
     WARNING_NO_PRINTABLE,
     WARNING_PRESUPPORTED,
-    WARNING_SUPPORTS,
 )
 
 
@@ -195,105 +194,12 @@ def test_warn_multiple_warnings_joined_by_newline():
 # detect_warnings — archive with supports
 # ---------------------------------------------------------------------------
 
-def test_warn_supports_default_patterns_supported_stl():
-    names = ["body_supported.stl", "arm.stl"]
-    out = detect_warnings(
-        names, check_presupported=False, check_no_images=False,
-        check_nested_archive=False, check_supports=True,
-    )
-    assert "Archive with supports" in out
-
-
-def test_warn_supports_default_patterns_sup_prefix():
-    names = ["sup_dragon.stl", "base.stl"]
-    out = detect_warnings(
-        names, check_presupported=False, check_no_images=False,
-        check_nested_archive=False, check_supports=True,
-    )
-    assert "Archive with supports" in out
-
-
-def test_warn_supports_unsupported_not_flagged():
-    """Files with 'unsupported' in the name should NOT trigger the warning."""
-    names = ["body_unsupported.stl", "arm.stl"]
-    out = detect_warnings(
-        names, check_presupported=False, check_no_images=False,
-        check_nested_archive=False, check_supports=True,
-    )
-    assert "Archive with supports" not in out
-
-
-def test_warn_supports_disabled_by_default():
-    """check_supports defaults to False — no warning without opting in."""
-    names = ["body_supported.stl"]
-    out = detect_warnings(names, check_no_images=False, check_nested_archive=False)
-    assert "Archive with supports" not in out
-
-
-def test_warn_supports_custom_pattern():
-    names = ["presup_arm.stl", "body.stl"]
-    out = detect_warnings(
-        names, check_presupported=False, check_no_images=False,
-        check_nested_archive=False, check_supports=True,
-        supports_patterns=[r"^presup.*\.stl$"],
-    )
-    assert "Archive with supports" in out
-
-
-def test_warn_supports_invalid_regex_skipped():
-    """An invalid regex should not crash; it is silently skipped."""
-    names = ["body_supported.stl"]
-    out = detect_warnings(
-        names, check_presupported=False, check_no_images=False,
-        check_nested_archive=False, check_supports=True,
-        supports_patterns=["[invalid(regex", r"(?<!un)supported\.stl$"],
-    )
-    assert "Archive with supports" in out
-
-
-def test_warn_supports_empty_pattern_list_no_warning():
-    names = ["body_supported.stl"]
-    out = detect_warnings(
-        names, check_presupported=False, check_no_images=False,
-        check_nested_archive=False, check_supports=True,
-        supports_patterns=[],
-    )
-    assert "Archive with supports" not in out
-
-
-def test_warn_supports_no_match_no_warning():
-    names = ["body.stl", "arm.stl"]
-    out = detect_warnings(
-        names, check_presupported=False, check_no_images=False,
-        check_nested_archive=False, check_supports=True,
-    )
-    assert "Archive with supports" not in out
-
-
-# ---------------------------------------------------------------------------
-# DEFAULT_SUPPORTS_PATTERNS
-# ---------------------------------------------------------------------------
-
-def test_default_supports_patterns_is_nonempty():
-    assert len(DEFAULT_SUPPORTS_PATTERNS) > 0
-
-
-def test_default_supports_patterns_match_supported_stl():
-    import re
-    for p in DEFAULT_SUPPORTS_PATTERNS:
-        rx = re.compile(p, re.IGNORECASE)
-        # At least one default pattern must match a "supported.stl" filename
-        if rx.search("body_supported.stl"):
-            return
-    raise AssertionError("No default pattern matched 'body_supported.stl'")
-
-
 # ---------------------------------------------------------------------------
 # explain_warnings
 # ---------------------------------------------------------------------------
 
 _ALL_ON = dict(check_presupported=True, check_no_images=True, check_nested_archive=True,
-               check_supports=True, check_no_printable=True)
+               check_no_printable=True)
 
 
 @pytest.mark.parametrize("names", [
@@ -334,8 +240,7 @@ def test_presupported_warning_still_fires_for_stl_members():
 
 
 _PRESUPPORT_ONLY = dict(check_presupported=True, check_no_images=False,
-                        check_nested_archive=False, check_supports=False,
-                        check_no_printable=False)
+                        check_nested_archive=False, check_no_printable=False)
 
 
 def _flags_presupported(member: str) -> bool:
@@ -533,29 +438,26 @@ def test_explain_absence_warnings_have_no_files():
     assert result[WARNING_NO_PRINTABLE] == []
 
 
-def test_explain_uses_supplied_supports_patterns():
-    names = ["hero_custom.stl", "body_supported.stl", "p.png"]
-    result = explain_warnings(names, check_presupported=False, check_no_images=False,
-                              check_nested_archive=False, check_supports=True,
-                              check_no_printable=False,
-                              supports_patterns=[r"_custom\.stl$"])
-    assert result[WARNING_SUPPORTS] == ["hero_custom.stl"]
+def test_explain_uses_supplied_presupport_patterns():
+    names = ["hero_custom.stl", "plain.stl", "p.png"]
+    result = explain_warnings(names, check_presupported=True, check_no_images=False,
+                              check_nested_archive=False, check_no_printable=False,
+                              presupport_patterns=[r"_custom\.stl$"])
+    assert result[WARNING_PRESUPPORTED] == ["hero_custom.stl"]
 
 
-def test_explain_skips_invalid_supports_pattern():
+def test_explain_skips_invalid_presupport_pattern():
     names = ["body_supported.stl"]
-    result = explain_warnings(names, check_presupported=False, check_no_images=False,
-                              check_nested_archive=False, check_supports=True,
-                              check_no_printable=False,
-                              supports_patterns=["(unclosed", r"_supported\.stl$"])
-    assert result[WARNING_SUPPORTS] == ["body_supported.stl"]
+    result = explain_warnings(names, check_presupported=True, check_no_images=False,
+                              check_nested_archive=False, check_no_printable=False,
+                              presupport_patterns=["(unclosed", r"_supported\.stl$"])
+    assert result[WARNING_PRESUPPORTED] == ["body_supported.stl"]
 
 
 def test_explain_respects_disabled_checks():
     names = ["body_presupported.stl", "nested.zip"]
     result = explain_warnings(names, check_presupported=False, check_no_images=False,
-                              check_nested_archive=False, check_supports=False,
-                              check_no_printable=False)
+                              check_nested_archive=False,                              check_no_printable=False)
     assert result == {}
 
 
@@ -563,6 +465,54 @@ def test_explain_normalises_backslash_paths():
     """Windows-style member names are matched on their bare filename."""
     result = explain_warnings([r"sub\\dir\\sup_arm.stl", "p.png"],
                               check_presupported=True, check_no_images=False,
-                              check_nested_archive=False, check_supports=False,
-                              check_no_printable=False)
+                              check_nested_archive=False,                              check_no_printable=False)
     assert result[WARNING_PRESUPPORTED] == [r"sub\\dir\\sup_arm.stl"]
+
+
+# ---------------------------------------------------------------------------
+# Configurable presupport patterns
+# ---------------------------------------------------------------------------
+
+def test_default_patterns_cover_both_retired_lists():
+    """The default is the union of the presupport and old supports defaults."""
+    from app.crawler.rules import LEGACY_PRESUPPORT_PATTERNS
+    assert set(LEGACY_PRESUPPORT_PATTERNS) < set(DEFAULT_PRESUPPORT_PATTERNS)
+    assert r"[_ -]presupported" in DEFAULT_PRESUPPORT_PATTERNS
+
+
+@pytest.mark.parametrize("member", [
+    "body_presupported.stl",
+    "body_supported.stl",
+    "sup_arm.stl",
+    "s_wing.stl",
+    "[s]_base.stl",
+])
+def test_default_patterns_flag_supported_names(member):
+    assert _flags_presupported(member) is True
+
+
+def test_custom_patterns_replace_the_defaults():
+    names = ["hero_XYZ.stl", "body_supported.stl"]
+    result = explain_warnings(names, presupport_patterns=[r"_XYZ\.stl$"],
+                              **_PRESUPPORT_ONLY)
+    assert result[WARNING_PRESUPPORTED] == ["hero_XYZ.stl"]
+
+
+@pytest.mark.parametrize("member", [
+    "unsupported.stl",
+    "No_Supported/body_supported.stl",
+    "Unsupported/s_wing.stl",
+    "supports/120MM_Unsup_s_Emerald.stl",
+])
+def test_veto_beats_the_broadened_filename_patterns(member):
+    """Widening the default list must not reopen the false positives."""
+    assert _flags_presupported(member) is False
+
+
+def test_archive_with_supports_is_no_longer_emitted():
+    """The retired warning must never come back out of detect_warnings()."""
+    from app.crawler.rules import RETIRED_WARNING_SUPPORTS, WARNING_ORDER
+    names = ["body_supported.stl", "s_arm.stl", "sup_leg.stl", "render.png"]
+    assert RETIRED_WARNING_SUPPORTS not in detect_warnings(names, **_ALL_ON)
+    assert RETIRED_WARNING_SUPPORTS not in explain_warnings(names, **_ALL_ON)
+    assert RETIRED_WARNING_SUPPORTS not in WARNING_ORDER

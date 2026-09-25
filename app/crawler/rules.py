@@ -26,35 +26,53 @@ _SCALE_MM_RE         = re.compile(r"(?<!\d)(\d+)[_ ]?mm(?![A-Za-z0-9])", re.IGNO
 # Captures the denominator in patterns like `1/35`, `1-72` (also underscore-bounded).
 _SCALE_RATIO_RE      = re.compile(r"(?<!\d)1[/\-](\d+)(?![A-Za-z0-9])")
 
-# Default patterns that identify a "supported" STL file (applied case-insensitively
-# to the bare filename of every archive member):
-#   · [ _-]supported.stl  — separator before "supported", not preceded by "un"
-#   · sup_*.stl           — starts with "sup_"
-#   · s_*.stl / [s]_*.stl — starts with "s_" or "[s]_"
-# "unsupported.stl", "un_supported.stl", and "superman.stl" are excluded.
+# Filename patterns that mark an STL as presupported, applied case-insensitively
+# to the bare filename of every ``.stl`` member.  Editable in
+# Configuration → Crawler warnings; this list is the default:
+#   · [_ -]presupported     — "body_presupported.stl", "arm - Presupported.stl"
+#   · [ _-]supported.stl    — separator before "supported", not preceded by "un"
+#   · sup_*.stl            — starts with "sup_"
+#   · s_*.stl / [s]_*.stl  — starts with "s_" or "[s]_"
+# "unsupported.stl" and "superman.stl" are excluded, and the negation veto in
+# _is_presupported_member() rejects raw meshes these patterns might still reach.
 DEFAULT_PRESUPPORT_PATTERNS: list[str] = [
+    r"[_ -]presupported",
     r"(?<!un)[ _-]supported\.stl$",
     r"^sup_.*\.stl$",
     r"^(?:s|\[s\])_.*\.stl$",
 ]
-DEFAULT_SUPPORTS_PATTERNS = DEFAULT_PRESUPPORT_PATTERNS
 
-SUPPORTED_STL_RE = re.compile(
+#: The default as it stood while these patterns drove the retired "Archive with
+#: supports" warning and nothing else.  A saved list identical to this was inert
+#: config, so :func:`app.ui.config_dialog.get_presupport_patterns` upgrades it to
+#: the current default rather than silently dropping the "presupported" rule.
+LEGACY_PRESUPPORT_PATTERNS: list[str] = [
+    r"(?<!un)[ _-]supported\.stl$",
+    r"^sup_.*\.stl$",
+    r"^(?:s|\[s\])_.*\.stl$",
+]
+
+_DEFAULT_PRESUPPORT_RE = re.compile(
     "|".join(f"(?:{p})" for p in DEFAULT_PRESUPPORT_PATTERNS),
     re.IGNORECASE,
 )
 
-# Patterns for the check_presupported warning: files explicitly labelled
-# "presupported" in the filename, or using the "sup_" naming prefix.
-# Applied only to ``.stl`` members — see _is_presupported_member().
-_DEFAULT_PRESUPPORTED_PATTERNS: list[str] = [
-    r"[_ -]presupported",
-    r"^sup_.*\.stl$",
-]
-_PRESUPPORTED_WARN_RE = re.compile(
-    "|".join(f"(?:{p})" for p in _DEFAULT_PRESUPPORTED_PATTERNS),
-    re.IGNORECASE,
-)
+
+def compile_presupport_patterns(patterns: "list[str] | None") -> list:
+    """Compile presupport filename patterns, skipping invalid ones.
+
+    ``None`` falls back to the module-level alternation of the defaults, which
+    is already compiled — no need to rebuild it per call.
+    """
+    if patterns is None:
+        return [_DEFAULT_PRESUPPORT_RE]
+    compiled = []
+    for pattern in patterns:
+        try:
+            compiled.append(re.compile(pattern, re.IGNORECASE))
+        except re.error:
+            logger.warning("Invalid presupport pattern %r — skipped", pattern)
+    return compiled
 
 
 # Folder names that mark their contents as presupported.  Compared as whole
@@ -109,7 +127,7 @@ def _segment_support_state(segment: str) -> "str | None":
     return _MARKED if marked else None
 
 
-def _is_presupported_member(member: Path) -> bool:
+def _is_presupported_member(member: Path, name_res: list) -> bool:
     """True when *member* is a presupported mesh file.
 
     The member must be an ``.stl``; that gate is what keeps the warning honest,
@@ -128,11 +146,13 @@ def _is_presupported_member(member: Path) -> bool:
 
     Failing a veto, the member qualifies when a folder above it is marked
     (``Presupported/body.stl``, ``PS/arm.stl``, ``Supported STL/leg.stl``) or its
-    own filename matches :data:`_DEFAULT_PRESUPPORTED_PATTERNS`
-    (``body_presupported.stl``, ``sup_arm.stl``).
+    own filename matches one of *name_res* (``body_presupported.stl``,
+    ``sup_arm.stl``).
 
     Args:
         member: Member path inside the archive, with ``/`` separators.
+        name_res: Compiled filename patterns from
+            :func:`compile_presupport_patterns`.
     """
     if member.suffix.lower() != ".stl":
         return False
@@ -142,7 +162,7 @@ def _is_presupported_member(member: Path) -> bool:
         return False
     if _MARKED in dir_states:
         return True
-    return bool(_PRESUPPORTED_WARN_RE.search(member.name))
+    return any(rx.search(member.name) for rx in name_res)
 
 
 def detect_presupport(names: list[str]) -> str:
@@ -198,8 +218,11 @@ def detect_presupport(names: list[str]) -> str:
 WARNING_PRESUPPORTED  = "Models with presupported stl"
 WARNING_NO_IMAGES     = "Archive without images"
 WARNING_NESTED        = "Nested archives"
-WARNING_SUPPORTS      = "Archive with supports"
 WARNING_NO_PRINTABLE  = "Archive without printable files"
+#: Retired in favour of WARNING_PRESUPPORTED, which covers the same idea with
+#: folder awareness and the unsupported veto.  Kept only so stored records
+#: carrying the old line can be recognised and cleared.
+RETIRED_WARNING_SUPPORTS = "Archive with supports"
 # Appended by the crawler itself rather than by detect_warnings().
 WARNING_LOW_COMPRESSION = "Archive with low compression rate"
 WARNING_UNREADABLE      = "Unreadable archive"
@@ -210,7 +233,6 @@ WARNING_ORDER: list[str] = [
     WARNING_PRESUPPORTED,
     WARNING_NO_IMAGES,
     WARNING_NESTED,
-    WARNING_SUPPORTS,
     WARNING_NO_PRINTABLE,
     WARNING_LOW_COMPRESSION,
     WARNING_UNREADABLE,
@@ -223,31 +245,13 @@ def sort_warning_lines(lines: list[str]) -> list[str]:
                                         if l in WARNING_ORDER else len(WARNING_ORDER)))
 
 
-def _compile_supports(supports_patterns: "list[str] | None") -> list:
-    """Compile the ``check_supports`` patterns, skipping invalid ones.
-
-    ``None`` falls back to the module-level alternation of the defaults, which
-    is already compiled — no need to rebuild it per call.
-    """
-    if supports_patterns is None:
-        return [SUPPORTED_STL_RE]
-    compiled = []
-    for pattern in supports_patterns:
-        try:
-            compiled.append(re.compile(pattern, re.IGNORECASE))
-        except re.error:
-            logger.warning("Invalid supports pattern %r — skipped", pattern)
-    return compiled
-
-
 def explain_warnings(
     names: list[str],
     check_presupported: bool = True,
     check_no_images: bool = True,
     check_nested_archive: bool = True,
-    check_supports: bool = False,
     check_no_printable: bool = True,
-    supports_patterns: "list[str] | None" = None,
+    presupport_patterns: "list[str] | None" = None,
 ) -> "dict[str, list[str]]":
     """Return ``{warning: [member names that triggered it]}`` for *names*.
 
@@ -263,33 +267,30 @@ def explain_warnings(
     Args:
         names: Archive member names, as passed to :func:`detect_warnings`.
         check_presupported, check_no_images, check_nested_archive,
-        check_supports, check_no_printable, supports_patterns:
+        check_no_printable, presupport_patterns:
             Same meanings as in :func:`detect_warnings`.
 
     Returns:
         Mapping of warning text to the member names responsible, ordered by
         :data:`WARNING_ORDER`.  A warning that does not apply is absent.
     """
-    compiled_supports = _compile_supports(supports_patterns) if check_supports else []
+    name_res = compile_presupport_patterns(presupport_patterns) if check_presupported else []
 
     presupported: list[str] = []
-    supported:    list[str] = []
     nested:       list[str] = []
     has_image     = False
     has_printable = False
 
     for name in names:
         p = Path(name.replace("\\", "/"))
-        fname, suffix = p.name, p.suffix.lower()
+        suffix = p.suffix.lower()
 
         if check_no_images and suffix in IMAGE_SUFFIXES:
             has_image = True
         if check_no_printable and suffix in _PRINTABLE_SUFFIXES:
             has_printable = True
-        if check_presupported and _is_presupported_member(p):
+        if check_presupported and _is_presupported_member(p, name_res):
             presupported.append(name)
-        if compiled_supports and any(rx.search(fname) for rx in compiled_supports):
-            supported.append(name)
         if check_nested_archive and suffix in ARCHIVE_SUFFIXES:
             nested.append(name)
 
@@ -300,8 +301,6 @@ def explain_warnings(
         result[WARNING_NO_IMAGES] = []
     if check_nested_archive and nested:
         result[WARNING_NESTED] = nested
-    if check_supports and supported:
-        result[WARNING_SUPPORTS] = supported
     if check_no_printable and not has_printable:
         result[WARNING_NO_PRINTABLE] = []
     return {k: result[k] for k in sort_warning_lines(list(result))}
@@ -312,9 +311,8 @@ def detect_warnings(
     check_presupported: bool = True,
     check_no_images: bool = True,
     check_nested_archive: bool = True,
-    check_supports: bool = False,
     check_no_printable: bool = True,
-    supports_patterns: list[str] | None = None,
+    presupport_patterns: list[str] | None = None,
 ) -> str:
     """Return a newline-separated string of warnings for an archive.
 
@@ -335,14 +333,12 @@ def detect_warnings(
             ``.gif``).
         check_nested_archive: Warn when the archive contains another compressed
             archive (``.zip``, ``.rar``, ``.7z``).
-        check_supports: Warn when the archive contains a supported STL file
-            matched by *supports_patterns*.
         check_no_printable: Warn when the archive contains no printable model
             file (``.stl``, ``.obj``, ``.lys``, ``.chitubox``).
-        supports_patterns: Regex strings (case-insensitive) applied to each
-            member's bare filename for the ``check_supports`` test. ``None``
-            falls back to ``DEFAULT_SUPPORTS_PATTERNS``. Invalid patterns are
-            skipped.
+        presupport_patterns: Regex strings (case-insensitive) applied to each
+            ``.stl`` member's bare filename for the ``check_presupported`` test.
+            ``None`` falls back to ``DEFAULT_PRESUPPORT_PATTERNS``. Invalid
+            patterns are skipped.
 
     Returns:
         Newline-separated warning strings, or ``""`` if no warnings apply.
@@ -350,26 +346,21 @@ def detect_warnings(
     warnings: list[str] = []
     has_image          = False
     has_presupported   = False
-    has_supported_stl  = False
     has_nested_archive = False
     has_printable      = False
 
-    compiled_supports = _compile_supports(supports_patterns) if check_supports else []
+    name_res = compile_presupport_patterns(presupport_patterns) if check_presupported else []
 
     for name in names:
         # Build the Path once and read both name and suffix from it; constructing
         # Path twice per member is a measurable cost across large archives.
         p = Path(name.replace("\\", "/"))
-        fname = p.name
         suffix = p.suffix.lower()
         if check_no_images and suffix in IMAGE_SUFFIXES:
             has_image = True
         if check_presupported and not has_presupported:
-            if _is_presupported_member(p):
+            if _is_presupported_member(p, name_res):
                 has_presupported = True
-        if compiled_supports and not has_supported_stl:
-            if any(rx.search(fname) for rx in compiled_supports):
-                has_supported_stl = True
         if check_nested_archive and suffix in ARCHIVE_SUFFIXES:
             has_nested_archive = True
         if check_no_printable and suffix in _PRINTABLE_SUFFIXES:
@@ -384,8 +375,6 @@ def detect_warnings(
     if check_nested_archive and has_nested_archive:
         warnings.append(WARNING_NESTED)
         logger.debug("  Warning: nested archives")
-    if check_supports and has_supported_stl:
-        warnings.append(WARNING_SUPPORTS)
         logger.debug("  Warning: archive with supports")
     if check_no_printable and not has_printable:
         warnings.append(WARNING_NO_PRINTABLE)
