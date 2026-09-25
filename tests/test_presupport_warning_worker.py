@@ -163,3 +163,52 @@ def test_missing_archive_is_skipped_not_cleared(tmp_path, monkeypatch):
 
 def test_empty_database_finishes_cleanly(monkeypatch):
     assert _run(monkeypatch) == (0, 0, 0)
+
+
+# ---------------------------------------------------------------------------
+# Retired "Archive with supports" line
+# ---------------------------------------------------------------------------
+
+def test_strips_retired_supports_line(tmp_path, monkeypatch):
+    """The dropped warning is cleaned out of stored records."""
+    from app.crawler.rules import RETIRED_WARNING_SUPPORTS
+
+    mid = _model(_zip(tmp_path / "s.zip", ["No_Supported/body.stl"]),
+                 RETIRED_WARNING_SUPPORTS)
+
+    cleared, added, _ = _run(monkeypatch)
+    assert (cleared, added) == (1, 0)
+    assert _warning_of(mid) is None
+
+
+def test_strips_retired_line_but_keeps_other_warnings(tmp_path, monkeypatch):
+    from app.crawler.rules import RETIRED_WARNING_SUPPORTS
+
+    mid = _model(_zip(tmp_path / "s.zip", ["No_Supported/body.stl", "nested.zip"]),
+                 f"{RETIRED_WARNING_SUPPORTS}\n{WARNING_NESTED}")
+
+    _run(monkeypatch)
+    assert _warning_of(mid) == WARNING_NESTED
+
+
+def test_strips_retired_line_even_when_archive_unreadable(tmp_path, monkeypatch):
+    """Dead text needs no verification, so it goes even on a skipped record."""
+    from app.crawler.rules import RETIRED_WARNING_SUPPORTS
+
+    bad = tmp_path / "corrupt.zip"
+    bad.write_bytes(b"not a zip")
+    mid = _model(bad, f"{RETIRED_WARNING_SUPPORTS}\n{WARNING_PRESUPPORTED}")
+
+    cleared, _added, skipped = _run(monkeypatch)
+    assert (cleared, skipped) == (1, 1)
+    # The presupport line itself survives — it could not be re-checked.
+    assert _warning_of(mid) == WARNING_PRESUPPORTED
+
+
+def test_configured_patterns_drive_the_warning(tmp_path, monkeypatch):
+    """The Configuration pattern list now actually feeds this warning."""
+    mid = _model(_zip(tmp_path / "c.zip", ["hero_XYZ.stl", "render.jpg"]), None)
+
+    _run(monkeypatch, CrawlerConfig(max_workers=2, warn_presupported_stl=True,
+                                    presupport_patterns=[r"_XYZ\.stl$"]))
+    assert _warning_of(mid) == WARNING_PRESUPPORTED

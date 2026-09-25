@@ -41,8 +41,8 @@ class CrawlerConfig:
         store_stl_file_list: Record the list of STL filenames contained in
             each archive.
         warn_supported_stl: Warn when an archive contains supported STL files.
-        presupport_patterns: Regex patterns applied to member filenames to
-            detect supported STL files. Defaults to
+        presupport_patterns: Regex patterns applied to ``.stl`` member
+            filenames for the presupported-STL warning. Defaults to
             ``DEFAULT_PRESUPPORT_PATTERNS``.
         warn_no_images: Warn when an archive contains no image files.
         warn_nested_archive: Warn when an archive contains another compressed
@@ -60,11 +60,8 @@ class CrawlerConfig:
     store_stl_file_list: bool = False
 
     # Warning flags
-    warn_supported_stl: bool = True        # legacy alias — kept for existing callers
     warn_presupported_stl: bool = True
-    warn_supports: bool = False
     presupport_patterns: list[str] = field(default_factory=_default_presupport_patterns)
-    support_patterns: list[str] = field(default_factory=_default_presupport_patterns)
     warn_no_images: bool = True
     warn_nested_archive: bool = True
     warn_no_printable: bool = True

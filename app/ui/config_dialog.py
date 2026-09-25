@@ -312,13 +312,19 @@ def get_warn_presupported_stl() -> bool:
 
 def get_presupport_patterns() -> list[str]:
     """Return the regex patterns used to detect supported STL files."""
-    from app.crawler.rules import DEFAULT_PRESUPPORT_PATTERNS
-    return list(_load_library_settings().get("presupport_patterns", DEFAULT_PRESUPPORT_PATTERNS))
-
-
-def get_supports_patterns() -> list[str]:
-    """Alias for get_presupport_patterns — used by settings_loader."""
-    return get_presupport_patterns()
+    from app.crawler.rules import (
+        DEFAULT_PRESUPPORT_PATTERNS, LEGACY_PRESUPPORT_PATTERNS,
+    )
+    saved = _load_library_settings().get("presupport_patterns")
+    if saved is None:
+        return list(DEFAULT_PRESUPPORT_PATTERNS)
+    if list(saved) == LEGACY_PRESUPPORT_PATTERNS:
+        # These patterns used to drive the retired "Archive with supports"
+        # warning and nothing else, so a list still identical to that default
+        # was never a deliberate choice.  Upgrading it keeps the "presupported"
+        # filename rule, which the old default has no pattern for.
+        return list(DEFAULT_PRESUPPORT_PATTERNS)
+    return list(saved)
 
 
 def get_font_family() -> str:
@@ -329,11 +335,6 @@ def get_font_family() -> str:
 def get_font_size() -> int:
     """Return the user-configured font size in points, or 0 for the theme default."""
     return int(_load_library_settings().get("font_size", 0))
-
-
-def get_warn_supports() -> bool:
-    """Whether to warn when an archive contains supported STL files (supports check)."""
-    return bool(_load_library_settings().get("warn_supports", False))
 
 
 def get_warn_no_images() -> bool:
@@ -964,14 +965,18 @@ class ConfigDialog(QDialog):
         group = QGroupBox(self.tr("Crawler Warnings"))
         form  = QFormLayout(group)
 
-        self._warn_presupported_check = QCheckBox(self.tr("Archive contains supported STLs"))
+        self._warn_presupported_check = QCheckBox(self.tr("Archive contains presupported STLs"))
         form.addRow("", self._warn_presupported_check)
         form.addRow(
             "",
             QLabel(
-                self.tr("<small>Warn when an archive contains STL files matching any of the "
-                "patterns below. Each pattern is a Python regex applied "
-                "(case-insensitively) to every archive member filename.</small>")
+                self.tr("<small>Warn when an archive contains a presupported <b>.stl</b>. A mesh "
+                "counts when its filename matches one of the patterns below, or when it sits in "
+                "a folder that marks its contents as presupported (<i>Presupported/</i>, "
+                "<i>PS/</i>, <i>Supported STL/</i>). Folders and filenames that negate the "
+                "marker (<i>Unsupported/</i>, <i>No_Supported/</i>, <i>…_Unsup_…</i>) are never "
+                "flagged. Each pattern is a Python regex applied case-insensitively to the "
+                "filename of every .stl member.</small>")
             ),
         )
 
@@ -1052,7 +1057,7 @@ class ConfigDialog(QDialog):
             self._low_compression_threshold_spin.setEnabled
         )
 
-        form.addSpacing(12)
+        form.addRow(QLabel(""))   # QFormLayout has no addSpacing(); a blank row spaces it
         self._highlight_warning_rows_check = QCheckBox(self.tr("Highlight rows with warnings"))
         form.addRow("", self._highlight_warning_rows_check)
         form.addRow(

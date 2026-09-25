@@ -345,7 +345,7 @@ class _FilterTreeWorker(QRunnable):
                     .filter(STLModel.warning.isnot(None)).all()
                 ]
                 for _wt in ("Models with presupported stl", "Archive without images",
-                            "Nested archives", "Archive with supports",
+                            "Nested archives",
                             "Archive without printable files", "Unreadable archive"):
                     _counts[("warning", _wt)] = sum(1 for w in _all_warnings if _wt in w)
                 _grp["warning"] = sum(1 for w in _all_warnings if w)
@@ -504,7 +504,7 @@ class _FilterTreeWorker(QRunnable):
                             .all()
                         ]
                         for _wt in ("Models with presupported stl", "Archive without images",
-                                    "Nested archives", "Archive with supports",
+                                    "Nested archives",
                                     "Archive without printable files"):
                             _scoped_counts[("warning", _wt)] = sum(1 for w in _sc_warns if _wt in w)
                         _scoped_counts[("group", "warning")] = sum(1 for w in _sc_warns if w)

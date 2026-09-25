@@ -30,7 +30,8 @@ from PyQt6.QtWidgets import (
 
 from app.constants import IMAGE_SUFFIXES
 from app.crawler.rules import (
-    explain_warnings, WARNING_NO_IMAGES, WARNING_PRESUPPORTED,
+    explain_warnings, RETIRED_WARNING_SUPPORTS, WARNING_NO_IMAGES,
+    WARNING_PRESUPPORTED,
 )
 
 logger = logging.getLogger(__name__)
@@ -537,6 +538,11 @@ class _WarningRecheckWorker(QThread):
     #: Warning text this worker owns, from :mod:`app.crawler.rules`.
     warning_line: str = ""
 
+    #: Warning texts this worker should strip wherever it finds them, because
+    #: the rule that produced them no longer exists.  Removed even when the
+    #: archive cannot be read: dead text needs no verification.
+    retired_lines: tuple = ()
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._stop_requested = False
@@ -629,21 +635,26 @@ class _WarningRecheckWorker(QThread):
                     logger.warning("Warning re-check failed for model %s: %s", model_id, exc)
                     should_warn = None
 
+                lines = [l for l in (warning or "").split("\n") if l.strip()]
+                retired = [l for l in lines if l in self.retired_lines]
+                if retired:
+                    lines = [l for l in lines if l not in self.retired_lines]
+                    cleared += len(retired)
+
                 if should_warn is None:
                     skipped += 1
-                    continue
-
-                lines = [l for l in (warning or "").split("\n") if l.strip()]
-                flagged = self.warning_line in lines
-
-                if not should_warn and flagged:
-                    lines.remove(self.warning_line)
-                    cleared += 1
-                elif should_warn and not flagged and self._may_add(config):
-                    lines.append(self.warning_line)
-                    added += 1
+                    if not retired:
+                        continue
                 else:
-                    continue
+                    flagged = self.warning_line in lines
+                    if not should_warn and flagged:
+                        lines.remove(self.warning_line)
+                        cleared += 1
+                    elif should_warn and not flagged and self._may_add(config):
+                        lines.append(self.warning_line)
+                        added += 1
+                    elif not retired:
+                        continue
 
                 pending.append((model_id, "\n".join(sort_warning_lines(lines)) or None))
                 if len(pending) >= self._BATCH:
@@ -685,9 +696,13 @@ class PresupportWarningWorker(_WarningRecheckWorker):
     presupported, or sitting under a presupport folder - so archives flagged by
     an older, looser rule (an image, or a folder entry whose name merely
     contained "presupported") are cleared without a full rescan.
+
+    Also strips the retired "Archive with supports" line, which the presupported
+    warning now subsumes.
     """
 
     warning_line = WARNING_PRESUPPORTED
+    retired_lines = (RETIRED_WARNING_SUPPORTS,)
 
     def _should_warn(self, names: list, config) -> bool:
         return WARNING_PRESUPPORTED in explain_warnings(
@@ -695,8 +710,8 @@ class PresupportWarningWorker(_WarningRecheckWorker):
             check_presupported=True,
             check_no_images=False,
             check_nested_archive=False,
-            check_supports=False,
             check_no_printable=False,
+            presupport_patterns=config.presupport_patterns,
         )
 
     def _may_add(self, config) -> bool:

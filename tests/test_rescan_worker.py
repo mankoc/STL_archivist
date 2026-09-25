@@ -91,27 +91,6 @@ def test_rescan_honours_no_printable_flag(tmp_path, monkeypatch):
     assert _warning_of(mid) == "Archive without printable files"
 
 
-def test_rescan_honours_supports_flag_not_presupport_flag(tmp_path, monkeypatch):
-    """The 'with supports' check keys off warn_supports, not warn_presupported_stl."""
-    zp = tmp_path / "supported.zip"
-    with zipfile.ZipFile(zp, "w") as z:
-        z.writestr("preview.png", b"\x89PNG\r\n\x1a\n")
-        z.writestr("hero_supported.stl", b"solid x\nendsolid x\n")
-    mid = _make_model(zp, None)
-
-    _run_rescan(monkeypatch, [mid], CrawlerConfig(
-        warn_supports=False, warn_presupported_stl=False,
-        warn_no_images=False, warn_nested_archive=False, warn_no_printable=False,
-    ))
-    assert _warning_of(mid) is None
-
-    _run_rescan(monkeypatch, [mid], CrawlerConfig(
-        warn_supports=True, warn_presupported_stl=False,
-        warn_no_images=False, warn_nested_archive=False, warn_no_printable=False,
-    ))
-    assert _warning_of(mid) == "Archive with supports"
-
-
 # ---------------------------------------------------------------------------
 # Unreadable archive
 # ---------------------------------------------------------------------------

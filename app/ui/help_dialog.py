@@ -729,13 +729,38 @@ same folder structure but have different values:</p>
 
 <ol>
   <li>Enter a pattern using the same <code>&#123;token&#125;</code> syntax as the Crawler
-      (see {_link(PAGE_CRAWLER, "Crawler &rarr; Path Patterns")}).</li>
-  <li>Click <b>Parse all paths</b> to preview the result on the example path shown.</li>
-  <li>Click <b>OK</b> to apply.</li>
+      (see {_link(PAGE_CRAWLER, "Crawler &rarr; Path Patterns")}). The line beneath shows what
+      it extracts from the example path.</li>
+  <li>Optionally click <b>Parse all paths</b> to check how many of the selected paths match,
+      or <b>Show parsed values</b> to see exactly what each model's path yields in a table
+      &mdash; one row per selected model, one column per extracted field, with unmatched paths
+      marked <em>no match</em>.</li>
+  <li>Click <b>OK</b> to apply. The paths are parsed at this point whether or not you pressed
+      the button, so the pattern in the box is always the one applied.</li>
 </ol>
 
 <div class="note">Path-extracted values are applied <em>per model</em>; manual field values are applied
 <em>uniformly</em> to all selected models. Both happen in the same Apply operation.</div>
+
+<div class="warn">Parsed values only fill fields that are currently <em>empty</em> unless
+<b>Overwrite existing field values with parsed values</b> is ticked. Models catalogued by the
+crawler already have a title, so re-titling them from a pattern needs that box checked.</div>
+
+<div class="tip">If the pattern matches none of the selected paths, Mass Edit tells you and asks
+whether to apply the rest of the changes &mdash; so a pattern that silently extracts nothing
+does not look like it worked.</div>
+
+<h2>Trimming Whitespace</h2>
+<p><b>Trim leading/trailing whitespace from text fields</b> strips spaces and tabs from the start
+and end of <em>Title</em>, <em>Creator</em>, <em>Source</em>, <em>URL</em> and
+<em>Description</em> on every selected model. It runs last, so values parsed from the path,
+typed in the manual overrides, or produced by Find &amp; Replace are trimmed too &mdash; useful
+when a pattern such as <code>&#123;release&#125; -&#123;title&#125;</code> leaves a stray space.
+A field containing nothing but whitespace is emptied.</p>
+
+<div class="note">Sculptor, Collection, Subcollection, Category and Release names are not
+trimmed: they are shared lookup values, so renaming one would affect every other model using
+it.</div>
 
 <h2>Saving and Loading Patterns</h2>
 <p>Just like the Crawler tab, the Mass Editor lets you save patterns to the
@@ -826,15 +851,15 @@ The dialog is divided into sections shown in a tree on the left.</p>
           nested inside the supported tree. A clean sibling in the same folder
           (<code>supports/120MM_Emerald.stl</code>) is still flagged &mdash; the test is
           per-file. Only <code>.stl</code> members qualify: images, readmes, slicer files,
-          and the folder entries themselves never raise it</td></tr>
+          and the folder entries themselves never raise it. The filename patterns are editable
+          in <b>Configuration &rarr; Crawler warnings</b>; the folder and negation rules are
+          built in</td></tr>
   <tr><td>No images found</td>
       <td>The archive contains no image files (<code>.jpg</code>, <code>.jpeg</code>,
           <code>.png</code>, <code>.webp</code>, <code>.avif</code>, <code>.gif</code>,
           <code>.bmp</code>) — no thumbnail can be shown</td></tr>
   <tr><td>Nested archive detected</td>
       <td>A <code>.zip</code> / <code>.7z</code> / <code>.rar</code> is found inside the archive</td></tr>
-  <tr><td>Support files detected</td>
-      <td>Files matching a custom list of support-related name patterns are present</td></tr>
   <tr><td>Archive without printable files</td>
       <td>The archive contains no file with a printable extension
           (<code>.stl</code>, <code>.obj</code>, <code>.lys</code>, <code>.chitubox</code>)
