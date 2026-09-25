@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Warning details now show file sizes.** Each file listed under a warning carries its size, and the heading gives the total — so *Nested archives* and *Models with presupported stl* tell you how much of the archive they account for, not just which files matched. Sizes come from the archive catalog (no decompression), so they are the uncompressed sizes of those members; a member whose format does not record a size is listed without one and excluded from the total, which says how many were skipped.
+
 - **Mass Edit: new _Show parsed values_ button.** Opens a table of what the path pattern extracts for every selected model — one row per model, one column per field, with paths the pattern misses marked *no match* and a matched-N-of-M summary. The pattern is re-parsed when you open it, so the table always reflects what is in the box.
 
 - **Mass Edit: new _Trim leading/trailing whitespace from text fields_ option.** Strips spaces and tabs from the start and end of Title, Creator, Source, URL and Description on every selected model. It runs last, so values parsed from the path, typed in the manual overrides, or produced by Find & Replace are trimmed as well — handy when a pattern like `{release} -{title}` leaves a stray space. A field left with nothing but whitespace is emptied. Sculptor, Collection, Subcollection, Category and Release names are deliberately excluded: those are shared lookup rows, so trimming one would rename it for every model using it.

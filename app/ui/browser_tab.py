@@ -53,7 +53,7 @@ from app.ui.browser_common import (
     COL_SCULPTOR, COL_COLLECTION, COL_SUBCOLLECTION, COL_SEQUENCE, COL_RELEASE,
     COL_PATH, COL_SCALE, COL_PRESUPPORTED, COL_ADDED, COL_WARNING, COL_FILESIZE,
     COL_CATEGORY, COL_COMPRESSION, COL_TO_PRINT, _HEADERS,
-    _prune_ancestor_paths, _FILTER_PATH_IDS,
+    _prune_ancestor_paths, _FILTER_PATH_IDS, _fmt_size,
 )
 from app.database.models import STLModel, Tag, Sculptor, Collection, Subcollection, Category, Release, Scale, Image, model_tags as _mt_global, model_scales as _ms_global
 from app.utils.path_pattern import parse_release_date, format_release_date
@@ -1683,13 +1683,27 @@ class BrowserTab(QWidget):
                 f'&nbsp;<b>{escape(warning)}</b></p>'
             )
             if files:
+                known = [size for _name, size in files if size is not None]
+                total = _fmt_size(sum(known)) if known else None
+                heading = self.tr("Triggered by {n} file(s):").format(n=len(files))
+                if total:
+                    # Sizes come from the archive catalog, so they are the
+                    # uncompressed sizes of the members, not their packed size.
+                    heading += self.tr(" {total} uncompressed").format(total=total)
+                    if len(known) != len(files):
+                        heading += self.tr(" (size unknown for {n})").format(
+                            n=len(files) - len(known)
+                        )
                 html_parts.append(
                     '<p style="margin-left:20px;margin-bottom:2px;color:gray">'
-                    + self.tr("Triggered by {n} file(s):").format(n=len(files))
-                    + "</p>"
+                    + escape(heading) + "</p>"
                 )
                 items = "".join(
-                    f"<li>{escape(f.replace(chr(92), '/'))}</li>" for f in files
+                    f"<li>{escape(name.replace(chr(92), '/'))}"
+                    + (f'&nbsp;<span style="color:gray">&mdash; {_fmt_size(size)}</span>'
+                       if size is not None else "")
+                    + "</li>"
+                    for name, size in files
                 )
                 html_parts.append(f'<ul style="margin-top:0">{items}</ul>')
             elif warning in no_file_notes:

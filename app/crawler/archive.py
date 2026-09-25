@@ -306,6 +306,27 @@ def list_contents(archive_path: Path, unrar_path: str = "") -> list[str]:
         return []
 
 
+def list_member_sizes(archive_path: Path, unrar_path: str = "") -> "dict[str, int | None]":
+    """Return ``{member_name: uncompressed_size}`` for every archive member.
+
+    Like :func:`list_contents` but keeps the catalog's size field, so callers
+    that need both names and sizes do not have to open the archive twice.
+    ``None`` for a member whose size the format does not record.  Returns an
+    empty dict on any error, matching :func:`list_contents`.
+    """
+    result: "dict[str, int | None]" = {}
+    try:
+        with open_archive(archive_path, unrar_path) as ar:
+            for m in ar.iter_members():
+                result[m.name] = m.size
+        logger.debug("  %d member(s) in %s", len(result), archive_path.name)
+    except PermissionError as exc:
+        logger.warning("Permission denied reading archive %s: %s", archive_path.name, exc)
+    except (ValueError, *_ARCHIVE_ERRORS) as exc:
+        logger.error("Failed to list members of %s: %s", archive_path.name, exc, exc_info=True)
+    return result
+
+
 _STL_EXTS = {".stl", ".obj", ".lys", ".lyt", ".chitubox", ".ctp"}
 
 

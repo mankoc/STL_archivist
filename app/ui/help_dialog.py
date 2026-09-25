@@ -1230,7 +1230,11 @@ them &mdash; so an image, a readme, or a folder entry whose name contains
 <code>presupported</code> does not raise it, and the file listed is always the mesh that
 qualified rather than its folder.
 Warnings that fire on an absence (no images, no printable files) say so instead of listing
-files, and an archive that is missing or cannot be opened is reported as such.</div>
+files, and an archive that is missing or cannot be opened is reported as such.
+Each listed file shows its size, with a total beside the heading &mdash; so a
+<em>Nested archives</em> or <em>Models with presupported stl</em> warning tells you at a glance
+how much of the archive it accounts for. Sizes come from the archive catalog, so they are the
+<em>uncompressed</em> sizes of those members.</div>
 
 <div class="warn">Removing records is permanent and cannot be undone. Run <b>Verify</b> first
 and review the list carefully before using any Remove action.</div>

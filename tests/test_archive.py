@@ -7,6 +7,7 @@ Covers: is_archive, _is_wanted, _member_size_limit, iter_archives,
         archive_hash (stable, fallback, content-differentiation).
 """
 import io
+import tempfile
 import zipfile
 from pathlib import Path
 from unittest.mock import patch
@@ -387,3 +388,49 @@ def test_archive_hash_fallback_for_corrupted_archive(tmp_path):
     p.write_bytes(b"not a real zip")
     h = archive_hash(p)
     assert h.startswith("fallback:")
+
+
+# ---------------------------------------------------------------------------
+# list_member_sizes
+# ---------------------------------------------------------------------------
+
+def test_list_member_sizes_returns_uncompressed_sizes():
+    from app.crawler.archive import list_member_sizes
+
+    with tempfile.TemporaryDirectory() as td:
+        zp = Path(td) / "a.zip"
+        with zipfile.ZipFile(zp, "w") as z:
+            z.writestr("big.stl", b"S" * 5000)
+            z.writestr("small.txt", b"x" * 7)
+        sizes = list_member_sizes(zp)
+
+    assert sizes == {"big.stl": 5000, "small.txt": 7}
+
+
+def test_list_member_sizes_lists_every_member():
+    """Same coverage as list_contents, just with the size field kept."""
+    from app.crawler.archive import list_contents, list_member_sizes
+
+    with tempfile.TemporaryDirectory() as td:
+        zp = Path(td) / "a.zip"
+        with zipfile.ZipFile(zp, "w") as z:
+            z.writestr("dir/", b"")
+            z.writestr("dir/a.stl", b"S" * 10)
+            z.writestr("b.zip", b"Z" * 20)
+        assert list(list_member_sizes(zp)) == list_contents(zp)
+
+
+def test_list_member_sizes_unreadable_archive_returns_empty():
+    from app.crawler.archive import list_member_sizes
+
+    with tempfile.TemporaryDirectory() as td:
+        bad = Path(td) / "corrupt.zip"
+        bad.write_bytes(b"not a zip at all")
+        assert list_member_sizes(bad) == {}
+
+
+def test_list_member_sizes_missing_file_returns_empty():
+    from app.crawler.archive import list_member_sizes
+
+    with tempfile.TemporaryDirectory() as td:
+        assert list_member_sizes(Path(td) / "gone.zip") == {}
