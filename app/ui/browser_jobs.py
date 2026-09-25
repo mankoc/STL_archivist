@@ -59,7 +59,7 @@ class _WarningDetailRunnable(QRunnable):
     """
 
     class _Signals(QObject):
-        # archive_path, [(warning, [member names])], error message ("" when fine)
+        # archive_path, [(warning, [(member name, size|None)])], error ("" when fine)
         ready = pyqtSignal(str, list, str)
 
     def __init__(self, archive_path: str, warning_text: str):
@@ -71,7 +71,7 @@ class _WarningDetailRunnable(QRunnable):
 
     def run(self):
         from pathlib import Path
-        from app.crawler.archive import list_contents
+        from app.crawler.archive import list_member_sizes
         from app.crawler.rules import explain_warnings
         from app.ui.settings_loader import build_crawler_config
 
@@ -79,13 +79,15 @@ class _WarningDetailRunnable(QRunnable):
         path  = Path(self._path) if self._path else None
         error = ""
         matches: dict = {}
+        sizes: dict = {}
 
         if path is None or not path.is_file():
             error = "The archive is no longer at the catalogued path, so its files cannot be listed."
         else:
             try:
                 config = build_crawler_config()
-                names  = list_contents(path, config.unrar_path)
+                sizes  = list_member_sizes(path, config.unrar_path)
+                names  = list(sizes)
                 if names:
                     # Every check is enabled here regardless of configuration: the
                     # question being answered is "what produced this stored
@@ -105,7 +107,10 @@ class _WarningDetailRunnable(QRunnable):
 
         # Keep the stored warning's own lines and order — a warning that no longer
         # reproduces still needs a row, shown as having no current matches.
-        sections = [(line, matches.get(line, [])) for line in lines]
+        sections = [
+            (line, [(name, sizes.get(name)) for name in matches.get(line, [])])
+            for line in lines
+        ]
         self.signals.ready.emit(self._path, sections, error)
 
 
