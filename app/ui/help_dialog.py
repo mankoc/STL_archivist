@@ -1208,6 +1208,14 @@ archives&rsquo; first thumbnails, making it easy to judge whether the match is g
           a record is changed. Adding the warning requires <em>Pre-supported STL</em> to be
           enabled in <b>Configuration &rarr; Crawler warnings</b>; a stale warning is cleared
           either way.</td></tr>
+  <tr><td><b>Deduplicate Thumbnails</b></td>
+      <td>Stores each distinct thumbnail once instead of once per model. Libraries that
+          share renders across archives often carry a large proportion of byte-identical
+          thumbnails &mdash; collapsing them can halve the store. Also removes thumbnails no
+          model references any more, then compacts. Every thumbnail stays viewable; only
+          redundant copies go. Safe to stop and re-run &mdash; progress is committed as it
+          goes, and a partly converted store reads correctly. New thumbnails are stored this
+          way from now on, so duplicates do not build up again.</td></tr>
   <tr><td><b>Compact Thumbnail Store</b></td>
       <td>Rewrites the LMDB thumbnail store to reclaim disk space left behind by deleted
           thumbnails. LMDB reuses freed space but never shrinks the file on its own, so run

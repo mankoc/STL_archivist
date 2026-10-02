@@ -32,8 +32,8 @@ def test_module_defines_the_expected_workers():
     assert names == {
         "VerifyWorker", "SearchWorker", "DHashWorker", "EmbeddingWorker",
         "_WarningRecheckWorker", "ImageWarningWorker", "PresupportWarningWorker",
-        "CompactWorker", "PruneImagesWorker", "FindDuplicateEntriesWorker",
-        "MovedInDbWorker",
+        "CompactWorker", "DedupWorker", "PruneImagesWorker",
+        "FindDuplicateEntriesWorker", "MovedInDbWorker",
     }
 
 

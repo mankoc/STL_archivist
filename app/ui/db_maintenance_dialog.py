@@ -29,6 +29,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.constants import IMAGE_SUFFIXES
+from app.ui.browser_common import _fmt_size
 from app.crawler.rules import (
     explain_warnings, RETIRED_WARNING_SUPPORTS, WARNING_NO_IMAGES,
     WARNING_PRESUPPORTED,
@@ -721,14 +722,103 @@ class PresupportWarningWorker(_WarningRecheckWorker):
         return f"Checking {total} archive(s) for presupported .stl files..."
 
 
+class DedupWorker(QThread):
+    """Collapse identical thumbnails so each distinct payload is stored once.
+
+    The heavy work lives in :func:`app.utils.thumbnailer.deduplicate_store`;
+    this just relays its progress and formats the summary.
+
+    Signals:
+        progress(current, total): Position within the current phase.
+        log(message): Human-readable status line for the UI log panel.
+        dedup_finished(stats): Result dict from ``deduplicate_store`` ({} on error).
+    """
+
+    progress       = pyqtSignal(int, int)
+    log            = pyqtSignal(str)
+    dedup_finished = pyqtSignal(dict)
+
+    _PHASE_LABEL = {
+        "convert": "Converting thumbnails",
+        "sweep":   "Removing unreferenced thumbnails",
+        "compact": "Compacting the store",
+    }
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._stop_requested = False
+        self._phase = ""
+
+    def stop(self) -> None:
+        self._stop_requested = True
+
+    def run(self) -> None:
+        from app.utils.thumbnailer import deduplicate_store, store_stats
+
+        self._stop_requested = False
+        before = store_stats()
+        if not before["thumbnails"]:
+            self.log.emit("No thumbnails stored.")
+            self.dedup_finished.emit({})
+            return
+
+        self.log.emit(
+            f"Scanning {before['thumbnails']:,} thumbnail(s) "
+            f"({_fmt_size(before['payload_bytes'])})…"
+        )
+
+        def _on_progress(done: int, total: int, phase: str) -> None:
+            if phase != self._phase:
+                self._phase = phase
+                self.log.emit(self._PHASE_LABEL.get(phase, phase) + "…")
+            self.progress.emit(done, max(total, 1))
+
+        try:
+            stats = deduplicate_store(
+                progress=_on_progress,
+                should_stop=lambda: self._stop_requested,
+            )
+        except Exception as exc:
+            self.log.emit(f"ERROR deduplicating thumbnails: {exc}")
+            logger.error("Thumbnail deduplication failed: %s", exc, exc_info=True)
+            self.dedup_finished.emit({})
+            return
+
+        saved = stats["payload_before"] - stats["payload_after"]
+        shared = stats["thumbnails"] - stats["blobs_after"]
+        self.log.emit(
+            f"{stats['thumbnails']:,} thumbnail(s) share "
+            f"{stats['blobs_after']:,} distinct image(s) — "
+            f"{shared:,} redundant copies avoided."
+        )
+        if stats["converted"]:
+            self.log.emit(f"Converted {stats['converted']:,} thumbnail(s) to shared storage.")
+        if stats["orphans_removed"]:
+            self.log.emit(
+                f"Removed {stats['orphans_removed']:,} thumbnail(s) no model referenced."
+            )
+        self.log.emit(
+            f"Payload {_fmt_size(stats['payload_before'])} → "
+            f"{_fmt_size(stats['payload_after'])} "
+            f"({_fmt_size(saved)} saved); store file "
+            f"{_fmt_size(stats['size_before'])} → "
+            f"{_fmt_size(stats['size_after'])}."
+        )
+        if stats["stopped"]:
+            self.log.emit("Stopped by user — re-run to finish the remainder.")
+        self.dedup_finished.emit(stats)
+
+
 class CompactWorker(QThread):
     """Rewrite the LMDB thumbnail store defragmented to reclaim disk space.
 
     Signals:
+        progress(current, total): Percent of the compacted copy written.
         log(message): Human-readable status line for the UI log panel.
         compact_finished(size_before, size_after): On-disk sizes in bytes (both -1 on error).
     """
 
+    progress = pyqtSignal(int, int)
     log      = pyqtSignal(str)
     compact_finished = pyqtSignal(int, int)   # (size_before, size_after); (-1, -1) on error
 
@@ -737,7 +827,13 @@ class CompactWorker(QThread):
 
         self.log.emit("Compacting thumbnail store — this may take a while…")
         try:
-            before, after = compact_store()
+            # Reported as a percentage: raw byte counts overflow the bar's int
+            # range, and MB granularity loses stores smaller than 1 MB.
+            before, after = compact_store(
+                progress=lambda done, total: self.progress.emit(
+                    done * 100 // max(total, 1), 100
+                )
+            )
         except Exception as exc:
             self.log.emit(f"ERROR compacting thumbnail store: {exc}")
             logger.error("Thumbnail store compaction failed: %s", exc, exc_info=True)
@@ -1028,6 +1124,7 @@ class DbMaintenanceDialog(QDialog):
         self._prune_worker:     PruneImagesWorker            | None = None
         self._img_warn_worker:  ImageWarningWorker           | None = None
         self._presup_worker:    PresupportWarningWorker      | None = None
+        self._dedup_worker:     DedupWorker                  | None = None
         self._results: list[dict] = []
         self._build_ui()
 
@@ -1152,6 +1249,19 @@ class DbMaintenanceDialog(QDialog):
         )
         self._check_presup_btn.clicked.connect(self._start_check_presupports)
         _add_btn(self._check_presup_btn)
+
+        self._dedup_btn = QPushButton(
+            style.standardIcon(SP.SP_DialogSaveButton), self.tr("Deduplicate Thumbnails")
+        )
+        self._dedup_btn.setToolTip(
+            self.tr("Store each distinct thumbnail once instead of once per model. "
+                    "Libraries that share renders across archives often carry a large "
+                    "proportion of byte-identical thumbnails; collapsing them can halve "
+                    "the store. Also removes thumbnails no model references any more, "
+                    "then compacts. Safe to stop and re-run.")
+        )
+        self._dedup_btn.clicked.connect(self._start_dedup)
+        _add_btn(self._dedup_btn)
 
         self._compact_btn = QPushButton(
             style.standardIcon(SP.SP_DriveHDIcon), self.tr("Compact Thumbnail Store")
@@ -1292,6 +1402,7 @@ class DbMaintenanceDialog(QDialog):
         self._prune_images_btn.setEnabled(not busy)
         self._check_images_btn.setEnabled(not busy)
         self._check_presup_btn.setEnabled(not busy)
+        self._dedup_btn.setEnabled(not busy)
         self._merge_moved_btn.setEnabled(False)
         self._remove_sel_btn.setEnabled(False)
         self._remove_all_btn.setEnabled(False)
@@ -1314,6 +1425,7 @@ class DbMaintenanceDialog(QDialog):
         self._prune_images_btn.setEnabled(True)
         self._check_images_btn.setEnabled(True)
         self._check_presup_btn.setEnabled(True)
+        self._dedup_btn.setEnabled(True)
         self._merge_moved_btn.setEnabled(has_moved_db)
         self._remove_sel_btn.setEnabled(has_any)
         self._remove_all_btn.setEnabled(has_missing)
@@ -1325,6 +1437,7 @@ class DbMaintenanceDialog(QDialog):
             self._verify_worker, self._search_worker,
             self._dhash_worker, self._embed_worker, self._moved_db_worker,
             self._prune_worker, self._img_warn_worker, self._presup_worker,
+            self._dedup_worker,
         ):
             if worker and worker.isRunning():
                 worker.stop()
@@ -1425,6 +1538,37 @@ class DbMaintenanceDialog(QDialog):
         play_notification("maintenance")
 
     # ------------------------------------------------------------------
+    def _start_dedup(self) -> None:
+        if self._dedup_worker is not None and self._dedup_worker.isRunning():
+            return
+        reply = QMessageBox.question(
+            self, self.tr("Deduplicate Thumbnails"),
+            self.tr("Store each distinct thumbnail once instead of once per model?\n\n"
+                    "Every thumbnail stays viewable; only redundant copies are removed. "
+                    "On a large library this can take a few minutes — you can stop it "
+                    "and re-run later without losing progress."),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Yes,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self._log.clear()
+        self._progress.setValue(0)
+        self._set_busy(True)
+
+        self._own_worker("_dedup_worker", DedupWorker())
+        self._dedup_worker.log.connect(self._on_log)
+        self._dedup_worker.progress.connect(self._on_progress)
+        self._dedup_worker.dedup_finished.connect(self._on_dedup_finished)
+        self._dedup_worker.start()
+
+    def _on_dedup_finished(self, _stats: dict) -> None:
+        self._set_idle()
+        from app.utils.sound import play_notification
+        play_notification("maintenance")
+
+    # ------------------------------------------------------------------
     def _start_compact(self) -> None:
         reply = QMessageBox.question(
             self, self.tr("Compact Thumbnail Store"),
@@ -1443,6 +1587,7 @@ class DbMaintenanceDialog(QDialog):
 
         self._own_worker("_compact_worker", CompactWorker())
         self._compact_worker.log.connect(self._on_log)
+        self._compact_worker.progress.connect(self._on_progress)
         self._compact_worker.compact_finished.connect(self._on_compact_finished)
         self._compact_worker.start()
 
@@ -1887,6 +2032,7 @@ class DbMaintenanceDialog(QDialog):
         self._prune_images_btn.setEnabled(True)
         self._check_images_btn.setEnabled(True)
         self._check_presup_btn.setEnabled(True)
+        self._dedup_btn.setEnabled(True)
         self._merge_moved_btn.setEnabled(has_moved_db)
         self._remove_all_btn.setEnabled(has_missing)
         self._remove_flagged_btn.setEnabled(has_flagged)
@@ -1907,6 +2053,7 @@ class DbMaintenanceDialog(QDialog):
             self._verify_worker, self._search_worker,
             self._dhash_worker, self._embed_worker, self._moved_db_worker,
             self._prune_worker, self._img_warn_worker, self._presup_worker,
+            self._dedup_worker,
         ):
             if worker and worker.isRunning():
                 worker.stop()
