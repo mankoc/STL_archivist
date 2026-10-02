@@ -322,11 +322,16 @@ def get_models_view():
 
 
 def _query_profiling_enabled() -> bool:
-    """Read the SQL profiling toggle from QSettings, default off.
+    """Read the SQL profiling toggle, default off.
 
-    Imported lazily because QSettings depends on QCoreApplication being created,
-    which may not be true during early init or tests.
+    ``STL_SQL_PROFILING=1`` enables it without Qt (e.g. headless). Otherwise
+    QSettings is imported lazily because it depends on QCoreApplication being
+    created, which may not be true during early init or tests.
     """
+    import os
+    env = os.environ.get("STL_SQL_PROFILING")
+    if env is not None:
+        return env.strip().lower() in ("1", "true", "yes", "on")
     try:
         from PyQt6.QtCore import QSettings
         return bool(QSettings().value("debug/sql_profiling", False, type=bool))

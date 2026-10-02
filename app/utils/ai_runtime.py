@@ -69,7 +69,7 @@ _VARIANT_MARKER = "variant.txt"
 
 def _get_data_dir() -> Optional[Path]:
     try:
-        from app.ui.config_dialog import get_data_dir
+        from app.core.settings import get_data_dir
         d = get_data_dir()
         return Path(d) if d else None
     except Exception:

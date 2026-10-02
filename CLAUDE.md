@@ -24,6 +24,7 @@ stl_database/
 ├── create_icon.py           # Regenerate resources/icon.{ico,png,svg} (run manually)
 ├── app/
 │   ├── config.py            # CrawlerConfig dataclass (passed to crawler, not imported by UI layer)
+│   ├── core/                # Qt-free core (settings provider; see docs/server-migration-plan.md)
 │   ├── crawler/             # Archive processing pipeline
 │   ├── database/            # SQLAlchemy ORM + session helpers
 │   ├── ui/                  # PyQt6 widgets and dialogs
@@ -120,6 +121,15 @@ Two-tier config:
 
 `CrawlerConfig` dataclass is populated from these settings and passed into `CrawlerWorker` —
 business-logic code has **no direct dependency on the UI layer**.
+
+The non-visual getters and `build_crawler_config()` live in **`app/core/settings.py`** (Qt-free).
+`get_data_dir()` / `get_unrar_path()` resolve in this order: env var (`STL_DATA_DIR` /
+`STL_UNRAR_PATH`), then a provider registered with `register_providers()` (the desktop registers
+`QSettings` readers when `app.ui.config_dialog` is imported), then the platform default.
+`config_dialog` re-exports these getters. Business-logic code should import from
+`app.core.settings`, not `app.ui.config_dialog`. Visual and widget-only settings (colors, fonts,
+hotkeys, notifications, file manager) stay in `config_dialog`. Tests that monkeypatch
+`_load_library_settings` for a core getter must patch `app.core.settings`.
 
 ## Circular-Import Pattern
 

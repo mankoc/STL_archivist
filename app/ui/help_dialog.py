@@ -803,6 +803,8 @@ The dialog is divided into sections shown in a tree on the left.</p>
       <td>Full path to the <code>unrar</code> binary, required to open
           <code>.rar</code> archives.  Leave blank if you have no RAR files.</td></tr>
 </table>
+<div class="note">The environment variables <code>STL_DATA_DIR</code> and
+<code>STL_UNRAR_PATH</code>, when set, take precedence over these two settings.</div>
 
 <h2>Language</h2>
 <table>

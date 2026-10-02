@@ -71,7 +71,7 @@ The existing Qt class becomes a thin wrapper that calls the function and re-emit
 
 This phase is worth doing even if the server never ships. The logic becomes testable, the UI files shrink, and it follows the "UI work budget" rule in `CLAUDE.md`.
 
-### 0.1 Settings provider: `app/core/settings.py`
+### 0.1 Settings provider: `app/core/settings.py` ✅ done
 - **Machine-wide values** are `get_data_dir()` and `get_unrar_path()`. They resolve in this order:
   1. Environment variables `STL_DATA_DIR` / `STL_UNRAR_PATH`.
   2. A provider callable registered by the desktop app, which reads `QSettings`.
