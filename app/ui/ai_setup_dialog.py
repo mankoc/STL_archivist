@@ -26,7 +26,7 @@ from app.utils.ai_runtime import INSTALL_VARIANTS, install_ai, ai_dir, MODEL_LAB
 
 class _InstallWorker(QThread):
     progress = pyqtSignal(str)   # status message
-    finished = pyqtSignal()
+    install_finished = pyqtSignal()
     error    = pyqtSignal(str)
 
     def __init__(self, variant: str) -> None:
@@ -39,7 +39,7 @@ class _InstallWorker(QThread):
                 variant=self._variant,
                 progress=lambda msg: self.progress.emit(msg),
             )
-            self.finished.emit()
+            self.install_finished.emit()
         except Exception as exc:
             self.error.emit(str(exc))
 
@@ -154,8 +154,11 @@ class AISetupDialog(QDialog):
     def _start_install(self) -> None:
         variant = self._selected_variant()
         self._worker = _InstallWorker(variant)
+        # Parent it so Qt, not the Python reference dropped in _on_finished
+        # (which runs from inside run()), owns the thread's lifetime.
+        self._worker.setParent(self)
         self._worker.progress.connect(self._on_progress)
-        self._worker.finished.connect(self._on_finished)
+        self._worker.install_finished.connect(self._on_finished)
         self._worker.error.connect(self._on_error)
 
         self._install_btn.setEnabled(False)

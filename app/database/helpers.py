@@ -126,36 +126,32 @@ def prune_unused_lookups(session: Session) -> dict[str, int]:
     Returns a mapping of ``{table_label: rows_deleted}`` for non-zero counts.
     """
     from sqlalchemy import select
+    from app.database.models import model_scales
 
     deleted: dict[str, int] = {}
 
+    def _bulk_delete(label: str, cls, *conditions) -> None:
+        # One DELETE … WHERE id NOT IN (subquery) per table instead of loading
+        # each orphan row and deleting it individually.  None of these rows
+        # has ORM-level cascades to honour (orphans are referenced by nothing,
+        # and orphan collections have no subcollections left by then).
+        n = (session.query(cls)
+             .filter(*conditions)
+             .delete(synchronize_session="fetch"))
+        if n:
+            deleted[label] = n
+
+    def _used(col):
+        return select(col).where(col.isnot(None))
+
     # 1. Orphan subcollections
-    used_sub = select(STLModel.subcollection_id).where(
-        STLModel.subcollection_id.isnot(None)
-    ).scalar_subquery()
-    orphan_subs = session.query(Subcollection).filter(
-        Subcollection.id.not_in(used_sub)
-    ).all()
-    for row in orphan_subs:
-        session.delete(row)
-    if orphan_subs:
-        deleted["subcollections"] = len(orphan_subs)
-        session.flush()
+    _bulk_delete("subcollections", Subcollection,
+                 Subcollection.id.not_in(_used(STLModel.subcollection_id)))
 
     # 2. Orphan collections (no model reference AND no subcollections left)
-    used_col = select(STLModel.collection_id).where(
-        STLModel.collection_id.isnot(None)
-    ).scalar_subquery()
-    has_sub = select(Subcollection.collection_id).scalar_subquery()
-    orphan_cols = session.query(Collection).filter(
-        Collection.id.not_in(used_col),
-        Collection.id.not_in(has_sub),
-    ).all()
-    for row in orphan_cols:
-        session.delete(row)
-    if orphan_cols:
-        deleted["collections"] = len(orphan_cols)
-        session.flush()
+    _bulk_delete("collections", Collection,
+                 Collection.id.not_in(_used(STLModel.collection_id)),
+                 Collection.id.not_in(select(Subcollection.collection_id)))
 
     # 3. Other simple FK lookup tables
     for label, cls, fk_attr in [
@@ -163,24 +159,12 @@ def prune_unused_lookups(session: Session) -> dict[str, int]:
         ("categories", Category, STLModel.category_id),
         ("releases",   Release,  STLModel.release_id),
     ]:
-        used = select(fk_attr).where(fk_attr.isnot(None)).scalar_subquery()
-        orphans = session.query(cls).filter(cls.id.not_in(used)).all()
-        for row in orphans:
-            session.delete(row)
-        if orphans:
-            deleted[label] = len(orphans)
-            session.flush()
+        _bulk_delete(label, cls, cls.id.not_in(_used(fk_attr)))
 
     # 4. Scales are many-to-many (model_scales); prune any not referenced there.
-    from app.database.models import model_scales
-    used_scales = select(model_scales.c.scale_id).scalar_subquery()
-    orphan_scales = session.query(Scale).filter(Scale.id.not_in(used_scales)).all()
-    for row in orphan_scales:
-        session.delete(row)
-    if orphan_scales:
-        deleted["scales"] = len(orphan_scales)
-        session.flush()
+    _bulk_delete("scales", Scale, Scale.id.not_in(select(model_scales.c.scale_id)))
 
+    session.flush()
     return deleted
 
 

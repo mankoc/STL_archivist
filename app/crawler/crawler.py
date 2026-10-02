@@ -41,7 +41,7 @@ from app.utils.thumbnailer import (
     save_thumbnail, delete_thumbnail, get_thumbnail_base_dir,
     get_thumbnail_bytes, save_thumbnails_batch, write_raw_thumbnails_batch,
 )
-from app.ui.find_content_duplicates_dialog import compute_dhash_from_jpeg, format_dhash
+from app.utils.image_hash import compute_dhash_from_jpeg, format_dhash
 from app.utils.path_pattern import parse_path, apply_extracted_to_model, parse_release_date
 
 
@@ -58,7 +58,7 @@ class CrawlerWorker(QThread):
     log            = pyqtSignal(str)
     warning        = pyqtSignal(str)              # corrupted/unreadable archive
     phase          = pyqtSignal(str)              # high-level step description
-    finished       = pyqtSignal()
+    crawl_finished       = pyqtSignal()
     counts_changed = pyqtSignal(int, int, int)   # new, updated, unchanged
     archive_result = pyqtSignal(str, str)         # full archive path, "new"|"updated"
     file_moved     = pyqtSignal(str, str)         # old_path, new_path
@@ -171,7 +171,7 @@ class CrawlerWorker(QThread):
         msg = "Crawl complete."
         self.log.emit(msg)
         logger.info(msg)
-        self.finished.emit()
+        self.crawl_finished.emit()
 
     def _pre_crawl_import(self, archives: list[Path], thumb_base: Path) -> None:
         """Restore DB records from METADATA.7z sidecars before crawling."""

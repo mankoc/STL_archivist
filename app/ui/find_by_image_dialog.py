@@ -19,7 +19,7 @@ from app.database.models import Image as DBImage, STLModel
 from app.utils.thumbnailer import pixmap_from_path
 from app.utils import image_embedding as _emb
 import numpy as np
-from app.ui.find_content_duplicates_dialog import (
+from app.utils.image_hash import (
     compute_dhash_from_jpeg, format_dhash, parse_dhash,
     _hamming128_batch,
 )

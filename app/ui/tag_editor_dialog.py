@@ -20,6 +20,7 @@ _NAME_ROLE = Qt.ItemDataRole.UserRole + 1
 
 from app.database.db import session_scope, get_session
 from app.database.models import Tag
+from app.services.lookups import usage_count, usage_counts
 from app.utils.string_utils import (
     levenshtein as _levenshtein,
     levenshtein_within as _within,
@@ -93,6 +94,7 @@ class TagEditorDialog(QDialog):
         self._table.setRowCount(0)
         session = get_session()
         try:
+            counts = usage_counts(session, "tag")
             for tag in session.query(Tag).order_by(Tag.name).all():
                 row = self._table.rowCount()
                 self._table.insertRow(row)
@@ -100,7 +102,7 @@ class TagEditorDialog(QDialog):
                 name_item = QTableWidgetItem(tag.name)
                 name_item.setData(Qt.ItemDataRole.UserRole, tag.id)
 
-                count_item = QTableWidgetItem(str(len(tag.models)))
+                count_item = QTableWidgetItem(str(counts.get(tag.id, 0)))
                 count_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
                 self._table.setItem(row, 0, name_item)
@@ -193,7 +195,7 @@ class TagEditorDialog(QDialog):
         try:
             tag = session.get(Tag, tag_id)
             name = tag.name
-            count = len(tag.models)
+            count = usage_count(session, "tag", tag_id)
         finally:
             session.close()
 
@@ -356,7 +358,7 @@ class _ScanWorker(QThread):
     (distance is always >= the length difference).
     """
 
-    finished = pyqtSignal(list, str)   # (pairs, column_header)
+    scan_finished = pyqtSignal(list, str)   # (pairs, column_header)
 
     def __init__(self, method: str, threshold: int, parent=None) -> None:
         super().__init__(parent)
@@ -400,7 +402,7 @@ class _ScanWorker(QThread):
             pairs.sort(key=lambda x: x[2])
             header = "Soundex"
 
-        self.finished.emit(pairs, header)
+        self.scan_finished.emit(pairs, header)
 
 
 class _MergeSimilarDialog(QDialog):
@@ -517,7 +519,7 @@ class _MergeSimilarDialog(QDialog):
         self._worker = _ScanWorker(
             self._method_combo.currentText(), self._thresh_spin.value(), self
         )
-        self._worker.finished.connect(self._on_scan_finished)
+        self._worker.scan_finished.connect(self._on_scan_finished)
         self._worker.start()
 
     def _on_scan_finished(self, pairs: list, col_header: str) -> None:

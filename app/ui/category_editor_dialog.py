@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
 
 from app.database.db import session_scope, get_session
 from app.database.models import Category
+from app.services.lookups import usage_count, usage_counts
 from app.utils.name_dedup import find_similar_pairs
 
 
@@ -69,6 +70,7 @@ class CategoryEditorDialog(QDialog):
         self._table.setRowCount(0)
         session = get_session()
         try:
+            counts = usage_counts(session, "category")
             for cat in session.query(Category).order_by(Category.name).all():
                 row = self._table.rowCount()
                 self._table.insertRow(row)
@@ -76,7 +78,7 @@ class CategoryEditorDialog(QDialog):
                 name_item = QTableWidgetItem(cat.name)
                 name_item.setData(Qt.ItemDataRole.UserRole, cat.id)
 
-                count_item = QTableWidgetItem(str(len(cat.models)))
+                count_item = QTableWidgetItem(str(counts.get(cat.id, 0)))
                 count_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
                 self._table.setItem(row, 0, name_item)
@@ -144,7 +146,7 @@ class CategoryEditorDialog(QDialog):
         try:
             cat = session.get(Category, cat_id)
             name = cat.name
-            count = len(cat.models)
+            count = usage_count(session, "category", cat_id)
         finally:
             session.close()
 
@@ -235,8 +237,9 @@ class _MergeCategoriesDialog(QDialog):
         method = self._method_combo.currentText()
         session = get_session()
         try:
+            counts = usage_counts(session, "category")
             categories = [
-                (cat.id, cat.name, len(cat.models))
+                (cat.id, cat.name, counts.get(cat.id, 0))
                 for cat in session.query(Category).order_by(Category.name).all()
             ]
         finally:

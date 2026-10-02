@@ -53,6 +53,30 @@ def test_save_then_load_round_trip(tmp_path):
     assert core._load_library_settings(str(tmp_path)) == {"recurse_subdirs": False}
 
 
+def test_cached_settings_are_private_copies(tmp_path):
+    core._save_library_settings({"hotkeys": {"refresh": "F5"}}, str(tmp_path))
+    first = core._load_library_settings(str(tmp_path))
+    first["hotkeys"]["refresh"] = "F9"          # caller mutates, then never saves
+    assert core._load_library_settings(str(tmp_path))["hotkeys"]["refresh"] == "F5"
+
+
+def test_cache_sees_save_and_external_edit(tmp_path):
+    core._save_library_settings({"max_workers": 2}, str(tmp_path))
+    assert core._load_library_settings(str(tmp_path))["max_workers"] == 2
+    core._save_library_settings({"max_workers": 3}, str(tmp_path))
+    assert core._load_library_settings(str(tmp_path))["max_workers"] == 3
+    # Written by something else (different size -> different stamp).
+    (tmp_path / "settings.json").write_text(json.dumps({"max_workers": 12}), encoding="utf-8")
+    assert core._load_library_settings(str(tmp_path))["max_workers"] == 12
+
+
+def test_corrupt_or_non_dict_settings_read_as_empty(tmp_path):
+    (tmp_path / "settings.json").write_text("{not json", encoding="utf-8")
+    assert core._load_library_settings(str(tmp_path)) == {}
+    (tmp_path / "settings.json").write_text("[1, 2]", encoding="utf-8")
+    assert core._load_library_settings(str(tmp_path)) == {}
+
+
 def test_core_settings_imports_without_pyqt():
     """``app.core.settings`` must stay usable on a headless server."""
     code = (

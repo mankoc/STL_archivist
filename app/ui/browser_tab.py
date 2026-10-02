@@ -29,9 +29,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import QSettings
 
-from sqlalchemy import (
-    func, or_, and_, select as sa_select,
-)
+from sqlalchemy import select as sa_select
 
 from app.database.db import session_scope, get_models_view
 from app.ui import lookup_cache as _lookup_cache
@@ -39,8 +37,12 @@ from app.ui.thumb_loader import ThumbnailLoaderWorker
 from app.ui.browser_table_model import _SqlTableModel
 from app.ui.browser_filter_tree import FilterTreeWidget, _FilterTreeWorker
 from app.ui.browser_jobs import (
-    _ImageDropRunnable, _WarningDetailRunnable, RescanWorker, RescanProgressDialog,
-    ThumbnailGeneratorWorker,
+    _CellEditRunnable, _ImageDropRunnable, _WarningDetailRunnable, RescanWorker,
+    RescanProgressDialog, ThumbnailGeneratorWorker,
+)
+from app.ui import sidecar_exporter
+from app.services.library_query import (
+    FilterSpec, GROUPS as FILTER_GROUPS, facet_scopes, table_where,
 )
 from app.ui.browser_dialogs import ClickableLabel, ImageViewerDialog
 from app.ui.browser_delegates import (
@@ -53,9 +55,9 @@ from app.ui.browser_common import (
     COL_SCULPTOR, COL_COLLECTION, COL_SUBCOLLECTION, COL_SEQUENCE, COL_RELEASE,
     COL_PATH, COL_SCALE, COL_PRESUPPORTED, COL_ADDED, COL_WARNING, COL_FILESIZE,
     COL_CATEGORY, COL_COMPRESSION, COL_TO_PRINT, _HEADERS,
-    _prune_ancestor_paths, _FILTER_PATH_IDS, _fmt_size,
+    _FILTER_PATH_IDS, _fmt_size,
 )
-from app.database.models import STLModel, Tag, Sculptor, Collection, Subcollection, Category, Release, Scale, Image, model_tags as _mt_global, model_scales as _ms_global
+from app.database.models import STLModel, Tag, Image
 from app.utils.path_pattern import parse_release_date, format_release_date
 
 
@@ -103,6 +105,10 @@ class BrowserTab(QWidget):
 
         # --- Background thumbnail loader ---
         QPixmapCache.setCacheLimit(64 * 1024)  # 64 MB Qt pixmap cache
+        # Long-lived loader for the image pane.  Thumbnail *generation* uses
+        # its own attribute (_thumb_gen_worker): reusing this one used to drop
+        # the only Python reference to the loader after a generation run.
+        self._thumb_gen_worker = None
         self._thumb_worker = ThumbnailLoaderWorker()
         self._thumb_thread = QThread(self)
         self._thumb_worker.moveToThread(self._thumb_thread)
@@ -121,8 +127,13 @@ class BrowserTab(QWidget):
         self._panel_cache: dict[int, dict] = {}
         # Generation counter for async filter-tree rebuilds (discard stale results)
         self._filter_gen: int = 0
-        # Debounce rapid cell edits: keyed by (row, col) → str
-        self._pending_edits: dict[tuple[int, int], str] = {}
+        # Debounce rapid cell edits: keyed by (model_id, field) → text.  Keyed
+        # by model id, not row, so a table reload during the debounce cannot
+        # redirect an edit to another model.  Written on a one-thread pool so
+        # batches commit in order.
+        self._pending_edits: dict[tuple[int, str], str] = {}
+        self._edit_pool = QThreadPool(self)
+        self._edit_pool.setMaxThreadCount(1)
         self._edit_timer = QTimer(self)
         self._edit_timer.setSingleShot(True)
         self._edit_timer.setInterval(400)  # ms
@@ -786,189 +797,35 @@ class BrowserTab(QWidget):
 
     def show_model_ids(self, ids: list[int]) -> None:
         """Show only the models with the given IDs, ignoring all sidebar filters."""
-        self._load_table(id_filters=ids)
+        self._load_table(FilterSpec(ids=list(ids)))
         if self._model.rowCount() > 0:
             self._table.setCurrentIndex(self._model.index(0, 0))
 
     def show_duplicate_pairs(self, pairs: list) -> None:
         """Show duplicate pairs sorted by pair and color-coded with alternating colors."""
         all_ids = list({pid for pair in pairs for pid in pair})
-        self._load_table(id_filters=all_ids, duplicate_pairs=pairs)
+        self._load_table(FilterSpec(ids=all_ids), duplicate_pairs=pairs)
         if self._model.rowCount() > 0:
             self._table.setCurrentIndex(self._model.index(0, 0))
 
     def _load_table(
         self,
-        author_filters:        list[str] | None = None,
-        author_exc_filters:    list[str] | None = None,
-        tag_filters:           list[str] | None = None,
-        tag_exc_filters:       list[str] | None = None,
-        type_filters:          list[str] | None = None,
-        type_exc_filters:      list[str] | None = None,
-        path_filters:          list[str] | None = None,
-        path_exc_filters:      list[str] | None = None,
-        date_filters:          list[tuple[int, int | None]] | None = None,
-        date_exc_filters:      list[tuple[int, int | None]] | None = None,
-        sculptor_filters:      list[str] | None = None,
-        sculptor_exc_filters:  list[str] | None = None,
-        collection_filters:    list[str] | None = None,
-        collection_exc_filters: list[str] | None = None,
-        subcollection_filters: list[str] | None = None,
-        subcollection_exc_filters: list[str] | None = None,
-        category_filters:      list[str] | None = None,
-        category_exc_filters:  list[str] | None = None,
-        release_filters:       list[str] | None = None,
-        release_exc_filters:   list[str] | None = None,
-        scale_filters:         list[str] | None = None,
-        scale_exc_filters:     list[str] | None = None,
-        presupports_filters:   list[str] | None = None,
-        presupports_exc_filters: list[str] | None = None,
-        warning_filters:       list[str] | None = None,
-        warning_exc_filters:   list[str] | None = None,
-        filetype_filters:      list[str] | None = None,
-        filetype_exc_filters:  list[str] | None = None,
-        has_value_groups:      list[str] | None = None,
-        no_value_groups:       list[str] | None = None,
-        id_filters:            list[int] | None = None,
-        duplicate_pairs:       list[list[int]] | None = None,
+        spec: FilterSpec | None = None,
+        *,
+        duplicate_pairs: list[list[int]] | None = None,
     ) -> None:
-        """Reload the table with optional include/exclude filter lists.
+        """Reload the table for *spec* (``None`` = everything).
 
-        Within each category the values are OR-ed; across categories they are AND-ed.
-        *_exc_filters* variants exclude rows that match those values.
-        *date_filters* / *date_exc_filters* are lists of (year, month_or_None) tuples.
-
-        Data is fetched in a background thread (TableLoaderWorker) and appended
-        to the model in 200-row batches so the UI stays responsive during loading.
+        The WHERE clause comes from :func:`app.services.library_query.table_where`,
+        the same builder that scopes the filter-pane counts.  The paged model
+        streams the matching ids in a background thread (see ``_SqlTableModel``).
         """
-        # ------------------------------------------------------------------
-        # Build flat SELECT from models_view — the view pre-joins the six FK
-        # lookup tables, so no outer-join construction is needed here.
-        # SA expressions are thread-safe to construct here and execute in the
-        # worker's own session.
-        # ------------------------------------------------------------------
+        spec = spec or FilterSpec()
         mv = get_models_view()
-
-        def _date_clauses(pairs):
-            return [
-                (mv.c.release_year == y) if mo is None
-                else and_(mv.c.release_year == y, mv.c.release_month == mo)
-                for y, mo in pairs
-            ]
-
-        stmt = sa_select(
-            mv.c.id, mv.c.title, mv.c.creator, mv.c.source,
-            mv.c.release_year, mv.c.release_month,
-            mv.c.archive_path, mv.c.presupports, mv.c.warning,
-            mv.c.archive_size, mv.c.compression_rate,
-            mv.c.sequence, mv.c.created_at,
-            mv.c.sculptor_name,
-            mv.c.collection_name,
-            mv.c.subcollection_name,
-            mv.c.category_name,
-            mv.c.release_name,
-            mv.c.to_print,
-        ).select_from(mv)
-
-        _tag_sub = sa_select(_mt_global.c.model_id).join(Tag, _mt_global.c.tag_id == Tag.id)
-        _scale_sub = sa_select(_ms_global.c.model_id)
-
-        # --- explicit ID set ---
-        if id_filters:
-            stmt = stmt.where(mv.c.id.in_(id_filters))
-        # --- include filters ---
-        if author_filters:
-            stmt = stmt.where(func.lower(mv.c.creator).in_([a.lower() for a in author_filters]))
-        if type_filters:
-            stmt = stmt.where(func.lower(mv.c.source).in_([t.lower() for t in type_filters]))
-        if tag_filters:
-            stmt = stmt.where(mv.c.id.in_(_tag_sub.where(Tag.name.in_(tag_filters))))
-        if path_filters:
-            _norm = func.replace(mv.c.archive_path, "\\", "/")
-            _pruned_paths = _prune_ancestor_paths(path_filters)
-            stmt = stmt.where(or_(*(_norm.like(p.rstrip("/") + "/%") for p in _pruned_paths)))
-        if date_filters:
-            stmt = stmt.where(or_(*_date_clauses(date_filters)))
-        if sculptor_filters:
-            stmt = stmt.where(mv.c.sculptor_id.in_(sculptor_filters))
-        if collection_filters:
-            stmt = stmt.where(mv.c.collection_id.in_(collection_filters))
-        if subcollection_filters:
-            stmt = stmt.where(mv.c.subcollection_id.in_(subcollection_filters))
-        if category_filters:
-            stmt = stmt.where(mv.c.category_id.in_(category_filters))
-        if release_filters:
-            stmt = stmt.where(mv.c.release_id.in_(release_filters))
-        if scale_filters:
-            stmt = stmt.where(mv.c.id.in_(_scale_sub.where(_ms_global.c.scale_id.in_(scale_filters))))
-        if presupports_filters:
-            stmt = stmt.where(mv.c.presupports.in_(presupports_filters))
-        if warning_filters:
-            stmt = stmt.where(or_(*(mv.c.warning.contains(w) for w in warning_filters)))
-        if filetype_filters:
-            _ap_lc = func.lower(mv.c.archive_path)
-            stmt = stmt.where(or_(*(_ap_lc.like("%" + ext) for ext in filetype_filters)))
-        # --- exclude filters ---
-        if author_exc_filters:
-            stmt = stmt.where(~func.lower(mv.c.creator).in_([a.lower() for a in author_exc_filters]))
-        if type_exc_filters:
-            stmt = stmt.where(~func.lower(mv.c.source).in_([t.lower() for t in type_exc_filters]))
-        if tag_exc_filters:
-            stmt = stmt.where(mv.c.id.notin_(_tag_sub.where(Tag.name.in_(tag_exc_filters))))
-        if path_exc_filters:
-            _norm = func.replace(mv.c.archive_path, "\\", "/")
-            _pruned_exc = _prune_ancestor_paths(path_exc_filters)
-            stmt = stmt.where(~or_(*(_norm.like(p.rstrip("/") + "/%") for p in _pruned_exc)))
-        if date_exc_filters:
-            stmt = stmt.where(~or_(*_date_clauses(date_exc_filters)))
-        if sculptor_exc_filters:
-            stmt = stmt.where(~mv.c.sculptor_id.in_(sculptor_exc_filters))
-        if collection_exc_filters:
-            stmt = stmt.where(~mv.c.collection_id.in_(collection_exc_filters))
-        if subcollection_exc_filters:
-            stmt = stmt.where(~mv.c.subcollection_id.in_(subcollection_exc_filters))
-        if category_exc_filters:
-            stmt = stmt.where(~mv.c.category_id.in_(category_exc_filters))
-        if release_exc_filters:
-            stmt = stmt.where(~mv.c.release_id.in_(release_exc_filters))
-        if scale_exc_filters:
-            stmt = stmt.where(mv.c.id.notin_(_scale_sub.where(_ms_global.c.scale_id.in_(scale_exc_filters))))
-        if presupports_exc_filters:
-            stmt = stmt.where(~mv.c.presupports.in_(presupports_exc_filters))
-        if warning_exc_filters:
-            stmt = stmt.where(and_(*(~mv.c.warning.contains(w) for w in warning_exc_filters)))
-        if filetype_exc_filters:
-            _ap_lc = func.lower(mv.c.archive_path)
-            stmt = stmt.where(and_(*(~_ap_lc.like("%" + ext) for ext in filetype_exc_filters)))
-
-        # --- group-level has/no-value filters ---
-        _has_tag_sub = sa_select(_mt_global.c.model_id).distinct()
-        _has_scale_sub = sa_select(_ms_global.c.model_id).distinct()
-        _group_has_value = {
-            "creator":       lambda: and_(mv.c.creator.isnot(None),       mv.c.creator != ""),
-            "tag":           lambda: mv.c.id.in_(_has_tag_sub),
-            "source":        lambda: and_(mv.c.source.isnot(None),         mv.c.source != ""),
-            "date":          lambda: mv.c.release_year.isnot(None),
-            "sculptor":      lambda: mv.c.sculptor_id.isnot(None),
-            "collection":    lambda: mv.c.collection_id.isnot(None),
-            "subcollection": lambda: mv.c.subcollection_id.isnot(None),
-            "category":      lambda: mv.c.category_id.isnot(None),
-            "release":       lambda: mv.c.release_id.isnot(None),
-            "scale":         lambda: mv.c.id.in_(_has_scale_sub),
-            "presupports":   lambda: and_(mv.c.presupports.isnot(None),   mv.c.presupports != ""),
-            "warning":       lambda: and_(mv.c.warning.isnot(None),       mv.c.warning != ""),
-            "path":          lambda: and_(mv.c.archive_path.isnot(None),  mv.c.archive_path != ""),
-        }
-        if has_value_groups:
-            for _key in has_value_groups:
-                _cond = _group_has_value.get(_key)
-                if _cond:
-                    stmt = stmt.where(_cond())
-        if no_value_groups:
-            for _key in no_value_groups:
-                _cond = _group_has_value.get(_key)
-                if _cond:
-                    stmt = stmt.where(~_cond())
+        stmt = sa_select(mv.c.id).select_from(mv)
+        where = table_where(spec, mv)
+        if where is not None:
+            stmt = stmt.where(where)
 
         # --- duplicate-pairs ordering ---
         pair_order:  dict | None = None
@@ -1003,137 +860,49 @@ class BrowserTab(QWidget):
         self._loading = False
         self.model_count_changed.emit(total)
 
+    # Table column → field name understood by app.services.editing.apply_cell_edit
+    _EDITABLE_FIELDS = {
+        COL_TITLE: "title", COL_CREATOR: "creator", COL_SOURCE: "source",
+        COL_DATE: "date", COL_TAGS: "tags", COL_SCULPTOR: "sculptor",
+        COL_COLLECTION: "collection", COL_SUBCOLLECTION: "subcollection",
+        COL_CATEGORY: "category", COL_SEQUENCE: "sequence", COL_RELEASE: "release",
+        COL_SCALE: "scale", COL_PRESUPPORTED: "presupports", COL_TO_PRINT: "to_print",
+    }
+
     def _on_cell_edited(self, row: int, col: int, text: str) -> None:
-        self._pending_edits[(row, col)] = text
+        field = self._EDITABLE_FIELDS.get(col)
+        model_id = self._model.model_id_for_row(row)
+        if field is None or model_id is None:
+            return
+        self._pending_edits[(model_id, field)] = text
         self._edit_timer.start()
 
     def _flush_pending_edits(self) -> None:
-        """Write all debounced cell edits to the DB in a single pass."""
-        edits = list(self._pending_edits.items())
-        self._pending_edits.clear()
-        for (row, col), text in edits:
-            self._write_cell(row, col, text)
-
-    def _write_cell(self, row: int, col: int, text: str) -> None:
-        """Persist a single edited table cell to the database."""
-        model_id = self._model.model_id_for_row(row)
-        if model_id is None:
+        """Hand all debounced cell edits to a background writer as one batch."""
+        if not self._pending_edits:
             return
-        value = text.strip() or None
-        with session_scope() as session:
-            stl: STLModel = session.get(STLModel, model_id)
-            if stl is None:
-                return
-            if col == COL_TITLE:
-                stl.title = value
-            elif col == COL_CREATOR:
-                stl.creator = value
-            elif col == COL_SOURCE:
-                stl.source = value
-            elif col == COL_DATE:
-                _year, _month = parse_release_date(value or "")
-                stl.release_year  = _year
-                stl.release_month = _month
-            elif col == COL_TAGS:
-                stl.tags.clear()
-                for name in [t.strip().lower() for t in (value or "").split(",") if t.strip()]:
-                    tag = session.query(Tag).filter_by(name=name).first()
-                    if tag is None:
-                        tag = Tag(name=name)
-                        session.add(tag)
-                        session.flush()
-                    stl.tags.append(tag)
-            elif col == COL_SCULPTOR:
-                if value:
-                    sc = session.query(Sculptor).filter_by(name=value).first()
-                    if sc is None:
-                        sc = Sculptor(name=value)
-                        session.add(sc)
-                        session.flush()
-                    stl.sculptor = sc
-                else:
-                    stl.sculptor = None
-            elif col == COL_COLLECTION:
-                if value:
-                    col_obj = session.query(Collection).filter_by(name=value).first()
-                    if col_obj is None:
-                        col_obj = Collection(name=value)
-                        session.add(col_obj)
-                        session.flush()
-                    stl.collection = col_obj
-                else:
-                    stl.collection = None
-                    stl.subcollection = None
-            elif col == COL_SUBCOLLECTION:
-                if value:
-                    q = session.query(Subcollection).filter_by(name=value)
-                    if stl.collection_id:
-                        q = q.filter_by(collection_id=stl.collection_id)
-                    sc = q.first()
-                    if sc is None and stl.collection_id:
-                        sc = Subcollection(name=value, collection_id=stl.collection_id)
-                        session.add(sc)
-                        session.flush()
-                    if sc:
-                        stl.subcollection = sc
-                else:
-                    stl.subcollection = None
-            elif col == COL_CATEGORY:
-                if value:
-                    cat = session.query(Category).filter_by(name=value).first()
-                    if cat is None:
-                        cat = Category(name=value)
-                        session.add(cat)
-                        session.flush()
-                    stl.category = cat
-                else:
-                    stl.category = None
-            elif col == COL_SEQUENCE:
-                try:
-                    stl.sequence = int(value) if value else None
-                except ValueError:
-                    pass
-            elif col == COL_RELEASE:
-                if value:
-                    rel = session.query(Release).filter_by(name=value).first()
-                    if rel is None:
-                        rel = Release(name=value)
-                        session.add(rel)
-                        session.flush()
-                    stl.release = rel
-                else:
-                    stl.release = None
-            elif col == COL_SCALE:
-                stl.scales.clear()
-                for name in [s.strip() for s in (value or "").split(",") if s.strip()]:
-                    sc = session.query(Scale).filter_by(name=name).first()
-                    if sc is None:
-                        sc = Scale(name=name)
-                        session.add(sc)
-                        session.flush()
-                    if sc not in stl.scales:
-                        stl.scales.append(sc)
-            elif col == COL_PRESUPPORTED:
-                stl.presupports = value.strip() or None
-            elif col == COL_TO_PRINT:
-                stl.to_print = value == "1"
+        edits = [(mid, field, text) for (mid, field), text in self._pending_edits.items()]
+        self._pending_edits.clear()
+        job = _CellEditRunnable(edits)
+        job.signals.done.connect(self._on_cell_edits_saved)
+        self._edit_pool.start(job)
 
-            # Update per-folder METADATA.7z sidecar with the saved change
-            if stl.archive_path:
-                from pathlib import Path as _Path
-                from app.crawler.folder_metadata import export_folder_metadata
-                from app.utils.thumbnailer import get_thumbnail_base_dir
-                from app.ui.config_dialog import get_metadata_thumbnails_enabled, get_metadata_sidecar_enabled
-                thumb_base = get_thumbnail_base_dir()
-                if thumb_base is not None and get_metadata_sidecar_enabled():
-                    try:
-                        export_folder_metadata(
-                            _Path(stl.archive_path).parent,
-                            session, thumb_base,
-                            include_thumbnails=get_metadata_thumbnails_enabled(),
-                        )
-                    except Exception:
-                        pass  # best-effort; never block the edit
+    def _on_cell_edits_saved(self, folders: list, error: str) -> None:
+        if error:
+            QMessageBox.warning(self, self.tr("Save Edit"),
+                                self.tr("Could not save the edit:") + f"\n{error}")
+            return
+        # New lookup names (sculptor, release, …) must appear in the delegates.
+        _lookup_cache.invalidate()
+        sidecar_exporter.schedule(folders)
+
+    def finish_pending_writes(self, msecs: int = 30000) -> None:
+        """Commit debounced edits now and wait for them (used on application close)."""
+        self._edit_timer.stop()
+        self._flush_pending_edits()
+        self._edit_pool.waitForDone(msecs)
+        # Deliver the queued "saved" signals so their sidecar refresh is scheduled.
+        QApplication.processEvents()
 
     # ------------------------------------------------------------------
     def _load_search_history(self) -> None:
@@ -1234,41 +1003,21 @@ class BrowserTab(QWidget):
         self._apply_filters_btn.setProperty("pending", False)
         self._apply_filters_btn.setStyleSheet("")
 
-    def _apply_checked_filters(self) -> None:
-        """Collect include (Checked) and exclude (PartiallyChecked) filter items and reload."""
-        self._clear_filters_pending()
-        author_inc:          list[str]   = []; author_exc:          list[str]   = []
-        tag_inc:             list[str]   = []; tag_exc:             list[str]   = []
-        type_inc:            list[str]   = []; type_exc:            list[str]   = []
-        path_inc:            list[str]   = []; path_exc:            list[str]   = []
-        date_inc:            list[tuple] = []; date_exc:            list[tuple] = []
-        sculptor_inc:        list[int]   = []; sculptor_exc:        list[int]   = []
-        collection_inc:      list[int]   = []; collection_exc:      list[int]   = []
-        subcollection_inc:   list[int]   = []; subcollection_exc:   list[int]   = []
-        category_inc:        list[int]   = []; category_exc:        list[int]   = []
-        release_inc:         list[int]   = []; release_exc:         list[int]   = []
-        scale_inc:           list[int]   = []; scale_exc:           list[int]   = []
-        presupports_inc:     list[str]   = []; presupports_exc:     list[str]   = []
-        warning_inc:         list[str]   = []; warning_exc:         list[str]   = []
-        filetype_inc:        list[str]   = []; filetype_exc:        list[str]   = []
-        has_value_groups:    set[str]    = set()
-        no_value_groups:     set[str]    = set()
+    # Filter-tree item kind → FilterSpec facet name
+    _KIND_TO_FACET = {
+        "creator": "creator", "tag": "tag", "source": "source", "path": "path",
+        "sculptor_id": "sculptor", "collection_id": "collection",
+        "subcollection_id": "subcollection", "category_id": "category",
+        "release_id": "release", "scale_id": "scale", "presupports": "presupports",
+        "warning": "warning", "filetype": "filetype",
+    }
 
-        _buckets = {
-            "creator":           (author_inc,       author_exc),
-            "tag":               (tag_inc,          tag_exc),
-            "source":            (type_inc,         type_exc),
-            "path":              (path_inc,         path_exc),
-            "sculptor_id":       (sculptor_inc,     sculptor_exc),
-            "collection_id":     (collection_inc,   collection_exc),
-            "subcollection_id":  (subcollection_inc, subcollection_exc),
-            "category_id":       (category_inc,     category_exc),
-            "release_id":        (release_inc,      release_exc),
-            "scale_id":          (scale_inc,        scale_exc),
-            "presupports":       (presupports_inc,  presupports_exc),
-            "warning":           (warning_inc,      warning_exc),
-            "filetype":          (filetype_inc,     filetype_exc),
-        }
+    def _collect_filter_spec(self) -> FilterSpec:
+        """Read the tree's include (Checked) / exclude (PartiallyChecked) items."""
+        include: dict[str, list] = {}
+        exclude: dict[str, list] = {}
+        has_value: set[str] = set()
+        no_value:  set[str] = set()
 
         def _collect(item: QTreeWidgetItem):
             data  = item.data(0, Qt.ItemDataRole.UserRole)
@@ -1277,185 +1026,47 @@ class BrowserTab(QWidget):
                 is_inc = state == Qt.CheckState.Checked
                 kind, value = data
                 if kind == "group":
-                    (has_value_groups if is_inc else no_value_groups).add(value)
+                    # Groups without a has-value rule (e.g. "filetype") are ignored.
+                    if value in FILTER_GROUPS:
+                        (has_value if is_inc else no_value).add(value)
                 elif kind in ("date_year", "date_month"):
-                    target = (date_inc if is_inc else date_exc)
-                    target.append((value, None) if kind == "date_year" else value)
-                elif kind in _buckets:
-                    _buckets[kind][0 if is_inc else 1].append(value)
+                    target = include if is_inc else exclude
+                    target.setdefault("date", []).append(
+                        (value, None) if kind == "date_year" else tuple(value))
+                elif kind in self._KIND_TO_FACET:
+                    target = include if is_inc else exclude
+                    target.setdefault(self._KIND_TO_FACET[kind], []).append(value)
             for i in range(item.childCount()):
                 _collect(item.child(i))
 
         root = self._filter_tree.invisibleRootItem()
         for i in range(root.childCount()):
             _collect(root.child(i))
+        return FilterSpec(include=include, exclude=exclude,
+                          has_value=has_value, no_value=no_value)
 
-        self._load_table(
-            author_filters=author_inc or None,               author_exc_filters=author_exc or None,
-            tag_filters=tag_inc or None,                     tag_exc_filters=tag_exc or None,
-            type_filters=type_inc or None,                   type_exc_filters=type_exc or None,
-            path_filters=path_inc or None,                   path_exc_filters=path_exc or None,
-            date_filters=date_inc or None,                   date_exc_filters=date_exc or None,
-            sculptor_filters=sculptor_inc or None,           sculptor_exc_filters=sculptor_exc or None,
-            collection_filters=collection_inc or None,       collection_exc_filters=collection_exc or None,
-            subcollection_filters=subcollection_inc or None, subcollection_exc_filters=subcollection_exc or None,
-            category_filters=category_inc or None,           category_exc_filters=category_exc or None,
-            release_filters=release_inc or None,             release_exc_filters=release_exc or None,
-            scale_filters=scale_inc or None,                 scale_exc_filters=scale_exc or None,
-            presupports_filters=presupports_inc or None,     presupports_exc_filters=presupports_exc or None,
-            warning_filters=warning_inc or None,             warning_exc_filters=warning_exc or None,
-            filetype_filters=filetype_inc or None,           filetype_exc_filters=filetype_exc or None,
-            has_value_groups=has_value_groups or None,
-            no_value_groups=no_value_groups or None,
-        )
+    def _apply_checked_filters(self) -> None:
+        """Reload the table and the faceted filter pane for the checked items."""
+        self._clear_filters_pending()
+        spec = self._collect_filter_spec()
+        self._load_table(spec)
 
-        # Compute per-section scopes for faceted filter pane.
-        # Each section's scope = IDs matching all OTHER active filters (not its own).
-        _has_creator     = bool(author_inc or author_exc)
-        _has_type        = bool(type_inc or type_exc)
-        _has_path        = bool(path_inc or path_exc)
-        _has_tag         = bool(tag_inc or tag_exc)
-        _has_date        = bool(date_inc or date_exc)
-        _has_sculptor    = bool(sculptor_inc or sculptor_exc)
-        _has_col         = bool(collection_inc or collection_exc)
-        _has_sub         = bool(subcollection_inc or subcollection_exc)
-        _has_category    = bool(category_inc or category_exc)
-        _has_rel         = bool(release_inc or release_exc)
-        _has_scale       = bool(scale_inc or scale_exc)
-        _has_presupports = bool(presupports_inc or presupports_exc)
-        _has_warning     = bool(warning_inc or warning_exc)
-        _has_filetype    = bool(filetype_inc or filetype_exc)
-        _has_group       = bool(has_value_groups or no_value_groups)
-        _has_any = any([
-            _has_creator, _has_type, _has_path, _has_tag, _has_date,
-            _has_sculptor, _has_col, _has_sub, _has_category, _has_rel,
-            _has_scale, _has_presupports, _has_warning, _has_filetype, _has_group,
-        ])
-
-        scope_by_section: dict | None = None
-        _path_inc_pruned: list[str] | None = None
-        _path_exc_pruned: list[str] | None = None
-
-        if _has_any:
-            # Build a subquery for each filter section (all filters except that
-            # section's own).  Using sa_select().subquery() means the DB sees
-            # "WHERE id IN (SELECT id FROM models WHERE …)" — a proper SQL
-            # subquery — instead of a huge IN (?, ?, …) parameter list.
-
-            # Path filter: the archive_path LIKE scan can't use an index, and a
-            # large library matches too many rows to inline as IN (?, …).  So the
-            # worker materialises the matching IDs ONCE into a connection-local
-            # TEMP table (_filter_path_ids); every scoped subquery references it as
-            # a fast primary-key lookup. We just capture the pruned LIKE patterns
-            # here and reference the temp table.
-            _path_sel = None
-            if _has_path:
-                _path_inc_pruned = _prune_ancestor_paths(path_inc) if path_inc else []
-                _path_exc_pruned = _prune_ancestor_paths(path_exc) if path_exc else []
-                _path_sel = sa_select(_FILTER_PATH_IDS.c.id)
-
-            def _run_id_subquery(
-                skip_creator=False, skip_type=False, skip_path=False,
-                skip_tag=False, skip_date=False, skip_sculptor=False,
-                skip_col=False, skip_sub=False, skip_category=False,
-                skip_rel=False, skip_scale=False, skip_presupports=False,
-                skip_warning=False, skip_filetype=False,
-            ):
-                q = sa_select(STLModel.id)
-                _has_condition = False
-                def _w(cond):
-                    nonlocal q, _has_condition
-                    q = q.where(cond)
-                    _has_condition = True
-                if not skip_creator:
-                    if author_inc:  _w(func.lower(STLModel.creator).in_([a.lower() for a in author_inc]))
-                    if author_exc:  _w(~func.lower(STLModel.creator).in_([a.lower() for a in author_exc]))
-                if not skip_type:
-                    if type_inc:    _w(func.lower(STLModel.source).in_([t.lower() for t in type_inc]))
-                    if type_exc:    _w(~func.lower(STLModel.source).in_([t.lower() for t in type_exc]))
-                if not skip_tag:
-                    if tag_inc:     _w(STLModel.tags.any(Tag.name.in_(tag_inc)))
-                    if tag_exc:     _w(~STLModel.tags.any(Tag.name.in_(tag_exc)))
-                if not skip_path and _path_sel is not None:
-                    _w(STLModel.id.in_(_path_sel))
-                if not skip_date:
-                    def _dc(pairs):
-                        return [and_(STLModel.release_year == y, STLModel.release_month == mo) if mo is not None else (STLModel.release_year == y) for y, mo in pairs]
-                    if date_inc:    _w(or_(*_dc(date_inc)))
-                    if date_exc:    _w(~or_(*_dc(date_exc)))
-                if not skip_sculptor:
-                    if sculptor_inc: _w(STLModel.sculptor_id.in_(sculptor_inc))
-                    if sculptor_exc: _w(~STLModel.sculptor_id.in_(sculptor_exc))
-                if not skip_col:
-                    if collection_inc:    _w(STLModel.collection_id.in_(collection_inc))
-                    if collection_exc:    _w(~STLModel.collection_id.in_(collection_exc))
-                if not skip_sub:
-                    if subcollection_inc: _w(STLModel.subcollection_id.in_(subcollection_inc))
-                    if subcollection_exc: _w(~STLModel.subcollection_id.in_(subcollection_exc))
-                if not skip_category:
-                    if category_inc: _w(STLModel.category_id.in_(category_inc))
-                    if category_exc: _w(~STLModel.category_id.in_(category_exc))
-                if not skip_rel:
-                    if release_inc:  _w(STLModel.release_id.in_(release_inc))
-                    if release_exc:  _w(~STLModel.release_id.in_(release_exc))
-                if not skip_scale:
-                    if scale_inc:    _w(STLModel.scales.any(Scale.id.in_(scale_inc)))
-                    if scale_exc:    _w(~STLModel.scales.any(Scale.id.in_(scale_exc)))
-                if not skip_presupports:
-                    if presupports_inc: _w(STLModel.presupports.in_(presupports_inc))
-                    if presupports_exc: _w(~STLModel.presupports.in_(presupports_exc))
-                if not skip_warning:
-                    if warning_inc:  _w(or_(*(STLModel.warning.contains(w) for w in warning_inc)))
-                    if warning_exc:  _w(and_(*(~STLModel.warning.contains(w) for w in warning_exc)))
-                if not skip_filetype:
-                    _ap = func.lower(STLModel.archive_path)
-                    if filetype_inc:
-                        _w(or_(*(_ap.like("%" + ext) for ext in filetype_inc)))
-                    if filetype_exc:
-                        _w(and_(*(~_ap.like("%" + ext) for ext in filetype_exc)))
-                _group_conds = {
-                    "creator":       lambda: and_(STLModel.creator.isnot(None),      STLModel.creator != ""),
-                    "tag":           lambda: STLModel.tags.any(),
-                    "source":        lambda: and_(STLModel.source.isnot(None),        STLModel.source != ""),
-                    "date":          lambda: STLModel.release_year.isnot(None),
-                    "sculptor":      lambda: STLModel.sculptor_id.isnot(None),
-                    "collection":    lambda: STLModel.collection_id.isnot(None),
-                    "subcollection": lambda: STLModel.subcollection_id.isnot(None),
-                    "category":      lambda: STLModel.category_id.isnot(None),
-                    "release":       lambda: STLModel.release_id.isnot(None),
-                    "scale":         lambda: STLModel.scales.any(),
-                    "presupports":   lambda: and_(STLModel.presupports.isnot(None),   STLModel.presupports != ""),
-                    "warning":       lambda: and_(STLModel.warning.isnot(None),       STLModel.warning != ""),
-                }
-                for _k in has_value_groups:
-                    _c2 = _group_conds.get(_k)
-                    if _c2: _w(_c2())
-                for _k in no_value_groups:
-                    _c2 = _group_conds.get(_k)
-                    if _c2: _w(~_c2())
-                return q.subquery() if _has_condition else None
-
-            scope_by_section = {
-                "creator":       _run_id_subquery(skip_creator=True),
-                "source":        _run_id_subquery(skip_type=True),
-                "tag":           _run_id_subquery(skip_tag=True),
-                "path":          _run_id_subquery(skip_path=True),
-                "date":          _run_id_subquery(skip_date=True),
-                "sculptor":      _run_id_subquery(skip_sculptor=True),
-                "collection":    _run_id_subquery(skip_col=True),
-                "subcollection": _run_id_subquery(skip_sub=True),
-                "category":      _run_id_subquery(skip_category=True),
-                "release":       _run_id_subquery(skip_rel=True),
-                "scale":         _run_id_subquery(skip_scale=True),
-                "presupports":   _run_id_subquery(skip_presupports=True),
-                "warning":       _run_id_subquery(skip_warning=True),
-                "filetype":      _run_id_subquery(skip_filetype=True),
-            }
+        # Each section's scope = ids matching all OTHER active filters.  Path
+        # matches are materialised once into a TEMP table by the filter-tree
+        # worker (the archive_path LIKE scan cannot use an index), so scopes
+        # reference that table instead of repeating the LIKE.
+        path_inc_pruned: list[str] | None = None
+        path_exc_pruned: list[str] | None = None
+        path_ids = None
+        if spec.facet_active("path"):
+            path_inc_pruned, path_exc_pruned = spec.pruned_paths()
+            path_ids = sa_select(_FILTER_PATH_IDS.c.id)
+        scope_by_section = facet_scopes(spec, path_ids=path_ids)
 
         self._populate_filter_tree(
             scope_by_section=scope_by_section,
-            path_inc_pruned=_path_inc_pruned,
-            path_exc_pruned=_path_exc_pruned,
+            path_inc_pruned=path_inc_pruned,
+            path_exc_pruned=path_exc_pruned,
         )
 
     def _clear_filters(self) -> None:
@@ -2636,7 +2247,7 @@ class BrowserTab(QWidget):
         vlay.addLayout(btn_row)
         dlg.setMinimumWidth(420)
 
-        self._thumb_worker = ThumbnailGeneratorWorker(model_ids, count, parent=self)
+        self._thumb_gen_worker = ThumbnailGeneratorWorker(model_ids, count, parent=self)
         # Prevent starting if another background job is active
         from app.utils.background_jobs import start_job, active_job
         if not start_job("thumbnails"):
@@ -2656,16 +2267,16 @@ class BrowserTab(QWidget):
             if dlg.isVisible():
                 dlg.accept()
             self.refresh()
-            self._thumb_worker = None
+            self._thumb_gen_worker = None
             from app.utils.background_jobs import end_job
             end_job("thumbnails")
             # Tell the main window here rather than after dlg.exec() returns: a
-            # short run finishes *during* exec(), which clears _thumb_worker
+            # short run finishes *during* exec(), which clears _thumb_gen_worker
             # before any post-exec wiring could reference it.
             self.thumbnail_finished.emit()
 
-        self._thumb_worker.progress.connect(_on_progress)
-        self._thumb_worker.finished.connect(_on_finished)
+        self._thumb_gen_worker.progress.connect(_on_progress)
+        self._thumb_gen_worker.generation_finished.connect(_on_finished)
         # Wire up buttons: Send to background hides the dialog; Cancel stops the worker
         def _send_background():
             dlg.hide()
@@ -2674,8 +2285,8 @@ class BrowserTab(QWidget):
 
         def _on_cancel():
             # Request worker to stop and close dialog
-            if self._thumb_worker is not None:
-                self._thumb_worker.stop()
+            if self._thumb_gen_worker is not None:
+                self._thumb_gen_worker.stop()
             dlg.reject()
             from app.utils.background_jobs import end_job
             end_job("thumbnails")
@@ -2683,7 +2294,7 @@ class BrowserTab(QWidget):
         send_bg_btn.clicked.connect(_send_background)
         cancel_btn.clicked.connect(_on_cancel)
 
-        self._thumb_worker.start()
+        self._thumb_gen_worker.start()
         # Show modal dialog (blocks until accept/reject) — if Send to background was clicked
         # dlg.exec() will return but the worker continues running; if Cancel was clicked,
         # the worker is requested to stop.

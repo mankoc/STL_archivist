@@ -12,8 +12,11 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QCursor, QPixmap
 
+from pathlib import Path
+
 from app.database.db import session_scope, get_session
 from app.database.models import STLModel, Tag, Release, Sculptor, Collection, Subcollection, Category, Scale
+from app.services import editing
 from app.utils.path_pattern import parse_path, ATTR_LABEL, PATTERN_HELP, parse_release_date, format_release_date
 
 
@@ -502,111 +505,30 @@ class EditorDialog(QDialog):
             _year, _month = parse_release_date(self._date_edit.text().strip())
             model.release_year  = _year
             model.release_month = _month
-            model.scales.clear()
-            _seen_scales: set[str] = set()
-            for scale_name in self._scale_edit.get_tags():
-                if scale_name.lower() in _seen_scales:
-                    continue
-                sc = session.query(Scale).filter_by(name=scale_name).first()
-                if sc is None:
-                    sc = Scale(name=scale_name)
-                    session.add(sc)
-                    session.flush()
-                model.scales.append(sc)
-                _seen_scales.add(scale_name.lower())
+            editing.assign_scales(session, model, self._scale_edit.get_tags())
             model.presupports  = self._presupports_edit.currentText().strip() or None
             model.url          = self._url_edit.text().strip() or None
             model.description  = self._desc_edit.toPlainText().strip() or None
             seq = self._sequence_spin.value()
             model.sequence     = seq if seq > 0 else None
 
-            release_name = self._release_edit.currentText().strip()
-            if release_name:
-                rel = session.query(Release).filter_by(name=release_name).first()
-                if rel is None:
-                    rel = Release(name=release_name)
-                    session.add(rel)
-                    session.flush()
-                model.release = rel
-            else:
-                model.release = None
-
-            sculptor_name = self._sculptor_edit.currentText().strip()
-            if sculptor_name:
-                sc = session.query(Sculptor).filter_by(name=sculptor_name).first()
-                if sc is None:
-                    sc = Sculptor(name=sculptor_name)
-                    session.add(sc)
-                    session.flush()
-                model.sculptor = sc
-            else:
-                model.sculptor = None
-
-            collection_name = self._collection_edit.currentText().strip()
-            if collection_name:
-                col = session.query(Collection).filter_by(name=collection_name).first()
-                if col is None:
-                    col = Collection(name=collection_name)
-                    session.add(col)
-                    session.flush()
-                model.collection = col
-            else:
-                model.collection = None
-                model.subcollection = None
-
-            if model.collection:
-                subcollection_name = self._subcollection_edit.currentText().strip()
-                if subcollection_name:
-                    sc = session.query(Subcollection).filter_by(
-                        name=subcollection_name, collection_id=model.collection.id
-                    ).first()
-                    if sc is None:
-                        sc = Subcollection(name=subcollection_name, collection_id=model.collection.id)
-                        session.add(sc)
-                        session.flush()
-                    model.subcollection = sc
-                else:
-                    model.subcollection = None
+            editing.set_release(session, model, self._release_edit.currentText())
+            editing.set_sculptor(session, model, self._sculptor_edit.currentText())
+            editing.set_collection(session, model, self._collection_edit.currentText())
+            # A subcollection is only kept under a collection.
+            if model.collection is not None:
+                editing.set_subcollection(session, model, self._subcollection_edit.currentText())
             else:
                 model.subcollection = None
+            editing.set_category(session, model, self._category_edit.currentText())
+            editing.assign_tags(session, model, self._tags_edit.get_tags())
 
-            category_name = self._category_edit.currentText().strip()
-            if category_name:
-                cat = session.query(Category).filter_by(name=category_name).first()
-                if cat is None:
-                    cat = Category(name=category_name)
-                    session.add(cat)
-                    session.flush()
-                model.category = cat
-            else:
-                model.category = None
-
-            model.tags.clear()
-            for name in self._tags_edit.get_tags():
-                tag = session.query(Tag).filter_by(name=name.lower()).first()
-                if tag is None:
-                    tag = Tag(name=name.lower())
-                    session.add(tag)
-                    session.flush()
-                model.tags.append(tag)
-
-            # Update per-folder METADATA.7z sidecar with the saved changes
-            if model.archive_path:
-                from pathlib import Path as _Path
-                from app.crawler.folder_metadata import export_folder_metadata
-                from app.utils.thumbnailer import get_thumbnail_base_dir
-                from app.ui.config_dialog import get_metadata_thumbnails_enabled, get_metadata_sidecar_enabled
-                thumb_base = get_thumbnail_base_dir()
-                if thumb_base is not None and get_metadata_sidecar_enabled():
-                    try:
-                        export_folder_metadata(
-                            _Path(model.archive_path).parent,
-                            session, thumb_base,
-                            include_thumbnails=get_metadata_thumbnails_enabled(),
-                        )
-                    except Exception:
-                        pass  # metadata export is best-effort; never block saving
+            folder = str(Path(model.archive_path).parent) if model.archive_path else None
 
         from app.ui import lookup_cache as _lookup_cache
+        from app.ui import sidecar_exporter
         _lookup_cache.invalidate()
+        # Refresh the per-folder METADATA.7z in the background, after commit.
+        if folder:
+            sidecar_exporter.schedule([folder])
         self.accept()

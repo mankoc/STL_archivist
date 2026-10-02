@@ -4,8 +4,9 @@ Extracted from ``browser_tab.py``. ``FilterItemDelegate`` renders the tristate
 checkboxes as coloured circles, ``FilterTreeWidget`` is the left-hand
 include/exclude tree with its check-cycle logic, and ``_FilterTreeWorker`` runs
 all faceted-count/distinct-value queries off the GUI thread (ORM/db imports are
-deferred inside ``run()``; only ``or_``/``sa_select`` and the shared
-``_FILTER_PATH_IDS`` temp table are needed at module scope).
+deferred inside ``run()``; only the shared ``_FILTER_PATH_IDS`` temp table is
+needed at module scope). The filter predicates themselves come from
+:mod:`app.services.library_query`.
 """
 from PyQt6.QtCore import (
     Qt, QObject, QRunnable, QPointF, QRect, QRectF, pyqtSignal,
@@ -15,7 +16,6 @@ from PyQt6.QtWidgets import (
     QApplication, QStyle, QStyleOptionViewItem, QStyledItemDelegate,
     QTreeWidget, QTreeWidgetItem,
 )
-from sqlalchemy import or_, select as sa_select
 
 from app.ui.browser_common import _FILTER_PATH_IDS, _FILTER_PATH_IDS_NAME
 
@@ -289,12 +289,8 @@ class _FilterTreeWorker(QRunnable):
                     f"(id INTEGER PRIMARY KEY)"
                 )
                 conn.exec_driver_sql(f"DELETE FROM {_FILTER_PATH_IDS_NAME}")
-                _pnorm = _func.replace(STLModel.archive_path, "\\", "/")
-                _psel = sa_select(STLModel.id)
-                if self._path_inc:
-                    _psel = _psel.where(or_(*(_pnorm.like(p.rstrip("/") + "/%") for p in self._path_inc)))
-                if self._path_exc:
-                    _psel = _psel.where(~or_(*(_pnorm.like(p.rstrip("/") + "/%") for p in self._path_exc)))
+                from app.services.library_query import path_id_select
+                _psel = path_id_select(self._path_inc, self._path_exc)
                 session.execute(_insert(_FILTER_PATH_IDS).from_select(["id"], _psel))
 
             # ── Counts ─────────────────────────────────────────────────────────

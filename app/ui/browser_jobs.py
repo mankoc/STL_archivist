@@ -51,6 +51,46 @@ class _ImageDropRunnable(QRunnable):
         self.signals.ready.emit(self._model_id, encoded, errors)
 
 
+class _CellEditRunnable(QRunnable):
+    """Persist a batch of browser cell edits off the GUI thread.
+
+    *edits* is ``[(model_id, field, text)]`` with fields from
+    :data:`app.services.editing.CELL_FIELDS`, applied in order in one
+    transaction.  Reports the archive folders touched (for the sidecar
+    refresh) and any error message.  Run on a single-thread pool so batches
+    commit in the order they were made.
+    """
+    class _Signals(QObject):
+        done = pyqtSignal(list, str)  # [folder_path], error message ("" if none)
+
+    def __init__(self, edits: list):
+        super().__init__()
+        self.signals = self._Signals()
+        self._edits  = edits
+        self.setAutoDelete(True)
+
+    def run(self):
+        from pathlib import Path
+        from app.database.models import STLModel
+        from app.services.editing import apply_cell_edit
+        folders: set[str] = set()
+        try:
+            with session_scope() as session:
+                for model_id, field, text in self._edits:
+                    stl = session.get(STLModel, model_id)
+                    if stl is None:
+                        continue
+                    apply_cell_edit(session, stl, field, text)
+                    if stl.archive_path:
+                        folders.add(str(Path(stl.archive_path).parent))
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error("Saving cell edits failed", exc_info=True)
+            self.signals.done.emit([], str(exc))
+            return
+        self.signals.done.emit(sorted(folders), "")
+
+
 class _WarningDetailRunnable(QRunnable):
     """Work out which archive members triggered each of a model's warnings.
 
@@ -314,7 +354,7 @@ class ThumbnailGeneratorWorker(QThread):
 
     progress = pyqtSignal(int, int)   # (current, total)
     log      = pyqtSignal(str)
-    finished = pyqtSignal()
+    generation_finished = pyqtSignal()
 
     def __init__(self, model_ids: list[int], max_thumbnails: int, parent=None) -> None:
         super().__init__(parent)
@@ -425,4 +465,4 @@ class ThumbnailGeneratorWorker(QThread):
                                                include_thumbnails=True)
                         self.log.emit(f"  Updated METADATA.7z in {folder.name}")
 
-        self.finished.emit()
+        self.generation_finished.emit()

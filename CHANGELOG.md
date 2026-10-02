@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Faster, more responsive editing and editors** (refactoring plan steps 1–4, see `docs/refactoring-plan.md`):
+  - **Inline table edits no longer freeze the window.** Each edited cell used to be written on the GUI thread and immediately rebuilt the folder's whole `METADATA.7z` (thumbnails included). Edits are now saved in the background, and the sidecar refresh is coalesced to once per folder, a moment after you stop editing. The model editor and the AI tagger use the same background refresh. Pending edits and refreshes are completed when the application closes.
+  - **Edits can no longer land on the wrong model.** Debounced cell edits were keyed by table row, so a table reload within the 400 ms window could apply an edit to whichever model now occupied that row. They are now keyed by model.
+  - **The Tag, Category, Collection, Subcollection and Scale editors open much faster on large libraries.** Their *Models* column counted usage by loading every referencing model row, one query per entry. It is now one grouped count query.
+  - **Settings reads are cached.** Every setting read re-parsed `settings.json` from disk, including inside the filter pane's paint code on every repaint. The file is now re-read only when it changes, and theme colour tokens are read from the theme file once.
+  - Database Maintenance: **Find Duplicate Entries** no longer slows down quadratically with the number of duplicates. **Prune Images per Model** works in batches instead of one query per model. **Verify** clears reappeared files' missing flags in one update. Pruning unused lookups after a crawl deletes in bulk.
+- **Fixed: generating thumbnails could break the image pane.** The generator reused the attribute holding the image pane's thumbnail loader, so after a *Generate Thumbnails* run (or an attempt blocked by another job) the loader's only reference was dropped.
+- **Fixed: possible "QThread: Destroyed while thread is still running"** in Metadata Sidecars, AI setup, Backup/Restore, the duplicate finders, the CLIP download, the tag merge scan and the crawler. As in the earlier Database Maintenance fix, 13 more workers declared their own `finished` signal and so hid Qt's real one. They now use distinct result signals, and a test checks every worker in the application.
+- **Fixed: clearing the _Presupports_ cell in the table raised an error** instead of clearing the value.
+- **Subcollections stay consistent with their collection.** Changing a model's collection clears a subcollection that belongs to a different collection. Setting a subcollection on a model with no collection adopts that subcollection's parent collection.
+- **Filter pane counts now honour the _Path_ has-value/no-value group,** which previously filtered the table but not the counts. Internally, the table and the counts now share one filter model (`app/services/library_query.py`), so they can no longer disagree.
+
 - **Settings no longer require Qt: new `app/core/settings.py`.** This is the first step towards a headless server (see `docs/server-migration-plan.md`). The data directory, the unrar path, every non-visual per-library setting and `build_crawler_config()` now live in a Qt-free module.
   - The desktop app behaves as before. It registers its `QSettings` readers with the module at startup, and `app.ui.config_dialog` / `app.ui.settings_loader` re-export the moved functions, so existing imports keep working.
   - **New environment overrides:** `STL_DATA_DIR` and `STL_UNRAR_PATH` take precedence over Configuration, and `STL_SQL_PROFILING` toggles SQL timing without Qt.

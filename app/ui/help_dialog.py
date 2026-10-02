@@ -1282,6 +1282,10 @@ model&rsquo;s database record for that folder, and optionally its JPEG thumbnail
 The main purpose is a <b>fast restore</b>: when you move your collection to a new
 machine you can rebuild the entire database by importing the sidecars rather than
 re-crawling and re-extracting every archive from scratch.</p>
+<p>Editing a model (in the editor, inline in the table, or with the AI tagger) also
+refreshes its folder&rsquo;s sidecar. That refresh runs in the background a moment
+after you stop editing, once per folder, so editing never waits for it; closing the
+application finishes any refresh still pending.</p>
 
 <h2>What Is Inside METADATA.7z</h2>
 <table>
