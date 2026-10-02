@@ -29,7 +29,7 @@ class MetadataSidecarWorker(QThread):
 
     progress = pyqtSignal(int, int)
     log      = pyqtSignal(str)
-    finished = pyqtSignal()
+    export_finished = pyqtSignal()
 
     def __init__(self, folders=None, parent=None) -> None:
         super().__init__(parent)
@@ -58,13 +58,13 @@ class MetadataSidecarWorker(QThread):
                 "Metadata sidecar is disabled in Configuration. "
                 "Enable it first, then retry."
             )
-            self.finished.emit()
+            self.export_finished.emit()
             return
 
         thumb_base = get_thumbnail_base_dir()
         if thumb_base is None:
             self.log.emit("Thumbnail directory is not configured — cannot run.")
-            self.finished.emit()
+            self.export_finished.emit()
             return
 
         include_thumbs = get_metadata_thumbnails_enabled()
@@ -81,7 +81,7 @@ class MetadataSidecarWorker(QThread):
 
         if total == 0:
             self.log.emit("No folders with database records found.")
-            self.finished.emit()
+            self.export_finished.emit()
             return
 
         self.log.emit(
@@ -118,7 +118,7 @@ class MetadataSidecarWorker(QThread):
 
         self.log.emit(f"Done — updated {written} of {total} folder(s).")
         logger.info("MetadataSidecarWorker finished: %d/%d written", written, total)
-        self.finished.emit()
+        self.export_finished.emit()
 
 
 class RemoveSidecarsWorker(QThread):
@@ -132,7 +132,7 @@ class RemoveSidecarsWorker(QThread):
 
     progress = pyqtSignal(int, int)
     log      = pyqtSignal(str)
-    finished = pyqtSignal()
+    remove_finished = pyqtSignal()
 
     def __init__(self, folders=None, parent=None) -> None:
         super().__init__(parent)
@@ -161,7 +161,7 @@ class RemoveSidecarsWorker(QThread):
 
         if total == 0:
             self.log.emit("No folders with database records found.")
-            self.finished.emit()
+            self.remove_finished.emit()
             return
 
         self.log.emit(f"Scanning {total} folder(s) for METADATA.7z files…")
@@ -189,7 +189,7 @@ class RemoveSidecarsWorker(QThread):
 
         self.log.emit(f"Done — removed {removed} of {total} folder(s).")
         logger.info("RemoveSidecarsWorker finished: %d/%d removed", removed, total)
-        self.finished.emit()
+        self.remove_finished.emit()
 
 
 class MetadataSidecarDialog(QDialog):
@@ -297,7 +297,8 @@ class MetadataSidecarDialog(QDialog):
         self._worker = MetadataSidecarWorker(folders=self._folders)
         self._worker.log.connect(self._on_log)
         self._worker.progress.connect(self._on_progress)
-        self._worker.finished.connect(self._on_finished)
+        self._worker.export_finished.connect(self._on_finished)
+        self._worker.finished.connect(lambda w=self._worker: self._release_worker(w))
         self._worker.start()
 
     def _stop(self) -> None:
@@ -330,7 +331,8 @@ class MetadataSidecarDialog(QDialog):
         self._worker = RemoveSidecarsWorker(folders=self._folders)
         self._worker.log.connect(self._on_log)
         self._worker.progress.connect(self._on_progress)
-        self._worker.finished.connect(self._on_finished)
+        self._worker.remove_finished.connect(self._on_finished)
+        self._worker.finished.connect(lambda w=self._worker: self._release_worker(w))
         self._worker.start()
 
     # ------------------------------------------------------------------
@@ -345,16 +347,23 @@ class MetadataSidecarDialog(QDialog):
         self._progress.setFormat(f"{current} / {total}")
 
     def _on_finished(self) -> None:
-        """Re-enable buttons and clear the worker reference when done."""
+        """Re-enable buttons when the worker reports its result."""
         self._start_btn.setEnabled(True)
         self._stop_btn.setEnabled(False)
         self._remove_btn.setEnabled(True)
         self._close_btn.setEnabled(True)
-        if self._worker is not None:
-            self._worker.deleteLater()
-        self._worker = None
         from app.utils.sound import play_notification
         play_notification("sidecar")
+
+    def _release_worker(self, worker) -> None:
+        """Drop *worker* once QThread.finished says its thread has stopped.
+
+        The result signal fires from inside ``run()``; releasing the worker
+        there could destroy a still-running thread.
+        """
+        worker.deleteLater()
+        if self._worker is worker:
+            self._worker = None
 
     # ------------------------------------------------------------------
     def closeEvent(self, event):

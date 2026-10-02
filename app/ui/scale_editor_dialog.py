@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
 
 from app.database.db import session_scope, get_session
 from app.database.models import Scale
+from app.services.lookups import usage_count, usage_counts
 
 
 class ScaleEditorDialog(QDialog):
@@ -61,12 +62,13 @@ class ScaleEditorDialog(QDialog):
         self._table.setRowCount(0)
         session = get_session()
         try:
+            counts = usage_counts(session, "scale")
             for sc in session.query(Scale).order_by(Scale.name).all():
                 row = self._table.rowCount()
                 self._table.insertRow(row)
                 name_item = QTableWidgetItem(sc.name)
                 name_item.setData(Qt.ItemDataRole.UserRole, sc.id)
-                count_item = QTableWidgetItem(str(len(sc.models)))
+                count_item = QTableWidgetItem(str(counts.get(sc.id, 0)))
                 count_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self._table.setItem(row, 0, name_item)
                 self._table.setItem(row, 1, count_item)
@@ -124,7 +126,7 @@ class ScaleEditorDialog(QDialog):
         session = get_session()
         try:
             sc = session.get(Scale, sc_id)
-            name, count = sc.name, len(sc.models)
+            name, count = sc.name, usage_count(session, "scale", sc_id)
         finally:
             session.close()
         msg = f"Delete scale '{name}'?"

@@ -26,6 +26,7 @@ _MAX_TAGS_KEY = "ai_tagger/max_tags"   # QSettings key; 0 = no limit
 
 from app.database.db import session_scope, get_session
 from app.database.models import STLModel, Tag, Category, Sculptor, Scale, Collection, Subcollection
+from app.services import editing
 from app.utils.thumbnailer import get_thumbnail_bytes
 from app.utils.ai_tagging import (
     build_meta_prompt as _build_meta_prompt,
@@ -265,61 +266,23 @@ def _commit_model_data(model_id: int, fields: dict, tags: list[str],
             model.source = fields["source"]
 
         if fields["sculptor"] and (overwrite or model.sculptor is None):
-            sc = session.query(Sculptor).filter_by(name=fields["sculptor"]).first()
-            if sc is None:
-                sc = Sculptor(name=fields["sculptor"])
-                session.add(sc)
-                session.flush()
-            model.sculptor = sc
+            editing.set_sculptor(session, model, fields["sculptor"])
 
         if fields["collection"] and (overwrite or model.collection is None):
-            col = session.query(Collection).filter_by(name=fields["collection"]).first()
-            if col is None:
-                col = Collection(name=fields["collection"])
-                session.add(col)
-                session.flush()
-            model.collection = col
+            editing.set_collection(session, model, fields["collection"])
 
         # Subcollection is scoped to its parent collection, so only set it when
         # the model has a collection to hang it under.
         if (fields["subcollection"] and model.collection is not None
                 and (overwrite or model.subcollection is None)):
-            sub = (session.query(Subcollection)
-                   .filter_by(name=fields["subcollection"], collection_id=model.collection.id)
-                   .first())
-            if sub is None:
-                sub = Subcollection(name=fields["subcollection"], collection_id=model.collection.id)
-                session.add(sub)
-                session.flush()
-            model.subcollection = sub
+            editing.set_subcollection(session, model, fields["subcollection"])
 
         if fields["scale"] and (overwrite or not model.scales):
-            names = [s.strip() for s in fields["scale"].split(",") if s.strip()]
-            if overwrite:
-                model.scales.clear()
-            existing_scales = {s.name.lower() for s in model.scales}
-            for name in names:
-                if name.lower() in existing_scales:
-                    continue
-                scl = session.query(Scale).filter_by(name=name).first()
-                if scl is None:
-                    scl = Scale(name=name)
-                    session.add(scl)
-                    session.flush()
-                model.scales.append(scl)
-                existing_scales.add(name.lower())
+            editing.assign_scales(session, model, editing.split_list(fields["scale"]),
+                                  replace=overwrite)
 
-        existing_lower = {t.name.lower() for t in model.tags}
-        for tag_name in tags:
-            tn = tag_name.strip().lower()
-            if tn and tn not in existing_lower:
-                tag_obj = session.query(Tag).filter_by(name=tn).first()
-                if tag_obj is None:
-                    tag_obj = Tag(name=tn)
-                    session.add(tag_obj)
-                    session.flush()
-                model.tags.append(tag_obj)
-                existing_lower.add(tn)
+        # Tags are always merged, never removed.
+        editing.assign_tags(session, model, tags, replace=False)
     return True
 
 

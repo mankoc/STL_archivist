@@ -48,18 +48,8 @@ def _fmt_size(nbytes: int) -> str:
     return f"{nbytes:.1f} TB"
 
 
-def _prune_ancestor_paths(paths: list[str]) -> list[str]:
-    """Return a minimal covering subset: drop paths whose ancestor is already present.
-
-    Prevents SQLite "Expression tree is too large" when a high-level folder is
-    checked in the tree and hundreds of descendant paths are also collected.
-    """
-    normalized = sorted(p.replace("\\", "/").rstrip("/") for p in paths)
-    result: list[str] = []
-    for p in normalized:
-        if not any(p.startswith(kept + "/") for kept in result):
-            result.append(p)
-    return result
+# Moved to the Qt-free filter model; kept under the old name for callers.
+from app.services.library_query import prune_ancestor_paths as _prune_ancestor_paths  # noqa: E402,F401
 
 
 MODEL_ID_ROLE = Qt.ItemDataRole.UserRole + 1

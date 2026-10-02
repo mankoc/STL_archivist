@@ -42,7 +42,7 @@ _BACKUP_ITEMS = [_DB_FILENAME, _LMDB_DIR, _SETTINGS_FILE]
 class _BackupWorker(QThread):
     log      = pyqtSignal(str)
     progress = pyqtSignal(int, int)   # current, total
-    finished = pyqtSignal(bool, str)  # success, message
+    backup_finished = pyqtSignal(bool, str)  # success, message
 
     def __init__(self, data_dir: Path, dest: Path, parent=None) -> None:
         super().__init__(parent)
@@ -72,16 +72,16 @@ class _BackupWorker(QThread):
 
             size_mb = self._dest.stat().st_size / (1024 * 1024)
             self.log.emit(f"Backup complete — {size_mb:.1f} MB written.")
-            self.finished.emit(True, "Backup completed successfully.")
+            self.backup_finished.emit(True, "Backup completed successfully.")
         except Exception as exc:
             logger.exception("Backup failed")
-            self.finished.emit(False, f"Backup failed: {exc}")
+            self.backup_finished.emit(False, f"Backup failed: {exc}")
 
 
 class _RestoreWorker(QThread):
     log      = pyqtSignal(str)
     progress = pyqtSignal(int, int)
-    finished = pyqtSignal(bool, str)
+    restore_finished = pyqtSignal(bool, str)
 
     def __init__(self, src: Path, data_dir: Path, parent=None) -> None:
         super().__init__(parent)
@@ -102,10 +102,10 @@ class _RestoreWorker(QThread):
                 self.progress.emit(total, total)
 
             self.log.emit("Restore complete — please restart the application.")
-            self.finished.emit(True, "Restore completed. Please restart stlLibrary.")
+            self.restore_finished.emit(True, "Restore completed. Please restart stlLibrary.")
         except Exception as exc:
             logger.exception("Restore failed")
-            self.finished.emit(False, f"Restore failed: {exc}")
+            self.restore_finished.emit(False, f"Restore failed: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +207,7 @@ class BackupRestoreDialog(QDialog):
         worker = _BackupWorker(self._data_dir, Path(dest), parent=self)
         worker.log.connect(self._log_line)
         worker.progress.connect(self._on_progress)
-        worker.finished.connect(self._on_finished)
+        worker.backup_finished.connect(self._on_finished)
         self._worker = worker
         worker.start()
 
@@ -239,7 +239,7 @@ class BackupRestoreDialog(QDialog):
         worker = _RestoreWorker(Path(src), self._data_dir, parent=self)
         worker.log.connect(self._log_line)
         worker.progress.connect(self._on_progress)
-        worker.finished.connect(self._on_finished)
+        worker.restore_finished.connect(self._on_finished)
         self._worker = worker
         worker.start()
 

@@ -25,6 +25,7 @@ stl_database/
 ├── app/
 │   ├── config.py            # CrawlerConfig dataclass (passed to crawler, not imported by UI layer)
 │   ├── core/                # Qt-free core (settings provider; see docs/server-migration-plan.md)
+│   ├── services/            # Qt-free business logic (filter model, editing, lookups, maintenance)
 │   ├── crawler/             # Archive processing pipeline
 │   ├── database/            # SQLAlchemy ORM + session helpers
 │   ├── ui/                  # PyQt6 widgets and dialogs
@@ -81,6 +82,32 @@ file I/O beyond a single cheap row lookup. Anything heavier must be dispatched t
 request it from the existing loader/cache layers (`ThumbnailLoaderWorker`, `_FilterTreeWorker`,
 `TableLoaderWorker`, `lookup_cache`), not query directly.
 
+**Sidecar refresh after edits.** Never call `export_folder_metadata()` from a GUI-thread save.
+Commit first, then call `app.ui.sidecar_exporter.schedule([folder, …])`: it debounces,
+exports each folder once on a background thread, and is flushed on application close.
+
+**Worker threads.** A `QThread` subclass must never declare a signal named `finished`, because
+it hides Qt's real `QThread.finished`. Name result signals `<what>_finished`, and release or
+`deleteLater()` a worker only from the real `finished` signal, or parent it to its owner.
+`tests/test_worker_signal_shadowing.py` enforces the rule app-wide. New worker logic goes in
+a plain function in `app/services/` that takes `progress` / `log` / `should_stop` callbacks;
+the `QThread` only wraps it (see `VerifyWorker` → `services.maintenance.verify_archives`).
+
+### `app/services/`
+
+Qt-free business logic, testable without a `QApplication`:
+
+- **`library_query.py`** — the browser's `FilterSpec` and the single predicate builder used by
+  both the table (`table_where`) and the faceted filter-pane counts (`facet_scopes`), plus the
+  search condition. Add a new filter here once; never re-implement predicates in a widget.
+- **`editing.py`** — field-level model edits (`apply_cell_edit`, `assign_tags`, `set_collection`,
+  …) built on the `database/helpers.py` get-or-create functions. Use these instead of inline
+  `query(...).filter_by(name=…).first()` + `add` + `flush`.
+- **`lookups.py`** — `usage_counts(session, kind)`: one `GROUP BY` instead of `len(x.models)`,
+  which lazy-loads every referencing model row.
+- **`maintenance.py`** — Database Maintenance operations (verify, duplicate entries, prune images).
+- **`file_deletion.py`** — archive deletion / trash.
+
 ### `app/utils/`
 
 - **`thumbnailer.py`** — LMDB key-value store for JPEG thumbnails (keyed by `Image.id`).
@@ -92,6 +119,8 @@ request it from the existing loader/cache layers (`ThumbnailLoaderWorker`, `_Fil
 - **`path_pattern.py`** — parses structured folder paths using `{sculptor}/{release}/{title}`
   syntax and maps extracted values onto ORM model fields.
 - **`string_utils.py`** — Levenshtein distance and Soundex (used for fuzzy name matching).
+- **`image_hash.py`** — 128-bit dHash and NumPy batch Hamming distance (crawler, maintenance,
+  Find by Image, content duplicates).
 - **`logger.py`** — rotating gzip-compressed file logger; must be initialised after
   `QApplication` / `QSettings` so the data-dir path is available.
 

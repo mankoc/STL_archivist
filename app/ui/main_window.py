@@ -35,6 +35,12 @@ class MainWindow(QMainWindow):
             ai_server.stop()
         except Exception:
             pass
+        # Persist debounced cell edits and refresh the sidecars they touched
+        # before the process exits; both run on background threads.
+        self._browser.finish_pending_writes()
+        from app.ui import sidecar_exporter
+        sidecar_exporter.flush_now()
+        sidecar_exporter.wait_for_done()
         super().closeEvent(event)
 
     # ------------------------------------------------------------------

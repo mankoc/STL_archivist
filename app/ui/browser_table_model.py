@@ -318,22 +318,8 @@ class _SqlTableModel(QAbstractTableModel):
         return id_stmt
 
     def _apply_search_where(self, stmt, mv):
-        from sqlalchemy import or_, select as sa_sel
-        from app.database.models import Tag
-        pat     = f"%{self._search_text}%"
-        tag_sub = (
-            sa_sel(_mt_global.c.model_id)
-            .join(Tag, _mt_global.c.tag_id == Tag.id)
-            .where(Tag.name.ilike(pat))
-        )
-        return stmt.where(or_(
-            mv.c.title.ilike(pat),
-            mv.c.creator.ilike(pat),
-            mv.c.sculptor_name.ilike(pat),
-            mv.c.collection_name.ilike(pat),
-            mv.c.archive_path.ilike(pat),
-            mv.c.id.in_(tag_sub),
-        ))
+        from app.services.library_query import search_condition
+        return stmt.where(search_condition(mv, self._search_text))
 
     def _sort_expr(self, mv):
         from sqlalchemy import asc, desc, nullslast

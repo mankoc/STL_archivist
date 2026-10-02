@@ -10,7 +10,10 @@ from PyQt6.QtWidgets import (
 )
 
 from app.database.db import session_scope, get_session
+from sqlalchemy.orm import contains_eager
+
 from app.database.models import Collection, Subcollection
+from app.services.lookups import usage_count, usage_counts
 from app.utils.name_dedup import find_similar_pairs_grouped
 
 
@@ -70,8 +73,10 @@ class SubcollectionEditorDialog(QDialog):
         self._table.setRowCount(0)
         session = get_session()
         try:
+            counts = usage_counts(session, "subcollection")
             for sc in (session.query(Subcollection)
                        .join(Subcollection.collection)
+                       .options(contains_eager(Subcollection.collection))
                        .order_by(Collection.name, Subcollection.name)
                        .all()):
                 row = self._table.rowCount()
@@ -83,7 +88,7 @@ class SubcollectionEditorDialog(QDialog):
                 col_item = QTableWidgetItem(sc.collection.name)
                 col_item.setData(Qt.ItemDataRole.UserRole, sc.collection_id)
 
-                count_item = QTableWidgetItem(str(len(sc.models)))
+                count_item = QTableWidgetItem(str(counts.get(sc.id, 0)))
                 count_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
                 self._table.setItem(row, 0, name_item)
@@ -196,7 +201,7 @@ class SubcollectionEditorDialog(QDialog):
         try:
             sc = session.get(Subcollection, sc_id)
             name = sc.name
-            count = len(sc.models)
+            count = usage_count(session, "subcollection", sc_id)
         finally:
             session.close()
 
@@ -287,14 +292,16 @@ class _MergeSubcollectionsDialog(QDialog):
         try:
             # Group subcollections by parent collection
             col_groups: dict[int, tuple[str, list]] = {}
+            counts = usage_counts(session, "subcollection")
             for sc in (session.query(Subcollection)
                        .join(Subcollection.collection)
+                       .options(contains_eager(Subcollection.collection))
                        .order_by(Collection.name, Subcollection.name)
                        .all()):
                 if sc.collection_id not in col_groups:
                     col_groups[sc.collection_id] = (sc.collection.name, [])
                 col_groups[sc.collection_id][1].append(
-                    (sc.id, sc.name, len(sc.models)))
+                    (sc.id, sc.name, counts.get(sc.id, 0)))
         finally:
             session.close()
 

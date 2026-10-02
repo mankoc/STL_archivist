@@ -13,9 +13,11 @@ Only non-visual settings are defined here; colors, fonts, hotkeys and other
 widget-only preferences stay in ``app.ui.config_dialog``, which re-exports
 everything below so existing imports keep working.
 """
+import copy
 import json
 import os
 import sys
+import threading
 from collections.abc import Callable
 from pathlib import Path
 
@@ -117,20 +119,44 @@ def _library_settings_path(data_dir: str | None = None) -> Path:
     return Path(data_dir or get_data_dir()) / _LIBRARY_SETTINGS_FILE
 
 
+# Parsed settings.json per path, validated by (mtime_ns, size) on every read so
+# an external edit is still picked up.  Getters run in paint code and worker
+# threads, so a cache hit costs one stat() instead of a read + json.loads().
+_settings_cache: dict[str, tuple[tuple[int, int], dict]] = {}
+_settings_lock = threading.Lock()
+
+
 def _load_library_settings(data_dir: str | None = None) -> dict:
+    """Return the library settings dict (a private copy — safe to mutate)."""
     path = _library_settings_path(data_dir)
-    if path.exists():
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            pass
-    return {}
+    key = str(path)
+    try:
+        st = path.stat()
+    except OSError:
+        return {}
+    stamp = (st.st_mtime_ns, st.st_size)
+    with _settings_lock:
+        hit = _settings_cache.get(key)
+        if hit is not None and hit[0] == stamp:
+            return copy.deepcopy(hit[1])
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    with _settings_lock:
+        _settings_cache[key] = (stamp, data)
+    return copy.deepcopy(data)
 
 
 def _save_library_settings(settings: dict, data_dir: str | None = None) -> None:
     path = _library_settings_path(data_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+    with _settings_lock:
+        # Drop rather than refresh: the next read re-stats and re-parses once.
+        _settings_cache.pop(str(path), None)
 
 
 def get_max_thumbnails() -> int:

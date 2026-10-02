@@ -4,6 +4,7 @@ The active data-directory is persisted via QSettings (one global pointer).
 All other settings are stored in a JSON file inside the data directory so
 that each library has its own independent configuration.
 """
+import functools
 import json
 import os
 import re
@@ -118,6 +119,19 @@ def _parse_qss_token(qss_text: str, token: str) -> str | None:
     return m.group(1) if m else None
 
 
+@functools.lru_cache(maxsize=None)
+def _theme_token_color(qss_path: str, token: str) -> str | None:
+    """Return *token*'s color from a built-in theme file (memoised).
+
+    Theme files ship with the application and do not change at runtime, and
+    the UI color getters run inside paint code — so the file is read once.
+    """
+    path = Path(qss_path)
+    if not path.exists():
+        return None
+    return _parse_qss_token(path.read_text(encoding="utf-8"), token)
+
+
 # Hardcoded fallback defaults when no theme token or override is set.
 _UI_COLOR_DEFAULTS: dict[str, str] = {
     "pair_a":            "",         # derives from QPalette if blank
@@ -192,11 +206,9 @@ def _get_ui_color(key: str, settings: dict | None = None) -> str:
     if token:
         value = THEMES.get(base_scheme, "")
         if value and not value.startswith("material:"):
-            qss_path = Path(value)
-            if qss_path.exists():
-                color = _parse_qss_token(qss_path.read_text(encoding="utf-8"), token)
-                if color:
-                    return color
+            color = _theme_token_color(value, token)
+            if color:
+                return color
 
     return _UI_COLOR_DEFAULTS.get(key, "")
 
@@ -505,7 +517,7 @@ class _ClipDownloadWorker(QThread):
     """Downloads the CLIP ONNX vision model from Hugging Face in a background thread."""
 
     progress = pyqtSignal(int, int)   # (bytes_done, total_bytes)
-    finished = pyqtSignal(bool, str)  # (success, message)
+    download_finished = pyqtSignal(bool, str)  # (success, message)
 
     def __init__(self, dest: "Path", parent=None) -> None:
         super().__init__(parent)
@@ -543,14 +555,14 @@ class _ClipDownloadWorker(QThread):
 
             if self._cancelled:
                 tmp.unlink(missing_ok=True)
-                self.finished.emit(False, "Download cancelled.")
+                self.download_finished.emit(False, "Download cancelled.")
                 return
 
             tmp.rename(dest)
-            self.finished.emit(True, f"Model saved to {dest}")
+            self.download_finished.emit(True, f"Model saved to {dest}")
         except Exception as exc:
             tmp.unlink(missing_ok=True)
-            self.finished.emit(False, f"Download failed: {exc}")
+            self.download_finished.emit(False, f"Download failed: {exc}")
 
 
 class ConfigDialog(QDialog):
@@ -1235,7 +1247,7 @@ class ConfigDialog(QDialog):
             return
         self._clip_dl_worker = _ClipDownloadWorker(dest, parent=self)
         self._clip_dl_worker.progress.connect(self._on_clip_dl_progress)
-        self._clip_dl_worker.finished.connect(self._on_clip_dl_finished)
+        self._clip_dl_worker.download_finished.connect(self._on_clip_dl_finished)
         self._clip_dl_worker.start()
         self._refresh_clip_dl_button()
 

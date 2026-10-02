@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
 
 from app.database.db import session_scope, get_session
 from app.database.models import Collection
+from app.services.lookups import usage_count, usage_counts
 from app.utils.name_dedup import find_similar_pairs
 
 
@@ -69,6 +70,7 @@ class CollectionEditorDialog(QDialog):
         self._table.setRowCount(0)
         session = get_session()
         try:
+            counts = usage_counts(session, "collection")
             for col in session.query(Collection).order_by(Collection.name).all():
                 row = self._table.rowCount()
                 self._table.insertRow(row)
@@ -76,7 +78,7 @@ class CollectionEditorDialog(QDialog):
                 name_item = QTableWidgetItem(col.name)
                 name_item.setData(Qt.ItemDataRole.UserRole, col.id)
 
-                count_item = QTableWidgetItem(str(len(col.models)))
+                count_item = QTableWidgetItem(str(counts.get(col.id, 0)))
                 count_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
                 self._table.setItem(row, 0, name_item)
@@ -141,7 +143,7 @@ class CollectionEditorDialog(QDialog):
         try:
             col = session.get(Collection, col_id)
             name = col.name
-            count = len(col.models)
+            count = usage_count(session, "collection", col_id)
             sub_count = len(col.subcollections)
         finally:
             session.close()
@@ -230,8 +232,9 @@ class _MergeCollectionsDialog(QDialog):
         method = self._method_combo.currentText()
         session = get_session()
         try:
+            counts = usage_counts(session, "collection")
             collections = [
-                (col.id, col.name, len(col.models))
+                (col.id, col.name, counts.get(col.id, 0))
                 for col in session.query(Collection).order_by(Collection.name).all()
             ]
         finally:

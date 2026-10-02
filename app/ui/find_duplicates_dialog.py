@@ -67,7 +67,7 @@ class _SearchWorker(QThread):
     """Background thread that compares model values and emits duplicate groups."""
 
     progress = pyqtSignal(int, int)   # (current, total) — steps are columns
-    finished = pyqtSignal(list)       # list of group dicts
+    search_finished = pyqtSignal(list)       # list of group dicts
 
     def __init__(self, columns, method: str, threshold: int, parent=None) -> None:
         super().__init__(parent)
@@ -123,7 +123,7 @@ class _SearchWorker(QThread):
                 groups.extend(self._find_soundex(rows, disp))
 
         self.progress.emit(total, total)
-        self.finished.emit(groups)
+        self.search_finished.emit(groups)
 
     # ------------------------------------------------------------------
     def _find_exact(self, rows: list[dict], col: str) -> list[dict]:
@@ -329,7 +329,7 @@ class FindDuplicatesDialog(QDialog):
 
         self._worker = _SearchWorker(selected, method, self._lev_spin.value(), self)
         self._worker.progress.connect(self._on_progress)
-        self._worker.finished.connect(self._on_finished)
+        self._worker.search_finished.connect(self._on_finished)
         self._worker.start()
 
     def _stop_search(self) -> None:

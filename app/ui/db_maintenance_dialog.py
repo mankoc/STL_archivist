@@ -37,13 +37,12 @@ from app.crawler.rules import (
 
 logger = logging.getLogger(__name__)
 
-_STATUS_OK             = "OK"
-_STATUS_MISSING        = "Missing"
-_STATUS_FLAGGED        = "Flagged Missing"
-_STATUS_FOUND          = "Relocated"
-_STATUS_MODIFIED       = "Modified"
-_STATUS_MOVED_DB       = "Moved (in DB)"
-_STATUS_DUPLICATE      = "Duplicate"
+from app.services.maintenance import (  # noqa: E402 — status strings shared with the service
+    STATUS_OK as _STATUS_OK, STATUS_MISSING as _STATUS_MISSING,
+    STATUS_FLAGGED as _STATUS_FLAGGED, STATUS_FOUND as _STATUS_FOUND,
+    STATUS_MODIFIED as _STATUS_MODIFIED, STATUS_MOVED_DB as _STATUS_MOVED_DB,
+    STATUS_DUPLICATE as _STATUS_DUPLICATE,
+)
 
 _COL_ID       = 0
 _COL_TITLE    = 1
@@ -77,6 +76,8 @@ _COLOR_FG = QColor(255, 255, 255)
 class VerifyWorker(QThread):
     """Check whether each archive_path in the database still exists on disk.
 
+    Thin wrapper around :func:`app.services.maintenance.verify_archives`.
+
     Signals:
         progress(current, total): Archive index and total count.
         log(message): Human-readable status line for the UI log panel.
@@ -95,75 +96,11 @@ class VerifyWorker(QThread):
         self._stop_requested = True
 
     def run(self) -> None:
-        from app.database.db import session_scope
-        from app.database.models import STLModel
-
+        from app.services.maintenance import verify_archives
         self._stop_requested = False
-        results: list[dict] = []
-
-        with session_scope() as session:
-            records = session.query(
-                STLModel.id,
-                STLModel.title,
-                STLModel.archive_path,
-                STLModel.archive_hash,
-                STLModel.archive_size,
-                STLModel.is_missing,
-            ).all()
-
-        total = len(records)
-        if total == 0:
-            self.log.emit("No records found in the database.")
-            self.verify_finished.emit([])
-            return
-
-        self.log.emit(f"Verifying {total} archive(s)…")
-        n_missing = 0
-        n_flagged = 0
-        n_modified = 0
-        for idx, (model_id, title, path, ahash, stored_size, is_missing) in enumerate(records, 1):
-            if self._stop_requested:
-                self.log.emit("Stopped by user.")
-                break
-            self.progress.emit(idx, total)
-            p = Path(path) if path else None
-            if is_missing and (p is None or not p.is_file()):
-                # Previously flagged by the crawler and still absent on disk
-                status = _STATUS_FLAGGED
-                n_flagged += 1
-            elif p is None or not p.is_file():
-                status = _STATUS_MISSING
-                n_missing += 1
-            elif stored_size is not None and p.stat().st_size != stored_size:
-                status = _STATUS_MODIFIED
-                n_modified += 1
-            else:
-                status = _STATUS_OK
-                if is_missing:
-                    # File reappeared — clear the flag opportunistically
-                    from app.database.db import session_scope as _ss
-                    try:
-                        with _ss() as s:
-                            m = s.get(STLModel, model_id)
-                            if m:
-                                m.is_missing = False
-                    except Exception:
-                        pass
-            results.append({
-                "id":         model_id,
-                "title":      title or "",
-                "path":       path or "",
-                "hash":       ahash or "",
-                "size":       stored_size,
-                "status":     status,
-                "match_path": "",
-            })
-
-        ok_count = total - n_missing - n_flagged - n_modified
-        self.log.emit(
-            f"Done — {ok_count} OK, {n_modified} modified, "
-            f"{n_missing} missing, {n_flagged} flagged missing "
-            f"out of {total} archive(s)."
+        results = verify_archives(
+            progress=self.progress.emit, log=self.log.emit,
+            should_stop=lambda: self._stop_requested,
         )
         self.verify_finished.emit(results)
 
@@ -320,7 +257,7 @@ class DHashWorker(QThread):
         from app.database.db import session_scope
         from app.database.models import Image as DBImage
         from app.utils.thumbnailer import get_thumbnail_bytes
-        from app.ui.find_content_duplicates_dialog import compute_dhash_from_jpeg, format_dhash
+        from app.utils.image_hash import compute_dhash_from_jpeg, format_dhash
 
         self._stop_requested = False
         computed = 0
@@ -855,9 +792,10 @@ class PruneImagesWorker(QThread):
     (lowest id = insertion order) are retained and the rest are deleted from the
     database along with their LMDB thumbnails. Run *Compact Thumbnail Store*
     afterwards to reclaim the freed disk space (LMDB never shrinks on its own).
+    Thin wrapper around :func:`app.services.maintenance.prune_images`.
 
     Signals:
-        progress(current, total): Index of the model being pruned and total count.
+        progress(current, total): Models processed so far and total count.
         log(message): Human-readable status line for the UI log panel.
         prune_finished(models_pruned, images_removed): Counts once the run completes.
     """
@@ -875,57 +813,13 @@ class PruneImagesWorker(QThread):
         self._stop_requested = True
 
     def run(self) -> None:
-        from sqlalchemy import func
-        from app.database.db import session_scope
-        from app.database.models import Image as DBImage
-        from app.utils.thumbnailer import delete_thumbnail
-
+        from app.services.maintenance import prune_images
         self._stop_requested = False
-        keep = self._keep
-
-        with session_scope() as session:
-            over = (
-                session.query(DBImage.model_id)
-                .group_by(DBImage.model_id)
-                .having(func.count(DBImage.id) > keep)
-                .all()
-            )
-        model_ids = [mid for (mid,) in over]
-
-        total = len(model_ids)
-        if total == 0:
-            self.log.emit(f"No models have more than {keep} image(s).")
-            self.prune_finished.emit(0, 0)
-            return
-
-        self.log.emit(f"Pruning {total} model(s) to at most {keep} image(s) each…")
-        models_pruned  = 0
-        images_removed = 0
-
-        for idx, model_id in enumerate(model_ids, 1):
-            if self._stop_requested:
-                self.log.emit("Stopped by user.")
-                break
-            self.progress.emit(idx, total)
-            with session_scope() as session:
-                excess = (
-                    session.query(DBImage)
-                    .filter(DBImage.model_id == model_id)
-                    .order_by(DBImage.id.asc())
-                    .all()[keep:]
-                )
-                for img in excess:
-                    delete_thumbnail(img.id)
-                    session.delete(img)
-                if excess:
-                    models_pruned  += 1
-                    images_removed += len(excess)
-
-        self.log.emit(
-            f"Done — removed {images_removed} image(s) from {models_pruned} model(s). "
-            "Run 'Compact Thumbnail Store' to reclaim the freed disk space."
+        pruned, removed = prune_images(
+            self._keep, progress=self.progress.emit, log=self.log.emit,
+            should_stop=lambda: self._stop_requested,
         )
-        self.prune_finished.emit(models_pruned, images_removed)
+        self.prune_finished.emit(pruned, removed)
 
 
 class FindDuplicateEntriesWorker(QThread):
@@ -933,14 +827,7 @@ class FindDuplicateEntriesWorker(QThread):
     filename + file size, indicating the same physical file has been catalogued
     more than once.
 
-    Matching rules (applied in order, most reliable first):
-    1. Identical ``archive_hash`` — definitive content duplicate.
-    2. Identical ``(filename, archive_size)`` — likely duplicate; only used
-       when the hash is a fallback fingerprint or absent.
-
-    Each record in a duplicate group is emitted as a result row; the
-    ``match_path`` field shows the path of the *first* record in the group so
-    the pair relationship is immediately visible.
+    Thin wrapper around :func:`app.services.maintenance.find_duplicate_entries`.
 
     Signals:
         progress(current, total)
@@ -953,73 +840,10 @@ class FindDuplicateEntriesWorker(QThread):
     duplicates_finished = pyqtSignal(list)
 
     def run(self) -> None:
-        from collections import defaultdict
-        from app.database.db import session_scope
-        from app.database.models import STLModel
-
-        self.log.emit("Scanning for duplicate entries…")
-
-        with session_scope() as session:
-            rows = session.query(
-                STLModel.id,
-                STLModel.title,
-                STLModel.archive_path,
-                STLModel.archive_hash,
-                STLModel.archive_size,
-            ).all()
-
-        total = len(rows)
-        self.progress.emit(0, total)
-
-        # Group by hash (skip fallback fingerprints for the hash bucket)
-        hash_groups:     dict[str, list]  = defaultdict(list)
-        namesize_groups: dict[tuple, list] = defaultdict(list)
-
-        for idx, (mid, title, path, ahash, asize) in enumerate(rows, 1):
-            self.progress.emit(idx, total)
-            rec = {
-                "id":       mid,
-                "title":    title or "",
-                "path":     path or "",
-                "hash":     ahash or "",
-                "size":     asize,
-                "status":   _STATUS_DUPLICATE,
-                "match_path": "",
-            }
-            if ahash and not ahash.startswith("fallback:"):
-                hash_groups[ahash].append(rec)
-            elif path and asize is not None:
-                namesize_groups[(Path(path).name, asize)].append(rec)
-
-        results: list[dict] = []
-
-        for group in hash_groups.values():
-            if len(group) < 2:
-                continue
-            first_path = group[0]["path"]
-            for rec in group:
-                rec["match_path"] = first_path if rec["path"] != first_path else group[1]["path"]
-                results.append(rec)
-
-        for group in namesize_groups.values():
-            if len(group) < 2:
-                continue
-            # Avoid re-reporting records already caught by the hash bucket
-            already = {r["id"] for r in results}
-            group = [r for r in group if r["id"] not in already]
-            if len(group) < 2:
-                continue
-            first_path = group[0]["path"]
-            for rec in group:
-                rec["match_path"] = first_path if rec["path"] != first_path else group[1]["path"]
-                results.append(rec)
-
-        n = len(results)
-        if n:
-            self.log.emit(f"Found {n} record(s) in {n // 2 + n % 2} duplicate group(s).")
-        else:
-            self.log.emit("No duplicate entries found.")
-        self.duplicates_finished.emit(results)
+        from app.services.maintenance import find_duplicate_entries
+        self.duplicates_finished.emit(
+            find_duplicate_entries(progress=self.progress.emit, log=self.log.emit)
+        )
 
 
 class MovedInDbWorker(QThread):
