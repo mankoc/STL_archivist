@@ -21,12 +21,36 @@ from PyQt6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QScrollArea, QFontComboBox, QKeySequenceEdit,
 )
 
+from app.core import settings as _core
+# Non-visual settings live in app.core.settings; re-exported here so existing
+# ``from app.ui.config_dialog import get_…`` imports keep working.
+from app.core.settings import (  # noqa: F401
+    MAX_THUMBS_DEFAULT, MAX_THUMB_SIZE_DEFAULT, DATA_DIR_DEFAULT,
+    _load_library_settings, _save_library_settings, _library_settings_path,
+    get_data_dir, get_unrar_path, get_db_path,
+    get_max_thumbnails, get_max_thumb_size,
+    get_allow_file_delete, get_use_trash_folder, get_trash_folder_path,
+    get_file_sorting_enabled, get_max_workers,
+    get_warn_presupported_stl, get_presupport_patterns,
+    get_warn_no_images, get_warn_nested_archive, get_warn_no_printable,
+    get_warn_low_compression, get_low_compression_threshold,
+    get_logging_enabled, get_metadata_sidecar_enabled,
+    get_metadata_thumbnails_enabled, get_store_stl_file_list,
+    get_recurse_subdirs, get_ai_embeddings_enabled,
+    get_ai_embeddings_during_crawl, get_ai_embeddings_batch_size,
+    get_embed_search_batch_size,
+)
+
 DATA_DIR_KEY           = "config/data_dir"
 UNRAR_TOOL_KEY         = "config/unrar_tool"
 
+# The desktop app keeps the machine-wide values in QSettings.
+_core.register_providers(
+    data_dir=lambda: QSettings().value(DATA_DIR_KEY, DATA_DIR_DEFAULT),
+    unrar_path=lambda: QSettings().value(UNRAR_TOOL_KEY, ""),
+)
+
 # Defaults for per-library settings (non-platform-specific)
-MAX_THUMBS_DEFAULT      = 5
-MAX_THUMB_SIZE_DEFAULT  = 512
 THUMB_PAGE_SIZE_DEFAULT = 200
 AI_TEMPERATURE_DEFAULT  = 0.2
 
@@ -53,53 +77,9 @@ _FILE_MANAGER_DEFAULTS: dict[str, dict[str, str]] = {
 }
 
 
-def _platform_defaults() -> dict:
-    """Return a dict of default values that differ by operating system.
+_PLATFORM = _core.PLATFORM_DEFAULTS
 
-    Keys
-    ----
-    data_dir        : str   — default location for the database and thumbnails
-    color_scheme    : str   — initial color theme name (must be a key in THEMES)
-    unrar_hint      : str   — placeholder text shown in the unrar path field
-    max_workers     : int   — default number of parallel crawler threads
-    """
-    cpu = os.cpu_count() or 2
-    # Use half the logical CPU count, clamped to [2, 8]
-    workers = max(2, min(cpu // 2, 8))
-
-    if sys.platform == "win32":
-        local_app_data = os.environ.get("LOCALAPPDATA", str(Path.home()))
-        data_dir       = str(Path(local_app_data) / "stlLibrary")
-        color_scheme   = "Windows 11 Dark"
-        unrar_hint     = (
-            r"C:\Program Files\WinRAR\UnRAR.exe  "
-            r"(or C:\Program Files (x86)\WinRAR\UnRAR.exe)"
-        )
-    elif sys.platform == "darwin":
-        data_dir     = str(Path.home() / "Library" / "Application Support" / "stlLibrary")
-        color_scheme = "System Default"
-        unrar_hint   = "/opt/homebrew/bin/unrar  (or /usr/local/bin/unrar)"
-    else:
-        # Linux / BSD — follow XDG Base Directory spec
-        xdg_data = os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))
-        data_dir     = str(Path(xdg_data) / "stlLibrary")
-        color_scheme = "System Default"
-        unrar_hint   = "/usr/bin/unrar"
-
-    return {
-        "data_dir":     data_dir,
-        "color_scheme": color_scheme,
-        "unrar_hint":   unrar_hint,
-        "max_workers":  workers,
-    }
-
-
-_PLATFORM = _platform_defaults()
-
-DATA_DIR_DEFAULT     = _PLATFORM["data_dir"]
 COLOR_SCHEME_DEFAULT = _PLATFORM["color_scheme"]
-
-_LIBRARY_SETTINGS_FILE = "settings.json"
 
 # Map display name -> path relative to the package root (or "" for system default).
 # Values prefixed with "material:" are routed to qt_material instead of a .qss file.
@@ -120,47 +100,6 @@ THEMES: dict[str, str] = {
     "Material Light Purple":"material:light_purple.xml",
     "Material Light Orange":"material:light_orange.xml",
 }
-
-
-def get_data_dir() -> str:
-    return QSettings().value(DATA_DIR_KEY, DATA_DIR_DEFAULT)
-
-
-def get_unrar_path() -> str:
-    """Return the configured path to the unrar/rar executable, or '' if not set."""
-    return QSettings().value(UNRAR_TOOL_KEY, "")
-
-
-def get_db_path() -> str:
-    return str(Path(get_data_dir()) / "stlLibrary.db")
-
-
-def _library_settings_path(data_dir: str | None = None) -> Path:
-    return Path(data_dir or get_data_dir()) / _LIBRARY_SETTINGS_FILE
-
-
-def _load_library_settings(data_dir: str | None = None) -> dict:
-    path = _library_settings_path(data_dir)
-    if path.exists():
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            pass
-    return {}
-
-
-def _save_library_settings(settings: dict, data_dir: str | None = None) -> None:
-    path = _library_settings_path(data_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
-
-
-def get_max_thumbnails() -> int:
-    return int(_load_library_settings().get("max_thumbnails", MAX_THUMBS_DEFAULT))
-
-
-def get_max_thumb_size() -> int:
-    return int(_load_library_settings().get("max_thumb_size", MAX_THUMB_SIZE_DEFAULT))
 
 
 def get_color_scheme() -> str:
@@ -286,47 +225,6 @@ def get_pair_colors() -> tuple[str, str]:
     return color_a.name(), color_b.name()
 
 
-def get_allow_file_delete() -> bool:
-    return bool(_load_library_settings().get("allow_file_delete", False))
-
-
-def get_use_trash_folder() -> bool:
-    return bool(_load_library_settings().get("use_trash_folder", True))
-
-
-def get_trash_folder_path() -> str:
-    return _load_library_settings().get("trash_folder_path", "")
-
-def get_file_sorting_enabled() -> bool:
-    return bool(_load_library_settings().get("file_sorting_enabled", False))
-
-
-def get_max_workers() -> int:
-    return int(_load_library_settings().get("max_workers", _PLATFORM["max_workers"]))
-
-
-def get_warn_presupported_stl() -> bool:
-    """Whether to warn when an archive contains supported STL files."""
-    return bool(_load_library_settings().get("warn_presupported_stl", True))
-
-
-def get_presupport_patterns() -> list[str]:
-    """Return the regex patterns used to detect supported STL files."""
-    from app.crawler.rules import (
-        DEFAULT_PRESUPPORT_PATTERNS, LEGACY_PRESUPPORT_PATTERNS,
-    )
-    saved = _load_library_settings().get("presupport_patterns")
-    if saved is None:
-        return list(DEFAULT_PRESUPPORT_PATTERNS)
-    if list(saved) == LEGACY_PRESUPPORT_PATTERNS:
-        # These patterns used to drive the retired "Archive with supports"
-        # warning and nothing else, so a list still identical to that default
-        # was never a deliberate choice.  Upgrading it keeps the "presupported"
-        # filename rule, which the old default has no pattern for.
-        return list(DEFAULT_PRESUPPORT_PATTERNS)
-    return list(saved)
-
-
 def get_font_family() -> str:
     """Return the user-configured font family, or empty string for the theme default."""
     return str(_load_library_settings().get("font_family", ""))
@@ -335,31 +233,6 @@ def get_font_family() -> str:
 def get_font_size() -> int:
     """Return the user-configured font size in points, or 0 for the theme default."""
     return int(_load_library_settings().get("font_size", 0))
-
-
-def get_warn_no_images() -> bool:
-    """Whether to warn when an archive contains no image files."""
-    return bool(_load_library_settings().get("warn_no_images", True))
-
-
-def get_warn_nested_archive() -> bool:
-    """Whether to warn when an archive contains another compressed archive."""
-    return bool(_load_library_settings().get("warn_nested_archive", True))
-
-
-def get_warn_no_printable() -> bool:
-    """Whether to warn when an archive contains no printable model files."""
-    return bool(_load_library_settings().get("warn_no_printable", True))
-
-
-def get_warn_low_compression() -> bool:
-    """Whether to warn when an archive has a low compression rate."""
-    return bool(_load_library_settings().get("warn_low_compression", False))
-
-
-def get_low_compression_threshold() -> float:
-    """Compression rate threshold above which the low-compression warning fires."""
-    return float(_load_library_settings().get("low_compression_threshold", 0.95))
 
 
 def get_highlight_warning_rows() -> bool:
@@ -408,31 +281,6 @@ def get_debug_menu_enabled() -> bool:
     return bool(_load_library_settings().get("debug_menu_enabled", False))
 
 
-def get_logging_enabled() -> bool:
-    """Whether file (and stderr) logging is active. Defaults to True."""
-    return bool(_load_library_settings().get("logging_enabled", True))
-
-
-def get_metadata_sidecar_enabled() -> bool:
-    """Whether per-folder METADATA.7z sidecar files are created at all."""
-    return bool(_load_library_settings().get("metadata_sidecar_enabled", True))
-
-
-def get_metadata_thumbnails_enabled() -> bool:
-    """Whether thumbnails are included in per-folder METADATA.7z sidecar files."""
-    return bool(_load_library_settings().get("metadata_thumbnails", True))
-
-
-def get_store_stl_file_list() -> bool:
-    """Whether the crawler records the list of STL files contained in each archive."""
-    return bool(_load_library_settings().get("store_stl_file_list", False))
-
-
-def get_recurse_subdirs() -> bool:
-    """Whether the crawler should recurse into subdirectories of the selected folder."""
-    return bool(_load_library_settings().get("recurse_subdirs", True))
-
-
 def get_filter_show_counts() -> bool:
     """Whether to show model counts next to each item in the filter pane."""
     return bool(_load_library_settings().get("filter_show_counts", True))
@@ -455,21 +303,6 @@ def get_ai_tagging_enabled() -> bool:
     menu, and the table's right-click menu.
     """
     return bool(_load_library_settings().get("ai_tagging_enabled", True))
-
-
-def get_ai_embeddings_enabled() -> bool:
-    """Whether AI image embeddings (CLIP) are enabled for image similarity search."""
-    return bool(_load_library_settings().get("ai_embeddings_enabled", True))
-
-
-def get_ai_embeddings_during_crawl() -> bool:
-    """Whether AI image embeddings are computed automatically during crawl."""
-    return bool(_load_library_settings().get("ai_embeddings_during_crawl", False))
-
-
-def get_ai_embeddings_batch_size() -> int:
-    """Number of images per CLIP inference call (higher = better GPU utilisation)."""
-    return int(_load_library_settings().get("ai_embeddings_batch_size", 32))
 
 
 def get_ai_temperature() -> float:
@@ -572,10 +405,6 @@ def get_notify_sidecar() -> bool:
 
 def get_notify_backup() -> bool:
     return bool(_load_library_settings().get("notify_backup", True))
-
-
-def get_embed_search_batch_size() -> int:
-    return int(_load_library_settings().get("embed_search_batch_size", 1000))
 
 
 def open_folder_with_file_manager(folder: str) -> None:

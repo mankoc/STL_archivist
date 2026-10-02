@@ -37,7 +37,7 @@ class _IdLoaderThread(QThread):
 
     def run(self):
         from app.database.db import get_session
-        session = get_session()
+        session = get_session() 
         try:
             if self._pair_order is not None:
                 all_ids = [row[0] for row in session.execute(self._id_stmt).all()]

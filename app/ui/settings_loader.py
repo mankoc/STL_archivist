@@ -1,64 +1,8 @@
 """
-Factory for building a :class:`~app.config.CrawlerConfig` from ``QSettings``
-and the per-library JSON settings file.
+Re-export of :func:`app.core.settings.build_crawler_config`.
 
-This is the single point where UI-layer settings are translated into the
-config dataclass that the crawler uses.  Business-logic modules import only
-``app.config`` — never ``app.ui.*``.
+Kept so existing callers (and tests that monkeypatch
+``app.ui.settings_loader.build_crawler_config``) keep working. New code should
+import from :mod:`app.core.settings` directly.
 """
-from app.config import CrawlerConfig
-from app.ui.config_dialog import (
-    get_max_thumbnails,
-    get_max_thumb_size,
-    get_max_workers,
-    get_metadata_sidecar_enabled,
-    get_metadata_thumbnails_enabled,
-    get_presupport_patterns,
-    get_store_stl_file_list,
-    get_unrar_path,
-    get_warn_nested_archive,
-    get_warn_no_images,
-    get_warn_no_printable,
-    get_warn_presupported_stl,
-    get_warn_low_compression,
-    get_low_compression_threshold,
-    get_ai_embeddings_enabled,
-    get_ai_embeddings_during_crawl,
-)
-
-
-def build_crawler_config(max_thumbnails: int | None = None, force_rescan: bool = False) -> CrawlerConfig:
-    """Return a :class:`CrawlerConfig` populated from the current settings.
-
-    Args:
-        max_thumbnails: Override for the thumbnail count.  Pass ``0`` to
-            disable thumbnail generation without changing the stored setting
-            (used by the UI's "generate thumbnails" checkbox).  When ``None``
-            the value is read from settings.
-    """
-    thumbs = max_thumbnails if max_thumbnails is not None else get_max_thumbnails()
-    # Import get_recurse_subdirs lazily to avoid import cycles at module import time
-    try:
-        from app.ui.config_dialog import get_recurse_subdirs
-        recurse = bool(get_recurse_subdirs())
-    except Exception:
-        recurse = True
-    return CrawlerConfig(
-        max_thumbnails=thumbs,
-        max_thumb_size=get_max_thumb_size(),
-        unrar_path=get_unrar_path(),
-        max_workers=get_max_workers(),
-        metadata_sidecar_enabled=get_metadata_sidecar_enabled(),
-        metadata_thumbnails=get_metadata_thumbnails_enabled(),
-        store_stl_file_list=get_store_stl_file_list(),
-        warn_presupported_stl=get_warn_presupported_stl(),
-        warn_no_images=get_warn_no_images(),
-        warn_nested_archive=get_warn_nested_archive(),
-        warn_no_printable=get_warn_no_printable(),
-        presupport_patterns=get_presupport_patterns(),
-        recurse_subdirs=recurse,
-        force_rescan=force_rescan,
-        warn_low_compression=get_warn_low_compression(),
-        low_compression_threshold=get_low_compression_threshold(),
-        embed_during_crawl=get_ai_embeddings_enabled() and get_ai_embeddings_during_crawl(),
-    )
+from app.core.settings import build_crawler_config  # noqa: F401

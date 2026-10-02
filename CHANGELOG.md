@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Settings no longer require Qt: new `app/core/settings.py`.** This is the first step towards a headless server (see `docs/server-migration-plan.md`). The data directory, the unrar path, every non-visual per-library setting and `build_crawler_config()` now live in a Qt-free module.
+  - The desktop app behaves as before. It registers its `QSettings` readers with the module at startup, and `app.ui.config_dialog` / `app.ui.settings_loader` re-export the moved functions, so existing imports keep working.
+  - **New environment overrides:** `STL_DATA_DIR` and `STL_UNRAR_PATH` take precedence over Configuration, and `STL_SQL_PROFILING` toggles SQL timing without Qt.
+  - The logger, the CLIP model locator and the AI runtime no longer import the UI layer to find the data directory.
+
 - **Compacting the thumbnail store now shows progress.** Compaction is a single blocking call inside LMDB with no callback of its own, so the bar sat still for the whole run and the dialog looked frozen — on a multi-gigabyte store that is a long silence. Progress is now derived by watching the compacted copy grow on disk against the expected payload size, reported as a percentage. This applies both to **Compact Thumbnail Store**, which previously reported no progress at all, and to the compaction phase of **Deduplicate Thumbnails**.
 
 - **Thumbnails are now deduplicated: new _Deduplicate Thumbnails_ action in Database Maintenance.** The store held one copy per image record, so a render shipped in many archives was stored many times — on a 338k-thumbnail library measured at 48% duplicate entries and 4.7 GB (51%) recoverable, with some images held 738 times over. The store is now content-addressed: an image id maps to a key derived from the thumbnail's xxh3-128 digest, and identical payloads share one blob. Digest hits are confirmed by comparing bytes, so a hash collision can never serve the wrong image.

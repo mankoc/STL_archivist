@@ -1,6 +1,6 @@
 import pytest
 from app.ui.file_list_dialog import format_size
-from app.ui.config_dialog import get_allow_file_delete, get_use_trash_folder, get_trash_folder_path, get_file_sorting_enabled
+from app.core.settings import get_allow_file_delete, get_use_trash_folder, get_trash_folder_path, get_file_sorting_enabled
 
 def test_format_size():
     # Test base cases
@@ -24,7 +24,7 @@ def test_format_size():
 
 def test_config_defaults(monkeypatch):
     """Test that UI settings helper functions return correct defaults."""
-    monkeypatch.setattr("app.ui.config_dialog._load_library_settings", lambda *args, **kwargs: {})
+    monkeypatch.setattr("app.core.settings._load_library_settings", lambda *args, **kwargs: {})
     
     assert get_allow_file_delete() is False
     assert get_use_trash_folder() is True
@@ -41,7 +41,7 @@ def test_config_overrides(monkeypatch):
         "file_sorting_enabled": True
     }
     
-    monkeypatch.setattr("app.ui.config_dialog._load_library_settings", lambda *args, **kwargs: mock_settings)
+    monkeypatch.setattr("app.core.settings._load_library_settings", lambda *args, **kwargs: mock_settings)
     
     assert get_allow_file_delete() is True
     assert get_use_trash_folder() is False
@@ -60,7 +60,7 @@ def test_inert_legacy_pattern_list_is_upgraded(monkeypatch):
     library still carrying them is upgraded to the current default rather than
     losing the "presupported" filename rule the old list has no pattern for.
     """
-    import app.ui.config_dialog as cfg
+    import app.core.settings as cfg
     from app.crawler.rules import DEFAULT_PRESUPPORT_PATTERNS, LEGACY_PRESUPPORT_PATTERNS
 
     monkeypatch.setattr(cfg, "_load_library_settings",
@@ -69,7 +69,7 @@ def test_inert_legacy_pattern_list_is_upgraded(monkeypatch):
 
 
 def test_customised_pattern_list_is_left_alone(monkeypatch):
-    import app.ui.config_dialog as cfg
+    import app.core.settings as cfg
 
     custom = [r"_mine\.stl$"]
     monkeypatch.setattr(cfg, "_load_library_settings",
@@ -78,7 +78,7 @@ def test_customised_pattern_list_is_left_alone(monkeypatch):
 
 
 def test_unset_pattern_list_falls_back_to_default(monkeypatch):
-    import app.ui.config_dialog as cfg
+    import app.core.settings as cfg
     from app.crawler.rules import DEFAULT_PRESUPPORT_PATTERNS
 
     monkeypatch.setattr(cfg, "_load_library_settings", lambda: {})

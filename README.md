@@ -100,6 +100,16 @@ python main.py
 > - Windows: install [WinRAR](https://www.rarlab.com/) or the standalone `UnRAR` tool and make sure it is on your `PATH`.
 > You can also set a custom path to the executable in **Configuration → Crawler → RAR tool**.
 
+### Environment overrides
+
+These optional environment variables take precedence over the values set in Configuration. They are useful for portable or headless setups.
+
+| Variable | Overrides |
+|---|---|
+| `STL_DATA_DIR` | Data directory (database, thumbnails, logs, `settings.json`) |
+| `STL_UNRAR_PATH` | Path to the `unrar` executable |
+| `STL_SQL_PROFILING` | `1` / `0` forces SQL statement timing on or off |
+
 ## Usage
 
 ### 1. Configure the application

@@ -68,7 +68,7 @@ def model_path() -> Optional[Path]:
     if env:
         candidates.append(Path(env))
     try:
-        from app.ui.config_dialog import get_data_dir
+        from app.core.settings import get_data_dir
         candidates.append(Path(get_data_dir()) / "models" / MODEL_FILENAME)
     except Exception:
         pass
@@ -87,7 +87,7 @@ def model_path() -> Optional[Path]:
 def default_model_dest() -> Optional[Path]:
     """Return the preferred local path for storing the downloaded CLIP model."""
     try:
-        from app.ui.config_dialog import get_data_dir
+        from app.core.settings import get_data_dir
         return Path(get_data_dir()) / "models" / MODEL_FILENAME
     except Exception:
         return None
