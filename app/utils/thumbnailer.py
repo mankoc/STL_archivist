@@ -1,9 +1,12 @@
 """
-Thumbnail storage: LMDB key-value store, keyed by image ID.
+Thumbnail storage: content-addressed LMDB key-value store.
 
 Store location: <data_dir>/thumbnails.lmdb/
-Keys:           image_id as big-endian 8-byte integer
-Values:         JPEG bytes
+
+Identical thumbnails are held once and shared: an image id maps to a blob key
+derived from the thumbnail's content hash, and the bytes live under that blob
+key.  See the key-layout comment below.  The public API is still addressed by
+``Image.id`` throughout, so callers never see the indirection.
 """
 import io
 import logging
@@ -12,7 +15,11 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
+import threading
+import time
+
 import lmdb
+import xxhash
 from PIL import Image, ImageSequence
 
 log = logging.getLogger(__name__)
@@ -41,8 +48,70 @@ _MAP_SIZE = 10 * 1024 ** 3
 _GROW_STEP = 2 * 1024 ** 3
 
 
+# ── Key layout ───────────────────────────────────────────────────────────────
+# The store is content-addressed so identical thumbnails are held once:
+#
+#   R<image_id:8>   -> the blob key that image's thumbnail lives under
+#   D<digest:16>    -> the JPEG/GIF bytes themselves
+#
+# Both prefixes are ASCII letters, while a legacy key is a bare big-endian
+# image id whose first byte is 0x00 for every id below 2**56 — so old and new
+# keys cannot be confused, and a part-migrated store still reads correctly.
+_REF_PREFIX  = b"R"
+_BLOB_PREFIX = b"D"
+
+
 def _key(image_id: int) -> bytes:
+    """Legacy key: the bare image id, as written before content addressing."""
     return image_id.to_bytes(8, "big")
+
+
+def _ref_key(image_id: int) -> bytes:
+    return _REF_PREFIX + image_id.to_bytes(8, "big")
+
+
+def _blob_key(digest: bytes, slot: int = 0) -> bytes:
+    """Key for a blob's bytes.  *slot* disambiguates a hash collision."""
+    return _BLOB_PREFIX + digest + (bytes([slot]) if slot else b"")
+
+
+def _put_blob(txn, data: bytes) -> bytes:
+    """Store *data* if new and return the blob key holding it.
+
+    xxh3-128 is fast but not collision-resistant by construction, so a hash hit
+    is confirmed by comparing the bytes.  On the (astronomically unlikely) event
+    of a genuine collision the new blob goes to the next free slot rather than
+    silently overwriting an unrelated thumbnail.
+    """
+    digest = xxhash.xxh3_128_digest(data)
+    for slot in range(256):
+        key = _blob_key(digest, slot)
+        existing = txn.get(key)
+        if existing is None:
+            txn.put(key, data)
+            return key
+        if existing == data:
+            return key
+        log.warning("xxh3-128 collision on thumbnail digest %s slot %d",
+                    digest.hex(), slot)
+    # 256 distinct payloads sharing one digest: store uncollapsed rather than fail.
+    key = _blob_key(digest, 255)
+    txn.put(key, data)
+    return key
+
+
+def _put_thumbnail(txn, image_id: int, data: bytes) -> None:
+    """Point *image_id* at *data*, sharing the blob with any identical thumbnail."""
+    txn.put(_ref_key(image_id), _put_blob(txn, data))
+    txn.delete(_key(image_id))   # drop the pre-dedup entry if one is still there
+
+
+def _get_thumbnail(txn, image_id: int) -> Optional[bytes]:
+    """Read *image_id*, transparently handling not-yet-migrated entries."""
+    blob_key = txn.get(_ref_key(image_id))
+    if blob_key is not None:
+        return txn.get(bytes(blob_key))
+    return txn.get(_key(image_id))
 
 
 def _write(put_fn) -> None:
@@ -119,14 +188,44 @@ def get_thumbnail_base_dir() -> Optional[Path]:
 
 
 def store_size_bytes() -> int:
-    """Return the on-disk size of the LMDB data file, or 0 if not present."""
+    """Return the space ``data.mdb`` actually occupies, or 0 if not present.
+
+    ``st_size`` is the wrong measure here.  LMDB sizes the file to its whole
+    map up front, and on Windows that file is sparse — so the logical length is
+    the 10 GB map regardless of how many thumbnails are stored, which made every
+    "reclaimed N MB" report read as zero.  Blocks actually allocated are what
+    matters, via ``st_blocks`` where the platform provides it and the NTFS valid
+    data length otherwise.
+    """
     if _lmdb_dir is None:
         return 0
     data_file = _lmdb_dir / "data.mdb"
-    return data_file.stat().st_size if data_file.exists() else 0
+    if not data_file.exists():
+        return 0
+
+    st = data_file.stat()
+    blocks = getattr(st, "st_blocks", None)
+    if blocks:                      # POSIX: 512-byte units, sparse-aware
+        return blocks * 512
+
+    if os.name == "nt":
+        try:
+            import re
+            import subprocess
+            out = subprocess.run(
+                ["fsutil", "file", "queryvaliddata", str(data_file)],
+                capture_output=True, text=True, timeout=30,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            ).stdout
+            match = re.search(r"0x([0-9a-fA-F]+)", out)
+            if match:
+                return int(match.group(1), 16)
+        except Exception:
+            log.debug("fsutil queryvaliddata failed; falling back to st_size")
+    return st.st_size
 
 
-def compact_store() -> "tuple[int, int]":
+def compact_store(progress=None) -> "tuple[int, int]":
     """Rewrite the thumbnail store defragmented, reclaiming space from deletions.
 
     LMDB never shrinks ``data.mdb`` on its own — deleted pages are reused but the
@@ -134,6 +233,12 @@ def compact_store() -> "tuple[int, int]":
     in, so the file shrinks to the size actually needed.
 
     Must not be called while other threads hold open transactions on the store.
+
+    Args:
+        progress: Optional ``callable(done_bytes, total_bytes)``.  ``env.copy()``
+            is one blocking call with no callback of its own, so progress is
+            derived by watching the copy grow on disk; the target is estimated
+            from the live payload, which the copy ends up very close to.
 
     Returns:
         ``(size_before, size_after)`` in bytes.
@@ -146,14 +251,39 @@ def compact_store() -> "tuple[int, int]":
         raise RuntimeError("Thumbnail store not initialised. Call init_thumbnail_store() first.")
 
     size_before = store_size_bytes()
+    expected = store_stats()["payload_bytes"] or size_before or 1
 
     tmp_dir = _lmdb_dir.parent / (_lmdb_dir.name + ".compact_tmp")
     if tmp_dir.exists():
         shutil.rmtree(tmp_dir, ignore_errors=True)
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
-    # Write a defragmented copy, then close, swap the data file in, and reopen.
-    _lmdb_env.copy(str(tmp_dir), compact=True)
+    stop_watch = threading.Event()
+
+    def _watch() -> None:
+        copy_file = tmp_dir / "data.mdb"
+        while not stop_watch.wait(0.25):
+            try:
+                done = copy_file.stat().st_size
+            except OSError:
+                continue
+            # The estimate can be a little under; never report past the end.
+            progress(min(done, expected), expected)
+
+    watcher = None
+    if progress is not None:
+        progress(0, expected)
+        watcher = threading.Thread(target=_watch, daemon=True)
+        watcher.start()
+
+    try:
+        # Write a defragmented copy, then close, swap the data file in, and reopen.
+        _lmdb_env.copy(str(tmp_dir), compact=True)
+    finally:
+        stop_watch.set()
+        if watcher is not None:
+            watcher.join(timeout=1.0)
+
     _lmdb_env.close()
     _lmdb_env = None
 
@@ -161,7 +291,141 @@ def compact_store() -> "tuple[int, int]":
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
     init_thumbnail_store(_lmdb_dir)
+    if progress is not None:
+        progress(expected, expected)
     return size_before, store_size_bytes()
+
+
+def store_stats() -> "dict[str, int]":
+    """Count what the store holds without modifying it.
+
+    Returns a dict with ``thumbnails`` (live image references), ``blobs``
+    (distinct stored payloads), ``legacy`` (entries not yet content-addressed)
+    and ``payload_bytes`` (total bytes across blobs and legacy entries).
+    """
+    if _lmdb_env is None:
+        return {"thumbnails": 0, "blobs": 0, "legacy": 0, "payload_bytes": 0}
+
+    thumbnails = blobs = legacy = payload = 0
+    with _lmdb_env.begin(buffers=True) as txn:
+        for key, value in txn.cursor():
+            key = bytes(key)
+            if key.startswith(_REF_PREFIX):
+                thumbnails += 1
+            elif key.startswith(_BLOB_PREFIX):
+                blobs += 1
+                payload += len(value)
+            else:
+                legacy += 1
+                thumbnails += 1
+                payload += len(value)
+    return {"thumbnails": thumbnails, "blobs": blobs,
+            "legacy": legacy, "payload_bytes": payload}
+
+
+def deduplicate_store(progress=None, should_stop=None) -> "dict[str, int]":
+    """Collapse identical thumbnails so each distinct payload is stored once.
+
+    Converts any entry still keyed by bare image id into the content-addressed
+    layout, then drops blobs nothing references any more (thumbnails deleted
+    since the last run leave those behind by design).  Finishes by compacting,
+    which is what actually returns the freed pages to the filesystem.
+
+    Safe to re-run and safe to interrupt: each batch is committed on its own, a
+    half-converted store still reads correctly, and stopping simply leaves the
+    remainder for the next run.
+
+    Args:
+        progress: Optional ``callable(done, total, phase)`` for a progress bar.
+        should_stop: Optional ``callable() -> bool`` polled between batches.
+
+    Returns:
+        Counts and sizes describing what changed — see the keys assembled below.
+
+    Raises:
+        RuntimeError: If the store has not been initialised.
+    """
+    if _lmdb_env is None or _lmdb_dir is None:
+        raise RuntimeError("Thumbnail store not initialised. Call init_thumbnail_store() first.")
+
+    def _report(done, total, phase):
+        if progress is not None:
+            progress(done, total, phase)
+
+    def _stopped():
+        return should_stop is not None and should_stop()
+
+    size_before = store_size_bytes()
+    before = store_stats()
+    _BATCH = 500
+
+    # ---- Phase 1: convert legacy entries, collapsing duplicates as we go ----
+    converted = 0
+    if before["legacy"]:
+        total = before["legacy"]
+        _report(0, total, "convert")
+        while not _stopped():
+            batch: list[tuple[int, bytes]] = []
+            with _lmdb_env.begin(buffers=True) as txn:
+                for key, value in txn.cursor():
+                    key = bytes(key)
+                    if key.startswith(_REF_PREFIX) or key.startswith(_BLOB_PREFIX):
+                        continue
+                    batch.append((int.from_bytes(key, "big"), bytes(value)))
+                    if len(batch) >= _BATCH:
+                        break
+            if not batch:
+                break
+
+            def _put(txn, _batch=batch):
+                for image_id, data in _batch:
+                    _put_thumbnail(txn, image_id, data)
+            _write(_put)
+            converted += len(batch)
+            _report(converted, total, "convert")
+
+    # ---- Phase 2: drop blobs no reference points at -------------------------
+    _report(0, 1, "sweep")
+    live: set = set()
+    orphans: list = []
+    with _lmdb_env.begin(buffers=True) as txn:
+        for key, value in txn.cursor():
+            if bytes(key).startswith(_REF_PREFIX):
+                live.add(bytes(value))
+    with _lmdb_env.begin(buffers=True) as txn:
+        for key, _value in txn.cursor():
+            key = bytes(key)
+            if key.startswith(_BLOB_PREFIX) and key not in live:
+                orphans.append(key)
+
+    for start in range(0, len(orphans), _BATCH):
+        chunk = orphans[start:start + _BATCH]
+
+        def _drop(txn, _chunk=chunk):
+            for key in _chunk:
+                txn.delete(key)
+        _write(_drop)
+        _report(min(start + _BATCH, len(orphans)), max(len(orphans), 1), "sweep")
+
+    # ---- Phase 3: hand the freed pages back to the filesystem ---------------
+    # Reported as a percentage: raw byte counts overflow the progress bar's int
+    # range, and dividing down to MB loses every store smaller than 1 MB.
+    compact_store(progress=lambda done, total:
+                  _report(done * 100 // max(total, 1), 100, "compact"))
+
+    after = store_stats()
+    return {
+        "thumbnails":     after["thumbnails"],
+        "blobs_before":   before["blobs"] + before["legacy"],
+        "blobs_after":    after["blobs"],
+        "converted":      converted,
+        "orphans_removed": len(orphans),
+        "payload_before": before["payload_bytes"],
+        "payload_after":  after["payload_bytes"],
+        "size_before":    size_before,
+        "size_after":     store_size_bytes(),
+        "stopped":        bool(_stopped()),
+    }
 
 
 def pdf_first_page_to_image_bytes(pdf_bytes: bytes) -> Optional[bytes]:
@@ -283,7 +547,7 @@ def save_thumbnail(image_bytes: bytes, image_id: int,
     thumb_bytes = make_thumbnail(image_bytes, max_size)
     if thumb_bytes is None:
         return None
-    _write(lambda txn: txn.put(_key(image_id), thumb_bytes))
+    _write(lambda txn: _put_thumbnail(txn, image_id, thumb_bytes))
     return str(image_id)
 
 
@@ -305,7 +569,7 @@ def save_thumbnail_returning_bytes(
     thumb_bytes = make_thumbnail(image_bytes, max_size)
     if thumb_bytes is None:
         return None
-    _write(lambda txn: txn.put(_key(image_id), thumb_bytes))
+    _write(lambda txn: _put_thumbnail(txn, image_id, thumb_bytes))
     return str(image_id), thumb_bytes
 
 
@@ -335,7 +599,7 @@ def save_thumbnails_batch(
     if prepared:
         def _put(txn):
             for image_id, thumb in prepared:
-                txn.put(_key(image_id), thumb)
+                _put_thumbnail(txn, image_id, thumb)
         _write(_put)
     return results
 
@@ -347,7 +611,7 @@ def write_raw_thumbnails_batch(items: "list[tuple[int, bytes]]") -> None:
     def _put(txn):
         for image_id, jpeg_bytes in items:
             if jpeg_bytes:
-                txn.put(_key(image_id), jpeg_bytes)
+                _put_thumbnail(txn, image_id, jpeg_bytes)
     try:
         _write(_put)
     except lmdb.Error as exc:
@@ -371,7 +635,7 @@ def write_raw_thumbnail(image_id: int, jpeg_bytes: bytes) -> Optional[str]:
     if _lmdb_env is None:
         return None
     try:
-        _write(lambda txn: txn.put(_key(image_id), jpeg_bytes))
+        _write(lambda txn: _put_thumbnail(txn, image_id, jpeg_bytes))
         return str(image_id)
     except lmdb.Error:
         return None
@@ -398,6 +662,9 @@ def delete_thumbnail(path_or_id: object) -> None:
         return
     try:
         with _lmdb_env.begin(write=True) as txn:
+            # Only the reference goes: the blob may still be shared with other
+            # images.  Unreferenced blobs are reclaimed by deduplicate_store().
+            txn.delete(_ref_key(image_id))
             txn.delete(_key(image_id))
     except lmdb.Error:
         pass
@@ -408,7 +675,7 @@ def get_thumbnail_bytes(image_id: int) -> Optional[bytes]:
     if _lmdb_env is None:
         return None
     with _lmdb_env.begin() as txn:
-        return txn.get(_key(image_id))
+        return _get_thumbnail(txn, image_id)
 
 
 def get_thumbnail_bytes_many(image_ids) -> "dict[int, bytes]":
@@ -420,9 +687,8 @@ def get_thumbnail_bytes_many(image_ids) -> "dict[int, bytes]":
         return {}
     result: dict[int, bytes] = {}
     with _lmdb_env.begin() as txn:
-        cursor = txn.cursor()
         for image_id in image_ids:
-            data = cursor.get(_key(image_id))
+            data = _get_thumbnail(txn, image_id)
             if data is not None:
                 result[image_id] = data
     return result

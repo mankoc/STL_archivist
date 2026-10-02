@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Compacting the thumbnail store now shows progress.** Compaction is a single blocking call inside LMDB with no callback of its own, so the bar sat still for the whole run and the dialog looked frozen — on a multi-gigabyte store that is a long silence. Progress is now derived by watching the compacted copy grow on disk against the expected payload size, reported as a percentage. This applies both to **Compact Thumbnail Store**, which previously reported no progress at all, and to the compaction phase of **Deduplicate Thumbnails**.
+
+- **Thumbnails are now deduplicated: new _Deduplicate Thumbnails_ action in Database Maintenance.** The store held one copy per image record, so a render shipped in many archives was stored many times — on a 338k-thumbnail library measured at 48% duplicate entries and 4.7 GB (51%) recoverable, with some images held 738 times over. The store is now content-addressed: an image id maps to a key derived from the thumbnail's xxh3-128 digest, and identical payloads share one blob. Digest hits are confirmed by comparing bytes, so a hash collision can never serve the wrong image.
+  - The button converts an existing store, sweeps blobs nothing references any more, and compacts, with a progress bar per phase. It commits as it goes, so it is safe to stop and re-run — and a partly converted store still reads correctly. New thumbnails are written deduplicated, so duplicates do not accumulate again.
+  - Deleting an image now drops only its reference; the shared image survives for other models and unreferenced blobs are reclaimed on the next run.
+  - The public API is unchanged — still addressed by `Image.id` — so nothing outside the thumbnail store needed to change.
+
+- **Fixed: the thumbnail store's reported size was always the 10 GB map.** `store_size_bytes()` used `data.mdb`'s logical length, but LMDB sizes that file to the whole map up front and on Windows it is sparse — so **Compact Thumbnail Store** always reported “10240 MB → 10240 MB, 0 MB reclaimed” however much it actually freed. It now measures blocks actually allocated (`st_blocks` where available, the NTFS valid data length on Windows).
+
 - **Warning details now show file sizes.** Each file listed under a warning carries its size, and the heading gives the total — so *Nested archives* and *Models with presupported stl* tell you how much of the archive they account for, not just which files matched. Sizes come from the archive catalog (no decompression), so they are the uncompressed sizes of those members; a member whose format does not record a size is listed without one and excluded from the total, which says how many were skipped.
 
 - **Mass Edit: new _Show parsed values_ button.** Opens a table of what the path pattern extracts for every selected model — one row per model, one column per field, with paths the pattern misses marked *no match* and a matched-N-of-M summary. The pattern is re-parsed when you open it, so the table always reflects what is in the box.
