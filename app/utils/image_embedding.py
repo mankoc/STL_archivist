@@ -13,8 +13,10 @@ Model lookup order (first existing wins):
   3. ``<package_root>/resources/models/clip_image_encoder.onnx``
 
 The model is expected to take a float32 tensor of shape ``(N, 3, 224, 224)``
-(RGB, CLIP-normalised) and output ``(N, D)`` image embeddings; any embedding
-dimension ``D`` works as long as every stored vector uses the same model.
+(RGB, CLIP-normalised) and output ``(N, EMBED_DIM)`` image embeddings.  Vectors
+are stored in the sqlite-vec table ``image_vec`` (``app/database/vectors.py``),
+whose column has a fixed dimension, so a model with a different output size
+needs ``EMBED_DIM`` and ``EMBED_MODEL_ID`` changed together.
 
 Heavy imports (``numpy``, ``onnxruntime``) are deferred into functions so that
 merely importing this module never pulls them in.
@@ -36,6 +38,8 @@ MODEL_FILENAME = "clip_image_encoder.onnx"
 
 # Stored alongside each embedding so swapping the model invalidates old vectors.
 EMBED_MODEL_ID = "clip-vit-b32-onnx"
+# Output dimension of that model; fixes the width of the image_vec column.
+EMBED_DIM = 512
 
 _INPUT_SIZE = 224
 # CLIP image preprocessing normalisation constants.
@@ -100,15 +104,24 @@ def reset_session() -> None:
     _session_tried = False
 
 
+def _vector_store_ok() -> bool:
+    # Deferred: app.database.vectors imports this module.
+    from app.database import vectors
+    return vectors.available()
+
+
 def is_available() -> bool:
-    """True if embeddings can be computed (deps installed and model present)."""
-    return _deps_ok() and model_path() is not None
+    """True if embeddings can be computed and stored (deps, model, sqlite-vec)."""
+    return _deps_ok() and model_path() is not None and _vector_store_ok()
 
 
 def unavailable_reason() -> str:
     """Human-readable explanation of why embeddings are unavailable ('' if available)."""
     if not _deps_ok():
         return "Install 'onnxruntime' and 'numpy' to enable AI image embeddings."
+    if not _vector_store_ok():
+        return ("The sqlite-vec extension could not be loaded. Install 'sqlite-vec' "
+                "with a Python whose sqlite3 module allows loading extensions.")
     if model_path() is None:
         return (
             f"CLIP model not found. Place '{MODEL_FILENAME}' in "

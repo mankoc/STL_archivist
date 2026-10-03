@@ -161,6 +161,9 @@ def main() -> None:
     db_path = get_db_path()
     _migrate_db_filename(db_path)
     db_path = _check_db_on_startup(db_path, splash)
+    from app.database.vectors import legacy_embeddings_present
+    if legacy_embeddings_present(db_path):
+        _update_splash(splash, "Moving image embeddings to sqlite-vec (one time, about a minute)…")
     init_db(db_path)
     backfill_archive_folder()
 

@@ -353,6 +353,7 @@ class EmbeddingWorker(QThread):
         self._stop_requested = True
 
     def run(self) -> None:
+        from app.database import vectors
         from app.database.db import session_scope
         from app.database.models import Image as DBImage
         from app.utils.thumbnailer import get_thumbnail_bytes
@@ -368,12 +369,12 @@ class EmbeddingWorker(QThread):
             return
 
         with session_scope() as session:
+            orphans = vectors.prune_orphans(session)
+            if orphans:
+                self.log.emit(f"Removed {orphans} embedding(s) of deleted images.")
             query = session.query(DBImage.id, DBImage.thumbnail)
             if not self._recompute_all:
-                query = query.filter(
-                    DBImage.embedding.is_(None)
-                    | (DBImage.embedding_model != emb.EMBED_MODEL_ID)
-                )
+                query = query.filter(DBImage.id.notin_(vectors.current_ids()))
             rows = query.all()
 
         total = len(rows)
@@ -385,17 +386,13 @@ class EmbeddingWorker(QThread):
         verb = "Recomputing" if self._recompute_all else "Computing"
         self.log.emit(f"{verb} image embeddings for {total} image(s)…")
 
-        pending: list[tuple[int, bytes]] = []   # (image_id, blob)
+        pending: list = []   # (image_id, vector)
 
         def flush() -> None:
             if not pending:
                 return
             with session_scope() as s:
-                for img_id, blob in pending:
-                    img = s.query(DBImage).filter(DBImage.id == img_id).first()
-                    if img:
-                        img.embedding = blob
-                        img.embedding_model = emb.EMBED_MODEL_ID
+                vectors.store(s, pending)
             pending.clear()
 
         computed = 0
@@ -425,7 +422,7 @@ class EmbeddingWorker(QThread):
                 if vec is None:
                     skipped += 1
                 else:
-                    pending.append((image_id, emb.to_blob(vec)))
+                    pending.append((image_id, vec))
                     computed += 1
 
             if len(pending) >= self._WRITE_BATCH:

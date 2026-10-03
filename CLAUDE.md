@@ -61,6 +61,17 @@ Handles all archive I/O and metadata extraction.
   `Category`, `Subcategory`, `Release`, `Scale`. Tags use a many-to-many join table.
 - **`db.py`** — engine/session factory (`init_db`, `session_scope`), WAL-mode pragmas,
   schema migration helper (`_ensure_columns`).
+- **`vectors.py`** — CLIP embeddings in the sqlite-vec `vec0` table `image_vec` (keyed by
+  `Image.id`; `images` has no embedding column). sqlite-vec is loaded per connection in the
+  engine's `connect` event; if it fails, `vectors.available()` is False and embedding features
+  disable themselves. Image deletes reach `image_vec` through a **TEMP** trigger created per
+  connection — never make it a persistent trigger, which breaks image deletes in any connection
+  without the extension. vec0 has no `INSERT OR REPLACE` (use `vectors.store`), caps KNN `k`
+  at 4096, and must not be joined inside a KNN query: put the `MATCH` in a `MATERIALIZED` CTE.
+  Searches go through `app/services/image_similarity.py`. For whole-table reads use
+  `vectors.read_all()`, which decodes sqlite-vec's chunk shadow tables (4.7x faster than a
+  row scan). It is gated on `_CHUNK_LAYOUT_VERSIONS`; after upgrading sqlite-vec, run
+  `tests/test_vectors.py` and add the new version only if the layout test passes.
 
 ### `app/ui/`
 
@@ -105,6 +116,11 @@ Qt-free business logic, testable without a `QApplication`:
   `query(...).filter_by(name=…).first()` + `add` + `flush`.
 - **`lookups.py`** — `usage_counts(session, kind)`: one `GROUP BY` instead of `len(x.models)`,
   which lazy-loads every referencing model row.
+- **`image_similarity.py`** — CLIP searches: `find_similar_models` (KNN over the
+  `MAX_RESULT_IMAGES` = 1024 nearest images, best image per model, returns `(results, capped)`)
+  and `load_model_vectors` for the all-pairs duplicate scan.
+- **`model_summary.py`** — `model_summary(session, model_id)`: one-statement display row
+  (names, tags, image count) for detail panels; cheap enough for the GUI thread.
 - **`maintenance.py`** — Database Maintenance operations (verify, duplicate entries, prune images).
 - **`file_deletion.py`** — archive deletion / trash.
 
@@ -194,6 +210,7 @@ Always update the readme, help and changelog with the changes that are made.
 | Store | Path | Contents |
 |---|---|---|
 | SQLite | `<data_dir>/*.db` | All model metadata, relationships |
+| sqlite-vec | `image_vec` table in the `.db` | CLIP image embeddings (512-d float32), keyed by `Image.id` |
 | LMDB | `<data_dir>/thumbnails.lmdb/` | JPEG thumbnails, keyed by `Image.id` |
 | Log | `<data_dir>/stlLibrary.log` | Rotating compressed log |
 | Sidecar | `<archive_folder>/METADATA.7z` | Per-folder snapshot for fast restore |

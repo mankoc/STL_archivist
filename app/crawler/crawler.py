@@ -27,6 +27,7 @@ from app.crawler.rules import (
     detect_presupport, detect_scale, detect_warnings,
     WARNING_LOW_COMPRESSION, WARNING_UNREADABLE,
 )
+from app.database import vectors
 from app.database.db import session_scope
 from app.database.helpers import (
     get_or_create_category,
@@ -43,6 +44,16 @@ from app.utils.thumbnailer import (
 )
 from app.utils.image_hash import compute_dhash_from_jpeg, format_dhash
 from app.utils.path_pattern import parse_path, apply_extracted_to_model, parse_release_date
+
+
+def _store_embeddings(session, images: list[Image], vecs: list) -> None:
+    """Write the CLIP vectors computed for *images* (parallel list) to image_vec."""
+    if not vecs:
+        return
+    try:
+        vectors.store(session, [(img.id, v) for img, v in zip(images, vecs) if v is not None])
+    except Exception:
+        logger.debug("  Failed to store embeddings", exc_info=True)
 
 
 class CrawlerWorker(QThread):
@@ -1207,21 +1218,13 @@ class CrawlerWorker(QThread):
                     except Exception:
                         embed_vecs = [None] * len(resolved_pre)
 
-                for i, (img, jpeg, dhash_int) in enumerate(resolved_pre):
+                for img, jpeg, dhash_int in resolved_pre:
                     img.thumbnail_path = str(img.id)
                     if dhash_int is not None:
                         img.dhash = format_dhash(dhash_int)
-                    if embed_vecs:
-                        # _emb is already imported above where embed_vecs was built.
-                        try:
-                            vec = embed_vecs[i]
-                            if vec is not None:
-                                img.embedding = _emb.to_blob(vec)
-                                img.embedding_model = _emb.EMBED_MODEL_ID
-                        except Exception:
-                            logger.debug("  Failed to store embedding for image id %s", img.id)
                     count += 1
                     logger.debug("  Thumbnail saved: %s → %s", img.filename, img.thumbnail_path)
+                _store_embeddings(session, [img for img, _, _ in resolved_pre], embed_vecs)
             else:
                 # Slow path (fallback): resolve raw bytes and resize serially.
                 from app.utils.thumbnailer import pdf_first_page_to_image_bytes
@@ -1261,7 +1264,7 @@ class CrawlerWorker(QThread):
                     except Exception:
                         embed_vecs = [None] * len(img_records)
 
-                for i, (img, (_iid, rel_path, jpeg_bytes)) in enumerate(zip(img_records, batch_results)):
+                for img, (_iid, rel_path, jpeg_bytes) in zip(img_records, batch_results):
                     if rel_path:
                         img.thumbnail_path = rel_path
                         try:
@@ -1271,15 +1274,6 @@ class CrawlerWorker(QThread):
                                     img.dhash = format_dhash(h)
                         except Exception:
                             logger.debug("  Failed to compute dHash for image id %s", img.id)
-                        if embed_vecs:
-                            # _emb is already imported above where embed_vecs was built.
-                            try:
-                                vec = embed_vecs[i]
-                                if vec is not None:
-                                    img.embedding = _emb.to_blob(vec)
-                                    img.embedding_model = _emb.EMBED_MODEL_ID
-                            except Exception:
-                                logger.debug("  Failed to store embedding for image id %s", img.id)
                         count += 1
                         logger.debug("  Thumbnail saved: %s → %s", img.filename, rel_path)
                     else:
@@ -1288,6 +1282,8 @@ class CrawlerWorker(QThread):
                         self.log.emit(msg)
                         logger.warning("Thumbnail conversion failed: %s in %s",
                                        img.filename, archive_path.name)
+                # Failed conversions embedded b"" and got None, so they are skipped.
+                _store_embeddings(session, img_records, embed_vecs)
 
             self.log.emit(f"  {count} thumbnail(s) stored")
             logger.debug("  %d thumbnail(s) stored for %s", count, archive_path.name)

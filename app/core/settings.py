@@ -274,10 +274,6 @@ def get_ai_embeddings_batch_size() -> int:
     return int(_load_library_settings().get("ai_embeddings_batch_size", 32))
 
 
-def get_embed_search_batch_size() -> int:
-    return int(_load_library_settings().get("embed_search_batch_size", 1000))
-
-
 def build_crawler_config(max_thumbnails: int | None = None, force_rescan: bool = False) -> CrawlerConfig:
     """Return a :class:`CrawlerConfig` populated from the current settings.
 

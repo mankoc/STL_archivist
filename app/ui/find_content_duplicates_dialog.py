@@ -566,55 +566,28 @@ class _EmbeddingDupWorker(QThread):
         self._stop = True
 
     def run(self) -> None:
+        from collections import Counter
+
         from app.database.db import session_scope
-        from app.database.models import Image, STLModel
-        from app.utils import image_embedding as emb
+        from app.database.models import STLModel
+        from app.services.image_similarity import load_model_vectors
 
         try:
             import numpy as np
 
-            # Stream embeddings from DB row-by-row to avoid a ~1 GB materialised result set.
+            # All-pairs comparison stays in NumPy: one KNN query per image would be far slower.
             self.progress.emit("Loading image embeddings…")
-            model_ids: list[int] = []
-            vecs: list = []
-            model_img_count: dict[int, int] = defaultdict(int)
-            dim: int | None = None
-            self.embeddings_loaded = 0
-
             with session_scope() as session:
-                q = (
-                    session.query(Image.model_id, Image.embedding)
-                    .join(STLModel, STLModel.id == Image.model_id)
-                    .filter(Image.embedding.isnot(None))
-                    .filter(Image.embedding_model == emb.EMBED_MODEL_ID)
-                    .filter(STLModel.is_missing.isnot(True))
-                    .yield_per(1000)
-                )
-                for model_id, blob in q:
-                    self.embeddings_loaded += 1
-                    v = emb.from_blob(blob)
-                    if v is None or v.size == 0:
-                        continue
-                    if dim is None:
-                        dim = v.size
-                    elif v.size != dim:
-                        continue
-                    model_ids.append(model_id)
-                    vecs.append(v.astype(np.float16))  # halves per-vector footprint immediately
-                    model_img_count[model_id] += 1
-                    if self.embeddings_loaded % 10_000 == 0:
-                        self.progress.emit(f"Loading embeddings… {self.embeddings_loaded:,}")
+                mids, M = load_model_vectors(session)
+            self.embeddings_loaded = self.embeddings_valid = len(mids)
+            model_img_count = Counter(mids.tolist())
 
-            self.embeddings_valid = len(vecs)
-            if len(vecs) < 2:
+            if len(mids) < 2:
                 self.scan_finished.emit([])
                 return
 
-            # Build the matrix and immediately release the Python list.
             # float16: ~512 MB for 500K×512-dim vs ~1 GB for float32.
-            M = np.vstack(vecs).astype(np.float16)
-            del vecs
-            mids = np.asarray(model_ids)
+            M = M.astype(np.float16)
             n = M.shape[0]
             thr = np.float16(self._threshold)
 
