@@ -121,7 +121,7 @@ On first launch, go to **File → Configuration…** and set up:
 - **File writing** — enable *Sort files into directory* (adds a right-click menu entry); optionally enable *Allow file delete* (with a confirmation guard) to physically delete or trash archive files from the right-click menu; configure a *Trash folder* to move deleted files there instead of permanently removing them
 - **File writing → Sidecar** — enable *Metadata sidecar* to write `METADATA.7z` per folder during crawl; optionally include thumbnails
 - **Browser** — configure the filter pane (model counts, alphabetical letter bins) and the **File Manager** used when opening archive folders: System Default, Double Commander, or a custom executable path
-- **Appearance** — select the interface **Language**, a color scheme (preview is applied immediately; Cancel reverts), highlight colors, and fonts
+- **Appearance** — select the interface **Language**, a color scheme (preview is applied immediately; Cancel reverts), an **Icon set** (Material monochrome, Fluent Color, Fluent Emoji or Flat Color Icons; applies after restart), **Toolbar buttons** (icon and text, or icon only), highlight colors, and fonts
 
 ### 2. Crawl your archive folder
 

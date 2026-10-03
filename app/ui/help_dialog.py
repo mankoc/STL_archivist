@@ -953,6 +953,14 @@ Add, edit, or remove patterns as needed for your naming conventions.</p>
   <tr><td>Color scheme</td>
       <td>Choose a built-in theme (System, Win11 Light/Dark, VS Code Dark, or a
           Material variant). A live preview is shown as you select each option.</td></tr>
+  <tr><td>Icon set</td>
+      <td>Icons for the toolbar, crawler buttons and filter-pane sections:
+          <b>Material</b> (monochrome, follows the light/dark theme),
+          <b>Fluent Color</b>, <b>Fluent Emoji</b> or <b>Flat Color Icons</b>.
+          A preview strip shows the selected set; the change applies after a restart.</td></tr>
+  <tr><td>Toolbar buttons</td>
+      <td><b>Icon and text</b> (default) or <b>Icon only</b> for the main toolbar.
+          With icons only, hover a button to see its name. Applies immediately.</td></tr>
   <tr><td>Custom Colors</td>
       <td>Collapsible section (3-column grid) of per-element colour overrides:
           duplicate-highlight, status indicators, warning rows, maintenance view,

@@ -113,9 +113,14 @@ Qt-free business logic, testable without a `QApplication`:
 - **`thumbnailer.py`** — LMDB key-value store for JPEG thumbnails (keyed by `Image.id`).
   Key API: `save_thumbnail(bytes, image_id)` resizes and writes; `pixmap_from_path(str)` reads
   back a `QPixmap`; `delete_thumbnail(id)` removes an entry.
-- **`material_icons.py`** — Material Design Icons integration. Maps application icon names to
-  Material Icon symbols and caches them locally. Automatically applies light/dark theme coloring.
-  Entry point: `lookup_icon(app_icon_name, is_dark_mode)`. Icons are pre-cached via `setup_material_icons.py`.
+- **`material_icons.py`** — application icons. Maps icon roles (`ICON_MAP` keys) to Material
+  Icon symbols (pre-cached via `setup_material_icons.py`, tinted for light/dark), or, when the
+  user picks a colour set in Appearance (`icon_set` setting), to
+  `resources/iconsets/<set>/<role>.svg` rendered untinted. Entry point:
+  `lookup_icon(app_icon_name, is_dark_mode)`. The colour sets are vendored by `setup_iconsets.py`,
+  whose `ROLES` table maps each role per set. **Adding a role** means: add it to `ICON_MAP`,
+  add a row to `ROLES`, re-run `setup_iconsets.py`. `tests/test_icon_sets.py` fails until every
+  set covers every role.
 - **`path_pattern.py`** — parses structured folder paths using `{sculptor}/{release}/{title}`
   syntax and maps extracted values onto ORM model fields.
 - **`string_utils.py`** — Levenshtein distance and Soundex (used for fuzzy name matching).

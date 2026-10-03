@@ -135,7 +135,7 @@ class MainWindow(QMainWindow):
         self._act_ai_tagging.triggered.connect(self._browser.open_ai_tagger_for_selection)
 
         self._act_archive_browser = QAction(
-            _icon("image_grid"), self.tr("Image Browsing"), self)
+            _icon("archive_browser"), self.tr("Image Browsing"), self)
         self._act_archive_browser.setShortcut(QKeySequence(_hk["archive_browser"]))
         self._act_archive_browser.setStatusTip(
             self.tr("Browse and view images organized by crawled directory"))
@@ -288,10 +288,12 @@ class MainWindow(QMainWindow):
 
         # ---- Toolbar ----
         toolbar = QToolBar("Main Toolbar")
+        toolbar.setObjectName("mainToolbar")
         toolbar.setMovable(False)
-        toolbar.setIconSize(QSize(36, 36))
-        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+        toolbar.setIconSize(QSize(self._TOOLBAR_ICON_PX, self._TOOLBAR_ICON_PX))
         self.addToolBar(toolbar)
+        self._toolbar = toolbar
+        self._apply_toolbar_style()
 
         toolbar.addAction(self._act_open_crawler)
         toolbar.addSeparator()
@@ -539,6 +541,7 @@ class MainWindow(QMainWindow):
         from app.ui.config_dialog import ConfigDialog
         ConfigDialog(parent=self).exec()
         self._apply_debug_menu_visibility()
+        self._apply_toolbar_style()
 
     def _open_metadata_sidecar_dialog(self) -> None:
         """Open the metadata sidecar generation dialog."""
@@ -614,6 +617,33 @@ class MainWindow(QMainWindow):
         """Open the column distribution dialog."""
         from app.ui.column_stats_dialog import ColumnStatsDialog
         ColumnStatsDialog(parent=self).exec()
+
+    _TOOLBAR_ICON_PX = 36
+
+    def _apply_toolbar_style(self) -> None:
+        """Apply Appearance → Toolbar buttons (icon only / icon and text).
+
+        qt-material themes pin every QToolButton to ``height: 36px`` — exactly
+        the icon height, which leaves no room for a label under it.  The
+        toolbar therefore sets the height it actually needs on itself (a
+        widget style sheet wins over the application's).  Other themes size
+        buttons from their contents, so they get no override.
+        """
+        from app.ui.config_dialog import (
+            get_color_scheme, get_toolbar_style, is_material_theme, TOOLBAR_ICON_ONLY,
+        )
+        icon_only = get_toolbar_style() == TOOLBAR_ICON_ONLY
+        self._toolbar.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonIconOnly if icon_only
+            else Qt.ToolButtonStyle.ToolButtonTextUnderIcon
+        )
+        if is_material_theme(get_color_scheme()):
+            height = self._TOOLBAR_ICON_PX
+            if not icon_only:
+                height += self._toolbar.fontMetrics().height() + 4
+            self._toolbar.setStyleSheet(f"QToolButton {{ height: {height}px; }}")
+        else:
+            self._toolbar.setStyleSheet("")
 
     def _apply_debug_menu_visibility(self) -> None:
         """Show or hide settings-driven actions based on current configuration."""

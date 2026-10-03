@@ -107,6 +107,31 @@ def get_color_scheme() -> str:
     return _load_library_settings().get("color_scheme", COLOR_SCHEME_DEFAULT)
 
 
+TOOLBAR_ICON_TEXT = "icon_text"
+TOOLBAR_ICON_ONLY = "icon_only"
+
+
+def get_toolbar_style() -> str:
+    """Return how main-toolbar buttons are shown: ``"icon_text"`` or ``"icon_only"``."""
+    value = _load_library_settings().get("toolbar_style", TOOLBAR_ICON_TEXT)
+    return value if value in (TOOLBAR_ICON_TEXT, TOOLBAR_ICON_ONLY) else TOOLBAR_ICON_TEXT
+
+
+def is_material_theme(scheme_name: str) -> bool:
+    """True when *scheme_name* (or the built-in theme a custom scheme is based on)
+    is rendered by qt-material."""
+    custom = _load_library_settings().get("custom_color_schemes", {})
+    if scheme_name in custom:
+        scheme_name = custom[scheme_name].get("base_theme", "System Default")
+    return THEMES.get(scheme_name, "").startswith("material:")
+
+
+def get_icon_set() -> str:
+    """Return the configured icon set id (see ``app.utils.material_icons.ICON_SETS``)."""
+    from app.utils.material_icons import DEFAULT_ICON_SET
+    return str(_load_library_settings().get("icon_set", DEFAULT_ICON_SET))
+
+
 def get_language() -> str:
     """Return the configured UI language code (e.g. ``"en"``, ``"de"``)."""
     from app.utils.i18n import DEFAULT_LANGUAGE
@@ -1429,6 +1454,22 @@ class ConfigDialog(QDialog):
         layout.addStretch()
         return page
 
+    # Sample of icon roles shown in the Appearance → Icons preview strip.
+    _ICON_PREVIEW_ROLES = (
+        "open_crawler", "update_folders", "toggle_images", "find_dupes",
+        "crawler_start", "crawler_stop", "icon_author", "icon_tag",
+        "icon_date", "icon_path", "icon_scale", "icon_warnings",
+    )
+
+    def _preview_icon_set(self, *_args) -> None:
+        """Show the selected icon set in the preview strip (no restart needed)."""
+        from app.utils.material_icons import lookup_icon
+        set_id = self._icon_set_combo.currentData() or "material"
+        is_dark = "dark" in self._theme_combo.currentText().lower()
+        for role, lbl in zip(self._ICON_PREVIEW_ROLES, self._icon_preview_labels):
+            lbl.setPixmap(lookup_icon(role, is_dark_mode=is_dark, icon_set=set_id).pixmap(24, 24))
+            lbl.setToolTip(role)
+
     def _build_appearance_page(self) -> QWidget:
         # Outer page widget holds only the scroll area (no extra margins)
         page = QWidget()
@@ -1456,6 +1497,41 @@ class ConfigDialog(QDialog):
             QLabel(self.tr("<small>Preview is applied immediately. Cancel reverts to the previous scheme.</small>")),
         )
         layout.addWidget(theme_group)
+
+        # ---- Icon Set ----------------------------------------------------
+        from app.utils.material_icons import available_icon_sets
+        icon_group = QGroupBox(self.tr("Icons"))
+        icon_form = QFormLayout(icon_group)
+        self._icon_set_combo = QComboBox()
+        for set_id, label in available_icon_sets().items():
+            self._icon_set_combo.addItem(label, set_id)
+        self._icon_set_combo.currentIndexChanged.connect(self._preview_icon_set)
+        icon_form.addRow(self.tr("Icon set:"), self._icon_set_combo)
+        self._toolbar_style_combo = QComboBox()
+        self._toolbar_style_combo.addItem(self.tr("Icon and text"), TOOLBAR_ICON_TEXT)
+        self._toolbar_style_combo.addItem(self.tr("Icon only"), TOOLBAR_ICON_ONLY)
+        self._toolbar_style_combo.setToolTip(
+            self.tr("Main toolbar buttons. With icons only, hover a button to see its name.")
+        )
+        icon_form.addRow(self.tr("Toolbar buttons:"), self._toolbar_style_combo)
+        self._icon_preview_row = QHBoxLayout()
+        self._icon_preview_labels: list[QLabel] = []
+        for _ in self._ICON_PREVIEW_ROLES:
+            lbl = QLabel()
+            lbl.setFixedSize(28, 28)
+            self._icon_preview_labels.append(lbl)
+            self._icon_preview_row.addWidget(lbl)
+        self._icon_preview_row.addStretch()
+        icon_form.addRow(self.tr("Preview:"), self._icon_preview_row)
+        icon_form.addRow(
+            "",
+            QLabel(self.tr("<small>The icon set (toolbar, crawler and filter-pane icons) "
+                           "takes effect after restarting the application; "
+                           "the toolbar button style applies immediately.</small>")),
+        )
+        layout.addWidget(icon_group)
+        # Monochrome Material icons are drawn black or white per theme.
+        self._theme_combo.currentTextChanged.connect(self._preview_icon_set)
 
         # ---- Duplicate Highlight Colors ----------------------------------
         pair_group = QGroupBox(self.tr("Duplicate Highlight Colors"))
@@ -1879,6 +1955,12 @@ class ConfigDialog(QDialog):
                 self._ui_color_overrides[new_key] = settings[leg_key]
         self._refresh_all_ui_color_btns()
 
+        icon_idx = self._icon_set_combo.findData(get_icon_set())
+        self._icon_set_combo.setCurrentIndex(icon_idx if icon_idx >= 0 else 0)
+        self._preview_icon_set()
+        tb_idx = self._toolbar_style_combo.findData(get_toolbar_style())
+        self._toolbar_style_combo.setCurrentIndex(tb_idx if tb_idx >= 0 else 0)
+
         # Load font settings
         family = settings.get("font_family", "")
         if family:
@@ -1937,6 +2019,8 @@ class ConfigDialog(QDialog):
         old_dir = get_data_dir()
         old_language = get_language()
         new_language = self._language_combo.currentData() or "en"
+        old_icon_set = get_icon_set()
+        new_icon_set = self._icon_set_combo.currentData() or "material"
 
         # Save the data-directory pointer and global tool paths
         QSettings().setValue(DATA_DIR_KEY, data_dir)
@@ -1959,6 +2043,8 @@ class ConfigDialog(QDialog):
                 "max_workers":       self._max_workers_spin.value(),
                 "language":          new_language,
                 "color_scheme":      selected_scheme,
+                "icon_set":          new_icon_set,
+                "toolbar_style":     self._toolbar_style_combo.currentData() or TOOLBAR_ICON_TEXT,
                 "ui_color_overrides": self._ui_color_overrides,
                 "custom_color_schemes": custom_color_schemes,
                 "filter_show_counts": self._filter_show_counts_check.isChecked(),
@@ -2048,6 +2134,12 @@ class ConfigDialog(QDialog):
                 self,
                 self.tr("Configuration"),
                 self.tr("Language updated. Please restart the application for the change to fully take effect."),
+            )
+        elif new_icon_set != old_icon_set:
+            QMessageBox.information(
+                self,
+                self.tr("Configuration"),
+                self.tr("Icon set updated. Please restart the application for the change to take effect."),
             )
         self.accept()
 
