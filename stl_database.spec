@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules
 
 block_cipher = None
 
@@ -27,10 +27,13 @@ hiddenimports = [
 ]
 hiddenimports += collect_submodules('sqlalchemy.dialects.sqlite')
 
+# sqlite-vec's loadable extension (vec0.dll / .so / .dylib) for image embeddings.
+binaries = collect_dynamic_libs('sqlite_vec')
+
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],

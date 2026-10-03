@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import sessionmaker, Session
 
+from app.database import vectors
 from app.database.models import Base
 
 logger = logging.getLogger(__name__)
@@ -42,17 +43,23 @@ def init_db(db_path: str = "stlLibrary.db") -> None:
             cursor.execute("PRAGMA cache_size=-65536")
             # Sort buffers / temp tables held in RAM instead of /tmp.
             cursor.execute("PRAGMA temp_store=MEMORY")
-            # 256 MB memory-mapped I/O window for read-heavy scans.
-            cursor.execute("PRAGMA mmap_size=268435456")
+            # Memory-mapped I/O window for read-heavy scans: 2 GB, SQLite's default
+            # ceiling.  sqlite-vec KNN reads every vector (~700 MB at 334k images);
+            # with a 256 MB window it ran 2.8x slower.  File-backed, so it adds
+            # address space, not private memory.
+            cursor.execute("PRAGMA mmap_size=2147483648")
             # Wait up to 5 s for a held lock before raising OperationalError.
             cursor.execute("PRAGMA busy_timeout=5000")
             # Auto-checkpoint when the WAL grows past ~1000 pages (~4 MB).
             cursor.execute("PRAGMA wal_autocheckpoint=1000")
         finally:
             cursor.close()
+        # sqlite-vec must be loaded per connection to reach the image_vec table.
+        vectors.on_connect(conn)
 
     _migrate_schema(_engine)
     Base.metadata.create_all(_engine)
+    vectors.ensure_schema(_engine)
     _ensure_columns(_engine)
     _migrate_scales(_engine)
     _ensure_views(_engine)

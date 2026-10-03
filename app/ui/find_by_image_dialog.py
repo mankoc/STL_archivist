@@ -1,21 +1,25 @@
 """
 Find by Image dialog — loads an image from disk, computes its perceptual hash
 (dHash), and shows database models whose images are closest by Hamming distance.
+
+Clicking a result shows its full thumbnail and model details in the side panel,
+with a *Go to Model* button that selects the model in the main table.
 """
 import logging
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
-    QApplication, QDialog, QFileDialog, QGridLayout, QHBoxLayout,
-    QLabel, QLineEdit, QPushButton, QScrollArea, QSpinBox, QDoubleSpinBox,
-    QComboBox, QSplitter, QVBoxLayout, QWidget, QFrame,
+    QApplication, QDialog, QFileDialog, QFormLayout, QGridLayout, QHBoxLayout,
+    QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QSpinBox,
+    QDoubleSpinBox, QComboBox, QSplitter, QVBoxLayout, QWidget, QFrame,
 )
 
 from app.database.db import session_scope
 from app.database.models import Image as DBImage, STLModel
+from app.services.image_similarity import MAX_RESULT_IMAGES
 from app.utils.thumbnailer import pixmap_from_path
 from app.utils import image_embedding as _emb
 import numpy as np
@@ -30,6 +34,7 @@ _THUMB_SIZE       = 130
 _CELL_WIDTH       = 156   # thumb + padding
 _COLS             = 4
 _MAX_DIST_DEFAULT = 16
+_DETAIL_WIDTH     = 340
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -39,19 +44,23 @@ _MAX_DIST_DEFAULT = 16
 class _ResultCell(QFrame):
     """Thumbnail + distance badge + title for a single search result."""
 
-    clicked = pyqtSignal(int)   # emits model_id
+    clicked   = pyqtSignal(object)   # emits the cell itself
+    activated = pyqtSignal(int)      # double-click: emits model_id
 
     def __init__(self, model_id: int, thumbnail_path: Optional[str],
                  title: str, archive: str, score_text: str, parent=None) -> None:
         super().__init__(parent)
-        self._model_id = model_id
+        self.model_id = model_id
+        self.thumbnail_path = thumbnail_path
+        self.score_text = score_text
+        self.setObjectName("resultCell")
         self.setFrameShape(QFrame.Shape.Box)
         self.setLineWidth(1)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedWidth(_CELL_WIDTH)
         self.setToolTip(
             f"{title or '(no title)'}\n{archive}\n{score_text}\n"
-            "Click to show in browser"
+            + self.tr("Click for details, double-click to go to the model")
         )
 
         layout = QVBoxLayout(self)
@@ -84,10 +93,175 @@ class _ResultCell(QFrame):
         title_lbl.setStyleSheet("font-size: 10px;")
         layout.addWidget(title_lbl)
 
+    def set_selected(self, selected: bool) -> None:
+        self.setStyleSheet(
+            "QFrame#resultCell { border: 2px solid palette(highlight); }" if selected else ""
+        )
+
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit(self._model_id)
+            self.clicked.emit(self)
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.activated.emit(self.model_id)
+        super().mouseDoubleClickEvent(event)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Detail panel
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _FitImageLabel(QLabel):
+    """Shows a pixmap scaled down to fit the label; never enlarged past full size."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._source = QPixmap()
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setMinimumSize(1, 1)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+    def set_source(self, px: QPixmap) -> None:
+        self._source = px
+        self._rescale()
+
+    def sizeHint(self) -> QSize:
+        # Not the pixmap's size: that would make the panel grow to fit the
+        # image instead of the image shrinking to fit the panel.
+        return QSize(_DETAIL_WIDTH - 20, 280)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._rescale()
+
+    def _rescale(self) -> None:
+        if self._source.isNull():
+            return
+        w, h = self.width(), self.height()
+        if self._source.width() <= w and self._source.height() <= h:
+            self.setPixmap(self._source)
+        else:
+            self.setPixmap(self._source.scaled(
+                w, h, Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation))
+
+
+class _MatchDetail(QWidget):
+    """Full thumbnail, model details and a Go to Model button for one result."""
+
+    go_requested = pyqtSignal(int)   # model_id
+
+    # (key, label) in display order; empty values hide their row.
+    _FIELDS = (
+        ("title", "Title"), ("creator", "Creator"), ("source", "Source"),
+        ("sculptor_name", "Sculptor"), ("collection", "Collection"),
+        ("category_name", "Category"), ("release_name", "Release"),
+        ("released", "Released"), ("tags", "Tags"), ("image_count", "Images"),
+        ("archive_size", "Size"), ("status", "Status"),
+    )
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._model_id: Optional[int] = None
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(6)
+
+        hdr = QLabel(self.tr("<b>Selected Match</b>"))
+        hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(hdr)
+
+        self._image = _FitImageLabel()
+        self._image.setStyleSheet("background: palette(base); border: 1px solid palette(mid);")
+        layout.addWidget(self._image, 1)
+
+        self._score = QLabel()
+        self._score.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._score.setStyleSheet("color: gray;")
+        layout.addWidget(self._score)
+
+        self._form = QFormLayout()
+        self._form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        self._values: dict[str, QLabel] = {}
+        for key, label in self._FIELDS:
+            val = QLabel()
+            val.setWordWrap(True)
+            val.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            self._values[key] = val
+            self._form.addRow(self.tr(label) + ":", val)
+        # A path has no spaces to wrap at, so it gets a scrollable read-only field.
+        self._archive = QLineEdit()
+        self._archive.setReadOnly(True)
+        self._archive.setFrame(False)
+        self._form.addRow(self.tr("Archive:"), self._archive)
+        layout.addLayout(self._form)
+
+        self._go_btn = QPushButton(self.tr("Go to Model"))
+        self._go_btn.setToolTip(self.tr("Show this model in the main table"))
+        self._go_btn.clicked.connect(lambda: self.go_requested.emit(self._model_id))
+        layout.addWidget(self._go_btn)
+
+        self.clear()
+
+    def clear(self) -> None:
+        self._model_id = None
+        self._image.set_source(QPixmap())
+        self._image.clear()
+        self._image.setText(self.tr("Click a result to see it here."))
+        self._score.clear()
+        for key, _label in self._FIELDS:
+            self._set_row(key, "")
+        self._archive.clear()
+        self._go_btn.setEnabled(False)
+
+    def show_match(self, model_id: int, thumbnail_path: Optional[str], score_text: str) -> None:
+        from app.services.model_summary import model_summary
+        from app.ui.browser_common import _fmt_size
+
+        px = pixmap_from_path(thumbnail_path)   # full stored thumbnail, one LMDB read
+        if px.isNull():
+            self._image.set_source(QPixmap())
+            self._image.clear()
+            self._image.setText(self.tr("(no image)"))
+        else:
+            self._image.set_source(px)
+        self._score.setText(score_text)
+
+        with session_scope() as session:
+            info = model_summary(session, model_id)
+        if info is None:
+            self.clear()
+            self._image.setText(self.tr("This model no longer exists."))
+            return
+
+        self._model_id = model_id
+        collection = " / ".join(x for x in (info["collection_name"], info["subcollection_name"]) if x)
+        released = ""
+        if info["release_year"]:
+            released = str(info["release_year"])
+            if info["release_month"]:
+                released += f"-{info['release_month']:02d}"
+        values = {
+            **info,
+            "collection": collection,
+            "released": released,
+            "image_count": str(info["image_count"]),
+            "archive_size": _fmt_size(info["archive_size"]) if info["archive_size"] else "",
+            "status": self.tr("Missing on disk") if info["is_missing"] else "",
+        }
+        for key, _label in self._FIELDS:
+            self._set_row(key, values.get(key) or "")
+        self._archive.setText(info["archive_path"] or "")
+        self._archive.setCursorPosition(0)
+        self._archive.setToolTip(info["archive_path"] or "")
+        self._go_btn.setEnabled(True)
+
+    def _set_row(self, key: str, text: str) -> None:
+        self._values[key].setText(str(text))
+        self._form.setRowVisible(self._values[key], bool(text))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -103,11 +277,12 @@ class FindByImageDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(self.tr("Find by Image"))
         self.setWindowFlag(Qt.WindowType.Window)
-        self.resize(940, 640)
+        self.resize(1240, 680)
         self._query_hash: Optional[int] = None
         self._query_raw:  Optional[bytes] = None
         self._query_embed = None
         self._dhash_outdated: int = 0
+        self._selected_cell: Optional[_ResultCell] = None
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -181,7 +356,7 @@ class FindByImageDialog(QDialog):
 
         root.addLayout(ctrl)
 
-        # ── Splitter: query image left, results right ─────────────────────────
+        # ── Splitter: query image | results | selected match ──────────────────
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
         # Left panel — query image
@@ -211,13 +386,14 @@ class FindByImageDialog(QDialog):
         q_panel.setFixedWidth(_CELL_WIDTH)
         splitter.addWidget(q_panel)
 
-        # Right panel — results
+        # Middle panel — results
         r_panel = QWidget()
         r_layout = QVBoxLayout(r_panel)
         r_layout.setContentsMargins(4, 4, 4, 4)
         r_layout.setSpacing(4)
 
         self._status_lbl = QLabel(self.tr("Load an image and click Search."))
+        self._status_lbl.setWordWrap(True)
         r_layout.addWidget(self._status_lbl)
 
         self._scroll = QScrollArea()
@@ -228,8 +404,16 @@ class FindByImageDialog(QDialog):
         r_layout.addWidget(self._scroll, 1)
 
         splitter.addWidget(r_panel)
+
+        # Right panel — selected match
+        self._detail = _MatchDetail()
+        self._detail.go_requested.connect(self._go_to_model)
+        splitter.addWidget(self._detail)
+
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
+        splitter.setStretchFactor(2, 0)
+        splitter.setSizes([_CELL_WIDTH, 1240 - _CELL_WIDTH - _DETAIL_WIDTH, _DETAIL_WIDTH])
 
         root.addWidget(splitter, 1)
 
@@ -303,6 +487,8 @@ class FindByImageDialog(QDialog):
 
         method = self._method_combo.currentData()
 
+        self._selected_cell = None
+        self._detail.clear()
         old = self._scroll.takeWidget()
         if old:
             old.deleteLater()
@@ -311,25 +497,27 @@ class FindByImageDialog(QDialog):
         try:
             if method == "embedding":
                 thr = self._sim_spin.value()
-                results = self._find_matches_embed(thr)
+                results, capped = self._find_matches_embed(thr)
                 score_fmt = lambda v: f"Similarity: {v:.3f}"
                 empty_msg = (
                     f"No matches found (similarity ≥ {thr:.2f}). "
                     "Run Database Maintenance → Compute Image Embeddings first."
                 )
-                found_msg = (
-                    f"{len(results)} model(s) found (similarity ≥ {thr:.2f}), "
-                    "sorted by similarity."
-                )
+                criterion = f"similarity ≥ {thr:.2f}"
             else:
                 max_dist = self._dist_spin.value()
-                results = self._find_matches(max_dist)
+                results, capped = self._find_matches(max_dist)
                 score_fmt = lambda v: f"Distance: {v}"
                 empty_msg = f"No matches found within distance {max_dist}."
+                criterion = f"distance ≤ {max_dist}"
+            if capped:
                 found_msg = (
-                    f"{len(results)} model(s) found (distance ≤ {max_dist}), "
-                    "sorted by similarity."
+                    f"{len(results)} model(s) among the {MAX_RESULT_IMAGES} closest images "
+                    f"({criterion}). More images match: tighten the threshold to narrow "
+                    "the results."
                 )
+            else:
+                found_msg = f"{len(results)} model(s) found ({criterion}), sorted by similarity."
         except Exception as exc:
             logger.exception("Find-by-image search failed")
             self._status_lbl.setText(f"Search failed: {exc}")
@@ -361,18 +549,22 @@ class FindByImageDialog(QDialog):
             for i, (score, model_id, title, archive, thumb_path) in enumerate(results):
                 cell = _ResultCell(model_id, thumb_path, title, archive, score_fmt(score))
                 cell.clicked.connect(self._on_result_clicked)
+                cell.activated.connect(self._go_to_model)
                 grid.addWidget(cell, i // _COLS, i % _COLS)
 
         self._scroll.setWidget(container)
 
     def _find_matches(
         self, max_dist: int
-    ) -> list[tuple[int, int, str, str, Optional[str]]]:
-        """Return (distance, model_id, title, archive, thumbnail_path) sorted by distance.
+    ) -> tuple[list[tuple[int, int, str, str, Optional[str]]], bool]:
+        """Return ``(results, capped)``; results are (distance, model_id, title,
+        archive, thumbnail_path) sorted by distance.
 
-        Deduplicates by model_id — only the best-matching image per model is kept.
-        Uses vectorised numpy Hamming so the distance computation is a single
-        C-level call rather than a Python loop over all rows.
+        Only the ``MAX_RESULT_IMAGES`` closest images within *max_dist* are
+        considered (*capped* is True when more matched), and only the
+        best-matching image per model is kept.  Uses vectorised numpy Hamming
+        so the distance computation is a single C-level call rather than a
+        Python loop over all rows.
         """
         query_hash = self._query_hash
         _U64 = (1 << 64) - 1
@@ -409,96 +601,71 @@ class FindByImageDialog(QDialog):
 
         self._dhash_outdated = outdated
         if not valid_rows:
-            return []
+            return [], False
 
         lo_arr = np.array(lo_list, dtype=np.uint64)
         hi_arr = np.array(hi_list, dtype=np.uint64)
         dist_arr = _hamming128_batch(qlo, qhi, lo_arr, hi_arr)[0]  # shape (N,)
 
+        hits = np.flatnonzero(dist_arr <= max_dist)
+        capped = len(hits) > MAX_RESULT_IMAGES
+        if capped:
+            hits = hits[np.argsort(dist_arr[hits], kind="stable")[:MAX_RESULT_IMAGES]]
+
         best: dict[int, tuple[int, str, str, Optional[str]]] = {}
-        for i, (model_id, thumb_path, title, archive_path) in enumerate(valid_rows):
+        for i in hits.tolist():
+            model_id, thumb_path, title, archive_path = valid_rows[i]
             dist = int(dist_arr[i])
-            if dist <= max_dist:
-                if model_id not in best or dist < best[model_id][0]:
-                    archive_name = Path(archive_path).name if archive_path else ""
-                    best[model_id] = (dist, title, archive_name, thumb_path)
+            if model_id not in best or dist < best[model_id][0]:
+                archive_name = Path(archive_path).name if archive_path else ""
+                best[model_id] = (dist, title, archive_name, thumb_path)
 
         out = [(d, mid, t, arch, tp) for mid, (d, t, arch, tp) in best.items()]
         out.sort(key=lambda x: x[0])
-        return out
+        return out, capped
 
     def _find_matches_embed(
         self, threshold: float
-    ) -> list[tuple[float, int, str, str, Optional[str]]]:
-        """Return (similarity, model_id, title, archive, thumbnail_path), best per model.
+    ) -> tuple[list[tuple[float, int, str, str, Optional[str]]], bool]:
+        """Return ``(results, capped)``, best image per model.
 
-        Processes embeddings in batches so peak memory is O(BATCH × D) rather
-        than O(N × D).  Each batch is stacked into a small matrix, multiplied
-        with the query vector (BLAS, multi-core), then immediately discarded.
+        Nearest-neighbour search runs inside SQLite (sqlite-vec), see
+        :func:`app.services.image_similarity.find_similar_models`.
         """
         if self._query_raw is None:
-            return []
+            return [], False
         if self._query_embed is None:
             self._query_embed = _emb.embed_jpeg(self._query_raw)
         if self._query_embed is None:
-            return []
+            return [], False
 
-        q = np.asarray(self._query_embed, dtype=np.float32)
-        qn = float(np.linalg.norm(q))
-        if qn > 0:
-            q = q / qn
-
-        from app.ui.config_dialog import get_embed_search_batch_size
-        BATCH = get_embed_search_batch_size()
-
-        best: dict[int, tuple[float, str, str, Optional[str]]] = {}
-
-        def _flush(batch_vecs: list, batch_meta: list) -> None:
-            if not batch_vecs:
-                return
-            M = np.stack(batch_vecs, axis=0)  # (B, D) — new contiguous copy
-            sims = M @ q                       # (B,)   — BLAS, uses all cores
-            for i, (model_id, thumb_path, title, archive_path) in enumerate(batch_meta):
-                sim = float(sims[i])
-                if sim >= threshold:
-                    if model_id not in best or sim > best[model_id][0]:
-                        archive_name = Path(archive_path).name if archive_path else ""
-                        best[model_id] = (sim, title, archive_name, thumb_path)
-
+        from app.services.image_similarity import find_similar_models
         with session_scope() as session:
-            query = (
-                session.query(
-                    DBImage.model_id,
-                    DBImage.embedding,
-                    DBImage.thumbnail_path,
-                    STLModel.title,
-                    STLModel.archive_path,
-                )
-                .join(STLModel, DBImage.model_id == STLModel.id)
-                .filter(DBImage.embedding.isnot(None))
-                .filter(DBImage.embedding_model == _emb.EMBED_MODEL_ID)
-                .yield_per(BATCH)
-            )
+            return find_similar_models(session, self._query_embed, threshold)
 
-            batch_vecs: list = []
-            batch_meta: list = []
+    def _on_result_clicked(self, cell: _ResultCell) -> None:
+        if self._selected_cell is not None:
+            self._selected_cell.set_selected(False)
+        self._selected_cell = cell
+        cell.set_selected(True)
+        self._detail.show_match(cell.model_id, cell.thumbnail_path, cell.score_text)
 
-            for model_id, blob, thumb_path, title, archive_path in query:
-                v = _emb.from_blob(blob)
-                if v is None or v.size != q.size:
-                    continue
-                batch_vecs.append(v)
-                batch_meta.append((model_id, thumb_path, title or "", archive_path))
-                if len(batch_vecs) == BATCH:
-                    _flush(batch_vecs, batch_meta)
-                    batch_vecs = []
-                    batch_meta = []
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        # A parented top-level window is "owned" on Windows and always stays
+        # above its owner, so Go to Model could never bring the main window
+        # forward.  Drop the window-level link; the Qt parent (and so the
+        # dialog's lifetime) is unchanged.
+        handle = self.windowHandle()
+        if handle is not None and handle.transientParent() is not None:
+            handle.setTransientParent(None)
 
-            _flush(batch_vecs, batch_meta)
-
-        out = [(s, mid, t, arch, tp) for mid, (s, t, arch, tp) in best.items()]
-        out.sort(key=lambda x: -x[0])
-        return out
-
-    def _on_result_clicked(self, model_id: int) -> None:
+    def _go_to_model(self, model_id: int) -> None:
+        """Select *model_id* in the main table and bring the main window forward."""
         self.show_models_requested.emit([model_id])
+        win = self.parentWidget()
+        if win is not None:
+            if win.isMinimized():
+                win.showNormal()
+            win.raise_()
+            win.activateWindow()

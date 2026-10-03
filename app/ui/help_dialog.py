@@ -1106,6 +1106,24 @@ older 64-bit hashes are recomputed on the fly during a search.</div>
       computed via <b>Database Maintenance &rarr; Compute Image Embeddings</b>. See the README
       for setup. The same method selector is available in <b>Find by Image</b>.</li>
 </ul>
+<div class="note">Embeddings are stored with the <b>sqlite-vec</b> extension, which also runs the
+<b>Find by Image</b> search inside the database. Searches at the default similarity take a
+fraction of a second. The first start after upgrading moves existing embeddings into the
+new storage once, which can take about a minute on a large library.</div>
+
+<h4>Find by Image</h4>
+<p><b>Tools &rarr; Find by Image</b> takes an image file and lists the catalogued models whose
+thumbnails look like it, using either matching method above. Each result is a model&rsquo;s
+best-matching image. At most the <b>1024 closest images</b> are considered; when more match,
+the status line says so &mdash; lower <b>Max distance</b> or raise <b>Min similarity</b> to
+narrow the results.</p>
+<ul>
+  <li><b>Click</b> a result to show its full thumbnail in the <b>Selected Match</b> panel,
+      with the model&rsquo;s title, creator, sculptor, collection, release, tags, image count,
+      archive path and size.</li>
+  <li><b>Go to Model</b>, or a <b>double-click</b> on the result, shows that model in the
+      main table.</li>
+</ul>
 
 <div class="tip">Tip: hover any row in the Images tab to see a side-by-side popup of both
 archives&rsquo; first thumbnails, making it easy to judge whether the match is genuine.</div>

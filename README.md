@@ -33,6 +33,7 @@ Version: 2026.24
 - **Find Metadata Duplicates** — finds models with identical or phonetically similar field values; supports exact match, Levenshtein (configurable distance), and Soundex; results can be sent directly to the browser table
 - **Find Archives by Content** — two-tab tool: the *STL Files* tab flags archive pairs that share a configurable fraction of identical files; the *Images* tab finds archives with similar thumbnails (selecting a result previews both archives' images); hover any row to see thumbnails in a popup; right-click any result row to open the archive's folder in the configured file manager, compare archive contents, or delete the archive from disk
 - **Image similarity matching** — two methods, selectable in the *Images* tab and *Find by Image*: a built-in **128-bit perceptual hash (dHash)** for near-duplicates, and an optional **AI embedding (CLIP)** for semantic matching of the same model across different renders, angles, and colours. Embeddings are an optional, dependency-light add-on (`onnxruntime` + a CLIP ONNX model); compute them via **Database Maintenance → Compute Image Embeddings**
+- **Find by Image** — pick an image file and find catalogued models whose thumbnails look like it, by perceptual hash or AI embedding. Results show the best-matching image per model, from at most the 1024 closest images (the status line says when more match, so you can tighten the threshold). Click a result to see its full thumbnail with the model's title, creator, sculptor, collection, release, tags, image count, archive path and size; **Go to Model** (or a double-click on the result) shows the model in the main table
 - **AI Tagging** — right-click any row and choose *AI Tagging…* to let Qwen2.5-VL analyse the model's thumbnails — along with the archive path, filenames, and any metadata already catalogued — and suggest tags, title, creator, sculptor, collection, subcollection, scale, source, year, and description (it picks the most specific collection — e.g. Batman → *comics* / *DC* — rather than defaulting to a generic genre). Each suggestion is editable before saving; tags are merged with (not replaced by) existing ones. Select several rows for one-by-one review, or click **Process All** to run every selected model unattended and save results automatically. By default existing values are kept (only empty fields filled, new tags added); tick **Overwrite existing values** to let the suggestions replace current field values instead. Tick **Ignore existing metadata** to withhold the catalogued metadata and file list from the prompt, using only the images, archive path, and image filenames (re-tag from scratch). The whole feature can be switched off with **Enable AI tagging** in *Configuration → AI* (which hides the action from the toolbar, Tools menu, and right-click menu). The model's **temperature** is configurable in *Configuration → AI → AI Tagging* (lower = more literal and grounded, higher = more creative). Runs locally via the [llama.cpp](https://github.com/ggml-org/llama.cpp) `llama-server` binary — **no torch, no Python AI packages**. On first use the small runtime and the ~3.3 GB GGUF model are downloaded once into your data folder; pick a **CPU** or **NVIDIA GPU (CUDA)** build in the setup dialog (CPU works on any machine)
 - **Archive content viewer** — list every `.stl` file in an archive, or compare two archives side-by-side with configurable matching by filename, size, or hash
 - **Physical file deletion** — optionally delete or trash archive files from disk via the right-click menu in the browser table or the duplicate-finder results (enable in Configuration → File writing)
@@ -307,6 +308,22 @@ Once the model is in place, open **Database Maintenance → Compute Image
 Embeddings** to populate embeddings for existing thumbnails. The **AI embedding
 (CLIP)** method becomes selectable in *Find by Image* and *Find Duplicate
 Archives → Images*.
+
+**Storage** — embeddings are stored with the
+[sqlite-vec](https://github.com/asg017/sqlite-vec) extension (`sqlite-vec` in
+`requirements.txt`) in a `vec0` table, `image_vec`, inside the main database.
+*Find by Image* searches it with a nearest-neighbour query inside SQLite
+(about 0.2 s on 334k embeddings), over the 1024 nearest images. sqlite-vec needs a
+Python whose `sqlite3` module can load extensions (the python.org and
+Windows-executable builds can); otherwise the embedding features are disabled
+and everything else keeps working.
+
+Databases from earlier versions kept embeddings on the `images` table. The first
+start with this version moves them into `image_vec` and compacts the file
+(about a minute for 334k embeddings, shown on the splash screen). Back up the
+database first if you want to be able to go back to an older version. Because
+`image_vec` is a virtual table, tools without sqlite-vec (DB Browser for SQLite,
+for example) can read every other table but not that one.
 
 **GPU acceleration** — the Windows executable uses the **DirectML** backend
 (built into Windows, works on NVIDIA / AMD / Intel GPUs with no extra driver

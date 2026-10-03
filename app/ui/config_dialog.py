@@ -39,7 +39,6 @@ from app.core.settings import (  # noqa: F401
     get_metadata_thumbnails_enabled, get_store_stl_file_list,
     get_recurse_subdirs, get_ai_embeddings_enabled,
     get_ai_embeddings_during_crawl, get_ai_embeddings_batch_size,
-    get_embed_search_batch_size,
 )
 
 DATA_DIR_KEY           = "config/data_dir"
@@ -1187,17 +1186,6 @@ class ConfigDialog(QDialog):
         ))
         sim_form.addRow(self.tr("Batch size:"), self._ai_batch_size_spin)
 
-        self._embed_search_batch_spin = QSpinBox()
-        self._embed_search_batch_spin.setRange(100, 10000)
-        self._embed_search_batch_spin.setSingleStep(100)
-        self._embed_search_batch_spin.setSuffix(self.tr(" rows"))
-        self._embed_search_batch_spin.setToolTip(self.tr(
-            "Number of image embeddings scored per batch during Find by Image (CLIP). "
-            "Lower values use less RAM; higher values improve BLAS throughput. "
-            "Default: 1000."
-        ))
-        sim_form.addRow(self.tr("Search batch:"), self._embed_search_batch_spin)
-
         from app.utils import image_embedding as _emb
         self._clip_model_present = _emb.is_available()
         self._clip_dl_worker: _ClipDownloadWorker | None = None
@@ -1986,7 +1974,6 @@ class ConfigDialog(QDialog):
         self._ai_batch_size_spin.setValue(get_ai_embeddings_batch_size())
         self._ai_batch_size_spin.setEnabled(ai_embed_enabled)
         self._ai_temperature_spin.setValue(get_ai_temperature())
-        self._embed_search_batch_spin.setValue(get_embed_search_batch_size())
         self._refresh_clip_dl_button()
 
         self._notif_enabled_check.setChecked(get_notifications_enabled())
@@ -2069,7 +2056,6 @@ class ConfigDialog(QDialog):
                 "recurse_subdirs": self._recurse_subdirs_check.isChecked(),
                 "debug_menu_enabled":       self._debug_menu_check.isChecked(),
                 "logging_enabled":          self._logging_enabled_check.isChecked(),
-                "embed_search_batch_size":  self._embed_search_batch_spin.value(),
                 "allow_file_delete": self._allow_file_delete_check.isChecked(),
                 "use_trash_folder": self._use_trash_folder_check.isChecked(),
                 "trash_folder_path": self._trash_folder_edit.text().strip(),
