@@ -17,7 +17,7 @@ MATERIAL_ICONS_CDN = "https://cdn.jsdelivr.net/npm/@material-design-icons/svg/ou
 
 # All Material Icon names used in the app (from material_icons.py ICON_MAP)
 MATERIAL_ICONS_NEEDED = {
-    "settings", "refresh", "grid_view", "image", "info", "find_in_page",
+    "settings", "refresh", "grid_view", "photo_library", "image", "info", "find_in_page",
     "image_search", "play_arrow", "stop", "work", "close", "expand_more",
     "expand_less", "folder", "folder_open", "person", "local_offer",
     "category", "calendar_today", "new_releases", "straighten", "layers",

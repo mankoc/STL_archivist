@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **The three image toolbar buttons now have distinct icons.** *Image Browsing* reused the *Image Grid* icon, and in the colour sets *Image Grid* and *Images* looked nearly identical. Each now has its own icon in every icon set: a grid of tiles, a photo stack or camera, and a single picture.
+
+- **New: _Toolbar buttons_ option** in **Configuration → Appearance → Icons**: *Icon and text* (default) or *Icon only*, for the main toolbar. With icons only, each button's name shows as a tooltip. The change applies as soon as you press OK.
+- **Fixed: toolbar labels missing or clipped under the Material themes.** qt-material fixes every tool button at 36 px tall, the same as the toolbar icons, which leaves no room for a label. With the colour icon sets the labels disappeared entirely; with Material icons their bottom was cut off. The toolbar now sets the height it needs. Material icons also render crisply at the toolbar's full 36 px instead of staying at 24 px.
+
+- **New: choose a colourful icon set** in **Configuration → Appearance → Icons**. Alongside the existing monochrome Material icons there are **Fluent Color** (Microsoft's Windows 11 colour icons; the few roles without a colour version use Fluent Emoji), **Fluent Emoji** and **Flat Color Icons** (Icons8). A preview strip shows the chosen set before you commit, and the change applies after a restart. The sets cover the toolbar, crawler buttons and filter-pane section icons. They ship with the app in `resources/iconsets/` (about 110 KB, all MIT-licensed, licenses included) and are refreshed with `python setup_iconsets.py`.
+
 - **Faster, more responsive editing and editors** (refactoring plan steps 1–4, see `docs/refactoring-plan.md`):
   - **Inline table edits no longer freeze the window.** Each edited cell used to be written on the GUI thread and immediately rebuilt the folder's whole `METADATA.7z` (thumbnails included). Edits are now saved in the background, and the sidecar refresh is coalesced to once per folder, a moment after you stop editing. The model editor and the AI tagger use the same background refresh. Pending edits and refreshes are completed when the application closes.
   - **Edits can no longer land on the wrong model.** Debounced cell edits were keyed by table row, so a table reload within the 400 ms window could apply an edit to whichever model now occupied that row. They are now keyed by model.
