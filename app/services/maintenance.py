@@ -220,7 +220,7 @@ def prune_images(
     """
     from app.database.db import session_scope
     from app.database.models import Image as DBImage
-    from app.utils.thumbnailer import delete_thumbnail
+    from app.utils.thumbnailer import delete_thumbnails
 
     keep = max(0, int(keep))
     with session_scope() as session:
@@ -258,8 +258,7 @@ def prune_images(
                 if extra:
                     models_pruned += 1
                     excess.extend(extra)
-            for img_id in excess:
-                delete_thumbnail(img_id)
+            delete_thumbnails(excess)
             if excess:
                 (session.query(DBImage)
                  .filter(DBImage.id.in_(excess))

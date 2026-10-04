@@ -29,7 +29,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.database.models import STLModel
-from app.utils.thumbnailer import delete_thumbnail
+from app.utils.thumbnailer import delete_thumbnails
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +88,7 @@ def delete_archives(
         trash.mkdir(parents=True, exist_ok=True)
 
     models = session.query(STLModel).filter(STLModel.id.in_(model_ids)).all()
+    thumb_refs: list[str] = []
     for model in models:
         archive_path = model.archive_path
         try:
@@ -98,16 +99,15 @@ def delete_archives(
                 else:
                     file_path.unlink()
 
-            for image in list(model.images):
-                if image.thumbnail_path:
-                    delete_thumbnail(image.thumbnail_path)
-
+            thumb_refs += [i.thumbnail_path for i in model.images if i.thumbnail_path]
             session.delete(model)
             report.deleted += 1
         except Exception as exc:
             logger.error("Failed to delete %s: %s", archive_path, exc, exc_info=True)
             report.failed.append((archive_path, str(exc)))
 
+    # One LMDB transaction for all models: each one ends with a disk flush.
+    delete_thumbnails(thumb_refs)
     return report
 
 

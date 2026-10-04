@@ -1651,11 +1651,13 @@ class DbMaintenanceDialog(QDialog):
 
         from app.database.db import session_scope
         from app.database.models import STLModel
-        from app.utils.thumbnailer import delete_thumbnail
+        from app.services import moves
+        from app.utils.thumbnailer import delete_thumbnails
 
         merged = 0
         errors = 0
         try:
+            thumb_refs: list[str] = []
             with session_scope() as session:
                 for rec in to_merge:
                     match_path = rec["match_path"]
@@ -1666,34 +1668,11 @@ class DbMaintenanceDialog(QDialog):
                     if old_model is None or new_model is None:
                         errors += 1
                         continue
-
-                    # Capture new location's filesystem metadata before deletion
-                    new_path  = new_model.archive_path
-                    new_hash  = new_model.archive_hash
-                    new_size  = new_model.archive_size
-                    new_mtime = new_model.archive_mtime_ns
-                    new_compr = new_model.compression_rate
-
-                    # Delete new model's images/thumbnails
-                    for img in list(new_model.images):
-                        if img.thumbnail_path:
-                            delete_thumbnail(img.thumbnail_path)
-                        session.delete(img)
-                    session.flush()
-
-                    # Remove the re-crawled (shallow) record
-                    session.delete(new_model)
-                    session.flush()
-
-                    # Redirect old record to new location
-                    old_model.archive_path     = new_path
-                    old_model.archive_hash     = new_hash
-                    old_model.archive_size     = new_size
-                    old_model.archive_mtime_ns = new_mtime
-                    if new_compr is not None:
-                        old_model.compression_rate = new_compr
-                    session.flush()
+                    # Keeps the missing record's metadata at the new location
+                    # (also clears its missing flag and updates its folder).
+                    thumb_refs += moves.merge_into_missing(session, old_model, new_model)
                     merged += 1
+            delete_thumbnails(thumb_refs)   # after commit, one LMDB transaction
 
         except Exception as exc:
             self._log.appendPlainText(f"ERROR during merge: {exc}")

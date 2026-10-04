@@ -123,6 +123,14 @@ Qt-free business logic, testable without a `QApplication`:
   (names, tags, image count) for detail panels; cheap enough for the GUI thread.
 - **`maintenance.py`** — Database Maintenance operations (verify, duplicate entries, prune images).
 - **`file_deletion.py`** — archive deletion / trash.
+- **`moves.py`** — moved archives: `relocate`, `merge_into_missing`, `delete_model`,
+  `index_by_hash`, `archive_folder_for`. Always set `archive_folder` through it (forward
+  slashes; views compare the string). The crawler matches moves by hash in Phase 2, before
+  extraction (`CrawlerWorker._match_early_move`).
+
+**Thumbnail deletes:** never call `delete_thumbnail()` in a loop. Each LMDB write transaction
+ends with a disk flush (~160 ms on a hard disk). Collect the refs and call
+`delete_thumbnails(refs)` once, after the session commits.
 
 ### `app/utils/`
 

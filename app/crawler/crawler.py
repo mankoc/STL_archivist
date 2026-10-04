@@ -3,7 +3,7 @@ Crawler — walks a source directory, processes each archive, and upserts record
 into the database. Runs inside a QThread to keep the UI responsive.
 """
 import logging
-from collections import defaultdict
+from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from functools import partial
@@ -38,8 +38,9 @@ from app.database.helpers import (
     get_or_create_tag,
 )
 from app.database.models import STLModel, Image, STLFile, CrawledFolder
+from app.services import moves
 from app.utils.thumbnailer import (
-    save_thumbnail, delete_thumbnail, get_thumbnail_base_dir,
+    save_thumbnail, delete_thumbnails, get_thumbnail_base_dir,
     get_thumbnail_bytes, save_thumbnails_batch, write_raw_thumbnails_batch,
 )
 from app.utils.image_hash import compute_dhash_from_jpeg, format_dhash
@@ -107,6 +108,11 @@ class CrawlerWorker(QThread):
                     self.source_dir, self._pattern, self._config.max_workers)
         self.phase.emit("Scanning for deleted files…")
         missing_records = self._collect_missing()
+        # Moves are matched by content hash while diffing (Phase 2), before a
+        # moved archive is extracted as if new; see _match_early_move.
+        self._move_candidates = moves.index_by_hash(missing_records)
+        self._early_moved_ids: set[int] = set()
+        self._moved_new_paths: set[str] = set()
 
         self.phase.emit("Retrieving file list…")
         logger.debug("Scanning source directory for archives: %s (recurse=%s)", self.source_dir, self._config.recurse_subdirs)
@@ -163,6 +169,11 @@ class CrawlerWorker(QThread):
         if modified_folders and thumb_base is not None and self._config.metadata_sidecar_enabled:
             self._post_export_metadata(modified_folders, thumb_base)
 
+        if self._early_moved_ids:
+            msg = f"Matched {len(self._early_moved_ids)} moved file(s) by content, without re-extracting."
+            self.log.emit(msg)
+            logger.info(msg)
+        missing_records = [r for r in missing_records if r["id"] not in self._early_moved_ids]
         if missing_records:
             self.phase.emit(f"Finding moved files ({len(missing_records)} candidate(s))…")
             self._reconcile_moved_files(missing_records)
@@ -282,6 +293,9 @@ class CrawlerWorker(QThread):
         stl_backfill: list[Path] = []
         store_stl = self._config.store_stl_file_list
         force = self._config.force_rescan
+        # Hashes shared by several new archives in this batch are ambiguous move
+        # targets; those are left to the post-crawl reconciliation.
+        new_hash_counts = Counter(hashes[p] for p in batch if str(p) not in existing_map)
         for p in batch:
             h = hashes[p]
             if h.startswith("fallback:"):
@@ -299,6 +313,11 @@ class CrawlerWorker(QThread):
                         ex2.warning = _uw
 
             ex = existing_map.get(str(p))
+            if ex is None and new_hash_counts[h] == 1:
+                ex = self._match_early_move(p, h, session)
+                if ex is not None:
+                    existing_map[str(p)] = ex   # now unchanged: pattern-only pass
+                    continue
             if ex is None:
                 to_extract.append(p)
                 logger.debug("  NEW: %s", p.name)
@@ -349,6 +368,35 @@ class CrawlerWorker(QThread):
                      len(to_extract), len(stl_backfill),
                      len(batch) - len(to_extract) - len(stl_backfill))
         return to_extract, stl_backfill, existing_map
+
+    def _match_early_move(self, p: Path, h: str, session: Session) -> Optional[STLModel]:
+        """Relocate the missing record whose content hash equals *p*'s, if any.
+
+        A moved archive used to be extracted as new (images decompressed,
+        thumbnails and embeddings computed) and only matched to its old record
+        after the crawl, which then threw that work away.  Matching here keeps
+        the old record and skips extraction.  Returns the relocated record.
+        """
+        candidates = getattr(self, "_move_candidates", None)
+        rec = candidates.pop(h, None) if candidates else None
+        if rec is None:
+            return None
+        old = session.get(STLModel, rec["id"])
+        if old is None:
+            return None
+        try:
+            st = p.stat()
+            size, mtime = int(st.st_size), int(st.st_mtime_ns)
+        except OSError:
+            size, mtime = old.archive_size, None
+        moves.relocate(old, str(p), h, size, mtime)
+        session.flush()
+        self._early_moved_ids.add(rec["id"])
+        self._moved_new_paths.add(str(p))
+        self.log.emit(f"Moved: {rec['filename']} → {p}")
+        logger.info("File moved: %s → %s", rec["path"], p)
+        self.file_moved.emit(rec["path"], str(p))
+        return old
 
     def _phase_extract(
         self,
@@ -518,6 +566,9 @@ class CrawlerWorker(QThread):
                     modified_folders.add(archive_path.parent)
                 else:
                     self._stats_unchanged += 1
+                    if str(archive_path) in getattr(self, "_moved_new_paths", ()):
+                        # Moved in: the new folder's sidecar should carry the record.
+                        modified_folders.add(archive_path.parent)
                 self._consecutive_failures = 0
                 logger.debug("  Upsert committed: %s", archive_path.name)
             except Exception as exc:
@@ -671,6 +722,7 @@ class CrawlerWorker(QThread):
         logger.info(msg)
 
         matched_ids: set[int] = set()
+        thumb_refs: list[str] = []
 
         with session_scope() as session:
             new_models: dict[str, STLModel] = {
@@ -745,34 +797,10 @@ class CrawlerWorker(QThread):
                 if old_model is None or new_model is None:
                     continue
 
-                # Capture new model's filesystem metadata before deletion
-                new_archive_path  = new_model.archive_path
-                new_archive_hash  = new_model.archive_hash
-                new_archive_size  = new_model.archive_size
-                new_archive_mtime = new_model.archive_mtime_ns
-                new_compression   = new_model.compression_rate
-
-                # Delete new model's thumbnails; old record keeps its existing ones
-                for img in list(new_model.images):
-                    if img.thumbnail_path:
-                        delete_thumbnail(img.thumbnail_path)
-                    session.delete(img)
-                session.flush()
-
-                # Remove the freshly-created (shallow) record
-                session.delete(new_model)
-                session.flush()
-
-                # Redirect old record to new location and clear missing flag
-                old_model.archive_path     = new_archive_path
-                old_model.archive_hash     = new_archive_hash
-                old_model.archive_size     = new_archive_size
-                old_model.archive_mtime_ns = new_archive_mtime
-                old_model.archive_folder   = str(Path(new_archive_path).parent)
-                old_model.is_missing       = False
-                if new_compression is not None:
-                    old_model.compression_rate = new_compression
-                session.flush()
+                # Old record keeps its metadata and thumbnails; the freshly
+                # created (shallow) record at the new path is removed.
+                new_archive_path = new_model.archive_path
+                thumb_refs += moves.merge_into_missing(session, old_model, new_model)
 
                 matched_ids.add(rec["id"])
                 used_new.add(new_path)
@@ -782,6 +810,7 @@ class CrawlerWorker(QThread):
                 logger.info("File moved: %s → %s", rec["path"], new_archive_path)
                 self.file_moved.emit(rec["path"], new_archive_path)
 
+        delete_thumbnails(thumb_refs)   # after commit, one LMDB transaction
         if matched_ids:
             self.log.emit(f"Matched {len(matched_ids)} moved file(s).")
 
@@ -809,6 +838,7 @@ class CrawlerWorker(QThread):
         deleted  = 0
         marked   = 0
         deferred = 0
+        thumb_refs: list[str] = []
         with session_scope() as session:
             for rec in missing:
                 model = session.get(STLModel, rec["id"])
@@ -829,15 +859,7 @@ class CrawlerWorker(QThread):
                         deferred += 1
                         logger.info("Deferred deletion: %s", rec["path"])
                     else:
-                        for img in list(model.images):
-                            if img.thumbnail_path:
-                                delete_thumbnail(img.thumbnail_path)
-                            session.delete(img)
-                        session.flush()
-                        for stl in list(model.stl_files):
-                            session.delete(stl)
-                        session.flush()
-                        session.delete(model)
+                        thumb_refs += moves.delete_model(session, model)
                         deleted += 1
                         msg = f"Deleted: {rec['path']}"
                         self.log.emit(msg)
@@ -851,6 +873,7 @@ class CrawlerWorker(QThread):
                     logger.info(msg)
                     self.file_deleted.emit(rec["path"])
 
+        delete_thumbnails(thumb_refs)   # after commit, one LMDB transaction
         if deleted:
             msg = f"Deleted {deleted} record(s) removed from the crawled folder."
             self.log.emit(msg)
@@ -1175,11 +1198,10 @@ class CrawlerWorker(QThread):
                 in parallel Phase 3; when populated, skips serial resize/dHash.
         """
         if hash_changed:
-            old_thumb_count = len([i for i in existing.images if i.thumbnail_path])
-            logger.debug("  Hash changed — purging %d old thumbnail(s)", old_thumb_count)
+            old_refs = [i.thumbnail_path for i in existing.images if i.thumbnail_path]
+            logger.debug("  Hash changed — purging %d old thumbnail(s)", len(old_refs))
+            delete_thumbnails(old_refs)
             for old_img in list(existing.images):
-                if old_img.thumbnail_path:
-                    delete_thumbnail(old_img.thumbnail_path)
                 session.delete(old_img)
 
         if not existing or hash_changed:
