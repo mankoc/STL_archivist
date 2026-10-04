@@ -20,6 +20,8 @@ from PyQt6.QtWidgets import (
 from app.crawler.crawler import CrawlerWorker
 from app.database.db import session_scope
 from app.database.models import CrawledFolder, STLModel
+from app.services import moves
+from app.utils.thumbnailer import delete_thumbnails
 
 # ── Change-type colours ───────────────────────────────────────────────────────
 _COLOUR: dict[str, QColor] = {
@@ -145,10 +147,14 @@ class _UpdateAllWorker(QThread):
         metadata is preserved, then delete the freshly-created (shallow) record.
         Hash collisions on either side are excluded to avoid mis-attribution.
         """
-        from app.utils.thumbnailer import delete_thumbnail
-
         if not all_new_paths:
             return
+        thumb_refs: list[str] = []
+        self._cross_folder_match(all_new_paths, thumb_refs)
+        delete_thumbnails(thumb_refs)   # only after the commit, one LMDB transaction
+
+    def _cross_folder_match(self, all_new_paths: set[str], thumb_refs: list[str]) -> None:
+        """Body of :meth:`_cross_folder_reconcile`; collects thumbnail refs to delete."""
 
         with session_scope() as session:
             missing_rows = session.query(
@@ -212,36 +218,9 @@ class _UpdateAllWorker(QThread):
                     continue
 
                 old_path = old_model.archive_path
-
-                # Capture filesystem metadata from the new record before deletion.
-                new_archive_path  = new_model.archive_path
-                new_archive_hash  = new_model.archive_hash
-                new_archive_size  = new_model.archive_size
-                new_archive_mtime = new_model.archive_mtime_ns
-                new_compression   = new_model.compression_rate
-
-                # Delete new model's thumbnails; old record keeps its existing ones.
-                for img in list(new_model.images):
-                    if img.thumbnail_path:
-                        delete_thumbnail(img.thumbnail_path)
-                    session.delete(img)
-                session.flush()
-                for stl in list(new_model.stl_files):
-                    session.delete(stl)
-                session.flush()
-                session.delete(new_model)
-                session.flush()
-
-                # Redirect old record to new location.
-                old_model.archive_path     = new_archive_path
-                old_model.archive_hash     = new_archive_hash
-                old_model.archive_size     = new_archive_size
-                old_model.archive_mtime_ns = new_archive_mtime
-                old_model.archive_folder   = str(Path(new_archive_path).parent)
-                old_model.is_missing       = False
-                if new_compression is not None:
-                    old_model.compression_rate = new_compression
-                session.flush()
+                new_archive_path = new_model.archive_path
+                # Old record keeps its metadata and thumbnails.
+                thumb_refs += moves.merge_into_missing(session, old_model, new_model)
 
                 matched += 1
                 used_new.add(new_path)
@@ -259,9 +238,8 @@ class _UpdateAllWorker(QThread):
         These are archives that were genuinely deleted (not moved) from one of
         the crawled folders during this update run.
         """
-        from app.utils.thumbnailer import delete_thumbnail
-
         folder_roots = [Path(p) for p in crawled_folder_paths]
+        thumb_refs: list[str] = []
 
         with session_scope() as session:
             missing_models = (
@@ -285,22 +263,15 @@ class _UpdateAllWorker(QThread):
                     continue
 
                 old_path = model.archive_path
-                for img in list(model.images):
-                    if img.thumbnail_path:
-                        delete_thumbnail(img.thumbnail_path)
-                    session.delete(img)
-                session.flush()
-                for stl in list(model.stl_files):
-                    session.delete(stl)
-                session.flush()
-                session.delete(model)
+                thumb_refs += moves.delete_model(session, model)
                 deleted += 1
                 self.file_deleted.emit(old_path)
 
-            if deleted:
-                self.log.emit(
-                    f"Deleted {deleted} record(s) removed from crawled folders."
-                )
+        delete_thumbnails(thumb_refs)   # after commit, one LMDB transaction
+        if deleted:
+            self.log.emit(
+                f"Deleted {deleted} record(s) removed from crawled folders."
+            )
 
 
 class UpdateCrawledFoldersDialog(QDialog):

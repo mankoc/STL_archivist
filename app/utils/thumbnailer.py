@@ -652,20 +652,34 @@ def delete_thumbnail(path_or_id: object) -> None:
         path_or_id: Thumbnail reference as stored in ``Image.thumbnail_path``,
             or a plain integer image ID.
     """
+    delete_thumbnails([path_or_id])
+
+
+def delete_thumbnails(refs) -> None:
+    """Remove many thumbnails in one LMDB write transaction.
+
+    Takes the same references as :func:`delete_thumbnail`.  Use it whenever
+    more than one image goes: every write transaction ends with a disk flush,
+    which measured ~160 ms on a hard-disk data drive, so deleting a 20-image
+    model one call at a time took over 3 s against a few ms batched.
+    """
     if _lmdb_env is None:
         return
-    if isinstance(path_or_id, int):
-        image_id = path_or_id
-    else:
-        image_id = _parse_image_id(str(path_or_id))
-    if image_id is None:
+    image_ids = []
+    for ref in refs:
+        if isinstance(ref, int):
+            image_ids.append(ref)
+        elif ref and (image_id := _parse_image_id(str(ref))) is not None:
+            image_ids.append(image_id)
+    if not image_ids:
         return
     try:
         with _lmdb_env.begin(write=True) as txn:
-            # Only the reference goes: the blob may still be shared with other
+            # Only the references go: a blob may still be shared with other
             # images.  Unreferenced blobs are reclaimed by deduplicate_store().
-            txn.delete(_ref_key(image_id))
-            txn.delete(_key(image_id))
+            for image_id in image_ids:
+                txn.delete(_ref_key(image_id))
+                txn.delete(_key(image_id))
     except lmdb.Error:
         pass
 

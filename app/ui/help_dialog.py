@@ -591,9 +591,12 @@ previously imported. The dialog shows a checkbox list of every stored folder:</p
 the set of newly-discovered archives for a match:</p>
 <ol>
   <li><b>Hash match</b> (definitive) &mdash; if a new archive has the same CRC fingerprint as
-      the missing record, the old record&rsquo;s path is updated to the new location.</li>
+      the missing record, the old record&rsquo;s path is updated to the new location. This is
+      checked while the crawler compares archives with the database, <em>before</em> anything is
+      extracted, so a moved archive is not decompressed or re-thumbnailed: it counts as
+      unchanged and keeps its existing images.</li>
   <li><b>Filename + size match</b> (fallback) &mdash; if no hash match is found, a match on
-      both filename and file size is used instead.</li>
+      both filename and file size is used instead, after the crawl.</li>
 </ol>
 <p>On a match all existing metadata, images, and thumbnails are preserved under the new path.
 Archives that match neither criterion are removed as before.</p>
@@ -610,7 +613,7 @@ database record is <b>automatically removed</b>.</p>
 <table>
   <tr><th>Phase</th><th>What happens</th><th>Parallelism</th></tr>
   <tr><td>1. Hash</td><td>Read CRC checksums from archive catalog (no decompression)</td><td>Parallel</td></tr>
-  <tr><td>2. DB query</td><td>Check which archives are new or changed</td><td>Serial</td></tr>
+  <tr><td>2. DB query</td><td>Check which archives are new or changed; match moved archives by hash</td><td>Serial</td></tr>
   <tr><td>3. Extract</td><td>Decompress only new / changed archives; extract images and metadata</td><td>Parallel</td></tr>
   <tr><td>4. Upsert</td><td>Write records to SQLite</td><td>Serial</td></tr>
 </table>
@@ -1202,7 +1205,8 @@ archives&rsquo; first thumbnails, making it easy to judge whether the match is g
           first, then by filename + size. Matches are highlighted as <em>Moved (in DB)</em>.</td></tr>
   <tr><td><b>Merge Moved</b></td>
       <td>For every <em>Moved (in DB)</em> row, updates the original record to the new path
-          and removes the duplicate, preserving all metadata and thumbnails.</td></tr>
+          and removes the duplicate, preserving all metadata and thumbnails. The record is no
+          longer flagged missing and appears under its new folder.</td></tr>
   <tr><td><b>Remove Selected</b></td>
       <td>Permanently deletes the selected rows from the database.</td></tr>
   <tr><td><b>Remove All Missing</b></td>

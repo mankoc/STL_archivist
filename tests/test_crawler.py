@@ -248,7 +248,7 @@ def test_thumbnail_refresh_on_hash_change():
     with (
         patch("app.crawler.crawler.extract_metadata",
               return_value=ModelMetadata(title="NewModel")),
-        patch("app.crawler.crawler.delete_thumbnail") as mock_delete,
+        patch("app.crawler.crawler.delete_thumbnails") as mock_delete,
         patch("app.crawler.crawler.save_thumbnail", return_value="thumbs/2.jpg"),
     ):
         with session_scope() as session:
@@ -262,8 +262,8 @@ def test_thumbnail_refresh_on_hash_change():
                 contents={"thumb.jpg": img_bytes},  # pre-extracted by caller
             )
 
-        # Old thumbnail must have been deleted
-        mock_delete.assert_called_once_with("thumbs/1.jpg")
+        # Old thumbnail must have been deleted, in one batched call
+        mock_delete.assert_called_once_with(["thumbs/1.jpg"])
 
     # DB must reflect the updated hash and new title
     with session_scope() as session:

@@ -1796,16 +1796,16 @@ class BrowserTab(QWidget):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        from app.utils.thumbnailer import delete_thumbnail
+        from app.services.moves import delete_model
+        from app.utils.thumbnailer import delete_thumbnails
+        thumb_refs: list[str] = []
         with session_scope() as session:
             for model_id in model_ids:
                 stl: STLModel = session.get(STLModel, model_id)
                 if stl is None:
                     continue
-                for img in list(stl.images):
-                    if img.thumbnail_path:
-                        delete_thumbnail(img.thumbnail_path)
-                session.delete(stl)
+                thumb_refs += delete_model(session, stl)
+        delete_thumbnails(thumb_refs)   # after commit; one LMDB flush, not one per image
 
         self.refresh()
 

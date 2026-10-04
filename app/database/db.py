@@ -433,6 +433,13 @@ def backfill_archive_folder() -> int:
     from app.database.models import STLModel
     from pathlib import PurePosixPath
     with session_scope() as session:
+        # Move reconciliation used to store the folder with backslashes, which
+        # never matches the forward-slash form the crawler writes, so moved
+        # models fell out of folder views.  Normalise any such rows.
+        session.execute(text(
+            "UPDATE models SET archive_folder = replace(archive_folder, char(92), '/') "
+            "WHERE instr(archive_folder, char(92)) > 0"
+        ))
         rows = (
             session.query(STLModel.id, STLModel.archive_path)
             .filter(STLModel.archive_folder.is_(None))

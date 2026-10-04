@@ -372,7 +372,7 @@ class ThumbnailGeneratorWorker(QThread):
         from app.database.db import session_scope
         from app.database.models import STLModel, Image as DBImage
         from app.crawler.archive import extract_archive_contents, IMAGE_SUFFIXES
-        from app.utils.thumbnailer import save_thumbnail, delete_thumbnail, get_thumbnail_base_dir
+        from app.utils.thumbnailer import save_thumbnail, delete_thumbnails, get_thumbnail_base_dir
         from app.ui.config_dialog import get_max_thumb_size, get_unrar_path
 
         max_size  = get_max_thumb_size()
@@ -398,10 +398,9 @@ class ThumbnailGeneratorWorker(QThread):
                     self.log.emit(f"  WARNING: archive not found, skipping")
                     continue
 
-                # Delete existing thumbnails
+                # Delete existing thumbnails (one LMDB transaction for the model)
+                delete_thumbnails([i.thumbnail_path for i in stl.images if i.thumbnail_path])
                 for old_img in list(stl.images):
-                    if old_img.thumbnail_path:
-                        delete_thumbnail(old_img.thumbnail_path)
                     session.delete(old_img)
                 session.flush()
 
