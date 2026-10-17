@@ -1,6 +1,6 @@
 # Rust Migration Plan
 
-**Status:** Phases 0 and 1 done (2026-10-17); Phase 2 done except the gate on extracted bytes and PDF via pdfium (see Phase 2). Written 2026-10-17.
+**Status:** Phases 0 and 1 done (2026-10-17); Phase 2 done (2026-10-18) except PDF via pdfium; Phase 3 next. Written 2026-10-17.
 
 **Goal:** move stlLibrary to Rust for **performance**, a **small native distribution** and a
 **server / client** architecture like Jellyfin's: one server owns the library, and every user
@@ -219,7 +219,8 @@ Split into 2a (archive reading), 2b (image pipeline) and 2c (new dHash and recom
   - **Catalog:** every `.zip`/`.7z` archive (60,487). 60,377 match the stored hash. The other
     110 all match what Python computes today: 25 changed after their crawl, 73 once failed in
     Python and now read, and 6 near-empty `.7z` files raise in Rust and fall back to Python.
-  - **Extraction:** a 3,000-archive sample; extracted bytes compared with `read_batch`.
+  - **Extraction:** a random 3,000-archive sample, every wanted member: all 3,000 identical
+    to `read_batch` (29 GB of extracted bytes compared).
   - **Speed:** catalogs are ~50–100x faster from the file cache. Extraction is ~1.3x faster;
     it is bound by LZMA decompression and disk.
 - Not done: nested-archive detection stays in Python until Phase 4 (it uses the catalog,
