@@ -188,7 +188,12 @@ ends with a disk flush (~160 ms on a hard disk). Collect the refs and call
 
 - **`thumbnailer.py`** — LMDB key-value store for JPEG thumbnails (keyed by `Image.id`).
   Key API: `save_thumbnail(bytes, image_id)` resizes and writes; `pixmap_from_path(str)` reads
-  back a `QPixmap`; `delete_thumbnail(id)` removes an entry.
+  back a `QPixmap`; `delete_thumbnail(id)` removes an entry. The store is held by one of two
+  backends, picked in `init_thumbnail_store`: `_NativeBackend` (`stl_native.ThumbStore`,
+  heed) or `_LmdbBackend` (py-lmdb), same on-disk format. Never open the store with the
+  other backend (or plain `lmdb.open`) in the same process; call `close_thumbnail_store()`
+  first. Go through the module functions or `_store` methods, never a raw environment.
+  `tests/golden/test_thumbstore_golden.py` checks that both backends write identical keys.
 - **`material_icons.py`** — application icons. Maps icon roles (`ICON_MAP` keys) to Material
   Icon symbols (pre-cached via `setup_material_icons.py`, tinted for light/dark), or, when the
   user picks a colour set in Appearance (`icon_set` setting), to

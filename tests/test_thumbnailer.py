@@ -300,7 +300,7 @@ def test_write_raw_thumbnail_stores_bytes():
 
 def test_write_raw_thumbnail_returns_none_when_uninitialised(monkeypatch):
     import app.utils.thumbnailer as t
-    monkeypatch.setattr(t, "_lmdb_env", None)
+    monkeypatch.setattr(t, "_store", None)
     result = write_raw_thumbnail(41, b"\xff\xd8\xff")
     assert result is None
 
@@ -311,7 +311,7 @@ def test_write_raw_thumbnail_returns_none_when_uninitialised(monkeypatch):
 
 def test_save_thumbnail_raises_without_init(monkeypatch):
     import app.utils.thumbnailer as t
-    monkeypatch.setattr(t, "_lmdb_env", None)
+    monkeypatch.setattr(t, "_store", None)
     with pytest.raises(RuntimeError, match="not initialised"):
         save_thumbnail(_minimal_png(), image_id=50)
 
@@ -322,7 +322,7 @@ def test_save_thumbnail_raises_without_init(monkeypatch):
 
 def test_get_thumbnail_bytes_without_init_returns_none(monkeypatch):
     import app.utils.thumbnailer as t
-    monkeypatch.setattr(t, "_lmdb_env", None)
+    monkeypatch.setattr(t, "_store", None)
     assert get_thumbnail_bytes(1) is None
 
 
@@ -332,5 +332,5 @@ def test_get_thumbnail_bytes_without_init_returns_none(monkeypatch):
 
 def test_delete_thumbnail_without_init_is_noop(monkeypatch):
     import app.utils.thumbnailer as t
-    monkeypatch.setattr(t, "_lmdb_env", None)
+    monkeypatch.setattr(t, "_store", None)
     delete_thumbnail("1")  # must not raise

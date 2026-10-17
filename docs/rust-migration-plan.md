@@ -268,6 +268,25 @@ Split into 2a (archive reading), 2b (image pipeline) and 2c (new dHash and recom
   batching, compaction and the dedup sweep.
 - `app/utils/thumbnailer.py` becomes a wrapper over `stl_native` in one change (rule 3).
 
+**Done 2026-10-18.** `stl-core/src/thumbstore.rs` (heed 0.22, LMDB mdb.master), exposed as
+`stl_native.ThumbStore`.
+
+- `thumbnailer.py` picks a backend once per open store: `_NativeBackend` when the native core
+  has `ThumbStore`, else `_LmdbBackend` (py-lmdb, kept as the fallback until Phase 8). All
+  access goes through the backend, so the two never hold one store in one process.
+- Same keys byte for byte (`R<id>` → `D<xxh3-128 BE>[slot]`, legacy bare ids), the same
+  collision slots, and the same map growth: start at max(10 GB, file + 2 GB), grow by 2 GB on
+  MDB_MAP_FULL. A `RwLock` keeps every transaction out while the map resizes, which LMDB
+  requires.
+- The dedup sweep and compaction stay in Python as loops over batch calls
+  (`convert_legacy`, `orphan_blobs`, `delete_keys`, `copy_compacted`), so their progress
+  callbacks stay on the calling thread.
+- Opening never writes: the main database is opened through a read transaction.
+- Gate: golden tests write with one backend and read with the other, and compare raw key
+  dumps. On the reference store, 30,000 random thumbnails and the full statistics matched.
+- Speed is not the point here; py-lmdb is already C. The point is that the server needs the
+  store without Python.
+
 ### Phase 4: Storage and the crawler (large)
 
 - Rust storage layer on `rusqlite`: models, lookups, images, STL files, crawled folders,

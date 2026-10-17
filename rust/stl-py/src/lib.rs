@@ -16,7 +16,7 @@ use pyo3::types::{PyBytes, PyDict};
 use stl_core::control::{Control, Stopped as CoreStopped};
 use stl_core::fingerprint::{self, Member};
 use stl_core::archive::{self, ArchiveError};
-use stl_core::{embedding, hamming, strings, thumbnail};
+use stl_core::{embedding, hamming, strings, thumbnail, thumbstore};
 
 create_exception!(
     stl_native,
@@ -186,6 +186,123 @@ fn dhash_many(py: Python<'_>, items: Vec<Bound<'_, PyBytes>>) -> Vec<Option<u128
     py.detach(|| stl_core::dhash::dhash_many(&slices))
 }
 
+/// The thumbnail store (`thumbnails.lmdb`), same format as the py-lmdb one.
+///
+/// A process uses this **or** py-lmdb for a store, never both (LMDB forbids
+/// opening one environment twice in a process). Every method releases the GIL.
+/// After `close()` every method raises `ValueError`.
+#[pyclass(frozen, name = "ThumbStore")]
+struct PyThumbStore {
+    inner: std::sync::RwLock<Option<thumbstore::ThumbStore>>,
+}
+
+fn store_err(e: heed::Error) -> PyErr {
+    match e {
+        heed::Error::Io(io) => io.into(),
+        other => PyRuntimeError::new_err(format!("thumbnail store: {other}")),
+    }
+}
+
+impl PyThumbStore {
+    fn with<T: Send>(
+        &self,
+        py: Python<'_>,
+        f: impl FnOnce(&thumbstore::ThumbStore) -> heed::Result<T> + Send,
+    ) -> PyResult<T> {
+        py.detach(|| {
+            let guard = self.inner.read().unwrap_or_else(|e| e.into_inner());
+            match guard.as_ref() {
+                Some(s) => f(s).map_err(store_err),
+                None => Err(PyValueError::new_err("thumbnail store is closed")),
+            }
+        })
+    }
+}
+
+#[pymethods]
+impl PyThumbStore {
+    #[new]
+    fn new(py: Python<'_>, path: std::path::PathBuf) -> PyResult<Self> {
+        let store = py.detach(|| thumbstore::ThumbStore::open(&path)).map_err(store_err)?;
+        Ok(PyThumbStore { inner: std::sync::RwLock::new(Some(store)) })
+    }
+
+    /// Store `(image_id, bytes)` pairs in one transaction (deduplicated).
+    fn put_many(&self, py: Python<'_>, items: Vec<(u64, Vec<u8>)>) -> PyResult<()> {
+        let refs: Vec<(u64, &[u8])> = items.iter().map(|(id, d)| (*id, d.as_slice())).collect();
+        self.with(py, |s| s.put_many(&refs))
+    }
+
+    /// `{image_id: bytes}` for the ids that have a thumbnail.
+    fn get_many<'py>(&self, py: Python<'py>, ids: Vec<u64>) -> PyResult<Bound<'py, PyDict>> {
+        let found = self.with(py, |s| s.get_many(&ids))?;
+        let out = PyDict::new(py);
+        for (id, data) in found {
+            out.set_item(id, PyBytes::new(py, &data))?;
+        }
+        Ok(out)
+    }
+
+    fn get<'py>(&self, py: Python<'py>, image_id: u64) -> PyResult<Option<Bound<'py, PyBytes>>> {
+        let found = self.with(py, |s| s.get_many(&[image_id]))?;
+        Ok(found.into_iter().next().map(|(_, d)| PyBytes::new(py, &d)))
+    }
+
+    fn delete_many(&self, py: Python<'_>, ids: Vec<u64>) -> PyResult<()> {
+        self.with(py, |s| s.delete_many(&ids))
+    }
+
+    /// `{"thumbnails", "blobs", "legacy", "payload_bytes"}`.
+    fn stats<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let st = self.with(py, |s| s.stats())?;
+        let out = PyDict::new(py);
+        out.set_item("thumbnails", st.thumbnails)?;
+        out.set_item("blobs", st.blobs)?;
+        out.set_item("legacy", st.legacy)?;
+        out.set_item("payload_bytes", st.payload_bytes)?;
+        Ok(out)
+    }
+
+    /// Convert up to `limit` legacy entries; returns how many were converted.
+    fn convert_legacy(&self, py: Python<'_>, limit: usize) -> PyResult<usize> {
+        self.with(py, |s| s.convert_legacy(limit))
+    }
+
+    /// Keys of blobs nothing references.
+    fn orphan_blobs<'py>(&self, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyBytes>>> {
+        let keys = self.with(py, |s| s.orphan_blobs())?;
+        Ok(keys.iter().map(|k| PyBytes::new(py, k)).collect())
+    }
+
+    fn delete_keys(&self, py: Python<'_>, keys: Vec<Vec<u8>>) -> PyResult<()> {
+        self.with(py, |s| s.delete_keys(&keys))
+    }
+
+    /// Write raw `(key, value)` pairs (tests and tools).
+    fn put_raw(&self, py: Python<'_>, items: Vec<(Vec<u8>, Vec<u8>)>) -> PyResult<()> {
+        self.with(py, |s| s.put_raw(&items))
+    }
+
+    /// Write a compacted copy of the store to the file `path`.
+    fn copy_compacted(&self, py: Python<'_>, path: std::path::PathBuf) -> PyResult<()> {
+        self.with(py, |s| s.copy_compacted(&path))
+    }
+
+    fn map_size(&self, py: Python<'_>) -> PyResult<usize> {
+        self.with(py, |s| Ok(s.map_size()))
+    }
+
+    /// Close the environment (waits until LMDB has released it). Idempotent.
+    fn close(&self, py: Python<'_>) {
+        py.detach(|| {
+            let store = self.inner.write().unwrap_or_else(|e| e.into_inner()).take();
+            if let Some(s) = store {
+                s.close();
+            }
+        })
+    }
+}
+
 /// Pairs of 128-bit hashes within `max_dist` bits.
 ///
 /// `hi` / `lo`: uint64 arrays (high and low halves). Returns `(i, j, dist)` as
@@ -252,6 +369,7 @@ fn stl_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(make_thumbnail, m)?)?;
     m.add_function(wrap_pyfunction!(dhash, m)?)?;
     m.add_function(wrap_pyfunction!(dhash_many, m)?)?;
+    m.add_class::<PyThumbStore>()?;
     m.add_function(wrap_pyfunction!(hamming_pairs, m)?)?;
     m.add_function(wrap_pyfunction!(cosine_pairs, m)?)?;
     m.add_function(wrap_pyfunction!(levenshtein_pairs, m)?)?;

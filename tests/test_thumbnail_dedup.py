@@ -30,7 +30,7 @@ RED, GREEN, BLUE = (200, 30, 30), (30, 200, 30), (30, 30, 200)
 
 def _write_legacy(image_id: int, data: bytes) -> None:
     """Write in the pre-dedup layout, to simulate an existing library."""
-    T._write(lambda txn: txn.put(T._key(image_id), data))
+    T._store.put_raw([(T._key(image_id), data)])
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +192,9 @@ def test_stopping_leaves_the_store_readable():
 
 def test_colliding_payloads_are_kept_apart(monkeypatch):
     """A digest clash must never serve one image's bytes for another."""
+    if T.store_backend() != "lmdb":
+        pytest.skip("forces a collision through the py-lmdb backend's xxhash; "
+                    "thumbstore.rs tests the native backend's collision slots")
     monkeypatch.setattr(T.xxhash, "xxh3_128_digest", lambda _data: b"\x00" * 16)
 
     red, green = _jpeg(RED), _jpeg(GREEN)

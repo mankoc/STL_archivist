@@ -101,7 +101,8 @@ python main.py
 
 The native core (`rust/`, installed as the `stl_native` module) is optional: without it the app
 runs its Python implementations. With it, the crawler reads `.zip` and `.7z` catalogs and
-extracts their images natively (RAR always uses UnRAR), thumbnails are made natively
+extracts their images natively (RAR always uses UnRAR), the thumbnail store is opened natively
+(same format as without it), thumbnails are made natively
 (AVIF and a few rare variants still go through Pillow), and the duplicate searches run
 several times faster. Perceptual hashes (dHash) are computed only by the native core; without
 it, perceptual-hash searches use only the hashes already stored. Building it needs [Rust](https://rustup.rs) and, on Windows,

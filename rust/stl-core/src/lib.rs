@@ -13,6 +13,7 @@ pub mod fingerprint;
 pub mod hamming;
 pub mod pairs;
 pub mod strings;
+pub mod thumbstore;
 pub mod thumbnail;
 
 /// Version of the core library.
