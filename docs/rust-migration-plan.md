@@ -1,6 +1,6 @@
 # Rust Migration Plan
 
-**Status:** Phases 0 and 1 done (2026-10-17); Phase 2 next. Written 2026-10-17.
+**Status:** Phases 0 and 1 done (2026-10-17); Phase 2a (archive reading) done, 2b next. Written 2026-10-17.
 
 **Goal:** move stlLibrary to Rust for **performance**, a **small native distribution** and a
 **server / client** architecture like Jellyfin's: one server owns the library, and every user
@@ -154,8 +154,8 @@ implementation on the same inputs.
   library (all 51 ZIP, all 106 RAR, 150 sampled `.7z`) found no difference.
 - `build_dist.py` builds the module before PyInstaller (`--no-native` skips it); the spec lists
   `stl_native`.
-- Still to do in Phase 2: the checked-in archive corpus with odd encodings and corrupt files,
-  once Rust reads archives itself.
+- The archive corpus with odd encodings and corrupt files was built in Phase 2a as
+  generated archives (`tests/golden/test_archive_golden.py`), not checked-in files.
 
 ### Phase 1: Pure computation (small–medium) — done 2026-10-17
 
@@ -194,6 +194,36 @@ Stateless all-pairs searches, chosen by measured cost; arrays in, arrays out.
   one-time recompute of every stored hash; the Python fallback stops producing hashes.
 - Gate: golden `archive_hash` equality on the whole corpus **and** on a read-only pass over the
   reference library (every stored hash recomputed by Rust must equal the stored value).
+
+Split into 2a (archive reading), 2b (image pipeline) and 2c (new dHash and recompute).
+
+**2a: archive reading — done 2026-10-17.**
+
+| Function (`stl_native`) | Core module | Python caller |
+|---|---|---|
+| `archive_members` / `archive_hash_file` | `archive/zip.rs`, `archive/sevenz.rs` | `_native_catalog` → `archive_hash`, `list_contents`, `list_member_sizes`, `list_stl_members`, `extract_archive_contents` |
+| `read_archive_members` | same | `_read_members` → `extract_archive_contents`, `read_file` |
+
+- Principle: return exactly what the Python reader returns, or raise. Unsupported cases
+  (RAR, encrypted or non-deflate ZIP members, a local header whose name differs from the
+  central directory, a ZIP size mismatch, an unparsable 7z) raise, and Python reads that
+  archive. Rust must also fail wherever Python fails, so the two never disagree on which
+  archives are readable.
+- ZIP: a port of CPython 3.14 `zipfile` (`_EndRecData`, `_RealGetContents`, `_decodeExtra`,
+  the `ZipFile.open` checks), including `NameToInfo` last-wins and the overlapped-entries guard.
+  Members `zipfile` would skip are skipped.
+- 7z: `sevenz-rust2` 0.24, decoding only the blocks holding wanted files. Its `BlockDecoder`
+  walks `first_file .. first_file + num_unpack_sub_streams`. If an entry without a stream lies
+  inside that range, the block's last files are silently dropped; such archives go to py7zr.
+- Gate, reference library:
+  - **Catalog:** every `.zip`/`.7z` archive (60,487). 60,377 match the stored hash. The other
+    110 all match what Python computes today: 25 changed after their crawl, 73 once failed in
+    Python and now read, and 6 near-empty `.7z` files raise in Rust and fall back to Python.
+  - **Extraction:** a 3,000-archive sample; extracted bytes compared with `read_batch`.
+  - **Speed:** catalogs are ~50–100x faster from the file cache. Extraction is ~1.3x faster;
+    it is bound by LZMA decompression and disk.
+- Not done: nested-archive detection stays in Python until Phase 4 (it uses the catalog,
+  which is native already).
 
 ### Phase 3: Thumbnail store (small–medium)
 

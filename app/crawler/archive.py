@@ -241,6 +241,53 @@ def is_archive(path: Path) -> bool:
     return path.suffix.lower() in ARCHIVE_SUFFIXES
 
 
+def _native_catalog(path: Path) -> Optional[list[MemberInfo]]:
+    """Catalog from the native core for ``.zip`` / ``.7z``, or None to use Python.
+
+    ``rust/stl-core/src/archive`` reproduces the Python readers' names and
+    CRCs exactly (golden-tested, and checked against every stored hash of the
+    reference library). It raises for anything it cannot read exactly, and for
+    ``.rar``; the Python readers then decide, errors included.
+    """
+    from app import native
+    mod = native.module()
+    if mod is None or path.suffix.lower() not in (".zip", ".7z"):
+        return None
+    try:
+        return [MemberInfo(name, crc, size) for name, crc, size in mod.archive_members(str(path))]
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def _catalog(path: Path, unrar_path: str = "") -> list[MemberInfo]:
+    """Every catalog entry of *path*: native when possible, else the Python reader."""
+    members = _native_catalog(path)
+    if members is not None:
+        return members
+    with open_archive(path, unrar_path) as ar:
+        return list(ar.iter_members())
+
+
+def _read_members(path: Path, names: list[str], unrar_path: str = "") -> dict[str, bytes]:
+    """``read_batch(names)``: native for ``.zip`` / ``.7z`` when possible, else Python.
+
+    The native reader returns what ``read_batch`` would (missing, empty and
+    unreadable members left out) and raises when the archive needs the Python
+    reader, which then opens it as before.
+    """
+    if not names:
+        return {}
+    from app import native
+    mod = native.module()
+    if mod is not None and path.suffix.lower() in (".zip", ".7z"):
+        try:
+            return mod.read_archive_members(str(path), names)
+        except (OSError, ValueError, AttributeError) as exc:
+            logger.debug("Native read of %s fell back to Python: %s", path.name, exc)
+    with open_archive(path, unrar_path) as ar:
+        return ar.read_batch(names)
+
+
 def archive_hash(path: Path, unrar_path: str = "") -> str:
     """
     Derive a stable fingerprint from the CRC values already stored in the
@@ -252,8 +299,7 @@ def archive_hash(path: Path, unrar_path: str = "") -> str:
     """
     logger.debug("Computing hash for: %s", path.name)
     try:
-        with open_archive(path, unrar_path) as ar:
-            members = [(m.name, m.crc) for m in ar.iter_members()]
+        members = [(m.name, m.crc) for m in _catalog(path, unrar_path)]
     except _ARCHIVE_ERRORS as exc:
         stat = path.stat()
         fingerprint = f"fallback:{stat.st_size}:{stat.st_mtime_ns}"
@@ -312,8 +358,7 @@ def list_contents(archive_path: Path, unrar_path: str = "") -> list[str]:
     """Return a list of all file names inside the archive."""
     logger.debug("Listing contents of: %s", archive_path.name)
     try:
-        with open_archive(archive_path, unrar_path) as ar:
-            names = [m.name for m in ar.iter_members()]
+        names = [m.name for m in _catalog(archive_path, unrar_path)]
         logger.debug("  %d member(s) in %s", len(names), archive_path.name)
         return names
     except PermissionError as exc:
@@ -334,9 +379,8 @@ def list_member_sizes(archive_path: Path, unrar_path: str = "") -> "dict[str, in
     """
     result: "dict[str, int | None]" = {}
     try:
-        with open_archive(archive_path, unrar_path) as ar:
-            for m in ar.iter_members():
-                result[m.name] = m.size
+        for m in _catalog(archive_path, unrar_path):
+            result[m.name] = m.size
         logger.debug("  %d member(s) in %s", len(result), archive_path.name)
     except PermissionError as exc:
         logger.warning("Permission denied reading archive %s: %s", archive_path.name, exc)
@@ -356,10 +400,9 @@ def list_stl_members(archive_path: Path, unrar_path: str = "") -> dict[str, int 
     """
     result: dict[str, int | None] = {}
     try:
-        with open_archive(archive_path, unrar_path) as ar:
-            for m in ar.iter_members():
-                if Path(m.name.replace("\\", "/")).suffix.lower() in _STL_EXTS:
-                    result[m.name] = m.size
+        for m in _catalog(archive_path, unrar_path):
+            if Path(m.name.replace("\\", "/")).suffix.lower() in _STL_EXTS:
+                result[m.name] = m.size
         logger.debug("  %d printable member(s) in %s", len(result), archive_path.name)
     except _ARCHIVE_ERRORS as exc:
         logger.warning("Could not list STL members in %s: %s", archive_path.name, exc)
@@ -369,8 +412,7 @@ def list_stl_members(archive_path: Path, unrar_path: str = "") -> dict[str, int 
 def read_file(archive_path: Path, member_name: str, unrar_path: str = "") -> Optional[bytes]:
     """Read a single member from the archive and return its bytes."""
     try:
-        with open_archive(archive_path, unrar_path) as ar:
-            return ar.read_batch([member_name]).get(member_name)
+        return _read_members(archive_path, [member_name], unrar_path).get(member_name)
     except Exception:
         return None
 
@@ -417,52 +459,51 @@ def extract_archive_contents(
     result: dict[str, bytes] = {}
     logger.debug("Extracting wanted files from: %s", archive_path.name)
     try:
-        with open_archive(archive_path, unrar_path) as ar:
-            all_members = list(ar.iter_members())
-            all_names   = [m.name for m in all_members]
+        all_members = _catalog(archive_path, unrar_path)
+        all_names   = [m.name for m in all_members]
 
-            if all_names_out is not None:
-                all_names_out.extend(all_names)
+        if all_names_out is not None:
+            all_names_out.extend(all_names)
 
-            if uncompressed_size_out is not None:
-                total = sum(m.size for m in all_members if m.size is not None)
-                uncompressed_size_out.append(total)
+        if uncompressed_size_out is not None:
+            total = sum(m.size for m in all_members if m.size is not None)
+            uncompressed_size_out.append(total)
 
-            if stl_info_out is not None:
-                target_exts = {".stl", ".obj", ".lys", ".lyt", ".chitubox", ".ctp"}
-                for m in all_members:
-                    if Path(m.name.replace("\\", "/")).suffix.lower() in target_exts:
-                        stl_info_out[m.name] = m.size
+        if stl_info_out is not None:
+            target_exts = {".stl", ".obj", ".lys", ".lyt", ".chitubox", ".ctp"}
+            for m in all_members:
+                if Path(m.name.replace("\\", "/")).suffix.lower() in target_exts:
+                    stl_info_out[m.name] = m.size
 
-            size_by_name = {m.name: m.size for m in all_members}
-            wanted = [n for n in all_names if _is_wanted(n)]
-            logger.debug("  %d total members, %d wanted", len(all_names), len(wanted))
+        size_by_name = {m.name: m.size for m in all_members}
+        wanted = [n for n in all_names if _is_wanted(n)]
+        logger.debug("  %d total members, %d wanted", len(all_names), len(wanted))
 
-            # Apply size limits before extraction where catalog size is known.
-            to_read: list[str] = []
-            for name in wanted:
-                limit     = _member_size_limit(name)
-                file_size = size_by_name.get(name)
-                if file_size is not None and file_size > limit:
-                    logger.warning(
-                        "Skipping oversized member %r (%d B > %d B limit) in %s",
-                        name, file_size, limit, archive_path,
-                    )
-                    continue
-                to_read.append(name)
+        # Apply size limits before extraction where catalog size is known.
+        to_read: list[str] = []
+        for name in wanted:
+            limit     = _member_size_limit(name)
+            file_size = size_by_name.get(name)
+            if file_size is not None and file_size > limit:
+                logger.warning(
+                    "Skipping oversized member %r (%d B > %d B limit) in %s",
+                    name, file_size, limit, archive_path,
+                )
+                continue
+            to_read.append(name)
 
-            batch = ar.read_batch(to_read)
+        batch = _read_members(archive_path, to_read, unrar_path)
 
-            # Secondary size check for formats where catalog size was unavailable.
-            for name, data in batch.items():
-                limit = _member_size_limit(name)
-                if len(data) > limit:
-                    logger.warning(
-                        "Skipping oversized member %r (%d B > %d B limit) in %s",
-                        name, len(data), limit, archive_path,
-                    )
-                    continue
-                result[name] = data
+        # Secondary size check for formats where catalog size was unavailable.
+        for name, data in batch.items():
+            limit = _member_size_limit(name)
+            if len(data) > limit:
+                logger.warning(
+                    "Skipping oversized member %r (%d B > %d B limit) in %s",
+                    name, len(data), limit, archive_path,
+                )
+                continue
+            result[name] = data
 
     except PermissionError as exc:
         logger.warning("Permission denied reading archive %s: %s", archive_path, exc)

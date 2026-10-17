@@ -809,7 +809,10 @@ The dialog is divided into sections shown in a tree on the left.</p>
 <div class="note">The environment variables <code>STL_DATA_DIR</code> and
 <code>STL_UNRAR_PATH</code>, when set, take precedence over these two settings.
 <code>STL_NATIVE=0</code> turns off the optional native (Rust) core so the Python
-implementations are used; the log's first line says which one is active.</div>
+implementations are used; the log's first line says which one is active. The native
+core reads <code>.zip</code> and <code>.7z</code> archives itself and hands any archive it
+cannot read exactly to the Python readers, so turning it off never changes what is
+catalogued.</div>
 
 <h2>Language</h2>
 <table>

@@ -100,7 +100,9 @@ python main.py
 ```
 
 The native core (`rust/`, installed as the `stl_native` module) is optional: without it the app
-runs its Python implementations. Building it needs [Rust](https://rustup.rs) and, on Windows,
+runs its Python implementations. With it, the crawler reads `.zip` and `.7z` catalogs and
+extracts their images natively (RAR always uses UnRAR), and the duplicate searches run
+several times faster. Building it needs [Rust](https://rustup.rs) and, on Windows,
 the Visual Studio C++ Build Tools. The codebase is moving to Rust step by step; see
 [docs/rust-migration-plan.md](docs/rust-migration-plan.md).
 

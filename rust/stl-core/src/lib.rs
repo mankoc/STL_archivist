@@ -5,6 +5,7 @@
 //! dependency, so the same code backs the PyO3 module used by the current PyQt
 //! app (`stl-py`) and, later, the server. See `docs/rust-migration-plan.md`.
 
+pub mod archive;
 pub mod control;
 pub mod embedding;
 pub mod fingerprint;
@@ -14,3 +15,5 @@ pub mod strings;
 
 /// Version of the core library.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Rust migration, Phase 2a: the crawler reads `.zip` and `.7z` archives natively.** The catalog (names, CRCs, sizes) behind `archive_hash`, and the extraction of images, `info.json` and `.url` files, now go through the native core when it is installed. RAR archives still use UnRAR.
+  - **Hashing archives is much faster.** Reading the catalogs of 300 sample archives took 4.7 s in Python and under 0.1 s natively. These figures come from the file cache, since Python read the same files first. Extraction is about 1.3x faster; it is bound by decompression and disk.
+  - **The results are the same.** The ZIP reader ports CPython's `zipfile`: CP437 and UTF-8 names, Unicode-path extra fields, NUL and backslash handling, ZIP64, data before the archive, and the per-member checks that make `zipfile` skip a member. Rust recomputed the hash of every `.zip` and `.7z` archive in the reference library (60,487). Wherever the stored hash differed, Rust's matched what Python computes today: 25 archives had changed since their crawl, and 73 had once failed to open in Python. In a sample, Rust's extracted bytes were compared with Python's.
+  - **Anything unusual is left to the Python readers.** This covers encrypted members, compression methods other than stored and deflate, and archives Rust cannot parse. The fallback is per archive and silent.
+  - Fixed before release: `sevenz-rust2`'s block decoder silently drops the last files of a solid block that has a directory or empty file inside it. py7zr writes archives laid out like that. Rust detects those blocks and leaves those archives to py7zr.
+  - New golden tests (`tests/golden/test_archive_golden.py`) build ZIP files byte by byte to cover each naming edge case, and compare catalogs and extracted bytes with `zipfile` and py7zr.
+
 - **Rust migration, Phase 1: faster duplicate searches.** Three all-pairs searches now run on the native core, with the Python code kept as the fallback. Timings are from the reference library.
   - **_Find Duplicate Archives → Images_ by perceptual hash: 15.7 s → 3.9 s.** The Hamming scan over 191k distinct hashes takes 2.1 s instead of 13.9 s in NumPy, with identical pairs.
   - **_Find Duplicate Archives → Images_ by AI embedding: 66 s → 36 s.** The scan uses `gemm`, which picks AVX2 or AVX-512 kernels at run time. The NumPy and Rust scans can disagree only on pairs within float rounding (about 1e-6) of the threshold; on the reference library that was 19 of 1.66 million pairs.

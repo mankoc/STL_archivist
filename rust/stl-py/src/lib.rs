@@ -12,9 +12,10 @@ use pyo3::buffer::{Element, PyBuffer};
 use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::PyBytes;
+use pyo3::types::{PyBytes, PyDict};
 use stl_core::control::{Control, Stopped as CoreStopped};
 use stl_core::fingerprint::{self, Member};
+use stl_core::archive::{self, ArchiveError};
 use stl_core::{embedding, hamming, strings};
 
 create_exception!(
@@ -108,6 +109,49 @@ fn archive_fingerprint(py: Python<'_>, members: Vec<(String, u32)>) -> String {
     py.detach(|| fingerprint::archive_fingerprint(&mut members))
 }
 
+fn archive_err(e: ArchiveError) -> PyErr {
+    match e {
+        ArchiveError::Io(io) => io.into(), // OSError subclass, like Python's own readers
+        other => PyValueError::new_err(other.to_string()),
+    }
+}
+
+/// Catalog of a `.zip` or `.7z` archive: `[(name, crc, size), ...]`.
+///
+/// Same names and CRCs as the Python readers in `app.crawler.archive`.
+/// Raises `OSError` or `ValueError` for anything it cannot read exactly; the
+/// caller then falls back to the Python reader (and always does for `.rar`).
+#[pyfunction]
+fn archive_members(py: Python<'_>, path: std::path::PathBuf) -> PyResult<Vec<(String, u32, Option<u64>)>> {
+    let members = py.detach(|| archive::list_members(&path)).map_err(archive_err)?;
+    Ok(members.into_iter().map(|m| (m.name, m.crc, m.size)).collect())
+}
+
+/// `archive_hash` of a `.zip` or `.7z` archive, computed in one native call.
+#[pyfunction]
+fn archive_hash_file(py: Python<'_>, path: std::path::PathBuf) -> PyResult<String> {
+    py.detach(|| archive::fingerprint(&path)).map_err(archive_err)
+}
+
+/// Decompress the named members of a `.zip` or `.7z` archive: `{name: bytes}`.
+///
+/// Same result as the Python readers' `read_batch`: missing, empty and
+/// unreadable members are left out. Raises `OSError` or `ValueError` when the
+/// archive needs the Python reader instead.
+#[pyfunction]
+fn read_archive_members<'py>(
+    py: Python<'py>,
+    path: std::path::PathBuf,
+    names: Vec<String>,
+) -> PyResult<Bound<'py, PyDict>> {
+    let members = py.detach(|| archive::read_members(&path, &names)).map_err(archive_err)?;
+    let out = PyDict::new(py);
+    for (name, data) in members {
+        out.set_item(name, PyBytes::new(py, &data))?;
+    }
+    Ok(out)
+}
+
 /// Pairs of 128-bit hashes within `max_dist` bits.
 ///
 /// `hi` / `lo`: uint64 arrays (high and low halves). Returns `(i, j, dist)` as
@@ -168,6 +212,9 @@ fn stl_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", stl_core::VERSION)?;
     m.add("Stopped", m.py().get_type::<Stopped>())?;
     m.add_function(wrap_pyfunction!(archive_fingerprint, m)?)?;
+    m.add_function(wrap_pyfunction!(archive_members, m)?)?;
+    m.add_function(wrap_pyfunction!(archive_hash_file, m)?)?;
+    m.add_function(wrap_pyfunction!(read_archive_members, m)?)?;
     m.add_function(wrap_pyfunction!(hamming_pairs, m)?)?;
     m.add_function(wrap_pyfunction!(cosine_pairs, m)?)?;
     m.add_function(wrap_pyfunction!(levenshtein_pairs, m)?)?;
