@@ -1,6 +1,10 @@
 # Server + Web UI Migration Plan
 
-**Status:** proposal, nothing implemented yet.
+**Status:** superseded on 2026-10-17 by [rust-migration-plan.md](rust-migration-plan.md). The
+server and React web client described here are now built in Rust (axum) on a Rust core, in a
+Jellyfin-style server + client architecture. Only step 0.1 (the Qt-free settings provider) was
+implemented from this plan. Kept for reference: its notes on desktop features in a server
+world, path remapping and Docker still apply.
 
 **Goal:** run stlLibrary as a backend server in Docker on a remote machine, with a React web UI. The PyQt6 desktop app is kept.
 

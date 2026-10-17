@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Rust migration, Phase 0: an optional native core.** The codebase is moving to Rust step by step, towards a server that owns the library and a React web client in front of it, like Jellyfin (plan: `docs/rust-migration-plan.md`).
+  - New Cargo workspace in `rust/`: `stl-core`, the core library, and `stl-py`, PyO3 bindings that install as the `stl_native` Python module. One `abi3` build covers Python 3.12 and later. Build it with `python tools/build_native.py`; `build_dist.py` builds it before PyInstaller and bundles it, or skips it with `--no-native`.
+  - The module is optional. `app/native.py` loads it when present, every ported function keeps its Python fallback, and `STL_NATIVE=0` turns it off. The first log line says whether it is in use.
+  - First ported function: the archive fingerprint behind `archive_hash` (xxh64 over member names and CRCs). New golden tests (`tests/golden/`) require the Rust and Python results to be identical. Rust also recomputed the stored hashes of every ZIP (51) and RAR (106) archive and 150 `.7z` archives in the reference library, all identical.
+  - Decisions recorded in the plan: perceptual hashes and CLIP embeddings get new Rust implementations and are recomputed once; PDF thumbnails will use pdfium; RAR keeps the external UnRAR tool.
+- **Documentation:** new `docs/rust-migration-plan.md`, covering the architecture, phases, crate choices, the compatibility rules for sharing one library between the Python and Rust code, and open decisions. `docs/server-migration-plan.md` is marked as superseded by it. `class_diagram.md` is regenerated from the source: package and module dependency graphs, data model, crawler, services, UI composition and hierarchy, a table of background workers, and the import cycles still present.
+
 - **_Find Duplicate Archives → Images_ is much faster, and complete.** On a 363k-image library the perceptual-hash search takes 16 s and the AI-embedding search 66 s.
   - **Fixed: the perceptual-hash search could stop early and miss duplicates.** It ended the scan after five consecutive rounds of 50-image chunks found no new pairs, which on a large library could happen after the first thousand images. Every pair is now compared.
   - **The AI-embedding search no longer takes hours.** It compared vectors in `float16`, which NumPy cannot pass to its optimised matrix routines, with a Python loop per image. It now multiplies `float32` tiles in BLAS.

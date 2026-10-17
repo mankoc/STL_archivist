@@ -24,6 +24,8 @@ hiddenimports = [
     'app.ui.ai_tagger_dialog',
     'app.ui.ai_setup_dialog',
     'app.utils.ai_runtime',
+    # Optional Rust core (tools/build_native.py); imported lazily by app/native.py.
+    'stl_native',
 ]
 hiddenimports += collect_submodules('sqlalchemy.dialects.sqlite')
 

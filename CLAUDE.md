@@ -36,8 +36,29 @@ stl_database/
 │   ├── icon.svg             # Scalable vector version
 │   ├── icons/               # Toolbar / tree-view SVG icon set (light + dark variants)
 │   └── material-icons/      # Cached Material Design Icons (pre-downloaded for offline use)
-└── tests/                   # pytest test suite
+├── rust/                    # Rust workspace: stl-core (library), stl-py (PyO3 → `stl_native`)
+├── tools/build_native.py    # maturin develop into the running interpreter's environment
+└── tests/                   # pytest test suite; tests/golden/ = Rust vs Python equality
 ```
+
+## Rust migration (in progress)
+
+The app is moving to Rust incrementally, towards a Jellyfin-style server + React web client.
+**Read `docs/rust-migration-plan.md` before touching `rust/` or porting a function**, in
+particular its compatibility rules (bit-identical `archive_hash`, one LMDB owner per process,
+Python owns the schema until Phase 4).
+
+- Ported functions are called through `app/native.py` and always keep a Python fallback
+  (`native.module()` is `None` when the module is missing or `STL_NATIVE=0`). Catch
+  `TypeError` / `ValueError` / `OverflowError` / `UnicodeError` from the native call and fall
+  back; never let the app require `stl_native`.
+- Logic lives in `rust/stl-core`; `rust/stl-py` only converts arguments and releases the GIL
+  (`py.detach`). Long operations take `progress` / `log` / `should_stop` callbacks, as in
+  `app/services`.
+- Every port gets a golden test in `tests/golden/` (skipped when `stl_native` is not built)
+  and `cargo test` in the crate. Run pytest with and without `STL_NATIVE=0`, plus
+  `cargo clippy --workspace --all-targets -- -D warnings`.
+- After changing Rust code, rebuild with `python tools/build_native.py` before running pytest.
 
 ## Module Responsibilities
 

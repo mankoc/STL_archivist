@@ -250,13 +250,10 @@ def archive_hash(path: Path, unrar_path: str = "") -> str:
     of insertion order.  Falls back to a size+mtime fingerprint when the
     archive cannot be opened (e.g. truncated file).
     """
-    import xxhash
     logger.debug("Computing hash for: %s", path.name)
     try:
         with open_archive(path, unrar_path) as ar:
-            members = sorted(
-                (m.name, m.crc) for m in ar.iter_members()
-            )
+            members = [(m.name, m.crc) for m in ar.iter_members()]
     except _ARCHIVE_ERRORS as exc:
         stat = path.stat()
         fingerprint = f"fallback:{stat.st_size}:{stat.st_mtime_ns}"
@@ -266,13 +263,34 @@ def archive_hash(path: Path, unrar_path: str = "") -> str:
         )
         return fingerprint
 
-    h = xxhash.xxh64()
-    for name, crc in members:
-        h.update(name.encode("utf-8", errors="replace"))
-        h.update(crc.to_bytes(4, "little"))
-    digest = h.hexdigest()
+    digest = members_fingerprint(members)
     logger.debug("Hash for %s: %s… (%d member(s))", path.name, digest[:12], len(members))
     return digest
+
+
+def members_fingerprint(members: list[tuple[str, int]]) -> str:
+    """xxh64 fingerprint of ``(name, crc)`` pairs, independent of their order.
+
+    Uses the native core when available (``rust/stl-core/src/fingerprint.rs``,
+    golden-tested to give the same digest) and this module otherwise.
+    """
+    from app import native
+    mod = native.module()
+    if mod is not None:
+        try:
+            return mod.archive_fingerprint(members)
+        except (TypeError, ValueError, OverflowError, UnicodeError):
+            pass   # e.g. a name with lone surrogates: the Python path handles it
+    return _members_fingerprint_py(members)
+
+
+def _members_fingerprint_py(members: list[tuple[str, int]]) -> str:
+    import xxhash
+    h = xxhash.xxh64()
+    for name, crc in sorted(members):
+        h.update(name.encode("utf-8", errors="replace"))
+        h.update(crc.to_bytes(4, "little"))
+    return h.hexdigest()
 
 
 def iter_archives(root: Path) -> Iterator[Path]:
