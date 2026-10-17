@@ -7,11 +7,13 @@
 
 pub mod archive;
 pub mod control;
+pub mod dhash;
 pub mod embedding;
 pub mod fingerprint;
 pub mod hamming;
 pub mod pairs;
 pub mod strings;
+pub mod thumbnail;
 
 /// Version of the core library.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

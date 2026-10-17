@@ -228,13 +228,10 @@ class SearchWorker(QThread):
 
 
 class DHashWorker(QThread):
-    """Compute and persist dHash values for Image records that are missing them.
-
-    For each image, LMDB thumbnail bytes are tried first; if absent the legacy
-    thumbnail blob stored in the DB column is used as a fallback.
+    """Compute and persist format-2 dHashes; wraps ``services.maintenance.recompute_dhashes``.
 
     Signals:
-        progress(current, total): Image index and total count.
+        progress(current, total): Images done and total count.
         log(message): Human-readable status line for the UI log panel.
         hash_finished(computed, skipped): Counts once the run completes.
     """
@@ -242,8 +239,6 @@ class DHashWorker(QThread):
     progress = pyqtSignal(int, int)
     log      = pyqtSignal(str)
     hash_finished = pyqtSignal(int, int)   # (computed, skipped)
-
-    _BATCH = 200
 
     def __init__(self, recompute_all: bool = False, parent=None) -> None:
         super().__init__(parent)
@@ -254,75 +249,14 @@ class DHashWorker(QThread):
         self._stop_requested = True
 
     def run(self) -> None:
-        from app.database.db import session_scope
-        from app.database.models import Image as DBImage
-        from app.utils.thumbnailer import get_thumbnail_bytes
-        from app.utils.image_hash import DHASH_HEX_LEN, compute_dhash_from_jpeg, format_dhash
+        from app.services.maintenance import recompute_dhashes
 
         self._stop_requested = False
-        computed = 0
-        skipped  = 0
-
-        with session_scope() as session:
-            query = session.query(DBImage.id, DBImage.thumbnail)
-            if not self._recompute_all:
-                # Only images without a current hash: none yet, or one in an older
-                # format (64-bit, 16 hex chars) that comparisons skip.
-                from sqlalchemy import func
-                query = query.filter(
-                    DBImage.dhash.is_(None) | (func.length(DBImage.dhash) != DHASH_HEX_LEN)
-                )
-            rows = query.all()
-
-        total = len(rows)
-        if total == 0:
-            self.log.emit("All images already have a dHash computed.")
-            self.hash_finished.emit(0, 0)
-            return
-
-        verb = "Recomputing" if self._recompute_all else "Computing"
-        self.log.emit(f"{verb} dHash for {total} image(s)…")
-
-        pending: list[tuple[int, str]] = []   # (image_id, dhash_hex)
-
-        def flush() -> None:
-            if not pending:
-                return
-            with session_scope() as s:
-                for img_id, dhash_hex in pending:
-                    img = s.query(DBImage).filter(DBImage.id == img_id).first()
-                    if img:
-                        img.dhash = dhash_hex
-            pending.clear()
-
-        for idx, (image_id, legacy_blob) in enumerate(rows, 1):
-            if self._stop_requested:
-                self.log.emit("Stopped by user.")
-                break
-
-            self.progress.emit(idx, total)
-
-            jpeg = get_thumbnail_bytes(image_id) or legacy_blob
-            if not jpeg:
-                skipped += 1
-                continue
-
-            h = compute_dhash_from_jpeg(jpeg)
-            if h is None:
-                skipped += 1
-                continue
-
-            pending.append((image_id, format_dhash(h)))
-            computed += 1
-
-            if len(pending) >= self._BATCH:
-                flush()
-
-        flush()
-
-        self.log.emit(
-            f"Done — {computed} dHash(es) computed, "
-            f"{skipped} skipped (no thumbnail or decode error)."
+        computed, skipped = recompute_dhashes(
+            self._recompute_all,
+            progress=self.progress.emit,
+            log=self.log.emit,
+            should_stop=lambda: self._stop_requested,
         )
         self.hash_finished.emit(computed, skipped)
 

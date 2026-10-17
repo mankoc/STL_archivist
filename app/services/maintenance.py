@@ -34,6 +34,76 @@ def _noop(*_a) -> None:
     pass
 
 
+# ── Perceptual hashes ────────────────────────────────────────────────────────
+
+DHASH_BATCH = 1024   # thumbnails read, hashed (in parallel) and written per round
+
+
+def recompute_dhashes(
+    recompute_all: bool = False,
+    progress: Progress = _noop,
+    log: Log = _noop,
+    should_stop: "ShouldStop" = lambda: False,
+) -> tuple[int, int]:
+    """Compute and store format-2 dHashes from the stored thumbnails.
+
+    Without *recompute_all* only images lacking a current hash are done: none
+    yet, or an older Pillow hash (a different length). Each round reads a batch
+    of thumbnails in one LMDB transaction (falling back to the legacy blob
+    column), hashes them in parallel in the native core, and writes the batch
+    in one statement. Returns ``(computed, skipped)``; images with no thumbnail
+    or undecodable data count as skipped. Without the native core it logs why
+    and does nothing.
+    """
+    from sqlalchemy import update
+
+    from app.database.db import session_scope
+    from app.database.models import Image as DBImage
+    from app.utils.image_hash import DHASH_STR_LEN, compute_dhashes, dhash_available, format_dhash
+    from app.utils.thumbnailer import get_thumbnail_bytes_many
+
+    if not dhash_available():
+        log("Perceptual hashes are computed by the native core, which is not available.")
+        return 0, 0
+    with session_scope() as session:
+        query = session.query(DBImage.id)
+        if not recompute_all:
+            query = query.filter(DBImage.dhash.is_(None)
+                                 | (func.length(DBImage.dhash) != DHASH_STR_LEN))
+        ids = [i for (i,) in query.order_by(DBImage.id)]
+    total = len(ids)
+    if total == 0:
+        log("All images already have a current dHash.")
+        return 0, 0
+    log(f"{'Recomputing' if recompute_all else 'Computing'} dHash for {total:,} image(s)…")
+
+    computed = skipped = 0
+    for start in range(0, total, DHASH_BATCH):
+        if should_stop():
+            log("Stopped by user.")
+            break
+        chunk = ids[start:start + DHASH_BATCH]
+        thumbs = get_thumbnail_bytes_many(chunk)
+        missing = [i for i in chunk if not thumbs.get(i)]
+        if missing:  # very old libraries kept thumbnails in the database
+            with session_scope() as session:
+                thumbs.update((i, blob) for i, blob in session.query(DBImage.id, DBImage.thumbnail)
+                              .filter(DBImage.id.in_(missing), DBImage.thumbnail.isnot(None)))
+        have = [i for i in chunk if thumbs.get(i)]
+        hashes = compute_dhashes([thumbs[i] for i in have])
+        rows = [{"id": i, "dhash": format_dhash(h)} for i, h in zip(have, hashes) if h is not None]
+        if rows:
+            with session_scope() as session:
+                session.execute(update(DBImage), rows)
+        computed += len(rows)
+        skipped += len(chunk) - len(rows)
+        progress(min(start + DHASH_BATCH, total), total)
+
+    log(f"Done — {computed:,} dHash(es) computed, {skipped:,} skipped "
+        "(no thumbnail or decode error).")
+    return computed, skipped
+
+
 # ── Database compaction ──────────────────────────────────────────────────────
 
 def database_free_bytes(session) -> int:

@@ -2004,6 +2004,11 @@ Run 'Find Moved in DB' first, then select rows to merge.</translation>
         <translation>Could not compute hash — unsupported image format.</translation>
     </message>
     <message>
+        <location filename="../../app/ui/find_by_image_dialog.py" line="490" />
+        <source>Searching by perceptual hash needs the native core; use the AI embedding method.</source>
+        <translation>Searching by perceptual hash needs the native core; use the AI embedding method.</translation>
+    </message>
+    <message>
         <location filename="../../app/ui/find_by_image_dialog.py" line="267" />
         <source>Cannot decode image</source>
         <translation>Cannot decode image</translation>

@@ -1109,14 +1109,18 @@ collapsed first: a library of 363,000 images holds about 190,000 distinct ones. 
 library the perceptual hash takes about 4 seconds and the AI embedding about 35 seconds
 with the native core (about 15 seconds and a minute without it).
 At most the 100,000 best pairs are listed.</p>
-<div class="note">After upgrading, run <b>Database Maintenance &rarr; Recompute Image Hashes</b>
-once so existing thumbnails are re-hashed with the current 128-bit algorithm; until then
-older 64-bit hashes are recomputed on the fly during a search.</div>
+<div class="note">Perceptual hashes are computed by the native core (format 2). After
+upgrading, run <b>Database Maintenance &rarr; Recompute Image Hashes</b> once so existing
+thumbnails are re-hashed; on a 365,000-image library on a hard disk it takes about an hour,
+almost all of it reading thumbnails. Until then, hashes in an older format are recomputed on the
+fly during a search (and not saved). Without the native core no hash can be computed: images
+without a current hash are left out of perceptual-hash searches, and <i>Find by Image</i>
+offers the AI embedding method only.</div>
 
 <h4>Matching method &mdash; dHash vs AI embedding</h4>
 <p>The <b>Method</b> dropdown chooses how images are compared:</p>
 <ul>
-  <li><b>Perceptual hash (dHash)</b> &mdash; the built-in, dependency-free method above;
+  <li><b>Perceptual hash (dHash)</b> &mdash; the built-in method above (it needs the native core);
       great for near-duplicates (re-encodes, resizes, minor edits).</li>
   <li><b>AI embedding (CLIP)</b> &mdash; an optional learned embedding that matches the
       <em>same model</em> across different renders, angles, and colours far more accurately.

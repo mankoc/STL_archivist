@@ -47,6 +47,7 @@ MAX_RESULTS = 100_000
 # total buffer memory stays bounded whatever the library size.
 _DHASH_TILE = (64, 2048)      # measured fastest of 32-256 rows x 2k-16k columns
 _EMBED_TILE = (1024, 16384)
+_DHASH_BATCH = 1024            # thumbnails read and hashed per native call
 
 
 def _noop(*_a) -> None:
@@ -86,33 +87,35 @@ def load_dhash_items(session, log: Log = _noop, progress: Progress = _noop,
                      should_stop: ShouldStop = _never):
     """``(img_model, hi, lo)``: model id per image and its dHash halves.
 
-    Stored hashes in the current 32-hex-char format are used as is; missing or
-    outdated ones are computed from the stored thumbnail (in threads), as
-    Database Maintenance → Recompute Image Hashes would.
+    Stored hashes in the current format are used as is; missing or outdated
+    ones are computed from the stored thumbnail (natively, in batches), as
+    Database Maintenance → Recompute Image Hashes would. They are not saved.
+    Without the native core no hash can be computed, and only stored current
+    ones take part.
     """
-    from app.utils.image_hash import DHASH_HEX_LEN, _dhash, format_dhash, split_dhashes
-    from app.utils.thumbnailer import get_thumbnail_bytes
+    from app.utils.image_hash import (
+        compute_dhashes, dhash_available, format_dhash, is_current_dhash, split_dhashes,
+    )
+    from app.utils.thumbnailer import get_thumbnail_bytes_many
 
     rows = _present_images(session, "i.dhash")
-    good = [(mid, h) for _iid, mid, h in rows if isinstance(h, str) and len(h) == DHASH_HEX_LEN]
-    todo = [(iid, mid) for iid, mid, h in rows if not (isinstance(h, str) and len(h) == DHASH_HEX_LEN)]
-    if todo:
+    good = [(mid, h) for _iid, mid, h in rows if is_current_dhash(h)]
+    todo = [(iid, mid) for iid, mid, h in rows if not is_current_dhash(h)]
+    if todo and not dhash_available():
+        log(f"{len(todo):,} image(s) have no current perceptual hash, and computing one "
+            "needs the native core; they are left out.")
+    elif todo:
         log(f"Computing {len(todo):,} missing perceptual hash(es)…")
-
-        def one(row):
-            iid, mid = row
-            jpeg = get_thumbnail_bytes(iid)
-            h = _dhash(jpeg) if jpeg else None
-            return mid, (format_dhash(h) if h is not None else None)
-
-        with ThreadPoolExecutor(min(os.cpu_count() or 1, 8)) as pool:
-            for k, (mid, h) in enumerate(pool.map(one, todo, chunksize=64), 1):
+        for start in range(0, len(todo), _DHASH_BATCH):
+            if should_stop():
+                raise Stopped
+            chunk = todo[start:start + _DHASH_BATCH]
+            thumbs = get_thumbnail_bytes_many([iid for iid, _mid in chunk])
+            have = [(mid, thumbs[iid]) for iid, mid in chunk if thumbs.get(iid)]
+            for (mid, _), h in zip(have, compute_dhashes([t for _m, t in have])):
                 if h is not None:
-                    good.append((mid, h))
-                if k % 200 == 0:
-                    if should_stop():
-                        raise Stopped
-                    progress(k, len(todo))
+                    good.append((mid, format_dhash(h)))
+            progress(min(start + _DHASH_BATCH, len(todo)), len(todo))
     if not good:
         return np.empty(0, np.int64), np.empty(0, np.uint64), np.empty(0, np.uint64)
     img_model = np.fromiter((m for m, _h in good), np.int64, len(good))
