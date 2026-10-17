@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from app.utils.string_utils import levenshtein as _lev, soundex as _sdx
+from app.utils.string_utils import levenshtein_pairs, soundex as _sdx
 
 logger = logging.getLogger(__name__)
 
@@ -139,27 +139,30 @@ class _SearchWorker(QThread):
         ]
 
     def _find_levenshtein(self, rows: list[dict], col: str) -> list[dict]:
-        pairs: list[dict] = []
-        # Normalise once to avoid repeated work
+        """Model pairs whose (lower-cased) values differ by 1..threshold edits.
+
+        Distinct values are compared once, on the native core when available
+        (a 60k-model library compared every title pair in Python before), and
+        the matches expanded back to model pairs in row order.
+        """
         vals = [(r, r[col].strip().lower()) for r in rows if r[col].strip()]
-        n = len(vals)
-        for i in range(n):
-            if self._stop:
-                break
-            ri, vi = vals[i]
-            for j in range(i + 1, n):
-                rj, vj = vals[j]
-                # Skip early if length difference already exceeds threshold
-                if abs(len(vi) - len(vj)) > self._threshold:
-                    continue
-                dist = _lev(vi, vj)
-                if 0 < dist <= self._threshold:
-                    pairs.append({
-                        "column": col,
-                        "similarity": f"Levenshtein: {dist}",
-                        "models": [ri, rj],
-                    })
-        return pairs
+        rows_of: dict[str, list[int]] = defaultdict(list)
+        for k, (_r, v) in enumerate(vals):
+            rows_of[v].append(k)
+        keys = list(rows_of)
+        hits: list[tuple[int, int, int]] = []
+        for a, b, dist in levenshtein_pairs(keys, self._threshold):
+            if dist == 0 or self._stop:
+                continue
+            for x in rows_of[keys[a]]:
+                for y in rows_of[keys[b]]:
+                    hits.append((min(x, y), max(x, y), dist))
+        hits.sort()
+        return [
+            {"column": col, "similarity": f"Levenshtein: {dist}",
+             "models": [vals[x][0], vals[y][0]]}
+            for x, y, dist in hits
+        ]
 
     def _find_soundex(self, rows: list[dict], col: str) -> list[dict]:
         buckets: dict[str, list[tuple]] = defaultdict(list)

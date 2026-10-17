@@ -25,6 +25,22 @@ def tiny_tiles(monkeypatch):
     monkeypatch.setattr(D, "_EMBED_TILE", (4, 6))
 
 
+@pytest.fixture(autouse=True, params=["python", "native"])
+def implementation(request, monkeypatch):
+    """Run every test against the NumPy scans and, when built, the Rust ones."""
+    from app import native
+    if request.param == "python":
+        monkeypatch.setenv("STL_NATIVE", "0")
+    else:
+        monkeypatch.delenv("STL_NATIVE", raising=False)
+    native.reload()
+    if request.param == "native" and not native.available():
+        pytest.skip("stl_native not built")
+    yield request.param
+    monkeypatch.undo()
+    native.reload()
+
+
 def _flip(h: int, nbits: int) -> int:
     for bit in rng.choice(128, nbits, replace=False):
         h ^= 1 << int(bit)

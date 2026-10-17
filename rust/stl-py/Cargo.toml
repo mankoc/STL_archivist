@@ -11,6 +11,7 @@ name = "stl_native"
 crate-type = ["cdylib"]
 
 [dependencies]
+bytemuck = "1.25.2"
 # abi3-py312: one build works on every CPython from 3.12 on (the app runs 3.14).
 pyo3 = { version = "0.30.1", features = ["extension-module", "abi3-py312"] }
 stl-core = { version = "0.1.0", path = "../stl-core" }

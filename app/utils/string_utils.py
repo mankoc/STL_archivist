@@ -81,6 +81,34 @@ def levenshtein_within(a: str, b: str, max_distance: int) -> bool:
     return prev[lb] <= max_distance
 
 
+def levenshtein_pairs(values: list[str], max_distance: int) -> list[tuple[int, int, int]]:
+    """All ``(i, j, distance)`` with ``i < j`` and distance <= *max_distance*.
+
+    Sorted by ``(i, j)``, the order of a nested ``for i … for j > i`` loop;
+    distance 0 (equal strings) is included, so callers filter as they need.
+    Uses the native core when available (``rust/stl-core/src/strings.rs``, all
+    cores, banded DP) and falls back to the pure-Python loop.
+    """
+    from app import native
+    mod = native.module()
+    if mod is not None:
+        try:
+            return mod.levenshtein_pairs(list(values), int(max_distance))
+        except (TypeError, ValueError, OverflowError, UnicodeError):
+            pass   # e.g. a negative threshold or a lone surrogate: Python path
+    return _levenshtein_pairs_py(values, max_distance)
+
+
+def _levenshtein_pairs_py(values: list[str], max_distance: int) -> list[tuple[int, int, int]]:
+    out: list[tuple[int, int, int]] = []
+    for i, a in enumerate(values):
+        for j in range(i + 1, len(values)):
+            b = values[j]
+            if abs(len(a) - len(b)) <= max_distance and levenshtein_within(a, b, max_distance):
+                out.append((i, j, levenshtein(a, b)))
+    return out
+
+
 def soundex(s: str) -> str:
     """Return the American Soundex code for *s* (4-character string).
 

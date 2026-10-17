@@ -59,6 +59,14 @@ Python owns the schema until Phase 4).
   and `cargo test` in the crate. Run pytest with and without `STL_NATIVE=0`, plus
   `cargo clippy --workspace --all-targets -- -D warnings`.
 - After changing Rust code, rebuild with `python tools/build_native.py` before running pytest.
+  It runs Cargo from `rust/` so `rust/.cargo/config.toml` (x86-64-v2, hardware popcount)
+  applies; a plain `maturin develop` from the project root silently skips it.
+- Native functions today: `archive_fingerprint`, `hamming_pairs`, `cosine_pairs`,
+  `levenshtein_pairs`. Long ones take `progress` / `should_stop` and raise
+  `stl_native.Stopped`; the binding's `run_job` polls them from the calling thread, so
+  Python callbacks never run on Rust threads. Arrays cross as NumPy buffers in and bytes out
+  (`np.frombuffer`). Tests for code with a native path should run in both modes (see the
+  `implementation` fixture in `tests/test_image_duplicates.py`).
 
 ## Module Responsibilities
 

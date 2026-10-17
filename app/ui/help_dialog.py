@@ -1058,9 +1058,10 @@ The table is sortable by any column.</p>
       appears in any duplicate group found by the last search.</li>
 </ul>
 
-<div class="tip">Tip: Levenshtein search on very large collections (thousands of models)
-is O(n&sup2;) — use the Stop button to cancel if it takes too long, or reduce the
-max distance to 1 or 2 to narrow the scope.</div>
+<div class="tip">Tip: Levenshtein compares every pair of distinct values. With the native
+core (built in to the Windows executable) about 51,000 distinct titles take a few seconds;
+without it the same search takes tens of minutes, so keep the max distance at 1 or 2 and
+use the Stop button if needed. Higher distances also return many more pairs.</div>
 
 <h2>Tools &mdash; Find Duplicate Archives by Content&hellip;</h2>
 <p>Open via <b>Tools &rarr; Find Duplicate Archives by Content&hellip;</b></p>
@@ -1102,7 +1103,8 @@ render at different sizes is caught.</p>
 </table>
 <p>Every pair of images is compared (there is no early stop), with identical images
 collapsed first: a library of 363,000 images holds about 190,000 distinct ones. On that
-library the perceptual hash takes about 15 seconds and the AI embedding about a minute.
+library the perceptual hash takes about 4 seconds and the AI embedding about 35 seconds
+with the native core (about 15 seconds and a minute without it).
 At most the 100,000 best pairs are listed.</p>
 <div class="note">After upgrading, run <b>Database Maintenance &rarr; Recompute Image Hashes</b>
 once so existing thumbnails are re-hashed with the current 128-bit algorithm; until then

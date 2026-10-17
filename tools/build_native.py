@@ -33,7 +33,9 @@ def build(release: bool = True) -> int:
     if release:
         cmd.append("--release")
     print("[native]", " ".join(cmd))
-    return subprocess.run(cmd, cwd=ROOT, env=env).returncode
+    # Run from rust/: cargo finds rust/.cargo/config.toml (target CPU flags)
+    # by searching from the working directory, not from the manifest.
+    return subprocess.run(cmd, cwd=MANIFEST.parent.parent, env=env).returncode
 
 
 def main() -> None:

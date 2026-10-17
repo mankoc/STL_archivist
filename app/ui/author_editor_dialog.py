@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
 
 from app.database.db import session_scope, get_session
 from app.database.models import STLModel, Creator
-from app.utils.string_utils import levenshtein as _levenshtein, soundex as _soundex
+from app.utils.string_utils import levenshtein_pairs as _levenshtein_pairs, soundex as _soundex
 
 
 class AuthorEditorDialog(QDialog):
@@ -309,11 +309,8 @@ class _MergeSimilarAuthorsDialog(QDialog):
 
         if method == "Levenshtein":
             threshold = self._thresh_spin.value()
-            for i in range(len(authors)):
-                for j in range(i + 1, len(authors)):
-                    d = _levenshtein(authors[i][0], authors[j][0])
-                    if d <= threshold:
-                        pairs.append((authors[i], authors[j], str(d)))
+            for i, j, d in _levenshtein_pairs([a[0] for a in authors], threshold):
+                pairs.append((authors[i], authors[j], str(d)))
             pairs.sort(key=lambda x: int(x[2]))
             col_header = "Distance"
         else:  # Soundex

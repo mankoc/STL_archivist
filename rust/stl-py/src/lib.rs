@@ -1,11 +1,99 @@
 //! `stl_native`: the Rust core exposed to the Python app.
 //!
-//! Thin wrappers only: argument conversion and GIL release. All logic lives in
-//! `stl-core`. The Python side imports this module through `app/native.py`,
-//! which falls back to the Python implementation when it is missing.
+//! Thin wrappers only: argument conversion, GIL release and progress relay.
+//! All logic lives in `stl-core`. The Python side imports this module through
+//! `app/native.py`, which falls back to the Python implementation when it is
+//! missing.
 
+use std::thread;
+use std::time::{Duration, Instant};
+
+use pyo3::buffer::{Element, PyBuffer};
+use pyo3::create_exception;
+use pyo3::exceptions::{PyException, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::types::PyBytes;
+use stl_core::control::{Control, Stopped as CoreStopped};
 use stl_core::fingerprint::{self, Member};
+use stl_core::{embedding, hamming, strings};
+
+create_exception!(
+    stl_native,
+    Stopped,
+    PyException,
+    "Raised when a long operation stops because should_stop() returned True."
+);
+
+/// How often a running job reports progress and polls `should_stop`.
+const POLL: Duration = Duration::from_millis(100);
+
+/// Run `job` on a worker thread while this thread, holding the GIL only
+/// briefly, relays progress to `progress(done, total)` and polls
+/// `should_stop()` every [`POLL`]. Callbacks never run on worker threads.
+fn run_job<T: Send>(
+    py: Python<'_>,
+    progress: Option<&Bound<'_, PyAny>>,
+    should_stop: Option<&Bound<'_, PyAny>>,
+    job: impl FnOnce(&Control) -> Result<T, CoreStopped> + Send,
+) -> PyResult<T> {
+    // A stop requested before the start must win even if the job is quicker
+    // than the first poll.
+    if let Some(cb) = should_stop
+        && cb.call0()?.is_truthy()?
+    {
+        return Err(Stopped::new_err("stopped"));
+    }
+    let ctl = Control::new();
+    let outcome = thread::scope(|s| {
+        let handle = s.spawn(|| job(&ctl));
+        let relay = || -> PyResult<()> {
+            if let Some(cb) = progress {
+                let (done, total) = ctl.progress();
+                cb.call1((done, total))?;
+            }
+            if let Some(cb) = should_stop
+                && cb.call0()?.is_truthy()?
+            {
+                ctl.request_stop();
+            }
+            Ok(())
+        };
+        while !handle.is_finished() {
+            py.detach(|| {
+                let start = Instant::now();
+                while !handle.is_finished() && start.elapsed() < POLL {
+                    thread::sleep(Duration::from_millis(5));
+                }
+            });
+            if let Err(e) = relay() {
+                ctl.request_stop(); // let the worker finish quickly, then re-raise
+                let _ = handle.join();
+                return Err(e);
+            }
+        }
+        let result = handle
+            .join()
+            .map_err(|_| PyRuntimeError::new_err("native worker thread panicked"))?;
+        relay()?; // final 100 % report
+        Ok(result)
+    })?;
+    outcome.map_err(|_| Stopped::new_err("stopped"))
+}
+
+/// Borrow a C-contiguous buffer (e.g. a NumPy array) as a slice without copying.
+fn contiguous<'a, T: Element>(buf: &'a PyBuffer<T>, what: &str) -> PyResult<&'a [T]> {
+    if !buf.is_c_contiguous() {
+        return Err(PyValueError::new_err(format!("{what} must be C-contiguous")));
+    }
+    // SAFETY: the buffer is C-contiguous, holds `item_count` elements of `T`
+    // (checked by PyBuffer::get), and stays alive and unmodified while `buf`
+    // is held; the caller does not mutate it during the call.
+    Ok(unsafe { std::slice::from_raw_parts(buf.buf_ptr() as *const T, buf.item_count()) })
+}
+
+fn bytes<'py, T: bytemuck::Pod>(py: Python<'py>, v: &[T]) -> Bound<'py, PyBytes> {
+    PyBytes::new(py, bytemuck::cast_slice(v))
+}
 
 /// Archive fingerprint from `(name, crc)` pairs; same result as
 /// `app.crawler.archive.archive_hash` computes from an archive's catalog.
@@ -20,9 +108,68 @@ fn archive_fingerprint(py: Python<'_>, members: Vec<(String, u32)>) -> String {
     py.detach(|| fingerprint::archive_fingerprint(&mut members))
 }
 
+/// Pairs of 128-bit hashes within `max_dist` bits.
+///
+/// `hi` / `lo`: uint64 arrays (high and low halves). Returns `(i, j, dist)` as
+/// bytes of uint32, uint32 and uint8 for `np.frombuffer`. Raises `Stopped`.
+#[pyfunction]
+#[pyo3(signature = (hi, lo, max_dist, progress=None, should_stop=None))]
+fn hamming_pairs<'py>(
+    py: Python<'py>,
+    hi: PyBuffer<u64>,
+    lo: PyBuffer<u64>,
+    max_dist: u32,
+    progress: Option<Bound<'py, PyAny>>,
+    should_stop: Option<Bound<'py, PyAny>>,
+) -> PyResult<(Bound<'py, PyBytes>, Bound<'py, PyBytes>, Bound<'py, PyBytes>)> {
+    let (h, l) = (contiguous(&hi, "hi")?, contiguous(&lo, "lo")?);
+    if h.len() != l.len() {
+        return Err(PyValueError::new_err("hi and lo must have the same length"));
+    }
+    let p = run_job(py, progress.as_ref(), should_stop.as_ref(), |ctl| {
+        hamming::near_pairs_128(h, l, max_dist, ctl)
+    })?;
+    Ok((bytes(py, &p.i), bytes(py, &p.j), bytes(py, &p.score)))
+}
+
+/// Pairs of L2-normalised vectors with cosine similarity >= `threshold`.
+///
+/// `vecs`: float32 array of shape (n, dim). Returns `(i, j, similarity)` as
+/// bytes of uint32, uint32 and float32. Raises `Stopped`.
+#[pyfunction]
+#[pyo3(signature = (vecs, dim, threshold, progress=None, should_stop=None))]
+fn cosine_pairs<'py>(
+    py: Python<'py>,
+    vecs: PyBuffer<f32>,
+    dim: usize,
+    threshold: f32,
+    progress: Option<Bound<'py, PyAny>>,
+    should_stop: Option<Bound<'py, PyAny>>,
+) -> PyResult<(Bound<'py, PyBytes>, Bound<'py, PyBytes>, Bound<'py, PyBytes>)> {
+    let v = contiguous(&vecs, "vecs")?;
+    if dim == 0 || !v.len().is_multiple_of(dim) {
+        return Err(PyValueError::new_err("vecs size must be a multiple of dim"));
+    }
+    let p = run_job(py, progress.as_ref(), should_stop.as_ref(), |ctl| {
+        embedding::near_pairs_cosine(v, dim, threshold, ctl)
+    })?;
+    Ok((bytes(py, &p.i), bytes(py, &p.j), bytes(py, &p.score)))
+}
+
+/// All `(i, j, distance)` with `i < j` and Levenshtein distance <= `max_distance`,
+/// sorted by `(i, j)`; distance 0 (equal strings) included.
+#[pyfunction]
+fn levenshtein_pairs(py: Python<'_>, values: Vec<String>, max_distance: u32) -> Vec<(u32, u32, u32)> {
+    py.detach(|| strings::levenshtein_pairs(&values, max_distance))
+}
+
 #[pymodule]
 fn stl_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", stl_core::VERSION)?;
+    m.add("Stopped", m.py().get_type::<Stopped>())?;
     m.add_function(wrap_pyfunction!(archive_fingerprint, m)?)?;
+    m.add_function(wrap_pyfunction!(hamming_pairs, m)?)?;
+    m.add_function(wrap_pyfunction!(cosine_pairs, m)?)?;
+    m.add_function(wrap_pyfunction!(levenshtein_pairs, m)?)?;
     Ok(())
 }

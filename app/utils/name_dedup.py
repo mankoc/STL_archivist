@@ -10,7 +10,7 @@ Each entry is a ``(id, name, count)`` tuple. ``method`` is ``"Levenshtein"`` or
 """
 from __future__ import annotations
 
-from app.utils.string_utils import levenshtein, soundex
+from app.utils.string_utils import levenshtein_pairs, soundex
 
 
 def find_similar_pairs(items, method, threshold=2):
@@ -30,11 +30,8 @@ def find_similar_pairs(items, method, threshold=2):
     items = list(items)
     pairs: list[tuple] = []
     if method == "Levenshtein":
-        for i in range(len(items)):
-            for j in range(i + 1, len(items)):
-                d = levenshtein(items[i][1], items[j][1])
-                if d <= threshold:
-                    pairs.append((items[i], items[j], str(d)))
+        for i, j, d in levenshtein_pairs([it[1] for it in items], threshold):
+            pairs.append((items[i], items[j], str(d)))
         pairs.sort(key=lambda x: int(x[2]))
     else:  # Soundex
         codes = {it[0]: soundex(it[1]) for it in items}
@@ -67,11 +64,8 @@ def find_similar_pairs_grouped(groups, method, threshold=2):
     pairs: list[tuple] = []
     if method == "Levenshtein":
         for parent_name, members in groups.values():
-            for i in range(len(members)):
-                for j in range(i + 1, len(members)):
-                    d = levenshtein(members[i][1], members[j][1])
-                    if d <= threshold:
-                        pairs.append((members[i], members[j], parent_name, str(d)))
+            for i, j, d in levenshtein_pairs([m[1] for m in members], threshold):
+                pairs.append((members[i], members[j], parent_name, str(d)))
         pairs.sort(key=lambda x: int(x[3]))
     else:  # Soundex
         for parent_name, members in groups.values():

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Rust migration, Phase 1: faster duplicate searches.** Three all-pairs searches now run on the native core, with the Python code kept as the fallback. Timings are from the reference library.
+  - **_Find Duplicate Archives → Images_ by perceptual hash: 15.7 s → 3.9 s.** The Hamming scan over 191k distinct hashes takes 2.1 s instead of 13.9 s in NumPy, with identical pairs.
+  - **_Find Duplicate Archives → Images_ by AI embedding: 66 s → 36 s.** The scan uses `gemm`, which picks AVX2 or AVX-512 kernels at run time. The NumPy and Rust scans can disagree only on pairs within float rounding (about 1e-6) of the threshold; on the reference library that was 19 of 1.66 million pairs.
+  - **_Find Metadata Duplicates_ by Levenshtein: minutes → seconds.** All 51k distinct titles at distance ≤ 2 take 3.3 s; the Python search took an estimated 21 minutes or more. Identical values are now compared once and expanded back to model pairs. The lookup editors' _Merge similar_ (collections, subcollections, categories and the rest) and the author editor use the same function.
+  - Long native operations report progress and honour _Stop_. Each scan runs on a worker thread while the calling thread relays progress every 100 ms, so no Python callback runs on a Rust thread.
+  - The native core is built for x86-64-v2, which includes hardware popcount; every x86-64 CPU since about 2009 supports it. `tools/build_native.py` now runs Cargo from `rust/` so that this setting applies.
+  - New golden tests compare each Rust scan with its Python version, and the duplicate-finder tests run against both.
+  - Plan change: perceptual-hash computation moves to Phase 2 with the image pipeline, and path patterns, crawler rules and Soundex move to Phase 4 with the crawler (see `docs/rust-migration-plan.md`).
+
 - **Rust migration, Phase 0: an optional native core.** The codebase is moving to Rust step by step, towards a server that owns the library and a React web client in front of it, like Jellyfin (plan: `docs/rust-migration-plan.md`).
   - New Cargo workspace in `rust/`: `stl-core`, the core library, and `stl-py`, PyO3 bindings that install as the `stl_native` Python module. One `abi3` build covers Python 3.12 and later. Build it with `python tools/build_native.py`; `build_dist.py` builds it before PyInstaller and bundles it, or skips it with `--no-native`.
   - The module is optional. `app/native.py` loads it when present, every ported function keeps its Python fallback, and `STL_NATIVE=0` turns it off. The first log line says whether it is in use.
