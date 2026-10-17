@@ -304,6 +304,22 @@ Split into 2a (archive reading), 2b (image pipeline) and 2c (new dHash and recom
   `detect_scale`) and Soundex (moved from Phase 1).
 - From here the Python app is a PyQt shell over the Rust core.
 
+**Steps** (each one committed with the app working and the tests passing in both modes):
+
+| Step | Content | Python side afterwards |
+|---|---|---|
+| 4a | Crawler rules, path patterns, Soundex in Rust | `rules.py`, `path_pattern.py`, `string_utils.soundex` call the native functions (Python fallback kept) |
+| 4b | Storage foundation: `rusqlite` connection with the same pragmas, sqlite-vec, and the schema migrations from `db.py` | `db.py` asks the native core to migrate before SQLAlchemy connects (rule 4 moves here) |
+| 4c | Read services: `lookups`, `model_summary`, `library_query` (table rows, facet counts, search) | services return the same rows, computed natively |
+| 4d | Write services: `editing`, `moves`, `file_deletion`, helpers' get-or-create | same signatures |
+| 4e | `maintenance`, `image_similarity`, duplicate loaders, `vectors` | same signatures |
+| 4f | Dialogs: every direct `session.query` in `app/ui` goes through a service (about 300 call sites, ~25 files), dialog by dialog | no ORM in `app/ui` |
+| 4g | Crawler pipeline in Rust (metadata inference, upsert, move detection, sidecars, embeddings via `ort`); `CrawlerWorker` wraps `stl_native.crawl` | crawler is a wrapper |
+| 4h | SQLAlchemy and the Python storage code removed; the Python fallbacks for ported code go with them, so the native core becomes required | PyQt shell |
+
+The Python fallbacks stay until 4h. A step's golden tests compare the native result with
+the Python implementation it replaces, as in earlier phases.
+
 ### Phase 5: Server (medium)
 
 `stl-server` on axum, the product's centre from here on:
