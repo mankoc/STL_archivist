@@ -61,12 +61,18 @@ Python owns the schema until Phase 4).
 - After changing Rust code, rebuild with `python tools/build_native.py` before running pytest.
   It runs Cargo from `rust/` so `rust/.cargo/config.toml` (x86-64-v2, hardware popcount)
   applies; a plain `maturin develop` from the project root silently skips it.
-- Native functions today: `archive_fingerprint`, `hamming_pairs`, `cosine_pairs`,
-  `levenshtein_pairs`. Long ones take `progress` / `should_stop` and raise
-  `stl_native.Stopped`; the binding's `run_job` polls them from the calling thread, so
+- Native functions today: `archive_fingerprint`, `archive_members`, `archive_hash_file`,
+  `read_archive_members`, `hamming_pairs`, `cosine_pairs`, `levenshtein_pairs`. Long ones
+  take `progress` / `should_stop` and raise `stl_native.Stopped`; the binding's `run_job` polls them from the calling thread, so
   Python callbacks never run on Rust threads. Arrays cross as NumPy buffers in and bytes out
   (`np.frombuffer`). Tests for code with a native path should run in both modes (see the
   `implementation` fixture in `tests/test_image_duplicates.py`).
+- Native archive reading (`rust/stl-core/src/archive/`, `.zip` and `.7z` only; RAR stays in
+  `rarfile`) must return exactly what the Python readers return, or raise. When in doubt it
+  raises (`Unsupported`) and `app/crawler/archive.py` (`_native_catalog`, `_read_members`)
+  falls back to the Python reader for that archive. `zip.rs` is a port of CPython's `zipfile`
+  catalog and `ZipFile.open` checks. Do not use `sevenz-rust2`'s `BlockDecoder` on a block
+  with an empty entry inside it: it silently drops that block's last files.
 
 ## Module Responsibilities
 
