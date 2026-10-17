@@ -196,7 +196,7 @@ def _img(session, model, dhash=None, thumb=None):
     return img
 
 
-def test_find_dhash_duplicates_end_to_end(thumb_store):
+def test_find_dhash_duplicates_end_to_end(thumb_store, implementation):
     h = int(rng.integers(0, 2**63)) << 64 | 12345
     banner = int(rng.integers(0, 2**63)) << 64 | 999
     with session_scope() as s:
@@ -213,11 +213,13 @@ def test_find_dhash_duplicates_end_to_end(thumb_store):
     with session_scope() as s:
         rep = D.find_dhash_duplicates(s, max_dist=5, max_models=10)
     got = {(r["id_a"], r["id_b"]): (r["pairs"], r["best"]) for r in rep.results}
-    assert got == {
-        (ids[0], ids[1]): (1, 3), (ids[0], ids[2]): (1, 0), (ids[1], ids[2]): (1, 3),
-        (ids[3], ids[15]): (1, 0),
-    }
-    assert rep.shared_skipped == 1 and rep.images == 18 and rep.items == 5
+    want = {(ids[0], ids[1]): (1, 3), (ids[0], ids[2]): (1, 0), (ids[1], ids[2]): (1, 3)}
+    if implementation == "native":   # missing hashes are computed only natively
+        want[(ids[3], ids[15])] = (1, 0)
+        assert rep.shared_skipped == 1 and rep.images == 18 and rep.items == 5
+    else:
+        assert rep.shared_skipped == 1 and rep.images == 16 and rep.items == 4
+    assert got == want
     row = next(r for r in rep.results if r["id_a"] == ids[0] and r["id_b"] == ids[2])
     assert (row["size_a"], row["imgs_a"], row["title_b"]) == (1000, 1, "M2")
 

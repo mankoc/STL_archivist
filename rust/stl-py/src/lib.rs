@@ -16,7 +16,7 @@ use pyo3::types::{PyBytes, PyDict};
 use stl_core::control::{Control, Stopped as CoreStopped};
 use stl_core::fingerprint::{self, Member};
 use stl_core::archive::{self, ArchiveError};
-use stl_core::{embedding, hamming, strings};
+use stl_core::{embedding, hamming, strings, thumbnail};
 
 create_exception!(
     stl_native,
@@ -152,6 +152,40 @@ fn read_archive_members<'py>(
     Ok(out)
 }
 
+/// Thumbnail of an encoded image: JPEG bytes, or GIF bytes for an animated GIF
+/// when `animate`. Same size rules as `Image.thumbnail`.
+///
+/// Raises `ValueError` for data it cannot decode or a format it does not handle
+/// (AVIF, CMYK JPEG, ...); the caller then uses Pillow.
+#[pyfunction]
+#[pyo3(signature = (data, max_size, animate=true))]
+fn make_thumbnail<'py>(
+    py: Python<'py>,
+    data: &[u8],
+    max_size: u32,
+    animate: bool,
+) -> PyResult<Bound<'py, PyBytes>> {
+    let out = py
+        .detach(|| thumbnail::make_thumbnail(data, max_size, animate))
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(PyBytes::new(py, &out))
+}
+
+/// Perceptual hash (format 2) of an encoded image, as a 128-bit int.
+///
+/// Raises `ValueError` for data it cannot decode.
+#[pyfunction]
+fn dhash(py: Python<'_>, data: &[u8]) -> PyResult<u128> {
+    py.detach(|| stl_core::dhash::dhash(data)).map_err(|e| PyValueError::new_err(e.to_string()))
+}
+
+/// `dhash` over a list of encoded images, in parallel: an int or `None` per item.
+#[pyfunction]
+fn dhash_many(py: Python<'_>, items: Vec<Bound<'_, PyBytes>>) -> Vec<Option<u128>> {
+    let slices: Vec<&[u8]> = items.iter().map(|b| b.as_bytes()).collect();
+    py.detach(|| stl_core::dhash::dhash_many(&slices))
+}
+
 /// Pairs of 128-bit hashes within `max_dist` bits.
 ///
 /// `hi` / `lo`: uint64 arrays (high and low halves). Returns `(i, j, dist)` as
@@ -215,6 +249,9 @@ fn stl_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(archive_members, m)?)?;
     m.add_function(wrap_pyfunction!(archive_hash_file, m)?)?;
     m.add_function(wrap_pyfunction!(read_archive_members, m)?)?;
+    m.add_function(wrap_pyfunction!(make_thumbnail, m)?)?;
+    m.add_function(wrap_pyfunction!(dhash, m)?)?;
+    m.add_function(wrap_pyfunction!(dhash_many, m)?)?;
     m.add_function(wrap_pyfunction!(hamming_pairs, m)?)?;
     m.add_function(wrap_pyfunction!(cosine_pairs, m)?)?;
     m.add_function(wrap_pyfunction!(levenshtein_pairs, m)?)?;

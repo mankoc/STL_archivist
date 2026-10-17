@@ -5,10 +5,15 @@ import random
 import numpy as np
 from PIL import Image
 
+import pytest
+
+from app import native
 from app.utils.image_hash import (
-    DHASH_HEX_LEN, _hamming, _hamming128_batch, compute_dhash_from_jpeg,
-    format_dhash, parse_dhash,
+    DHASH_HEX_LEN, DHASH_STR_LEN, _hamming, _hamming128_batch, compute_dhash_from_jpeg,
+    compute_dhashes, dhash_available, format_dhash, is_current_dhash, parse_dhash, split_dhashes,
 )
+
+needs_native = pytest.mark.skipif(not dhash_available(), reason="dHash needs the native core")
 
 
 def _jpeg(fill) -> bytes:
@@ -21,6 +26,7 @@ def _jpeg(fill) -> bytes:
     return buf.getvalue()
 
 
+@needs_native
 def test_dhash_is_stable_and_discriminates():
     gradient = _jpeg(lambda x, y: (x * 4, x * 4, x * 4))
     flipped = _jpeg(lambda x, y: (255 - x * 4,) * 3)
@@ -33,17 +39,42 @@ def test_dhash_rejects_garbage():
     assert compute_dhash_from_jpeg(b"not an image") is None
 
 
+@needs_native
+def test_batch_matches_single():
+    imgs = [_jpeg(lambda x, y: (x * 4, y * 4, 0)), b"junk", _jpeg(lambda x, y: (y * 4,) * 3)]
+    assert compute_dhashes(imgs) == [compute_dhash_from_jpeg(b) for b in imgs]
+    assert compute_dhashes(imgs)[1] is None
+
+
+def test_no_hash_without_native(monkeypatch):
+    monkeypatch.setenv("STL_NATIVE", "0")
+    native.reload()
+    try:
+        img = _jpeg(lambda x, y: (x * 4,) * 3)
+        assert not dhash_available()
+        assert compute_dhash_from_jpeg(img) is None
+        assert compute_dhashes([img, img]) == [None, None]
+    finally:
+        monkeypatch.delenv("STL_NATIVE")
+        native.reload()
+
+
 def test_format_and_parse_round_trip():
     value = (1 << 127) | 12345
     text = format_dhash(value)
-    assert len(text) == DHASH_HEX_LEN
+    assert len(text) == DHASH_STR_LEN and text.startswith("2:")
+    assert is_current_dhash(text)
     assert parse_dhash(text) == value
-    assert format_dhash(1) == "0" * (DHASH_HEX_LEN - 1) + "1"
+    assert format_dhash(1) == "2:" + "0" * (DHASH_HEX_LEN - 1) + "1"
+    hi, lo = split_dhashes([text])
+    assert (int(hi[0]) << 64 | int(lo[0])) == value
 
 
-def test_parse_rejects_old_width_and_junk():
-    assert parse_dhash("f" * 16) is None          # legacy 64-bit hash
-    assert parse_dhash("z" * DHASH_HEX_LEN) is None
+def test_parse_rejects_old_formats_and_junk():
+    assert parse_dhash("f" * 16) is None          # Pillow 64-bit hash
+    assert parse_dhash("f" * 32) is None          # Pillow 128-bit hash (format 1)
+    assert not is_current_dhash("f" * 32)
+    assert parse_dhash("2:" + "z" * DHASH_HEX_LEN) is None
     assert parse_dhash(42) is None
     assert parse_dhash(None) is None
 

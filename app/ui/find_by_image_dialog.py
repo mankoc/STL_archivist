@@ -24,9 +24,10 @@ from app.utils.thumbnailer import pixmap_from_path
 from app.utils import image_embedding as _emb
 import numpy as np
 from app.utils.image_hash import (
-    compute_dhash_from_jpeg, format_dhash, parse_dhash,
+    compute_dhash_from_jpeg, dhash_available, format_dhash, parse_dhash,
     _hamming128_batch,
 )
+from app.utils.thumbnailer import make_thumbnail
 
 logger = logging.getLogger(__name__)
 
@@ -444,7 +445,10 @@ class FindByImageDialog(QDialog):
             return
 
         h = compute_dhash_from_jpeg(raw)
-        if h is None:
+        # Without the native core no dHash can be computed, but the embedding
+        # search still works for any image Pillow can decode.
+        decodable = h is not None or (not dhash_available() and make_thumbnail(raw) is not None)
+        if not decodable:
             self._status_lbl.setText(
                 self.tr("Could not compute hash — unsupported image format.")
             )
@@ -462,8 +466,7 @@ class FindByImageDialog(QDialog):
         px.loadFromData(raw)
         if px.isNull():
             # Qt has no codec for some formats Pillow reads (AVIF, for one), so
-            # fall back to the Pillow-backed JPEG transcode used for thumbnails.
-            from app.utils.thumbnailer import make_thumbnail
+            # fall back to the JPEG transcode used for thumbnails.
             jpeg = make_thumbnail(raw)
             if jpeg:
                 px.loadFromData(jpeg)
@@ -476,16 +479,22 @@ class FindByImageDialog(QDialog):
         else:
             self._query_img.setText(path.name)
 
-        self._hash_lbl.setText(f"dHash: {format_dhash(h)}")
+        self._hash_lbl.setText(f"dHash: {format_dhash(h)}" if h is not None else "")
         self._search_btn.setEnabled(True)
         self._status_lbl.setText(self.tr("Image loaded. Click Search to find matches."))
 
     # ------------------------------------------------------------------
     def _run_search(self) -> None:
-        if self._query_hash is None:
+        if self._query_raw is None:
             return
 
         method = self._method_combo.currentData()
+        if method != "embedding" and self._query_hash is None:
+            self._status_lbl.setText(
+                self.tr("Searching by perceptual hash needs the native core; "
+                        "use the AI embedding method.")
+            )
+            return
 
         self._selected_cell = None
         self._detail.clear()

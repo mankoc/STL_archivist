@@ -62,8 +62,9 @@ Python owns the schema until Phase 4).
   It runs Cargo from `rust/` so `rust/.cargo/config.toml` (x86-64-v2, hardware popcount)
   applies; a plain `maturin develop` from the project root silently skips it.
 - Native functions today: `archive_fingerprint`, `archive_members`, `archive_hash_file`,
-  `read_archive_members`, `hamming_pairs`, `cosine_pairs`, `levenshtein_pairs`. Long ones
-  take `progress` / `should_stop` and raise `stl_native.Stopped`; the binding's `run_job` polls them from the calling thread, so
+  `read_archive_members`, `make_thumbnail`, `dhash`, `dhash_many`, `hamming_pairs`,
+  `cosine_pairs`, `levenshtein_pairs`. Long ones take `progress` / `should_stop` and raise
+  `stl_native.Stopped`; the binding's `run_job` polls them from the calling thread, so
   Python callbacks never run on Rust threads. Arrays cross as NumPy buffers in and bytes out
   (`np.frombuffer`). Tests for code with a native path should run in both modes (see the
   `implementation` fixture in `tests/test_image_duplicates.py`).
@@ -73,6 +74,15 @@ Python owns the schema until Phase 4).
   falls back to the Python reader for that archive. `zip.rs` is a port of CPython's `zipfile`
   catalog and `ZipFile.open` checks. Do not use `sevenz-rust2`'s `BlockDecoder` on a block
   with an empty entry inside it: it silently drops that block's last files.
+- Thumbnails: `thumbnailer.make_thumbnail` tries the native `make_thumbnail`
+  (`rust/stl-core/src/thumbnail.rs`) and falls back to Pillow (`_make_thumbnail_py`) on
+  `ValueError` (AVIF, CMYK JPEG, corrupt data). Output sizes follow `Image.thumbnail`.
+- **Perceptual hashes are native-only (format 2).** Stored as `"2:" + 32 hex`
+  (`format_dhash`); test a stored value with `is_current_dhash`, never with a length check on
+  `DHASH_HEX_LEN`. Older Pillow hashes (bare hex) count as missing. Without the native core
+  `_dhash` / `compute_dhashes` return `None`; never add a Python fallback that writes hashes,
+  because one library must not mix two algorithms. Batch work goes through `compute_dhashes`
+  (one parallel native call); see `services.maintenance.recompute_dhashes`.
 
 ## Module Responsibilities
 
@@ -190,8 +200,9 @@ ends with a disk flush (~160 ms on a hard disk). Collect the refs and call
 - **`path_pattern.py`** — parses structured folder paths using `{sculptor}/{release}/{title}`
   syntax and maps extracted values onto ORM model fields.
 - **`string_utils.py`** — Levenshtein distance and Soundex (used for fuzzy name matching).
-- **`image_hash.py`** — 128-bit dHash and NumPy batch Hamming distance (crawler, maintenance,
-  Find by Image, content duplicates).
+- **`image_hash.py`** — 128-bit dHash (format 2, computed natively; storage format and
+  parsing here) and NumPy batch Hamming distance (crawler, maintenance, Find by Image,
+  content duplicates).
 - **`logger.py`** — rotating gzip-compressed file logger; must be initialised after
   `QApplication` / `QSettings` so the data-dir path is available.
 

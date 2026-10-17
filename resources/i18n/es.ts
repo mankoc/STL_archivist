@@ -2004,6 +2004,11 @@ Ejecute primero «Buscar movidos en BD» y luego seleccione las filas a combinar
         <translation>No se pudo calcular el hash: formato de imagen no compatible.</translation>
     </message>
     <message>
+        <location filename="../../app/ui/find_by_image_dialog.py" line="490" />
+        <source>Searching by perceptual hash needs the native core; use the AI embedding method.</source>
+        <translation>La búsqueda por hash perceptual necesita el núcleo nativo; usa el método de embeddings de IA.</translation>
+    </message>
+    <message>
         <location filename="../../app/ui/find_by_image_dialog.py" line="267" />
         <source>Cannot decode image</source>
         <translation>No se puede decodificar la imagen</translation>

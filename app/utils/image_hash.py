@@ -1,12 +1,11 @@
 """
 Perceptual image hashing (128-bit dHash) and fast Hamming-distance search.
 
-Pure Pillow + NumPy; no Qt.  Used by the crawler (hashing new thumbnails),
+NumPy, plus the native core for computing hashes; no Qt.  Used by the crawler (hashing new thumbnails),
 Database Maintenance (recompute hashes), Find by Image and the content
 duplicate finder.  Moved here from ``app.ui.find_content_duplicates_dialog``
 so business-logic code no longer imports the UI layer.
 """
-import io
 from typing import Optional
 
 import numpy as np
@@ -27,83 +26,98 @@ def popcount64(x: "np.ndarray") -> "np.ndarray":
     return _BYTE_POPCNT[x.view(np.uint8).reshape(x.shape + (8,))].sum(axis=-1).astype(np.uint8)
 
 
-def split_dhashes(hex_hashes) -> "tuple[np.ndarray, np.ndarray]":
-    """Turn 32-char hex dHashes into ``(hi, lo)`` uint64 arrays, without Python ints."""
-    raw = bytes.fromhex("".join(hex_hashes))
+def split_dhashes(hashes) -> "tuple[np.ndarray, np.ndarray]":
+    """Turn stored dHashes (see :func:`format_dhash`) into ``(hi, lo)`` uint64 arrays."""
+    p = len(DHASH_PREFIX)
+    raw = bytes.fromhex("".join(h[p:] for h in hashes))
     words = np.frombuffer(raw, dtype=">u8").reshape(-1, 2)
     return words[:, 0].astype(np.uint64), words[:, 1].astype(np.uint64)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Perceptual hashing — pure Pillow, no extra dependencies
+# Perceptual hashing — format 2, computed by the native core
 # ─────────────────────────────────────────────────────────────────────────────
 
 DHASH_SIZE    = 8                          # grid size per gradient direction
 DHASH_BITS    = 2 * DHASH_SIZE * DHASH_SIZE  # 128 (horizontal + vertical)
-DHASH_HEX_LEN = DHASH_BITS // 4              # 32 hex chars
+DHASH_HEX_LEN = DHASH_BITS // 4              # 32 hex digits
+# Stored hashes are "2:" + 32 hex digits. Format 2 is computed by the native core
+# (rust/stl-core/src/dhash.rs). Older formats (16 or 32 bare hex digits, from
+# Pillow) have a different length, so length checks treat them as missing.
+DHASH_PREFIX  = "2:"
+DHASH_STR_LEN = len(DHASH_PREFIX) + DHASH_HEX_LEN   # 34
 
 
-def _dhash(jpeg_bytes: bytes, hash_size: int = DHASH_SIZE) -> Optional[int]:
-    """Compute a 128-bit difference hash (horizontal + vertical) from JPEG bytes.
+def _dhash(image_bytes: bytes, hash_size: int = DHASH_SIZE) -> Optional[int]:
+    """Format-2 dHash of encoded image bytes, or ``None``.
 
-    The image is converted to greyscale and resized to
-    (hash_size+1) × (hash_size+1) pixels.  Two ``hash_size²``-bit hashes are
-    computed and concatenated: one comparing each pixel to its right neighbour
-    (horizontal gradient) and one comparing each pixel to the one below it
-    (vertical gradient).  Capturing both directions discriminates better than
-    a horizontal-only hash, reducing false matches between images that share a
-    horizontal gradient but differ vertically.
+    A 128-bit difference hash: the image is shrunk as a thumbnail would be,
+    resized (Lanczos) to a 9 × 9 grid of 8-bit luma, and each cell compared
+    with its right neighbour (bits 0–63) and the one below (bits 64–127).
 
-    Returns None if the image cannot be decoded.
+    Only the native core computes it: its decoders differ from Pillow's, so a
+    Python version could not produce the same bits, and one library must not
+    mix two algorithms. Without the native core (or for undecodable data) this
+    returns ``None`` and the image simply has no hash.
     """
+    from app import native
+    mod = native.module()
+    if mod is None or hash_size != DHASH_SIZE or not image_bytes:
+        return None
     try:
-        from PIL import Image
-        img = Image.open(io.BytesIO(jpeg_bytes)).convert("L")
-        img = img.resize((hash_size + 1, hash_size + 1), Image.LANCZOS)
-        px  = img.load()
-        result = 0
-        bit = 0
-        # Horizontal gradient: compare each pixel to the one to its right.
-        for row in range(hash_size):
-            for col in range(hash_size):
-                if px[col, row] > px[col + 1, row]:
-                    result |= 1 << bit
-                bit += 1
-        # Vertical gradient: compare each pixel to the one below it.
-        for row in range(hash_size):
-            for col in range(hash_size):
-                if px[col, row] > px[col, row + 1]:
-                    result |= 1 << bit
-                bit += 1
-        return result
-    except Exception:
+        return mod.dhash(image_bytes)
+    except (ValueError, TypeError, AttributeError):
         return None
 
 
 def compute_dhash_from_jpeg(jpeg_bytes: bytes) -> Optional[int]:
-    """Public wrapper used by other modules to compute dHash from JPEG bytes."""
+    """Public wrapper: format-2 dHash of image bytes (any decodable format)."""
     return _dhash(jpeg_bytes)
 
 
-def format_dhash(value: int) -> str:
-    """Format a dHash integer as a fixed-width, zero-padded hex string.
+def compute_dhashes(images: "list[bytes]") -> "list[Optional[int]]":
+    """:func:`_dhash` over many images at once, in parallel natively."""
+    from app import native
+    mod = native.module()
+    if mod is None:
+        return [None] * len(images)
+    try:
+        return mod.dhash_many([bytes(b) for b in images])
+    except (ValueError, TypeError, AttributeError):
+        return [_dhash(b) for b in images]
 
-    The fixed width (:data:`DHASH_HEX_LEN`) lets readers recognise hashes made
-    by an older/narrower algorithm by their differing length and recompute them.
+
+def dhash_available() -> bool:
+    """True when hashes can be computed (the native core is loaded)."""
+    from app import native
+    return native.module() is not None and hasattr(native.module(), "dhash")
+
+
+def is_current_dhash(stored) -> bool:
+    """True for a stored hash in the current format (see :data:`DHASH_PREFIX`)."""
+    return isinstance(stored, str) and len(stored) == DHASH_STR_LEN and stored.startswith(DHASH_PREFIX)
+
+
+def format_dhash(value: int) -> str:
+    """Format a dHash integer for storage: ``"2:"`` + 32 zero-padded hex digits.
+
+    The prefix and fixed width let readers recognise hashes made by an older
+    algorithm by their differing length and recompute them.
     """
-    return f"{value:0{DHASH_HEX_LEN}x}"
+    return f"{DHASH_PREFIX}{value:0{DHASH_HEX_LEN}x}"
 
 
 def parse_dhash(stored) -> Optional[int]:
-    """Parse a stored dHash, accepting only the current algorithm's bit width.
+    """Parse a stored dHash, accepting only the current format.
 
-    Older 64-bit hashes (16 hex chars), integers, and malformed values return
-    ``None`` so callers recompute rather than compare incompatible fingerprints.
+    Older Pillow hashes (16 or 32 bare hex digits), integers and malformed
+    values return ``None`` so callers recompute rather than compare
+    incompatible fingerprints.
     """
-    if not isinstance(stored, str) or len(stored) != DHASH_HEX_LEN:
+    if not is_current_dhash(stored):
         return None
     try:
-        return int(stored, 16)
+        return int(stored[len(DHASH_PREFIX):], 16)
     except ValueError:
         return None
 

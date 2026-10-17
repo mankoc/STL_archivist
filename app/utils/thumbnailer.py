@@ -499,7 +499,24 @@ def make_thumbnail(image_bytes: bytes, max_size: int = THUMB_SIZE_DEFAULT,
     Returns:
         JPEG bytes, GIF bytes for an animated GIF, or ``None`` if conversion
         fails for any reason.
+
+    The native core (``rust/stl-core/src/thumbnail.rs``) handles JPEG, PNG,
+    WebP, BMP, TIFF and GIF with the same size rules; anything it cannot decode
+    (AVIF, CMYK JPEG, corrupt data) goes through Pillow below.
     """
+    from app import native
+    mod = native.module()
+    if mod is not None:
+        try:
+            return mod.make_thumbnail(image_bytes, max_size, animate)
+        except (ValueError, TypeError, OverflowError, AttributeError):
+            pass
+    return _make_thumbnail_py(image_bytes, max_size, animate)
+
+
+def _make_thumbnail_py(image_bytes: bytes, max_size: int = THUMB_SIZE_DEFAULT,
+                       animate: bool = True) -> Optional[bytes]:
+    """Pillow implementation of :func:`make_thumbnail`."""
     try:
         with Image.open(io.BytesIO(image_bytes)) as img:
             if animate and getattr(img, "is_animated", False):

@@ -1,6 +1,6 @@
 # Rust Migration Plan
 
-**Status:** Phases 0 and 1 done (2026-10-17); Phase 2a (archive reading) done, 2b next. Written 2026-10-17.
+**Status:** Phases 0 and 1 done (2026-10-17); Phase 2 done except the gate on extracted bytes and PDF via pdfium (see Phase 2). Written 2026-10-17.
 
 **Goal:** move stlLibrary to Rust for **performance**, a **small native distribution** and a
 **server / client** architecture like Jellyfin's: one server owns the library, and every user
@@ -224,6 +224,42 @@ Split into 2a (archive reading), 2b (image pipeline) and 2c (new dHash and recom
     it is bound by LZMA decompression and disk.
 - Not done: nested-archive detection stays in Python until Phase 4 (it uses the catalog,
   which is native already).
+
+**2b: image pipeline — done 2026-10-17.** `make_thumbnail` (`thumbnail.rs`), used by
+`thumbnailer.make_thumbnail` with Pillow as the fallback.
+
+- Crates: `image` 0.25 (PNG, GIF, WebP, BMP, TIFF; default features off), `jpeg-decoder`
+  (DCT-scaled decode to ≥ 2x the target, like Pillow's `reducing_gap=2`; Pillow never used it
+  here because `convert` loaded the full image first), `fast_image_resize` (Lanczos3, SIMD),
+  `jpeg-encoder` (quality 75, 4:2:0, optimised Huffman tables, as Pillow's `optimize=True`).
+- Same visible behaviour as Pillow: `Image.thumbnail` sizes computed from the source size
+  (not the DCT-scaled one, which rounds differently), alpha dropped, EXIF orientation
+  ignored, animated GIFs kept up to 60 frames / 2 MB.
+- Reference library, 1,022 images: sizes identical; mean pixel difference 1.2/255 (max 4.9);
+  1.7x faster overall (PNG 2.2x, JPEG 1.4x). JPEG entropy decoding dominates: DCT scaling
+  saves only ~15%, and `zune-jpeg` was not much faster. libjpeg-turbo would be faster but
+  needs a C toolchain in the build; not worth it yet.
+- Fallback to Pillow: AVIF (needs dav1d, a C library), CMYK JPEG, anything undecodable.
+- Deviation, deliberate: 16-bit greyscale PNGs are scaled to 8 bits; Pillow clipped them to white.
+- Not done: PDF first page through pdfium. PyMuPDF still renders it, and the PNG goes through
+  the native thumbnail. pdfium needs a bundled `pdfium.dll` (pdfium-binaries), which is
+  packaging work best done with the server build (Phase 5).
+
+**2c: dHash format 2 — done 2026-10-17.** `dhash` / `dhash_many` (`dhash.rs`).
+
+- Same method as Pillow's hash (8-bit BT.601 luma, Lanczos3 to 9×9, strict comparison, same
+  bit layout); computed after shrinking to fit 512 px so an original and its thumbnail
+  agree. Stored as `"2:" + 32 hex`; older hashes have another length and count as missing.
+- Measured on 2,000 reference thumbnails against Pillow's hash: re-encode at JPEG q50 mean
+  1.1 vs 1.2 bits, 2/3 resize 0.4 vs 0.4, 3% crop + brightness p95 19 vs 20; random pairs
+  p1 42 vs 42. Exact float area averaging (with or without rounding) was measured and
+  rejected: less robust to re-encoding (q50 within 10 bits 99.0%), weaker separation (p1 38).
+- Native only (no Python fallback writes hashes). Without the native core, searches use the
+  stored current hashes and Find by Image offers embeddings only.
+- One-time recompute: `services.maintenance.recompute_dhashes`, batches of 1,024. Hashing a
+  batch takes ~0.3 s; reading thumbnails (~10 ms each in id order on the reference hard disk)
+  dominates, about an hour for 365k images. Reading in blob-key order could cut that if
+  it ever matters.
 
 ### Phase 3: Thumbnail store (small–medium)
 
