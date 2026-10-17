@@ -320,6 +320,25 @@ Split into 2a (archive reading), 2b (image pipeline) and 2c (new dHash and recom
 The Python fallbacks stay until 4h. A step's golden tests compare the native result with
 the Python implementation it replaces, as in earlier phases.
 
+**4a: done 2026-10-18.** `rules.rs`, `path_pattern.rs`, `strings::soundex`; Python's
+`detect_presupport`, `detect_warnings`, `explain_warnings`, `detect_scale`, `parse_path` and
+`soundex` call them.
+
+- `rules::MemberPath` reproduces Windows `pathlib` for member names (drive prefix, dropped `.`
+  and empty segments, Python 3.14 `suffix`/`stem`).
+- **Custom presupport patterns stay on Python.** fancy-regex and `re` disagree on some
+  syntax without raising (`[[:alpha:]]`, `(?<name>…)`, `\x{41}`, `(?(1)a|b)`), so only the
+  built-in defaults go native. **4g must settle this** before the crawler leaves Python:
+  validate patterns when they are saved, accepting only syntax both engines read the same.
+- `parse_path` returns fields in Python's dict order (dialogs show them in that order) and
+  caches compiled patterns. Release dates: ASCII digits only; Python's `int()` also takes
+  other Unicode digits.
+- Gate: no differences on the reference library. That covers 484,744 `parse_path` calls
+  (4 patterns over every archive path, relative and absolute), the rules on the member
+  lists of 2,998 archives, and Soundex of 53,841 names. `parse_path` is 2.5x faster than
+  Python.
+- Not ported: `apply_extracted_to_model` (needs the database; 4d).
+
 ### Phase 5: Server (medium)
 
 `stl-server` on axum, the product's centre from here on:
