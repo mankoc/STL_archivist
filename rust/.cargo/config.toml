@@ -1,0 +1,5 @@
+# x86-64-v2 (SSE4.2 + POPCNT, every x86-64 CPU since ~2009) makes `count_ones`
+# a single instruction in the Hamming scan. `gemm` detects AVX2/AVX-512 itself
+# at run time, so newer CPUs still get their wider kernels.
+[target.'cfg(target_arch = "x86_64")']
+rustflags = ["-C", "target-cpu=x86-64-v2"]

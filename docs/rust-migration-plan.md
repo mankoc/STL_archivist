@@ -1,6 +1,6 @@
 # Rust Migration Plan
 
-**Status:** Phase 0 done (2026-10-17); Phase 1 next. Written 2026-10-17.
+**Status:** Phases 0 and 1 done (2026-10-17); Phase 2 next. Written 2026-10-17.
 
 **Goal:** move stlLibrary to Rust for **performance**, a **small native distribution** and a
 **server / client** architecture like Jellyfin's: one server owns the library, and every user
@@ -157,19 +157,32 @@ implementation on the same inputs.
 - Still to do in Phase 2: the checked-in archive corpus with odd encodings and corrupt files,
   once Rust reads archives itself.
 
-### Phase 1: Pure computation (small–medium, biggest early speed-up)
+### Phase 1: Pure computation (small–medium) — done 2026-10-17
 
-Stateless functions, bytes or arrays in and out; no database, no LMDB.
+Stateless all-pairs searches, chosen by measured cost; arrays in, arrays out.
 
-- dHash computation (new format) and the all-pairs Hamming scan, the embedding scan and the
-  duplicate aggregation (`app/services/image_duplicates.py`), Find by Image dHash ranking.
-- Levenshtein / Soundex (Find Metadata Duplicates, tag merge).
-- Path pattern parsing (`path_pattern.parse_path`), crawler rules (`detect_presupport`,
-  `detect_warnings`, `detect_scale`).
+| Function (`stl_native`) | Core module | Used by | Reference library |
+|---|---|---|---|
+| `hamming_pairs` | `hamming.rs` (rayon, hardware popcount) | Duplicate Archives → Images, dHash | scan 13.9 s → 2.1 s; whole search 15.7 s → 3.9 s; identical pairs |
+| `cosine_pairs` | `embedding.rs` (`gemm`, run-time AVX2/AVX-512) | Duplicate Archives → Images, AI embedding | scan 87 s → 29 s; whole search 66 s → 36 s; 19 of 1.66M pairs differ, all within 1e-6 of the threshold |
+| `levenshtein_pairs` | `strings.rs` (banded DP, rayon) | Find Metadata Duplicates, lookup and author editors' *Merge similar* | 51k titles at distance ≤ 2: ~21 min (Python estimate) → 3.3 s; identical pairs |
 
-Expected gain: the duplicate scans are currently memory-bound NumPy loops (16 s dHash, 66 s
-embeddings on 363k images); `rayon` + `count_ones()` and a cache-blocked kernel should cut the
-dHash scan substantially. Measure before and after on the reference library.
+- Long operations report progress and stop through `control::Control`; the binding's
+  `run_job` polls it from the calling thread every 100 ms, so Python callbacks never run on
+  Rust threads.
+- `rust/.cargo/config.toml` targets x86-64-v2 (hardware popcount; the Hamming scan was 2x
+  slower without it). `tools/build_native.py` runs Cargo from `rust/` so it applies.
+- Duplicate aggregation (`model_pairs`) stays in NumPy: it takes under a second.
+
+**Moved out of Phase 1:**
+
+- **dHash computation (new format) → Phase 2.** The format changes because Rust image
+  decoding differs from Pillow's; computing hashes in Rust while Python remains a fallback
+  would let one library hold hashes from two algorithms. In Phase 2 Rust owns image decoding,
+  so the switch and the one-time recompute happen once.
+- **Path patterns, crawler rules, Soundex → Phase 4**, with the crawler that uses them. They
+  run once per archive and are already fast; porting them earlier would add compatibility
+  surface without a speed gain.
 
 ### Phase 2: Archives and images (medium, highest compatibility risk)
 
@@ -177,6 +190,8 @@ dHash scan substantially. Measure before and after on the reference library.
   wanted files, nested-archive detection; RAR through the external tool.
 - Image pipeline: decode (JPEG/PNG/WebP/AVIF/GIF/BMP/TIFF/PDF first page), resize, JPEG encode,
   animated-GIF passthrough.
+- dHash in the new format (moved from Phase 1, rule 2): computed by Rust only, with a
+  one-time recompute of every stored hash; the Python fallback stops producing hashes.
 - Gate: golden `archive_hash` equality on the whole corpus **and** on a read-only pass over the
   reference library (every stored hash recomputed by Rust must equal the stored value).
 
@@ -196,6 +211,8 @@ dHash scan substantially. Measure before and after on the reference library.
   `stl_native.crawl(config, sink)` call.
 - Services move with it: `library_query`, `moves`, `maintenance`, `editing`, `lookups`,
   `file_deletion`, `model_summary`, `image_similarity`, `image_duplicates`.
+- Path pattern parsing, crawler rules (`detect_presupport`, `detect_warnings`,
+  `detect_scale`) and Soundex (moved from Phase 1).
 - From here the Python app is a PyQt shell over the Rust core.
 
 ### Phase 5: Server (medium)
