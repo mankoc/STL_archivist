@@ -5,18 +5,12 @@ that share a high fraction of identical files or similar-looking images.
 
 Two separate tabs handle the two modes:
   STL Files  — inverted-index overlap on (filename, file_size)
-  Images     — dHash perceptual matching on LMDB thumbnails (pure Pillow)
+  Images     — dHash or CLIP-embedding matching, see app.services.image_duplicates
 """
-import io
 import logging
-import os
-import threading
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
-
-import numpy as np
 
 from PyQt6.QtCore import QEvent, QObject, QPoint, QThread, pyqtSignal, Qt
 from PyQt6.QtGui import QPixmap
@@ -99,11 +93,15 @@ def _fmt_size(n: int) -> str:
     return f"{n:.1f} TB"
 
 
-def _size_item(path: str) -> QTableWidgetItem:
-    """Return a centre-aligned, numerically sortable size cell for *path*."""
+def _size_item(path: str, size: Optional[int] = None) -> QTableWidgetItem:
+    """Return a centre-aligned, numerically sortable size cell for *path*.
+
+    Pass the stored *size* when known: otherwise the file is stat()ed, which on
+    the GUI thread is slow for many rows on a network or USB drive.
+    """
     c = Qt.AlignmentFlag.AlignCenter
     try:
-        n = Path(path).stat().st_size
+        n = size if size is not None else Path(path).stat().st_size
     except OSError:
         it = _NumericItem("?")
         it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -249,445 +247,49 @@ class _ContentDupWorker(QThread):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class _ImageDupWorker(QThread):
-    """Find archive pairs that share perceptually similar thumbnail images."""
+    """Find archive pairs with similar thumbnails, by dHash or CLIP embedding.
 
-    progress = pyqtSignal(str)
-    prog_val = pyqtSignal(int, int)   # (current, total) for hash-computation phase
-    scan_finished = pyqtSignal(list)
-
-    def __init__(self, max_dist: int, parent=None) -> None:
-        super().__init__(parent)
-        self._max_dist = max_dist
-        self._stop = False
-        # Diagnostic counts — set during run(), read by _on_img_finished.
-        self.images_loaded: int = 0
-        self.hashes_computed: int = 0
-        self.candidates_found: int = 0
-
-    def stop(self) -> None:
-        self._stop = True
-
-    def run(self) -> None:
-        from app.database.db import session_scope
-        from app.database.models import Image, STLModel
-        from app.utils.thumbnailer import get_thumbnail_bytes
-
-        try:
-            with session_scope() as session:
-                from sqlalchemy import text as _text
-
-                self.progress.emit("Loading image records…")
-                image_rows = (
-                    session.query(Image.id, Image.model_id)
-                    .join(STLModel, STLModel.id == Image.model_id)
-                    .filter(Image.thumbnail_path.isnot(None))
-                    .filter(STLModel.is_missing.isnot(True))
-                    .all()
-                )
-                if not image_rows:
-                    self.images_loaded = 0
-                    self.scan_finished.emit([])
-                    return
-
-                total = len(image_rows)
-                self.images_loaded = total
-
-                # Bulk-load all stored dhash values in one query — avoids opening
-                # N separate sessions (the previous per-image session loop).
-                self.progress.emit(f"Loading stored hashes for {total} image(s)…")
-                stored_dhash: dict[int, Optional[str]] = {}
-                for row in session.execute(_text("SELECT id, dhash FROM images")):
-                    stored_dhash[row[0]] = row[1]
-
-            n_workers = min(os.cpu_count() or 1, 8)
-            self.prog_val.emit(0, total)
-            self.progress.emit(
-                f"Computing perceptual hashes for {total} image(s) ({n_workers} worker(s))…"
-            )
-
-            # (image_id, model_id, dhash_value)
-            hashes: list[tuple[int, int, int]] = []
-            model_img_count: dict[int, int] = defaultdict(int)
-
-            # Pillow image decode and LMDB reads both release the GIL, so
-            # ThreadPoolExecutor gives genuine parallelism here without pickling
-            # overhead.
-            def _hash_one(row: tuple) -> tuple:
-                img_id, model_id = row
-                h = parse_dhash(stored_dhash.get(img_id))
-                if h is None:
-                    jpeg = get_thumbnail_bytes(img_id)
-                    if jpeg:
-                        h = _dhash(jpeg)
-                return img_id, model_id, h
-
-            done = 0
-            with ThreadPoolExecutor(max_workers=n_workers) as pool:
-                for img_id, model_id, h_int in pool.map(_hash_one, image_rows, chunksize=200):
-                    if self._stop:
-                        self.scan_finished.emit([])
-                        return
-                    if h_int is not None:
-                        hashes.append((img_id, model_id, h_int))
-                        model_img_count[model_id] += 1
-                    done += 1
-                    if done % 200 == 0:
-                        self.prog_val.emit(done, total)
-
-            self.prog_val.emit(total, total)
-            self.hashes_computed = len(hashes)
-
-            if not hashes:
-                self.scan_finished.emit([])
-                return
-
-            # ── Two-phase matching (no O(N²) candidates set) ──────────────────
-            #
-            # Phase 1: stream through the segment index to find *model* pairs
-            #   that have at least one image pair within threshold.  We never
-            #   materialise a full (image_i, image_j) candidate set; instead we
-            #   emit (model_a, model_b) the moment the first qualifying image
-            #   pair is found, then skip further work for that model pair.
-            #
-            # Phase 2: for each candidate model pair do an exact per-image
-            #   Cartesian product to get the true pair count and best distance.
-            #
-            # Memory: O(N) for the index + O(models²) for candidate model pairs
-            #   — instead of the previous O(image_pairs²) which caused ~48 GB
-            #   peak usage on large collections.
-
-            self.progress.emit(
-                f"Building segment index over {len(hashes)} hash(es)…"
-            )
-
-            # model_id → list of positions in the `hashes` list
-            model_to_idxs: dict[int, list[int]] = defaultdict(list)
-            for idx, (_, model_id, _) in enumerate(hashes):
-                model_to_idxs[model_id].append(idx)
-
-            # ── Phase 1: numpy vectorised pairwise Hamming scan ──────────────
-            #
-            # The previous segment-index approach required O(N × segs × bucket)
-            # Python-level iterations.  For max_dist > 10 the segments are only
-            # 1–3 bits wide (2–8 buckets), so every bucket contains N/2–N/8
-            # images and the inner loop becomes O(N²) in slow Python.
-            #
-            # Instead: split each 128-bit hash into two uint64 halves, broadcast
-            # XOR over chunks of the distance matrix, count bits via a 256-entry
-            # byte lookup table, and collect matching model pairs.  The work is
-            # still O(N²) but runs in numpy C-loops — roughly 200× faster.
-            #
-            # Memory per chunk: 2 × (CHUNK × N × 8 bytes) for the XOR matrices
-            # ≈ 2 × 50 × 340 K × 8 = 272 MB.  Acceptable on modern machines.
-
-            _U64 = (1 << 64) - 1
-            n = len(hashes)
-            lo_arr = np.array([h & _U64 for _, _, h in hashes],  dtype=np.uint64)
-            hi_arr = np.array([h >> 64   for _, _, h in hashes], dtype=np.uint64)
-            model_arr = np.array([m for _, m, _ in hashes], dtype=np.int64)
-
-            # Phase 1 parallelism: numpy XOR/popcount releases the GIL, so
-            # multiple threads can compute distance chunks simultaneously.
-            # CHUNK=50 keeps each worker's intermediate XOR array ≤ 270 MB;
-            # with 4 workers the peak resident cost stays under ~1.1 GB.
-            CHUNK = 50
-            # Cap workers so total peak XOR memory stays ≤ ~1 GB regardless of N.
-            max_by_mem = max(1, (1 << 30) // max(1, CHUNK * n * 16))
-            phase1_workers = min(n_workers, max_by_mem, 4)
-
-            candidate_model_pairs: set[tuple[int, int]] = set()
-            stop_event = threading.Event()
-
-            max_dist = self._max_dist  # capture before entering threads
-
-            def _scan_chunk(chunk_start: int) -> list:
-                """Return new (model_a, model_b) pairs found in this chunk."""
-                if stop_event.is_set():
-                    return []
-                chunk_end = min(chunk_start + CHUNK, n)
-                dist_mat = _hamming128_batch(
-                    lo_arr[chunk_start:chunk_end],
-                    hi_arr[chunk_start:chunk_end],
-                    lo_arr, hi_arr,
-                )
-                found: list = []
-                for i_local in range(chunk_end - chunk_start):
-                    i_global = chunk_start + i_local
-                    model_a  = int(model_arr[i_global])
-                    dist_row   = dist_mat[i_local, i_global + 1:]
-                    models_row = model_arr[i_global + 1:]
-                    within = dist_row <= max_dist
-                    if not np.any(within):
-                        continue
-                    matching = models_row[within]
-                    matching = matching[matching != model_a]
-                    for mb in np.unique(matching):
-                        found.append((min(model_a, int(mb)), max(model_a, int(mb))))
-                del dist_mat
-                return found
-
-            self.progress.emit(
-                f"Phase 1 — scanning {n} hash(es) ({phase1_workers} worker(s))…"
-            )
-            self.prog_val.emit(0, n)
-
-            all_starts = list(range(0, n, CHUNK))
-            WAVE = phase1_workers  # one wave = one full set of concurrent chunks
-
-            prev_pair_count = 0
-            stable_waves = 0
-
-            with ThreadPoolExecutor(max_workers=phase1_workers) as pool:
-                for wave_idx in range(0, len(all_starts), WAVE):
-                    if self._stop:
-                        stop_event.set()
-                        self.scan_finished.emit([])
-                        return
-
-                    wave = all_starts[wave_idx: wave_idx + WAVE]
-                    futures = [pool.submit(_scan_chunk, s) for s in wave]
-
-                    for fut in as_completed(futures):
-                        for pair in fut.result():
-                            candidate_model_pairs.add(pair)
-
-                    last_end = min(wave[-1] + CHUNK, n)
-                    self.prog_val.emit(last_end, n)
-                    new_count = len(candidate_model_pairs)
-                    self.progress.emit(
-                        f"Phase 1 — {last_end}/{n} scanned, "
-                        f"{new_count} candidate pair(s) found…"
-                    )
-
-                    if new_count == prev_pair_count:
-                        stable_waves += 1
-                        if stable_waves >= 5:
-                            stop_event.set()
-                            self.progress.emit(
-                                f"Phase 1 — converged after {last_end} images, "
-                                f"{new_count} candidate pair(s)."
-                            )
-                            break
-                    else:
-                        stable_waves    = 0
-                        prev_pair_count = new_count
-
-            self.prog_val.emit(n, n)
-            # (model_a, model_b) → list of per-image-pair distances within threshold
-            pair_dists: dict[tuple[int, int], list[int]] = defaultdict(list)
-
-            self.candidates_found = len(candidate_model_pairs)
-
-            if not candidate_model_pairs:
-                self.scan_finished.emit([])
-                return
-
-            # Phase 2: exact per-image Cartesian scoring for found model pairs.
-            self.progress.emit(
-                f"Phase 2 — scoring {len(candidate_model_pairs)} candidate pair(s)…"
-            )
-            for model_a, model_b in candidate_model_pairs:
-                if self._stop:
-                    self.scan_finished.emit([])
-                    return
-                for ia in model_to_idxs.get(model_a, []):
-                    _, _, h_a = hashes[ia]
-                    for ib in model_to_idxs.get(model_b, []):
-                        _, _, h_b = hashes[ib]
-                        d = _hamming(h_a, h_b)
-                        if d <= self._max_dist:
-                            pair_dists[(model_a, model_b)].append(d)
-
-            if not pair_dists:
-                self.scan_finished.emit([])
-                return
-
-            self.progress.emit("Loading model titles…")
-            all_ids: set[int] = set()
-            for id_a, id_b in pair_dists:
-                all_ids.add(id_a)
-                all_ids.add(id_b)
-            with session_scope() as session:
-                models_map = {
-                    m.id: m
-                    for m in session.query(STLModel)
-                        .filter(STLModel.id.in_(list(all_ids)))
-                        .all()
-                }
-
-            results = []
-            for (id_a, id_b), dists in pair_dists.items():
-                ma = models_map.get(id_a)
-                mb = models_map.get(id_b)
-                if ma and mb:
-                    results.append({
-                        "id_a":    id_a,
-                        "title_a": ma.title or Path(ma.archive_path).stem,
-                        "path_a":  ma.archive_path or "",
-                        "imgs_a":  model_img_count.get(id_a, 0),
-                        "id_b":    id_b,
-                        "title_b": mb.title or Path(mb.archive_path).stem,
-                        "path_b":  mb.archive_path or "",
-                        "imgs_b":  model_img_count.get(id_b, 0),
-                        "pairs":   len(dists),
-                        "best":    min(dists),
-                    })
-
-            # Sort: lowest best-distance first, then most matching pairs
-            results.sort(key=lambda r: (r["best"], -r["pairs"]))
-            self.scan_finished.emit(results)
-
-        except Exception as exc:
-            logger.error("Image duplicate search failed: %s", exc, exc_info=True)
-            self.scan_finished.emit([])
-
-
-class _EmbeddingDupWorker(QThread):
-    """Find archive pairs whose thumbnails are semantically similar.
-
-    Uses the stored CLIP embeddings (cosine similarity).  Only images that
-    already have a current embedding are considered; the rest are ignored
-    (run Database Maintenance → Compute Image Embeddings first).
+    The work is done by :mod:`app.services.image_duplicates`; this thread only
+    runs it and relays progress.  ``report`` holds the counts once it finishes.
     """
 
     progress = pyqtSignal(str)
     prog_val = pyqtSignal(int, int)
     scan_finished = pyqtSignal(list)
 
-    def __init__(self, threshold: float, parent=None) -> None:
+    def __init__(self, method: str, threshold, max_models: int, parent=None) -> None:
         super().__init__(parent)
-        self._threshold = threshold
+        self._method = method            # "dhash" | "embedding"
+        self._threshold = threshold      # max distance (dhash) or min similarity
+        self._max_models = max_models
         self._stop = False
-        # Diagnostic counts — read by _on_img_finished.
-        self.embeddings_loaded: int = 0
-        self.embeddings_valid:  int = 0
+        self.report = None               # ScanReport, set by run()
 
     def stop(self) -> None:
         self._stop = True
 
     def run(self) -> None:
-        from collections import Counter
-
         from app.database.db import session_scope
-        from app.database.models import STLModel
-        from app.services.image_similarity import load_model_vectors
+        from app.services import image_duplicates as dup
 
+        find = (dup.find_embedding_duplicates if self._method == "embedding"
+                else dup.find_dhash_duplicates)
         try:
-            import numpy as np
-
-            # All-pairs comparison stays in NumPy: one KNN query per image would be far slower.
-            self.progress.emit("Loading image embeddings…")
             with session_scope() as session:
-                mids, M = load_model_vectors(session)
-            self.embeddings_loaded = self.embeddings_valid = len(mids)
-            model_img_count = Counter(mids.tolist())
-
-            if len(mids) < 2:
-                self.scan_finished.emit([])
-                return
-
-            # float16: ~512 MB for 500K×512-dim vs ~1 GB for float32.
-            M = M.astype(np.float16)
-            n = M.shape[0]
-            thr = np.float16(self._threshold)
-
-            pair_best: dict[tuple[int, int], float] = {}
-            pair_cnt:  dict[tuple[int, int], int]   = defaultdict(int)
-
-            self.progress.emit(f"Comparing {n:,} embedding(s)…")
-
-            # Tiled upper-triangle scan: CHUNK×CHUNK sims blocks (~8 MB each at CHUNK=2048)
-            # instead of CHUNK×n blocks (~500 MB each at CHUNK=512 for n=500K).
-            CHUNK = 2048
-            for start_r in range(0, n, CHUNK):
-                if self._stop:
-                    self.scan_finished.emit([])
-                    return
-                end_r = min(start_r + CHUNK, n)
-                block_r = M[start_r:end_r]
-
-                # Diagonal tile — pairs where both i and j fall in [start_r, end_r).
-                sims_d = block_r @ block_r.T
-                for li in range(start_r, end_r):
-                    local_i = li - start_r
-                    row = sims_d[local_i]
-                    offset = local_i + 1
-                    local_js = np.where(row[offset:] >= thr)[0]
-                    ma = int(mids[li])
-                    for lj in local_js:
-                        mb = int(mids[start_r + offset + lj])
-                        if ma == mb:
-                            continue
-                        key = (min(ma, mb), max(ma, mb))
-                        s = float(row[offset + lj])
-                        pair_cnt[key] += 1
-                        if key not in pair_best or s > pair_best[key]:
-                            pair_best[key] = s
-                del sims_d
-
-                # Off-diagonal tiles — pairs where i ∈ [start_r, end_r), j ∈ [start_c, end_c).
-                for start_c in range(end_r, n, CHUNK):
-                    end_c = min(start_c + CHUNK, n)
-                    sims_o = block_r @ M[start_c:end_c].T
-                    for li in range(start_r, end_r):
-                        local_i = li - start_r
-                        row = sims_o[local_i]
-                        local_js = np.where(row >= thr)[0]
-                        ma = int(mids[li])
-                        for lj in local_js:
-                            mb = int(mids[start_c + lj])
-                            if ma == mb:
-                                continue
-                            key = (min(ma, mb), max(ma, mb))
-                            s = float(row[lj])
-                            pair_cnt[key] += 1
-                            if key not in pair_best or s > pair_best[key]:
-                                pair_best[key] = s
-                    del sims_o
-
-                self.prog_val.emit(end_r, n)
-
-            if not pair_best:
-                self.scan_finished.emit([])
-                return
-
-            all_ids: set[int] = set()
-            for a, b in pair_best:
-                all_ids.add(a)
-                all_ids.add(b)
-            with session_scope() as session:
-                models_map = {
-                    m.id: m
-                    for m in session.query(STLModel)
-                        .filter(STLModel.id.in_(list(all_ids)))
-                        .all()
-                }
-
-            results = []
-            for (a, b), best in pair_best.items():
-                ma = models_map.get(a)
-                mb = models_map.get(b)
-                if ma and mb:
-                    results.append({
-                        "id_a":    a,
-                        "title_a": ma.title or Path(ma.archive_path).stem,
-                        "path_a":  ma.archive_path or "",
-                        "imgs_a":  model_img_count.get(a, 0),
-                        "id_b":    b,
-                        "title_b": mb.title or Path(mb.archive_path).stem,
-                        "path_b":  mb.archive_path or "",
-                        "imgs_b":  model_img_count.get(b, 0),
-                        "pairs":   pair_cnt[(a, b)],
-                        "best":    best,            # cosine similarity (higher = better)
-                    })
-
-            # Most similar first, then most matching image pairs.
-            results.sort(key=lambda r: (-r["best"], -r["pairs"]))
-            self.scan_finished.emit(results)
-
-        except Exception as exc:
-            logger.error("Embedding duplicate search failed: %s", exc, exc_info=True)
+                self.report = find(
+                    session, self._threshold, self._max_models,
+                    progress=self.prog_val.emit, log=self.progress.emit,
+                    should_stop=lambda: self._stop,
+                )
+        except dup.Stopped:
             self.scan_finished.emit([])
+            return
+        except Exception as exc:
+            logger.error("Image duplicate search failed: %s", exc, exc_info=True)
+            self.progress.emit(f"Search failed: {exc}")
+            self.scan_finished.emit([])
+            return
+        self.scan_finished.emit(self.report.results)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1044,6 +646,21 @@ class FindContentDuplicatesDialog(QDialog):
         self._img_embed_help.setWordWrap(True)
         form.addRow("", self._img_embed_help)
 
+        # ── Shared images (both methods) ───────────────────────────────────
+        from app.services.image_duplicates import DEFAULT_MAX_MODELS_PER_IMAGE
+        self._img_shared_spin = QSpinBox()
+        self._img_shared_spin.setRange(1, 100_000)
+        self._img_shared_spin.setValue(DEFAULT_MAX_MODELS_PER_IMAGE)
+        self._img_shared_spin.setSuffix(self.tr(" archives"))
+        self._img_shared_spin.setToolTip(
+            self.tr("Ignore an image when it, or a near-identical copy of it, appears in "
+                    "more than this many archives. Such images are banners, logos or promo "
+                    "renders shipped with many releases; they say nothing about whether two "
+                    "archives are copies, and in a large library a few of them can produce "
+                    "millions of pairs.")
+        )
+        form.addRow(self.tr("Skip images shared by more than:"), self._img_shared_spin)
+
         layout.addWidget(grp)
         self._on_img_method_changed()
 
@@ -1296,20 +913,25 @@ class FindContentDuplicatesDialog(QDialog):
         self._refresh_bottom_buttons()
 
         self._img_method_active = self._img_method_combo.currentData()
-        if self._img_method_active == "embedding":
-            self._set_img_score_header(similarity=True)
-            self._img_worker = _EmbeddingDupWorker(
-                self._img_sim_spin.value(), parent=self
-            )
-        else:
-            self._set_img_score_header(similarity=False)
-            self._img_worker = _ImageDupWorker(
-                self._img_dist_spin.value(), parent=self
-            )
-        self._img_worker.progress.connect(self._img_status.setText)
+        is_embed = self._img_method_active == "embedding"
+        self._set_img_score_header(similarity=is_embed)
+        self._img_worker = _ImageDupWorker(
+            self._img_method_active,
+            self._img_sim_spin.value() if is_embed else self._img_dist_spin.value(),
+            self._img_shared_spin.value(),
+            parent=self,
+        )
+        self._img_worker.progress.connect(self._on_img_log)
         self._img_worker.prog_val.connect(self._on_img_progress)
         self._img_worker.scan_finished.connect(self._on_img_finished)
         self._img_worker.start()
+
+    def _on_img_log(self, message: str) -> None:
+        # Ignore messages a stopped or superseded worker had already queued;
+        # they would overwrite "Search stopped." or a newer search's status.
+        worker = self.sender()
+        if worker is self._img_worker and not worker._stop:
+            self._img_status.setText(message)
 
     def _on_img_progress(self, current: int, total: int) -> None:
         self._img_progress.setRange(0, total)
@@ -1332,77 +954,57 @@ class FindContentDuplicatesDialog(QDialog):
         from app.utils.sound import play_notification
         play_notification("duplicates")
 
-        self._img_table.setSortingEnabled(False)
-        self._img_table.setRowCount(0)
+        is_embed = getattr(self, "_img_method_active", "dhash") == "embedding"
+        table = self._img_table
+        table.setSortingEnabled(False)
+        table.setUpdatesEnabled(False)
+        table.setRowCount(0)
+        table.setRowCount(len(results))   # one resize instead of one insertRow per row
         c = Qt.AlignmentFlag.AlignCenter
         for row_idx, r in enumerate(results):
-            self._img_table.insertRow(row_idx)
-            self._img_table.setItem(row_idx, _I_ID_A,    _item(str(r["id_a"]),  r["id_a"]))
-            self._img_table.setItem(row_idx, _I_TITLE_A, _item(r["title_a"]))
-            self._img_table.setItem(row_idx, _I_PATH_A,  _item(r["path_a"]))
-            self._img_table.setItem(row_idx, _I_SIZE_A,  _size_item(r["path_a"]))
-            self._img_table.setItem(row_idx, _I_IMGS_A,  _item(str(r["imgs_a"]), align=c))
-            self._img_table.setItem(row_idx, _I_ID_B,    _item(str(r["id_b"]),  r["id_b"]))
-            self._img_table.setItem(row_idx, _I_TITLE_B, _item(r["title_b"]))
-            self._img_table.setItem(row_idx, _I_PATH_B,  _item(r["path_b"]))
-            self._img_table.setItem(row_idx, _I_SIZE_B,  _size_item(r["path_b"]))
-            self._img_table.setItem(row_idx, _I_IMGS_B,  _item(str(r["imgs_b"]), align=c))
-            self._img_table.setItem(row_idx, _I_PAIRS,   _item(str(r["pairs"]),  align=c))
-            is_embed = getattr(self, "_img_method_active", "dhash") == "embedding"
+            table.setItem(row_idx, _I_ID_A,    _item(str(r["id_a"]),  r["id_a"]))
+            table.setItem(row_idx, _I_TITLE_A, _item(r["title_a"]))
+            table.setItem(row_idx, _I_PATH_A,  _item(r["path_a"]))
+            table.setItem(row_idx, _I_SIZE_A,  _size_item(r["path_a"], r["size_a"]))
+            table.setItem(row_idx, _I_IMGS_A,  _item(str(r["imgs_a"]), align=c))
+            table.setItem(row_idx, _I_ID_B,    _item(str(r["id_b"]),  r["id_b"]))
+            table.setItem(row_idx, _I_TITLE_B, _item(r["title_b"]))
+            table.setItem(row_idx, _I_PATH_B,  _item(r["path_b"]))
+            table.setItem(row_idx, _I_SIZE_B,  _size_item(r["path_b"], r["size_b"]))
+            table.setItem(row_idx, _I_IMGS_B,  _item(str(r["imgs_b"]), align=c))
+            table.setItem(row_idx, _I_PAIRS,   _item(str(r["pairs"]),  align=c))
             best_text = f"{r['best']:.3f}" if is_embed else str(r["best"])
-            self._img_table.setItem(row_idx, _I_DIST,    _item(best_text, align=c))
-        self._img_table.setSortingEnabled(True)
+            table.setItem(row_idx, _I_DIST,    _item(best_text, align=c))
+        table.setUpdatesEnabled(True)
+        table.setSortingEnabled(True)
 
-        n = len(results)
-        if n:
-            self._img_status.setText(f"{n} archive pair(s) with similar images found.")
-        elif getattr(self, "_img_method_active", "dhash") == "embedding":
-            worker = self._img_worker
-            loaded  = getattr(worker, "embeddings_loaded", 0)
-            valid   = getattr(worker, "embeddings_valid",  0)
-            if loaded == 0:
-                detail = (
-                    "No embeddings found in the database. "
-                    "Run Database Maintenance → Compute Image Embeddings first."
-                )
-            elif valid < 2:
-                detail = (
-                    f"{loaded} embedding record(s) found but fewer than 2 could be "
-                    "decoded. Re-run Compute Image Embeddings."
-                )
-            else:
-                detail = (
-                    f"{valid} embedding(s) compared — no pair exceeded the "
-                    f"{self._img_sim_spin.value():.2f} threshold. "
-                    "Try lowering the similarity threshold (e.g. 0.85–0.90)."
-                )
-            self._img_status.setText(f"No similar image pairs found. {detail}")
-        else:
-            worker = self._img_worker
-            imgs  = getattr(worker, "images_loaded",   0)
-            hashes = getattr(worker, "hashes_computed", 0)
-            cands  = getattr(worker, "candidates_found", 0)
-            if imgs == 0:
-                detail = "No thumbnails found — crawl with thumbnails enabled."
-            elif hashes == 0:
-                detail = (
-                    f"{imgs} thumbnail(s) found but none had a valid hash. "
-                    "Run Database Maintenance → Recompute Image Hashes."
-                )
-            elif cands == 0:
-                detail = (
-                    f"{hashes} hash(es) computed, 0 candidate pairs — "
-                    "no images share any hash segment. Try increasing the distance threshold."
-                )
-            else:
-                detail = (
-                    f"{hashes} hash(es), {cands} candidate pair(s) checked — "
-                    "all exceeded the distance threshold. Try a higher value."
-                )
-            self._img_status.setText(f"No similar image pairs found. {detail}")
-        all_ids = {r["id_a"] for r in results} | {r["id_b"] for r in results}
-        self._img_model_thumb = self._load_model_thumbs(all_ids)
+        self._img_model_thumb = {}        # hover thumbnails load lazily
         self._refresh_bottom_buttons()
+        report = getattr(self._img_worker, "report", None)
+        if report is None:                # stopped or failed: keep that status text
+            return
+        skipped = (f" {report.shared_skipped:,} image(s) shared by more than "
+                   f"{self._img_shared_spin.value()} archives were skipped."
+                   if report.shared_skipped else "")
+        if results:
+            more = (f" Showing the best {len(results):,}; tighten the threshold to see the rest."
+                    if report.truncated else "")
+            self._img_status.setText(
+                f"{len(results):,} archive pair(s) with similar images found in "
+                f"{report.seconds:.0f} s ({report.items:,} distinct of {report.images:,} "
+                f"images).{more}{skipped}")
+        elif report.images == 0:
+            self._img_status.setText(
+                "No similar image pairs found. " + (
+                    "No embeddings found in the database. Run Database Maintenance → "
+                    "Compute Image Embeddings first." if is_embed else
+                    "No thumbnails found — crawl with thumbnails enabled."))
+        else:
+            hint = ("Try lowering the similarity threshold (e.g. 0.85–0.90)." if is_embed
+                    else "Try a higher distance.")
+            self._img_status.setText(
+                f"No similar image pairs found among {report.items:,} distinct image(s). "
+                f"{hint}{skipped}")
 
     def _on_img_selection(self) -> None:
         if self._tabs.currentIndex() == _TAB_IMGS:
@@ -1449,35 +1051,27 @@ class FindContentDuplicatesDialog(QDialog):
     # ── Thumbnail helpers ─────────────────────────────────────────────────────
 
     def _get_model_thumb(self, model_id: int) -> Optional[bytes]:
-        return self._img_model_thumb.get(model_id)
+        """First thumbnail of *model_id* for the hover popup, loaded on first hover.
 
-    def _load_model_thumbs(self, model_ids: set[int]) -> dict[int, Optional[bytes]]:
-        from app.database.db import session_scope
-        from app.database.models import Image
-        from app.utils.thumbnailer import get_thumbnail_bytes
-
-        result: dict[int, Optional[bytes]] = {}
-        if not model_ids:
-            return result
+        One indexed lookup and one LMDB read per model, cached.  Loading every
+        result's thumbnail up front froze the window on large result sets.
+        """
+        if model_id in self._img_model_thumb:
+            return self._img_model_thumb[model_id]
+        data: Optional[bytes] = None
         try:
+            from app.database.db import session_scope
+            from app.database.models import Image
+            from app.utils.thumbnailer import get_thumbnail_bytes
             with session_scope() as session:
-                rows = (
-                    session.query(Image.model_id, Image.id)
-                    .filter(
-                        Image.model_id.in_(list(model_ids)),
-                        Image.thumbnail_path.isnot(None),
-                    )
-                    .all()
-                )
-            first_img: dict[int, int] = {}
-            for model_id, img_id in rows:
-                if model_id not in first_img:
-                    first_img[model_id] = img_id
-            for model_id, img_id in first_img.items():
-                result[model_id] = get_thumbnail_bytes(img_id)
+                img_id = (session.query(Image.id)
+                          .filter(Image.model_id == model_id, Image.thumbnail_path.isnot(None))
+                          .order_by(Image.id).limit(1).scalar())
+            data = get_thumbnail_bytes(img_id) if img_id is not None else None
         except Exception as exc:
-            logger.warning(self.tr("Failed to load model thumbnails for popup: %s"), exc)
-        return result
+            logger.warning("Failed to load model thumbnail for popup: %s", exc)
+        self._img_model_thumb[model_id] = data
+        return data
 
     # ── Shared bottom buttons ─────────────────────────────────────────────────
 

@@ -34,6 +34,60 @@ def _noop(*_a) -> None:
     pass
 
 
+# ── Database compaction ──────────────────────────────────────────────────────
+
+def database_free_bytes(session) -> int:
+    """Bytes held by free pages in the database file (what VACUUM can reclaim).
+
+    Reads two header values, so it is cheap enough for the GUI thread.  The
+    write-ahead log is not counted; compaction also truncates it.
+    """
+    conn = session.connection()
+    free = conn.exec_driver_sql("PRAGMA freelist_count").scalar_one()
+    page = conn.exec_driver_sql("PRAGMA page_size").scalar_one()
+    return free * page
+
+
+def database_file_bytes(db_path: Path) -> int:
+    """On-disk size of the database: the main file plus its write-ahead log."""
+    total = 0
+    for p in (db_path, db_path.with_name(db_path.name + "-wal")):
+        try:
+            total += p.stat().st_size
+        except OSError:
+            pass
+    return total
+
+
+def compact_database(engine, db_path: Path) -> tuple[int, int, bool]:
+    """Rewrite the database without free pages (``VACUUM``) and shrink its WAL.
+
+    SQLite never shrinks its file on its own: deleted rows leave free pages
+    that are reused, but the file stays at its high-water mark.  ``VACUUM``
+    rebuilds it compactly.  In WAL mode the rebuilt pages go through the
+    write-ahead log, which ``VACUUM`` leaves as large as the database, so a
+    ``wal_checkpoint(TRUNCATE)`` follows to write them back and empty it.
+
+    Other connections may keep reading; a concurrent writer (a crawl) makes
+    ``VACUUM`` fail with "database is locked" after the busy timeout.
+
+    Returns ``(size_before, size_after, wal_truncated)`` in bytes.  The WAL
+    is not truncated while another connection is still reading from it; it
+    is then reset at a later checkpoint.
+    """
+    before = database_file_bytes(db_path)
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        # The app keeps temporary data in RAM (temp_store=MEMORY); VACUUM's
+        # temporary copy of the whole database belongs on disk instead.
+        conn.exec_driver_sql("PRAGMA temp_store=FILE")
+        try:
+            conn.exec_driver_sql("VACUUM")
+        finally:
+            conn.exec_driver_sql("PRAGMA temp_store=MEMORY")
+        busy, _log_pages, _done = conn.exec_driver_sql("PRAGMA wal_checkpoint(TRUNCATE)").one()
+    return before, database_file_bytes(db_path), not busy
+
+
 def _never() -> bool:
     return False
 

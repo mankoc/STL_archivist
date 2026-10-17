@@ -11,9 +11,27 @@ from typing import Optional
 
 import numpy as np
 
-# Lookup table: byte value → popcount.  Used by _hamming128_batch to count
-# differing bits in 128-bit dHash fingerprints without a Python-level loop.
+# Lookup table: byte value → popcount, for NumPy < 2.0 (no np.bitwise_count).
 _BYTE_POPCNT = np.array([bin(i).count('1') for i in range(256)], dtype=np.int32)
+
+
+def popcount64(x: "np.ndarray") -> "np.ndarray":
+    """Set bits per element of a uint64 array, as uint8.
+
+    ``np.bitwise_count`` (NumPy >= 2.0) is a single SIMD ufunc; the fallback
+    views each word as 8 bytes and sums a lookup table, several times slower.
+    """
+    if hasattr(np, "bitwise_count"):
+        return np.bitwise_count(x)
+    x = np.ascontiguousarray(x)
+    return _BYTE_POPCNT[x.view(np.uint8).reshape(x.shape + (8,))].sum(axis=-1).astype(np.uint8)
+
+
+def split_dhashes(hex_hashes) -> "tuple[np.ndarray, np.ndarray]":
+    """Turn 32-char hex dHashes into ``(hi, lo)`` uint64 arrays, without Python ints."""
+    raw = bytes.fromhex("".join(hex_hashes))
+    words = np.frombuffer(raw, dtype=">u8").reshape(-1, 2)
+    return words[:, 0].astype(np.uint64), words[:, 1].astype(np.uint64)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -111,10 +129,6 @@ def _hamming128_batch(
     -------
     (Nq, Ndb) int32 — pairwise Hamming distances
     """
-    Nq, Ndb = len(lo_q), len(lo_db)
-    xor_lo = lo_q[:, None] ^ lo_db[None, :]   # (Nq, Ndb) uint64
-    xor_hi = hi_q[:, None] ^ hi_db[None, :]
-    # View each uint64 as 8 bytes, look up per-byte popcount, then sum.
-    lo_bits = _BYTE_POPCNT[xor_lo.view(np.uint8).reshape(Nq, Ndb, 8)].sum(axis=2)
-    hi_bits = _BYTE_POPCNT[xor_hi.view(np.uint8).reshape(Nq, Ndb, 8)].sum(axis=2)
-    return (lo_bits + hi_bits).astype(np.int32)
+    lo_bits = popcount64(lo_q[:, None] ^ lo_db[None, :])   # (Nq, Ndb)
+    hi_bits = popcount64(hi_q[:, None] ^ hi_db[None, :])
+    return lo_bits.astype(np.int32) + hi_bits

@@ -119,9 +119,16 @@ Qt-free business logic, testable without a `QApplication`:
 - **`image_similarity.py`** — CLIP searches: `find_similar_models` (KNN over the
   `MAX_RESULT_IMAGES` = 1024 nearest images, best image per model, returns `(results, capped)`)
   and `load_model_vectors` for the all-pairs duplicate scan.
+- **`image_duplicates.py`** — Find Duplicate Archives → Images, both methods: collapse identical
+  items, tiled all-pairs scan (`near_dhash_pairs` / `near_embedding_pairs`), skip items shared
+  by more than N models (`shared_items`), aggregate to model pairs (`model_pairs`). Pigeonhole /
+  multi-index Hamming search was tried and rejected: real dHashes cluster, and one segment
+  bucket blew up to 30+ GB of candidates. `tests/test_image_duplicates.py` checks the
+  aggregation against a slow reference.
 - **`model_summary.py`** — `model_summary(session, model_id)`: one-statement display row
   (names, tags, image count) for detail panels; cheap enough for the GUI thread.
-- **`maintenance.py`** — Database Maintenance operations (verify, duplicate entries, prune images).
+- **`maintenance.py`** — Database Maintenance operations (verify, duplicate entries, prune images,
+  `compact_database` = `VACUUM` + `wal_checkpoint(TRUNCATE)`, run with `temp_store=FILE`).
 - **`file_deletion.py`** — archive deletion / trash.
 - **`moves.py`** — moved archives: `relocate`, `merge_into_missing`, `delete_model`,
   `index_by_hash`, `archive_folder_for`. Always set `archive_folder` through it (forward

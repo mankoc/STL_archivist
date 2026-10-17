@@ -58,6 +58,7 @@ def init_db(db_path: str = "stlLibrary.db") -> None:
         vectors.on_connect(conn)
 
     _migrate_schema(_engine)
+    _fix_dhash_affinity(_engine)
     Base.metadata.create_all(_engine)
     vectors.ensure_schema(_engine)
     _ensure_columns(_engine)
@@ -143,6 +144,37 @@ def _migrate_schema(engine) -> None:
                 ))
         finally:
             conn.execute(text("PRAGMA foreign_keys=ON"))
+
+
+def _fix_dhash_affinity(engine) -> None:
+    """Give ``images.dhash`` TEXT affinity on databases that declared it INTEGER.
+
+    Early schemas stored a 64-bit dHash as an integer.  The column kept that
+    declaration when the ORM switched to 32-char hex strings, so SQLite
+    converted every hash made only of decimal digits (``"0000…"`` from a flat
+    image, for one) into an integer or a lossy float.  Rebuild the column as
+    VARCHAR, keep the intact text values, and leave the damaged ones NULL so
+    Database Maintenance → Recompute Image Hashes (or the next crawl) refills
+    them.  A no-op once the column is text.
+    """
+    with engine.begin() as conn:
+        cols = {r[1]: (r[2] or "").upper()
+                for r in conn.exec_driver_sql("PRAGMA table_info(images)")}
+        decl = cols.get("dhash")
+        # SQLite gives TEXT affinity to any declared type containing these.
+        if decl is None or any(k in decl for k in ("CHAR", "CLOB", "TEXT")):
+            return
+        damaged = conn.exec_driver_sql(
+            "SELECT count(*) FROM images WHERE typeof(dhash) IN ('integer', 'real')"
+        ).scalar_one()
+        conn.exec_driver_sql("DROP INDEX IF EXISTS ix_images_dhash")   # recreated later
+        conn.exec_driver_sql("ALTER TABLE images RENAME COLUMN dhash TO dhash_old")
+        conn.exec_driver_sql("ALTER TABLE images ADD COLUMN dhash VARCHAR(32)")
+        conn.exec_driver_sql(
+            "UPDATE images SET dhash = dhash_old WHERE typeof(dhash_old) = 'text'")
+        conn.exec_driver_sql("ALTER TABLE images DROP COLUMN dhash_old")
+    logger.info("images.dhash changed from %s to VARCHAR(32); %d damaged hash(es) "
+                "cleared for recomputation", decl, damaged)
 
 
 def _migrate_scales(engine) -> None:
@@ -373,6 +405,24 @@ def _attach_query_profiler(engine) -> None:
         else:
             logger.info("SQL %7.1f ms  %s", elapsed_ms, snippet)
         logger.debug("SQL full statement:\n%s", statement)
+
+
+def get_engine():
+    """Return the engine created by :func:`init_db`.
+
+    Raises:
+        RuntimeError: If ``init_db()`` has not been called yet.
+    """
+    if _engine is None:
+        raise RuntimeError("Database not initialised. Call init_db() first.")
+    return _engine
+
+
+def database_path():
+    """Path of the open database file, or ``None`` for an in-memory database."""
+    from pathlib import Path
+    name = get_engine().url.database
+    return None if not name or name == ":memory:" else Path(name)
 
 
 def get_session() -> Session:
