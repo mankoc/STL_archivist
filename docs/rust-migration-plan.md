@@ -25,7 +25,10 @@ and its FastAPI server becomes a Rust (axum) server.
 | Staging | Incremental: Rust core first, called from the PyQt app through **PyO3**; then server; then web client; desktop shell last |
 | Client | **React + TypeScript** web client, served by the server; TypeScript API types generated from the Rust API (OpenAPI via `utoipa`) |
 | Desktop app | Thin native shell (Tauri) around the web client: server picker, local-server launcher, native touches. No Tauri commands: all data goes through the HTTP API |
-| Python app | Stays the shipping product until the web client reaches parity |
+| Python app | Stays the shipping product until the web client reaches parity, then is **removed at once** (no period of shipping both; decided 2026-10-18) |
+| Phase 4 | **As planned: the PyQt app becomes a shell over the Rust core.** Schema ownership and all database access move to Rust, and the PyQt dialogs, workers and crawler are rewired onto `stl_native` (decided 2026-10-18, over the cheaper option of building the core beside the PyQt app) |
+| Accounts | **User accounts**, Jellyfin-style: per-user settings, read-only users, login UI and user administration (decided 2026-10-18) |
+| Web UI library | **Mantine**, with TanStack Table + Virtual (decided 2026-10-18) |
 | dHash | New Rust implementation with a new hash format; all hashes recomputed once (rule 2) |
 | CLIP embeddings | Recomputed once with the Rust preprocessing; no bit-exact match required |
 | PDF thumbnails | `pdfium-render` |
@@ -362,11 +365,7 @@ Phase 5 and the new UI and native distribution with Phases 6–7.
 
 ## Open decisions
 
-1. **Python app end of life:** keep shipping both builds for a while after the web client
-   reaches parity, or switch at once?
-2. **Accounts:** single admin token, or real user accounts (per-user settings, read-only
-   users) like Jellyfin?
-3. **Component library** for the web client: Mantine or MUI.
+None at the moment; the three open questions were decided on 2026-10-18 (see the table above).
 
 ## Verification per phase
 
