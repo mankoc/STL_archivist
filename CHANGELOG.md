@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Rust migration, Phase 4 begins: crawler rules, path patterns and Soundex run natively.** The presupport classification, archive warnings, scale detection, folder path patterns and Soundex now go through the native core, with the Python versions as the fallback. On the reference library they gave identical results for 484,744 path parses, the member lists of 2,998 archives and 53,841 names. Path parsing is 2.5x faster.
+  - A custom list of presupport filename patterns (Configuration → Crawler warnings) is always applied by Python. The two regex engines read some syntax differently without reporting an error, so a native run could flag different archives. The built-in patterns run natively.
+  - Plan: Phase 4 now runs in steps 4a–4h, and the open decisions are settled. The PyQt app becomes a shell over the Rust core; the server gets user accounts; the web client uses Mantine; and the PyQt app is removed as soon as the web client reaches parity (`docs/rust-migration-plan.md`).
+  - Tests: a test that switched the native core off could leave it on for the following tests, so part of an `STL_NATIVE=0` run quietly used Rust. A shared fixture now resets it after every test.
+
 - **Rust migration, Phase 3: the thumbnail store runs on the native core.** With the native core installed, `thumbnails.lmdb` is opened through Rust (heed) instead of py-lmdb. The on-disk format is unchanged and byte-identical: same keys, same shared blobs for identical thumbnails, same collision handling. A library still opens with either build, and switching back and forth is safe. Without the native core, py-lmdb is used as before.
   - All store access goes through one backend chosen when the store opens. LMDB forbids opening the same store twice in one process, so the two implementations never touch it together.
   - Opening the store no longer writes to it.

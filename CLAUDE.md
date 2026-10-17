@@ -62,8 +62,9 @@ Python owns the schema until Phase 4).
   It runs Cargo from `rust/` so `rust/.cargo/config.toml` (x86-64-v2, hardware popcount)
   applies; a plain `maturin develop` from the project root silently skips it.
 - Native functions today: `archive_fingerprint`, `archive_members`, `archive_hash_file`,
-  `read_archive_members`, `make_thumbnail`, `dhash`, `dhash_many`, `hamming_pairs`,
-  `cosine_pairs`, `levenshtein_pairs`. Long ones take `progress` / `should_stop` and raise
+  `read_archive_members`, `make_thumbnail`, `dhash`, `dhash_many`, `ThumbStore`,
+  `detect_presupport`, `detect_warnings`, `explain_warnings`, `detect_scale`, `parse_path`,
+  `render_path_pattern`, `soundex`, `hamming_pairs`, `cosine_pairs`, `levenshtein_pairs`. Long ones take `progress` / `should_stop` and raise
   `stl_native.Stopped`; the binding's `run_job` polls them from the calling thread, so
   Python callbacks never run on Rust threads. Arrays cross as NumPy buffers in and bytes out
   (`np.frombuffer`). Tests for code with a native path should run in both modes (see the
@@ -74,6 +75,12 @@ Python owns the schema until Phase 4).
   falls back to the Python reader for that archive. `zip.rs` is a port of CPython's `zipfile`
   catalog and `ZipFile.open` checks. Do not use `sevenz-rust2`'s `BlockDecoder` on a block
   with an empty entry inside it: it silently drops that block's last files.
+- Crawler rules (`rules.py`) use the native port only with the built-in presupport
+  patterns; a custom pattern list always runs in Python, because fancy-regex and `re` read
+  some syntax differently without raising. Keep `_native_patterns_ok` when touching them.
+- Tests that toggle `STL_NATIVE` need no cleanup of their own: the autouse
+  `native_follows_environment` fixture in `tests/conftest.py` reloads the native core after
+  every test, once monkeypatch has restored the environment.
 - Thumbnails: `thumbnailer.make_thumbnail` tries the native `make_thumbnail`
   (`rust/stl-core/src/thumbnail.rs`) and falls back to Pillow (`_make_thumbnail_py`) on
   `ValueError` (AVIF, CMYK JPEG, corrupt data). Output sizes follow `Image.thumbnail`.
