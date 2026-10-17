@@ -18,3 +18,4 @@ sqlite-vec>=0.1.6  # vec0 table + KNN search for CLIP image embeddings (metadata
 # Dev / test
 pytest>=8.0
 pytest-cov>=5.0
+maturin>=1.15    # builds the optional Rust core: python tools/build_native.py

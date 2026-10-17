@@ -92,9 +92,17 @@ source .venv/bin/activate      # Linux / macOS
 # 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. Run the application
+# 4. Optional: build the native (Rust) core
+python tools/build_native.py
+
+# 5. Run the application
 python main.py
 ```
+
+The native core (`rust/`, installed as the `stl_native` module) is optional: without it the app
+runs its Python implementations. Building it needs [Rust](https://rustup.rs) and, on Windows,
+the Visual Studio C++ Build Tools. The codebase is moving to Rust step by step; see
+[docs/rust-migration-plan.md](docs/rust-migration-plan.md).
 
 > **Note for RAR support:** `rarfile` requires the `unrar` binary to be installed on your system.
 > - Linux: `sudo apt install unrar`
@@ -110,6 +118,7 @@ These optional environment variables take precedence over the values set in Conf
 | `STL_DATA_DIR` | Data directory (database, thumbnails, logs, `settings.json`) |
 | `STL_UNRAR_PATH` | Path to the `unrar` executable |
 | `STL_SQL_PROFILING` | `1` / `0` forces SQL statement timing on or off |
+| `STL_NATIVE` | `0` turns the native (Rust) core off and uses the Python implementations; useful when reporting a problem |
 
 ## Usage
 
@@ -255,7 +264,11 @@ stl_database/
 │       ├── string_utils.py  # Levenshtein distance, Soundex
 │       ├── i18n.py          # Translation loader (.ts parser + QTranslator)
 │       └── logger.py        # Rotating gzip-compressed file logger
-└── tests/
+├── rust/                    # Rust workspace (migration in progress)
+│   ├── stl-core/            # Core library: no UI, no Python
+│   └── stl-py/              # PyO3 bindings, installed as the `stl_native` module
+├── tools/build_native.py    # Builds rust/ and installs `stl_native` into the active environment
+└── tests/                   # pytest suite; tests/golden/ compares Rust and Python outputs
 ```
 
 ## Localization

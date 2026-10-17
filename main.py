@@ -153,8 +153,9 @@ def main() -> None:
     setup_excepthook()
 
     import logging
+    from app import native
     logging.getLogger(__name__).info(
-        "stlLibrary %s starting up", __version__
+        "stlLibrary %s starting up (%s)", __version__, native.status()
     )
 
     _update_splash(splash, "Opening database…")

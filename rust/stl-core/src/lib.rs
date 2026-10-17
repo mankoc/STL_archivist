@@ -1,0 +1,11 @@
+//! stlLibrary core library.
+//!
+//! Everything the application does without a user interface: storage, archive
+//! reading, hashing, the crawler and the services. It has no Python, UI or HTTP
+//! dependency, so the same code backs the PyO3 module used by the current PyQt
+//! app (`stl-py`) and, later, the server. See `docs/rust-migration-plan.md`.
+
+pub mod fingerprint;
+
+/// Version of the core library.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");

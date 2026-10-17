@@ -12,6 +12,10 @@ thumbnails/
 dist/
 build/
 .venv/
+# Rust build output (rust/ workspace)
+rust/target/
+*.pyd
+*.pdb
 venv/
 .env
 *.egg-info/

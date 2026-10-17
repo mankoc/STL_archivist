@@ -52,6 +52,8 @@ def _get_version() -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build stlLibrary distribution")
     parser.add_argument("--version", default=None, help="Override version string")
+    parser.add_argument("--no-native", action="store_true",
+                        help="Skip building the Rust core (the exe then uses the Python paths)")
     args = parser.parse_args()
 
     version = args.version or _get_version()
@@ -66,7 +68,15 @@ def main() -> None:
         shutil.rmtree(build_dir)
     dist_dir.mkdir(exist_ok=True)
 
-    # 2. Build with PyInstaller
+    # 2. Build the optional Rust core so PyInstaller bundles it (stl_native).
+    if not args.no_native:
+        print("[build] building native core…")
+        from tools.build_native import build as build_native
+        if build_native(release=True) != 0:
+            print("WARNING: native core build failed — the exe will use the Python "
+                  "implementations", file=sys.stderr)
+
+    # 3. Build with PyInstaller
     print("[build] running PyInstaller…")
     _run([sys.executable, "-m", "PyInstaller", "stl_database.spec", "--noconfirm"])
 
@@ -75,14 +85,14 @@ def main() -> None:
         print("ERROR: PyInstaller did not produce dist/stlLibrary.exe", file=sys.stderr)
         sys.exit(1)
 
-    # 3. Rename exe to versioned name
+    # 4. Rename exe to versioned name
     versioned_exe = dist_dir / f"stlLibrary-{version}.exe"
     bare_exe.rename(versioned_exe)
 
     exe_mb = versioned_exe.stat().st_size / 1_048_576
     print(f"[build] exe: {versioned_exe.name}  ({exe_mb:.1f} MB)")
 
-    # 4. Create zip
+    # 5. Create zip
     zip_path = dist_dir / f"stlLibrary-{version}.zip"
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.write(versioned_exe, versioned_exe.name)
