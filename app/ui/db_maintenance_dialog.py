@@ -257,7 +257,7 @@ class DHashWorker(QThread):
         from app.database.db import session_scope
         from app.database.models import Image as DBImage
         from app.utils.thumbnailer import get_thumbnail_bytes
-        from app.utils.image_hash import compute_dhash_from_jpeg, format_dhash
+        from app.utils.image_hash import DHASH_HEX_LEN, compute_dhash_from_jpeg, format_dhash
 
         self._stop_requested = False
         computed = 0
@@ -266,8 +266,12 @@ class DHashWorker(QThread):
         with session_scope() as session:
             query = session.query(DBImage.id, DBImage.thumbnail)
             if not self._recompute_all:
-                # Only fill in images that have no hash yet.
-                query = query.filter(DBImage.dhash.is_(None))
+                # Only images without a current hash: none yet, or one in an older
+                # format (64-bit, 16 hex chars) that comparisons skip.
+                from sqlalchemy import func
+                query = query.filter(
+                    DBImage.dhash.is_(None) | (func.length(DBImage.dhash) != DHASH_HEX_LEN)
+                )
             rows = query.all()
 
         total = len(rows)
@@ -782,6 +786,57 @@ class CompactWorker(QThread):
         self.compact_finished.emit(before, after)
 
 
+class CompactDatabaseWorker(QThread):
+    """Rewrite the SQLite database without free pages (VACUUM) to reclaim disk space.
+
+    Signals:
+        progress(current, total): ``(0, 0)`` while running (busy bar), ``(1, 1)`` when done.
+        log(message): Human-readable status line for the UI log panel.
+        db_compact_finished(size_before, size_after): Bytes on disk (both -1 on error).
+    """
+
+    progress = pyqtSignal(int, int)
+    log      = pyqtSignal(str)
+    db_compact_finished = pyqtSignal(object, object)   # ints may exceed 32 bits
+
+    def run(self) -> None:
+        import time
+        from app.database.db import database_path, get_engine
+        from app.services.maintenance import compact_database
+
+        db_path = database_path()
+        if db_path is None:
+            self.log.emit("The database is in memory; there is nothing to compact.")
+            self.db_compact_finished.emit(-1, -1)
+            return
+
+        self.log.emit("Compacting database — this may take a minute on a large library…")
+        self.progress.emit(0, 0)   # VACUUM reports no progress: show a busy bar
+        t0 = time.perf_counter()
+        try:
+            before, after, wal_truncated = compact_database(get_engine(), db_path)
+        except Exception as exc:
+            msg = str(exc)
+            if "locked" in msg:
+                msg += " — another job is writing to the database; let it finish and retry."
+            self.log.emit(f"ERROR compacting database: {msg}")
+            logger.error("Database compaction failed: %s", exc, exc_info=True)
+            self.progress.emit(0, 1)
+            self.db_compact_finished.emit(-1, -1)
+            return
+
+        self.progress.emit(1, 1)
+        self.log.emit(
+            f"Done in {time.perf_counter() - t0:.0f} s — database went from "
+            f"{before / 1024**2:.1f} MB to {after / 1024**2:.1f} MB "
+            f"({(before - after) / 1024**2:.1f} MB reclaimed)."
+        )
+        if not wal_truncated:
+            self.log.emit("The write-ahead log is still in use by another view; it will "
+                          "shrink at a later checkpoint.")
+        self.db_compact_finished.emit(before, after)
+
+
 class PruneImagesWorker(QThread):
     """Reduce the number of images stored per model down to a target maximum.
 
@@ -942,6 +997,7 @@ class DbMaintenanceDialog(QDialog):
         self._moved_db_worker:  MovedInDbWorker              | None = None
         self._dup_entry_worker: FindDuplicateEntriesWorker   | None = None
         self._compact_worker:   CompactWorker                | None = None
+        self._db_compact_worker: CompactDatabaseWorker       | None = None
         self._prune_worker:     PruneImagesWorker            | None = None
         self._img_warn_worker:  ImageWarningWorker           | None = None
         self._presup_worker:    PresupportWarningWorker      | None = None
@@ -1095,6 +1151,17 @@ class DbMaintenanceDialog(QDialog):
         self._compact_btn.clicked.connect(self._start_compact)
         _add_btn(self._compact_btn)
 
+        self._db_compact_btn = QPushButton(
+            style.standardIcon(SP.SP_DriveHDIcon), self.tr("Compact Database")
+        )
+        self._db_compact_btn.setToolTip(
+            self.tr("Reclaim disk space in the database file by rewriting it without the "
+            "free space left by deleted models, images and embeddings (SQLite VACUUM). "
+            "SQLite never shrinks the file on its own. Avoid crawling while it runs.")
+        )
+        self._db_compact_btn.clicked.connect(self._start_db_compact)
+        _add_btn(self._db_compact_btn)
+
         self._prune_images_btn = QPushButton(
             style.standardIcon(SP.SP_TrashIcon), self.tr("Prune Images per Model…")
         )
@@ -1220,6 +1287,7 @@ class DbMaintenanceDialog(QDialog):
         self._recompute_dhash_btn.setEnabled(not busy)
         self._embed_btn.setEnabled(not busy and self._embed_available)
         self._compact_btn.setEnabled(not busy)
+        self._db_compact_btn.setEnabled(not busy)
         self._prune_images_btn.setEnabled(not busy)
         self._check_images_btn.setEnabled(not busy)
         self._check_presup_btn.setEnabled(not busy)
@@ -1243,6 +1311,7 @@ class DbMaintenanceDialog(QDialog):
         self._recompute_dhash_btn.setEnabled(True)
         self._embed_btn.setEnabled(self._embed_available)
         self._compact_btn.setEnabled(True)
+        self._db_compact_btn.setEnabled(True)
         self._prune_images_btn.setEnabled(True)
         self._check_images_btn.setEnabled(True)
         self._check_presup_btn.setEnabled(True)
@@ -1413,6 +1482,46 @@ class DbMaintenanceDialog(QDialog):
         self._compact_worker.start()
 
     def _on_compact_finished(self, size_before: int, size_after: int) -> None:
+        self._set_idle()
+        from app.utils.sound import play_notification
+        play_notification("maintenance")
+
+    # ------------------------------------------------------------------
+    def _start_db_compact(self) -> None:
+        from app.database.db import database_path, session_scope
+        from app.services.maintenance import database_file_bytes, database_free_bytes
+
+        db_path = database_path()
+        if db_path is None:
+            return
+        with session_scope() as session:          # two header reads: cheap
+            free = database_free_bytes(session)
+        size = database_file_bytes(db_path)
+        reply = QMessageBox.question(
+            self, self.tr("Compact Database"),
+            self.tr("Rewrite the database to reclaim unused space?\n\n"
+                    "Database on disk: {size} MB, of which about {free} MB is free space.\n\n"
+                    "This can take a minute on a large library and needs free disk space "
+                    "about the size of the database. Don't crawl or edit while it runs.")
+                .replace("{size}", f"{size / 1024**2:.0f}")
+                .replace("{free}", f"{free / 1024**2:.0f}"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self._log.clear()
+        self._set_busy(True)
+        self._stop_btn.setEnabled(False)          # VACUUM cannot be interrupted
+
+        self._own_worker("_db_compact_worker", CompactDatabaseWorker())
+        self._db_compact_worker.log.connect(self._on_log)
+        self._db_compact_worker.progress.connect(self._on_progress)
+        self._db_compact_worker.db_compact_finished.connect(self._on_db_compact_finished)
+        self._db_compact_worker.start()
+
+    def _on_db_compact_finished(self, _size_before, _size_after) -> None:
         self._set_idle()
         from app.utils.sound import play_notification
         play_notification("maintenance")
@@ -1829,6 +1938,7 @@ class DbMaintenanceDialog(QDialog):
         self._recompute_dhash_btn.setEnabled(True)
         self._embed_btn.setEnabled(self._embed_available)
         self._compact_btn.setEnabled(True)
+        self._db_compact_btn.setEnabled(True)
         self._prune_images_btn.setEnabled(True)
         self._check_images_btn.setEnabled(True)
         self._check_presup_btn.setEnabled(True)
@@ -1843,9 +1953,9 @@ class DbMaintenanceDialog(QDialog):
         self._log.appendPlainText(msg)
 
     def _on_progress(self, current: int, total: int) -> None:
-        self._progress.setMaximum(total)
+        self._progress.setMaximum(total)          # 0 = busy animation
         self._progress.setValue(current)
-        self._progress.setFormat(f"{current} / {total}")
+        self._progress.setFormat(f"{current} / {total}" if total else "")
 
     # ------------------------------------------------------------------
     def closeEvent(self, event) -> None:
@@ -1863,4 +1973,7 @@ class DbMaintenanceDialog(QDialog):
         # Compaction must not be interrupted mid-swap — wait for it to finish.
         if self._compact_worker and self._compact_worker.isRunning():
             self._compact_worker.wait(60000)
+        # VACUUM cannot be interrupted and the thread is parented to this dialog.
+        if self._db_compact_worker and self._db_compact_worker.isRunning():
+            self._db_compact_worker.wait()
         super().closeEvent(event)

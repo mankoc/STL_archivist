@@ -1091,7 +1091,17 @@ render at different sizes is caught.</p>
           two thumbnail hashes.  0 = bit-for-bit identical pixels after downscaling;
           &le;6 = very similar (different resolution or minor JPEG artefacts);
           &le;16 = noticeably similar; higher values increase recall but also false positives.</td></tr>
+  <tr><td>Skip images shared by more than</td>
+      <td>Default 10 archives, for both methods. An image found in more archives than this,
+          directly or through a near-identical copy, is ignored. Studios often ship the same
+          banner, logo or promo render with every release; such an image says nothing about
+          whether two archives are copies, and a handful of them can otherwise produce millions
+          of pairs. The status line reports how many were skipped.</td></tr>
 </table>
+<p>Every pair of images is compared (there is no early stop), with identical images
+collapsed first: a library of 363,000 images holds about 190,000 distinct ones. On that
+library the perceptual hash takes about 15 seconds and the AI embedding about a minute.
+At most the 100,000 best pairs are listed.</p>
 <div class="note">After upgrading, run <b>Database Maintenance &rarr; Recompute Image Hashes</b>
 once so existing thumbnails are re-hashed with the current 128-bit algorithm; until then
 older 64-bit hashes are recomputed on the fly during a search.</div>
@@ -1252,6 +1262,14 @@ archives&rsquo; first thumbnails, making it easy to judge whether the match is g
       <td>Rewrites the LMDB thumbnail store to reclaim disk space left behind by deleted
           thumbnails. LMDB reuses freed space but never shrinks the file on its own, so run
           this after removing many models or images. The store is briefly closed and rebuilt.</td></tr>
+  <tr><td><b>Compact Database</b></td>
+      <td>Rewrites the SQLite database file without the free space left by deleted models,
+          images and AI embeddings (<code>VACUUM</code>), then empties the write-ahead log.
+          SQLite reuses freed space but never shrinks the file on its own. The confirmation
+          shows the current size and how much is free. It cannot be stopped once started,
+          needs free disk space about the size of the database, and takes around 10 seconds
+          for a 1 GB database. Don&rsquo;t crawl or edit while it runs: a concurrent write makes it
+          fail with &ldquo;database is locked&rdquo;, and nothing is changed.</td></tr>
   <tr><td><b>Prune Images per Model&hellip;</b></td>
       <td>Reduces the number of stored images per model to a maximum you choose (e.g. keep
           3 of 10). The oldest images are kept; the extras and their thumbnails are deleted
