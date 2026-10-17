@@ -17,7 +17,9 @@ jpeg-decoder = "0.3.2"
 jpeg-encoder = { version = "0.7.1", features = ["simd"] }
 rayon = "1.12.0"
 regex = "1.13.1"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
 sevenz-rust2 = "0.24.0"
+sqlite-vec = "=0.1.9"
 unicode-normalization = "0.1.26"
 xxhash-rust = { version = "0.8.19", features = ["xxh3", "xxh64"] }
 

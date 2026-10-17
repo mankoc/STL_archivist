@@ -339,6 +339,35 @@ the Python implementation it replaces, as in earlier phases.
   Python.
 - Not ported: `apply_extracted_to_model` (needs the database; 4d).
 
+**4b: done 2026-10-18.** `stl-core/src/storage` (rusqlite 0.40, bundled SQLite; sqlite-vec
+0.1.9 registered as an auto-extension, the version Python uses). **The schema is owned by
+the native core from here (rule 4):** `db.init_db` calls `stl_native.migrate_database` for
+file databases. The Python steps stay as the fallback, and in-memory test databases use
+them.
+
+- `storage::migrate` repeats `init_db`'s seven steps in order, each in its own transaction:
+  renames, dhash affinity, `create_all`, vec0 table and legacy embedding move, missing
+  columns plus extra indexes plus `ANALYZE`, `scale_id` → `model_scales`, and `models_view`.
+- The DDL is not retyped. `tools/gen_schema.py` compiles it from `models.py` with
+  SQLAlchemy's SQLite dialect into `storage/schema_sql.rs`, together with `db.ENSURE_INDEXES`,
+  `db.MODELS_VIEW_SQL` and the vec0 DDL, so `sqlite_master` holds byte-identical SQL.
+  `.gitattributes` pins that file to LF, because CRLF would change the stored SQL.
+  `tests/golden/test_schema_golden.py` fails if the file is stale. **After editing
+  `models.py`, run `python tools/gen_schema.py`.**
+- Python passes the embedding model ID and dimension, and whether its own sqlite3 can load
+  sqlite-vec. Without that, the vector step is skipped exactly as in Python.
+- The bundled SQLite has STAT4, so its `ANALYZE` also writes `sqlite_stat4`. The migration
+  drops that table to keep the file identical to a Python-migrated one.
+- Gate: five generated databases (fresh, the old category/author schema, an INTEGER dhash
+  column, legacy embeddings with the right and with a wrong model) and a copy of the
+  reference database. Migrated by each side, they agree on `sqlite_master`, every column
+  declaration and every row (355,643 vectors, 882,264 STL file rows).
+- **Two SQLite copies in one process.** rusqlite's SQLite and Python's are separate
+  libraries. On POSIX, both holding one database file in one process can corrupt it
+  (closing a file in one drops the other's locks). `migrate` closes before SQLAlchemy
+  connects, so 4b is safe everywhere. From 4c, native database access while SQLAlchemy is
+  open is limited to Windows until 4h removes SQLAlchemy.
+
 ### Phase 5: Server (medium)
 
 `stl-server` on axum, the product's centre from here on:

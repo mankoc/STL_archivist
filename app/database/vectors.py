@@ -57,6 +57,8 @@ _CREATE_TABLE = (
     f"embedding float[{EMBED_DIM}] distance_metric=cosine)"
 )
 
+_CREATE_INFO = f"CREATE TABLE IF NOT EXISTS {_INFO} (model TEXT NOT NULL, dim INTEGER NOT NULL)"
+
 _CREATE_TRIGGER = (
     f"CREATE TEMP TRIGGER IF NOT EXISTS {TABLE}_image_deleted "
     f"AFTER DELETE ON main.images BEGIN "
@@ -90,6 +92,27 @@ def on_connect(dbapi_conn) -> None:
         return
     _available = True
     _create_trigger(dbapi_conn)
+
+
+def extension_loadable() -> bool:
+    """True if sqlite-vec loads into this Python's sqlite3 (probed on a scratch connection).
+
+    The native schema migration runs before SQLAlchemy connects, so it cannot
+    wait for :func:`on_connect` to find out; it needs the answer to leave legacy
+    embeddings alone, as :func:`ensure_schema` does, when the app could not use
+    ``image_vec`` anyway.
+    """
+    try:
+        import sqlite_vec
+        con = sqlite3.connect(":memory:")
+        try:
+            con.enable_load_extension(True)
+            sqlite_vec.load(con)
+            return True
+        finally:
+            con.close()
+    except Exception:
+        return False
 
 
 def _create_trigger(dbapi_conn) -> None:
@@ -132,7 +155,7 @@ def ensure_schema(engine) -> None:
     if not _available:
         return
     with engine.begin() as conn:
-        conn.exec_driver_sql(f"CREATE TABLE IF NOT EXISTS {_INFO} (model TEXT NOT NULL, dim INTEGER NOT NULL)")
+        conn.exec_driver_sql(_CREATE_INFO)
         stored = conn.exec_driver_sql(f"SELECT model, dim FROM {_INFO}").first()
         exists = conn.exec_driver_sql(
             "SELECT 1 FROM sqlite_master WHERE name = ?", (TABLE,)).first()
