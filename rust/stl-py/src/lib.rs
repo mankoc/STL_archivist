@@ -16,7 +16,7 @@ use pyo3::types::{PyBytes, PyDict};
 use stl_core::control::{Control, Stopped as CoreStopped};
 use stl_core::fingerprint::{self, Member};
 use stl_core::archive::{self, ArchiveError};
-use stl_core::{embedding, hamming, strings, thumbnail, thumbstore};
+use stl_core::{embedding, hamming, path_pattern, rules, strings, thumbnail, thumbstore};
 
 create_exception!(
     stl_native,
@@ -184,6 +184,93 @@ fn dhash(py: Python<'_>, data: &[u8]) -> PyResult<u128> {
 fn dhash_many(py: Python<'_>, items: Vec<Bound<'_, PyBytes>>) -> Vec<Option<u128>> {
     let slices: Vec<&[u8]> = items.iter().map(|b| b.as_bytes()).collect();
     py.detach(|| stl_core::dhash::dhash_many(&slices))
+}
+
+fn rules_err(e: rules::RulesError) -> PyErr {
+    PyValueError::new_err(e.to_string())
+}
+
+fn checks(presupported: bool, no_images: bool, nested_archive: bool, no_printable: bool) -> rules::Checks {
+    rules::Checks { presupported, no_images, nested_archive, no_printable }
+}
+
+/// `app.crawler.rules.detect_presupport`.
+#[pyfunction]
+fn detect_presupport(py: Python<'_>, names: Vec<String>) -> &'static str {
+    py.detach(|| rules::detect_presupport(&names))
+}
+
+/// `app.crawler.rules.detect_warnings`. Raises `ValueError` for a presupport
+/// pattern the native regex engine rejects (the caller then uses Python).
+#[pyfunction]
+#[pyo3(signature = (names, check_presupported=true, check_no_images=true, check_nested_archive=true,
+                    check_no_printable=true, presupport_patterns=None))]
+fn detect_warnings(
+    py: Python<'_>,
+    names: Vec<String>,
+    check_presupported: bool,
+    check_no_images: bool,
+    check_nested_archive: bool,
+    check_no_printable: bool,
+    presupport_patterns: Option<Vec<String>>,
+) -> PyResult<String> {
+    py.detach(|| {
+        let pats = rules::PresupportPatterns::new(presupport_patterns.as_deref())?;
+        rules::detect_warnings(
+            &names,
+            checks(check_presupported, check_no_images, check_nested_archive, check_no_printable),
+            &pats,
+        )
+    })
+    .map_err(rules_err)
+}
+
+/// `app.crawler.rules.explain_warnings`, as `[(warning, [members]), ...]`.
+#[pyfunction]
+#[pyo3(signature = (names, check_presupported=true, check_no_images=true, check_nested_archive=true,
+                    check_no_printable=true, presupport_patterns=None))]
+fn explain_warnings(
+    py: Python<'_>,
+    names: Vec<String>,
+    check_presupported: bool,
+    check_no_images: bool,
+    check_nested_archive: bool,
+    check_no_printable: bool,
+    presupport_patterns: Option<Vec<String>>,
+) -> PyResult<Vec<(&'static str, Vec<String>)>> {
+    py.detach(|| {
+        let pats = rules::PresupportPatterns::new(presupport_patterns.as_deref())?;
+        rules::explain_warnings(
+            &names,
+            checks(check_presupported, check_no_images, check_nested_archive, check_no_printable),
+            &pats,
+        )
+    })
+    .map_err(rules_err)
+}
+
+/// `app.crawler.rules.detect_scale`.
+#[pyfunction]
+fn detect_scale(py: Python<'_>, names: Vec<String>) -> Vec<String> {
+    py.detach(|| rules::detect_scale(&names))
+}
+
+/// `app.utils.path_pattern.parse_path`: `{field: value}`.
+#[pyfunction]
+fn parse_path(py: Python<'_>, pattern: String, path: String) -> Vec<(String, String)> {
+    py.detach(|| path_pattern::parse_path(&pattern, &path))
+}
+
+/// The token substitution of `app.utils.path_pattern.render_path_pattern`.
+#[pyfunction]
+fn render_path_pattern(pattern: String, values: std::collections::HashMap<String, String>) -> String {
+    path_pattern::render(&pattern, &values)
+}
+
+/// `app.utils.string_utils.soundex`.
+#[pyfunction]
+fn soundex(s: &str) -> String {
+    strings::soundex(s)
 }
 
 /// The thumbnail store (`thumbnails.lmdb`), same format as the py-lmdb one.
@@ -370,6 +457,17 @@ fn stl_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(dhash, m)?)?;
     m.add_function(wrap_pyfunction!(dhash_many, m)?)?;
     m.add_class::<PyThumbStore>()?;
+    for f in [
+        wrap_pyfunction!(detect_presupport, m)?,
+        wrap_pyfunction!(detect_warnings, m)?,
+        wrap_pyfunction!(explain_warnings, m)?,
+        wrap_pyfunction!(detect_scale, m)?,
+        wrap_pyfunction!(parse_path, m)?,
+        wrap_pyfunction!(render_path_pattern, m)?,
+        wrap_pyfunction!(soundex, m)?,
+    ] {
+        m.add_function(f)?;
+    }
     m.add_function(wrap_pyfunction!(hamming_pairs, m)?)?;
     m.add_function(wrap_pyfunction!(cosine_pairs, m)?)?;
     m.add_function(wrap_pyfunction!(levenshtein_pairs, m)?)?;

@@ -110,6 +110,18 @@ def _levenshtein_pairs_py(values: list[str], max_distance: int) -> list[tuple[in
 
 
 def soundex(s: str) -> str:
+    """Soundex code of *s*, natively when possible (see :func:`_soundex_py`)."""
+    from app import native
+    mod = native.module()
+    if mod is not None:
+        try:
+            return mod.soundex(s)
+        except (ValueError, TypeError, UnicodeError, AttributeError):
+            pass
+    return _soundex_py(s)
+
+
+def _soundex_py(s: str) -> str:
     """Return the American Soundex code for *s* (4-character string).
 
     Accented / non-ASCII letters are decomposed to their ASCII base before
