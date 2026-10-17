@@ -73,6 +73,40 @@ pub fn levenshtein_pairs(values: &[String], max: u32) -> Vec<(u32, u32, u32)> {
         .collect()
 }
 
+/// Soundex code of `s`, as `app.utils.string_utils.soundex`: NFKD-decompose,
+/// uppercase, keep ASCII letters; `"0000"` when none are left.
+///
+/// Not the textbook algorithm, kept bit-compatible with the Python one: a vowel
+/// (or H, W, Y) between two consonants of the same code does not separate them.
+pub fn soundex(s: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    // A..Z -> digit, as `_SOUNDEX_CODE`.
+    const CODE: &[u8; 26] = b"01230120022455012623010202";
+    let letters: Vec<u8> = s
+        .nfkd()
+        .flat_map(char::to_uppercase)
+        .filter(char::is_ascii_alphabetic)
+        .map(|c| c as u8)
+        .collect();
+    let Some(&first) = letters.first() else { return "0000".into() };
+    let digits: Vec<u8> = letters.iter().map(|&c| CODE[(c - b'A') as usize]).collect();
+    let mut out = vec![first];
+    let mut prev = digits[0];
+    for &d in &digits[1..] {
+        if d != b'0' && d != prev {
+            out.push(d);
+        }
+        if d != b'0' {
+            prev = d;
+        }
+        if out.len() == 4 {
+            break;
+        }
+    }
+    out.resize(4, b'0');
+    String::from_utf8(out).expect("ASCII")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

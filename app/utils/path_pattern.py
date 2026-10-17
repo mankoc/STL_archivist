@@ -175,6 +175,22 @@ def _result_from_match(m: re.Match) -> dict[str, str]:
 
 
 def parse_path(pattern: str, path: str) -> dict[str, str]:
+    """Extract field values from *path* using *pattern* (natively when possible).
+
+    ``rust/stl-core/src/path_pattern.rs`` ports :func:`_parse_path_py`;
+    ``tests/golden`` compares the two.
+    """
+    from app import native
+    mod = native.module()
+    if mod is not None:
+        try:
+            return dict(mod.parse_path(pattern, path))
+        except (ValueError, TypeError, UnicodeError, AttributeError):
+            pass
+    return _parse_path_py(pattern, path)
+
+
+def _parse_path_py(pattern: str, path: str) -> dict[str, str]:
     """Extract field values from *path* using *pattern*.
 
     Tries two passes so that both flat and nested structures are handled:

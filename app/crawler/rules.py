@@ -165,7 +165,7 @@ def _is_presupported_member(member: Path, name_res: list) -> bool:
     return any(rx.search(member.name) for rx in name_res)
 
 
-def detect_presupport(names: list[str]) -> str:
+def _detect_presupport_py(names: list[str]) -> str:
     """Return the presupport classification for an archive given its member *names*.
 
     Rules are applied in priority order (first match wins):
@@ -245,7 +245,7 @@ def sort_warning_lines(lines: list[str]) -> list[str]:
                                         if l in WARNING_ORDER else len(WARNING_ORDER)))
 
 
-def explain_warnings(
+def _explain_warnings_py(
     names: list[str],
     check_presupported: bool = True,
     check_no_images: bool = True,
@@ -306,7 +306,7 @@ def explain_warnings(
     return {k: result[k] for k in sort_warning_lines(list(result))}
 
 
-def detect_warnings(
+def _detect_warnings_py(
     names: list[str],
     check_presupported: bool = True,
     check_no_images: bool = True,
@@ -386,7 +386,7 @@ def detect_warnings(
     return "\n".join(warnings)
 
 
-def detect_scale(names: list[str]) -> list[str]:
+def _detect_scale_py(names: list[str]) -> list[str]:
     """Return a de-duplicated list of scale strings detected in *names*.
 
     Each entry in *names* is a file path (archive member or the archive path
@@ -429,3 +429,92 @@ def detect_scale(names: list[str]) -> list[str]:
     if not found:
         logger.debug("  No scale detected")
     return found
+
+
+# ── Native versions ──────────────────────────────────────────────────────────
+# rust/stl-core/src/rules.rs ports the functions above; tests/golden compares
+# them. The native call raises for input it does not handle exactly (a name
+# with lone surrogates, for one), and the Python implementation then runs.
+#
+# Custom presupport patterns always use Python: fancy-regex and Python's re
+# disagree on some syntax without either raising ("[[:alpha:]]" is a POSIX
+# class in one and a character set in the other; "(?<name>x)" and "\x{41}"
+# are valid only natively), so a user's pattern list could flag different
+# archives. The built-in defaults are golden-tested.
+
+_NATIVE_ERRORS = (ValueError, TypeError, UnicodeError, AttributeError)
+
+
+def _native():
+    from app import native
+    return native.module()
+
+
+def detect_presupport(names: list[str]) -> str:
+    """Presupport classification of an archive's members; see :func:`_detect_presupport_py`."""
+    mod = _native()
+    if mod is not None:
+        try:
+            return mod.detect_presupport(list(names))
+        except _NATIVE_ERRORS:
+            pass
+    return _detect_presupport_py(names)
+
+
+def _native_patterns_ok(check_presupported: bool, patterns) -> bool:
+    """True when the native rules give Python's result for these patterns."""
+    return (not check_presupported or patterns is None
+            or list(patterns) == DEFAULT_PRESUPPORT_PATTERNS)
+
+
+def explain_warnings(
+    names: list[str],
+    check_presupported: bool = True,
+    check_no_images: bool = True,
+    check_nested_archive: bool = True,
+    check_no_printable: bool = True,
+    presupport_patterns: "list[str] | None" = None,
+) -> "dict[str, list[str]]":
+    """``{warning: [member names that triggered it]}``; see :func:`_explain_warnings_py`."""
+    flags = (check_presupported, check_no_images, check_nested_archive, check_no_printable)
+    mod = _native()
+    if mod is not None and _native_patterns_ok(check_presupported, presupport_patterns):
+        try:
+            return dict(mod.explain_warnings(
+                list(names), *flags,
+                list(presupport_patterns) if presupport_patterns is not None else None))
+        except _NATIVE_ERRORS:
+            pass
+    return _explain_warnings_py(names, *flags, presupport_patterns=presupport_patterns)
+
+
+def detect_warnings(
+    names: list[str],
+    check_presupported: bool = True,
+    check_no_images: bool = True,
+    check_nested_archive: bool = True,
+    check_no_printable: bool = True,
+    presupport_patterns: "list[str] | None" = None,
+) -> str:
+    """Newline-separated warnings for an archive; see :func:`_detect_warnings_py`."""
+    flags = (check_presupported, check_no_images, check_nested_archive, check_no_printable)
+    mod = _native()
+    if mod is not None and _native_patterns_ok(check_presupported, presupport_patterns):
+        try:
+            return mod.detect_warnings(
+                list(names), *flags,
+                list(presupport_patterns) if presupport_patterns is not None else None)
+        except _NATIVE_ERRORS:
+            pass
+    return _detect_warnings_py(names, *flags, presupport_patterns=presupport_patterns)
+
+
+def detect_scale(names: list[str]) -> list[str]:
+    """Scales (``"28 mm"``, ``"1/35"``) found in the names; see :func:`_detect_scale_py`."""
+    mod = _native()
+    if mod is not None:
+        try:
+            return mod.detect_scale(list(names))
+        except _NATIVE_ERRORS:
+            pass
+    return _detect_scale_py(names)
