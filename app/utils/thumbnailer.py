@@ -7,6 +7,12 @@ Identical thumbnails are held once and shared: an image id maps to a blob key
 derived from the thumbnail's content hash, and the bytes live under that blob
 key.  See the key-layout comment below.  The public API is still addressed by
 ``Image.id`` throughout, so callers never see the indirection.
+
+Two interchangeable backends hold the store, chosen when it is opened: the
+native core's ``ThumbStore`` (heed, ``rust/stl-core/src/thumbstore.rs``) when
+available, else py-lmdb.  Both use the same on-disk format.  A process uses one
+of them for a store, never both: LMDB forbids opening an environment twice in
+one process (compatibility rule 3 in ``docs/rust-migration-plan.md``).
 """
 import io
 import logging
@@ -35,7 +41,7 @@ THUMB_QUALITY = 75
 GIF_MAX_FRAMES = 60
 GIF_MAX_BYTES = 2 * 1024 ** 2
 
-_lmdb_env: Optional[lmdb.Environment] = None
+_store = None                      # the open backend (_NativeBackend / _LmdbBackend)
 _lmdb_dir: Optional[Path] = None
 
 # 10 GB virtual address space reserved for the LMDB map.
@@ -114,7 +120,7 @@ def _get_thumbnail(txn, image_id: int) -> Optional[bytes]:
     return txn.get(_key(image_id))
 
 
-def _write(put_fn) -> None:
+def _write(env: "lmdb.Environment", put_fn) -> None:
     """Run *put_fn(txn)* in a write transaction, growing the map on MDB_MAP_FULL.
 
     LMDB has a fixed map size; once the data reaches it, every write raises
@@ -124,12 +130,193 @@ def _write(put_fn) -> None:
     """
     while True:
         try:
-            with _lmdb_env.begin(write=True) as txn:
+            with env.begin(write=True) as txn:
                 put_fn(txn)
             return
         except lmdb.MapFullError:
-            new_size = _lmdb_env.info()["map_size"] + _GROW_STEP
-            _lmdb_env.set_mapsize(new_size)
+            new_size = env.info()["map_size"] + _GROW_STEP
+            env.set_mapsize(new_size)
+
+
+class _LmdbBackend:
+    """The store through py-lmdb (used when the native core is unavailable)."""
+
+    native = False
+
+    def __init__(self, path: Path) -> None:
+        # Open with a map at least as large as the data already on disk (plus a
+        # grow-step of headroom), so a store that previously grew past _MAP_SIZE
+        # reopens without immediately hitting MDB_MAP_FULL on the first write.
+        data_file = path / "data.mdb"
+        existing = data_file.stat().st_size if data_file.exists() else 0
+        self.env = lmdb.open(str(path), map_size=max(_MAP_SIZE, existing + _GROW_STEP))
+
+    def put_many(self, items) -> None:
+        def _put(txn):
+            for image_id, data in items:
+                if data:
+                    _put_thumbnail(txn, image_id, data)
+        _write(self.env, _put)
+
+    def get_many(self, ids) -> "dict[int, bytes]":
+        out: dict[int, bytes] = {}
+        with self.env.begin() as txn:
+            for image_id in ids:
+                data = _get_thumbnail(txn, image_id)
+                if data is not None:
+                    out[image_id] = data
+        return out
+
+    def get(self, image_id: int) -> Optional[bytes]:
+        with self.env.begin() as txn:
+            return _get_thumbnail(txn, image_id)
+
+    def delete_many(self, ids) -> None:
+        with self.env.begin(write=True) as txn:
+            # Only the references go: a blob may still be shared with other
+            # images.  Unreferenced blobs are reclaimed by deduplicate_store().
+            for image_id in ids:
+                txn.delete(_ref_key(image_id))
+                txn.delete(_key(image_id))
+
+    def stats(self) -> "dict[str, int]":
+        thumbnails = blobs = legacy = payload = 0
+        with self.env.begin(buffers=True) as txn:
+            for key, value in txn.cursor():
+                key = bytes(key)
+                if key.startswith(_REF_PREFIX):
+                    thumbnails += 1
+                elif key.startswith(_BLOB_PREFIX):
+                    blobs += 1
+                    payload += len(value)
+                else:
+                    legacy += 1
+                    thumbnails += 1
+                    payload += len(value)
+        return {"thumbnails": thumbnails, "blobs": blobs,
+                "legacy": legacy, "payload_bytes": payload}
+
+    def convert_legacy(self, limit: int) -> int:
+        batch: list[tuple[int, bytes]] = []
+        with self.env.begin(buffers=True) as txn:
+            for key, value in txn.cursor():
+                key = bytes(key)
+                if key.startswith(_REF_PREFIX) or key.startswith(_BLOB_PREFIX):
+                    continue
+                batch.append((int.from_bytes(key, "big"), bytes(value)))
+                if len(batch) >= limit:
+                    break
+        if batch:
+            self.put_many(batch)
+        return len(batch)
+
+    def orphan_blobs(self) -> "list[bytes]":
+        live: set = set()
+        orphans: list = []
+        with self.env.begin(buffers=True) as txn:
+            for key, value in txn.cursor():
+                if bytes(key).startswith(_REF_PREFIX):
+                    live.add(bytes(value))
+            for key, _value in txn.cursor():
+                key = bytes(key)
+                if key.startswith(_BLOB_PREFIX) and key not in live:
+                    orphans.append(key)
+        return orphans
+
+    def delete_keys(self, keys) -> None:
+        def _drop(txn):
+            for key in keys:
+                txn.delete(key)
+        _write(self.env, _drop)
+
+    def put_raw(self, items) -> None:
+        def _put(txn):
+            for key, value in items:
+                txn.put(key, value)
+        _write(self.env, _put)
+
+    def copy_compacted(self, dest_dir: Path) -> None:
+        self.env.copy(str(dest_dir), compact=True)
+
+    def map_size(self) -> int:
+        return self.env.info()["map_size"]
+
+    def close(self) -> None:
+        self.env.close()
+
+
+class _NativeBackend:
+    """The store through the native core's ``ThumbStore`` (heed)."""
+
+    native = True
+
+    def __init__(self, store) -> None:
+        self.s = store
+
+    def put_many(self, items) -> None:
+        self.s.put_many([(int(i), bytes(d)) for i, d in items if d])
+
+    def get_many(self, ids) -> "dict[int, bytes]":
+        return self.s.get_many([int(i) for i in ids])
+
+    def get(self, image_id: int) -> Optional[bytes]:
+        return self.s.get(int(image_id))
+
+    def delete_many(self, ids) -> None:
+        self.s.delete_many([int(i) for i in ids])
+
+    def stats(self) -> "dict[str, int]":
+        return self.s.stats()
+
+    def convert_legacy(self, limit: int) -> int:
+        return self.s.convert_legacy(limit)
+
+    def orphan_blobs(self) -> "list[bytes]":
+        return self.s.orphan_blobs()
+
+    def delete_keys(self, keys) -> None:
+        self.s.delete_keys(list(keys))
+
+    def put_raw(self, items) -> None:
+        self.s.put_raw(list(items))
+
+    def copy_compacted(self, dest_dir: Path) -> None:
+        self.s.copy_compacted(str(dest_dir / "data.mdb"))
+
+    def map_size(self) -> int:
+        return self.s.map_size()
+
+    def close(self) -> None:
+        self.s.close()
+
+
+# Errors either backend raises for a failed store operation.
+_STORE_ERRORS: tuple = (lmdb.Error, OSError, RuntimeError)
+
+
+def _open_backend(path: Path):
+    """The native store when the core provides one, else py-lmdb."""
+    from app import native
+    mod = native.module()
+    if mod is not None and hasattr(mod, "ThumbStore"):
+        try:
+            return _NativeBackend(mod.ThumbStore(str(path)))
+        except (OSError, RuntimeError, ValueError) as exc:
+            log.warning("Native thumbnail store failed to open %s (%s); using py-lmdb", path, exc)
+    return _LmdbBackend(path)
+
+
+def store_backend() -> str:
+    """``"native"``, ``"lmdb"`` or ``"closed"``: which backend holds the store."""
+    if _store is None:
+        return "closed"
+    return "native" if _store.native else "lmdb"
+
+
+def _require_store():
+    if _store is None:
+        raise RuntimeError("Thumbnail store not initialised. Call init_thumbnail_store() first.")
+    return _store
 
 
 def _parse_image_id(path_or_id: str) -> Optional[int]:
@@ -165,21 +352,24 @@ def init_thumbnail_store(base_dir: Path) -> None:
         base_dir: Directory that will contain the LMDB data and lock files.
             Created automatically if it does not exist.
     """
-    global _lmdb_env, _lmdb_dir
+    global _store, _lmdb_dir
     new_path = Path(base_dir)
-    if _lmdb_env is not None and _lmdb_dir == new_path:
+    if _store is not None and _lmdb_dir == new_path:
         return
-    if _lmdb_env is not None:
-        _lmdb_env.close()
+    close_thumbnail_store()
+    new_path.mkdir(parents=True, exist_ok=True)
+    _store = _open_backend(new_path)
     _lmdb_dir = new_path
-    _lmdb_dir.mkdir(parents=True, exist_ok=True)
-    # Open with a map at least as large as the data already on disk (plus a
-    # grow-step of headroom), so a store that previously grew past _MAP_SIZE
-    # reopens without immediately hitting MDB_MAP_FULL on the first write.
-    data_file = _lmdb_dir / "data.mdb"
-    existing = data_file.stat().st_size if data_file.exists() else 0
-    map_size = max(_MAP_SIZE, existing + _GROW_STEP)
-    _lmdb_env = lmdb.open(str(_lmdb_dir), map_size=map_size)
+    log.debug("Thumbnail store %s opened with the %s backend", new_path, store_backend())
+
+
+def close_thumbnail_store() -> None:
+    """Close the store if open (it can then be reopened, by either backend)."""
+    global _store, _lmdb_dir
+    if _store is not None:
+        _store.close()
+    _store = None
+    _lmdb_dir = None
 
 
 def get_thumbnail_base_dir() -> Optional[Path]:
@@ -246,14 +436,13 @@ def compact_store(progress=None) -> "tuple[int, int]":
     Raises:
         RuntimeError: If the store has not been initialised.
     """
-    global _lmdb_env
-    if _lmdb_env is None or _lmdb_dir is None:
-        raise RuntimeError("Thumbnail store not initialised. Call init_thumbnail_store() first.")
+    store = _require_store()
+    store_dir = _lmdb_dir
 
     size_before = store_size_bytes()
     expected = store_stats()["payload_bytes"] or size_before or 1
 
-    tmp_dir = _lmdb_dir.parent / (_lmdb_dir.name + ".compact_tmp")
+    tmp_dir = store_dir.parent / (store_dir.name + ".compact_tmp")
     if tmp_dir.exists():
         shutil.rmtree(tmp_dir, ignore_errors=True)
     tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -278,19 +467,18 @@ def compact_store(progress=None) -> "tuple[int, int]":
 
     try:
         # Write a defragmented copy, then close, swap the data file in, and reopen.
-        _lmdb_env.copy(str(tmp_dir), compact=True)
+        store.copy_compacted(tmp_dir)
     finally:
         stop_watch.set()
         if watcher is not None:
             watcher.join(timeout=1.0)
 
-    _lmdb_env.close()
-    _lmdb_env = None
+    close_thumbnail_store()
 
-    os.replace(str(tmp_dir / "data.mdb"), str(_lmdb_dir / "data.mdb"))
+    os.replace(str(tmp_dir / "data.mdb"), str(store_dir / "data.mdb"))
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    init_thumbnail_store(_lmdb_dir)
+    init_thumbnail_store(store_dir)
     if progress is not None:
         progress(expected, expected)
     return size_before, store_size_bytes()
@@ -303,24 +491,9 @@ def store_stats() -> "dict[str, int]":
     (distinct stored payloads), ``legacy`` (entries not yet content-addressed)
     and ``payload_bytes`` (total bytes across blobs and legacy entries).
     """
-    if _lmdb_env is None:
+    if _store is None:
         return {"thumbnails": 0, "blobs": 0, "legacy": 0, "payload_bytes": 0}
-
-    thumbnails = blobs = legacy = payload = 0
-    with _lmdb_env.begin(buffers=True) as txn:
-        for key, value in txn.cursor():
-            key = bytes(key)
-            if key.startswith(_REF_PREFIX):
-                thumbnails += 1
-            elif key.startswith(_BLOB_PREFIX):
-                blobs += 1
-                payload += len(value)
-            else:
-                legacy += 1
-                thumbnails += 1
-                payload += len(value)
-    return {"thumbnails": thumbnails, "blobs": blobs,
-            "legacy": legacy, "payload_bytes": payload}
+    return _store.stats()
 
 
 def deduplicate_store(progress=None, should_stop=None) -> "dict[str, int]":
@@ -345,8 +518,7 @@ def deduplicate_store(progress=None, should_stop=None) -> "dict[str, int]":
     Raises:
         RuntimeError: If the store has not been initialised.
     """
-    if _lmdb_env is None or _lmdb_dir is None:
-        raise RuntimeError("Thumbnail store not initialised. Call init_thumbnail_store() first.")
+    store = _require_store()
 
     def _report(done, total, phase):
         if progress is not None:
@@ -365,46 +537,18 @@ def deduplicate_store(progress=None, should_stop=None) -> "dict[str, int]":
         total = before["legacy"]
         _report(0, total, "convert")
         while not _stopped():
-            batch: list[tuple[int, bytes]] = []
-            with _lmdb_env.begin(buffers=True) as txn:
-                for key, value in txn.cursor():
-                    key = bytes(key)
-                    if key.startswith(_REF_PREFIX) or key.startswith(_BLOB_PREFIX):
-                        continue
-                    batch.append((int.from_bytes(key, "big"), bytes(value)))
-                    if len(batch) >= _BATCH:
-                        break
-            if not batch:
+            n = store.convert_legacy(_BATCH)
+            if not n:
                 break
-
-            def _put(txn, _batch=batch):
-                for image_id, data in _batch:
-                    _put_thumbnail(txn, image_id, data)
-            _write(_put)
-            converted += len(batch)
+            converted += n
             _report(converted, total, "convert")
 
     # ---- Phase 2: drop blobs no reference points at -------------------------
     _report(0, 1, "sweep")
-    live: set = set()
-    orphans: list = []
-    with _lmdb_env.begin(buffers=True) as txn:
-        for key, value in txn.cursor():
-            if bytes(key).startswith(_REF_PREFIX):
-                live.add(bytes(value))
-    with _lmdb_env.begin(buffers=True) as txn:
-        for key, _value in txn.cursor():
-            key = bytes(key)
-            if key.startswith(_BLOB_PREFIX) and key not in live:
-                orphans.append(key)
+    orphans = store.orphan_blobs()
 
     for start in range(0, len(orphans), _BATCH):
-        chunk = orphans[start:start + _BATCH]
-
-        def _drop(txn, _chunk=chunk):
-            for key in _chunk:
-                txn.delete(key)
-        _write(_drop)
+        store.delete_keys(orphans[start:start + _BATCH])
         _report(min(start + _BATCH, len(orphans)), max(len(orphans), 1), "sweep")
 
     # ---- Phase 3: hand the freed pages back to the filesystem ---------------
@@ -545,11 +689,11 @@ def is_animated_thumbnail(data: bytes) -> bool:
 
 def save_thumbnail(image_bytes: bytes, image_id: int,
                    max_size: int = THUMB_SIZE_DEFAULT) -> Optional[str]:
-    """Resize *image_bytes* and write the result to LMDB under *image_id*.
+    """Resize *image_bytes* and write the result to the store under *image_id*.
 
     Args:
         image_bytes: Raw image data to convert.
-        image_id: Primary key from the ``Image`` DB record — used as the LMDB key.
+        image_id: Primary key from the ``Image`` DB record — the store key.
         max_size: Maximum thumbnail dimension in pixels.
 
     Returns:
@@ -559,13 +703,8 @@ def save_thumbnail(image_bytes: bytes, image_id: int,
     Raises:
         RuntimeError: If ``init_thumbnail_store()`` has not been called yet.
     """
-    if _lmdb_env is None:
-        raise RuntimeError("Thumbnail store not initialised. Call init_thumbnail_store() first.")
-    thumb_bytes = make_thumbnail(image_bytes, max_size)
-    if thumb_bytes is None:
-        return None
-    _write(lambda txn: _put_thumbnail(txn, image_id, thumb_bytes))
-    return str(image_id)
+    result = save_thumbnail_returning_bytes(image_bytes, image_id, max_size)
+    return result[0] if result else None
 
 
 def save_thumbnail_returning_bytes(
@@ -575,25 +714,24 @@ def save_thumbnail_returning_bytes(
 ) -> "Optional[tuple[str, bytes]]":
     """Like :func:`save_thumbnail` but also returns the stored JPEG bytes.
 
-    Avoids the extra LMDB read that callers need when computing dHash
+    Avoids the extra store read that callers need when computing dHash
     immediately after saving.
 
     Returns:
         ``(rel_path, jpeg_bytes)`` on success, or ``None`` on failure.
     """
-    if _lmdb_env is None:
-        raise RuntimeError("Thumbnail store not initialised. Call init_thumbnail_store() first.")
+    store = _require_store()
     thumb_bytes = make_thumbnail(image_bytes, max_size)
     if thumb_bytes is None:
         return None
-    _write(lambda txn: _put_thumbnail(txn, image_id, thumb_bytes))
+    store.put_many([(image_id, thumb_bytes)])
     return str(image_id), thumb_bytes
 
 
 def save_thumbnails_batch(
     items: "list[tuple[int, bytes, int]]",
 ) -> "list[tuple[int, Optional[str], Optional[bytes]]]":
-    """Resize and write multiple thumbnails in a single LMDB write transaction.
+    """Resize and write multiple thumbnails in a single write transaction.
 
     Args:
         items: List of ``(image_id, raw_bytes, max_size)`` triples.
@@ -602,8 +740,7 @@ def save_thumbnails_batch(
         List of ``(image_id, rel_path, jpeg_bytes)`` in the same order.
         ``rel_path`` and ``jpeg_bytes`` are ``None`` when conversion failed.
     """
-    if _lmdb_env is None:
-        raise RuntimeError("Thumbnail store not initialised. Call init_thumbnail_store() first.")
+    store = _require_store()
     results: list[tuple[int, Optional[str], Optional[bytes]]] = []
     prepared: list[tuple[int, bytes]] = []
     for image_id, raw_bytes, max_size in items:
@@ -614,29 +751,22 @@ def save_thumbnails_batch(
             prepared.append((image_id, thumb))
             results.append((image_id, str(image_id), thumb))
     if prepared:
-        def _put(txn):
-            for image_id, thumb in prepared:
-                _put_thumbnail(txn, image_id, thumb)
-        _write(_put)
+        store.put_many(prepared)
     return results
 
 
 def write_raw_thumbnails_batch(items: "list[tuple[int, bytes]]") -> None:
-    """Write already-processed JPEG bytes for multiple images in one LMDB transaction."""
-    if _lmdb_env is None or not items:
+    """Write already-processed JPEG bytes for multiple images in one transaction."""
+    if _store is None or not items:
         return
-    def _put(txn):
-        for image_id, jpeg_bytes in items:
-            if jpeg_bytes:
-                _put_thumbnail(txn, image_id, jpeg_bytes)
     try:
-        _write(_put)
-    except lmdb.Error as exc:
-        log.error("Failed to write %d thumbnails to LMDB: %s", len(items), exc)
+        _store.put_many(items)
+    except _STORE_ERRORS as exc:
+        log.error("Failed to write %d thumbnails to the store: %s", len(items), exc)
 
 
 def write_raw_thumbnail(image_id: int, jpeg_bytes: bytes) -> Optional[str]:
-    """Write already-processed JPEG bytes to LMDB without resizing.
+    """Write already-processed JPEG bytes to the store without resizing.
 
     Used when importing thumbnails from a ``METADATA.7z`` sidecar where the
     images are already JPEG-encoded at the correct size.
@@ -646,20 +776,20 @@ def write_raw_thumbnail(image_id: int, jpeg_bytes: bytes) -> Optional[str]:
         jpeg_bytes: Pre-encoded JPEG data.
 
     Returns:
-        The image ID as a string, or ``None`` on any LMDB error or if the
+        The image ID as a string, or ``None`` on any store error or if the
         store is not initialised.
     """
-    if _lmdb_env is None:
+    if _store is None:
         return None
     try:
-        _write(lambda txn: _put_thumbnail(txn, image_id, jpeg_bytes))
+        _store.put_many([(image_id, jpeg_bytes)])
         return str(image_id)
-    except lmdb.Error:
+    except _STORE_ERRORS:
         return None
 
 
 def delete_thumbnail(path_or_id: object) -> None:
-    """Remove a thumbnail from LMDB.
+    """Remove a thumbnail from the store.
 
     Accepts the current string-ID format (``"42"``), the legacy path format
     (``"0000/42.jpg"``), or a plain ``int``.  Silently ignores errors including
@@ -673,14 +803,16 @@ def delete_thumbnail(path_or_id: object) -> None:
 
 
 def delete_thumbnails(refs) -> None:
-    """Remove many thumbnails in one LMDB write transaction.
+    """Remove many thumbnails in one write transaction.
 
     Takes the same references as :func:`delete_thumbnail`.  Use it whenever
     more than one image goes: every write transaction ends with a disk flush,
     which measured ~160 ms on a hard-disk data drive, so deleting a 20-image
     model one call at a time took over 3 s against a few ms batched.
+    Only the references go: a blob may still be shared with other images, and
+    unreferenced blobs are reclaimed by :func:`deduplicate_store`.
     """
-    if _lmdb_env is None:
+    if _store is None:
         return
     image_ids = []
     for ref in refs:
@@ -691,38 +823,26 @@ def delete_thumbnails(refs) -> None:
     if not image_ids:
         return
     try:
-        with _lmdb_env.begin(write=True) as txn:
-            # Only the references go: a blob may still be shared with other
-            # images.  Unreferenced blobs are reclaimed by deduplicate_store().
-            for image_id in image_ids:
-                txn.delete(_ref_key(image_id))
-                txn.delete(_key(image_id))
-    except lmdb.Error:
+        _store.delete_many(image_ids)
+    except _STORE_ERRORS:
         pass
 
 
 def get_thumbnail_bytes(image_id: int) -> Optional[bytes]:
     """Return raw JPEG bytes for the given *image_id*, or ``None`` if not found."""
-    if _lmdb_env is None:
+    if _store is None:
         return None
-    with _lmdb_env.begin() as txn:
-        return _get_thumbnail(txn, image_id)
+    return _store.get(image_id)
 
 
 def get_thumbnail_bytes_many(image_ids) -> "dict[int, bytes]":
-    """Return a mapping of image_id → JPEG bytes for all *image_ids* in one LMDB txn.
+    """Return a mapping of image_id → JPEG bytes for all *image_ids* in one read txn.
 
     Missing keys are omitted from the result.  Safe to call from any thread.
     """
-    if _lmdb_env is None:
+    if _store is None:
         return {}
-    result: dict[int, bytes] = {}
-    with _lmdb_env.begin() as txn:
-        for image_id in image_ids:
-            data = _get_thumbnail(txn, image_id)
-            if data is not None:
-                result[image_id] = data
-    return result
+    return _store.get_many(image_ids)
 
 
 def pixmap_from_path(path_or_id: Optional[str]):

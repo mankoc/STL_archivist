@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Rust migration, Phase 3: the thumbnail store runs on the native core.** With the native core installed, `thumbnails.lmdb` is opened through Rust (heed) instead of py-lmdb. The on-disk format is unchanged and byte-identical: same keys, same shared blobs for identical thumbnails, same collision handling. A library still opens with either build, and switching back and forth is safe. Without the native core, py-lmdb is used as before.
+  - All store access goes through one backend chosen when the store opens. LMDB forbids opening the same store twice in one process, so the two implementations never touch it together.
+  - Opening the store no longer writes to it.
+  - New golden tests write with one implementation, read with the other, and compare the raw keys. On the reference library, 30,000 random thumbnails and the store statistics read identically through both.
+
 - **Rust migration, Phase 2b–2c: native thumbnails and a new perceptual-hash format.**
   - **Thumbnails are made by the native core** for JPEG, PNG, WebP, BMP, TIFF and GIF, animated GIFs included. On 1,022 images from the reference library this was 1.7x faster than Pillow: PNG 2.2x, JPEG 1.4x. JPEGs are decoded at a reduced DCT scale when that still leaves at least twice the target size. Output sizes are exactly Pillow's `Image.thumbnail` sizes. Pixels differ from Pillow's by 1.2/255 on average (at most 4.9), and the files are the same size. AVIF, CMYK JPEGs and anything the native core cannot decode still go through Pillow.
   - **Fixed: 16-bit greyscale PNGs no longer come out almost white.** Pillow converted them to RGB by clipping at 255; they are now scaled to 8 bits.
