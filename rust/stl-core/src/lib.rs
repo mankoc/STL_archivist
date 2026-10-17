@@ -14,6 +14,7 @@ pub mod hamming;
 pub mod path_pattern;
 pub mod pairs;
 pub mod rules;
+pub mod storage;
 pub mod strings;
 pub mod thumbstore;
 pub mod thumbnail;

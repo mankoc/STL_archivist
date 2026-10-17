@@ -46,7 +46,7 @@ stl_database/
 The app is moving to Rust incrementally, towards a Jellyfin-style server + React web client.
 **Read `docs/rust-migration-plan.md` before touching `rust/` or porting a function**, in
 particular its compatibility rules (bit-identical `archive_hash`, one LMDB owner per process,
-Python owns the schema until Phase 4).
+the native core owns the schema from Phase 4b).
 
 - Ported functions are called through `app/native.py` and always keep a Python fallback
   (`native.module()` is `None` when the module is missing or `STL_NATIVE=0`). Catch
@@ -75,6 +75,16 @@ Python owns the schema until Phase 4).
   falls back to the Python reader for that archive. `zip.rs` is a port of CPython's `zipfile`
   catalog and `ZipFile.open` checks. Do not use `sevenz-rust2`'s `BlockDecoder` on a block
   with an empty entry inside it: it silently drops that block's last files.
+- **Schema changes:** the native core migrates file databases
+  (`rust/stl-core/src/storage`, called from `db.init_db`); the Python steps in `db.py` are the
+  fallback and must stay equivalent. After editing `models.py`, `db.ENSURE_INDEXES`,
+  `db.MODELS_VIEW_SQL` or the vec0 DDL, run `python tools/gen_schema.py`;
+  `tests/golden/test_schema_golden.py` fails until you do, and compares the two migrations
+  on fresh and legacy databases. A new data migration step goes into both.
+- **Two SQLite copies:** rusqlite bundles its own SQLite. On POSIX, a native connection must
+  not hold the database while SQLAlchemy has it open in the same process (lock loss can
+  corrupt it); keep native database access Windows-only, or sequential, until SQLAlchemy is
+  removed (step 4h).
 - Crawler rules (`rules.py`) use the native port only with the built-in presupport
   patterns; a custom pattern list always runs in Python, because fancy-regex and `re` read
   some syntax differently without raising. Keep `_native_patterns_ok` when touching them.
@@ -111,8 +121,9 @@ Handles all archive I/O and metadata extraction.
 
 - **`models.py`** — SQLAlchemy ORM classes: `STLModel` (central), `Tag`, `Image`, `Sculptor`,
   `Category`, `Subcategory`, `Release`, `Scale`. Tags use a many-to-many join table.
-- **`db.py`** — engine/session factory (`init_db`, `session_scope`), WAL-mode pragmas,
-  schema migration helper (`_ensure_columns`).
+- **`db.py`** — engine/session factory (`init_db`, `session_scope`), WAL-mode pragmas;
+  schema migration through the native core (`_migrate_natively`), with the Python steps
+  (`_migrate_schema`, `_ensure_columns`, …) as the fallback.
 - **`vectors.py`** — CLIP embeddings in the sqlite-vec `vec0` table `image_vec` (keyed by
   `Image.id`; `images` has no embedding column). sqlite-vec is loaded per connection in the
   engine's `connect` event; if it fails, `vectors.available()` is False and embedding features

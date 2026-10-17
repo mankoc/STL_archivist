@@ -16,7 +16,7 @@ use pyo3::types::{PyBytes, PyDict};
 use stl_core::control::{Control, Stopped as CoreStopped};
 use stl_core::fingerprint::{self, Member};
 use stl_core::archive::{self, ArchiveError};
-use stl_core::{embedding, hamming, path_pattern, rules, strings, thumbnail, thumbstore};
+use stl_core::{embedding, hamming, path_pattern, rules, storage, strings, thumbnail, thumbstore};
 
 create_exception!(
     stl_native,
@@ -184,6 +184,39 @@ fn dhash(py: Python<'_>, data: &[u8]) -> PyResult<u128> {
 fn dhash_many(py: Python<'_>, items: Vec<Bound<'_, PyBytes>>) -> Vec<Option<u128>> {
     let slices: Vec<&[u8]> = items.iter().map(|b| b.as_bytes()).collect();
     py.detach(|| stl_core::dhash::dhash_many(&slices))
+}
+
+/// Bring the database file at `path` to the current schema (`storage::migrate`).
+///
+/// Returns what changed as a dict (`renamed`, `tables_created`, `columns_added`,
+/// `dhash_rebuilt`, `embeddings_moved`, `vectors_reset`, `scales_copied`).
+/// Opens, migrates and closes its own connection. Raises `RuntimeError`.
+///
+/// `embed_model_id` / `embed_dim`: the embedding model stored vectors must come
+/// from (`app.database.vectors`); `vectors=False` skips the vector step, as the
+/// Python migration does when it cannot load sqlite-vec.
+#[pyfunction]
+#[pyo3(signature = (path, embed_model_id, embed_dim, vectors=true))]
+fn migrate_database<'py>(
+    py: Python<'py>,
+    path: std::path::PathBuf,
+    embed_model_id: String,
+    embed_dim: i64,
+    vectors: bool,
+) -> PyResult<Bound<'py, PyDict>> {
+    let v = storage::Vectors { model_id: embed_model_id, dim: embed_dim, enabled: vectors };
+    let r = py
+        .detach(|| storage::migrate(&path, &v))
+        .map_err(|e| PyRuntimeError::new_err(format!("database migration: {e}")))?;
+    let out = PyDict::new(py);
+    out.set_item("renamed", r.renamed)?;
+    out.set_item("tables_created", r.tables_created)?;
+    out.set_item("columns_added", r.columns_added)?;
+    out.set_item("dhash_rebuilt", r.dhash_rebuilt)?;
+    out.set_item("embeddings_moved", r.embeddings_moved)?;
+    out.set_item("vectors_reset", r.vectors_reset)?;
+    out.set_item("scales_copied", r.scales_copied)?;
+    Ok(out)
 }
 
 fn rules_err(e: rules::RulesError) -> PyErr {
@@ -465,6 +498,7 @@ fn stl_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
         wrap_pyfunction!(parse_path, m)?,
         wrap_pyfunction!(render_path_pattern, m)?,
         wrap_pyfunction!(soundex, m)?,
+        wrap_pyfunction!(migrate_database, m)?,
     ] {
         m.add_function(f)?;
     }
