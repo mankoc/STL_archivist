@@ -72,6 +72,18 @@ impl WinPath {
         self.parts.last().map(String::as_str).unwrap_or("")
     }
 
+    /// `stem` (Python 3.14): the final part minus its last suffix.
+    pub fn stem(&self) -> &str {
+        let name = self.name();
+        if let Some(i) = name.rfind('.') {
+            let stem = &name[..i];
+            if !stem.trim_start_matches('.').is_empty() {
+                return stem;
+            }
+        }
+        name
+    }
+
     /// `suffix` (Python 3.14) of the final part.
     pub fn suffix(&self) -> &str {
         let name = self.parts.last().map(String::as_str).unwrap_or("");

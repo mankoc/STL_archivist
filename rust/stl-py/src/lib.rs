@@ -604,6 +604,181 @@ impl PyLibraryDb {
         self.with_tx(py, move |tx| stl_core::storage::maintenance::delete_images(tx, &ids), db_err)
     }
 
+    // ── model editing (services.model_edit) ───────────────────────────────────
+
+    fn edit_editor_choices<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let lists = self.with(py, stl_core::storage::model_edit::editor_choices)?;
+        let out = PyDict::new(py);
+        for (k, v) in lists {
+            out.set_item(k, v)?;
+        }
+        Ok(out)
+    }
+
+    fn edit_subcollection_names(&self, py: Python<'_>, collection_name: String) -> PyResult<Vec<String>> {
+        self.with(py, |c| stl_core::storage::model_edit::subcollection_names(c, &collection_name))
+    }
+
+    fn edit_model_for_editor<'py>(&self, py: Python<'py>, model_id: i64) -> PyResult<Option<Bound<'py, PyDict>>> {
+        let Some(m) = self.with(py, |c| stl_core::storage::model_edit::model_for_editor(c, model_id))? else {
+            return Ok(None);
+        };
+        let out = PyDict::new(py);
+        out.set_item("archive_path", m.archive_path)?;
+        out.set_item("title", m.row.title)?;
+        out.set_item("creator", m.row.creator)?;
+        out.set_item("source", m.row.source)?;
+        out.set_item("release_year", m.row.release_year)?;
+        out.set_item("release_month", m.row.release_month)?;
+        out.set_item("release", m.release)?;
+        out.set_item("sculptor", m.sculptor)?;
+        out.set_item("collection", m.collection)?;
+        out.set_item("subcollection", m.subcollection)?;
+        out.set_item("category", m.category)?;
+        out.set_item("sequence", m.row.sequence)?;
+        out.set_item("presupports", m.row.presupports)?;
+        out.set_item("url", m.row.url)?;
+        out.set_item("description", m.row.description)?;
+        out.set_item("scales", m.scales)?;
+        out.set_item("tags", m.tags)?;
+        out.set_item("images", m.images)?;
+        Ok(Some(out))
+    }
+
+    /// Returns the archive path (`None` when the model is gone or has none).
+    fn edit_save_model_editor(&self, py: Python<'_>, model_id: i64, form: &Bound<'_, PyDict>) -> PyResult<Option<String>> {
+        use stl_core::storage::model_edit::{EditorForm, save_model_editor};
+        let get = |k: &str| -> PyResult<String> { Ok(form.get_item(k)?.map(|v| v.extract()).transpose()?.unwrap_or_default()) };
+        let f = EditorForm {
+            title: get("title")?,
+            creator: get("creator")?,
+            source: get("source")?,
+            date: get("date")?,
+            presupports: get("presupports")?,
+            url: get("url")?,
+            description: get("description")?,
+            sequence: form.get_item("sequence")?.map(|v| v.extract()).transpose()?.unwrap_or(0),
+            release: get("release")?,
+            sculptor: get("sculptor")?,
+            collection: get("collection")?,
+            subcollection: get("subcollection")?,
+            category: get("category")?,
+            scales: form.get_item("scales")?.map(|v| v.extract()).transpose()?.unwrap_or_default(),
+            tags: form.get_item("tags")?.map(|v| v.extract()).transpose()?.unwrap_or_default(),
+        };
+        let out = self.with_tx(py, move |tx| save_model_editor(tx, model_id, &f), edit_err)?;
+        Ok(out.flatten())
+    }
+
+    fn edit_ai_model_inputs<'py>(&self, py: Python<'py>, model_id: i64) -> PyResult<Option<Bound<'py, PyDict>>> {
+        let Some(a) = self.with(py, |c| stl_core::storage::model_edit::ai_model_inputs(c, model_id))? else {
+            return Ok(None);
+        };
+        let out = PyDict::new(py);
+        out.set_item("archive_path", a.archive_path)?;
+        out.set_item("title", a.title)?;
+        out.set_item("meta", a.meta)?;
+        out.set_item("tags", a.tags)?;
+        out.set_item("images", a.images)?;
+        out.set_item("files", a.files)?;
+        Ok(Some(out))
+    }
+
+    fn edit_ai_commit(
+        &self,
+        py: Python<'_>,
+        model_id: i64,
+        fields: std::collections::HashMap<String, String>,
+        year: Option<i64>,
+        tags: Vec<String>,
+        overwrite: bool,
+    ) -> PyResult<bool> {
+        use stl_core::storage::model_edit::{AiFields, ai_commit};
+        let g = |k: &str| fields.get(k).cloned().unwrap_or_default();
+        let f = AiFields {
+            title: g("title"),
+            creator: g("creator"),
+            description: g("description"),
+            source: g("source"),
+            sculptor: g("sculptor"),
+            collection: g("collection"),
+            subcollection: g("subcollection"),
+            scale: g("scale"),
+            year,
+        };
+        self.with_tx(py, move |tx| ai_commit(tx, model_id, &f, &tags, overwrite), edit_err)
+    }
+
+    fn edit_mass_choices<'py>(&self, py: Python<'py>, model_ids: Vec<i64>) -> PyResult<Bound<'py, PyDict>> {
+        let lists = self.with(py, |c| stl_core::storage::model_edit::mass_choices(c, &model_ids))?;
+        let out = PyDict::new(py);
+        for (k, v) in lists {
+            out.set_item(k, v)?;
+        }
+        Ok(out)
+    }
+
+    fn edit_archive_paths(&self, py: Python<'_>, model_ids: Vec<i64>) -> PyResult<std::collections::HashMap<i64, String>> {
+        self.with(py, |c| stl_core::storage::model_edit::archive_paths(c, &model_ids))
+    }
+
+    /// `model_edit.mass_save`; raises `ValueError` (nothing written) for what the
+    /// native port leaves to Python.
+    fn edit_mass_save(&self, py: Python<'_>, plan: &Bound<'_, PyDict>) -> PyResult<()> {
+        use stl_core::storage::model_edit::{Find, MassPlan, mass_save};
+        let s = |k: &str| -> PyResult<String> { Ok(plan.get_item(k)?.map(|v| v.extract()).transpose()?.unwrap_or_default()) };
+        let mut p = MassPlan {
+            model_ids: plan.get_item("model_ids")?.map(|v| v.extract()).transpose()?.unwrap_or_default(),
+            overwrite: plan.get_item("overwrite")?.map(|v| v.extract()).transpose()?.unwrap_or(false),
+            scale: s("scale")?,
+            release: s("release")?,
+            collection: s("collection")?,
+            subcollection: s("subcollection")?,
+            category: s("category")?,
+            sculptor: s("sculptor")?,
+            tags: s("tags")?,
+            trim: plan.get_item("trim")?.map(|v| v.extract()).transpose()?.unwrap_or(false),
+            presupports: plan.get_item("presupports")?.map(|v| v.extract()).transpose()?.flatten(),
+            ..Default::default()
+        };
+        if let Some(c) = plan.get_item("clearing")? {
+            for x in c.try_iter()? {
+                p.clearing.insert(x?.extract()?);
+            }
+        }
+        if let Some(m) = plan.get_item("manual")? {
+            for (k, v) in m.cast::<PyDict>()?.iter() {
+                p.manual.push((k.extract()?, v.extract()?));
+            }
+        }
+        if let Some(pr) = plan.get_item("path_results")? {
+            for (k, v) in pr.cast::<PyDict>()?.iter() {
+                let fields: Vec<(String, String)> = v
+                    .cast::<PyDict>()?
+                    .iter()
+                    .map(|(a, b)| Ok((a.extract()?, b.extract()?)))
+                    .collect::<PyResult<_>>()?;
+                p.path_results.insert(k.extract()?, fields);
+            }
+        }
+        if let Some(f) = plan.get_item("find")?
+            && !f.is_none()
+        {
+            let f = f.cast::<PyDict>()?;
+            let g = |k: &str| -> PyResult<Bound<'_, PyAny>> {
+                f.get_item(k)?.ok_or_else(|| PyValueError::new_err(format!("find.{k} missing")))
+            };
+            p.find = Some(Find {
+                find: g("find")?.extract()?,
+                replace: g("replace")?.extract()?,
+                case: g("case")?.extract()?,
+                regex: g("regex")?.extract()?,
+                fields: g("fields")?.extract()?,
+            });
+        }
+        self.with_tx(py, move |tx| mass_save(tx, &p), edit_err)
+    }
+
     // ── lookup administration (services.lookup_admin) ─────────────────────────
 
     /// `(id, name, models)`, or `(id, name, models, collection_id, collection_name)`

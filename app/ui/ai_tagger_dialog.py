@@ -24,9 +24,7 @@ from PyQt6.QtWidgets import (
 
 _MAX_TAGS_KEY = "ai_tagger/max_tags"   # QSettings key; 0 = no limit
 
-from app.database.db import session_scope, get_session
-from app.database.models import STLModel, Tag, Category, Sculptor, Scale, Collection, Subcollection
-from app.services import editing
+from app.services import model_edit
 from app.utils.thumbnailer import get_thumbnail_bytes
 from app.utils.ai_tagging import (
     build_meta_prompt as _build_meta_prompt,
@@ -155,37 +153,21 @@ def _generate_suggestions(
     return tags, meta
 
 
-def _collect_known_meta(m: STLModel) -> dict[str, str]:
-    """Existing catalogued metadata for *m* as an ordered {label: value} dict.
+def _collect_known_meta(inputs: dict) -> dict[str, str]:
+    """Existing catalogued metadata as an ordered {label: value} dict.
 
-    Only non-empty fields are included. Must be called while *m*'s session is
-    still open (it touches the sculptor/category/scale/tags relationships).
+    *inputs* is :func:`app.services.model_edit.ai_model_inputs`; only non-empty
+    fields are in it.
     """
-    meta: dict[str, str] = {}
-
-    def add(label: str, value) -> None:
-        if value not in (None, ""):
-            meta[label] = str(value).strip()
-
-    add("Title", m.title)
-    add("Creator", m.creator)
-    add("Sculptor", m.sculptor.name if m.sculptor else None)
-    add("Category", m.category.name if m.category else None)
-    add("Collection", m.collection.name if m.collection else None)
-    add("Subcollection", m.subcollection.name if m.subcollection else None)
-    add("Scale", ", ".join(s.name for s in m.scales) if m.scales else None)
-    add("Source", m.source)
-    add("Year", m.release_year)
-    add("Description", m.description)
-    existing_tags = [t.name for t in m.tags]
-    if existing_tags:
-        meta["Tags"] = ", ".join(existing_tags)
+    meta: dict[str, str] = dict(inputs["meta"])
+    if inputs["tags"]:
+        meta["Tags"] = ", ".join(inputs["tags"])
 
     # The printable files inside the archive — strong hints for the subject and
     # the scale (filenames often encode "32mm", "1-35", etc.). Capped so the
     # prompt stays small for archives with hundreds of parts.
     _FILE_CAP = 60
-    file_names = [Path(sf.filename).name for sf in m.stl_files if sf.filename]
+    file_names = [Path(f).name for f in inputs["files"]]
     if file_names:
         shown = ", ".join(file_names[:_FILE_CAP])
         if len(file_names) > _FILE_CAP:
@@ -198,24 +180,19 @@ def _load_model_inputs(
     model_id: int,
 ) -> "tuple[list[bytes], list[str], str, str, dict[str, str], list[str]]":
     """Return ``(image_bytes, stems, archive_path, display_title, known_meta, file_list)``."""
-    session = get_session()
-    try:
-        m = session.get(STLModel, model_id)
-        if m is None:
-            return [], [], "", f"#{model_id}", {}, []
-        archive_path = m.archive_path or ""
-        title = m.title or Path(archive_path).stem
-        images: list[bytes] = []
-        stems: list[str] = []
-        for img in m.images:
-            b = get_thumbnail_bytes(img.id)
-            if b:
-                images.append(b)
-                stems.append(Path(img.filename).stem if img.filename else f"img{img.id}")
-        file_list = [sf.filename for sf in m.stl_files if sf.filename]
-        return images, stems, archive_path, title, _collect_known_meta(m), file_list
-    finally:
-        session.close()
+    inputs = model_edit.ai_model_inputs(model_id)
+    if inputs is None:
+        return [], [], "", f"#{model_id}", {}, []
+    archive_path = inputs["archive_path"]
+    title = inputs["title"] or Path(archive_path).stem
+    images: list[bytes] = []
+    stems: list[str] = []
+    for image_id, filename in inputs["images"]:
+        b = get_thumbnail_bytes(image_id)
+        if b:
+            images.append(b)
+            stems.append(Path(filename).stem if filename else f"img{image_id}")
+    return images, stems, archive_path, title, _collect_known_meta(inputs), list(inputs["files"])
 
 
 def _normalize_meta(meta: dict[str, str]) -> dict:
@@ -249,41 +226,7 @@ def _commit_model_data(model_id: int, fields: dict, tags: list[str],
     *overwrite* is True any non-empty suggested value replaces the current one.
     Tags are always merged (never removed). Returns True if the model existed.
     """
-    with session_scope() as session:
-        model: Optional[STLModel] = session.get(STLModel, model_id)
-        if model is None:
-            return False
-
-        if fields["title"] and (overwrite or not model.title):
-            model.title = fields["title"]
-        if fields["creator"] and (overwrite or not model.creator):
-            model.creator = fields["creator"]
-        if fields["year"] is not None and (overwrite or model.release_year is None):
-            model.release_year = fields["year"]
-        if fields["description"] and (overwrite or not model.description):
-            model.description = fields["description"]
-        if fields["source"] and (overwrite or not model.source):
-            model.source = fields["source"]
-
-        if fields["sculptor"] and (overwrite or model.sculptor is None):
-            editing.set_sculptor(session, model, fields["sculptor"])
-
-        if fields["collection"] and (overwrite or model.collection is None):
-            editing.set_collection(session, model, fields["collection"])
-
-        # Subcollection is scoped to its parent collection, so only set it when
-        # the model has a collection to hang it under.
-        if (fields["subcollection"] and model.collection is not None
-                and (overwrite or model.subcollection is None)):
-            editing.set_subcollection(session, model, fields["subcollection"])
-
-        if fields["scale"] and (overwrite or not model.scales):
-            editing.assign_scales(session, model, editing.split_list(fields["scale"]),
-                                  replace=overwrite)
-
-        # Tags are always merged, never removed.
-        editing.assign_tags(session, model, tags, replace=False)
-    return True
+    return model_edit.ai_commit(model_id, fields, tags, overwrite)
 
 
 # ---------------------------------------------------------------------------
@@ -716,22 +659,19 @@ class AITaggerDialog(QDialog):
 
         # Load model data from DB
         model_id = self._model_ids[index]
-        session = get_session()
-        try:
-            m = session.get(STLModel, model_id)
-            self._model_id    = model_id
-            self._archive_path = m.archive_path or ""
-            display_title     = m.title or Path(self._archive_path).stem
-            self._image_data  = []
-            for img in m.images:
-                b = get_thumbnail_bytes(img.id)
-                if b:
-                    stem = Path(img.filename).stem if img.filename else f"img{img.id}"
-                    self._image_data.append((b, stem))
-            self._known_meta = _collect_known_meta(m)
-            self._file_list = [sf.filename for sf in m.stl_files if sf.filename]
-        finally:
-            session.close()
+        inputs = model_edit.ai_model_inputs(model_id) or {
+            "archive_path": "", "title": None, "meta": [], "tags": [], "images": [], "files": []}
+        self._model_id    = model_id
+        self._archive_path = inputs["archive_path"]
+        display_title     = inputs["title"] or Path(self._archive_path).stem
+        self._image_data  = []
+        for image_id, filename in inputs["images"]:
+            b = get_thumbnail_bytes(image_id)
+            if b:
+                stem = Path(filename).stem if filename else f"img{image_id}"
+                self._image_data.append((b, stem))
+        self._known_meta = _collect_known_meta(inputs)
+        self._file_list = list(inputs["files"])
 
         # Rebuild thumbnail strip
         self._rebuild_thumbs()

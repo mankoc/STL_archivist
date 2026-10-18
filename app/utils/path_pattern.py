@@ -388,6 +388,7 @@ def apply_extracted_to_model(
                     sc = (
                         session.query(Subcollection)
                         .filter_by(name=value)
+                        .order_by(Subcollection.id)
                         .first()
                     )
                     if sc is not None:

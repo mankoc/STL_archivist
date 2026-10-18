@@ -132,28 +132,31 @@ pub const CELL_FIELDS: &[&str] = &[
     "release", "scale", "presupports", "to_print",
 ];
 
-/// The model columns cell edits touch, as loaded and as edited.
+/// The editable model columns, as loaded and as edited.
 #[derive(Debug, Clone, PartialEq)]
-struct Row {
-    title: Option<String>,
-    creator: Option<String>,
-    source: Option<String>,
-    release_year: Option<i64>,
-    release_month: Option<i64>,
-    sequence: Option<i64>,
-    presupports: Option<String>,
-    to_print: bool,
-    sculptor_id: Option<i64>,
-    collection_id: Option<i64>,
-    subcollection_id: Option<i64>,
-    category_id: Option<i64>,
-    release_id: Option<i64>,
+pub struct Row {
+    pub title: Option<String>,
+    pub creator: Option<String>,
+    pub source: Option<String>,
+    pub release_year: Option<i64>,
+    pub release_month: Option<i64>,
+    pub sequence: Option<i64>,
+    pub presupports: Option<String>,
+    pub to_print: bool,
+    pub sculptor_id: Option<i64>,
+    pub collection_id: Option<i64>,
+    pub subcollection_id: Option<i64>,
+    pub category_id: Option<i64>,
+    pub release_id: Option<i64>,
+    pub url: Option<String>,
+    pub description: Option<String>,
 }
 
-fn load_row(tx: &Transaction, model_id: i64) -> Result<Option<(Row, Option<String>)>> {
+/// The model's editable columns and its archive path.
+pub(crate) fn load_row(tx: &rusqlite::Connection, model_id: i64) -> Result<Option<(Row, Option<String>)>> {
     tx.query_row(
         "SELECT title, creator, source, release_year, release_month, sequence, presupports, to_print, \
-         sculptor_id, collection_id, subcollection_id, category_id, release_id, archive_path \
+         sculptor_id, collection_id, subcollection_id, category_id, release_id, archive_path, url, description \
          FROM models WHERE id = ?1",
         [model_id],
         |r| {
@@ -172,6 +175,8 @@ fn load_row(tx: &Transaction, model_id: i64) -> Result<Option<(Row, Option<Strin
                     subcollection_id: r.get(10)?,
                     category_id: r.get(11)?,
                     release_id: r.get(12)?,
+                    url: r.get(14)?,
+                    description: r.get(15)?,
                 },
                 r.get(13)?,
             ))
@@ -180,7 +185,8 @@ fn load_row(tx: &Transaction, model_id: i64) -> Result<Option<(Row, Option<Strin
     .optional()
 }
 
-fn store_row(tx: &Transaction, model_id: i64, old: &Row, new: &Row) -> Result<()> {
+/// Write the columns that differ (and `updated_at`, only if any does).
+pub(crate) fn store_row(tx: &Transaction, model_id: i64, old: &Row, new: &Row) -> Result<()> {
     let mut sets: Vec<&str> = Vec::new();
     let mut vals: Vec<Value> = Vec::new();
     macro_rules! diff {
@@ -206,6 +212,8 @@ fn store_row(tx: &Transaction, model_id: i64, old: &Row, new: &Row) -> Result<()
     diff!(subcollection_id, "subcollection_id", int);
     diff!(category_id, "category_id", int);
     diff!(release_id, "release_id", int);
+    diff!(url, "url", text);
+    diff!(description, "description", text);
     if sets.is_empty() {
         return Ok(());
     }
@@ -217,7 +225,7 @@ fn store_row(tx: &Transaction, model_id: i64, old: &Row, new: &Row) -> Result<()
 }
 
 /// `parse_release_date` for typed input; non-ASCII digits are left to Python.
-fn release_date(value: &str) -> std::result::Result<(Option<i64>, Option<i64>), EditError> {
+pub(crate) fn release_date(value: &str) -> std::result::Result<(Option<i64>, Option<i64>), EditError> {
     if value.chars().any(|c| c.is_numeric() && !c.is_ascii_digit()) {
         return Err(EditError::Unsupported("date with non-ASCII digits".into()));
     }
@@ -226,7 +234,7 @@ fn release_date(value: &str) -> std::result::Result<(Option<i64>, Option<i64>), 
 
 /// Python's `int(value)` for a stripped string: sign, ASCII digits, single
 /// underscores between digits. `Ok(None)` where `int()` raises `ValueError`.
-fn py_int(value: &str) -> std::result::Result<Option<i64>, EditError> {
+pub(crate) fn py_int(value: &str) -> std::result::Result<Option<i64>, EditError> {
     if value.chars().any(|c| c.is_numeric() && !c.is_ascii_digit()) {
         return Err(EditError::Unsupported("number with non-ASCII digits".into()));
     }
@@ -242,10 +250,26 @@ fn py_int(value: &str) -> std::result::Result<Option<i64>, EditError> {
     value.replace('_', "").parse::<i64>().map(Some).map_err(|_| EditError::Unsupported("integer out of range".into()))
 }
 
-/// `assign_tags(..., replace=True)`.
-fn assign_tags(tx: &Transaction, model_id: i64, names: &[String]) -> Result<()> {
-    tx.execute("DELETE FROM model_tags WHERE model_id = ?1", [model_id])?;
-    let mut seen = std::collections::HashSet::new();
+/// Names of the model's links (`tags` or `scales`), lowercased.
+fn linked_names_lower(tx: &Transaction, model_id: i64, tags: bool) -> Result<std::collections::HashSet<String>> {
+    let sql = if tags {
+        "SELECT tags.name FROM model_tags JOIN tags ON tags.id = model_tags.tag_id WHERE model_tags.model_id = ?1"
+    } else {
+        "SELECT scales.name FROM model_scales JOIN scales ON scales.id = model_scales.scale_id \
+         WHERE model_scales.model_id = ?1"
+    };
+    let mut st = tx.prepare(sql)?;
+    let names: Vec<String> = st.query_map([model_id], |r| r.get(0))?.collect::<Result<_>>()?;
+    Ok(names.into_iter().map(|n| n.to_lowercase()).collect())
+}
+
+/// `editing.assign_tags`: names stripped, lowercased, de-duplicated; with
+/// `replace` the model's tags are cleared first, otherwise they are kept.
+pub(crate) fn assign_tags_ext(tx: &Transaction, model_id: i64, names: &[String], replace: bool) -> Result<()> {
+    if replace {
+        tx.execute("DELETE FROM model_tags WHERE model_id = ?1", [model_id])?;
+    }
+    let mut seen = linked_names_lower(tx, model_id, true)?;
     for raw in names {
         let name = py_strip(raw).to_lowercase();
         if name.is_empty() || !seen.insert(name.clone()) {
@@ -257,11 +281,13 @@ fn assign_tags(tx: &Transaction, model_id: i64, names: &[String]) -> Result<()> 
     Ok(())
 }
 
-/// `assign_scales(..., replace=True)`: de-duplicated case-insensitively, rows
-/// keep the casing they were first created with.
-fn assign_scales(tx: &Transaction, model_id: i64, names: &[String]) -> Result<()> {
-    tx.execute("DELETE FROM model_scales WHERE model_id = ?1", [model_id])?;
-    let mut seen = std::collections::HashSet::new();
+/// `editing.assign_scales`: de-duplicated case-insensitively, rows keep the
+/// casing they were first created with; `replace` as for tags.
+pub(crate) fn assign_scales_ext(tx: &Transaction, model_id: i64, names: &[String], replace: bool) -> Result<()> {
+    if replace {
+        tx.execute("DELETE FROM model_scales WHERE model_id = ?1", [model_id])?;
+    }
+    let mut seen = linked_names_lower(tx, model_id, false)?;
     for raw in names {
         let name = py_strip(raw);
         if name.is_empty() || !seen.insert(name.to_lowercase()) {
@@ -286,48 +312,13 @@ pub fn apply_cell_edit(tx: &Transaction, model_id: i64, field: &str, text: Optio
         "creator" => new.creator = value,
         "source" => new.source = value,
         "date" => (new.release_year, new.release_month) = release_date(value.as_deref().unwrap_or(""))?,
-        "tags" => assign_tags(tx, model_id, &split_list(value.as_deref()))?,
-        "scale" => assign_scales(tx, model_id, &split_list(value.as_deref()))?,
+        "tags" => assign_tags_ext(tx, model_id, &split_list(value.as_deref()), true)?,
+        "scale" => assign_scales_ext(tx, model_id, &split_list(value.as_deref()), true)?,
         "sculptor" => new.sculptor_id = value.map(|n| lookup(tx, "sculptors", &n)).transpose()?,
         "category" => new.category_id = value.map(|n| lookup(tx, "categories", &n)).transpose()?,
         "release" => new.release_id = value.map(|n| lookup(tx, "releases", &n)).transpose()?,
-        "collection" => match value {
-            None => {
-                new.collection_id = None;
-                new.subcollection_id = None;
-            }
-            Some(n) => {
-                let col = lookup(tx, "collections", &n)?;
-                new.collection_id = Some(col);
-                if let Some(sub) = old.subcollection_id {
-                    let parent: Option<i64> = tx
-                        .query_row("SELECT collection_id FROM subcollections WHERE id = ?1", [sub], |r| r.get(0))
-                        .optional()?;
-                    if parent != Some(col) {
-                        new.subcollection_id = None;
-                    }
-                }
-            }
-        },
-        "subcollection" => match value {
-            None => new.subcollection_id = None,
-            Some(n) => match old.collection_id {
-                Some(col) => new.subcollection_id = Some(subcollection(tx, &n, col)?),
-                None => {
-                    let found: Option<(i64, i64)> = tx
-                        .query_row(
-                            "SELECT id, collection_id FROM subcollections WHERE name = ?1 ORDER BY id LIMIT 1",
-                            [&n],
-                            |r| Ok((r.get(0)?, r.get(1)?)),
-                        )
-                        .optional()?;
-                    if let Some((sub, col)) = found {
-                        new.collection_id = Some(col);
-                        new.subcollection_id = Some(sub);
-                    }
-                }
-            },
-        },
+        "collection" => set_collection(tx, &mut new, value.as_deref())?,
+        "subcollection" => set_subcollection(tx, &mut new, value.as_deref())?,
         "sequence" => match value {
             None => new.sequence = None,
             Some(v) => {
@@ -342,6 +333,53 @@ pub fn apply_cell_edit(tx: &Transaction, model_id: i64, field: &str, text: Optio
     }
     store_row(tx, model_id, &old, &new)?;
     Ok(true)
+}
+
+/// `editing.set_collection` on a row: a subcollection of another collection is cleared.
+pub(crate) fn set_collection(tx: &Transaction, row: &mut Row, name: Option<&str>) -> Result<()> {
+    match name {
+        None => {
+            row.collection_id = None;
+            row.subcollection_id = None;
+        }
+        Some(n) => {
+            let col = lookup(tx, "collections", n)?;
+            row.collection_id = Some(col);
+            if let Some(sub) = row.subcollection_id {
+                let parent: Option<i64> =
+                    tx.query_row("SELECT collection_id FROM subcollections WHERE id = ?1", [sub], |r| r.get(0)).optional()?;
+                if parent != Some(col) {
+                    row.subcollection_id = None;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `editing.set_subcollection` on a row: created under the row's collection, or,
+/// without one, an existing subcollection of that name and its collection.
+pub(crate) fn set_subcollection(tx: &Transaction, row: &mut Row, name: Option<&str>) -> Result<()> {
+    match name {
+        None => row.subcollection_id = None,
+        Some(n) => match row.collection_id {
+            Some(col) => row.subcollection_id = Some(subcollection(tx, n, col)?),
+            None => {
+                let found: Option<(i64, i64)> = tx
+                    .query_row(
+                        "SELECT id, collection_id FROM subcollections WHERE name = ?1 ORDER BY id LIMIT 1",
+                        [n],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )
+                    .optional()?;
+                if let Some((sub, col)) = found {
+                    row.collection_id = Some(col);
+                    row.subcollection_id = Some(sub);
+                }
+            }
+        },
+    }
+    Ok(())
 }
 
 /// A batch of `(model_id, field, text)` edits in order (the browser's
