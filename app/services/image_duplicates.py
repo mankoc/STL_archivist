@@ -76,10 +76,15 @@ class ScanReport:
 
 # ── Loading ──────────────────────────────────────────────────────────────────
 
-def _present_images(session, extra_col: str = "") -> list[tuple]:
-    sql = (f"SELECT i.id, i.model_id{', ' + extra_col if extra_col else ''} "
+def _present_images(session) -> list[tuple]:
+    """``(image id, model id, dhash)`` by image id; *session* ``None`` uses
+    ``content_duplicates`` (native when available)."""
+    if session is None:
+        from app.services.content_duplicates import present_images
+        return present_images()
+    sql = ("SELECT i.id, i.model_id, i.dhash "
            "FROM images i JOIN models m ON m.id = i.model_id "
-           "WHERE i.thumbnail_path IS NOT NULL AND m.is_missing IS NOT 1")
+           "WHERE i.thumbnail_path IS NOT NULL AND m.is_missing IS NOT 1 ORDER BY i.id")
     return session.connection().exec_driver_sql(sql).all()
 
 
@@ -98,7 +103,7 @@ def load_dhash_items(session, log: Log = _noop, progress: Progress = _noop,
     )
     from app.utils.thumbnailer import get_thumbnail_bytes_many
 
-    rows = _present_images(session, "i.dhash")
+    rows = _present_images(session)
     good = [(mid, h) for _iid, mid, h in rows if is_current_dhash(h)]
     todo = [(iid, mid) for iid, mid, h in rows if not is_current_dhash(h)]
     if todo and not dhash_available():
@@ -411,8 +416,13 @@ def _results(session, ma, mb, pairs, best, img_model, higher_is_better: bool):
     truncated = len(order) > MAX_RESULTS
     order = order[:MAX_RESULTS]
     imgs = dict(zip(*np.unique(img_model, return_counts=True)))
-    info = {mid: (title, path, size) for mid, title, path, size in session.connection()
-            .exec_driver_sql("SELECT id, title, archive_path, archive_size FROM models")}
+    if session is None:
+        from app.services.content_duplicates import model_info
+        model_rows = model_info()
+    else:
+        model_rows = session.connection().exec_driver_sql(
+            "SELECT id, title, archive_path, archive_size FROM models")
+    info = {mid: (title, path, size) for mid, title, path, size in model_rows}
     rows = []
     for k in order.tolist():
         a, b = int(ma[k]), int(mb[k])
@@ -435,7 +445,10 @@ def find_dhash_duplicates(session, max_dist: int,
                           max_models: int = DEFAULT_MAX_MODELS_PER_IMAGE,
                           progress: Progress = _noop, log: Log = _noop,
                           should_stop: ShouldStop = _never) -> ScanReport:
-    """Archive pairs whose thumbnails' dHashes differ in at most *max_dist* bits."""
+    """Archive pairs whose thumbnails' dHashes differ in at most *max_dist* bits.
+
+    *session* may be ``None``: the reads then run natively when available.
+    """
     t0 = time.perf_counter()
     report = ScanReport()
     log("Loading image hashes…")
@@ -461,7 +474,10 @@ def find_embedding_duplicates(session, threshold: float,
                               max_models: int = DEFAULT_MAX_MODELS_PER_IMAGE,
                               progress: Progress = _noop, log: Log = _noop,
                               should_stop: ShouldStop = _never) -> ScanReport:
-    """Archive pairs whose thumbnails' CLIP embeddings have cosine similarity >= *threshold*."""
+    """Archive pairs whose thumbnails' CLIP embeddings have cosine similarity >= *threshold*.
+
+    *session* may be ``None``: the reads then run natively when available.
+    """
     t0 = time.perf_counter()
     report = ScanReport()
     log("Loading image embeddings…")

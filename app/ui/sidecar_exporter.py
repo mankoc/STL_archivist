@@ -35,7 +35,6 @@ class _ExportRunnable(QRunnable):
     def run(self) -> None:
         from app.core.settings import get_metadata_thumbnails_enabled
         from app.crawler.folder_metadata import export_folder_metadata
-        from app.database.db import session_scope
         from app.utils.thumbnailer import get_thumbnail_base_dir
 
         thumb_base = get_thumbnail_base_dir()
@@ -44,9 +43,8 @@ class _ExportRunnable(QRunnable):
         include_thumbs = get_metadata_thumbnails_enabled()
         for folder in self._folders:
             try:
-                with session_scope() as session:
-                    export_folder_metadata(folder, session, thumb_base,
-                                           include_thumbnails=include_thumbs)
+                export_folder_metadata(folder, None, thumb_base,
+                                       include_thumbnails=include_thumbs)
             except Exception:
                 # Best-effort, as before: a failed sidecar never blocks an edit.
                 logger.warning("Sidecar export failed for %s", folder, exc_info=True)

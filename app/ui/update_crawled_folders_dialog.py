@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
 
 from app.crawler.crawler import CrawlerWorker
 from app.database.db import session_scope
-from app.database.models import CrawledFolder, STLModel
+from app.database.models import STLModel
 from app.services import moves
 from app.utils.thumbnailer import delete_thumbnails
 
@@ -409,13 +409,8 @@ class UpdateCrawledFoldersDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _load_folders(self) -> None:
-        with session_scope() as session:
-            rows = (
-                session.query(CrawledFolder)
-                .order_by(CrawledFolder.path)
-                .all()
-            )
-            self._all_folders = [(r.path, r.pattern) for r in rows]
+        from app.services.content_duplicates import crawled_folders
+        self._all_folders = crawled_folders()
 
         self._folder_list.clear()
         for path, _pattern in self._all_folders:
@@ -467,10 +462,8 @@ class UpdateCrawledFoldersDialog(QDialog):
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-        with session_scope() as session:
-            record = session.query(CrawledFolder).filter_by(path=path).first()
-            if record:
-                session.delete(record)
+        from app.services.content_duplicates import remove_crawled_folder
+        remove_crawled_folder(path)
         del self._all_folders[row]
         self._folder_list.takeItem(row)
         self._refresh_status_label()

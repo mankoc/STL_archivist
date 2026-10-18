@@ -514,6 +514,24 @@ by name.
 Moved to 4g, because they are crawler work: the Update Crawled Folders reconciliation, the
 crawler tab, and the browser's rescan and thumbnail jobs.
 
+**4f-4b: done 2026-10-18 (content duplicates, folder lists).** `services/content_duplicates.py`
+is backed natively by `storage::duplicates`. It covers:
+- the STL file-list overlap scan of Find Duplicate Archives (content), cancellable through
+  `run_job`; ties are ordered by ids;
+- the result popups' thumbnail ids;
+- the image scans' reads (`image_duplicates` with `session=None`; `_present_images` is now
+  in image id order);
+- the crawled-folder list and its remove;
+- the sidecar dialogs' folder list.
+
+`export_folder_metadata` accepts `session=None`, so the sidecar dialog and
+`sidecar_exporter` open no session. The export itself stays in Python and is ported with
+the sidecars in 4g.
+- `tests/golden/test_content_duplicates_golden.py` covers the reads, the scan at five
+  thresholds, the dHash scan through both paths, and stopping.
+- On the reference library every result is identical. The STL scan takes 1.3 s against
+  2.9 s in Python.
+
 ### Phase 5: Server (medium)
 
 `stl-server` on axum, the product's centre from here on:

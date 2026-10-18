@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Rust migration, step 4f-4b: Find Duplicate Archives (content) and the folder lists run natively** (on Windows). The STL file-list comparison now takes 1.3 s instead of 2.9 s on a 60,000-model library, and pairs with equal similarity are listed in a consistent order. The image comparison's reads, the crawled-folder list and the sidecar dialogs' folder list also run natively.
+
 - **Rust migration, step 4f-4a: the viewer dialogs read natively** (on Windows). This covers Archive Contents and its compare view, Image Browsing, the image grid, Find Duplicate Archives and Find by Image. Results are identical to the Python code (golden-tested). On a 60,000-model library, Find Duplicate Archives loads its data 38 times faster.
 
 - **Rust migration, step 4f-3: the browser panel, statistics and the sort dialog read and write natively** (on Windows). This covers the info panel, thumbnails, dropped images, Delete from DB, Add Tag, the edit-cell lookup lists, Statistics, Column Distribution and Sort Files. Results are identical to the Python code (golden-tested). Statistics rankings now order models with equal counts consistently.

@@ -1045,6 +1045,68 @@ impl PyLibraryDb {
         self.with(py, stl_core::storage::views::image_hash_rows)
     }
 
+    // ── content duplicates and folder lists (services.content_duplicates) ─────
+
+    fn dup_present_images(&self, py: Python<'_>) -> PyResult<Vec<(i64, i64, Option<String>)>> {
+        self.with(py, stl_core::storage::duplicates::present_images)
+    }
+
+    fn dup_model_info<'py>(&self, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyAny>>> {
+        let rows = self.with(py, stl_core::storage::duplicates::model_info)?;
+        rows.iter()
+            .map(|(id, t, p, size)| Ok((id, t, p, sql_value_to_py(py, size)?).into_pyobject(py)?.into_any()))
+            .collect()
+    }
+
+    fn dup_thumbnail_image_ids(&self, py: Python<'_>, model_id: i64, limit: i64) -> PyResult<Vec<i64>> {
+        self.with(py, |c| stl_core::storage::duplicates::thumbnail_image_ids(c, model_id, limit))
+    }
+
+    fn dup_crawled_folders(&self, py: Python<'_>) -> PyResult<Vec<(String, Option<String>)>> {
+        self.with(py, stl_core::storage::duplicates::crawled_folders)
+    }
+
+    fn dup_remove_crawled_folder(&self, py: Python<'_>, path: String) -> PyResult<usize> {
+        self.with_tx(py, |tx| stl_core::storage::duplicates::remove_crawled_folder(tx, &path), db_err)
+    }
+
+    fn dup_all_archive_paths(&self, py: Python<'_>) -> PyResult<Vec<String>> {
+        self.with(py, stl_core::storage::duplicates::all_archive_paths)
+    }
+
+    /// `(id_a, id_b, overlap, total_a, total_b, sim, title_a, path_a, title_b,
+    /// path_b)` tuples; raises `Stopped` when `should_stop` asks.
+    #[allow(clippy::type_complexity)]
+    #[pyo3(signature = (threshold, progress=None, should_stop=None))]
+    fn dup_stl_content_pairs<'py>(
+        &self,
+        py: Python<'py>,
+        threshold: f64,
+        progress: Option<Bound<'py, PyAny>>,
+        should_stop: Option<Bound<'py, PyAny>>,
+    ) -> PyResult<
+        Vec<(i64, i64, i64, i64, i64, f64, Option<String>, Option<String>, Option<String>, Option<String>)>,
+    > {
+        use stl_core::storage::duplicates;
+        let conn = self.pool.lock().unwrap_or_else(|e| e.into_inner()).pop();
+        let conn = match conn {
+            Some(c) => c,
+            None => storage::open(&self.path).map_err(db_err)?,
+        };
+        let (found, conn) = run_job(py, progress.as_ref(), should_stop.as_ref(), move |ctl| {
+            let found = duplicates::stl_content_pairs(&conn, threshold, ctl);
+            Ok((found, conn))
+        })?;
+        self.pool.lock().unwrap_or_else(|e| e.into_inner()).push(conn);
+        let Some(pairs) = found.map_err(db_err)? else {
+            return Err(Stopped::new_err("stopped"));
+        };
+        Ok(pairs
+            .into_iter()
+            .map(|p| (p.id_a, p.id_b, p.overlap, p.total_a, p.total_b, p.sim, p.title_a, p.path_a, p.title_b, p.path_b))
+            .collect())
+    }
+
     /// Close the pooled connections (they reopen on the next call).
     fn close(&self, py: Python<'_>) {
         py.detach(|| self.pool.lock().unwrap_or_else(|e| e.into_inner()).clear());
