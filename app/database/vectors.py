@@ -232,7 +232,15 @@ def read_all(session):
     sqlite-vec's chunk shadow tables directly (~0.5 s).  That layout is
     internal, so the fast path runs only for checked versions and only if the
     rows it decodes match ``count(*)``; otherwise it uses the public scan.
+    The native core does the same (``storage::vectors::read_all``) when it can.
     """
+    from app.database import native_db
+    lib = native_db.library() if native_db.session_clean(session) else None
+    if lib is not None:
+        import numpy as np
+        ids, mat = lib.vectors_read_all(EMBED_DIM)
+        return (np.frombuffer(ids, dtype=np.int64).copy(),
+                np.frombuffer(mat, dtype=np.float32).reshape(-1, EMBED_DIM))
     try:
         out = _read_chunks(session)
         if out is not None:
