@@ -20,8 +20,6 @@ from app.utils.material_icons import lookup_icon
 from app.ui.config_dialog import get_max_thumbnails
 from app.ui.settings_loader import build_crawler_config
 from app.utils.path_pattern import parse_path, PATTERN_HELP, ATTR_LABEL
-from app.database.db import session_scope
-from app.database.models import CrawledFolder
 
 _SAVED_PATTERNS_KEY      = "crawler/saved_patterns"
 _LAST_PATTERN_KEY        = "crawler/last_pattern"
@@ -383,13 +381,8 @@ class CrawlerTab(QWidget):
 
     def _load_folders(self) -> None:
         try:
-            with session_scope() as session:
-                rows = (
-                    session.query(CrawledFolder)
-                    .order_by(CrawledFolder.path)
-                    .all()
-                )
-                self._all_folders = [(r.path, r.pattern) for r in rows]
+            from app.services.content_duplicates import crawled_folders
+            self._all_folders = crawled_folders()
         except Exception:
             self._all_folders = []
 
@@ -461,10 +454,8 @@ class CrawlerTab(QWidget):
             QMessageBox.information(self, self.tr("Already Listed"), f"{path}\nis already in the list.")
             return
         try:
-            with session_scope() as session:
-                existing = session.query(CrawledFolder).filter_by(path=path).first()
-                if not existing:
-                    session.add(CrawledFolder(path=path, pattern=None))
+            from app.services.content_duplicates import add_crawled_folder
+            add_crawled_folder(path)
         except Exception:
             pass
         self._all_folders.append((path, None))
@@ -488,10 +479,8 @@ class CrawlerTab(QWidget):
         if reply != QMessageBox.StandardButton.Yes:
             return
         try:
-            with session_scope() as session:
-                record = session.query(CrawledFolder).filter_by(path=path).first()
-                if record:
-                    session.delete(record)
+            from app.services.content_duplicates import remove_crawled_folder
+            remove_crawled_folder(path)
         except Exception:
             pass
         del self._all_folders[row]

@@ -12,7 +12,6 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar, QPushButton, QSizePolicy,
 )
 
-from app.database.db import session_scope
 
 
 class _ImageDropRunnable(QRunnable):
@@ -70,40 +69,15 @@ class _CellEditRunnable(QRunnable):
         self.setAutoDelete(True)
 
     def run(self):
-        from pathlib import Path
-        from app.database import native_db
-        from app.database.models import STLModel
-        from app.services.editing import apply_cell_edit
-        folders: set[str] = set()
-        lib = native_db.library()
-        if lib is not None:
-            try:
-                paths = lib.apply_cell_edits(
-                    [(int(mid), field, text) for mid, field, text in self._edits])
-                self.signals.done.emit(sorted({str(Path(p).parent) for p in paths}), "")
-                return
-            except ValueError:
-                pass   # input the native port leaves to Python (nothing was written)
-            except Exception as exc:
-                import logging
-                logging.getLogger(__name__).error("Saving cell edits failed", exc_info=True)
-                self.signals.done.emit([], str(exc))
-                return
+        from app.services.editing import apply_cell_edits
         try:
-            with session_scope() as session:
-                for model_id, field, text in self._edits:
-                    stl = session.get(STLModel, model_id)
-                    if stl is None:
-                        continue
-                    apply_cell_edit(session, stl, field, text)
-                    if stl.archive_path:
-                        folders.add(str(Path(stl.archive_path).parent))
+            folders = apply_cell_edits(self._edits)
         except Exception as exc:
             import logging
             logging.getLogger(__name__).error("Saving cell edits failed", exc_info=True)
             self.signals.done.emit([], str(exc))
             return
-        self.signals.done.emit(sorted(folders), "")
+        self.signals.done.emit(folders, "")
 
 
 class _WarningDetailRunnable(QRunnable):

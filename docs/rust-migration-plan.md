@@ -548,6 +548,17 @@ Two bug fixes, in both implementations:
 
 `tests/golden/test_maintenance_dialog_golden.py` covers every function, including vectors.
 
+**4f-4d: done 2026-10-18 (crawler tab folder list, cell edits). 4f is complete.**
+- The crawler tab's folder list, add and remove go through `content_duplicates`
+  (`add_crawled_folder` is native too).
+- The browser's cell-edit runnable calls `editing.apply_cell_edits`, which holds the
+  native path and the Python fallback.
+
+ORM use left in `app/ui` is crawler work only, so it moves to 4g with the crawler:
+- `browser_jobs.RescanWorker` and `ThumbnailGeneratorWorker`;
+- the browser's re-crawl preview and apply;
+- the Update Crawled Folders cross-folder reconciliation and deferred deletions.
+
 ### Phase 5: Server (medium)
 
 `stl-server` on axum, the product's centre from here on:

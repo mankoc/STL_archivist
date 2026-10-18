@@ -1066,6 +1066,10 @@ impl PyLibraryDb {
         self.with(py, stl_core::storage::duplicates::crawled_folders)
     }
 
+    fn dup_add_crawled_folder(&self, py: Python<'_>, path: String) -> PyResult<bool> {
+        self.with_tx(py, |tx| stl_core::storage::duplicates::add_crawled_folder(tx, &path), db_err)
+    }
+
     fn dup_remove_crawled_folder(&self, py: Python<'_>, path: String) -> PyResult<usize> {
         self.with_tx(py, |tx| stl_core::storage::duplicates::remove_crawled_folder(tx, &path), db_err)
     }
