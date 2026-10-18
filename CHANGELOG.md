@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-- **Fix: the thumbnail store no longer grows by 2 GB every time it is opened.** On Windows the store's `data.mdb` takes the size of its memory map, and the map was sized from that file plus 2 GB of headroom, so each start of the application (and each test run) enlarged it. The map is now sized from the space actually in use. The space is allocated sparsely, so disk usage did not grow with it. An enlarged file keeps its size until *Database Maintenance → Compact thumbnail store* rewrites it.
+- **Rust migration, step 4g-3: METADATA.7z sidecars are written and read natively** (on Windows). Writing is about 9 times faster, because thumbnails are stored instead of being recompressed. Records restored from a sidecar now get their folder set, so folder views show them at once.
+
+- **Fix: the thumbnail store no longer grows by 2 GB every time it is opened.** On Windows the store's `data.mdb` takes the size of its memory map, and the map was sized from that file plus 2 GB of headroom, so each start of the application (and each test run) enlarged it. The map is now sized from the space actually in use. The space is allocated sparsely, so disk usage did not grow with it. An enlarged file keeps its size until *Database Maintenance → Compact Thumbnail Store* rewrites it.
 
 - **Rust migration, step 4g-2: model metadata is inferred natively** (title, creator, source, release date and URL from the path, `.url` files and `info.json`). Results are identical to the Python code on a 60,000-archive library.
 

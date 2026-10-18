@@ -140,7 +140,9 @@ Handles all archive I/O and metadata extraction.
 - **`rules.py`** — stateless rule functions: `detect_presupport()`, `detect_warnings()`,
   `detect_scale()` applied to archive member lists.
 - **`folder_metadata.py`** — reads and writes `METADATA.7z` sidecars (per-folder snapshots that
-  allow fast restore on a new machine without re-crawling every archive).
+  allow fast restore on a new machine without re-crawling every archive). With `session=None`
+  both directions run natively (`storage::sidecar`, through `thumbnailer.native_store()`);
+  change both implementations together.
 - **`crawler.py`** — `CrawlerWorker(QThread)` orchestrates the four-phase pipeline:
   1. Hash (parallel) → 2. DB query (batch) → 3. Extract (parallel) → 4. Upsert (serial)
 

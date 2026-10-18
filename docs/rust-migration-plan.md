@@ -614,6 +614,39 @@ CJK years, UNC and relative roots), and `.url` placement and `info.json` variant
 files. Gate on the reference library: path inference for all 60,593 archives and full
 extraction of 2,000 sampled zip / 7z archives, with no differences and no fallbacks.
 
+**4g-3: done 2026-10-18 (METADATA.7z sidecars).** `storage::sidecar` ports
+`export_folder_metadata` and `import_folder_metadata`. `folder_metadata` uses them when
+called with `session=None`, as the crawler, the sidecar dialog and `sidecar_exporter` now
+call it.
+
+The export:
+- writes the same `metadata.json`, in `json.dumps(indent=2)` layout, dict order and
+  `repr(float)` (`pyjson.rs`), and the same thumbnail members;
+- reads thumbnails from the native `ThumbStore` that the Python thumbnailer holds
+  (`thumbnailer.native_store()`), keeping one LMDB owner per process;
+- stores thumbnails uncompressed (7z COPY; JPEGs gain nothing from LZMA2), which made it
+  8.7x faster than py7zr on reference data;
+- runs in one read connection.
+
+The import:
+- plans every record before writing, and refuses anything where Python would raise,
+  store a non-text value or read the JSON differently;
+- inserts the records in one transaction;
+- writes the thumbnails in one LMDB transaction.
+
+Behaviour changes, in both implementations:
+- models, images, tags and scales in id order, and STL files by name;
+- imported records get `archive_folder` (they had none).
+
+`tests/golden/test_sidecar_golden.py` compares:
+- exports, with and without thumbnails;
+- imports of Python-written and native-written sidecars into two empty databases,
+  including the stored thumbnails;
+- 32 malformed sidecars (identical results, or a native refusal that writes nothing).
+
+Gate: 30 reference folders (301 models, 1,248 real thumbnails, read through a read-only copy
+of the live store) export identically.
+
 ### Phase 5: Server (medium)
 
 `stl-server` on axum, the product's centre from here on:

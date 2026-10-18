@@ -201,19 +201,18 @@ class CrawlerWorker(QThread):
         for p in archives:
             folder_archives[p.parent].append(p)
 
-        with session_scope() as session:
-            for folder in folder_archives:
-                if self._stop_requested:
-                    break
-                metadata_path = folder / "METADATA.7z"
-                if metadata_path.exists():
-                    logger.info("Pre-crawl import from %s", metadata_path)
-                    imported = import_folder_metadata(folder, session, thumb_base)
-                    if imported:
-                        msg = (f"Imported {len(imported)} record(s) "
-                               f"from METADATA.7z in {folder.name}")
-                        self.log.emit(msg)
-                        logger.info(msg)
+        for folder in folder_archives:
+            if self._stop_requested:
+                break
+            metadata_path = folder / "METADATA.7z"
+            if metadata_path.exists():
+                logger.info("Pre-crawl import from %s", metadata_path)
+                imported = import_folder_metadata(folder, None, thumb_base)
+                if imported:
+                    msg = (f"Imported {len(imported)} record(s) "
+                           f"from METADATA.7z in {folder.name}")
+                    self.log.emit(msg)
+                    logger.info(msg)
 
     def _phase_hash(self, batch: list[Path]) -> dict[Path, str]:
         """Phase 1: parallel CRC-based fingerprinting of each archive."""
@@ -597,17 +596,16 @@ class CrawlerWorker(QThread):
         self.log.emit(f"Updating METADATA.7z in {len(modified_folders)} folder(s)…")
         logger.info("Post-crawl: updating METADATA.7z in %d folder(s) (thumbnails=%s)",
                     len(modified_folders), include_thumbs)
-        with session_scope() as session:
-            for folder in sorted(modified_folders):
-                if self._stop_requested:
-                    break
-                try:
-                    export_folder_metadata(folder, session, thumb_base,
-                                           include_thumbnails=include_thumbs)
-                    self.log.emit(f"  Updated METADATA.7z in {folder.name}")
-                except Exception as exc:
-                    logger.error("Failed to update METADATA.7z in %s: %s",
-                                 folder, exc, exc_info=True)
+        for folder in sorted(modified_folders):
+            if self._stop_requested:
+                break
+            try:
+                export_folder_metadata(folder, None, thumb_base,
+                                       include_thumbnails=include_thumbs)
+                self.log.emit(f"  Updated METADATA.7z in {folder.name}")
+            except Exception as exc:
+                logger.error("Failed to update METADATA.7z in %s: %s",
+                             folder, exc, exc_info=True)
 
     # ------------------------------------------------------------------
     # Private helpers

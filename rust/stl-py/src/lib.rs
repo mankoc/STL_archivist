@@ -263,6 +263,28 @@ impl PyLibraryDb {
 }
 
 impl PyLibraryDb {
+    /// [`Self::with`] for functions with their own error type.
+    fn with_map<T: Send, E: Send>(
+        &self,
+        py: Python<'_>,
+        f: impl FnOnce(&rusqlite::Connection) -> Result<T, E> + Send,
+        err: fn(E) -> PyErr,
+    ) -> PyResult<T> {
+        py.detach(|| {
+            let conn = self.pool.lock().unwrap_or_else(|e| e.into_inner()).pop();
+            let conn = match conn {
+                Some(c) => c,
+                None => storage::open(&self.path).map_err(db_err)?,
+            };
+            let out = f(&conn).map_err(err);
+            let mut pool = self.pool.lock().unwrap_or_else(|e| e.into_inner());
+            if pool.len() < 8 {
+                pool.push(conn);
+            }
+            out
+        })
+    }
+
     /// Run `f` in one `BEGIN IMMEDIATE` transaction on a pooled connection;
     /// commits on `Ok`, rolls back on `Err`.
     fn with_tx<T: Send, E: Send>(
@@ -291,6 +313,16 @@ impl PyLibraryDb {
             }
             out
         })
+    }
+}
+
+fn sidecar_err(e: stl_core::storage::sidecar::SidecarError) -> PyErr {
+    use stl_core::storage::sidecar::SidecarError;
+    match e {
+        SidecarError::Db(e) => db_err(e),
+        SidecarError::Unsupported(m) => PyValueError::new_err(m),
+        SidecarError::Io(m) => pyo3::exceptions::PyOSError::new_err(m),
+        SidecarError::Store(m) => PyRuntimeError::new_err(m),
     }
 }
 
@@ -1153,6 +1185,51 @@ impl PyLibraryDb {
 
     fn maint_free_bytes(&self, py: Python<'_>) -> PyResult<i64> {
         self.with(py, stl_core::storage::maintenance::free_bytes)
+    }
+
+    // ── METADATA.7z sidecars (app.crawler.folder_metadata) ───────────────────
+
+    /// `export_folder_metadata` for `folder` (`str(Path)`): `False` when no record
+    /// lives there. Raises `OSError` when writing fails, `ValueError` for input
+    /// left to Python.
+    #[pyo3(signature = (folder, include_thumbnails, store=None))]
+    fn sidecar_export(
+        &self,
+        py: Python<'_>,
+        folder: String,
+        include_thumbnails: bool,
+        store: Option<Bound<'_, PyThumbStore>>,
+    ) -> PyResult<bool> {
+        let store = store.as_ref().map(|b| b.get());
+        self.with_map(
+            py,
+            |c| {
+                let guard = store.map(|s| s.inner.read().unwrap_or_else(|e| e.into_inner()));
+                let st = guard.as_ref().and_then(|g| g.as_ref());
+                if store.is_some() && st.is_none() {
+                    return Err(stl_core::storage::sidecar::SidecarError::Unsupported("thumbnail store is closed".into()));
+                }
+                stl_core::storage::sidecar::export(c, st, &folder, include_thumbnails)
+            },
+            sidecar_err,
+        )
+    }
+
+    /// `import_folder_metadata` for `folder`: the archive paths inserted, in one
+    /// transaction. Raises `ValueError` (nothing written) for input left to Python.
+    fn sidecar_import(&self, py: Python<'_>, folder: String, store: Bound<'_, PyThumbStore>) -> PyResult<Vec<String>> {
+        let store = store.get();
+        self.with_tx(
+            py,
+            |tx| {
+                let guard = store.inner.read().unwrap_or_else(|e| e.into_inner());
+                let Some(st) = guard.as_ref() else {
+                    return Err(stl_core::storage::sidecar::SidecarError::Unsupported("thumbnail store is closed".into()));
+                };
+                stl_core::storage::sidecar::import(tx, st, &folder)
+            },
+            sidecar_err,
+        )
     }
 
     /// Close the pooled connections (they reopen on the next call).
