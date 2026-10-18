@@ -208,6 +208,43 @@ fn model_pairs(
     Ok(py.detach(|| stl_core::image_pairs::model_pairs(n_items, &img_item, &img_model, &edges, perfect, higher_is_better, max_models)))
 }
 
+/// AI tagger text handling (`stl_core::ai_tagging`), for the golden tests:
+/// `clean_tags(raw, max_tags)`.
+#[pyfunction]
+fn ai_clean_tags(raw: &str, max_tags: usize) -> Vec<String> {
+    stl_core::ai_tagging::clean_tags(raw, max_tags)
+}
+
+/// `is_corrupted_output(text)`.
+#[pyfunction]
+fn ai_is_corrupted(text: &str) -> bool {
+    stl_core::ai_tagging::is_corrupted_output(text)
+}
+
+/// `(tags prompt, metadata prompt)` for the stems, archive path and hint pairs.
+#[pyfunction]
+fn ai_prompts(stems: Vec<String>, archive_path: &str, meta: Vec<(String, String)>) -> (String, String) {
+    (
+        stl_core::ai_tagging::build_tags_prompt(&stems, archive_path, &meta),
+        stl_core::ai_tagging::build_meta_prompt(archive_path, &meta),
+    )
+}
+
+/// `parse_meta` as `[(key, value)]`, and `normalize_meta` of it as
+/// `(title, creator, sculptor, collection, subcollection, scale, description, source, year)`.
+#[pyfunction]
+#[allow(clippy::type_complexity)]
+fn ai_parse_meta(
+    raw: &str,
+    archive_path: &str,
+    stems: Vec<String>,
+    files: Vec<String>,
+) -> (Vec<(String, String)>, (String, String, String, String, String, String, String, String, Option<i64>)) {
+    let meta = stl_core::ai_tagging::parse_meta(raw, archive_path, &stems, &files);
+    let f = stl_core::ai_tagging::normalize_meta(&meta);
+    (meta, (f.title, f.creator, f.sculptor, f.collection, f.subcollection, f.scale, f.description, f.source, f.year))
+}
+
 /// The CLIP input tensor of an image (`stl_core::clip::preprocess`): 3 x 224 x
 /// 224 float32, channel-major, as little-endian bytes. Raises `ValueError`
 /// for an image the native decoder cannot read.
@@ -2106,6 +2143,10 @@ fn stl_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(make_thumbnail, m)?)?;
     m.add_function(wrap_pyfunction!(clip_preprocess, m)?)?;
     m.add_function(wrap_pyfunction!(model_pairs, m)?)?;
+    m.add_function(wrap_pyfunction!(ai_clean_tags, m)?)?;
+    m.add_function(wrap_pyfunction!(ai_is_corrupted, m)?)?;
+    m.add_function(wrap_pyfunction!(ai_prompts, m)?)?;
+    m.add_function(wrap_pyfunction!(ai_parse_meta, m)?)?;
     m.add_function(wrap_pyfunction!(dhash, m)?)?;
     m.add_function(wrap_pyfunction!(dhash_many, m)?)?;
     m.add_class::<PyThumbStore>()?;

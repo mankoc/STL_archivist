@@ -10,6 +10,79 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/api/ai/commit/{id}": {
+      "post": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "Save a reviewed suggestion to a model.",
+        "operationId": "post_ai_commit_by_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiCommit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiSaved"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ai/status": {
+      "get": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "Whether the AI tagger can run, and with what.",
+        "operationId": "get_ai_status",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/auth/login": {
       "post": {
         "tags": [
@@ -2385,6 +2458,145 @@
           }
         }
       },
+      "AiCommit": {
+        "type": "object",
+        "required": [
+          "fields"
+        ],
+        "properties": {
+          "fields": {
+            "$ref": "#/components/schemas/AiFieldValues"
+          },
+          "overwrite": {
+            "type": "boolean",
+            "description": "Replace values already set (default: fill empty fields only). Tags are merged."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "AiFieldValues": {
+        "type": "object",
+        "description": "The metadata fields the tagger fills (`normalize_meta`).",
+        "properties": {
+          "collection": {
+            "type": "string"
+          },
+          "creator": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "scale": {
+            "type": "string"
+          },
+          "sculptor": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "description": "`patreon`, `kickstarter`, `myminifactory` or empty."
+          },
+          "subcollection": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AiSaved": {
+        "type": "object",
+        "required": [
+          "saved"
+        ],
+        "properties": {
+          "saved": {
+            "type": "boolean"
+          }
+        }
+      },
+      "AiStatus": {
+        "type": "object",
+        "description": "What the AI tagger can use.",
+        "required": [
+          "available",
+          "running",
+          "model",
+          "detail"
+        ],
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "detail": {
+            "type": "string",
+            "description": "Why it is not available, or where it comes from."
+          },
+          "model": {
+            "type": "string"
+          },
+          "running": {
+            "type": "boolean",
+            "description": "A started `llama-server` is running (always false with `url`)."
+          }
+        }
+      },
+      "AiSuggestion": {
+        "type": "object",
+        "description": "What the model suggests for one model.",
+        "required": [
+          "model_id",
+          "title",
+          "archive_path",
+          "image_ids",
+          "tags",
+          "fields"
+        ],
+        "properties": {
+          "archive_path": {
+            "type": "string"
+          },
+          "fields": {
+            "$ref": "#/components/schemas/AiFieldValues"
+          },
+          "image_ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "The images sent (their thumbnails), in order."
+          },
+          "model_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
       "AuthStatus": {
         "type": "object",
         "required": [
@@ -3793,6 +4005,68 @@
           },
           {
             "type": "object",
+            "description": "Ask the AI tagger for one model's tags and metadata; nothing is saved\n(save the reviewed result with `/api/ai/commit/{id}`).",
+            "required": [
+              "id",
+              "kind"
+            ],
+            "properties": {
+              "id": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "ignore_meta": {
+                "type": "boolean",
+                "description": "Leave the catalogued metadata out of the prompt."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "ai_suggest"
+                ]
+              },
+              "max_tags": {
+                "type": "integer",
+                "description": "At most this many tags (0: no limit).",
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Tag every model with the AI tagger and save the results: empty fields\nonly, unless `overwrite`; tags are merged.",
+            "required": [
+              "ids",
+              "kind"
+            ],
+            "properties": {
+              "ids": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int64"
+                }
+              },
+              "ignore_meta": {
+                "type": "boolean"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "ai_tag"
+                ]
+              },
+              "max_tags": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "overwrite": {
+                "type": "boolean"
+              }
+            }
+          },
+          {
+            "type": "object",
             "description": "Records cataloguing the same archive more than once (same content hash,\nelse same file name and size).",
             "required": [
               "kind"
@@ -3998,6 +4272,29 @@
                 ]
               }
             }
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AiSuggestion",
+                "description": "The AI tagger's suggestion for one model (`ai_suggest`)."
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "ai_suggestion"
+                    ]
+                  }
+                }
+              }
+            ],
+            "description": "The AI tagger's suggestion for one model (`ai_suggest`)."
           }
         ],
         "description": "What a finder or maintenance job found (`JobDetail.result`)."

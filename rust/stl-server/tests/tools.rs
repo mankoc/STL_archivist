@@ -42,6 +42,7 @@ fn library(ort: Option<PathBuf>, pdf: Option<PathBuf>) -> TestLib {
         roots: vec![dir.path().to_string_lossy().into_owned()],
         path_map: vec![],
         web_dir: None,
+        ai: Default::default(),
     };
     TestLib { state: Arc::new(Library::open(config).unwrap()), dir }
 }

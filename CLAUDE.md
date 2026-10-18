@@ -91,6 +91,9 @@ the native core owns the schema from Phase 4b).
   `stl_core::clip` (golden-tested against Python); keep it in step with
   `image_embedding._preprocess`. Decode JPEGs in Rust with `jpeg-decoder`, not the `image`
   crate (zune-jpeg misreads the core encoder's output).
+- **Server AI tagger:** `stl-server/src/ai.rs` runs `llama-server` as a child process
+  (never link llama.cpp) or uses `ai.url`; text handling is `stl_core::ai_tagging`, kept
+  in step with `app/utils/ai_tagging.py` by a golden test.
 - **Server backups:** `stl_core::backup` (desktop layout); the `backup` job and
   `/api/backups` are admin-only, and restoring is the offline `stl-server restore`
   command (it takes the library lock). Never replace the database of an open library.
@@ -122,7 +125,8 @@ the native core owns the schema from Phase 4b).
   `read_archive_members`, `make_thumbnail`, `dhash`, `dhash_many`, `ThumbStore`,
   `detect_presupport`, `detect_warnings`, `explain_warnings`, `detect_scale`, `parse_path`,
   `render_path_pattern`, `soundex`, `hamming_pairs`, `cosine_pairs`, `levenshtein_pairs`,
-  `clip_preprocess`, `model_pairs`. Long ones take `progress` / `should_stop` and raise
+  `clip_preprocess`, `model_pairs`, `ai_clean_tags` / `ai_is_corrupted` / `ai_prompts` /
+  `ai_parse_meta` (golden tests only). Long ones take `progress` / `should_stop` and raise
   `stl_native.Stopped`; the binding's `run_job` polls them from the calling thread, so
   Python callbacks never run on Rust threads. Arrays cross as NumPy buffers in and bytes out
   (`np.frombuffer`). The NumPy scans in `image_duplicates.py` still have Python versions;

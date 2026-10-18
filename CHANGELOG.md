@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Web client step 6j: AI tagger.** Select models in the browser and choose *AI tagger*: review a suggestion per model (tags and metadata from Qwen2.5-VL through llama.cpp, editable before *Save & next*) or process them all in one job. The server starts `llama-server` from the desktop app's AI install in its data directory (or the paths under `"ai"` in `server.json`, or uses a running server at `"ai": {"url": …}` / `STL_AI_URL`) and stops it after ten idle minutes. The tagger's text handling (tag cleanup, prompts, metadata parsing) moved to `app/utils/ai_tagging.py` so the native port is golden-tested against it.
+- Fixed: merging or removing records from Maintenance did not refresh other open clients.
+
 - **Web client step 6i: sidecars and backups.** The Maintenance page generates or removes the METADATA.7z sidecars of every folder, and administrators back up the library (database, thumbnails and settings in one `.7z`, the desktop's Backup / Restore layout, taken from consistent snapshots while the server runs), then download or delete the backups. `stl-server restore FILE.7z --data-dir DIR` restores a backup, the server's or the desktop app's, while neither has the library open; the replaced files are kept in `pre-restore-<time>`.
 
 - **Web client step 6h: Database Maintenance.** A *Maintenance* page replaces the maintenance buttons of the Jobs page. *Verify archives* and *Find duplicate entries* list the records with problems; on that list, *Find moved in DB*, *Search in folder…* (finds missing archives under a folder by content and points their records there), *Merge moved*, *Remove selected* and *Remove all missing* work as in the desktop dialog. *Check images warning* and *Check presupport warning* fix one warning line without a rescan. Searching a folder needs the same access as crawling it (editors: inside the library's folders). Sidecar refreshes skip folders that no longer exist.

@@ -1,5 +1,5 @@
 //! Server configuration: defaults, then `<data_dir>/server.json`, then the
-//! environment (`STL_DATA_DIR`, `STL_BIND`, `STL_UNRAR_PATH`), then the
+//! environment (`STL_DATA_DIR`, `STL_BIND`, `STL_UNRAR_PATH`, `STL_AI_URL`), then the
 //! command line (`--data-dir`, `--bind`). Later sources win.
 
 use std::net::SocketAddr;
@@ -33,6 +33,8 @@ pub struct Config {
     pub path_map: Vec<PathMap>,
     /// The built web client (`web/dist`); see [`Config::web_dir`].
     pub web_dir: Option<String>,
+    /// The AI tagger's model server (see `ai`).
+    pub ai: crate::ai::AiConfig,
 }
 
 /// A server path prefix and how clients reach it (`"D:/STL"` → `"\\nas\stl"`).
@@ -56,6 +58,8 @@ struct FileSettings {
     #[serde(default)]
     path_map: Vec<PathMap>,
     web_dir: Option<String>,
+    #[serde(default)]
+    ai: crate::ai::AiConfig,
 }
 
 impl Config {
@@ -111,7 +115,21 @@ impl Config {
         let bind = bind_arg.or_else(|| env("STL_BIND")).or(file.bind).unwrap_or_else(|| DEFAULT_BIND.into());
         let bind = bind.parse().map_err(|e| format!("bind address {bind:?}: {e}"))?;
         let unrar = env("STL_UNRAR_PATH").or(file.unrar).filter(|u| !u.is_empty());
-        Ok(Config { data_dir, bind, unrar, onnxruntime: file.onnxruntime, pdfium: file.pdfium, roots: file.roots, path_map: file.path_map, web_dir: env("STL_WEB_DIR").or(file.web_dir) })
+        let mut ai = file.ai;
+        if let Some(url) = env("STL_AI_URL").filter(|u| !u.is_empty()) {
+            ai.url = Some(url);
+        }
+        Ok(Config {
+            data_dir,
+            bind,
+            unrar,
+            onnxruntime: file.onnxruntime,
+            pdfium: file.pdfium,
+            roots: file.roots,
+            path_map: file.path_map,
+            web_dir: env("STL_WEB_DIR").or(file.web_dir),
+            ai,
+        })
     }
 }
 

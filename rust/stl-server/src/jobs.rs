@@ -91,6 +91,28 @@ pub enum JobRequest {
     /// Back up the database, thumbnails and settings to
     /// `<data dir>/backups/stlLibrary_backup_<stamp>.7z` (administrators).
     Backup,
+    /// Ask the AI tagger for one model's tags and metadata; nothing is saved
+    /// (save the reviewed result with `/api/ai/commit/{id}`).
+    AiSuggest {
+        id: i64,
+        /// At most this many tags (0: no limit).
+        #[serde(default = "default_max_tags")]
+        max_tags: usize,
+        /// Leave the catalogued metadata out of the prompt.
+        #[serde(default)]
+        ignore_meta: bool,
+    },
+    /// Tag every model with the AI tagger and save the results: empty fields
+    /// only, unless `overwrite`; tags are merged.
+    AiTag {
+        ids: Vec<i64>,
+        #[serde(default)]
+        overwrite: bool,
+        #[serde(default)]
+        ignore_meta: bool,
+        #[serde(default = "default_max_tags")]
+        max_tags: usize,
+    },
     /// Records cataloguing the same archive more than once (same content hash,
     /// else same file name and size).
     FindDuplicateEntries,
@@ -131,6 +153,9 @@ fn default_max_models() -> usize {
 fn default_levenshtein() -> u32 {
     3
 }
+fn default_max_tags() -> usize {
+    20
+}
 
 impl JobRequest {
     pub fn kind(&self) -> &'static str {
@@ -141,6 +166,8 @@ impl JobRequest {
             JobRequest::PruneImages { .. } => "prune_images",
             JobRequest::CompactDatabase => "compact_database",
             JobRequest::ComputeEmbeddings { .. } => "compute_embeddings",
+            JobRequest::AiSuggest { .. } => "ai_suggest",
+            JobRequest::AiTag { .. } => "ai_tag",
             JobRequest::GenerateSidecars => "generate_sidecars",
             JobRequest::RemoveSidecars => "remove_sidecars",
             JobRequest::Backup => "backup",
@@ -159,6 +186,7 @@ impl JobRequest {
         matches!(
             self,
             JobRequest::FindDuplicateEntries
+                | JobRequest::AiSuggest { .. }
                 | JobRequest::GenerateSidecars
                 | JobRequest::RemoveSidecars
                 | JobRequest::Backup
@@ -178,7 +206,7 @@ impl JobRequest {
             JobRequest::RecheckWarnings { warning } if crate::maint::Recheck::parse(warning).is_none() => {
                 Err(format!("unknown warning {warning:?} (no_images or presupported)"))
             }
-            JobRequest::FindMoved { ids } | JobRequest::SearchFolder { ids, .. } if ids.is_empty() => {
+            JobRequest::FindMoved { ids } | JobRequest::SearchFolder { ids, .. } | JobRequest::AiTag { ids, .. } if ids.is_empty() => {
                 Err("no records given".into())
             }
             JobRequest::FindImageDuplicates { method, max_distance, threshold, max_models } => {
@@ -507,6 +535,8 @@ fn run(lib: &Library, job: &Job) -> Result<String, String> {
         JobRequest::PruneImages { keep } => prune_images(lib, job, keep),
         JobRequest::CompactDatabase => compact(lib, job),
         JobRequest::ComputeEmbeddings { all } => compute_embeddings(lib, job, all),
+        JobRequest::AiSuggest { id, max_tags, ignore_meta } => ai_suggest(lib, job, id, max_tags, ignore_meta),
+        JobRequest::AiTag { ids, overwrite, ignore_meta, max_tags } => ai_tag(lib, job, &ids, overwrite, ignore_meta, max_tags),
         JobRequest::GenerateSidecars => generate_sidecars(lib, job),
         JobRequest::RemoveSidecars => remove_sidecars(lib, job),
         JobRequest::Backup => backup(lib, job),
@@ -522,6 +552,43 @@ fn run(lib: &Library, job: &Job) -> Result<String, String> {
             find_metadata(lib, job, &columns, &method, max_distance)
         }
     }
+}
+
+// ── AI tagger ────────────────────────────────────────────────────────────────
+
+fn ai_suggest(lib: &Library, job: &Job, id: i64, max_tags: usize, ignore_meta: bool) -> Result<String, String> {
+    let log = |line: String| lib.job_log(job, line);
+    job.ctl.set_total(1);
+    let s = crate::ai::suggest(lib, &job.ctl, &log, id, max_tags, ignore_meta)?;
+    job.ctl.advance(1);
+    let msg = format!("{}: {} tag(s) suggested", s.title, s.tags.len());
+    job.set_result(crate::dupes::JobResult::AiSuggestion(Box::new(s)));
+    Ok(msg)
+}
+
+/// `_BatchThread`: suggest and save each model in turn. A failure on the first
+/// model (most likely the setup) ends the job; later ones are logged and skipped.
+fn ai_tag(lib: &Library, job: &Job, ids: &[i64], overwrite: bool, ignore_meta: bool, max_tags: usize) -> Result<String, String> {
+    let log = |line: String| lib.job_log(job, line);
+    job.ctl.set_total(ids.len() as u64);
+    let mut saved = 0usize;
+    for (k, &id) in ids.iter().enumerate() {
+        if job.stopped() {
+            break;
+        }
+        match crate::ai::suggest(lib, &job.ctl, &log, id, max_tags, ignore_meta) {
+            Ok(s) => {
+                if let Some(path) = crate::ai::commit(lib, id, s.fields, &s.tags, overwrite)? {
+                    saved += 1;
+                    job.touch_sidecars([path]);
+                }
+            }
+            Err(e) if k == 0 => return Err(e),
+            Err(e) => lib.job_log(job, format!("Model #{id}: {e}")),
+        }
+        job.ctl.advance(1);
+    }
+    Ok(format!("saved {saved} of {} model(s)", ids.len()))
 }
 
 // ── sidecars and backups ─────────────────────────────────────────────────────
