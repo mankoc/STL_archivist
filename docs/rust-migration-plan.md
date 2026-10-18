@@ -773,6 +773,14 @@ The scenario now also covers a PDF page and a CMYK JPEG, both answered by the ho
 three real library folders, including one of RAR archives (57 archives, 127 thumbnails),
 crawl to identical databases and stores.
 
+**4h-1: done 2026-10-18 (test databases on disk).** Every test now gets its own database
+file (`conftest.library_db`) instead of an in-memory database, so the native core serves it
+as it serves the app. `tests/factory.py` builds and reads test data with plain `sqlite3`;
+4h-3 moves the remaining ORM-built fixtures to it.
+
+`native_db.session_clean` now also refuses a session that has flushed changes it has not
+committed: a native connection cannot see them, and native reads used to miss them there.
+
 ### Phase 5: Server (medium)
 
 `stl-server` on axum, the product's centre from here on:

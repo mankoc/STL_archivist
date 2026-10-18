@@ -68,5 +68,27 @@ def spec_dict(spec) -> dict:
 
 
 def session_clean(session) -> bool:
-    """True when *session* holds no unflushed changes a native read would miss."""
-    return session is None or not (session.new or session.dirty or session.deleted)
+    """True when *session* holds no changes a native read would miss: none
+    pending, and none flushed but not yet committed (a native connection
+    cannot see another connection's open transaction)."""
+    if session is None:
+        return True
+    return not (session.new or session.dirty or session.deleted or session.info.get("uncommitted_flush"))
+
+
+def _track_flushes() -> None:
+    """Mark sessions that flushed changes, until they commit or roll back."""
+    from sqlalchemy import event
+    from sqlalchemy.orm import Session
+
+    @event.listens_for(Session, "after_flush")
+    def _flushed(session, _ctx):
+        session.info["uncommitted_flush"] = True
+
+    @event.listens_for(Session, "after_commit")
+    @event.listens_for(Session, "after_rollback")
+    def _ended(session):
+        session.info.pop("uncommitted_flush", None)
+
+
+_track_flushes()
