@@ -1242,6 +1242,13 @@ fn render_path_pattern(pattern: String, values: std::collections::HashMap<String
     path_pattern::render(&pattern, &values)
 }
 
+/// Why a custom presupport pattern is not portable (`rules.portable_pattern_error`),
+/// or `None` when the native rules read it as Python does.
+#[pyfunction]
+fn portable_pattern_error(pattern: &str) -> Option<String> {
+    rules::portable_pattern(pattern).err()
+}
+
 /// `app.utils.string_utils.soundex`.
 #[pyfunction]
 fn soundex(s: &str) -> String {
@@ -1441,6 +1448,7 @@ fn stl_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
         wrap_pyfunction!(parse_path, m)?,
         wrap_pyfunction!(render_path_pattern, m)?,
         wrap_pyfunction!(soundex, m)?,
+        wrap_pyfunction!(portable_pattern_error, m)?,
         wrap_pyfunction!(migrate_database, m)?,
     ] {
         m.add_function(f)?;

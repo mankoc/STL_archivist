@@ -73,8 +73,8 @@ def test_presupport_and_scale_match():
 
 
 @pytest.mark.parametrize("pats", [[r"[[:alpha:]]_x"], [r"(?<name>sup)"], [r"\x{73}up"], [r"(?a)\w+_x"]])
-def test_custom_patterns_always_use_python(pats, monkeypatch):
-    # The engines disagree on these without raising (or native rejects them);
+def test_non_portable_patterns_use_python(pats, monkeypatch):
+    # Not portable: the engines disagree on these without raising (or native rejects them);
     # the public functions must give Python's answer regardless.
     names = ["a_x.stl", "[_x.stl", "sup.stl", "x{73}up.stl", "é_x.stl", "pic.jpg"]
     called = []

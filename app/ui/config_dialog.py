@@ -1662,6 +1662,37 @@ class ConfigDialog(QDialog):
         self._presupport_patterns_list.addItem(item)
         self._presupport_patterns_list.editItem(item)
 
+    def _presupport_patterns_valid(self) -> bool:
+        """Refuse custom presupport patterns the native rules would read differently.
+
+        Only syntax Python's ``re`` and the native regex engine agree on is
+        accepted (``rules.portable_pattern_error``, checked natively too when
+        the native core is loaded).
+        """
+        from app import native
+        from app.crawler.rules import portable_pattern_error
+        mod = native.module()
+        problems = []
+        for i in range(self._presupport_patterns_list.count()):
+            pattern = self._presupport_patterns_list.item(i).text().strip()
+            if not pattern:
+                continue
+            err = portable_pattern_error(pattern)
+            if err is None and mod is not None and hasattr(mod, "portable_pattern_error"):
+                err = mod.portable_pattern_error(pattern)
+            if err is not None:
+                problems.append(f"{pattern}\n    {err}")
+        if not problems:
+            return True
+        QMessageBox.warning(
+            self, self.tr("Presupport patterns"),
+            self.tr("These presupport patterns use syntax that is not supported:")
+            + "\n\n" + "\n".join(problems) + "\n\n"
+            + self.tr("Use letters, digits, '.', classes such as [_ -], \\d, groups (?:...), "
+                      "lookarounds (?<!...), quantifiers and ^ / $."),
+        )
+        return False
+
     def _remove_presupport_pattern(self) -> None:
         for item in self._presupport_patterns_list.selectedItems():
             self._presupport_patterns_list.takeItem(self._presupport_patterns_list.row(item))
@@ -2002,6 +2033,8 @@ class ConfigDialog(QDialog):
 
     def _save(self) -> None:
         """Persist all form values to QSettings and the library settings JSON."""
+        if not self._presupport_patterns_valid():
+            return
         data_dir = self._data_dir_edit.text().strip() or DATA_DIR_DEFAULT
         old_dir = get_data_dir()
         old_language = get_language()
