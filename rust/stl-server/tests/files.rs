@@ -71,6 +71,7 @@ async fn archives_download_and_client_paths() {
         pdfium: None,
         roots: vec![],
         path_map: vec![PathMap { server: dir.path().join("STL").to_string_lossy().into_owned(), client: r"\\nas\stl".into() }],
+        web_dir: None,
     };
     let state = Arc::new(Library::open(config).unwrap());
     let id = state

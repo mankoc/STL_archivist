@@ -31,6 +31,8 @@ pub struct Config {
     pub roots: Vec<String>,
     /// How clients see the server's paths, for "open folder" (see `api::files`).
     pub path_map: Vec<PathMap>,
+    /// The built web client (`web/dist`); see [`Config::web_dir`].
+    pub web_dir: Option<String>,
 }
 
 /// A server path prefix and how clients reach it (`"D:/STL"` → `"\\nas\stl"`).
@@ -53,6 +55,7 @@ struct FileSettings {
     roots: Vec<String>,
     #[serde(default)]
     path_map: Vec<PathMap>,
+    web_dir: Option<String>,
 }
 
 impl Config {
@@ -62,6 +65,20 @@ impl Config {
 
     pub fn thumb_dir(&self) -> PathBuf {
         self.data_dir.join(THUMB_DIR)
+    }
+
+    /// The web client's folder: `web_dir` (`server.json` / `STL_WEB_DIR`), else
+    /// `web` beside the server, else `web/dist` in the working directory (a
+    /// development checkout); `None` when none holds an `index.html`.
+    pub fn web_dir(&self) -> Option<PathBuf> {
+        let exe = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("web")));
+        self.web_dir
+            .clone()
+            .map(PathBuf::from)
+            .into_iter()
+            .chain(exe)
+            .chain([PathBuf::from("web/dist"), PathBuf::from("../web/dist")])
+            .find(|d| d.join("index.html").is_file())
     }
 
     /// The UnRAR executable as a full path, or `""` when none is found (as
@@ -94,7 +111,7 @@ impl Config {
         let bind = bind_arg.or_else(|| env("STL_BIND")).or(file.bind).unwrap_or_else(|| DEFAULT_BIND.into());
         let bind = bind.parse().map_err(|e| format!("bind address {bind:?}: {e}"))?;
         let unrar = env("STL_UNRAR_PATH").or(file.unrar).filter(|u| !u.is_empty());
-        Ok(Config { data_dir, bind, unrar, onnxruntime: file.onnxruntime, pdfium: file.pdfium, roots: file.roots, path_map: file.path_map })
+        Ok(Config { data_dir, bind, unrar, onnxruntime: file.onnxruntime, pdfium: file.pdfium, roots: file.roots, path_map: file.path_map, web_dir: env("STL_WEB_DIR").or(file.web_dir) })
     }
 }
 

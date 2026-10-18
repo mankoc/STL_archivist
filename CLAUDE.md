@@ -17,6 +17,12 @@ python -m pytest tests/ -v
 
 # Server (Phase 5; takes the library lock, so not while the app has the library open)
 cd rust && cargo run -p stl-server -- --data-dir <dir> --bind 127.0.0.1:8770
+
+# Web client (Phase 6; Node 24): dev server on :5173 proxying /api to :8770
+cd web && npm install && npm run dev
+npm run build        # web/dist, served by stl-server
+npm test             # vitest
+npm run gen:api      # after changing server routes or schemas
 ```
 
 ## Architecture
@@ -41,6 +47,7 @@ stl_database/
 │   └── material-icons/      # Cached Material Design Icons (pre-downloaded for offline use)
 ├── rust/                    # Rust workspace: stl-core (library), stl-py (PyO3 → `stl_native`),
 │                            #   stl-server (axum HTTP API, Phase 5)
+├── web/                     # React + TypeScript web client (Phase 6), served by stl-server
 ├── tools/build_native.py    # maturin develop into the running interpreter's environment
 └── tests/                   # pytest; tests/factory.py builds data; tests/golden/ = Rust vs Python
 ```
@@ -84,6 +91,13 @@ the native core owns the schema from Phase 4b).
 - **Server files:** browsing and crawling go through `api::files::check_access` (editors
   inside roots, admins anywhere; canonical paths). Never serve a file by a client-given
   path: downloads go by model id.
+- **Web client (`web/`):** React 19 + Mantine 8 + TanStack Query/Table/Virtual. All requests
+  go through `src/api/client.ts` (`api.GET/POST…` typed from `schema.d.ts`, `unwrap` for
+  errors); never hand-write API types. After a server route or schema change run
+  `npm run gen:api` (the cargo test `web_client_types_are_current` enforces it). Keep view
+  logic testable as pure functions next to the component (`filters.ts`, `rowBlocks.ts`)
+  with a vitest file. Query keys: `ids`, `rows`, `tree`, `model`, … (`api/events.ts`
+  invalidates them on library changes).
 - **Library lock (rule 7):** `stl_core::lock::LibraryLock` (`library.lock` + `library.owner`
   in the data directory). The server and `main.py` both hold it for their lifetime; never
   open a library's database or store from a second process without it.

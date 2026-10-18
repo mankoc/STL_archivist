@@ -83,5 +83,14 @@ impl Library {
 /// `into_make_service_with_connect_info::<SocketAddr>()`: first-run setup
 /// checks the peer address.
 pub fn app(state: AppState) -> axum::Router {
-    api::router(Arc::clone(&state)).with_state(state)
+    let web = state.config.web_dir();
+    let router = api::router(Arc::clone(&state)).with_state(state);
+    match web {
+        // The client's files, and index.html for its routes (a single-page app).
+        Some(dir) => {
+            let index = tower_http::services::ServeFile::new(dir.join("index.html"));
+            router.fallback_service(tower_http::services::ServeDir::new(dir).fallback(index))
+        }
+        None => router,
+    }
 }

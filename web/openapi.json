@@ -1,0 +1,3777 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "stlLibrary API",
+    "description": "The stlLibrary server's HTTP API. Every route except `/api/auth/status`, `/api/auth/setup`, `/api/auth/login` and this document needs a session: `Authorization: Bearer <token>` or the `stl_session` cookie set at sign-in.",
+    "license": {
+      "name": "CC-BY-NC-SA-4.0",
+      "identifier": "CC-BY-NC-SA-4.0"
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/auth/login": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Sign in. After five failures a name is locked out for 15 minutes.",
+        "operationId": "post_auth_login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Credentials"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "End this session.",
+        "operationId": "post_auth_logout",
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/auth/password": {
+      "put": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Change your own password. Ends all your sessions, this one included.",
+        "operationId": "put_auth_password",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/setup": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Create the first administrator and sign in. Only while no user exists, and\nonly from the server's own machine (not through a proxy).",
+        "operationId": "post_auth_setup",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Credentials"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/status": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Whether setup is needed and who is signed in. Needs no session.",
+        "operationId": "get_auth_status",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/authors": {
+      "get": {
+        "tags": [
+          "lookups"
+        ],
+        "summary": "Every creator name with its model count.",
+        "operationId": "get_authors",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Author"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "lookups"
+        ],
+        "summary": "Rename, merge or delete a creator name across all models.",
+        "operationId": "post_authors",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthorChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/authors/profile": {
+      "get": {
+        "tags": [
+          "lookups"
+        ],
+        "summary": "A creator's profile (404 when there is none).",
+        "operationId": "get_authors_profile",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Profile"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "lookups"
+        ],
+        "summary": "Create or update a creator's profile; blank values are stored as null.",
+        "operationId": "put_authors_profile",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Profile"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/crawled-folders": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "The folders tracked for crawling (Update Crawled Folders).",
+        "operationId": "get_crawled_folders",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CrawledFolder"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Track a folder for crawling (201), or 200 when it is already tracked.",
+        "operationId": "post_crawled_folders",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FolderPath"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "201": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/crawled-folders/remove": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Stop tracking a folder (its models stay).",
+        "operationId": "post_crawled_folders_remove",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FolderPath"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/editor/choices": {
+      "get": {
+        "tags": [
+          "editing"
+        ],
+        "summary": "Completion lists: `titles`, `creators`, `sources`, `dates`, `tags`,\n`releases`, `sculptors`, `collections`, `subcollections`, `categories`, `scales`.",
+        "operationId": "get_editor_choices",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/editor/subcollections": {
+      "get": {
+        "tags": [
+          "editing"
+        ],
+        "summary": "The subcollection names of one collection.",
+        "operationId": "get_editor_subcollections",
+        "parameters": [
+          {
+            "name": "collection",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/events": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "The event stream: [`ServerEvent`] JSON text frames (job progress and logs,\nlibrary changes). Authenticates like any route (the session cookie works\nfor browsers, which cannot set headers on a WebSocket).",
+        "operationId": "get_events",
+        "responses": {
+          "101": {
+            "description": "WebSocket of ServerEvent frames",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerEvent"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/files/browse": {
+      "get": {
+        "tags": [
+          "files"
+        ],
+        "summary": "List a folder on the server (editor role): subfolders and archives.",
+        "operationId": "get_files_browse",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "description": "The folder to list; empty lists the starting points.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Listing"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/filter-tree": {
+      "post": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Every value list and count the filter pane shows.",
+        "operationId": "post_filter_tree",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FilterTreeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FilterTree"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/images/{id}": {
+      "delete": {
+        "tags": [
+          "editing"
+        ],
+        "summary": "Remove one image and its thumbnail.",
+        "operationId": "delete_images_by_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Image id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/images/{id}/thumbnail": {
+      "get": {
+        "tags": [
+          "thumbnails"
+        ],
+        "summary": "An image's thumbnail: a redirect to its content address.",
+        "operationId": "get_images_by_id_thumbnail",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Image id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bytes of a legacy entry",
+            "content": {
+              "image/jpeg": {}
+            }
+          },
+          "308": {
+            "description": "Redirect to `/api/thumb/<digest>`"
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Queued, running and recently finished jobs, oldest first.",
+        "operationId": "get_jobs",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/JobInfo"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Queue a job. Jobs run one at a time, in order. Needs the editor role\n(compacting the database: admin).",
+        "operationId": "post_jobs",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobInfo"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/{id}": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "One job with its log.",
+        "operationId": "get_jobs_by_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Job id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Cancel a job: a queued one at once, a running one at its next checkpoint\n(what it finished so far stays). 409 when it has already finished.",
+        "operationId": "delete_jobs_by_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Job id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/lookups/{kind}": {
+      "get": {
+        "tags": [
+          "lookups"
+        ],
+        "summary": "Every row of a lookup table by name (subcollections by collection, then name).",
+        "operationId": "get_lookups_by_kind",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "tag, category, collection, subcollection or scale",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LookupRow"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "lookups"
+        ],
+        "summary": "Add a row. 409 when the name exists (within the collection, for a\nsubcollection) or the parent collection does not.",
+        "operationId": "post_lookups_by_kind",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "Lookup kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewLookup"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/lookups/{kind}/merge": {
+      "post": {
+        "tags": [
+          "lookups"
+        ],
+        "summary": "Merge two rows: models of `remove` get `keep`, then `remove` is deleted.",
+        "operationId": "post_lookups_by_kind_merge",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "Lookup kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Merge"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/lookups/{kind}/{id}": {
+      "get": {
+        "tags": [
+          "lookups"
+        ],
+        "summary": "What deleting a row would affect.",
+        "operationId": "get_lookups_by_kind_by_id",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "Lookup kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Row id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "lookups"
+        ],
+        "summary": "Delete a row. Models lose the value; a collection takes its subcollections.",
+        "operationId": "delete_lookups_by_kind_by_id",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "Lookup kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Row id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "lookups"
+        ],
+        "summary": "Rename a row; 409 when the new name is taken.",
+        "operationId": "patch_lookups_by_kind_by_id",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "Lookup kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Row id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Rename"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/settings": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Your own settings: key → any JSON value.",
+        "operationId": "get_me_settings",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/settings/{key}": {
+      "put": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Store one of your settings (the body is its JSON value, at most 64 KB).",
+        "operationId": "put_me_settings_by_key",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "description": "Setting key: a-z, A-Z, 0-9, '.', '_', '-'",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Remove one of your settings.",
+        "operationId": "delete_me_settings_by_key",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "description": "Setting key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/models/cells": {
+      "patch": {
+        "tags": [
+          "editing"
+        ],
+        "summary": "Apply browser-table cell edits in one transaction, in order. Tags are\nlowercased and de-duplicated; a subcollection belongs to its collection.",
+        "operationId": "patch_models_cells",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CellEdits"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changed"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/delete": {
+      "post": {
+        "tags": [
+          "editing"
+        ],
+        "summary": "Remove models from the library (their images and thumbnails too). The\narchive files are not touched.",
+        "operationId": "post_models_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changed"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/ids": {
+      "post": {
+        "tags": [
+          "library"
+        ],
+        "summary": "The ids of the models matching the query, in display order.",
+        "operationId": "post_models_ids",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelQuery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/mass-edit": {
+      "post": {
+        "tags": [
+          "editing"
+        ],
+        "summary": "Apply the mass editor's changes to the listed models in one transaction.",
+        "operationId": "post_models_mass_edit",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MassEdit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MassResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/rows": {
+      "post": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Rows for `ids`, in that order; unknown ids are skipped.",
+        "operationId": "post_models_rows",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RowsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Rows"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/{id}": {
+      "get": {
+        "tags": [
+          "library"
+        ],
+        "summary": "One model's display fields and its images.",
+        "operationId": "get_models_by_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Model id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/{id}/archive": {
+      "get": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Download a model's archive file.",
+        "operationId": "get_models_by_id_archive",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Model id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The archive file",
+            "content": {
+              "application/octet-stream": {}
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/{id}/editor": {
+      "get": {
+        "tags": [
+          "editing"
+        ],
+        "summary": "A model as the editor shows it.",
+        "operationId": "get_models_by_id_editor",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Model id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditorModel"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "editing"
+        ],
+        "summary": "Save the editor's form for one model.",
+        "operationId": "put_models_by_id_editor",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Model id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditorSave"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/{id}/images": {
+      "post": {
+        "tags": [
+          "editing"
+        ],
+        "summary": "Add images to a model (multipart form, one file per part). Each becomes a\nthumbnail (resized to the library's thumbnail size); the original is not kept.",
+        "operationId": "post_models_by_id_images",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Model id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Image files",
+          "content": {
+            "multipart/form-data": {}
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddedImages"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/system/info": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Name, version and library size.",
+        "operationId": "get_system_info",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tags/merge": {
+      "post": {
+        "tags": [
+          "lookups"
+        ],
+        "summary": "Merge tags into one (Tag editor → Merge).",
+        "operationId": "post_tags_merge",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagMerge"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/tags/unused": {
+      "get": {
+        "tags": [
+          "lookups"
+        ],
+        "summary": "Tags no model uses.",
+        "operationId": "get_tags_unused",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Count"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "lookups"
+        ],
+        "summary": "Delete the tags no model uses.",
+        "operationId": "delete_tags_unused",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Count"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/thumb/{digest}": {
+      "get": {
+        "tags": [
+          "thumbnails"
+        ],
+        "summary": "A thumbnail by content address.",
+        "operationId": "get_thumb_by_digest",
+        "parameters": [
+          {
+            "name": "digest",
+            "in": "path",
+            "description": "Hex digest from an image's `thumbnail` URL",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JPEG or GIF bytes",
+            "content": {
+              "image/jpeg": {}
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Every user, by name.",
+        "operationId": "get_users",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/User"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Create a user.",
+        "operationId": "post_users",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewUser"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/{id}": {
+      "delete": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Delete a user (not the last enabled administrator).",
+        "operationId": "delete_users_by_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "User id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Change a user's role, enabled state or password. The last enabled\nadministrator cannot be demoted or disabled.",
+        "operationId": "patch_users_by_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "User id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AddedImages": {
+        "type": "object",
+        "required": [
+          "added",
+          "failed"
+        ],
+        "properties": {
+          "added": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImageRef"
+            }
+          },
+          "failed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "File names that could not be read as images."
+          }
+        }
+      },
+      "AuthStatus": {
+        "type": "object",
+        "required": [
+          "version",
+          "setup_required"
+        ],
+        "properties": {
+          "setup_required": {
+            "type": "boolean",
+            "description": "No user exists yet: the first administrator must be created\n(`POST /api/auth/setup`, from the server's own machine)."
+          },
+          "user": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/User",
+                "description": "The signed-in user, if the request carries a live session."
+              }
+            ]
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "Author": {
+        "type": "object",
+        "required": [
+          "name",
+          "models"
+        ],
+        "properties": {
+          "models": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "AuthorChange": {
+        "type": "object",
+        "required": [
+          "action",
+          "name"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "`rename` (`name` → `to`), `merge` (`name` into `to`, keeping `to`'s\nprofile) or `delete` (clear `name` from its models)."
+          },
+          "name": {
+            "type": "string"
+          },
+          "to": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "BTreeMap": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "propertyNames": {
+            "type": "string"
+          }
+        },
+        "propertyNames": {
+          "type": "string"
+        }
+      },
+      "CellEdit": {
+        "type": "object",
+        "required": [
+          "id",
+          "field"
+        ],
+        "properties": {
+          "field": {
+            "type": "string",
+            "description": "`title`, `creator`, `source`, `date`, `tags`, `sculptor`, `collection`,\n`subcollection`, `category`, `sequence`, `release`, `scale`,\n`presupports` or `to_print`."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "value": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The cell text as typed; empty or null clears the field."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CellEdits": {
+        "type": "object",
+        "required": [
+          "edits"
+        ],
+        "properties": {
+          "edits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CellEdit"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "Changed": {
+        "type": "object",
+        "required": [
+          "models"
+        ],
+        "properties": {
+          "models": {
+            "type": "integer",
+            "description": "How many of the listed models exist (and were changed).",
+            "minimum": 0
+          }
+        }
+      },
+      "CollectionNode": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "subcollections"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "subcollections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NamedId"
+            }
+          }
+        }
+      },
+      "Count": {
+        "type": "object",
+        "required": [
+          "count"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "CrawledFolder": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "pattern": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The path pattern used when crawling it."
+          }
+        }
+      },
+      "Credentials": {
+        "type": "object",
+        "required": [
+          "name",
+          "password"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "DateDto": {
+        "type": "object",
+        "required": [
+          "year"
+        ],
+        "properties": {
+          "month": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Absent (or null) for the whole year."
+          },
+          "year": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "DeleteInfo": {
+        "type": "object",
+        "required": [
+          "name",
+          "models",
+          "subcollections"
+        ],
+        "properties": {
+          "models": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Models that lose the value."
+          },
+          "name": {
+            "type": "string"
+          },
+          "subcollections": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Subcollections deleted with a collection."
+          }
+        }
+      },
+      "EditorModel": {
+        "type": "object",
+        "required": [
+          "id",
+          "date",
+          "to_print",
+          "scales",
+          "tags",
+          "images"
+        ],
+        "properties": {
+          "archive_path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "collection": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "creator": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "date": {
+            "type": "string",
+            "description": "`YYYY-MM`, `YYYY` or empty."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImageRef"
+            }
+          },
+          "presupports": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "release": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scales": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sculptor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sequence": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "subcollection": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "to_print": {
+            "type": "boolean"
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "EditorSave": {
+        "type": "object",
+        "description": "The editor's form. Empty strings clear; lookups are created by name.",
+        "properties": {
+          "category": {
+            "type": "string",
+            "default": ""
+          },
+          "collection": {
+            "type": "string",
+            "default": ""
+          },
+          "creator": {
+            "type": "string",
+            "default": ""
+          },
+          "date": {
+            "type": "string",
+            "description": "`YYYY-MM`, `YYYY_MM`, `YYYY` or empty.",
+            "default": ""
+          },
+          "description": {
+            "type": "string",
+            "default": ""
+          },
+          "presupports": {
+            "type": "string",
+            "default": ""
+          },
+          "release": {
+            "type": "string",
+            "default": ""
+          },
+          "scales": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "sculptor": {
+            "type": "string",
+            "default": ""
+          },
+          "sequence": {
+            "type": "integer",
+            "format": "int64",
+            "description": "0 clears.",
+            "default": 0
+          },
+          "source": {
+            "type": "string",
+            "default": ""
+          },
+          "subcollection": {
+            "type": "string",
+            "default": ""
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "title": {
+            "type": "string",
+            "default": ""
+          },
+          "url": {
+            "type": "string",
+            "default": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "Entry": {
+        "type": "object",
+        "required": [
+          "name",
+          "path",
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "`folder` or `archive`."
+          },
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Archives only.",
+            "minimum": 0
+          }
+        }
+      },
+      "ErrorBody": {
+        "type": "object",
+        "description": "The body of every error response.",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "FilterSpecDto": {
+        "type": "object",
+        "description": "Include/exclude values per facet (`creator`, `tag`, `path`, `date`,\n`sculptor`, …), has-value / no-value groups and an optional id list.\nLookup facets take ids, `date` takes `{year, month}`, the others text.",
+        "properties": {
+          "exclude": {
+            "type": "object",
+            "default": {},
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/FilterValueDto"
+              }
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "has_value": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "ids": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "default": null
+          },
+          "include": {
+            "type": "object",
+            "default": {},
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/FilterValueDto"
+              }
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "no_value": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          }
+        },
+        "additionalProperties": false
+      },
+      "FilterTree": {
+        "type": "object",
+        "required": [
+          "counts",
+          "scoped_counts",
+          "creators",
+          "tags",
+          "sources",
+          "dates",
+          "sculptors",
+          "collections",
+          "subcollections",
+          "categories",
+          "releases",
+          "scales",
+          "presupports",
+          "filetypes",
+          "folders",
+          "scoped"
+        ],
+        "properties": {
+          "categories": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NamedId"
+            }
+          },
+          "collections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NamedId"
+            }
+          },
+          "counts": {
+            "$ref": "#/components/schemas/BTreeMap"
+          },
+          "creators": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DateDto"
+            }
+          },
+          "filetypes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "folders": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "new_folders": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "path_counts": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Models per folder, ancestors included.",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "presupports": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "releases": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NamedId"
+            }
+          },
+          "scales": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NamedId"
+            }
+          },
+          "scoped": {
+            "type": "boolean",
+            "description": "Whether the counts are scoped by a filter."
+          },
+          "scoped_counts": {
+            "$ref": "#/components/schemas/BTreeMap"
+          },
+          "scoped_folders": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "scoped_path_counts": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "sculptors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NamedId"
+            }
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "subcollections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CollectionNode"
+            }
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "FilterTreeRequest": {
+        "type": "object",
+        "properties": {
+          "counts": {
+            "type": "boolean",
+            "description": "Compute per-value counts."
+          },
+          "filter": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FilterSpecDto",
+                "description": "The current filter; the counts of each section are scoped by the others."
+              }
+            ]
+          },
+          "show": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Sections to fill: `author`, `tags`, `source`, `date`, `sculptor`,\n`collection`, `subcollection`, `category`, `release`, `scale`,\n`presupports`, `path`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "FilterValueDto": {
+        "oneOf": [
+          {
+            "type": "integer",
+            "format": "int64"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "$ref": "#/components/schemas/DateDto"
+          }
+        ],
+        "description": "A selected filter value: text, a lookup id, or a release date."
+      },
+      "FindReplace": {
+        "type": "object",
+        "required": [
+          "find",
+          "replace",
+          "fields"
+        ],
+        "properties": {
+          "case": {
+            "type": "boolean",
+            "description": "Case-sensitive matching."
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Any of `title`, `creator`, `source`, `url`."
+          },
+          "find": {
+            "type": "string"
+          },
+          "regex": {
+            "type": "boolean",
+            "description": "`find` is a regular expression (Rust fancy-regex); `replace` then takes\n`\\1`, `\\g<name>`, `\\n` as in Python."
+          },
+          "replace": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "FolderPath": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "IdList": {
+        "type": "object",
+        "required": [
+          "ids"
+        ],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        }
+      },
+      "IdsRequest": {
+        "type": "object",
+        "required": [
+          "ids"
+        ],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ImageRef": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "thumbnail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where the thumbnail is served; absent when the image has none."
+          }
+        }
+      },
+      "JobDetail": {
+        "type": "object",
+        "required": [
+          "job",
+          "log"
+        ],
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/JobInfo"
+          },
+          "log": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The job's log, oldest line first (at most the last 2,000 lines)."
+          }
+        }
+      },
+      "JobInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "request",
+          "state",
+          "user",
+          "done",
+          "total",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "done": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "finished_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "kind": {
+            "type": "string"
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The outcome (a summary, or the error)."
+          },
+          "phase": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "request": {
+            "$ref": "#/components/schemas/JobRequest"
+          },
+          "started_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "state": {
+            "$ref": "#/components/schemas/JobState"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "user": {
+            "type": "string",
+            "description": "Who submitted it."
+          }
+        }
+      },
+      "JobRequest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Crawl a folder of archives.",
+            "required": [
+              "folder",
+              "kind"
+            ],
+            "properties": {
+              "folder": {
+                "type": "string"
+              },
+              "force_rescan": {
+                "type": "boolean",
+                "description": "Re-extract archives whose hash did not change."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "crawl"
+                ]
+              },
+              "pattern": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Folder path pattern (`{sculptor}/{release}/{title}`); default: the\npattern stored for this crawled folder."
+              },
+              "recurse": {
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "description": "Default: the `recurse_subdirs` setting."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Check that every archive is still on disk, unchanged in size.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "verify_archives"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Compute perceptual hashes from stored thumbnails (all, or only missing / outdated).",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "all": {
+                "type": "boolean"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "recompute_dhashes"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Keep at most `keep` images per model (the oldest).",
+            "required": [
+              "keep",
+              "kind"
+            ],
+            "properties": {
+              "keep": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "prune_images"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "`VACUUM` the database and truncate its write-ahead log.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "compact_database"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Compute CLIP embeddings from stored thumbnails (all, or only images without one).",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "all": {
+                "type": "boolean"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "compute_embeddings"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "What to run. Crawl settings not given here come from the library's\n`settings.json`, as in the desktop app."
+      },
+      "JobState": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "running",
+          "done",
+          "failed",
+          "cancelled"
+        ]
+      },
+      "Listing": {
+        "type": "object",
+        "required": [
+          "path",
+          "entries",
+          "truncated"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Entry"
+            },
+            "description": "Folders first, then archives, each by name."
+          },
+          "parent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its parent, when the user may go there."
+          },
+          "path": {
+            "type": "string",
+            "description": "The listed folder (empty for the starting points)."
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "More entries exist than were returned."
+          }
+        }
+      },
+      "LookupRow": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "models"
+        ],
+        "properties": {
+          "collection": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "collection_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Subcollections only."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "models": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Models using it."
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "MassEdit": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "default": ""
+          },
+          "clearing": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Fields to clear.",
+            "default": []
+          },
+          "collection": {
+            "type": "string",
+            "default": ""
+          },
+          "find": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FindReplace"
+              }
+            ],
+            "default": null
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "default": []
+          },
+          "manual": {
+            "type": "object",
+            "description": "`source`, `creator`, `release_date`, `url`, `title` → template\n(`{token}`s from the path pattern and file name), or null to clear."
+          },
+          "overwrite": {
+            "type": "boolean",
+            "description": "Path values replace existing ones (otherwise they fill empty fields).",
+            "default": false
+          },
+          "pattern": {
+            "type": "string",
+            "description": "A path pattern (`{sculptor}/{release}/{title}`) parsed from each\nmodel's archive path; its values are applied per model.",
+            "default": ""
+          },
+          "presupports": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Null: no change; empty: clear.",
+            "default": null
+          },
+          "release": {
+            "type": "string",
+            "default": ""
+          },
+          "scale": {
+            "type": "string",
+            "default": ""
+          },
+          "sculptor": {
+            "type": "string",
+            "default": ""
+          },
+          "subcollection": {
+            "type": "string",
+            "default": ""
+          },
+          "tags": {
+            "type": "string",
+            "description": "Comma-separated tags to add (a template).",
+            "default": ""
+          },
+          "trim": {
+            "type": "boolean",
+            "description": "Strip leading and trailing whitespace from the text fields.",
+            "default": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "MassResult": {
+        "type": "object",
+        "required": [
+          "models",
+          "pattern_matches"
+        ],
+        "properties": {
+          "models": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pattern_matches": {
+            "type": "integer",
+            "description": "Models whose archive path matched `pattern`.",
+            "minimum": 0
+          }
+        }
+      },
+      "Merge": {
+        "type": "object",
+        "required": [
+          "keep",
+          "remove"
+        ],
+        "properties": {
+          "keep": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The row that stays."
+          },
+          "remove": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The row merged into it and deleted."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ModelDetail": {
+        "type": "object",
+        "required": [
+          "id",
+          "fields",
+          "images"
+        ],
+        "properties": {
+          "client_path": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The archive's path as this client sees it, when it can open it there\n(a client on the server's machine, or a `path_map` entry); otherwise\noffer `/api/models/{id}/archive`."
+          },
+          "fields": {
+            "type": "object",
+            "description": "`title`, `creator`, `source`, `sculptor_name`, `collection_name`,\n`subcollection_name`, `category_name`, `release_name`, `release_year`,\n`release_month`, `archive_path`, `archive_size`, `is_missing`, `tags`\n(comma-separated) and `image_count`."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImageRef"
+            }
+          }
+        }
+      },
+      "ModelQuery": {
+        "type": "object",
+        "properties": {
+          "filter": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FilterSpecDto"
+              }
+            ],
+            "default": {
+              "exclude": {},
+              "has_value": [],
+              "ids": null,
+              "include": {},
+              "no_value": []
+            }
+          },
+          "search": {
+            "type": "string",
+            "description": "Matched against title, creator, path and tags (case-insensitive).",
+            "default": ""
+          },
+          "sort": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Sort",
+                "description": "Display order; ties and no sort are ordered by id."
+              }
+            ],
+            "default": null
+          }
+        },
+        "additionalProperties": false
+      },
+      "NamedId": {
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "NewLookup": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "collection": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The parent collection's name (subcollections only)."
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "NewUser": {
+        "type": "object",
+        "required": [
+          "name",
+          "password",
+          "role"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PasswordChange": {
+        "type": "object",
+        "required": [
+          "current",
+          "new"
+        ],
+        "properties": {
+          "current": {
+            "type": "string"
+          },
+          "new": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "Profile": {
+        "type": "object",
+        "description": "A creator's profile links; each may be null.",
+        "properties": {
+          "artstation_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "full_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "gumroad_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "myminifactory_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "patreon_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          }
+        },
+        "additionalProperties": false
+      },
+      "Rename": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "Role": {
+        "type": "string",
+        "description": "What a user may do. Ordered: each role includes the ones before it.",
+        "enum": [
+          "viewer",
+          "editor",
+          "admin"
+        ]
+      },
+      "Row": {
+        "type": "object",
+        "description": "One table row.",
+        "required": [
+          "id",
+          "scales",
+          "tags",
+          "to_print"
+        ],
+        "properties": {
+          "archive_path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "archive_size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "collection": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "compression_rate": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "created_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "creator": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "presupports": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "release": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "release_month": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "release_year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "scales": {
+            "type": "string",
+            "description": "Comma-separated, by name."
+          },
+          "sculptor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sequence": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "subcollection": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tags": {
+            "type": "string",
+            "description": "Comma-separated, by name."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "to_print": {
+            "type": "boolean"
+          },
+          "warning": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Rows": {
+        "type": "object",
+        "required": [
+          "rows"
+        ],
+        "properties": {
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Row"
+            }
+          }
+        }
+      },
+      "RowsRequest": {
+        "type": "object",
+        "required": [
+          "ids"
+        ],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ServerEvent": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "A job was queued, started, progressed or finished.",
+            "required": [
+              "job",
+              "type"
+            ],
+            "properties": {
+              "job": {
+                "$ref": "#/components/schemas/JobInfo"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "job"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "One log line of a running job.",
+            "required": [
+              "id",
+              "line",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "line": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "job_log"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The library changed (`models`, `lookups`, `crawl`, …): reload what is shown.",
+            "required": [
+              "what",
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "library_changed"
+                ]
+              },
+              "what": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Events were dropped for this client (it was too slow); reload everything.",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "resync"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "What WebSocket clients receive (`/api/events`), as JSON text frames."
+      },
+      "ServerInfo": {
+        "type": "object",
+        "required": [
+          "name",
+          "version",
+          "models"
+        ],
+        "properties": {
+          "models": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Models in the library."
+          },
+          "name": {
+            "type": "string",
+            "description": "Always `\"stlLibrary\"`."
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "Session": {
+        "type": "object",
+        "required": [
+          "token",
+          "user"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "For `Authorization: Bearer`; browsers can rely on the cookie instead."
+          },
+          "user": {
+            "$ref": "#/components/schemas/User"
+          }
+        }
+      },
+      "Sort": {
+        "type": "object",
+        "required": [
+          "column"
+        ],
+        "properties": {
+          "column": {
+            "type": "string",
+            "description": "One of `title`, `creator`, `source`, `sculptor_name`, `collection_name`,\n`subcollection_name`, `sequence`, `release_name`, `archive_path`,\n`presupports`, `created_at`, `archive_size`, `compression_rate`, `category_name`."
+          },
+          "descending": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "TagMerge": {
+        "type": "object",
+        "required": [
+          "ids",
+          "target"
+        ],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "target": {
+            "type": "string",
+            "description": "The resulting tag's name (an existing tag, matched case-insensitively, or a new one)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "User": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "role",
+          "disabled"
+        ],
+        "properties": {
+          "disabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          }
+        }
+      },
+      "UserChange": {
+        "type": "object",
+        "properties": {
+          "disabled": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A new password; ends the user's sessions."
+          },
+          "role": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Role"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}

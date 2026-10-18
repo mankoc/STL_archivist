@@ -1000,6 +1000,37 @@ keeps shipping, in this order:
 5. Maintenance, duplicate finders, Find by Image, statistics, sidecars, backup/restore.
 6. AI tagger (llama.cpp server stays an external process, run by the server).
 
+**Toolchain:** Node.js 24 LTS (portable, not installed system-wide on the development
+machine). Pinned majors whose APIs are known: React 19, Mantine 8, TanStack Query 5 /
+Table 8 / Virtual 3, Vite 7, TypeScript 5.9, Vitest 3 (Mantine 9, Table 9, Vite 8 and
+TypeScript 7 were out but not taken). API types are generated: `npm run gen:api` writes
+`web/openapi.json` (from `stl-server openapi`) and `src/api/schema.d.ts` (openapi-typescript);
+the cargo test `web_client_types_are_current` fails when the committed document is stale.
+Operation ids are derived from method and path (`get_models_by_id`), because handler names
+repeat across modules.
+
+**6a: done 2026-10-18 (browser view).**
+
+- `web/`: sign-in and first-run setup screens, the app shell with the user menu (change
+  password, sign out), and the browser:
+  - the filter pane: every desktop section, with the include / exclude / off cycle,
+    has-value / no-value groups, scoped counts (a section the server does not scope falls
+    back to its unscoped counts), date years with months, collections with
+    subcollections, the folder tree, and value search in long sections;
+  - the virtualised table: all ids in one request, rows fetched in blocks of 100 as they
+    scroll into view, server-side sorting by header click (ascending → descending → id
+    order), resizable columns;
+  - the detail pane: fields, tags, thumbnails, the archive download, and "Copy path" when
+    the server reports a `client_path`.
+- `/api/events` invalidates the library queries on `library_changed`. A 401 shows the
+  sign-in screen again.
+- The server serves the built client: `web_dir` (`server.json` / `STL_WEB_DIR`), else
+  `web/` beside the binary, else `web/dist` from the working directory, with an SPA
+  fallback to `index.html`. The Dockerfile builds the client in a Node stage.
+- Verified in headless Edge (DevTools protocol) against the server on a crawled library:
+  sign-in, filtering by tag (counts and row count), selection, the thumbnail through the
+  authenticated content-address route, and no console errors.
+
 ### Phase 7: Desktop shell (small)
 
 Tauri app that hosts the web client: connect to a remote server or start a bundled local one on

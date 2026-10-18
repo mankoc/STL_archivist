@@ -223,10 +223,20 @@ async fn openapi_lists_every_route() {
 #[test]
 fn a_second_server_is_refused() {
     let dir = tempfile::tempdir().unwrap();
-    let config = Config { data_dir: dir.path().to_path_buf(), bind: "127.0.0.1:0".parse().unwrap(), unrar: None, onnxruntime: None, pdfium: None, roots: vec![], path_map: vec![] };
+    let config = Config { data_dir: dir.path().to_path_buf(), bind: "127.0.0.1:0".parse().unwrap(), unrar: None, onnxruntime: None, pdfium: None, roots: vec![], path_map: vec![], web_dir: None };
     let first = Library::open(config.clone()).unwrap();
     let err = Library::open(config.clone()).err().expect("second open must fail");
     assert!(err.contains("stl-server"), "{err}");
     drop(first);
     Library::open(config).unwrap();
+}
+
+#[test]
+fn web_client_types_are_current() {
+    // web/ generates its TypeScript types from this document: after changing a
+    // route or schema, run `npm run gen:api` in web/.
+    let committed = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../web/openapi.json"))
+        .expect("web/openapi.json")
+        .replace("\r\n", "\n");
+    assert!(committed == stl_server::api::openapi_json(), "web/openapi.json is stale: run `npm run gen:api` in web/");
 }

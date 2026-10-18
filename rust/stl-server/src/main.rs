@@ -3,6 +3,7 @@
 //! (password from `STL_ADMIN_PASSWORD` or the first line of standard input), for
 //! installs where `POST /api/auth/setup` cannot come from the server's own machine
 //! (a container, a headless host).
+//! `stl-server openapi`: print the OpenAPI document (`web/` generates its types from it).
 
 use std::sync::Arc;
 
@@ -17,6 +18,10 @@ async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("create-admin") => create_admin(&args[1..]),
+        Some("openapi") => {
+            print!("{}", stl_server::api::openapi_json());
+            Ok(())
+        }
         _ => run(&args).await,
     };
     if let Err(e) = result {

@@ -1,5 +1,5 @@
-# stlLibrary server (rust/stl-server) with pdfium (PDF previews) and ONNX Runtime
-# (AI embeddings). See README.md → "Server (preview)".
+# stlLibrary server (rust/stl-server) and web client (web/), with pdfium (PDF
+# previews) and ONNX Runtime (AI embeddings). See README.md → "Server (preview)".
 #
 #   docker build -t stllibrary-server .
 #   docker run -d --name stl -p 8770:8770 -v /srv/stl-data:/data -v /srv/STL:/library:ro stllibrary-server
@@ -16,6 +16,14 @@ WORKDIR /src
 COPY rust/ rust/
 RUN cd rust && cargo build --release -p stl-server
 
+# The web client (its API types are committed, so no Rust is needed here).
+FROM node:24-trixie-slim AS web
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --no-fund --no-audit
+COPY web/ ./
+RUN npm run build
+
 FROM debian:trixie-slim
 ARG PDFIUM_BUILD=7881
 ARG ORT_VERSION=1.22.0
@@ -30,6 +38,7 @@ RUN apt-get update \
  && apt-get purge -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/* \
  && useradd --uid 1000 --create-home stl && mkdir -p /data && chown stl /data
 COPY --from=build /src/rust/target/release/stl-server /usr/local/bin/stl-server
+COPY --from=web /web/dist /usr/local/bin/web
 ENV STL_DATA_DIR=/data \
     STL_BIND=0.0.0.0:8770 \
     STL_PDFIUM_PATH=/opt/pdfium/lib/libpdfium.so \

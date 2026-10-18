@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Rust migration, Phase 6 begins: the web client (step 6a).** `web/` holds the new browser front end (React, TypeScript, Mantine), served by the server. You can sign in, set up the first administrator, and browse the library: the filter pane with include/exclude values, has-value groups and counts, search, a fast virtualised table with server-side sorting, and a detail pane with thumbnails and the archive download. Its API types are generated from the server's OpenAPI description.
+
 - **Server step 5e, completing Phase 5: server files and Docker.** Editors choose folders to crawl by browsing the server's disks, limited to the library's folders unless they are administrators. Anyone signed in can download an archive. Remote clients get a folder path to open only where `server.json` maps the server's paths to theirs. `stl-server create-admin` sets up the first administrator on headless machines and in containers. A `Dockerfile` builds the server with PDF and AI-embedding support included (not yet test-built).
 
 - **Server step 5d-2: PDF previews and AI embeddings without Python.** When it finds pdfium and ONNX Runtime, the server renders PDF previews and computes CLIP embeddings itself, during crawls and as a *compute embeddings* job. Its vectors match the desktop app's (cosine above 0.9999), so both can share one library. The image preparation for CLIP is native and checked against the Python version.

@@ -1,0 +1,67 @@
+.scroll {
+  height: 100%;
+  overflow: auto;
+  position: relative;
+  font-size: var(--mantine-font-size-sm);
+}
+
+.header {
+  display: flex;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--mantine-color-body);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+.headerCell {
+  position: relative;
+  flex: none;
+  padding: 6px 8px;
+}
+
+.headerButton {
+  width: 100%;
+}
+
+.resizer {
+  position: absolute;
+  right: 0;
+  top: 0;
+  height: 100%;
+  width: 5px;
+  cursor: col-resize;
+  user-select: none;
+  touch-action: none;
+}
+
+.resizer:hover,
+.resizer[data-resizing] {
+  background: var(--mantine-primary-color-filled);
+}
+
+.row {
+  display: flex;
+  position: absolute;
+  top: 0;
+  left: 0;
+  cursor: pointer;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+.row:hover {
+  background: var(--mantine-color-default-hover);
+}
+
+.row[data-selected] {
+  background: var(--mantine-primary-color-light);
+}
+
+.cell {
+  flex: none;
+  padding: 0 8px;
+  line-height: 30px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

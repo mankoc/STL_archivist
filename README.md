@@ -176,6 +176,22 @@ A library can be open in only one process at a time: the desktop app refuses a l
 server has open (and a second app instance on the same library), and the server refuses one
 the app has open.
 
+### Web client (preview)
+
+The browser front end for the server lives in `web/` (React + TypeScript, Mantine). It needs
+[Node.js](https://nodejs.org) 24 to build:
+
+```bash
+cd web
+npm install
+npm run build      # writes web/dist; stl-server serves it at http://127.0.0.1:8770/
+npm run dev        # development: http://localhost:5173, forwarding /api to a server on :8770
+```
+
+So far it signs in and browses the library: the filter pane (include / exclude values,
+has-value groups, counts), search, the sortable table, and a detail pane with thumbnails and
+the archive download.
+
 ### Environment overrides
 
 These optional environment variables take precedence over the values set in Configuration. They are useful for portable or headless setups.

@@ -18,7 +18,7 @@ use axum::http::Method;
 use axum::middleware::{self, Next};
 use axum::response::Response;
 use axum::routing::{delete, get, patch, post, put};
-use utoipa::OpenApi;
+use utoipa::{Modify, OpenApi};
 
 use crate::AppState;
 
@@ -80,9 +80,42 @@ use crate::AppState;
         files::browse,
         files::download,
     ),
-    components(schemas(crate::error::ErrorBody))
+    components(schemas(crate::error::ErrorBody)),
+    modifiers(&OperationIds)
 )]
 pub struct ApiDoc;
+
+/// Operation ids from method and path (`get_models_by_id`): handler names
+/// repeat across modules (`detail`, `list`, …), and generated clients key
+/// operations by id.
+struct OperationIds;
+
+impl Modify for OperationIds {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        for (path, item) in openapi.paths.paths.iter_mut() {
+            let name: String = path
+                .trim_start_matches("/api/")
+                .split('/')
+                .map(|seg| match seg.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
+                    Some(param) => format!("by_{param}"),
+                    None => seg.replace(['-', '.'], "_"),
+                })
+                .collect::<Vec<_>>()
+                .join("_");
+            for (method, op) in [
+                ("get", &mut item.get),
+                ("post", &mut item.post),
+                ("put", &mut item.put),
+                ("patch", &mut item.patch),
+                ("delete", &mut item.delete),
+            ] {
+                if let Some(op) = op {
+                    op.operation_id = Some(format!("{method}_{name}"));
+                }
+            }
+        }
+    }
+}
 
 pub fn router(state: AppState) -> Router<AppState> {
     Router::new()
@@ -149,4 +182,11 @@ async fn announce_changes(State(lib): State<AppState>, req: Request, next: Next)
 
 async fn openapi() -> Json<utoipa::openapi::OpenApi> {
     Json(ApiDoc::openapi())
+}
+
+/// The OpenAPI document, pretty-printed with a final newline (what
+/// `web/openapi.json` must hold).
+pub fn openapi_json() -> String {
+    ApiDoc::openapi().to_pretty_json().expect("the document serialises") + "
+"
 }

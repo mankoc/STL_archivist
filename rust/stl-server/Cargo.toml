@@ -20,6 +20,7 @@ sha2 = "0.10.9"
 stl-core = { version = "0.1.0", path = "../stl-core" }
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "net", "signal", "time", "fs"] }
 tokio-util = { version = "0.7.20", features = ["io"] }
+tower-http = { version = "0.7.1", features = ["fs"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 utoipa = { version = "5", features = ["axum_extras"] }

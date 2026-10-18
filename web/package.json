@@ -1,0 +1,43 @@
+{
+  "name": "stllibrary-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "stlLibrary web client (Phase 6 of docs/rust-migration-plan.md)",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "test": "vitest run",
+    "gen:api": "cd ../rust && cargo run -q -p stl-server -- openapi > ../web/openapi.json && cd ../web && openapi-typescript openapi.json -o src/api/schema.d.ts",
+    "check:api": "openapi-typescript openapi.json -o src/api/schema.d.ts --check"
+  },
+  "dependencies": {
+    "@mantine/core": "^8.3.18",
+    "@mantine/dropzone": "^8.3.18",
+    "@mantine/hooks": "^8.3.18",
+    "@mantine/notifications": "^8.3.18",
+    "@tabler/icons-react": "^3.49.0",
+    "@tanstack/react-query": "^5.104.4",
+    "@tanstack/react-table": "^8.21.3",
+    "@tanstack/react-virtual": "^3.14.21",
+    "openapi-fetch": "^0.14.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.10.0",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.8",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "jsdom": "^26.1.0",
+    "openapi-typescript": "^7.13.0",
+    "postcss": "^8.5.30",
+    "postcss-preset-mantine": "^1.18.0",
+    "postcss-simple-vars": "^7.0.1",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.7",
+    "vitest": "^3.2.7"
+  }
+}
