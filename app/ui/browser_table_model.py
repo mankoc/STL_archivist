@@ -12,13 +12,12 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import QColor, QFont
 
-from app.database.models import model_tags as _mt_global
 from app.utils.path_pattern import format_release_date
 from app.ui.browser_common import (
     COL_THUMB, COL_TITLE, COL_CREATOR, COL_SOURCE, COL_DATE, COL_TAGS,
     COL_SCULPTOR, COL_COLLECTION, COL_SUBCOLLECTION, COL_SEQUENCE, COL_RELEASE,
     COL_PATH, COL_SCALE, COL_PRESUPPORTED, COL_ADDED, COL_WARNING, COL_FILESIZE,
-    COL_CATEGORY, COL_COMPRESSION, COL_TO_PRINT, _HEADERS, _fmt_size, MODEL_ID_ROLE, _pack_row,
+    COL_CATEGORY, COL_COMPRESSION, COL_TO_PRINT, _HEADERS, _fmt_size, MODEL_ID_ROLE,
 )
 
 
@@ -26,9 +25,11 @@ class _IdLoaderThread(QThread):
     ids_ready       = pyqtSignal(list)   # complete sorted list[int]
     finished_signal = pyqtSignal(int)    # total count
 
-    def __init__(self, id_stmt, pair_order=None, parent=None):
+    def __init__(self, spec, search: str, sort, pair_order=None, parent=None):
         super().__init__(parent)
-        self._id_stmt    = id_stmt
+        self._spec       = spec
+        self._search     = search
+        self._sort       = sort
         self._pair_order = pair_order
         self._stop       = False
 
@@ -36,26 +37,16 @@ class _IdLoaderThread(QThread):
         self._stop = True
 
     def run(self):
-        from app.database.db import get_session
-        session = get_session() 
-        try:
-            if self._pair_order is not None:
-                all_ids = [row[0] for row in session.execute(self._id_stmt).all()]
-                all_ids.sort(key=lambda i: self._pair_order.get(i, len(self._pair_order)))
-            else:
-                all_ids = []
-                result = session.execute(
-                    self._id_stmt.execution_options(yield_per=2000)
-                )
-                for row in result:
-                    if self._stop:
-                        break
-                    all_ids.append(row[0])
-            if not self._stop:
-                self.ids_ready.emit(all_ids)
-                self.finished_signal.emit(len(all_ids))
-        finally:
-            session.close()
+        from app.services.library_query import table_ids
+        if self._pair_order is not None:
+            all_ids = table_ids(self._spec, "", None)
+            all_ids.sort(key=lambda i: self._pair_order.get(i, len(self._pair_order)))
+        else:
+            all_ids = table_ids(self._spec, self._search, self._sort,
+                                should_stop=lambda: self._stop)
+        if all_ids is not None and not self._stop:
+            self.ids_ready.emit(all_ids)
+            self.finished_signal.emit(len(all_ids))
 
 
 class _PageFetchRunnable(QRunnable):
@@ -71,51 +62,12 @@ class _PageFetchRunnable(QRunnable):
         self.setAutoDelete(True)
 
     def run(self):
-        from app.database.db import get_session, get_models_view
-        from app.database.models import Tag, Scale, model_scales as _ms
-        from sqlalchemy import select as sa_sel, func
-        session = get_session()
+        from app.services.library_query import page_rows
         try:
-            mv   = get_models_view()
-            ids  = self._ids
-            stmt = sa_sel(
-                mv.c.id, mv.c.title, mv.c.creator, mv.c.source,
-                mv.c.release_year, mv.c.release_month,
-                mv.c.archive_path, mv.c.presupports, mv.c.warning,
-                mv.c.archive_size, mv.c.compression_rate,
-                mv.c.sequence, mv.c.created_at,
-                mv.c.sculptor_name, mv.c.collection_name,
-                mv.c.subcollection_name, mv.c.category_name,
-                mv.c.release_name, mv.c.to_print,
-            ).select_from(mv).where(mv.c.id.in_(ids))
-            rows_by_id = {row.id: row for row in session.execute(stmt).all()}
-
-            tags_stmt = (
-                sa_sel(_mt_global.c.model_id, func.group_concat(Tag.name, ", "))
-                .join(Tag, _mt_global.c.tag_id == Tag.id)
-                .where(_mt_global.c.model_id.in_(ids))
-                .group_by(_mt_global.c.model_id)
-            )
-            tags_for = {mid: ts or "" for mid, ts in session.execute(tags_stmt).all()}
-
-            scales_stmt = (
-                sa_sel(_ms.c.model_id, func.group_concat(Scale.name, ", "))
-                .join(Scale, _ms.c.scale_id == Scale.id)
-                .where(_ms.c.model_id.in_(ids))
-                .group_by(_ms.c.model_id)
-            )
-            scales_for = {mid: ss or "" for mid, ss in session.execute(scales_stmt).all()}
-
-            pair_for_id = self._pair_for_id
-            packed = [
-                _pack_row(rows_by_id[mid], tags_for, scales_for, pair_for_id)
-                for mid in ids if mid in rows_by_id
-            ]
-            self.signals.page_ready.emit(self._page_idx, packed)
+            packed = page_rows(self._ids, self._pair_for_id)
         except Exception:
-            self.signals.page_ready.emit(self._page_idx, [])
-        finally:
-            session.close()
+            packed = []
+        self.signals.page_ready.emit(self._page_idx, packed)
 
 
 class _SqlTableModel(QAbstractTableModel):
@@ -144,7 +96,7 @@ class _SqlTableModel(QAbstractTableModel):
         self._warn_fg                        = None
         self._warn_font                      = None
         self._highlight_warning_rows         = True
-        self._main_stmt                      = None
+        self._spec                           = None   # FilterSpec of the loaded table
         self._pair_order                     = None
         self._sort_col: int                  = COL_TITLE
         self._sort_order                     = Qt.SortOrder.AscendingOrder
@@ -244,7 +196,7 @@ class _SqlTableModel(QAbstractTableModel):
         return True
 
     def sort(self, column: int, order) -> None:
-        if self._main_stmt is None or self._pair_order is not None:
+        if self._spec is None or self._pair_order is not None:
             return
         self._sort_col   = column
         self._sort_order = order
@@ -258,8 +210,8 @@ class _SqlTableModel(QAbstractTableModel):
     def all_visible_ids(self) -> list:
         return list(self._ordered_ids)
 
-    def load(self, main_stmt, pair_order=None, pair_for_id=None, pair_colors=None) -> None:
-        self._main_stmt   = main_stmt
+    def load(self, spec, pair_order=None, pair_for_id=None, pair_colors=None) -> None:
+        self._spec        = spec
         self._pair_order  = pair_order
         self._pair_for_id = pair_for_id or {}
         self._pair_colors = pair_colors
@@ -276,7 +228,7 @@ class _SqlTableModel(QAbstractTableModel):
         if text == self._search_text:
             return
         self._search_text = text
-        if self._main_stmt is not None:
+        if self._spec is not None:
             self._do_reload()
 
     def stop(self) -> None:
@@ -297,52 +249,35 @@ class _SqlTableModel(QAbstractTableModel):
         self._page_lru    = []
         self.endResetModel()
         self.load_started.emit()
-        id_stmt = self._build_id_stmt()
-        loader  = _IdLoaderThread(id_stmt, self._pair_order, parent=self)
+        loader  = _IdLoaderThread(self._spec, self._search_text, self._sort_key(),
+                                  self._pair_order, parent=self)
         loader.ids_ready.connect(self._on_ids_ready)
         loader.finished_signal.connect(self._on_load_finished)
         self._id_loader = loader
         loader.start()
 
-    def _build_id_stmt(self):
-        from app.database.db import get_models_view
-        from sqlalchemy import select as sa_sel
-        mv      = get_models_view()
-        id_stmt = sa_sel(mv.c.id).select_from(mv)
-        if self._main_stmt is not None and self._main_stmt.whereclause is not None:
-            id_stmt = id_stmt.where(self._main_stmt.whereclause)
-        if self._search_text and self._pair_order is None:
-            id_stmt = self._apply_search_where(id_stmt, mv)
-        if self._pair_order is None:
-            id_stmt = id_stmt.order_by(self._sort_expr(mv))
-        return id_stmt
+    # Table column -> sortable models_view column (library_query.SORT_COLUMNS).
+    _SORT_COLUMNS = {
+        COL_TITLE:         "title",
+        COL_CREATOR:       "creator",
+        COL_SOURCE:        "source",
+        COL_SCULPTOR:      "sculptor_name",
+        COL_COLLECTION:    "collection_name",
+        COL_SUBCOLLECTION: "subcollection_name",
+        COL_SEQUENCE:      "sequence",
+        COL_RELEASE:       "release_name",
+        COL_PATH:          "archive_path",
+        # COL_SCALE is many-to-many (not in the view) — not sortable, like Tags.
+        COL_PRESUPPORTED:  "presupports",
+        COL_ADDED:         "created_at",
+        COL_FILESIZE:      "archive_size",
+        COL_COMPRESSION:   "compression_rate",
+        COL_CATEGORY:      "category_name",
+    }
 
-    def _apply_search_where(self, stmt, mv):
-        from app.services.library_query import search_condition
-        return stmt.where(search_condition(mv, self._search_text))
-
-    def _sort_expr(self, mv):
-        from sqlalchemy import asc, desc, nullslast
-        _COLS = {
-            COL_TITLE:         mv.c.title,
-            COL_CREATOR:       mv.c.creator,
-            COL_SOURCE:        mv.c.source,
-            COL_SCULPTOR:      mv.c.sculptor_name,
-            COL_COLLECTION:    mv.c.collection_name,
-            COL_SUBCOLLECTION: mv.c.subcollection_name,
-            COL_SEQUENCE:      mv.c.sequence,
-            COL_RELEASE:       mv.c.release_name,
-            COL_PATH:          mv.c.archive_path,
-            # COL_SCALE is many-to-many (not in the view) — not sortable, like Tags.
-            COL_PRESUPPORTED:  mv.c.presupports,
-            COL_ADDED:         mv.c.created_at,
-            COL_FILESIZE:      mv.c.archive_size,
-            COL_COMPRESSION:   mv.c.compression_rate,
-            COL_CATEGORY:      mv.c.category_name,
-        }
-        col_expr = _COLS.get(self._sort_col, mv.c.title)
-        fn = desc if self._sort_order == Qt.SortOrder.DescendingOrder else asc
-        return nullslast(fn(col_expr))
+    def _sort_key(self) -> "tuple[str, bool]":
+        column = self._SORT_COLUMNS.get(self._sort_col, "title")
+        return column, self._sort_order == Qt.SortOrder.DescendingOrder
 
     def _request_page(self, page_idx: int) -> None:
         if page_idx in self._pending_pages:

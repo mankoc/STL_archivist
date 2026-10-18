@@ -29,9 +29,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import QSettings
 
-from sqlalchemy import select as sa_select
 
-from app.database.db import session_scope, get_models_view
+from app.database.db import session_scope
 from app.ui import lookup_cache as _lookup_cache
 from app.ui.thumb_loader import ThumbnailLoaderWorker
 from app.ui.browser_table_model import _SqlTableModel
@@ -42,7 +41,7 @@ from app.ui.browser_jobs import (
 )
 from app.ui import sidecar_exporter
 from app.services.library_query import (
-    FilterSpec, GROUPS as FILTER_GROUPS, facet_scopes, table_where,
+    FilterSpec, GROUPS as FILTER_GROUPS,
 )
 from app.ui.browser_dialogs import ClickableLabel, ImageViewerDialog
 from app.ui.browser_delegates import (
@@ -55,7 +54,7 @@ from app.ui.browser_common import (
     COL_SCULPTOR, COL_COLLECTION, COL_SUBCOLLECTION, COL_SEQUENCE, COL_RELEASE,
     COL_PATH, COL_SCALE, COL_PRESUPPORTED, COL_ADDED, COL_WARNING, COL_FILESIZE,
     COL_CATEGORY, COL_COMPRESSION, COL_TO_PRINT, _HEADERS,
-    _FILTER_PATH_IDS, _fmt_size,
+    _fmt_size,
 )
 from app.database.models import STLModel, Tag, Image
 from app.utils.path_pattern import parse_release_date, format_release_date
@@ -396,12 +395,7 @@ class BrowserTab(QWidget):
         return visible
 
     # ------------------------------------------------------------------
-    def _populate_filter_tree(
-        self,
-        scope_by_section: dict | None = None,
-        path_inc_pruned: list[str] | None = None,
-        path_exc_pruned: list[str] | None = None,
-    ) -> None:
+    def _populate_filter_tree(self, spec: FilterSpec | None = None) -> None:
         """Kick off a background worker to rebuild the filter tree.
 
         All DB queries run in a QRunnable; the GUI thread slot
@@ -463,7 +457,7 @@ class BrowserTab(QWidget):
 
         worker = _FilterTreeWorker(
             gen=gen,
-            scope_by_section=scope_by_section,
+            spec=spec,
             show_flags=show_flags,
             show_counts=_get_fsc(),
             alpha_enabled=get_filter_alpha_enabled(),
@@ -471,8 +465,6 @@ class BrowserTab(QWidget):
             checked_data=checked_data,
             excluded_data=excluded_data,
             expanded_sections=expanded_sections,
-            path_inc_pruned=path_inc_pruned,
-            path_exc_pruned=path_exc_pruned,
         )
         worker.signals.ready.connect(self._on_filter_data_ready)
         QThreadPool.globalInstance().start(worker)
@@ -816,16 +808,12 @@ class BrowserTab(QWidget):
     ) -> None:
         """Reload the table for *spec* (``None`` = everything).
 
-        The WHERE clause comes from :func:`app.services.library_query.table_where`,
-        the same builder that scopes the filter-pane counts.  The paged model
-        streams the matching ids in a background thread (see ``_SqlTableModel``).
+        The paged model gets the matching ids from
+        :func:`app.services.library_query.table_ids` in a background thread (the
+        same predicates scope the filter-pane counts) and its rows a page at a
+        time from :func:`~app.services.library_query.page_rows`.
         """
         spec = spec or FilterSpec()
-        mv = get_models_view()
-        stmt = sa_select(mv.c.id).select_from(mv)
-        where = table_where(spec, mv)
-        if where is not None:
-            stmt = stmt.where(where)
 
         # --- duplicate-pairs ordering ---
         pair_order:  dict | None = None
@@ -850,7 +838,7 @@ class BrowserTab(QWidget):
 
         self.loading_started.emit()
         self._loading = True
-        self._model.load(stmt, pair_order, pair_for_id, self._load_pair_colors)
+        self._model.load(spec, pair_order, pair_for_id, self._load_pair_colors)
 
     # ------------------------------------------------------------------
     def _on_load_started(self) -> None:
@@ -1050,24 +1038,9 @@ class BrowserTab(QWidget):
         self._clear_filters_pending()
         spec = self._collect_filter_spec()
         self._load_table(spec)
-
-        # Each section's scope = ids matching all OTHER active filters.  Path
-        # matches are materialised once into a TEMP table by the filter-tree
-        # worker (the archive_path LIKE scan cannot use an index), so scopes
-        # reference that table instead of repeating the LIKE.
-        path_inc_pruned: list[str] | None = None
-        path_exc_pruned: list[str] | None = None
-        path_ids = None
-        if spec.facet_active("path"):
-            path_inc_pruned, path_exc_pruned = spec.pruned_paths()
-            path_ids = sa_select(_FILTER_PATH_IDS.c.id)
-        scope_by_section = facet_scopes(spec, path_ids=path_ids)
-
-        self._populate_filter_tree(
-            scope_by_section=scope_by_section,
-            path_inc_pruned=path_inc_pruned,
-            path_exc_pruned=path_exc_pruned,
-        )
+        # Each section is counted over the models matching all OTHER active
+        # filters (app.services.filter_tree / library_query.facet_scopes).
+        self._populate_filter_tree(spec=spec)
 
     def _clear_filters(self) -> None:
         """Uncheck all filter items and reload the full table."""

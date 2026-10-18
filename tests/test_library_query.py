@@ -10,7 +10,7 @@ from app.services.library_query import (
     FACETS, FilterSpec, conditions, facet_scopes, path_id_select,
     prune_ancestor_paths, search_condition, table_where,
 )
-from app.ui.browser_common import _FILTER_PATH_IDS, _FILTER_PATH_IDS_NAME
+from app.services.filter_tree import FILTER_PATH_IDS as _FILTER_PATH_IDS, FILTER_PATH_IDS_NAME as _FILTER_PATH_IDS_NAME
 
 
 @pytest.fixture
@@ -209,3 +209,42 @@ def test_spec_validation_and_normalisation():
 
 def test_prune_ancestor_paths():
     assert prune_ancestor_paths(["a/b/c", "a/b", "a\\x\\", "ab"]) == ["a/b", "a/x", "ab"]
+
+
+# ---------------------------------------------------------------------------
+# table_ids / page_rows (what the browser table model loads)
+# ---------------------------------------------------------------------------
+
+from app.services.library_query import page_rows, table_ids  # noqa: E402
+
+
+def test_table_ids_order_nulls_last_and_ties_by_id(lib):
+    ids, _lk = lib
+    n = {v: k for k, v in ids.items()}
+    by_creator = [n[i] for i in table_ids(FilterSpec(), sort=("creator", False))]
+    assert by_creator == [1, 3, 5, 2, 4]          # "Alice" < "Bob" < "Carol" < "alice", NULL last
+    desc = [n[i] for i in table_ids(FilterSpec(), sort=("creator", True))]
+    assert desc == [2, 5, 3, 1, 4]
+    by_presupports = [n[i] for i in table_ids(FilterSpec(), sort=("presupports", False))]
+    assert by_presupports == [5, 1, 2, 3, 4]              # "No" < "Presupported", NULLs last by id
+    with pytest.raises(ValueError):
+        table_ids(FilterSpec(), sort=("tags", False))
+
+
+def test_table_ids_filter_search_and_stop(lib):
+    ids, _lk = lib
+    n = {v: k for k, v in ids.items()}
+    got = table_ids(FilterSpec(include={"creator": ["alice"]}), search="elf")
+    assert [n[i] for i in got] == [2]
+    assert {n[i] for i in table_ids(FilterSpec(), search="DRAGON", sort=None)} == {1, 3}
+    assert table_ids(FilterSpec(), should_stop=lambda: True) is None
+
+
+def test_page_rows_follow_the_given_order(lib):
+    ids, lk = lib
+    rows = page_rows([ids[3], 999_999, ids[1]], {ids[1]: 4})
+    assert [r[0] for r in rows] == [ids[3], ids[1]]
+    knight = rows[0]
+    assert knight[19] == "dragon, elf" and knight[18] == "28mm, 75mm"
+    assert knight[17] == "May" and knight[20] == -1 and knight[21] is False
+    assert rows[1][20] == 4 and rows[1][13] == "Alice" and rows[1][16] == "Busts"
