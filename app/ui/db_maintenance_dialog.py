@@ -715,7 +715,7 @@ class CompactDatabaseWorker(QThread):
 
     def run(self) -> None:
         import time
-        from app.database.db import database_path, get_engine
+        from app.database.db import database_path
         from app.services.maintenance import compact_database
 
         db_path = database_path()
@@ -728,7 +728,7 @@ class CompactDatabaseWorker(QThread):
         self.progress.emit(0, 0)   # VACUUM reports no progress: show a busy bar
         t0 = time.perf_counter()
         try:
-            before, after, wal_truncated = compact_database(get_engine(), db_path)
+            before, after, wal_truncated = compact_database(db_path)
         except Exception as exc:
             msg = str(exc)
             if "locked" in msg:

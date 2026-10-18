@@ -47,16 +47,11 @@ def test_batch_matches_single():
 
 
 def test_no_hash_without_native(monkeypatch):
-    monkeypatch.setenv("STL_NATIVE", "0")
-    native.reload()
-    try:
-        img = _jpeg(lambda x, y: (x * 4,) * 3)
-        assert not dhash_available()
-        assert compute_dhash_from_jpeg(img) is None
-        assert compute_dhashes([img, img]) == [None, None]
-    finally:
-        monkeypatch.delenv("STL_NATIVE")
-        native.reload()
+    monkeypatch.setattr(native, "module", lambda: None)
+    img = _jpeg(lambda x, y: (x * 4,) * 3)
+    assert not dhash_available()
+    assert compute_dhash_from_jpeg(img) is None
+    assert compute_dhashes([img, img]) == [None, None]
 
 
 def test_format_and_parse_round_trip():

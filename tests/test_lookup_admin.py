@@ -1,42 +1,30 @@
 """Tests for app.services.lookup_admin (the lookup editors' operations)."""
-from app.database.db import session_scope
-from app.database.models import (
-    Category, Collection, Creator, Scale, STLModel, Subcollection, Tag,
-)
 from app.services import lookup_admin as LA
+from tests import factory
 
 
 def _lib():
-    with session_scope() as s:
-        comics, games = Collection(name="Comics"), Collection(name="Games")
-        busts, minis = Category(name="Busts"), Category(name="Minis")
-        dragon, elf, unused = Tag(name="dragon"), Tag(name="Elf"), Tag(name="unused")
-        s28 = Scale(name="28mm")
-        s.add_all([comics, games, busts, minis, dragon, elf, unused, s28])
-        s.flush()
-        marvel = Subcollection(name="Marvel", collection_id=comics.id)
-        zelda = Subcollection(name="Zelda", collection_id=games.id)
-        s.add_all([marvel, zelda])
-        s.flush()
-        m1 = STLModel(title="a", archive_path="p1", archive_hash="h1", creator="Sanix",
-                      collection=comics, subcollection=marvel, category=busts)
-        m2 = STLModel(title="b", archive_path="p2", archive_hash="h2", creator="sanix",
-                      collection=games, subcollection=zelda, category=minis)
-        m1.tags.extend([dragon, elf])
-        m2.tags.append(elf)
-        m1.scales.append(s28)
-        s.add_all([m1, m2, Creator(name="Sanix", full_name="S. Anix")])
-        s.flush()
-        return dict(comics=comics.id, games=games.id, busts=busts.id, minis=minis.id,
-                    dragon=dragon.id, elf=elf.id, unused=unused.id, s28=s28.id,
-                    marvel=marvel.id, zelda=zelda.id, m1=m1.id, m2=m2.id)
+    ids = {k: factory.lookup(t, n) for k, t, n in [
+        ("comics", "collections", "Comics"), ("games", "collections", "Games"),
+        ("busts", "categories", "Busts"), ("minis", "categories", "Minis"),
+        ("dragon", "tags", "dragon"), ("elf", "tags", "Elf"), ("unused", "tags", "unused"),
+        ("s28", "scales", "28mm")]}
+    ids["marvel"] = factory.insert("subcollections", name="Marvel", collection_id=ids["comics"])
+    ids["zelda"] = factory.insert("subcollections", name="Zelda", collection_id=ids["games"])
+    ids["m1"] = factory.add_model("p1", "h1", title="a", creator="Sanix", collection_id=ids["comics"],
+                                  subcollection_id=ids["marvel"], category_id=ids["busts"],
+                                  tags=("dragon", "Elf"), scales=("28mm",))
+    ids["m2"] = factory.add_model("p2", "h2", title="b", creator="sanix", collection_id=ids["games"],
+                                  subcollection_id=ids["zelda"], category_id=ids["minis"],
+                                  tags=("Elf",))
+    factory.insert("creators", name="Sanix", full_name="S. Anix")
+    return ids
 
 
 def _model(mid):
-    with session_scope() as s:
-        m = s.get(STLModel, mid)
-        return (m.creator, m.collection_id, m.subcollection_id, m.category_id,
-                sorted(t.name for t in m.tags))
+    m = factory.row("models", mid)
+    return (m["creator"], m["collection_id"], m["subcollection_id"], m["category_id"],
+            sorted(factory.names(mid, "tags")))
 
 
 def test_listing():

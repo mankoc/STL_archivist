@@ -13,8 +13,7 @@ import pytest
 pytest.importorskip("PyQt6")
 
 from app.config import CrawlerConfig
-from app.database.db import session_scope
-from app.database.models import STLModel
+from tests import factory
 
 
 def _zip_with_image(path):
@@ -29,12 +28,7 @@ def _zip_with_image(path):
 
 
 def _make_model(archive_path, warning):
-    with session_scope() as s:
-        m = STLModel(title="t", archive_path=str(archive_path),
-                     archive_hash="stale", warning=warning)
-        s.add(m)
-        s.flush()
-        return m.id
+    return factory.add_model(str(archive_path), "stale", title="t", warning=warning)
 
 
 def _run_rescan(monkeypatch, model_ids, config=None):
@@ -54,8 +48,7 @@ def _run_rescan(monkeypatch, model_ids, config=None):
 
 
 def _warning_of(model_id):
-    with session_scope() as s:
-        return s.get(STLModel, model_id).warning
+    return factory.row("models", model_id)["warning"]
 
 
 # ---------------------------------------------------------------------------

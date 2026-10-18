@@ -10,14 +10,8 @@ stl_native = pytest.importorskip("stl_native")
 if not hasattr(stl_native, "extract_metadata"):
     pytest.skip("stl_native predates native metadata; rebuild it", allow_module_level=True)
 
-from app import native
 from app.crawler import metadata as M
 
-
-@pytest.fixture(autouse=True)
-def _native_on(monkeypatch):
-    monkeypatch.delenv("STL_NATIVE", raising=False)
-    native.reload()
 
 SEGMENTS = ["Patreon", "patreons", "Kickstarter Rewards", "MyMiniFactory", "Cults", "cults3d", "Gumroad",
             "Sanix", "2024-03", "2024_3", "2024", "2024年", "Dragon - Bust", "x_patreon_y", "patreon-x",

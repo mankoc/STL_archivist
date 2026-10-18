@@ -303,6 +303,111 @@ pub fn free_bytes(conn: &Connection) -> Result<i64> {
     Ok(free * page)
 }
 
+
+// ── database administration (app.database.db, filter_cache, maintenance) ──
+
+/// `compact_database`: `VACUUM` with temporary data on disk, then
+/// `wal_checkpoint(TRUNCATE)`. Returns whether the WAL was truncated (no
+/// reader kept it busy).
+pub fn compact(conn: &Connection) -> Result<bool> {
+    conn.execute_batch("PRAGMA temp_store=FILE")?;
+    let vacuum = conn.execute_batch("VACUUM");
+    conn.execute_batch("PRAGMA temp_store=MEMORY")?;
+    vacuum?;
+    let busy: i64 = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| r.get(0))?;
+    Ok(busy == 0)
+}
+
+/// `clear_db`: delete every row of every table (children first), keeping the schema.
+pub fn clear_all(tx: &Transaction) -> Result<()> {
+    for table in [
+        "model_tags", "model_scales", "stl_files", "images", "models", "subcollections", "collections", "sculptors",
+        "categories", "releases", "scales", "tags", "creators", "crawled_folders", "filter_cache",
+    ] {
+        tx.execute(&format!("DELETE FROM {table}"), [])?;
+    }
+    tx.execute(&format!("DELETE FROM {}", super::schema_sql::VECTOR_TABLE), []).ok();
+    Ok(())
+}
+
+pub fn filter_cache_get(conn: &Connection) -> Result<Option<String>> {
+    conn.query_row("SELECT payload FROM filter_cache WHERE id = 1", [], |r| r.get(0)).optional()
+}
+
+pub fn filter_cache_set(tx: &Transaction, payload: &str) -> Result<()> {
+    tx.execute(
+        "INSERT INTO filter_cache (id, payload, updated_at) VALUES (1, ?1, ?2) \
+         ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at",
+        params![payload, super::edit::utc_now_text()],
+    )?;
+    Ok(())
+}
+
+pub fn filter_cache_clear(tx: &Transaction) -> Result<()> {
+    tx.execute("DELETE FROM filter_cache WHERE id = 1", [])?;
+    Ok(())
+}
+
+/// Whether any of `paths` is a model's archive path (`folder_has_db_records`).
+pub fn any_archive_path(conn: &Connection, paths: &[String]) -> Result<bool> {
+    let json = serde_json::to_string(paths).unwrap_or_else(|_| "[]".into());
+    conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM models WHERE archive_path IN (SELECT value FROM json_each(?1)))",
+        [json],
+        |r| r.get(0),
+    )
+}
+
+/// Image ids that need a dHash: all, or those without a current one
+/// (none, or a length other than `current_len`), by id.
+pub fn dhash_targets(conn: &Connection, all: bool, current_len: i64) -> Result<Vec<i64>> {
+    let sql = if all {
+        "SELECT id FROM images ORDER BY id"
+    } else {
+        "SELECT id FROM images WHERE dhash IS NULL OR length(dhash) != ?1 ORDER BY id"
+    };
+    let mut st = conn.prepare(sql)?;
+    if all {
+        st.query_map([], |r| r.get(0))?.collect()
+    } else {
+        st.query_map([current_len], |r| r.get(0))?.collect()
+    }
+}
+
+/// Legacy thumbnail blobs (the `images.thumbnail` column) of `ids`.
+pub fn legacy_thumbnails(conn: &Connection, ids: &[i64]) -> Result<Vec<(i64, Vec<u8>)>> {
+    let json = format!("[{}]", ids.iter().map(i64::to_string).collect::<Vec<_>>().join(","));
+    let mut st = conn.prepare(
+        "SELECT id, thumbnail FROM images WHERE id IN (SELECT value FROM json_each(?1)) AND thumbnail IS NOT NULL",
+    )?;
+    st.query_map([json], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()
+}
+
+pub fn set_dhashes(tx: &Transaction, rows: &[(i64, String)]) -> Result<()> {
+    let mut st = tx.prepare("UPDATE images SET dhash = ?2 WHERE id = ?1")?;
+    for (id, h) in rows {
+        st.execute(params![id, h])?;
+    }
+    Ok(())
+}
+
+/// `backfill_archive_folder`: normalise backslashed folders and fill missing
+/// ones from the archive path (`PurePosixPath(...).parent`). Returns the number filled.
+pub fn backfill_archive_folder(tx: &Transaction) -> Result<usize> {
+    tx.execute(
+        "UPDATE models SET archive_folder = replace(archive_folder, char(92), '/') WHERE instr(archive_folder, char(92)) > 0",
+        [],
+    )?;
+    let mut st = tx.prepare("SELECT id, archive_path FROM models WHERE archive_folder IS NULL")?;
+    let rows: Vec<(i64, String)> = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_>>()?;
+    drop(st);
+    let mut up = tx.prepare("UPDATE models SET archive_folder = ?2 WHERE id = ?1")?;
+    for (id, path) in &rows {
+        up.execute(params![id, super::edit::archive_folder_for(path)])?;
+    }
+    Ok(rows.len())
+}
+
 #[cfg(test)]
 mod dialog_tests {
     use super::*;

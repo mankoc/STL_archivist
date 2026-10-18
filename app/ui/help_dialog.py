@@ -775,9 +775,13 @@ or more text fields on all selected models.</p>
 <table>
   <tr><th>Control</th><th>Description</th></tr>
   <tr><td><b>Find</b></td>
-      <td>The substring to search for (treated as a literal string, not a regex).</td></tr>
+      <td>The text to search for: a literal string, or a regular expression when
+          <b>Use regex</b> is ticked.</td></tr>
   <tr><td><b>Replace with</b></td>
-      <td>The replacement string; leave empty to delete the matched substring.</td></tr>
+      <td>The replacement string; leave empty to delete the matched substring. In regex
+          mode <code>&#92;1</code>, <code>&#92;g&lt;name&gt;</code> and <code>&#92;g&lt;0&gt;</code>
+          insert groups, and <code>&#92;n</code> / <code>&#92;t</code> insert a newline / tab, as in
+          Python.</td></tr>
   <tr><td><b>Apply to</b></td>
       <td>Checkboxes for <em>Title</em>, <em>Creator</em>, <em>Source</em>, and <em>URL</em>;
           tick any combination to apply the replacement to those fields.</td></tr>
@@ -785,7 +789,10 @@ or more text fields on all selected models.</p>
       <td>When checked, the search is case-sensitive; otherwise it matches regardless of case.</td></tr>
 </table>
 <div class="note">Find &amp; Replace runs after all manual field overwrites and path-pattern
-extractions within the same OK operation.</div>
+extractions within the same OK operation. Regular expressions use the native core's dialect
+(Rust <code>fancy-regex</code>): Unicode-aware like Python, with lookarounds and
+backreferences. A pattern or replacement it cannot read is reported and nothing is
+saved.</div>
 {_prev_next(PAGE_MASS_EDITOR)}"""
 
 
@@ -808,11 +815,10 @@ The dialog is divided into sections shown in a tree on the left.</p>
 </table>
 <div class="note">The environment variables <code>STL_DATA_DIR</code> and
 <code>STL_UNRAR_PATH</code>, when set, take precedence over these two settings.
-<code>STL_NATIVE=0</code> turns off the optional native (Rust) core so the Python
-implementations are used; the log's first line says which one is active. The native
-core reads <code>.zip</code> and <code>.7z</code> archives itself and hands any archive it
-cannot read exactly to the Python readers, so turning it off never changes what is
-catalogued.</div>
+The native (Rust) core is required; the log's first line shows its version. It reads
+<code>.zip</code>, <code>.7z</code> and <code>.rar</code> archives itself and hands any
+archive it cannot read exactly to the Python readers, so nothing is catalogued
+differently.</div>
 
 <h2>Language</h2>
 <table>
@@ -1120,21 +1126,18 @@ render at different sizes is caught.</p>
 </table>
 <p>Every pair of images is compared (there is no early stop), with identical images
 collapsed first: a library of 363,000 images holds about 190,000 distinct ones. On that
-library the perceptual hash takes about 4 seconds and the AI embedding about 35 seconds
-with the native core (about 15 seconds and a minute without it).
+library the perceptual hash takes about 4 seconds and the AI embedding about 35 seconds.
 At most the 100,000 best pairs are listed.</p>
 <div class="note">Perceptual hashes are computed by the native core (format 2). After
 upgrading, run <b>Database Maintenance &rarr; Recompute Image Hashes</b> once so existing
 thumbnails are re-hashed; on a 365,000-image library on a hard disk it takes about an hour,
 almost all of it reading thumbnails. Until then, hashes in an older format are recomputed on the
-fly during a search (and not saved). Without the native core no hash can be computed: images
-without a current hash are left out of perceptual-hash searches, and <i>Find by Image</i>
-offers the AI embedding method only.</div>
+fly during a search (and not saved).</div>
 
 <h4>Matching method &mdash; dHash vs AI embedding</h4>
 <p>The <b>Method</b> dropdown chooses how images are compared:</p>
 <ul>
-  <li><b>Perceptual hash (dHash)</b> &mdash; the built-in method above (it needs the native core);
+  <li><b>Perceptual hash (dHash)</b> &mdash; the built-in method above;
       great for near-duplicates (re-encodes, resizes, minor edits).</li>
   <li><b>AI embedding (CLIP)</b> &mdash; an optional learned embedding that matches the
       <em>same model</em> across different renders, angles, and colours far more accurately.
@@ -1144,7 +1147,8 @@ offers the AI embedding method only.</div>
       computed via <b>Database Maintenance &rarr; Compute Image Embeddings</b>. See the README
       for setup. The same method selector is available in <b>Find by Image</b>.</li>
 </ul>
-<div class="note">Embeddings are stored with the <b>sqlite-vec</b> extension, which also runs the
+<div class="note">Embeddings are stored with the <b>sqlite-vec</b> extension (built into the
+native core), which also runs the
 <b>Find by Image</b> search inside the database. Searches at the default similarity take a
 fraction of a second. The first start after upgrading moves existing embeddings into the
 new storage once, which can take about a minute on a large library.</div>

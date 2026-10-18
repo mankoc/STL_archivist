@@ -25,14 +25,6 @@ ALPHABET = (
 )
 
 
-@pytest.fixture(autouse=True)
-def native_enabled(monkeypatch):
-    monkeypatch.delenv("STL_NATIVE", raising=False)
-    native.reload()
-    yield
-    native.reload()
-
-
 def _random_members(rnd: random.Random) -> list[tuple[str, int]]:
     names = ["".join(rnd.choice(ALPHABET) for _ in range(rnd.randint(0, 24)))
              for _ in range(rnd.randint(0, 40))]
@@ -80,8 +72,6 @@ def test_archive_hash_identical_with_and_without_native(tmp_path, monkeypatch):
         _zip(tmp_path / "empty.zip", []),
     ]
     with_native = [archive_hash(a) for a in archives]
-    monkeypatch.setenv("STL_NATIVE", "0")
-    native.reload()
-    assert not native.available()
+    monkeypatch.setattr(native, "module", lambda: None)    # the Python fallback
     without = [archive_hash(a) for a in archives]
     assert with_native == without

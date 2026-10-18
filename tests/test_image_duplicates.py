@@ -8,12 +8,11 @@ import pytest
 from PIL import Image as PILImage
 
 import app.services.image_duplicates as D
-from app.database import vectors
-from app.database.db import session_scope
-from app.database.models import Image, STLModel
+from app.database import native_db
 from app.utils.image_embedding import EMBED_DIM
 from app.utils.image_hash import format_dhash, split_dhashes
 from app.utils.thumbnailer import write_raw_thumbnail
+from tests import factory
 
 rng = np.random.default_rng(7)
 
@@ -27,18 +26,10 @@ def tiny_tiles(monkeypatch):
 
 @pytest.fixture(autouse=True, params=["python", "native"])
 def implementation(request, monkeypatch):
-    """Run every test against the NumPy scans and, when built, the Rust ones."""
-    from app import native
+    """Run every test against the NumPy scans and the Rust ones."""
     if request.param == "python":
-        monkeypatch.setenv("STL_NATIVE", "0")
-    else:
-        monkeypatch.delenv("STL_NATIVE", raising=False)
-    native.reload()
-    if request.param == "native" and not native.available():
-        pytest.skip("stl_native not built")
-    yield request.param
-    monkeypatch.undo()
-    native.reload()
+        monkeypatch.setattr(D, "_native_pairs", lambda *a, **k: None)
+    return request.param
 
 
 def _flip(h: int, nbits: int) -> int:
@@ -155,15 +146,12 @@ def test_integer_dhash_column_is_rebuilt_as_text(tmp_path):
     con.close()
 
     init_db(str(db))
-    with session_scope() as s:
-        from sqlalchemy import text
-        decl = [r[2] for r in s.execute(text("PRAGMA table_info(images)")) if r[1] == "dhash"][0]
-        assert "CHAR" in decl.upper()
-        assert dict(s.execute(text("SELECT id, dhash FROM images")).all()) == {1: hex_ok, 2: None}
-        s.execute(text("UPDATE images SET dhash = :d WHERE id = 2"), {"d": digits})
-        assert s.execute(text("SELECT dhash FROM images WHERE id = 2")).scalar_one() == digits
-        assert s.execute(text(
-            "SELECT 1 FROM sqlite_master WHERE name = 'ix_images_dhash'")).scalar_one() == 1
+    decl = [r[2] for r in factory.rows("PRAGMA table_info(images)") if r[1] == "dhash"][0]
+    assert "CHAR" in decl.upper()
+    assert {r[0]: r[1] for r in factory.rows("SELECT id, dhash FROM images")} == {1: hex_ok, 2: None}
+    factory.execute("UPDATE images SET dhash = ? WHERE id = 2", digits)
+    assert factory.scalar("SELECT dhash FROM images WHERE id = 2") == digits
+    assert factory.scalar("SELECT 1 FROM sqlite_master WHERE name = 'ix_images_dhash'") == 1
 
 
 # ── end to end ───────────────────────────────────────────────────────────────
@@ -175,50 +163,36 @@ def _jpeg(seed: int) -> bytes:
     return buf.getvalue()
 
 
-def _models(session, n, banner_hash=None):
-    out = []
-    for k in range(n):
-        m = STLModel(title=f"M{k}", archive_path=f"/lib/m{k}.7z", archive_hash=str(k),
-                     archive_size=1000 + k)
-        session.add(m)
-        out.append(m)
-    session.flush()
-    return out
+def _models(n):
+    return [factory.add_model(f"/lib/m{k}.7z", str(k), title=f"M{k}", archive_size=1000 + k)
+            for k in range(n)]
 
 
-def _img(session, model, dhash=None, thumb=None):
-    img = Image(model=model, filename="x.jpg", dhash=dhash)
-    session.add(img)
-    session.flush()
-    img.thumbnail_path = str(img.id)
+def _img(model_id, dhash=None, thumb=None):
+    image_id = factory.add_image(model_id, "x.jpg", dhash=dhash)
+    factory.execute("UPDATE images SET thumbnail_path = ? WHERE id = ?", str(image_id), image_id)
     if thumb is not None:
-        write_raw_thumbnail(img.id, thumb)
-    return img
+        write_raw_thumbnail(image_id, thumb)
+    return image_id
 
 
-def test_find_dhash_duplicates_end_to_end(thumb_store, implementation):
+def test_find_dhash_duplicates_end_to_end(thumb_store):
     h = int(rng.integers(0, 2**63)) << 64 | 12345
     banner = int(rng.integers(0, 2**63)) << 64 | 999
-    with session_scope() as s:
-        ms = _models(s, 16)
-        _img(s, ms[0], format_dhash(h))
-        _img(s, ms[1], format_dhash(_flip(h, 3)))            # near: distance 3
-        _img(s, ms[2], format_dhash(h))                       # identical
-        _img(s, ms[3], format_dhash(_flip(h, 40)))           # far
-        for m in ms[4:16]:                                    # banner in 12 models
-            _img(s, m, format_dhash(banner))
-        _img(s, ms[3], None, thumb=_jpeg(1))                  # hash computed from thumbnail
-        _img(s, ms[15], None, thumb=_jpeg(1))
-        ids = [m.id for m in ms]
-    with session_scope() as s:
-        rep = D.find_dhash_duplicates(s, max_dist=5, max_models=10)
+    ids = _models(16)
+    _img(ids[0], format_dhash(h))
+    _img(ids[1], format_dhash(_flip(h, 3)))            # near: distance 3
+    _img(ids[2], format_dhash(h))                       # identical
+    _img(ids[3], format_dhash(_flip(h, 40)))           # far
+    for m in ids[4:16]:                                 # banner in 12 models
+        _img(m, format_dhash(banner))
+    _img(ids[3], None, thumb=_jpeg(1))                  # hash computed from thumbnail
+    _img(ids[15], None, thumb=_jpeg(1))
+    rep = D.find_dhash_duplicates(None, max_dist=5, max_models=10)
     got = {(r["id_a"], r["id_b"]): (r["pairs"], r["best"]) for r in rep.results}
-    want = {(ids[0], ids[1]): (1, 3), (ids[0], ids[2]): (1, 0), (ids[1], ids[2]): (1, 3)}
-    if implementation == "native":   # missing hashes are computed only natively
-        want[(ids[3], ids[15])] = (1, 0)
-        assert rep.shared_skipped == 1 and rep.images == 18 and rep.items == 5
-    else:
-        assert rep.shared_skipped == 1 and rep.images == 16 and rep.items == 4
+    want = {(ids[0], ids[1]): (1, 3), (ids[0], ids[2]): (1, 0), (ids[1], ids[2]): (1, 3),
+            (ids[3], ids[15]): (1, 0)}
+    assert rep.shared_skipped == 1 and rep.images == 18 and rep.items == 5
     assert got == want
     row = next(r for r in rep.results if r["id_a"] == ids[0] and r["id_b"] == ids[2])
     assert (row["size_a"], row["imgs_a"], row["title_b"]) == (1000, 1, "M2")
@@ -227,14 +201,12 @@ def test_find_dhash_duplicates_end_to_end(thumb_store, implementation):
 def test_find_embedding_duplicates_end_to_end():
     base = rng.standard_normal(EMBED_DIM).astype(np.float32)
     other = rng.standard_normal(EMBED_DIM).astype(np.float32)
-    with session_scope() as s:
-        ms = _models(s, 4)
-        imgs = [_img(s, m) for m in ms]
-        vectors.store(s, [(imgs[0].id, base), (imgs[1].id, base + 0.01),
-                          (imgs[2].id, base), (imgs[3].id, other)])
-        ids = [m.id for m in ms]
-    with session_scope() as s:
-        rep = D.find_embedding_duplicates(s, threshold=0.95)
+    ids = _models(4)
+    imgs = [_img(m) for m in ids]
+    native_db.library().vectors_store(EMBED_DIM, [
+        (imgs[0], base.tobytes()), (imgs[1], (base + 0.01).astype(np.float32).tobytes()),
+        (imgs[2], base.tobytes()), (imgs[3], other.tobytes())])
+    rep = D.find_embedding_duplicates(None, threshold=0.95)
     got = {(r["id_a"], r["id_b"]): r["best"] for r in rep.results}
     assert set(got) == {(ids[0], ids[1]), (ids[0], ids[2]), (ids[1], ids[2])}
     assert got[(ids[0], ids[2])] == pytest.approx(1.0)

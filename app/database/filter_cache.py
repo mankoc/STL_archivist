@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -169,18 +168,10 @@ def build_folder_tree(folders: list[str]) -> list[dict]:
 
 def save_filter_cache(payload: dict) -> None:
     """Persist the unscoped filter-tree payload to the database."""
-    from app.database.db import session_scope
-    from app.database.models import FilterCache
+    from app.database import native_db
 
     try:
-        encoded = _encode_payload(payload)
-        with session_scope() as session:
-            row = session.get(FilterCache, 1)
-            if row is None:
-                row = FilterCache(id=1)
-                session.add(row)
-            row.payload    = encoded
-            row.updated_at = datetime.now(timezone.utc)
+        native_db.library().filter_cache_set(_encode_payload(payload))
         logger.debug("Filter cache saved.")
     except Exception as exc:
         logger.warning("Failed to save filter cache: %s", exc)
@@ -188,15 +179,12 @@ def save_filter_cache(payload: dict) -> None:
 
 def load_filter_cache() -> Optional[dict]:
     """Return the cached unscoped payload, or *None* if no cache exists."""
-    from app.database.db import session_scope
-    from app.database.models import FilterCache
+    from app.database import native_db
 
     try:
-        with session_scope() as session:
-            row = session.get(FilterCache, 1)
-            if row is None or not row.payload:
-                return None
-            raw = row.payload
+        raw = native_db.library().filter_cache_get()
+        if not raw:
+            return None
         result = _decode_payload(raw)
         logger.debug("Filter cache loaded.")
         return result
@@ -207,14 +195,10 @@ def load_filter_cache() -> Optional[dict]:
 
 def invalidate_filter_cache() -> None:
     """Delete the cached row so the next unscoped tree build refreshes it."""
-    from app.database.db import session_scope
-    from app.database.models import FilterCache
+    from app.database import native_db
 
     try:
-        with session_scope() as session:
-            row = session.get(FilterCache, 1)
-            if row is not None:
-                session.delete(row)
+        native_db.library().filter_cache_clear()
         logger.debug("Filter cache invalidated.")
     except Exception as exc:
         logger.warning("Failed to invalidate filter cache: %s", exc)

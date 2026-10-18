@@ -333,6 +333,7 @@ fn edit_err(e: stl_core::storage::edit::EditError) -> PyErr {
     use stl_core::storage::edit::EditError;
     match e {
         EditError::Db(e) => db_err(e),
+        EditError::Invalid(m) => PyValueError::new_err(m),
         EditError::Unsupported(m) => PyValueError::new_err(m),
         EditError::UnknownField(f) => pyo3::exceptions::PyKeyError::new_err(f),
     }
@@ -588,11 +589,6 @@ fn crawl_answer(
                 services.call_method1("rules", (archive_name, names))?.extract()?;
             Response::Rules { presupports, warnings, scales }
         }
-        Request::ParseDate(s) => {
-            let (y, m): (Option<i64>, Option<i64>) = services.call_method1("parse_date", (s,))?.extract()?;
-            Response::Date(y, m)
-        }
-        Request::ParseInt(s) => Response::Int(services.call_method1("parse_int", (s,))?.extract()?),
         Request::SidecarImport(folder) => Response::Imported(services.call_method1("sidecar_import", (folder,))?.extract()?),
         Request::SidecarExport(folder) => {
             services.call_method1("sidecar_export", (folder,))?;
@@ -1711,6 +1707,63 @@ impl PyLibraryDb {
         out.set_item("unchanged", outcome.unchanged)?;
         out.set_item("new_paths", outcome.new_paths)?;
         Ok(out)
+    }
+
+    // ── database administration ───────────────────────────────────────────────
+
+    /// `VACUUM` plus `wal_checkpoint(TRUNCATE)`; whether the WAL was truncated.
+    fn db_compact(&self, py: Python<'_>) -> PyResult<bool> {
+        self.with(py, stl_core::storage::maintenance::compact)
+    }
+
+    fn db_clear_all(&self, py: Python<'_>) -> PyResult<()> {
+        self.with_tx(py, stl_core::storage::maintenance::clear_all, db_err)
+    }
+
+    fn db_backfill_archive_folder(&self, py: Python<'_>) -> PyResult<usize> {
+        self.with_tx(py, stl_core::storage::maintenance::backfill_archive_folder, db_err)
+    }
+
+    fn filter_cache_get(&self, py: Python<'_>) -> PyResult<Option<String>> {
+        self.with(py, stl_core::storage::maintenance::filter_cache_get)
+    }
+
+    fn filter_cache_set(&self, py: Python<'_>, payload: String) -> PyResult<()> {
+        self.with_tx(py, |tx| stl_core::storage::maintenance::filter_cache_set(tx, &payload), db_err)
+    }
+
+    fn filter_cache_clear(&self, py: Python<'_>) -> PyResult<()> {
+        self.with_tx(py, stl_core::storage::maintenance::filter_cache_clear, db_err)
+    }
+
+    fn any_archive_path(&self, py: Python<'_>, paths: Vec<String>) -> PyResult<bool> {
+        self.with(py, |c| stl_core::storage::maintenance::any_archive_path(c, &paths))
+    }
+
+    fn dhash_targets(&self, py: Python<'_>, all: bool, current_len: i64) -> PyResult<Vec<i64>> {
+        self.with(py, |c| stl_core::storage::maintenance::dhash_targets(c, all, current_len))
+    }
+
+    fn legacy_thumbnails<'py>(&self, py: Python<'py>, ids: Vec<i64>) -> PyResult<Bound<'py, PyDict>> {
+        let rows = self.with(py, |c| stl_core::storage::maintenance::legacy_thumbnails(c, &ids))?;
+        let out = PyDict::new(py);
+        for (id, blob) in rows {
+            out.set_item(id, PyBytes::new(py, &blob))?;
+        }
+        Ok(out)
+    }
+
+    fn set_dhashes(&self, py: Python<'_>, rows: Vec<(i64, String)>) -> PyResult<()> {
+        self.with_tx(py, |tx| stl_core::storage::maintenance::set_dhashes(tx, &rows), db_err)
+    }
+
+    fn vectors_count(&self, py: Python<'_>) -> PyResult<usize> {
+        self.with(py, stl_core::storage::vectors::count)
+    }
+
+    /// The database file this pool opens.
+    fn path(&self) -> std::path::PathBuf {
+        self.path.clone()
     }
 
     /// Close the pooled connections (they reopen on the next call).

@@ -15,7 +15,6 @@ stl_native = pytest.importorskip("stl_native")
 if not hasattr(stl_native, "make_thumbnail"):
     pytest.skip("stl_native predates make_thumbnail; rebuild it", allow_module_level=True)
 
-from app import native
 from app.utils import thumbnailer as T
 
 
@@ -109,10 +108,7 @@ def test_unhandled_input_raises_for_the_pillow_fallback(raw):
         stl_native.make_thumbnail(raw, 128)
 
 
-def test_make_thumbnail_falls_back_to_pillow(monkeypatch):
-    monkeypatch.delenv("STL_NATIVE", raising=False)
-    native.reload()
+def test_make_thumbnail_falls_back_to_pillow():
     cmyk = _encode(_gradient(300, 200, "CMYK"), "JPEG")
     assert T.make_thumbnail(cmyk, 128) == T._make_thumbnail_py(cmyk, 128)
     assert T.make_thumbnail(b"garbage", 128) is None
-    native.reload()

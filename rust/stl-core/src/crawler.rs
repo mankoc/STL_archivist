@@ -9,7 +9,7 @@
 //! What this crate cannot do exactly as the Python app does goes to the
 //! [`Host`] as a [`Request`]: archives the native readers refuse, images only
 //! Pillow decodes, PDF pages (PyMuPDF), CLIP vectors, metadata or rules the
-//! native ports leave to Python, Unicode-digit parses, sidecars the native
+//! native ports leave to Python, sidecars the native
 //! port refuses. The Python host answers them on its own thread; a host
 //! without Python answers `Response::None` and the crawl continues without
 //! that piece (a later native implementation can answer instead).
@@ -72,10 +72,6 @@ pub enum Request {
     Metadata { path: String, files: Vec<(String, Vec<u8>)> },
     /// `detect_presupport`, `detect_warnings`, `detect_scale([name] + names)`.
     Rules { archive_name: String, names: Vec<String> },
-    /// `parse_release_date(text)`.
-    ParseDate(String),
-    /// `int(text)` (`None` where it raises).
-    ParseInt(String),
     SidecarImport(String),
     SidecarExport(String),
 }
@@ -98,8 +94,6 @@ pub enum Response {
     Vectors(Vec<Option<Vec<u8>>>),
     Metadata(Metadata),
     Rules { presupports: String, warnings: String, scales: Vec<String> },
-    Date(Option<i64>, Option<i64>),
-    Int(Option<i64>),
     Imported(usize),
 }
 
@@ -349,28 +343,13 @@ fn prepare(path: &str, cfg: &CrawlConfig, host: &dyn Host) -> Prepared {
 
 // ── phase 4 inputs ───────────────────────────────────────────────────────────
 
-fn has_unicode_digit(s: &str) -> bool {
-    s.chars().any(|c| c.is_numeric() && !c.is_ascii_digit())
-}
-
-fn parse_date(s: &str, host: &dyn Host) -> (Option<i64>, Option<i64>) {
-    if has_unicode_digit(s) {
-        if let Response::Date(y, m) = host.call(Request::ParseDate(s.to_string())) {
-            return (y, m);
-        }
-        return (None, None);
-    }
+fn parse_date(s: &str, _host: &dyn Host) -> (Option<i64>, Option<i64>) {
     path_pattern::parse_release_date(s)
 }
 
-fn parse_int(s: &str, host: &dyn Host) -> Option<i64> {
-    match edit::py_int(crate::storage::edit::py_strip(s)) {
-        Ok(v) => v,
-        Err(_) => match host.call(Request::ParseInt(s.to_string())) {
-            Response::Int(v) => v,
-            _ => None,
-        },
-    }
+/// Python's `int(s)` (it strips surrounding whitespace itself).
+fn parse_int(s: &str, _host: &dyn Host) -> Option<i64> {
+    crate::pyunicode::py_int(crate::storage::edit::py_strip(s))
 }
 
 /// `"/" + str(path.relative_to(source)).replace("\\", "/")`, or the path itself.

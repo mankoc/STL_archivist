@@ -6,14 +6,17 @@ Decoupled from the UI so it can be unit-tested without a ``QApplication``.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
-from app.database.models import STLFile
+#: An STL file entry with ``filename``, ``file_size`` and ``archive_hash``
+#: (``services.model_views.StlFileRow``).
+FileRow = Any
+
 
 MatchKey = Literal["filename", "size", "hash"]
 
 
-def _key_fn(f: STLFile, key: MatchKey):
+def _key_fn(f: FileRow, key: MatchKey):
     """Return the comparison key for *f* given matching *key*."""
     if key == "filename":
         return Path(f.filename).name.lower()
@@ -24,10 +27,10 @@ def _key_fn(f: STLFile, key: MatchKey):
 
 
 def match_files(
-    files_a: list[STLFile],
-    files_b: list[STLFile],
+    files_a: list[FileRow],
+    files_b: list[FileRow],
     key: MatchKey = "filename",
-) -> list[tuple[STLFile | None, STLFile | None]]:
+) -> list[tuple[FileRow | None, FileRow | None]]:
     """Pair files from *files_a* and *files_b* by *key* using greedy matching.
 
     Each file in A is matched against the first file in B with the same key
@@ -40,7 +43,7 @@ def match_files(
     """
     unmatched_a = list(files_a)
     unmatched_b = list(files_b)
-    rows: list[tuple[STLFile | None, STLFile | None]] = []
+    rows: list[tuple[FileRow | None, FileRow | None]] = []
 
     for fa in list(unmatched_a):
         ka = _key_fn(fa, key)

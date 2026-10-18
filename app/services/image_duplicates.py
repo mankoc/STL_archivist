@@ -30,7 +30,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
-from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
@@ -76,16 +75,10 @@ class ScanReport:
 
 # ── Loading ──────────────────────────────────────────────────────────────────
 
-def _present_images(session) -> list[tuple]:
-    """``(image id, model id, dhash)`` by image id; *session* ``None`` uses
-    ``content_duplicates`` (native when available)."""
-    if session is None:
-        from app.services.content_duplicates import present_images
-        return present_images()
-    sql = ("SELECT i.id, i.model_id, i.dhash "
-           "FROM images i JOIN models m ON m.id = i.model_id "
-           "WHERE i.thumbnail_path IS NOT NULL AND m.is_missing IS NOT 1 ORDER BY i.id")
-    return session.connection().exec_driver_sql(sql).all()
+def _present_images(_session=None) -> list[tuple]:
+    """``(image id, model id, dhash)`` of thumbnailed images of present models, by image id."""
+    from app.services.content_duplicates import present_images
+    return present_images()
 
 
 def load_dhash_items(session, log: Log = _noop, progress: Progress = _noop,
@@ -416,13 +409,8 @@ def _results(session, ma, mb, pairs, best, img_model, higher_is_better: bool):
     truncated = len(order) > MAX_RESULTS
     order = order[:MAX_RESULTS]
     imgs = dict(zip(*np.unique(img_model, return_counts=True)))
-    if session is None:
-        from app.services.content_duplicates import model_info
-        model_rows = model_info()
-    else:
-        model_rows = session.connection().exec_driver_sql(
-            "SELECT id, title, archive_path, archive_size FROM models")
-    info = {mid: (title, path, size) for mid, title, path, size in model_rows}
+    from app.services.content_duplicates import model_info
+    info = {mid: (title, path, size) for mid, title, path, size in model_info()}
     rows = []
     for k in order.tolist():
         a, b = int(ma[k]), int(mb[k])
@@ -447,7 +435,7 @@ def find_dhash_duplicates(session, max_dist: int,
                           should_stop: ShouldStop = _never) -> ScanReport:
     """Archive pairs whose thumbnails' dHashes differ in at most *max_dist* bits.
 
-    *session* may be ``None``: the reads then run natively when available.
+    The first argument is unused (it was a session).
     """
     t0 = time.perf_counter()
     report = ScanReport()
@@ -476,7 +464,7 @@ def find_embedding_duplicates(session, threshold: float,
                               should_stop: ShouldStop = _never) -> ScanReport:
     """Archive pairs whose thumbnails' CLIP embeddings have cosine similarity >= *threshold*.
 
-    *session* may be ``None``: the reads then run natively when available.
+    The first argument is unused (it was a session).
     """
     t0 = time.perf_counter()
     report = ScanReport()

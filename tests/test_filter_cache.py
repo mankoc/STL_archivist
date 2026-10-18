@@ -3,8 +3,6 @@ Tests for filter cache functionality, including folder tree caching and building
 """
 import pytest
 
-from app.database.db import session_scope
-from app.database.models import STLModel, FilterCache
 from app.database.filter_cache import (
     save_filter_cache,
     load_filter_cache,
@@ -12,6 +10,7 @@ from app.database.filter_cache import (
     get_folder_tree,
     build_folder_tree,
 )
+from tests import factory
 
 
 # ---------------------------------------------------------------------------
@@ -306,11 +305,10 @@ def test_filter_cache_stored_in_database():
 
     save_filter_cache(payload)
 
-    with session_scope() as session:
-        cache_row = session.get(FilterCache, 1)
-        assert cache_row is not None
-        assert cache_row.payload is not None
-        assert cache_row.updated_at is not None
+    cache_row = factory.row("filter_cache", 1)
+    assert cache_row is not None
+    assert cache_row["payload"] is not None
+    assert cache_row["updated_at"] is not None
 
 
 def test_save_overwrites_existing_cache():
@@ -366,33 +364,11 @@ def test_save_overwrites_existing_cache():
 
 def test_folder_tree_from_database_archives():
     """Build folder tree from actual archive_folder values in database."""
-    with session_scope() as session:
-        session.add(STLModel(
-            title="Model1",
-            archive_path="/path/to/model1.zip",
-            archive_hash="hash1",
-            archive_folder="C:/Archives/Collection1",
-        ))
-        session.add(STLModel(
-            title="Model2",
-            archive_path="/path/to/model2.zip",
-            archive_hash="hash2",
-            archive_folder="C:/Archives/Collection1",
-        ))
-        session.add(STLModel(
-            title="Model3",
-            archive_path="/path/to/model3.zip",
-            archive_hash="hash3",
-            archive_folder="C:/Archives/Collection2",
-        ))
+    factory.add_model("/path/to/model1.zip", title="Model1", archive_folder="C:/Archives/Collection1")
+    factory.add_model("/path/to/model2.zip", title="Model2", archive_folder="C:/Archives/Collection1")
+    factory.add_model("/path/to/model3.zip", title="Model3", archive_folder="C:/Archives/Collection2")
 
-    # Build tree from database folders
-    with session_scope() as session:
-        folders = session.query(STLModel.archive_folder)\
-            .filter(STLModel.archive_folder.isnot(None))\
-            .distinct()\
-            .all()
-
+    folders = factory.rows("SELECT DISTINCT archive_folder FROM models WHERE archive_folder IS NOT NULL")
     folder_list = [f[0] for f in folders]
     tree = build_folder_tree(folder_list)
 

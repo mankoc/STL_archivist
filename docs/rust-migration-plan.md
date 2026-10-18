@@ -461,8 +461,9 @@ rules, find & replace, and trimming, all in one transaction.
 - **Find & replace runs natively only where Rust and `re` agree:** a literal find
   (case-insensitive only for an ASCII find text) and a replacement without backslashes.
   Python expands `\1`, `\n` and `\g<0>`. Regex mode, and a tag list that would link one
-  tag twice (an IntegrityError in Python), raise before writing and run in Python. **4h
-  needs a decision for regex find & replace**, as for the crawler's custom patterns.
+  tag twice (an IntegrityError in Python), raise before writing and run in Python. 4h
+  settled it: regex mode runs natively with Python's template rules, and a duplicate tag
+  is linked once.
 - Lists the ORM loaded in unspecified order (a model's scales, tags, images, STL files)
   are now explicitly in id (or file name) order in both implementations.
   `apply_extracted_to_model`'s parentless subcollection lookup is `ORDER BY id`.
@@ -584,7 +585,7 @@ same grammar. Rust translates `$` to `(?=\n?\z)` and `\Z` to `\z`, so `$` keeps 
 
 Configuration refuses a non-portable pattern on save and says why; it checks with both
 validators when the native core is loaded. A non-portable list saved earlier keeps running
-in Python until 4h, when it will be reported and dropped.
+in Python (through the crawl host) until Phase 8.
 `tests/golden/test_portable_patterns_golden.py` checks 4,000 random patterns: both
 validators accept the same ones, and every accepted pattern flags the same members in both
 rule sets. The test names probe case folding (`ſ`, the Kelvin sign, `İ`, `ß`) and `$` before
@@ -780,6 +781,35 @@ as it serves the app. `tests/factory.py` builds and reads test data with plain `
 
 `native_db.session_clean` now also refuses a session that has flushed changes it has not
 committed: a native connection cannot see them, and native reads used to miss them there.
+
+**4h-2/3: done 2026-10-18 (SQLAlchemy removed; the native core is required).**
+
+- `app/database/models.py`, `helpers.py`, the engine and sessions are gone. `db.init_db`
+  only migrates the file (in-memory databases are refused) and opens the thumbnail store;
+  every read and write goes through `native_db.library()`, on every platform. With one
+  SQLite copy left in the process, the POSIX restriction on native access ends.
+- `rust/stl-core/src/storage/schema_sql.rs` is the schema's source of truth;
+  `tools/gen_schema.py` and the schema golden test are removed.
+- `app/native.py`: `module()` raises `RuntimeError` when `stl_native` is missing, and
+  `STL_NATIVE` is no longer read. Python implementations remain only for input the port
+  refuses (archive readers, Pillow thumbnails, non-portable rule patterns, metadata edge
+  cases), reached through the crawl host or a `ValueError` fallback.
+- The services lost their Python branches; the golden tests that compared them (admin,
+  archive jobs, browser, content duplicates, crawl, edit, library, maintenance, model edit,
+  schema, sidecar, views) are removed. The thumbnail store's py-lmdb backend and its golden
+  test are removed too: `ThumbStore` is the only backend. The remaining golden tests cover
+  functions that keep a Python implementation.
+- Decisions settled: Unicode digits in dates and sequences are parsed natively
+  (`pyunicode.rs`, Python's `unicodedata` 16.0 table); regex Find & Replace in the mass
+  editor uses the native regex dialect (fancy-regex) with Python's replacement-template
+  rules (`\1`, `\g<name>`, `\n`); a tag listed twice is linked once. The crawler's
+  `ParseDate` / `ParseInt` host requests are gone.
+- Additional 4h work: admin operations (`compact`, `clear_all`, the filter cache, dHash
+  targets and writes, the `archive_folder` backfill) moved to `storage::maintenance`.
+- Tests build data with `tests/factory.py` (plain `sqlite3`) and call the services.
+  Vectors are written and read through `LibraryDb`, because plain `sqlite3` has neither
+  sqlite-vec nor the per-connection delete trigger.
+- Dependencies dropped: SQLAlchemy, lmdb, sqlite-vec (Python package).
 
 ### Phase 5: Server (medium)
 

@@ -18,14 +18,6 @@ from app import native
 from app.crawler import archive as A
 
 
-@pytest.fixture(autouse=True)
-def native_enabled(monkeypatch):
-    monkeypatch.delenv("STL_NATIVE", raising=False)
-    native.reload()
-    yield
-    native.reload()
-
-
 def _python_catalog(path: Path):
     """(name, crc, size) as the Python readers produce them, native bypassed."""
     with A.open_archive(path) as ar:
@@ -289,8 +281,6 @@ def test_extract_archive_contents_same_with_and_without_native(tmp_path, monkeyp
 
     with_native = run()
     assert len(with_native[0]) == (2 if kind == "zip" else 3)
-    monkeypatch.setenv("STL_NATIVE", "0")
-    native.reload()
-    assert native.module() is None
+    monkeypatch.setattr(native, "module", lambda: None)    # the Python readers
     assert run()[0] == with_native[0]
     assert sorted(run()[1]) == sorted(with_native[1])

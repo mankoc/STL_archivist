@@ -5,8 +5,7 @@ import pytest
 from PyQt6.QtWidgets import QApplication, QTreeWidgetItem
 from PyQt6.QtCore import Qt
 
-from app.database.db import session_scope
-from app.database.models import STLModel, Image
+from tests import factory
 from app.database.filter_cache import save_filter_cache, build_folder_tree
 
 
@@ -21,32 +20,14 @@ def qapp():
 
 def _setup_test_archive(folder: str, title: str, creator: str) -> int:
     """Helper to create a test archive in the database."""
-    with session_scope() as session:
-        model = STLModel(
-            title=title,
-            creator=creator,
-            archive_path=f"{folder}/{title}.zip",
-            archive_hash=f"hash_{title}",
-            archive_folder=folder,
-        )
-        session.add(model)
-        session.flush()
-        model_id = model.id
-
-    return model_id
+    return factory.add_model(f"{folder}/{title}.zip", f"hash_{title}", title=title,
+                             creator=creator, archive_folder=folder)
 
 
 def _setup_test_images(model_id: int, count: int):
     """Helper to create test images for a model."""
-    with session_scope() as session:
-        model = session.get(STLModel, model_id)
-        for i in range(count):
-            img = Image(
-                model_id=model_id,
-                filename=f"image_{i}.jpg",
-                thumbnail_path=f"thumb_{model_id}_{i}",
-            )
-            session.add(img)
+    for i in range(count):
+        factory.add_image(model_id, f"image_{i}.jpg", thumbnail_path=f"thumb_{model_id}_{i}")
 
 
 # ---------------------------------------------------------------------------

@@ -1,37 +1,19 @@
-"""Optional native (Rust) core: the ``stl_native`` module built from ``rust/stl-py``.
+"""The native (Rust) core: the ``stl_native`` module built from ``rust/stl-py``.
 
-The module is an accelerator, never a requirement. Every function ported to
-Rust keeps its Python implementation as a fallback, so the app runs the same
-without the module, with a stale build, or with the module turned off.
-
-Usage pattern for a ported function::
-
-    from app import native
-
-    def thing(args):
-        mod = native.module()
-        if mod is not None:
-            try:
-                return mod.thing(args)
-            except (TypeError, ValueError, UnicodeError):
-                pass                    # inputs the port does not accept
-        return _thing_py(args)
-
-``STL_NATIVE=0`` (or ``false`` / ``no`` / ``off``) disables the module, which
-is how the golden tests compare both implementations and how a user can rule
-the native code out when reporting a problem. Build it with
+Required since Phase 4h: the database, the crawler and the services run in
+it.  Some functions keep a Python implementation for input the port refuses
+(``ValueError`` and friends) — archive readers, Pillow thumbnails, rules with
+non-portable patterns, metadata edge cases — and the native crawl asks for
+those through its host (``app/crawler/crawler.py``).  Build the module with
 ``python tools/build_native.py``; see ``docs/rust-migration-plan.md``.
 """
 from __future__ import annotations
 
 import logging
-import os
 from types import ModuleType
 from typing import Optional
 
 log = logging.getLogger(__name__)
-
-_DISABLED_VALUES = {"0", "false", "no", "off"}
 
 _module: Optional[ModuleType] = None
 _reason = ""
@@ -40,19 +22,18 @@ _reason = ""
 def _load() -> None:
     global _module, _reason
     _module, _reason = None, ""
-    if os.environ.get("STL_NATIVE", "").strip().lower() in _DISABLED_VALUES:
-        _reason = "disabled by STL_NATIVE"
-        return
     try:
         import stl_native
     except ImportError as exc:
-        _reason = f"not installed ({exc})"
+        _reason = f"not installed ({exc}); build it with: python tools/build_native.py"
         return
     _module = stl_native
 
 
-def module() -> Optional[ModuleType]:
-    """The ``stl_native`` module, or ``None`` when unavailable or disabled."""
+def module() -> ModuleType:
+    """The ``stl_native`` module.  Raises ``RuntimeError`` when it is missing."""
+    if _module is None:
+        raise RuntimeError(f"The native core is required but unavailable: {_reason}")
     return _module
 
 
@@ -68,7 +49,7 @@ def status() -> str:
 
 
 def reload() -> None:
-    """Re-read ``STL_NATIVE`` and re-import; for tests."""
+    """Re-import the module (tests)."""
     _load()
 
 

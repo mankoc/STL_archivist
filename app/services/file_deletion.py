@@ -27,8 +27,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.database import native_db
-from app.database.db import session_scope
-from app.database.models import STLModel
 from app.services import browser_data
 from app.utils.thumbnailer import delete_thumbnails
 
@@ -109,12 +107,7 @@ def delete_archives(
 def _rows(model_ids: list[int]) -> list[tuple]:
     """``(id, archive_path, title, creator, archive_hash)`` in id order."""
     lib = native_db.library()
-    if lib is not None:
-        return lib.browser_deletion_rows([int(i) for i in model_ids])
-    with session_scope() as s:
-        return [tuple(r) for r in s.query(STLModel.id, STLModel.archive_path, STLModel.title,
-                                          STLModel.creator, STLModel.archive_hash)
-                .filter(STLModel.id.in_(model_ids)).order_by(STLModel.id)]
+    return lib.browser_deletion_rows([int(i) for i in model_ids])
 
 
 def _move_to_trash(file_path: Path, trash_dir: Path, title, creator, archive_hash) -> None:

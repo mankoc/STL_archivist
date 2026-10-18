@@ -1,7 +1,7 @@
 """Tests for ``ImageWarningWorker`` — Database Maintenance → Check Images Warning.
 
 Like ``test_rescan_worker``, this covers a QThread whose ``run()`` is plain data
-logic (it rewrites ``STLModel.warning`` in place); no widgets are involved and
+logic (it rewrites ``models.warning`` in place); no widgets are involved and
 ``run()`` is called directly rather than started as a thread.
 """
 import io
@@ -13,8 +13,7 @@ pytest.importorskip("PyQt6")
 
 from app.config import CrawlerConfig
 from app.crawler.rules import WARNING_NESTED, WARNING_NO_IMAGES, WARNING_PRESUPPORTED
-from app.database.db import session_scope
-from app.database.models import STLModel
+from tests import factory
 
 
 def _png() -> bytes:
@@ -32,12 +31,7 @@ def _zip(path, members: dict) -> "object":
 
 
 def _model(archive_path, warning):
-    with session_scope() as s:
-        m = STLModel(title=str(archive_path), archive_path=str(archive_path),
-                     archive_hash=str(archive_path), warning=warning)
-        s.add(m)
-        s.flush()
-        return m.id
+    return factory.add_model(str(archive_path), str(archive_path), title=str(archive_path), warning=warning)
 
 
 def _run(monkeypatch, config=None):
@@ -55,8 +49,7 @@ def _run(monkeypatch, config=None):
 
 
 def _warning_of(model_id):
-    with session_scope() as s:
-        return s.get(STLModel, model_id).warning
+    return factory.row("models", model_id)["warning"]
 
 
 # ---------------------------------------------------------------------------

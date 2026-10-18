@@ -52,7 +52,7 @@ class AboutDialog(QDialog):
             f"<b>stlLibrary</b> v{__version__}<br>"
             "A desktop application for cataloguing and browsing<br>"
             "3D-print model archives.<br><br>"
-            "Built with Python + PyQt6 + SQLAlchemy."
+            "Built with Python + PyQt6 and a Rust core."
         )
         header.setAlignment(Qt.AlignmentFlag.AlignLeft)
         header.setTextFormat(Qt.TextFormat.RichText)

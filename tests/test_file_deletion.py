@@ -6,28 +6,22 @@ bookkeeping.
 """
 import json
 
-from app.database.db import session_scope
-from app.database.models import STLModel
 from app.services.file_deletion import delete_archives
+from tests import factory
 
 
 def test_permanent_delete_removes_file_and_record(tmp_path):
     archive = tmp_path / "test_archive.zip"
     archive.write_text("dummy content")
 
-    with session_scope() as session:
-        model = STLModel(title="Test", archive_path=str(archive), archive_hash="abc")
-        session.add(model)
-        session.flush()
-        model_id = model.id
+    model_id = factory.add_model(str(archive), "abc", title="Test")
 
     report = delete_archives([model_id], use_trash=False, trash_path=None)
 
     assert report.deleted == 1
     assert report.failed == []
     assert not archive.exists()
-    with session_scope() as session:
-        assert session.get(STLModel, model_id) is None
+    assert factory.row("models", model_id) is None
 
 
 def test_trash_move_writes_recovery_sidecar(tmp_path):
@@ -35,12 +29,7 @@ def test_trash_move_writes_recovery_sidecar(tmp_path):
     archive.write_text("dummy content")
     trash_dir = tmp_path / "trash"
 
-    with session_scope() as session:
-        model = STLModel(title="Test Trash", creator="Me",
-                         archive_path=str(archive), archive_hash="def")
-        session.add(model)
-        session.flush()
-        model_id = model.id
+    model_id = factory.add_model(str(archive), "def", title="Test Trash", creator="Me")
 
     report = delete_archives([model_id], use_trash=True, trash_path=trash_dir)
 
@@ -59,8 +48,7 @@ def test_trash_move_writes_recovery_sidecar(tmp_path):
     assert info["archive_hash"] == "def"
     assert "deleted_at" in info
 
-    with session_scope() as session:
-        assert session.get(STLModel, model_id) is None
+    assert factory.row("models", model_id) is None
 
 
 def test_trash_move_resolves_filename_collision(tmp_path):
@@ -71,12 +59,7 @@ def test_trash_move_resolves_filename_collision(tmp_path):
     a.write_text("first"); b.write_text("second")
     trash_dir = tmp_path / "trash"
 
-    with session_scope() as session:
-        m_a = STLModel(archive_path=str(a), archive_hash="h1")
-        m_b = STLModel(archive_path=str(b), archive_hash="h2")
-        session.add_all([m_a, m_b])
-        session.flush()
-        ids = [m_a.id, m_b.id]
+    ids = [factory.add_model(str(a), "h1"), factory.add_model(str(b), "h2")]
 
     delete_archives(ids, use_trash=True, trash_path=trash_dir)
 
@@ -92,19 +75,14 @@ def test_failed_deletion_is_reported_and_record_kept(tmp_path):
     in `report.failed`."""
     missing = tmp_path / "missing.zip"  # never created
 
-    with session_scope() as session:
-        model = STLModel(archive_path=str(missing), archive_hash="x")
-        session.add(model)
-        session.flush()
-        model_id = model.id
+    model_id = factory.add_model(str(missing), "x")
 
     report = delete_archives([model_id], use_trash=False, trash_path=None)
 
     # No physical file to delete, but the DB row is removed.
     assert report.deleted == 1
     assert report.failed == []
-    with session_scope() as session:
-        assert session.get(STLModel, model_id) is None
+    assert factory.row("models", model_id) is None
 
 
 def test_empty_list_is_a_noop(tmp_path):

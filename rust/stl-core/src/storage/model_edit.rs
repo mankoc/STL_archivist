@@ -421,49 +421,158 @@ pub fn resolve_tokens(value: &str, ctx: &[(String, String)]) -> String {
         .into_owned()
 }
 
-/// A literal find & replace with Python `re` results, or `None` when this
-/// port cannot promise them (see the module docs).
+/// One part of a replacement template.
+#[derive(Debug, Clone, PartialEq)]
+enum Part {
+    Text(String),
+    Group(usize),
+    Named(String),
+}
+
+/// Python's `re` replacement-template syntax (`sre_parse.parse_template`):
+/// `\1`..`\99` and `\g<n>` / `\g<name>` group references, `\0nn` / `\nnn`
+/// octal escapes, `\a \b \f \n \r \t \v \\`; an unknown escape of an ASCII
+/// letter is an error, other unknown escapes stay as written.
+fn parse_template(t: &str) -> std::result::Result<Vec<Part>, String> {
+    let c: Vec<char> = t.chars().collect();
+    let mut parts = Vec::new();
+    let mut text = String::new();
+    let mut i = 0;
+    let octal = |ch: char| ('0'..='7').contains(&ch);
+    while i < c.len() {
+        if c[i] != '\\' {
+            text.push(c[i]);
+            i += 1;
+            continue;
+        }
+        let Some(&e) = c.get(i + 1) else { return Err("bad escape (end of pattern)".into()) };
+        i += 2;
+        let mut group: Option<Part> = None;
+        match e {
+            'g' => {
+                if c.get(i) != Some(&'<') {
+                    return Err("missing <".into());
+                }
+                let end = c[i + 1..].iter().position(|&x| x == '>').ok_or("missing >, unterminated name")? + i + 1;
+                let name: String = c[i + 1..end].iter().collect();
+                i = end + 1;
+                if name.is_empty() {
+                    return Err("missing group name".into());
+                }
+                group = Some(if name.chars().all(|x| x.is_ascii_digit()) {
+                    Part::Group(name.parse().map_err(|_| format!("invalid group reference {name}"))?)
+                } else {
+                    Part::Named(name)
+                });
+            }
+            '0' => {
+                let mut v = 0u32;
+                let mut n = 0;
+                while n < 2 && c.get(i).is_some_and(|&x| octal(x)) {
+                    v = v * 8 + c[i].to_digit(8).unwrap_or(0);
+                    i += 1;
+                    n += 1;
+                }
+                text.push(char::from_u32(v).ok_or("bad octal escape")?);
+            }
+            '1'..='9' => {
+                let d2 = c.get(i).copied().filter(|x| x.is_ascii_digit());
+                let d3 = c.get(i + 1).copied().filter(|&x| octal(x));
+                if let (Some(x2), Some(x3)) = (d2, d3)
+                    && octal(e)
+                    && octal(x2)
+                {
+                    let v = e.to_digit(8).unwrap_or(0) * 64 + x2.to_digit(8).unwrap_or(0) * 8 + x3.to_digit(8).unwrap_or(0);
+                    if v > 0o377 {
+                        return Err(format!("octal escape value \\{e}{x2}{x3} outside of range 0-0o377"));
+                    }
+                    text.push(char::from_u32(v).ok_or("bad octal escape")?);
+                    i += 2;
+                } else {
+                    let mut n = e.to_digit(10).unwrap_or(0) as usize;
+                    if let Some(x2) = d2 {
+                        n = n * 10 + x2.to_digit(10).unwrap_or(0) as usize;
+                        i += 1;
+                    }
+                    group = Some(Part::Group(n));
+                }
+            }
+            'a' => text.push('\u{07}'),
+            'b' => text.push('\u{08}'),
+            'f' => text.push('\u{0c}'),
+            'n' => text.push('\n'),
+            'r' => text.push('\r'),
+            't' => text.push('\t'),
+            'v' => text.push('\u{0b}'),
+            '\\' => text.push('\\'),
+            e if e.is_ascii_alphabetic() => return Err(format!("bad escape \\{e}")),
+            e => {
+                text.push('\\');
+                text.push(e);
+            }
+        }
+        if let Some(g) = group {
+            if !text.is_empty() {
+                parts.push(Part::Text(std::mem::take(&mut text)));
+            }
+            parts.push(g);
+        }
+    }
+    if !text.is_empty() {
+        parts.push(Part::Text(text));
+    }
+    Ok(parts)
+}
+
+/// The mass editor's find & replace: a literal (escaped) or regular-expression
+/// find in the native regex dialect (fancy-regex), and Python's replacement
+/// template rules.
 struct Replacer {
-    find: String,
-    case: bool,
-    replace: String,
-    rx: Option<regex::Regex>,
+    rx: fancy_regex::Regex,
+    parts: Vec<Part>,
 }
 
 impl Replacer {
     fn new(f: &Find) -> EResult<Self> {
-        if f.regex {
-            return Err(EditError::Unsupported("regex find & replace".into()));
+        let pattern = if f.regex { f.find.clone() } else { regex::escape(&f.find) };
+        let rx = fancy_regex::RegexBuilder::new(&pattern)
+            .case_insensitive(!f.case)
+            .build()
+            .map_err(|e| EditError::Invalid(format!("find: {e}")))?;
+        let parts = parse_template(&f.replace).map_err(|e| EditError::Invalid(format!("replace: {e}")))?;
+        let groups = rx.captures_len();
+        for p in &parts {
+            match p {
+                Part::Group(n) if *n >= groups => {
+                    return Err(EditError::Invalid(format!("replace: invalid group reference {n}")));
+                }
+                Part::Named(name) if !rx.capture_names().flatten().any(|g| g == name) => {
+                    return Err(EditError::Invalid(format!("replace: unknown group name '{name}'")));
+                }
+                _ => {}
+            }
         }
-        if f.replace.contains('\\') {
-            return Err(EditError::Unsupported("replacement with backslashes".into()));
-        }
-        if !f.case && !f.find.is_ascii() {
-            return Err(EditError::Unsupported("case-insensitive non-ASCII find".into()));
-        }
-        let rx = if f.case {
-            None
-        } else {
-            Some(regex::RegexBuilder::new(&regex::escape(&f.find)).case_insensitive(true).build().unwrap())
-        };
-        Ok(Replacer { find: f.find.clone(), case: f.case, replace: f.replace.clone(), rx })
+        Ok(Replacer { rx, parts })
     }
 
-    fn sub(&self, s: &str) -> String {
-        if self.case {
-            if self.find.is_empty() {
-                // re.sub with an empty pattern inserts at every position.
-                let mut out = String::from(self.replace.as_str());
-                for ch in s.chars() {
-                    out.push(ch);
-                    out.push_str(&self.replace);
+    fn sub(&self, s: &str) -> EResult<String> {
+        let mut out = String::with_capacity(s.len());
+        let mut last = 0;
+        for caps in self.rx.captures_iter(s) {
+            let caps = caps.map_err(|e| EditError::Invalid(format!("find: {e}")))?;
+            let m = caps.get(0).expect("group 0");
+            out.push_str(&s[last..m.start()]);
+            for p in &self.parts {
+                match p {
+                    Part::Text(t) => out.push_str(t),
+                    Part::Group(n) => out.push_str(caps.get(*n).map_or("", |g| g.as_str())),
+                    Part::Named(name) => out.push_str(caps.name(name).map_or("", |g| g.as_str())),
                 }
-                return out;
             }
-            s.replace(&self.find, &self.replace)
-        } else {
-            self.rx.as_ref().unwrap().replace_all(s, regex::NoExpand(&self.replace)).into_owned()
+            last = m.end();
         }
+        out.push_str(&s[last..]);
+        Ok(out)
     }
 }
 
@@ -480,9 +589,6 @@ fn apply_extracted(tx: &Transaction, row: &mut Row, extracted: &[(String, String
             "title" if should(empty(&row.title)) => row.title = Some(value.clone()),
             "url" if should(empty(&row.url)) => row.url = Some(value.clone()),
             "release_date" if should(row.release_year.is_none_or(|y| y == 0)) => {
-                if value.chars().any(|c| c.is_numeric() && !c.is_ascii_digit()) {
-                    return Err(EditError::Unsupported("date with non-ASCII digits".into()));
-                }
                 let (y, m) = parse_release_date(value);
                 if y.is_some() {
                     row.release_year = y;
@@ -648,8 +754,7 @@ pub fn mass_save(tx: &Transaction, plan: &MassPlan) -> EResult<()> {
                 let mut seen = std::collections::HashSet::new();
                 for name in names {
                     if !seen.insert(py_strip(name).to_lowercase()) {
-                        // Python appends the same tag twice and fails on the unique key.
-                        return Err(EditError::Unsupported("tag listed twice".into()));
+                        continue; // a tag listed twice is linked once
                     }
                     let id = tag(tx, name)?;
                     tx.execute("INSERT INTO model_tags (model_id, tag_id) VALUES (?1, ?2)", params![mid, id])?;
@@ -660,7 +765,7 @@ pub fn mass_save(tx: &Transaction, plan: &MassPlan) -> EResult<()> {
         if let (Some(r), Some(f)) = (&replacer, &plan.find) {
             for field in f.fields.iter().filter(|x| *x != "collection" && *x != "subcollection") {
                 let Some(old_val) = text_field(&row, field).filter(|v| !v.is_empty()) else { continue };
-                let new_val = r.sub(&old_val);
+                let new_val = r.sub(&old_val)?;
                 if new_val != old_val {
                     set_text_field(&mut row, field, (!new_val.is_empty()).then_some(new_val));
                 }
@@ -668,7 +773,7 @@ pub fn mass_save(tx: &Transaction, plan: &MassPlan) -> EResult<()> {
             if f.fields.iter().any(|x| x == "collection")
                 && let Some(name) = super_name(tx, "collections", row.collection_id)?
             {
-                let new_name = r.sub(&name);
+                let new_name = r.sub(&name)?;
                 if !new_name.is_empty() && new_name != name {
                     row.collection_id = Some(lookup(tx, "collections", &new_name)?);
                 }
@@ -676,7 +781,7 @@ pub fn mass_save(tx: &Transaction, plan: &MassPlan) -> EResult<()> {
             if f.fields.iter().any(|x| x == "subcollection")
                 && let Some(name) = super_name(tx, "subcollections", row.subcollection_id)?
             {
-                let new_name = r.sub(&name);
+                let new_name = r.sub(&name)?;
                 if !new_name.is_empty()
                     && new_name != name
                     && let Some(parent) = row.collection_id
@@ -703,4 +808,27 @@ pub fn mass_save(tx: &Transaction, plan: &MassPlan) -> EResult<()> {
 
 fn super_name(tx: &Transaction, table: &str, id: Option<i64>) -> Result<Option<String>> {
     lookup_name(tx, table, id)
+}
+
+#[cfg(test)]
+mod template_tests {
+    use super::*;
+
+    fn find(f: &str, r: &str, regex: bool, case: bool) -> Replacer {
+        Replacer::new(&Find { find: f.into(), replace: r.into(), case, regex, fields: vec![] }).unwrap()
+    }
+
+    #[test]
+    fn python_replacement_templates() {
+        assert_eq!(find(r"(\w+)-(\w+)", r"\2_\1", true, true).sub("ab-cd x").unwrap(), "cd_ab x");
+        assert_eq!(find(r"(?P<a>x)", r"[\g<a>\g<0>]", true, true).sub("axb").unwrap(), "a[xx]b");
+        assert_eq!(find("a.b", r"\t\\", false, true).sub("a.b axb").unwrap(), "\t\\ axb");
+        assert_eq!(find("X", "y", false, false).sub("xXx").unwrap(), "yyy");
+        assert_eq!(find("(a)|(b)", r"[\2]", true, true).sub("ab").unwrap(), "[][b]");
+        assert_eq!(find("a", r"\101\0", true, true).sub("a").unwrap(), "A\u{0}");
+        assert_eq!(find("a", r"\-", true, true).sub("a").unwrap(), r"\-");
+        assert!(Replacer::new(&Find { find: "a".into(), replace: r"\q".into(), case: true, regex: true, fields: vec![] }).is_err());
+        assert!(Replacer::new(&Find { find: "(a)".into(), replace: r"\2".into(), case: true, regex: true, fields: vec![] }).is_err());
+        assert!(Replacer::new(&Find { find: "(".into(), replace: "".into(), case: true, regex: true, fields: vec![] }).is_err());
+    }
 }

@@ -14,6 +14,7 @@ pub mod fingerprint;
 pub mod hamming;
 pub mod metadata;
 pub mod path_pattern;
+pub mod pyunicode;
 pub mod pyjson;
 pub mod pairs;
 pub mod rules;
