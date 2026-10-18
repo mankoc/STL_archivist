@@ -164,7 +164,10 @@ def test_legacy_embeddings_are_migrated(tmp_path):
     con.commit()
     con.close()
 
+    from app.database.vectors import legacy_embeddings_present
+    assert legacy_embeddings_present(str(db))
     init_db(str(db))
+    assert not legacy_embeddings_present(str(db))
     cols = {r[1] for r in factory.rows("PRAGMA table_info(images)")}
     assert "embedding" not in cols and "embedding_model" not in cols
     assert _vec_ids() == [1]
