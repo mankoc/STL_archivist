@@ -9,6 +9,10 @@ they can be unit-tested in isolation; the interactive dialog in
 from __future__ import annotations
 
 import re
+from pathlib import Path
+
+#: SOURCE values the tagger keeps.
+VALID_SOURCES = {"patreon", "kickstarter", "myminifactory", "unknown"}
 
 
 def dedupe_words(tag: str) -> str:
@@ -195,3 +199,90 @@ def build_meta_prompt(archive_path: str,
         "DESCRIPTION: <one sentence describing the model>\n"
         "Output ONLY these 9 lines."
     )
+
+
+def parse_meta(raw_meta: str, archive_path: str, stems: list[str],
+               file_list: list[str] | None = None) -> dict[str, str]:
+    """Parse the model's ``KEY: value`` lines into a dict.
+
+    Empty, ``n/a``, ``none`` and ``unknown`` values are dropped. ``SCALE`` is
+    text-derived, not visible in an image: it is replaced by the scales detected
+    in the archive path, image file names and file list (so every scale is
+    caught, e.g. both 32mm and 75mm), plus any model suggestion in a format the
+    detector misses (e.g. "1:35") that the text backs up.
+    """
+    from app.crawler.rules import detect_scale
+
+    meta: dict[str, str] = {}
+    for line in raw_meta.splitlines():
+        if ":" in line:
+            key, _, val = line.partition(":")
+            key = key.strip().upper()
+            val = val.strip()
+            if val and val.lower() not in ("n/a", "none", "unknown", ""):
+                meta[key] = val
+
+    def _norm_scale(s: str) -> str:
+        return s.lower().replace(" ", "").replace("-", "/")
+
+    scale_context = [archive_path, *stems, *(file_list or [])]
+    detected = detect_scale(scale_context)
+    have = {_norm_scale(s) for s in detected}
+    final_scales = list(detected)
+    nctx = _norm_scale(" ".join(scale_context))
+    for tok in meta.get("SCALE", "").split(","):
+        t = tok.strip()
+        if t and _norm_scale(t) in nctx and _norm_scale(t) not in have:
+            final_scales.append(t)
+            have.add(_norm_scale(t))
+
+    if final_scales:
+        meta["SCALE"] = ", ".join(final_scales)
+    else:
+        meta.pop("SCALE", None)
+    return meta
+
+
+def normalize_meta(meta: dict[str, str]) -> dict:
+    """Convert parsed metadata into validated, normalized field values."""
+    fields = {
+        "title":         meta.get("TITLE", "").strip(),
+        "creator":       meta.get("CREATOR", "").strip(),
+        "sculptor":      meta.get("SCULPTOR", "").strip(),
+        "collection":    meta.get("COLLECTION", "").strip(),
+        "subcollection": meta.get("SUBCOLLECTION", "").strip(),
+        "scale":         meta.get("SCALE", "").strip(),
+        "description":   meta.get("DESCRIPTION", "").strip(),
+        "source":        "",
+        "year":          None,
+    }
+    src = meta.get("SOURCE", "").strip().lower()
+    if src in VALID_SOURCES:
+        fields["source"] = src
+    year = meta.get("YEAR", "").strip()[:4]
+    if year.isdigit() and 1900 <= int(year) <= 2100:
+        fields["year"] = int(year)
+    return fields
+
+
+#: Printable file names shown in the prompt, at most.
+FILE_CAP = 60
+
+
+def collect_known_meta(inputs: dict) -> dict[str, str]:
+    """Existing catalogued metadata as an ordered {label: value} dict.
+
+    *inputs* is :func:`app.services.model_edit.ai_model_inputs`; only non-empty
+    fields are in it. The printable files inside the archive are strong hints
+    for the subject and the scale, capped so the prompt stays small.
+    """
+    meta: dict[str, str] = dict(inputs["meta"])
+    if inputs["tags"]:
+        meta["Tags"] = ", ".join(inputs["tags"])
+    file_names = [Path(f).name for f in inputs["files"]]
+    if file_names:
+        shown = ", ".join(file_names[:FILE_CAP])
+        if len(file_names) > FILE_CAP:
+            shown += f", …(+{len(file_names) - FILE_CAP} more)"
+        meta["Files"] = shown
+    return meta

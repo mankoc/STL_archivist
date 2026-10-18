@@ -7,6 +7,7 @@
 //! pool through [`Library::run`].
 
 pub mod accounts;
+pub mod ai;
 pub mod api;
 pub mod auth;
 pub mod config;
@@ -38,6 +39,7 @@ pub struct Library {
     pub sidecars: sidecars::SidecarQueue,
     pub jobs: jobs::Jobs,
     pub tools: tools::Tools,
+    pub ai: Arc<ai::AiRuntime>,
     _lock: LibraryLock,
 }
 
@@ -66,6 +68,7 @@ impl Library {
             sidecars: sidecars::SidecarQueue::default(),
             jobs: jobs::Jobs::default(),
             tools: tools::Tools::default(),
+            ai: Arc::default(),
             config,
             _lock: lock,
         })

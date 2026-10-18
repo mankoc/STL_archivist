@@ -9,6 +9,7 @@ pub mod lookups;
 pub mod models;
 pub mod search;
 pub mod settings;
+pub mod ai;
 pub mod backups;
 pub mod maintenance;
 pub mod stats;
@@ -87,6 +88,8 @@ use crate::AppState;
         files::download,
         settings::get,
         settings::put,
+        ai::status,
+        ai::commit,
         backups::list,
         backups::download,
         backups::delete,
@@ -175,6 +178,8 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/files/browse", get(files::browse))
         .route("/api/models/{id}/archive", get(files::download))
         .route("/api/settings/library", get(settings::get).put(settings::put))
+        .route("/api/ai/status", get(ai::status))
+        .route("/api/ai/commit/{id}", post(ai::commit))
         .route("/api/backups", get(backups::list))
         .route("/api/backups/{name}", get(backups::download).delete(backups::delete))
         .route("/api/maintenance/merge-moved", post(maintenance::merge_moved))
@@ -193,8 +198,9 @@ async fn announce_changes(State(lib): State<AppState>, req: Request, next: Next)
     if method != Method::GET && resp.status().is_success() {
         let what = match path.as_str() {
             // POSTs that only read.
-            "/api/models/ids" | "/api/models/rows" | "/api/filter-tree" => None,
+            "/api/models/ids" | "/api/models/rows" | "/api/models/parse-paths" | "/api/filter-tree" => None,
             p if p.starts_with("/api/models") || p.starts_with("/api/images") => Some("models"),
+            p if p.starts_with("/api/maintenance") || p.starts_with("/api/ai/commit") => Some("models"),
             p if p.starts_with("/api/lookups") || p.starts_with("/api/tags") || p.starts_with("/api/authors") => Some("lookups"),
             _ => None,
         };

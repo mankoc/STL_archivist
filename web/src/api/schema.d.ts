@@ -4,6 +4,40 @@
  */
 
 export interface paths {
+    "/api/ai/commit/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Save a reviewed suggestion to a model. */
+        post: operations["post_ai_commit_by_id"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ai/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether the AI tagger can run, and with what. */
+        get: operations["get_ai_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/login": {
         parameters: {
             query?: never;
@@ -870,6 +904,49 @@ export interface components {
             /** @description File names that could not be read as images. */
             failed: string[];
         };
+        AiCommit: {
+            fields: components["schemas"]["AiFieldValues"];
+            /** @description Replace values already set (default: fill empty fields only). Tags are merged. */
+            overwrite?: boolean;
+            tags?: string[];
+        };
+        /** @description The metadata fields the tagger fills (`normalize_meta`). */
+        AiFieldValues: {
+            collection?: string;
+            creator?: string;
+            description?: string;
+            scale?: string;
+            sculptor?: string;
+            /** @description `patreon`, `kickstarter`, `myminifactory` or empty. */
+            source?: string;
+            subcollection?: string;
+            title?: string;
+            /** Format: int64 */
+            year?: number | null;
+        };
+        AiSaved: {
+            saved: boolean;
+        };
+        /** @description What the AI tagger can use. */
+        AiStatus: {
+            available: boolean;
+            /** @description Why it is not available, or where it comes from. */
+            detail: string;
+            model: string;
+            /** @description A started `llama-server` is running (always false with `url`). */
+            running: boolean;
+        };
+        /** @description What the model suggests for one model. */
+        AiSuggestion: {
+            archive_path: string;
+            fields: components["schemas"]["AiFieldValues"];
+            /** @description The images sent (their thumbnails), in order. */
+            image_ids: number[];
+            /** Format: int64 */
+            model_id: number;
+            tags: string[];
+            title: string;
+        };
         AuthStatus: {
             /**
              * @description No user exists yet: the first administrator must be created
@@ -1316,6 +1393,22 @@ export interface components {
             /** @enum {string} */
             kind: "backup";
         } | {
+            /** Format: int64 */
+            id: number;
+            /** @description Leave the catalogued metadata out of the prompt. */
+            ignore_meta?: boolean;
+            /** @enum {string} */
+            kind: "ai_suggest";
+            /** @description At most this many tags (0: no limit). */
+            max_tags?: number;
+        } | {
+            ids: number[];
+            ignore_meta?: boolean;
+            /** @enum {string} */
+            kind: "ai_tag";
+            max_tags?: number;
+            overwrite?: boolean;
+        } | {
             /** @enum {string} */
             kind: "find_duplicate_entries";
         } | {
@@ -1363,7 +1456,10 @@ export interface components {
             rows: components["schemas"]["RecordRow"][];
             /** @enum {string} */
             type: "records";
-        };
+        } | (components["schemas"]["AiSuggestion"] & {
+            /** @enum {string} */
+            type: "ai_suggestion";
+        });
         /** @enum {string} */
         JobState: "queued" | "running" | "done" | "failed" | "cancelled";
         LibraryStats: {
@@ -1792,6 +1888,58 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    post_ai_commit_by_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiCommit"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiSaved"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_ai_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiStatus"];
+                };
+            };
+        };
+    };
     post_auth_login: {
         parameters: {
             query?: never;

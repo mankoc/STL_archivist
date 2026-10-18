@@ -2,7 +2,7 @@
 import { Box, Button, Center, Group, Loader, Modal, Text, TextInput } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconEdit, IconFilterOff, IconSearch, IconTrash } from "@tabler/icons-react";
+import { IconEdit, IconFilterOff, IconSearch, IconSparkles, IconTrash } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
@@ -11,6 +11,7 @@ import { hasRole, useUser } from "../auth/user";
 import { DetailPane } from "./DetailPane";
 import { EditorDrawer } from "./EditorDrawer";
 import { FilterPane } from "./FilterPane";
+import { AiTaggerDrawer } from "./AiTaggerDrawer";
 import { MassEditDrawer } from "./MassEditDrawer";
 import { EMPTY, type FilterSpec, isEmpty } from "./filters";
 import { ModelTable, type Sort, useModelIds } from "./ModelTable";
@@ -28,6 +29,7 @@ export function BrowserPage() {
   const [editing, setEditing] = useState<number | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [massEdit, setMassEdit] = useState(false);
+  const [aiTagger, setAiTagger] = useState(false);
   const user = useUser();
   const editor = hasRole(user, "editor");
   const queryClient = useQueryClient();
@@ -96,6 +98,9 @@ export function BrowserPage() {
               <Button size="compact-xs" variant="subtle" leftSection={<IconEdit size={14} />} onClick={() => setMassEdit(true)}>
                 Mass edit
               </Button>
+              <Button size="compact-xs" variant="subtle" leftSection={<IconSparkles size={14} />} onClick={() => setAiTagger(true)} data-testid="ai-tagger">
+                AI tagger
+              </Button>
               <Button size="compact-xs" variant="subtle" color="red" leftSection={<IconTrash size={14} />} onClick={() => setConfirmRemove(true)}>
                 Remove from library
               </Button>
@@ -117,6 +122,7 @@ export function BrowserPage() {
       </Box>
       <EditorDrawer id={editing} onClose={() => setEditing(null)} />
       <MassEditDrawer ids={order.filter((i) => selection.ids.has(i))} opened={massEdit} onClose={() => setMassEdit(false)} />
+      <AiTaggerDrawer ids={order.filter((i) => selection.ids.has(i))} opened={aiTagger} onClose={() => setAiTagger(false)} />
       <Modal opened={confirmRemove} onClose={() => setConfirmRemove(false)} title="Remove from library">
         <Text size="sm">
           Remove {selection.ids.size} model(s) from the library? Their records, images and thumbnails are deleted;

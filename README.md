@@ -154,6 +154,19 @@ crawls embed new thumbnails when *compute embeddings during crawl* is on. The se
 still cannot read the few images only Pillow decodes (AVIF, CMYK JPEG).
 `.rar` archives need UnRAR on `PATH`, or `"unrar"` in `server.json` / `STL_UNRAR_PATH`.
 
+The AI tagger uses the desktop app's AI install (*AI Setup*: llama.cpp's `llama-server` and
+the Qwen2.5-VL model under `<data dir>/ai`). Elsewhere, point `server.json` at them, or at
+an OpenAI-compatible server that is already running:
+
+```json
+{"ai": {"llama_server": "/opt/llama/llama-server", "model": "/models/Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf",
+        "mmproj": "/models/mmproj-Qwen2.5-VL-3B-Instruct-f16.gguf", "gpu_layers": 99}}
+```
+
+(`{"ai": {"url": "http://127.0.0.1:8080"}}` or `STL_AI_URL` for a running one). The server
+starts `llama-server` on the first request and stops it after ten idle minutes or when it
+shuts down.
+
 Accounts are kept in `<data dir>/server.db`, separate from the library database. Put the
 server behind an HTTPS reverse proxy before exposing it beyond `127.0.0.1`.
 
@@ -207,7 +220,8 @@ sharing STL files, archives with matching images and models with similar metadat
 compares two archives side by side. **Maintenance** verifies archives, finds duplicate
 entries and moved records (by content, in the database or under a folder), merges and
 removes records, re-checks warnings, generates or removes the metadata sidecars, runs the
-image and storage jobs and (administrators) makes backups. **Settings** holds your colour scheme, the library's crawler and sidecar settings
+image and storage jobs and (administrators) makes backups. The **AI tagger** (on a
+selection) suggests tags and metadata per model for review, or tags them all in one job. **Settings** holds your colour scheme, the library's crawler and sidecar settings
 (administrators change them; they are the same `settings.json` the desktop app uses), and
 user administration.
 

@@ -27,13 +27,14 @@ _MAX_TAGS_KEY = "ai_tagger/max_tags"   # QSettings key; 0 = no limit
 from app.services import model_edit
 from app.utils.thumbnailer import get_thumbnail_bytes
 from app.utils.ai_tagging import (
+    VALID_SOURCES as _VALID_SOURCES,
     build_meta_prompt as _build_meta_prompt,
     build_tags_prompt as _build_tags_prompt,
     clean_tags as _clean_tags,
+    collect_known_meta as _collect_known_meta,
+    normalize_meta as _normalize_meta,
+    parse_meta as _parse_meta,
 )
-
-
-_VALID_SOURCES = {"patreon", "kickstarter", "myminifactory", "unknown"}
 
 
 # ---------------------------------------------------------------------------
@@ -111,69 +112,14 @@ def _generate_suggestions(
             continue
         break
 
-    meta: dict[str, str] = {}
-    for line in raw_meta.splitlines():
-        if ":" in line:
-            key, _, val = line.partition(":")
-            key = key.strip().upper()
-            val = val.strip()
-            if val and val.lower() not in ("n/a", "none", "unknown", ""):
-                meta[key] = val
-
-    # Scale is text-derived, not visible in an image. Detect it deterministically
-    # from the archive path, image filenames, and the file list so ALL scales are
-    # caught (e.g. both 32mm and 75mm) — the model routinely under-reports them.
-    from app.crawler.rules import detect_scale
-
-    def _norm_scale(s: str) -> str:
-        return s.lower().replace(" ", "").replace("-", "/")
-
-    scale_context = [archive_path, *stems, *(file_list or [])]
-    detected = detect_scale(scale_context)
-    have = {_norm_scale(s) for s in detected}
-    final_scales = list(detected)
-
-    # Keep any model-suggested scale that is backed by the text context but uses a
-    # format the detector misses (e.g. "1:35").
-    nctx = _norm_scale(" ".join(scale_context))
-    for tok in meta.get("SCALE", "").split(","):
-        t = tok.strip()
-        if t and _norm_scale(t) in nctx and _norm_scale(t) not in have:
-            final_scales.append(t)
-            have.add(_norm_scale(t))
-
-    if final_scales:
-        meta["SCALE"] = ", ".join(final_scales)
-    else:
-        meta.pop("SCALE", None)
+    # Scale is text-derived (parse_meta detects it from the path, image names and
+    # file list); the model routinely under-reports it.
+    meta = _parse_meta(raw_meta, archive_path, stems, file_list)
 
     if on_meta:
         on_meta(meta)
 
     return tags, meta
-
-
-def _collect_known_meta(inputs: dict) -> dict[str, str]:
-    """Existing catalogued metadata as an ordered {label: value} dict.
-
-    *inputs* is :func:`app.services.model_edit.ai_model_inputs`; only non-empty
-    fields are in it.
-    """
-    meta: dict[str, str] = dict(inputs["meta"])
-    if inputs["tags"]:
-        meta["Tags"] = ", ".join(inputs["tags"])
-
-    # The printable files inside the archive — strong hints for the subject and
-    # the scale (filenames often encode "32mm", "1-35", etc.). Capped so the
-    # prompt stays small for archives with hundreds of parts.
-    _FILE_CAP = 60
-    file_names = [Path(f).name for f in inputs["files"]]
-    if file_names:
-        shown = ", ".join(file_names[:_FILE_CAP])
-        if len(file_names) > _FILE_CAP:
-            shown += f", …(+{len(file_names) - _FILE_CAP} more)"
-        meta["Files"] = shown
-    return meta
 
 
 def _load_model_inputs(
@@ -193,28 +139,6 @@ def _load_model_inputs(
             images.append(b)
             stems.append(Path(filename).stem if filename else f"img{image_id}")
     return images, stems, archive_path, title, _collect_known_meta(inputs), list(inputs["files"])
-
-
-def _normalize_meta(meta: dict[str, str]) -> dict:
-    """Convert a raw Qwen metadata dict into validated, normalized field values."""
-    fields = {
-        "title":         meta.get("TITLE", "").strip(),
-        "creator":       meta.get("CREATOR", "").strip(),
-        "sculptor":      meta.get("SCULPTOR", "").strip(),
-        "collection":    meta.get("COLLECTION", "").strip(),
-        "subcollection": meta.get("SUBCOLLECTION", "").strip(),
-        "scale":         meta.get("SCALE", "").strip(),
-        "description":   meta.get("DESCRIPTION", "").strip(),
-        "source":        "",
-        "year":          None,
-    }
-    src = meta.get("SOURCE", "").strip().lower()
-    if src in _VALID_SOURCES:
-        fields["source"] = src
-    year = meta.get("YEAR", "").strip()[:4]
-    if year.isdigit() and 1900 <= int(year) <= 2100:
-        fields["year"] = int(year)
-    return fields
 
 
 def _commit_model_data(model_id: int, fields: dict, tags: list[str],

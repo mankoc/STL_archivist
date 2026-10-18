@@ -41,6 +41,8 @@ const KIND_LABEL: Record<string, string> = {
   generate_sidecars: "Generate sidecars",
   remove_sidecars: "Remove sidecars",
   backup: "Backup",
+  ai_suggest: "AI suggestion",
+  ai_tag: "AI tagging",
 };
 
 /** "Crawl D:/STL/Patreon", "Verify archives", … */

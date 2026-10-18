@@ -88,6 +88,11 @@ impl LibrarySettings {
         self.get_bool("warn_low_compression", false)
     }
 
+    /// The AI tagger's sampling temperature (`get_ai_temperature`).
+    pub fn ai_temperature(&self) -> f64 {
+        self.0.get("ai_temperature").and_then(Value::as_f64).unwrap_or(0.2)
+    }
+
     pub fn low_compression_threshold(&self) -> f64 {
         self.0.get("low_compression_threshold").and_then(Value::as_f64).unwrap_or(0.95)
     }

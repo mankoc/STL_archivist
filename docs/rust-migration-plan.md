@@ -1195,6 +1195,33 @@ Ctrl-selected models.
   a backup downloaded through the page; `stl-server restore` refused while the server ran
   and restored into a copy of the data directory.
 
+**6j: done 2026-10-18 (AI tagger). Phase 6 is complete.**
+
+- Core: `stl_core::ai_tagging` ports `app/utils/ai_tagging.py`: `clean_tags` (atomize,
+  dedupe, cumulative chains), `is_corrupted_output`, the two prompts, `parse_meta`
+  (Python `splitlines`, repeated keys, scales from the path / image names / file list)
+  and `normalize_meta`, `known_meta`. The Python side was refactored so those pieces are
+  pure functions there too (`parse_meta`, `normalize_meta`, `collect_known_meta`);
+  `tests/golden/test_ai_tagging_golden.py` (650 cases) compares them through
+  `stl_native.ai_clean_tags` / `ai_is_corrupted` / `ai_prompts` / `ai_parse_meta`.
+- Server (`stl-server/src/ai.rs`): `AiRuntime` starts `llama-server` (from
+  `<data dir>/ai`, the desktop's install with its `variant.txt`, or `server.json` →
+  `ai`), waits for `/health`, talks OpenAI chat completions over `ureq` (plain HTTP),
+  restarts after corrupted output, and stops after ten idle minutes or with the server
+  (a forced kill of the server leaves it running until then). `ai.url` / `STL_AI_URL`
+  use a running server instead.
+  - Jobs `ai_suggest { id, max_tags, ignore_meta }` (result: `ai_suggestion`, nothing
+    saved) and `ai_tag { ids, overwrite, ignore_meta, max_tags }` (saves each; a failure
+    on the first model ends the job, as the desktop batch does).
+  - `GET /api/ai/status`, `POST /api/ai/commit/{id}` (`model_edit::ai_commit`: empty
+    fields only unless `overwrite`, tags merged).
+  - `announce_changes` now covers `/api/maintenance/*` and `/api/ai/commit`, and no
+    longer announces the read-only `/api/models/parse-paths`.
+- Web: *AI tagger* on the browser selection: a drawer to review suggestions one by one
+  (thumbnails sent, tag pills, editable fields, Save & next / Skip) or process all.
+- Tests: `tests/ai.rs` against a stand-in OpenAI-compatible server; verified in headless
+  Edge with the real model (CUDA llama-server, first suggestion in 32 s with loading).
+
 ### Phase 7: Desktop shell (small)
 
 Tauri app that hosts the web client: connect to a remote server or start a bundled local one on

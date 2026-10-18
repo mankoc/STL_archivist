@@ -24,6 +24,8 @@ pub enum JobResult {
     Metadata { groups: Vec<MetadataGroup> },
     /// Records of a maintenance list (Verify, duplicate entries, moved, found).
     Records { rows: Vec<crate::maint::RecordRow> },
+    /// The AI tagger's suggestion for one model (`ai_suggest`).
+    AiSuggestion(Box<crate::ai::AiSuggestion>),
 }
 
 impl JobResult {
@@ -34,6 +36,7 @@ impl JobResult {
             JobResult::Images(r) => r.pairs.len(),
             JobResult::Metadata { groups } => groups.len(),
             JobResult::Records { rows } => rows.len(),
+            JobResult::AiSuggestion(_) => 1,
         }
     }
 

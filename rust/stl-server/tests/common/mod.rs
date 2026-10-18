@@ -23,8 +23,13 @@ pub struct TestLib {
 }
 
 pub fn empty_library() -> TestLib {
+    library_with(|_| {})
+}
+
+/// A temporary library whose configuration `adjust` may change first.
+pub fn library_with(adjust: impl FnOnce(&mut Config)) -> TestLib {
     let dir = tempfile::tempdir().unwrap();
-    let config = Config {
+    let mut config = Config {
         data_dir: dir.path().to_path_buf(),
         bind: "127.0.0.1:0".parse().unwrap(),
         unrar: None,
@@ -34,7 +39,9 @@ pub fn empty_library() -> TestLib {
         roots: vec![dir.path().to_string_lossy().into_owned()],
         path_map: vec![],
         web_dir: None,
+        ai: Default::default(),
     };
+    adjust(&mut config);
     let state = Arc::new(Library::open(config).unwrap());
     TestLib { dir, state }
 }
