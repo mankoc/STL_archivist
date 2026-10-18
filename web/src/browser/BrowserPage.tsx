@@ -2,7 +2,7 @@
 import { Box, Button, Center, Group, Loader, Modal, Text, TextInput } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconFilterOff, IconSearch, IconTrash } from "@tabler/icons-react";
+import { IconEdit, IconFilterOff, IconSearch, IconTrash } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
@@ -11,6 +11,7 @@ import { hasRole, useUser } from "../auth/user";
 import { DetailPane } from "./DetailPane";
 import { EditorDrawer } from "./EditorDrawer";
 import { FilterPane } from "./FilterPane";
+import { MassEditDrawer } from "./MassEditDrawer";
 import { EMPTY, type FilterSpec, isEmpty } from "./filters";
 import { ModelTable, type Sort, useModelIds } from "./ModelTable";
 import { NONE, click, prune, type Selection } from "./selection";
@@ -26,6 +27,7 @@ export function BrowserPage() {
   const [selection, setSelection] = useState<Selection>(NONE);
   const [editing, setEditing] = useState<number | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [massEdit, setMassEdit] = useState(false);
   const user = useUser();
   const editor = hasRole(user, "editor");
   const queryClient = useQueryClient();
@@ -90,9 +92,14 @@ export function BrowserPage() {
             {selection.ids.size > 1 ? ` · ${selection.ids.size} selected` : ""}
           </Text>
           {editor && selection.ids.size > 0 && (
-            <Button size="compact-xs" variant="subtle" color="red" ml="auto" leftSection={<IconTrash size={14} />} onClick={() => setConfirmRemove(true)}>
-              Remove from library
-            </Button>
+            <Group gap="xs" ml="auto">
+              <Button size="compact-xs" variant="subtle" leftSection={<IconEdit size={14} />} onClick={() => setMassEdit(true)}>
+                Mass edit
+              </Button>
+              <Button size="compact-xs" variant="subtle" color="red" leftSection={<IconTrash size={14} />} onClick={() => setConfirmRemove(true)}>
+                Remove from library
+              </Button>
+            </Group>
           )}
         </Group>
         <Box className={classes.tableBody}>
@@ -109,6 +116,7 @@ export function BrowserPage() {
         <DetailPane id={selection.current} onEdit={setEditing} />
       </Box>
       <EditorDrawer id={editing} onClose={() => setEditing(null)} />
+      <MassEditDrawer ids={order.filter((i) => selection.ids.has(i))} opened={massEdit} onClose={() => setMassEdit(false)} />
       <Modal opened={confirmRemove} onClose={() => setConfirmRemove(false)} title="Remove from library">
         <Text size="sm">
           Remove {selection.ids.size} model(s) from the library? Their records, images and thumbnails are deleted;

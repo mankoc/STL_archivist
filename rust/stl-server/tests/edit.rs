@@ -146,6 +146,18 @@ async fn editor_round_trip() {
 }
 
 #[tokio::test]
+async fn parse_paths_previews_a_pattern() {
+    let l = library();
+    let r = l.call("POST", "/api/models/parse-paths", Some(json!({"ids": l.ids, "pattern": "{release} - {title}"}))).await;
+    assert_eq!(r.status, StatusCode::OK);
+    let v = r.json();
+    assert_eq!(v[0]["fields"], json!([["release_name", "030"], ["title", "Red riding hood"]]));
+    let v = l.call("POST", "/api/models/parse-paths", Some(json!({"ids": l.ids, "pattern": "ZZZ_{title}"}))).await.json();
+    assert_eq!(v[1]["fields"], json!([]));
+    assert_eq!(l.title(l.ids[0]).as_deref(), Some("old 0"), "nothing saved");
+}
+
+#[tokio::test]
 async fn mass_edit_with_pattern_and_regex() {
     let l = library();
     let r = l

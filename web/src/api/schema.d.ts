@@ -497,6 +497,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/models/parse-paths": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * What a path pattern extracts from each model's archive path (the mass
+         *     editor's "Show parsed values"); nothing is saved.
+         */
+        post: operations["post_models_parse_paths"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/models/rows": {
         parameters: {
             query?: never;
@@ -1089,8 +1109,11 @@ export interface components {
             /**
              * @description `source`, `creator`, `release_date`, `url`, `title` → template
              *     (`{token}`s from the path pattern and file name), or null to clear.
+             * @default {}
              */
-            manual?: Record<string, never>;
+            manual: {
+                [key: string]: string | null;
+            };
             /**
              * @description Path values replace existing ones (otherwise they fill empty fields).
              * @default false
@@ -1194,6 +1217,23 @@ export interface components {
             name: string;
             password: string;
             role: components["schemas"]["Role"];
+        };
+        ParseRequest: {
+            ids: number[];
+            pattern: string;
+        };
+        Parsed: {
+            archive_path: string;
+            /**
+             * @description What the pattern extracted (`title`, `sculptor_name`, `release_name`, …), in
+             *     pattern order; empty when the path does not match.
+             */
+            fields: [
+                string,
+                string
+            ][];
+            /** Format: int64 */
+            id: number;
         };
         PasswordChange: {
             current: string;
@@ -2378,6 +2418,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    post_models_parse_paths: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ParseRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Parsed"][];
                 };
             };
         };

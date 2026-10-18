@@ -12,6 +12,7 @@ import { useServerEvents } from "../api/events";
 import { UserContext } from "../auth/user";
 import { BrowserPage } from "../browser/BrowserPage";
 import { JobsPage } from "../jobs/JobsPage";
+import { LookupsPage } from "../lookups/LookupsPage";
 import { SettingsPage } from "../settings/SettingsPage";
 import { type Page, usePage } from "./route";
 
@@ -44,6 +45,7 @@ export function Shell({ user }: { user: Schemas["User"] }) {
                 onChange={(v) => setPage(v as Page)}
                 data={[
                   { value: "library", label: "Library" },
+                  { value: "lookups", label: "Lookups" },
                   { value: "jobs", label: "Jobs" },
                   { value: "settings", label: "Settings" },
                 ]}
@@ -76,7 +78,7 @@ export function Shell({ user }: { user: Schemas["User"] }) {
           </Group>
         </AppShell.Header>
         <AppShell.Main style={{ height: "100vh", paddingTop: 48, display: "flex", flexDirection: "column" }}>
-          {page === "jobs" ? <JobsPage /> : page === "settings" ? <SettingsPage /> : <BrowserPage />}
+          {page === "jobs" ? <JobsPage /> : page === "settings" ? <SettingsPage /> : page === "lookups" ? <LookupsPage /> : <BrowserPage />}
         </AppShell.Main>
         <PasswordModal opened={passwordOpen} onClose={password.close} />
       </AppShell>

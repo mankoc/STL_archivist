@@ -54,6 +54,7 @@ use crate::AppState;
         edit::choices,
         edit::subcollections,
         edit::mass_edit,
+        edit::parse_paths,
         edit::delete_models,
         edit::add_images,
         edit::delete_image,
@@ -138,6 +139,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/models/cells", patch(edit::cells))
         .route("/api/models/{id}/editor", get(edit::get_editor).put(edit::save_editor))
         .route("/api/models/mass-edit", post(edit::mass_edit))
+        .route("/api/models/parse-paths", post(edit::parse_paths))
         .route("/api/models/delete", post(edit::delete_models))
         .route("/api/models/{id}/images", post(edit::add_images))
         .route("/api/images/{id}", delete(edit::delete_image))
