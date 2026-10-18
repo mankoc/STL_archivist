@@ -688,6 +688,28 @@ Still to do in 4g:
 - 4g-6: the browser's rescan, thumbnail generation and re-crawl, and the Update Crawled
   Folders reconciliation, on top of these phases.
 
+**4g-6: done 2026-10-18 (archive jobs; no ORM left in `app/ui`).**
+- `services/archive_jobs.py`, backed natively by `storage::jobs`, takes over these writes:
+  - Generate Thumbnails: replacing a model's images (its row operations follow the ORM
+    order);
+  - Rescan: applying the rescanned values;
+  - Update Crawled Folders: the cross-folder reconciliation and the deferred-deletion
+    clean-up.
+
+  The workers still extract archives and build thumbnails in Python.
+- `CrawlerWorker.run()` is split into `_reset_state` and `_process_batch`.
+- The browser's Recrawl applies changes through the new `CrawlerWorker.recrawl(paths)`, a
+  forced rescan through the crawler's own phases (native when available), one worker per
+  folder. It uses the real crawler configuration; before, a default `CrawlerConfig()`
+  carried no UnRAR path. Its preview reads through `model_views`.
+
+`tests/golden/test_archive_jobs_golden.py` compares every job on two database copies.
+An offscreen smoke run did a crawl, Generate Thumbnails, Rescan and Recrawl on copies of
+real archives, all through the native paths.
+
+What is left of SQLAlchemy in `app/ui`: engine-level actions (Compact Database's
+`get_engine`, Clear Database), which go with 4h.
+
 ### Phase 5: Server (medium)
 
 `stl-server` on axum, the product's centre from here on:

@@ -1425,6 +1425,70 @@ impl PyLibraryDb {
         )
     }
 
+    // ── archive jobs (services.archive_jobs) ──────────────────────────────────
+
+    #[allow(clippy::type_complexity)]
+    fn jobs_rescan_state(
+        &self,
+        py: Python<'_>,
+        model_id: i64,
+    ) -> PyResult<Option<(Option<String>, Option<i64>, Option<i64>, String)>> {
+        self.with(py, |c| stl_core::storage::jobs::rescan_state(c, model_id))
+    }
+
+    /// Generate Thumbnails for one model: the number stored, or `None` without it.
+    #[pyo3(signature = (model_id, thumbs, warning, store=None))]
+    fn jobs_replace_thumbnails(
+        &self,
+        py: Python<'_>,
+        model_id: i64,
+        thumbs: Vec<(String, Option<Vec<u8>>)>,
+        warning: Option<String>,
+        store: Option<Bound<'_, PyThumbStore>>,
+    ) -> PyResult<Option<usize>> {
+        let store = store.as_ref().map(|b| b.get());
+        self.with_tx(
+            py,
+            |tx| {
+                let guard = store.map(|s| s.inner.read().unwrap_or_else(|e| e.into_inner()));
+                let st = guard.as_ref().and_then(|g| g.as_ref());
+                stl_core::storage::jobs::replace_thumbnails(tx, st, model_id, &thumbs, warning.as_deref())
+            },
+            db_err,
+        )
+    }
+
+    /// Rescan for one model; `False` without it. Raises `RuntimeError` (nothing
+    /// written) where the ORM's flush would fail.
+    fn jobs_apply_rescan(&self, py: Python<'_>, model_id: i64, values: &Bound<'_, PyDict>) -> PyResult<bool> {
+        let r = stl_core::storage::jobs::Rescan {
+            archive_hash: opt_item(values, "archive_hash")?.unwrap_or_default(),
+            archive_size: opt_item(values, "archive_size")?,
+            archive_mtime_ns: opt_item(values, "archive_mtime_ns")?,
+            compression_rate: opt_item(values, "compression_rate")?,
+            title: opt_item(values, "title")?,
+            creator: opt_item(values, "creator")?,
+            source: opt_item(values, "source")?,
+            release: opt_item(values, "release")?,
+            url: opt_item(values, "url")?,
+            description: opt_item(values, "description")?,
+            presupports: opt_item(values, "presupports")?.unwrap_or_default(),
+            warning: opt_item(values, "warning")?,
+            scales: opt_item(values, "scales")?.unwrap_or_default(),
+            stl_files: opt_item(values, "stl_files")?,
+        };
+        self.with_tx(py, |tx| stl_core::storage::jobs::apply_rescan(tx, model_id, &r), PyRuntimeError::new_err)
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn jobs_cross_folder(&self, py: Python<'_>, new_paths: Vec<String>) -> PyResult<(Vec<(String, String)>, Vec<String>)> {
+        self.with_tx(py, |tx| stl_core::storage::jobs::cross_folder(tx, &new_paths), db_err)
+    }
+
+    fn jobs_delete_missing_under(&self, py: Python<'_>, roots: Vec<String>) -> PyResult<(Vec<String>, Vec<String>)> {
+        self.with_tx(py, |tx| stl_core::storage::jobs::delete_missing_under(tx, &roots), db_err)
+    }
+
     /// Close the pooled connections (they reopen on the next call).
     fn close(&self, py: Python<'_>) {
         py.detach(|| self.pool.lock().unwrap_or_else(|e| e.into_inner()).clear());

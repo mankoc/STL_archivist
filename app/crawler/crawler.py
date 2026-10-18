@@ -103,14 +103,7 @@ class CrawlerWorker(QThread):
 
     def run(self) -> None:
         """Main thread entry point — orchestrates the full crawl pipeline."""
-        self._stop_requested = False
-        self._consecutive_failures = 0
-        self._stats_new = 0
-        self._stats_updated = 0
-        self._stats_unchanged = 0
-        self._new_archive_paths: set[str] = set()
-        self._lib = self._native_library()
-        self._existing_hashes: dict[str, str] = {}
+        self._reset_state()
         logger.info("Crawl started — source: %s, pattern: %r, workers: %d",
                     self.source_dir, self._pattern, self._config.max_workers)
         self.phase.emit("Scanning for deleted files…")
@@ -118,8 +111,6 @@ class CrawlerWorker(QThread):
         # Moves are matched by content hash while diffing (Phase 2), before a
         # moved archive is extracted as if new; see _match_early_move.
         self._move_candidates = moves.index_by_hash(missing_records)
-        self._early_moved_ids: set[int] = set()
-        self._moved_new_paths: set[str] = set()
 
         self.phase.emit("Retrieving file list…")
         logger.debug("Scanning source directory for archives: %s (recurse=%s)", self.source_dir, self._config.recurse_subdirs)
@@ -151,38 +142,7 @@ class CrawlerWorker(QThread):
             batch_idx = batch_start // self.BATCH_SIZE + 1
             logger.debug("--- Batch %d/%d (%d archives) ---", batch_idx, num_batches, len(batch))
 
-            hashes = self._phase_hash(batch)
-
-            if self._lib is not None:
-                if batch_start == 0:
-                    self.phase.emit("Checking database for changes…")
-                to_extract, stl_backfill, existing_ids = self._native_diff(batch, hashes)
-                if to_extract and batch_start == 0:
-                    self.phase.emit("Extracting new/changed archives…")
-                extracted = self._phase_extract(to_extract, stl_backfill)
-                stopped = self._native_upsert(batch, batch_start, total, hashes, existing_ids,
-                                              *extracted, modified_folders)
-                if stopped or self._stop_requested:
-                    break
-                continue
-
-            with session_scope() as session:
-                if batch_start == 0:
-                    self.phase.emit("Checking database for changes…")
-                to_extract, stl_backfill, existing_map = self._phase_diff(batch, hashes, session)
-                if to_extract and batch_start == 0:
-                    self.phase.emit(f"Extracting new/changed archives…")
-                contents_map, all_names_map, stl_info_map, uncompressed_map, precomp_map = self._phase_extract(to_extract, stl_backfill)
-                # Fresh per-batch lookup cache so repeated sculptor/tag/scale
-                # references within the same batch skip redundant SELECTs.
-                self._lookup_cache: dict = {}
-                stopped = self._phase_upsert(
-                    batch, batch_start, total, hashes,
-                    existing_map, contents_map, all_names_map, stl_info_map, uncompressed_map,
-                    precomp_map, session, modified_folders,
-                )
-                self._lookup_cache = {}
-
+            stopped = self._process_batch(batch, batch_start, total, modified_folders)
             if stopped or self._stop_requested:
                 break
 
@@ -214,6 +174,68 @@ class CrawlerWorker(QThread):
         self.log.emit(msg)
         logger.info(msg)
         self.crawl_finished.emit()
+
+    def _reset_state(self) -> None:
+        """Per-run state, before :meth:`run` or :meth:`recrawl`."""
+        self._stop_requested = False
+        self._consecutive_failures = 0
+        self._stats_new = 0
+        self._stats_updated = 0
+        self._stats_unchanged = 0
+        self._new_archive_paths: set[str] = set()
+        self._lib = self._native_library()
+        self._existing_hashes: dict[str, str] = {}
+        self._move_candidates: dict = {}
+        self._early_moved_ids: set[int] = set()
+        self._moved_new_paths: set[str] = set()
+
+    def _process_batch(self, batch: list[Path], batch_start: int, total: int,
+                       modified_folders: set[Path]) -> bool:
+        """Phases 1–4 for one batch; returns ``True`` when the crawl should stop."""
+        hashes = self._phase_hash(batch)
+
+        if self._lib is not None:
+            if batch_start == 0:
+                self.phase.emit("Checking database for changes…")
+            to_extract, stl_backfill, existing_ids = self._native_diff(batch, hashes)
+            if to_extract and batch_start == 0:
+                self.phase.emit("Extracting new/changed archives…")
+            extracted = self._phase_extract(to_extract, stl_backfill)
+            return self._native_upsert(batch, batch_start, total, hashes, existing_ids,
+                                       *extracted, modified_folders)
+
+        with session_scope() as session:
+            if batch_start == 0:
+                self.phase.emit("Checking database for changes…")
+            to_extract, stl_backfill, existing_map = self._phase_diff(batch, hashes, session)
+            if to_extract and batch_start == 0:
+                self.phase.emit(f"Extracting new/changed archives…")
+            contents_map, all_names_map, stl_info_map, uncompressed_map, precomp_map = self._phase_extract(to_extract, stl_backfill)
+            # Fresh per-batch lookup cache so repeated sculptor/tag/scale
+            # references within the same batch skip redundant SELECTs.
+            self._lookup_cache: dict = {}
+            stopped = self._phase_upsert(
+                batch, batch_start, total, hashes,
+                existing_map, contents_map, all_names_map, stl_info_map, uncompressed_map,
+                precomp_map, session, modified_folders,
+            )
+            self._lookup_cache = {}
+        return stopped
+
+    def recrawl(self, archives: list[Path]) -> None:
+        """Re-extract *archives* (all under ``source_dir``) as a forced rescan and
+        refresh their folders' sidecars; no move or deletion handling.  The
+        browser's Recrawl action uses it (synchronously)."""
+        self._reset_state()
+        self._config.force_rescan = True
+        modified_folders: set[Path] = set()
+        for start in range(0, len(archives), self.BATCH_SIZE):
+            if self._process_batch(archives[start:start + self.BATCH_SIZE], start, len(archives),
+                                   modified_folders):
+                break
+        thumb_base = get_thumbnail_base_dir()
+        if modified_folders and thumb_base is not None and self._config.metadata_sidecar_enabled:
+            self._post_export_metadata(modified_folders, thumb_base)
 
     def _pre_crawl_import(self, archives: list[Path], thumb_base: Path) -> None:
         """Restore DB records from METADATA.7z sidecars before crawling."""

@@ -26,6 +26,7 @@ pub mod browser;
 pub mod crawl;
 pub mod duplicates;
 pub mod edit;
+pub mod jobs;
 pub mod library;
 pub mod maintenance;
 pub mod model_edit;
