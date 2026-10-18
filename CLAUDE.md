@@ -227,7 +227,9 @@ Qt-free business logic, testable without a `QApplication`:
   scan, popup thumbnail ids, image-scan reads; crawled-folder list; sidecar folder list.
 - **`model_summary.py`** — `model_summary(session, model_id)`: one-statement display row
   (names, tags, image count) for detail panels; cheap enough for the GUI thread.
-- **`maintenance.py`** — Database Maintenance operations (verify, duplicate entries, prune images,
+- **`maintenance.py`** — Database Maintenance operations (the dialog's reads and writes:
+  embedding targets / store, warning re-check, moved-record merge, record removal; verify,
+  duplicate entries, prune images,
   `compact_database` = `VACUUM` + `wal_checkpoint(TRUNCATE)`, run with `temp_store=FILE`).
 - **`file_deletion.py`** — archive deletion / trash (`delete_archives(ids, use_trash, trash)`
   manages its own transaction).

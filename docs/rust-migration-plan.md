@@ -532,6 +532,22 @@ the sidecars in 4g.
 - On the reference library every result is identical. The STL scan takes 1.3 s against
   2.9 s in Python.
 
+**4f-4c: done 2026-10-18 (Database Maintenance dialog).** The dialog's remaining database
+work goes through `services/maintenance.py`, backed natively by `storage::maintenance`:
+- embedding targets (after pruning orphan vectors) and storing vectors;
+- the warning re-check's reads and writes;
+- location rows for Find Moved;
+- the moved-record merge (one transaction);
+- record removal with lookup pruning;
+- free-space bytes for Compact.
+
+Two bug fixes, in both implementations:
+- Remove Records now deletes the removed models' thumbnails. They used to stay in LMDB.
+- Search for missing archives now sets `archive_folder` with `archive_path`
+  (`browser_data.set_archive_paths`).
+
+`tests/golden/test_maintenance_dialog_golden.py` covers every function, including vectors.
+
 ### Phase 5: Server (medium)
 
 `stl-server` on axum, the product's centre from here on:

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use rayon::prelude::*;
-use rusqlite::{Connection, Transaction};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 use super::Result;
 use crate::control::Control;
@@ -223,4 +223,113 @@ pub fn excess_images(conn: &Connection, model_ids: &[i64], keep: usize) -> Resul
 pub fn delete_images(tx: &Transaction, ids: &[i64]) -> Result<usize> {
     let json = format!("[{}]", ids.iter().map(i64::to_string).collect::<Vec<_>>().join(","));
     tx.execute("DELETE FROM images WHERE id IN (SELECT value FROM json_each(?1))", [json])
+}
+
+// ── Database Maintenance dialog (services.maintenance) ──────────────────────
+
+/// Images without a stored embedding (all images with `all`), by id, with
+/// their legacy thumbnail blob.
+pub fn embedding_targets(conn: &Connection, all: bool) -> Result<Vec<(i64, Option<Vec<u8>>)>> {
+    let sql = if all {
+        "SELECT id, thumbnail FROM images ORDER BY id".to_owned()
+    } else {
+        format!(
+            "SELECT id, thumbnail FROM images WHERE id NOT IN (SELECT image_id FROM {}) ORDER BY id",
+            super::schema_sql::VECTOR_TABLE
+        )
+    };
+    let mut st = conn.prepare(&sql)?;
+    st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()
+}
+
+/// `(id, archive_path, warning)` of every model, by id.
+pub type WarningRow = (i64, Option<String>, Option<String>);
+
+pub fn warning_records(conn: &Connection) -> Result<Vec<WarningRow>> {
+    let mut st = conn.prepare("SELECT id, archive_path, warning FROM models ORDER BY id")?;
+    st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect()
+}
+
+/// Set `warning` of each model; `updated_at` changes only where it differs.
+pub fn set_warnings(tx: &Transaction, items: &[(i64, Option<String>)]) -> Result<()> {
+    let now = super::edit::utc_now_text();
+    let mut st = tx.prepare("UPDATE models SET warning = ?2, updated_at = ?3 WHERE id = ?1 AND warning IS NOT ?2")?;
+    for (id, w) in items {
+        st.execute(params![id, w, now])?;
+    }
+    Ok(())
+}
+
+pub type LocationRow = (i64, Option<String>, Option<String>, Option<i64>);
+
+/// `(id, archive_path, archive_hash, archive_size)` of every model, by id.
+pub fn location_rows(conn: &Connection) -> Result<Vec<LocationRow>> {
+    let mut st = conn.prepare("SELECT id, archive_path, archive_hash, archive_size FROM models ORDER BY id")?;
+    st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect()
+}
+
+/// Merge each missing record into the record at `match_path` (`moves.merge_into_missing`).
+/// Returns `(merged, errors, thumbnail refs)`; an error is a record that no longer exists.
+pub fn merge_moved(tx: &Transaction, items: &[(i64, String)]) -> Result<(usize, usize, Vec<String>)> {
+    let (mut merged, mut errors, mut refs) = (0, 0, Vec::new());
+    for (old_id, path) in items {
+        let old = tx.query_row("SELECT 1 FROM models WHERE id = ?1", [old_id], |_| Ok(())).optional()?;
+        let new: Option<i64> = tx
+            .query_row("SELECT id FROM models WHERE archive_path = ?1 ORDER BY id LIMIT 1", [path], |r| r.get(0))
+            .optional()?;
+        match (old, new) {
+            (Some(()), Some(new_id)) => {
+                refs.extend(super::edit::merge_into_missing(tx, *old_id, new_id)?);
+                merged += 1;
+            }
+            _ => errors += 1,
+        }
+    }
+    Ok((merged, errors, refs))
+}
+
+/// Delete models, then prune unused lookups: `(thumbnail refs, {table: rows pruned})`.
+pub type Removed = (Vec<String>, Vec<(&'static str, usize)>);
+
+pub fn remove_records(tx: &Transaction, ids: &[i64]) -> Result<Removed> {
+    let refs = super::browser::delete_models(tx, ids)?;
+    Ok((refs, super::edit::prune_unused_lookups(tx)?))
+}
+
+/// Bytes held by free pages (`PRAGMA freelist_count * page_size`).
+pub fn free_bytes(conn: &Connection) -> Result<i64> {
+    let free: i64 = conn.query_row("PRAGMA freelist_count", [], |r| r.get(0))?;
+    let page: i64 = conn.query_row("PRAGMA page_size", [], |r| r.get(0))?;
+    Ok(free * page)
+}
+
+#[cfg(test)]
+mod dialog_tests {
+    use super::*;
+    use crate::storage::{Vectors, migrate, open};
+
+    #[test]
+    fn dialog_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("lib.db");
+        migrate(&path, &Vectors::default()).unwrap();
+        let mut conn = open(&path).unwrap();
+        conn.execute_batch(
+            "INSERT INTO sculptors (name) VALUES ('unused');
+             INSERT INTO models (title, archive_path, archive_hash, warning, is_missing, to_print)
+             VALUES ('A', 'F:/a.7z', 'h', 'w', 1, 0), ('B', 'G:/a.7z', 'h', NULL, 0, 0), ('C', 'c', 'x', NULL, 0, 0);",
+        )
+        .unwrap();
+        let tx = conn.transaction().unwrap();
+        set_warnings(&tx, &[(1, None), (3, Some("n".into()))]).unwrap();
+        assert_eq!(merge_moved(&tx, &[(1, "G:/a.7z".into()), (1, "nope".into())]).unwrap(), (1, 1, vec![]));
+        let (refs, pruned) = remove_records(&tx, &[3]).unwrap();
+        tx.commit().unwrap();
+        assert!(refs.is_empty());
+        assert_eq!(pruned, [("sculptors", 1)]);
+        let rows = location_rows(&conn).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].1.as_deref(), Some("G:/a.7z"));
+        assert!(free_bytes(&conn).unwrap() >= 0);
+    }
 }

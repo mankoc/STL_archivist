@@ -139,8 +139,7 @@ class SearchWorker(QThread):
 
     def run(self) -> None:
         from app.crawler.archive import ARCHIVE_SUFFIXES, METADATA_FILENAME, archive_hash
-        from app.database.db import session_scope
-        from app.database.models import STLModel
+        from app.services.browser_data import set_archive_paths
         from app.ui.config_dialog import get_unrar_path
 
         self._stop_requested = False
@@ -208,10 +207,7 @@ class SearchWorker(QThread):
             model_id = remaining.pop(h)
             new_path = str(candidate)
             try:
-                with session_scope() as session:
-                    model = session.query(STLModel).filter(STLModel.id == model_id).first()
-                    if model:
-                        model.archive_path = new_path
+                set_archive_paths([(model_id, new_path)])
                 self.found.emit(model_id, new_path)
                 self.log.emit(f"  [{idx}/{total}] Found: {candidate.name} → updated record #{model_id}")
                 matched += 1
@@ -291,9 +287,7 @@ class EmbeddingWorker(QThread):
         self._stop_requested = True
 
     def run(self) -> None:
-        from app.database import vectors
-        from app.database.db import session_scope
-        from app.database.models import Image as DBImage
+        from app.services.maintenance import embedding_targets, store_embeddings
         from app.utils.thumbnailer import get_thumbnail_bytes
         from app.utils import image_embedding as emb
         from app.ui.config_dialog import get_ai_embeddings_batch_size
@@ -306,14 +300,9 @@ class EmbeddingWorker(QThread):
             self.embed_finished.emit(0, 0)
             return
 
-        with session_scope() as session:
-            orphans = vectors.prune_orphans(session)
-            if orphans:
-                self.log.emit(f"Removed {orphans} embedding(s) of deleted images.")
-            query = session.query(DBImage.id, DBImage.thumbnail)
-            if not self._recompute_all:
-                query = query.filter(DBImage.id.notin_(vectors.current_ids()))
-            rows = query.all()
+        orphans, rows = embedding_targets(self._recompute_all)
+        if orphans:
+            self.log.emit(f"Removed {orphans} embedding(s) of deleted images.")
 
         total = len(rows)
         if total == 0:
@@ -329,8 +318,7 @@ class EmbeddingWorker(QThread):
         def flush() -> None:
             if not pending:
                 return
-            with session_scope() as s:
-                vectors.store(s, pending)
+            store_embeddings(pending)
             pending.clear()
 
         computed = 0
@@ -442,17 +430,13 @@ class _WarningRecheckWorker(QThread):
 
         from app.crawler.archive import list_contents
         from app.crawler.rules import sort_warning_lines
-        from app.database.db import session_scope
-        from app.database.models import STLModel
+        from app.services.maintenance import set_warnings, warning_records
         from app.ui.settings_loader import build_crawler_config
 
         self._stop_requested = False
         config = build_crawler_config()
 
-        with session_scope() as session:
-            records = session.query(
-                STLModel.id, STLModel.archive_path, STLModel.warning
-            ).all()
+        records = warning_records()
 
         total = len(records)
         if total == 0:
@@ -482,11 +466,7 @@ class _WarningRecheckWorker(QThread):
         def flush() -> None:
             if not pending:
                 return
-            with session_scope() as s:
-                for model_id, new_warning in pending:
-                    m = s.get(STLModel, model_id)
-                    if m is not None:
-                        m.warning = new_warning
+            set_warnings(pending)
             pending.clear()
 
         with ThreadPoolExecutor(max_workers=config.max_workers) as pool:
@@ -856,8 +836,7 @@ class MovedInDbWorker(QThread):
 
     def run(self) -> None:
         from collections import defaultdict
-        from app.database.db import get_session
-        from app.database.models import STLModel
+        from app.services.maintenance import location_rows
 
         if not self._missing:
             self.log.emit("No missing records to check.")
@@ -866,14 +845,7 @@ class MovedInDbWorker(QThread):
 
         self.log.emit(f"Searching {len(self._missing)} missing record(s) in the database…")
 
-        session = get_session()
-        try:
-            rows = session.query(
-                STLModel.id, STLModel.archive_path,
-                STLModel.archive_hash, STLModel.archive_size,
-            ).all()
-        finally:
-            session.close()
+        rows = location_rows()
 
         # Build lookup tables keyed by hash and by (filename, size)
         hash_to_candidates:     dict[str, list[tuple[str, int]]] = defaultdict(list)
@@ -1422,14 +1394,13 @@ class DbMaintenanceDialog(QDialog):
 
     # ------------------------------------------------------------------
     def _start_db_compact(self) -> None:
-        from app.database.db import database_path, session_scope
+        from app.database.db import database_path
         from app.services.maintenance import database_file_bytes, database_free_bytes
 
         db_path = database_path()
         if db_path is None:
             return
-        with session_scope() as session:          # two header reads: cheap
-            free = database_free_bytes(session)
+        free = database_free_bytes()              # two header reads: cheap
         size = database_file_bytes(db_path)
         reply = QMessageBox.question(
             self, self.tr("Compact Database"),
@@ -1692,29 +1663,15 @@ class DbMaintenanceDialog(QDialog):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        from app.database.db import session_scope
-        from app.database.models import STLModel
-        from app.services import moves
+        from app.services.maintenance import merge_moved
         from app.utils.thumbnailer import delete_thumbnails
 
         merged = 0
         errors = 0
         try:
-            thumb_refs: list[str] = []
-            with session_scope() as session:
-                for rec in to_merge:
-                    match_path = rec["match_path"]
-                    old_model = session.query(STLModel).filter_by(id=rec["id"]).first()
-                    new_model = session.query(STLModel).filter_by(
-                        archive_path=match_path
-                    ).first()
-                    if old_model is None or new_model is None:
-                        errors += 1
-                        continue
-                    # Keeps the missing record's metadata at the new location
-                    # (also clears its missing flag and updates its folder).
-                    thumb_refs += moves.merge_into_missing(session, old_model, new_model)
-                    merged += 1
+            # Keeps each missing record's metadata at the new location
+            # (also clears its missing flag and updates its folder).
+            merged, errors, thumb_refs = merge_moved([(r["id"], r["match_path"]) for r in to_merge])
             delete_thumbnails(thumb_refs)   # after commit, one LMDB transaction
 
         except Exception as exc:
@@ -1843,18 +1800,12 @@ class DbMaintenanceDialog(QDialog):
         self._refresh_action_buttons()
 
     def _remove_records(self, ids: list[int]) -> None:
-        from app.database.db import session_scope
-        from app.database.models import STLModel
-        from app.database.helpers import prune_unused_lookups
+        from app.services.maintenance import remove_records
+        from app.utils.thumbnailer import delete_thumbnails
 
         try:
-            with session_scope() as session:
-                for model_id in ids:
-                    model = session.query(STLModel).filter(STLModel.id == model_id).first()
-                    if model:
-                        session.delete(model)
-                session.flush()
-                deleted = prune_unused_lookups(session)
+            thumb_refs, deleted = remove_records(ids)
+            delete_thumbnails(thumb_refs)   # after commit, one LMDB transaction
             if deleted:
                 summary = ", ".join(f"{n} {k}" for k, n in deleted.items())
                 self._log.appendPlainText(f"Pruned unused lookups: {summary}")

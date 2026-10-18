@@ -1107,6 +1107,50 @@ impl PyLibraryDb {
             .collect())
     }
 
+    // ── Database Maintenance dialog (services.maintenance) ────────────────────
+
+    fn maint_embedding_targets(&self, py: Python<'_>, all: bool) -> PyResult<Vec<(i64, Option<Vec<u8>>)>> {
+        self.with(py, |c| stl_core::storage::maintenance::embedding_targets(c, all))
+    }
+
+    fn vectors_prune_orphans(&self, py: Python<'_>) -> PyResult<usize> {
+        self.with_tx(py, stl_core::storage::vectors::prune_orphans, db_err)
+    }
+
+    /// `vectors.store` for `(image_id, float32 blob)` pairs of `dim` floats.
+    fn vectors_store(&self, py: Python<'_>, dim: usize, items: Vec<(i64, Vec<u8>)>) -> PyResult<usize> {
+        self.with_tx(py, |tx| stl_core::storage::vectors::store(tx, dim, &items), db_err)
+    }
+
+    fn maint_warning_records(&self, py: Python<'_>) -> PyResult<Vec<stl_core::storage::maintenance::WarningRow>> {
+        self.with(py, stl_core::storage::maintenance::warning_records)
+    }
+
+    fn maint_set_warnings(&self, py: Python<'_>, items: Vec<(i64, Option<String>)>) -> PyResult<()> {
+        self.with_tx(py, |tx| stl_core::storage::maintenance::set_warnings(tx, &items), db_err)
+    }
+
+    fn maint_location_rows(&self, py: Python<'_>) -> PyResult<Vec<stl_core::storage::maintenance::LocationRow>> {
+        self.with(py, stl_core::storage::maintenance::location_rows)
+    }
+
+    fn maint_merge_moved(&self, py: Python<'_>, items: Vec<(i64, String)>) -> PyResult<(usize, usize, Vec<String>)> {
+        self.with_tx(py, |tx| stl_core::storage::maintenance::merge_moved(tx, &items), db_err)
+    }
+
+    fn maint_remove_records(
+        &self,
+        py: Python<'_>,
+        ids: Vec<i64>,
+    ) -> PyResult<(Vec<String>, std::collections::HashMap<&'static str, usize>)> {
+        let (refs, pruned) = self.with_tx(py, |tx| stl_core::storage::maintenance::remove_records(tx, &ids), db_err)?;
+        Ok((refs, pruned.into_iter().collect()))
+    }
+
+    fn maint_free_bytes(&self, py: Python<'_>) -> PyResult<i64> {
+        self.with(py, stl_core::storage::maintenance::free_bytes)
+    }
+
     /// Close the pooled connections (they reopen on the next call).
     fn close(&self, py: Python<'_>) {
         py.detach(|| self.pool.lock().unwrap_or_else(|e| e.into_inner()).clear());

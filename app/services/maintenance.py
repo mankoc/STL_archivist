@@ -106,12 +106,21 @@ def recompute_dhashes(
 
 # ── Database compaction ──────────────────────────────────────────────────────
 
-def database_free_bytes(session) -> int:
+def database_free_bytes(session=None) -> int:
     """Bytes held by free pages in the database file (what VACUUM can reclaim).
 
     Reads two header values, so it is cheap enough for the GUI thread.  The
-    write-ahead log is not counted; compaction also truncates it.
+    write-ahead log is not counted; compaction also truncates it.  Without a
+    *session* it reads natively, or through a session of its own.
     """
+    if session is None:
+        from app.database import native_db
+        from app.database.db import session_scope
+        lib = native_db.library()
+        if lib is not None:
+            return lib.maint_free_bytes()
+        with session_scope() as s:
+            return database_free_bytes(s)
     conn = session.connection()
     free = conn.exec_driver_sql("PRAGMA freelist_count").scalar_one()
     page = conn.exec_driver_sql("PRAGMA page_size").scalar_one()
@@ -456,3 +465,135 @@ def prune_images(
         "Run 'Compact Thumbnail Store' to reclaim the freed disk space."
     )
     return models_pruned, images_removed
+
+
+# ── Maintenance dialog reads and writes ─────────────────────────────────────
+# Run natively (storage::maintenance) when native_db.library() allows it;
+# tests/golden/test_maintenance_dialog_golden.py compares the two.
+
+def embedding_targets(recompute_all: bool) -> tuple[int, list[tuple]]:
+    """Prune vectors of deleted images, then list the images to embed:
+    ``(orphans removed, [(image id, legacy thumbnail blob)])`` by id."""
+    from app.database import native_db, vectors
+    from app.database.db import session_scope
+    from app.database.models import Image
+    lib = native_db.library()
+    if lib is not None:
+        return lib.vectors_prune_orphans(), lib.maint_embedding_targets(bool(recompute_all))
+    with session_scope() as s:
+        orphans = vectors.prune_orphans(s)
+        q = s.query(Image.id, Image.thumbnail)
+        if not recompute_all:
+            q = q.filter(Image.id.notin_(vectors.current_ids()))
+        return orphans, [tuple(r) for r in q.order_by(Image.id)]
+
+
+def store_embeddings(items: list[tuple]) -> int:
+    """``vectors.store`` in a transaction of its own; returns how many were stored."""
+    from app.database import native_db, vectors
+    from app.database.db import session_scope
+    from app.utils.image_embedding import EMBED_DIM
+    lib = native_db.library()
+    if lib is not None:
+        blobs = []
+        for image_id, vec in items:
+            blob = vectors.to_blob(vec)
+            if len(blob) != EMBED_DIM * 4:
+                logger.warning("Skipping embedding for image %s: %d dimensions, expected %d",
+                               image_id, len(blob) // 4, EMBED_DIM)
+                continue
+            blobs.append((int(image_id), blob))
+        return lib.vectors_store(EMBED_DIM, blobs)
+    with session_scope() as s:
+        return vectors.store(s, items)
+
+
+def warning_records() -> list[tuple]:
+    """``(id, archive_path, warning)`` of every model, by id."""
+    from app.database import native_db
+    from app.database.db import session_scope
+    from app.database.models import STLModel
+    lib = native_db.library()
+    if lib is not None:
+        return lib.maint_warning_records()
+    with session_scope() as s:
+        return [tuple(r) for r in s.query(STLModel.id, STLModel.archive_path, STLModel.warning)
+                .order_by(STLModel.id)]
+
+
+def set_warnings(items: list[tuple[int, str | None]]) -> None:
+    """Set the ``warning`` of each ``(model id, warning)`` in one transaction."""
+    from app.database import native_db
+    from app.database.db import session_scope
+    from app.database.models import STLModel
+    lib = native_db.library()
+    if lib is not None:
+        lib.maint_set_warnings([(int(i), w) for i, w in items])
+        return
+    with session_scope() as s:
+        for model_id, warning in items:
+            m = s.get(STLModel, model_id)
+            if m is not None:
+                m.warning = warning
+
+
+def location_rows() -> list[tuple]:
+    """``(id, archive_path, archive_hash, archive_size)`` of every model, by id."""
+    from app.database import native_db
+    from app.database.db import session_scope
+    from app.database.models import STLModel
+    lib = native_db.library()
+    if lib is not None:
+        return lib.maint_location_rows()
+    with session_scope() as s:
+        return [tuple(r) for r in s.query(STLModel.id, STLModel.archive_path, STLModel.archive_hash,
+                                          STLModel.archive_size).order_by(STLModel.id)]
+
+
+def merge_moved(items: list[tuple[int, str]]) -> tuple[int, int, list[str]]:
+    """Merge each missing record into the record at its match path
+    (``moves.merge_into_missing``), in one transaction.  Returns ``(merged,
+    errors, thumbnail refs)``; delete the thumbnails after this returns."""
+    from app.database import native_db
+    from app.database.db import session_scope
+    from app.database.models import STLModel
+    from app.services import moves
+    lib = native_db.library()
+    if lib is not None:
+        return tuple(lib.maint_merge_moved([(int(i), str(p)) for i, p in items]))
+    merged = errors = 0
+    refs: list[str] = []
+    with session_scope() as s:
+        for old_id, match_path in items:
+            old = s.get(STLModel, old_id)
+            new = (s.query(STLModel).filter_by(archive_path=match_path)
+                   .order_by(STLModel.id).first())
+            if old is None or new is None:
+                errors += 1
+                continue
+            refs += moves.merge_into_missing(s, old, new)
+            merged += 1
+    return merged, errors, refs
+
+
+def remove_records(model_ids: list[int]) -> tuple[list[str], dict[str, int]]:
+    """Delete models and prune unused lookups in one transaction.  Returns
+    ``(thumbnail refs, {table: rows pruned})``; delete the thumbnails after."""
+    from app.database import native_db
+    from app.database.db import session_scope
+    from app.database.helpers import prune_unused_lookups
+    from app.database.models import STLModel
+    from app.services import moves
+    order = ("subcollections", "collections", "sculptors", "categories", "releases", "scales")
+    lib = native_db.library()
+    if lib is not None:
+        refs, counts = lib.maint_remove_records([int(i) for i in model_ids])
+        return refs, {k: counts[k] for k in order if k in counts}
+    refs: list[str] = []
+    with session_scope() as s:
+        for model_id in model_ids:
+            model = s.get(STLModel, model_id)
+            if model is not None:
+                refs += moves.delete_model(s, model)
+        s.flush()
+        return refs, prune_unused_lookups(s)
