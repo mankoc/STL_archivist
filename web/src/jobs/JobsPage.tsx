@@ -1,7 +1,7 @@
-// Crawls and maintenance (the desktop's Crawler and Database Maintenance):
-// crawled folders, maintenance actions, the job queue, and a live log.
+// Crawls (the desktop's Crawler): crawled folders, the job queue, and a live
+// log. Database Maintenance has its own page (MaintenancePage).
 import {
-  ActionIcon, Badge, Box, Button, Card, Checkbox, Group, Modal, NumberInput, Progress, ScrollArea, Stack,
+  ActionIcon, Badge, Box, Button, Card, Checkbox, Group, Modal, Progress, ScrollArea, Stack,
   Table, Text, TextInput, Title, Tooltip, UnstyledButton,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
@@ -40,14 +40,12 @@ function useNow(active: boolean) {
 export function JobsPage() {
   const user = useUser();
   const editor = hasRole(user, "editor");
-  const admin = hasRole(user, "admin");
   const queryClient = useQueryClient();
   const jobs = useQuery({ queryKey: ["jobs"], queryFn: async () => unwrap(await api.GET("/api/jobs")) });
   const folders = useQuery({ queryKey: ["crawled-folders"], queryFn: async () => unwrap(await api.GET("/api/crawled-folders")) });
   const [selected, setSelected] = useState<number | null>(null);
   const [picker, setPicker] = useState(false);
   const [crawl, setCrawl] = useState<{ folder: string; pattern: string; force: boolean } | null>(null);
-  const [keep, setKeep] = useState<number>(5);
   const list = sortJobs(jobs.data ?? []);
   const now = useNow(list.some(isActive));
   const shown = selected ?? list[0]?.id ?? null;
@@ -130,45 +128,6 @@ export function JobsPage() {
           )}
         </Card>
 
-        {editor && (
-          <Card withBorder>
-            <Title order={5} mb="xs">
-              Maintenance
-            </Title>
-            <Stack gap="xs">
-              <Group gap="xs">
-                <Button size="xs" variant="default" onClick={() => start({ kind: "verify_archives" })}>
-                  Verify archives
-                </Button>
-                <Button size="xs" variant="default" onClick={() => start({ kind: "recompute_dhashes", all: false })}>
-                  Compute missing image hashes
-                </Button>
-                <Button size="xs" variant="default" onClick={() => start({ kind: "recompute_dhashes", all: true })}>
-                  Recompute all image hashes
-                </Button>
-              </Group>
-              <Group gap="xs">
-                <Button size="xs" variant="default" onClick={() => start({ kind: "compute_embeddings", all: false })}>
-                  Compute missing embeddings
-                </Button>
-                <Button size="xs" variant="default" onClick={() => start({ kind: "compute_embeddings", all: true })}>
-                  Recompute all embeddings
-                </Button>
-              </Group>
-              <Group gap="xs" align="flex-end">
-                <NumberInput size="xs" label="Images per model" min={0} w={130} value={keep} onChange={(v) => setKeep(Number(v) || 0)} />
-                <Button size="xs" variant="default" onClick={() => start({ kind: "prune_images", keep })}>
-                  Prune images
-                </Button>
-                {admin && (
-                  <Button size="xs" variant="default" onClick={() => start({ kind: "compact_database" })}>
-                    Compact database
-                  </Button>
-                )}
-              </Group>
-            </Stack>
-          </Card>
-        )}
       </Stack>
 
       <Stack gap="md" className={classes.column}>
@@ -277,7 +236,7 @@ export function JobsPage() {
 }
 
 /** A job's log: what the server kept when it was opened, then new lines as they arrive. */
-function JobLog({ id, job }: { id: number; job: Job | undefined }) {
+export function JobLog({ id, job }: { id: number; job: Job | undefined }) {
   const detail = useQuery({
     queryKey: ["job-log", id],
     queryFn: async () => unwrap(await api.GET("/api/jobs/{id}", { params: { path: { id } } })).log,

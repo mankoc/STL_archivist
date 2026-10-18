@@ -12,6 +12,7 @@ import { useServerEvents } from "../api/events";
 import { UserContext } from "../auth/user";
 import { BrowserPage } from "../browser/BrowserPage";
 import { JobsPage } from "../jobs/JobsPage";
+import { MaintenancePage } from "../jobs/MaintenancePage";
 import { LookupsPage } from "../lookups/LookupsPage";
 import { DuplicatesPage } from "../tools/DuplicatesPage";
 import { FindByImagePage } from "../tools/FindByImagePage";
@@ -52,6 +53,7 @@ export function Shell({ user }: { user: Schemas["User"] }) {
                   { value: "duplicates", label: "Duplicates" },
                   { value: "lookups", label: "Lookups" },
                   { value: "jobs", label: "Jobs" },
+                  { value: "maintenance", label: "Maintenance" },
                   { value: "stats", label: "Statistics" },
                   { value: "settings", label: "Settings" },
                 ]}
@@ -86,6 +88,8 @@ export function Shell({ user }: { user: Schemas["User"] }) {
         <AppShell.Main style={{ height: "100vh", paddingTop: 48, display: "flex", flexDirection: "column" }}>
           {page === "jobs" ? (
             <JobsPage />
+          ) : page === "maintenance" ? (
+            <MaintenancePage />
           ) : page === "settings" ? (
             <SettingsPage />
           ) : page === "lookups" ? (

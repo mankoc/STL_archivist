@@ -64,6 +64,11 @@ impl Library {
         }
         let thumbs = LibrarySettings::load(&self.config.data_dir).sidecar_thumbnails();
         for folder in folders {
+            // An archive moved out of a folder that is gone since: nothing to refresh.
+            if !std::path::Path::new(&folder).is_dir() {
+                tracing::debug!(%folder, "sidecar skipped: the folder no longer exists");
+                continue;
+            }
             let r = self.db.with(|c| {
                 Ok::<_, rusqlite::Error>(stl_core::storage::sidecar::export(c, Some(&self.thumbs), &folder, thumbs))
             });

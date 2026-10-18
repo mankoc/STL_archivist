@@ -1142,6 +1142,36 @@ Ctrl-selected models.
 - Verified in headless Edge: a duplicated archive found by STL files, Levenshtein on
   titles, the image scan and Compare, and the results shown again after a reload.
 
+**6h: done 2026-10-18 (Database Maintenance).**
+
+- Server (`stl-server/src/maint.rs`; the job result type is now `JobResult`, with a
+  `records` variant of `RecordRow`s, the desktop's `_result_row`):
+  - `verify_archives` also returns its non-OK records; `find_duplicate_entries` returns
+    `maintenance::duplicate_entries`.
+  - `find_moved { ids }`: Find Moved in DB (same hash, else same file name and size,
+    archive on disk).
+  - `search_folder { folder, ids }`: walks the folder (`crawler::list_archives`), hashes
+    candidates in parallel with the native fingerprint (refused archives get the
+    size/mtime fallback, as in a server crawl; a size pre-filter when every target has a
+    fallback hash) and points matches at their new path (`browser::set_archive_paths`).
+    The folder goes through `files::check_access`, as a crawl's does.
+  - `recheck_warnings { warning: no_images | presupported }`: the desktop's
+    `_WarningRecheckWorker`: native catalogs in parallel, only that warning line changes
+    (plus the retired "Archive with supports"), lines in `WARNING_ORDER`, unreadable
+    archives skipped; custom presupport patterns that are not portable refuse the job.
+  - `POST /api/maintenance/merge-moved` (`maintenance::merge_moved`) and
+    `POST /api/maintenance/remove` (`maintenance::remove_records`, pruning unused
+    lookups); both delete thumbnails after the commit and schedule sidecars.
+  - Jobs that write record paths or warnings queue their folders' sidecars
+    (`Job::touch_sidecars`, flushed when the job ends); the exporter skips folders that
+    no longer exist.
+- Web: the Maintenance page (records, warnings, images and storage, the current job's
+  log) with the record list and its actions; the Jobs page keeps crawled folders and
+  the queue.
+- Verified in headless Edge: an archive moved and found by Search in folder; a copy
+  crawled elsewhere, Find moved in DB and Merge moved; a duplicate entry removed; the
+  images warning re-check.
+
 ### Phase 7: Desktop shell (small)
 
 Tauri app that hosts the web client: connect to a remote server or start a bundled local one on

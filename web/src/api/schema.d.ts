@@ -388,6 +388,46 @@ export interface paths {
         patch: operations["patch_lookups_by_kind_by_id"];
         trace?: never;
     };
+    "/api/maintenance/merge-moved": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Merge each missing record into the record found at its new location: the
+         *     metadata of the missing one moves there (Merge Moved).
+         */
+        post: operations["post_maintenance_merge_moved"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/maintenance/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove records from the library and prune lookups left unused (Remove
+         *     Selected / All Missing). The archive files are not touched.
+         */
+        post: operations["post_maintenance_remove"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/me/settings": {
         parameters: {
             query?: never;
@@ -1075,19 +1115,6 @@ export interface components {
             regex?: boolean;
             replace: string;
         };
-        /** @description What a finder job found (`JobDetail.result`). */
-        FinderResult: {
-            pairs: components["schemas"]["ContentRow"][];
-            /** @enum {string} */
-            type: "content";
-        } | (components["schemas"]["ImageResult"] & {
-            /** @enum {string} */
-            type: "images";
-        }) | {
-            groups: components["schemas"]["MetadataGroup"][];
-            /** @enum {string} */
-            type: "metadata";
-        };
         FolderPath: {
             path: string;
         };
@@ -1153,7 +1180,7 @@ export interface components {
             job: components["schemas"]["JobInfo"];
             /** @description The job's log, oldest line first (at most the last 2,000 lines). */
             log: string[];
-            result?: null | components["schemas"]["FinderResult"];
+            result?: null | components["schemas"]["JobResult"];
         };
         JobInfo: {
             /** Format: int64 */
@@ -1235,6 +1262,22 @@ export interface components {
              */
             threshold?: number;
         } | {
+            /** @enum {string} */
+            kind: "find_duplicate_entries";
+        } | {
+            ids: number[];
+            /** @enum {string} */
+            kind: "find_moved";
+        } | {
+            folder: string;
+            ids: number[];
+            /** @enum {string} */
+            kind: "search_folder";
+        } | {
+            /** @enum {string} */
+            kind: "recheck_warnings";
+            warning: string;
+        } | {
             /**
              * @description Column keys: title, creator, source, sculptor, collection,
              *     subcollection, category, release, scale.
@@ -1249,6 +1292,23 @@ export interface components {
             max_distance?: number;
             /** @description `exact`, `levenshtein` or `soundex`. */
             method: string;
+        };
+        /** @description What a finder or maintenance job found (`JobDetail.result`). */
+        JobResult: {
+            pairs: components["schemas"]["ContentRow"][];
+            /** @enum {string} */
+            type: "content";
+        } | (components["schemas"]["ImageResult"] & {
+            /** @enum {string} */
+            type: "images";
+        }) | {
+            groups: components["schemas"]["MetadataGroup"][];
+            /** @enum {string} */
+            type: "metadata";
+        } | {
+            rows: components["schemas"]["RecordRow"][];
+            /** @enum {string} */
+            type: "records";
         };
         /** @enum {string} */
         JobState: "queued" | "running" | "done" | "failed" | "cancelled";
@@ -1374,6 +1434,14 @@ export interface components {
              */
             remove: number;
         };
+        MergeMoved: {
+            items: components["schemas"]["MovedRecord"][];
+        };
+        Merged: {
+            /** @description Items whose records no longer exist. */
+            errors: number;
+            merged: number;
+        };
         /** @description Models with equal or similar values in one column. */
         MetadataGroup: {
             /** @description The column's label. */
@@ -1424,6 +1492,15 @@ export interface components {
             search: string;
             /** @default null */
             sort: null | components["schemas"]["Sort"];
+        };
+        MovedRecord: {
+            /**
+             * Format: int64
+             * @description The missing record, whose metadata is kept.
+             */
+            id: number;
+            /** @description The archive path of the record crawled at the new location. */
+            path: string;
         };
         NamedId: {
             /** Format: int64 */
@@ -1479,6 +1556,30 @@ export interface components {
             count: number;
             /** @description The value (a name, a year, …); null for "none". */
             value: Record<string, never>;
+        };
+        /** @description One record of a maintenance list (`_result_row`). */
+        RecordRow: {
+            hash: string;
+            /** Format: int64 */
+            id: number;
+            /** @description Another record's path (duplicates, moved) or where the archive was found. */
+            match_path: string;
+            path: string;
+            /** Format: int64 */
+            size?: number | null;
+            /** @description `Missing`, `Flagged Missing`, `Modified`, `Duplicate`, `Moved (in DB)` or `Found`. */
+            status: string;
+            title: string;
+        };
+        RemoveRecords: {
+            ids: number[];
+        };
+        Removed: {
+            /** @description Lookup rows no model uses any more, deleted with them: `{table: rows}`. */
+            pruned: {
+                [key: string]: number;
+            };
+            removed: number;
         };
         Rename: {
             name: string;
@@ -2447,6 +2548,68 @@ export interface operations {
                 };
             };
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    post_maintenance_merge_moved: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MergeMoved"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Merged"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    post_maintenance_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RemoveRecords"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Removed"];
+                };
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

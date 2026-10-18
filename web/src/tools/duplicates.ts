@@ -2,7 +2,7 @@
 import type { Schemas } from "../api/client";
 
 export type Job = Schemas["JobInfo"];
-export type FinderResult = Schemas["FinderResult"];
+export type JobResult = Schemas["JobResult"];
 export type Finder = "content" | "images" | "metadata";
 
 export const FINDER_KIND: Record<Finder, string> = {

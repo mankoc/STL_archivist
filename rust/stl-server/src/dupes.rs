@@ -15,22 +15,25 @@ use crate::Library;
 pub const MAX_RESULTS: usize = 100_000;
 const DHASH_BATCH: usize = 1024;
 
-/// What a finder job found (`JobDetail.result`).
+/// What a finder or maintenance job found (`JobDetail.result`).
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum FinderResult {
+pub enum JobResult {
     Content { pairs: Vec<ContentRow> },
     Images(ImageResult),
     Metadata { groups: Vec<MetadataGroup> },
+    /// Records of a maintenance list (Verify, duplicate entries, moved, found).
+    Records { rows: Vec<crate::maint::RecordRow> },
 }
 
-impl FinderResult {
+impl JobResult {
     /// Pairs or groups found.
     pub fn len(&self) -> usize {
         match self {
-            FinderResult::Content { pairs } => pairs.len(),
-            FinderResult::Images(r) => r.pairs.len(),
-            FinderResult::Metadata { groups } => groups.len(),
+            JobResult::Content { pairs } => pairs.len(),
+            JobResult::Images(r) => r.pairs.len(),
+            JobResult::Metadata { groups } => groups.len(),
+            JobResult::Records { rows } => rows.len(),
         }
     }
 
@@ -198,7 +201,7 @@ fn rows(lib: &Library, pairs: Vec<stl_core::image_pairs::ModelPair>, img_model: 
 }
 
 /// Find Duplicate Archives → Images by perceptual hash.
-pub fn image_dhash(lib: &Library, ctl: &Control, log: &dyn Fn(String), max_dist: u32, max_models: usize) -> Result<FinderResult, String> {
+pub fn image_dhash(lib: &Library, ctl: &Control, log: &dyn Fn(String), max_dist: u32, max_models: usize) -> Result<JobResult, String> {
     log("Loading image hashes…".into());
     let items = dhash_items(lib, log)?;
     let mut index: HashMap<u128, usize> = HashMap::new();
@@ -222,7 +225,7 @@ pub fn image_dhash(lib: &Library, ctl: &Control, log: &dyn Fn(String), max_dist:
     log("Grouping matches by archive…".into());
     let (pairs, skipped) = stl_core::image_pairs::model_pairs(hashes.len(), &img_item, &img_model, &edges, 0.0, false, max_models);
     let (out, truncated) = rows(lib, pairs, &img_model, false)?;
-    Ok(FinderResult::Images(ImageResult {
+    Ok(JobResult::Images(ImageResult {
         method: "dhash".into(),
         images: items.len(),
         items: hashes.len(),
@@ -234,7 +237,7 @@ pub fn image_dhash(lib: &Library, ctl: &Control, log: &dyn Fn(String), max_dist:
 }
 
 /// Find Duplicate Archives → Images by AI embedding.
-pub fn image_clip(lib: &Library, ctl: &Control, log: &dyn Fn(String), threshold: f32, max_models: usize) -> Result<FinderResult, String> {
+pub fn image_clip(lib: &Library, ctl: &Control, log: &dyn Fn(String), threshold: f32, max_models: usize) -> Result<JobResult, String> {
     log("Loading image embeddings…".into());
     let dim = schema_sql::EMBED_DIM as usize;
     let (img_model, mat) = lib.db.with(|c| vectors::load_model_vectors(c, dim)).map_err(db)?;
@@ -260,7 +263,7 @@ pub fn image_clip(lib: &Library, ctl: &Control, log: &dyn Fn(String), threshold:
     log("Grouping matches by archive…".into());
     let (pairs, skipped) = stl_core::image_pairs::model_pairs(n_items, &img_item, &img_model, &edges, 1.0, true, max_models);
     let (out, truncated) = rows(lib, pairs, &img_model, true)?;
-    Ok(FinderResult::Images(ImageResult {
+    Ok(JobResult::Images(ImageResult {
         method: "clip".into(),
         images: img_model.len(),
         items: n_items,
@@ -272,7 +275,7 @@ pub fn image_clip(lib: &Library, ctl: &Control, log: &dyn Fn(String), threshold:
 }
 
 /// Find Duplicate Archives → STL files: archive pairs sharing a fraction of files.
-pub fn content(lib: &Library, ctl: &Control, threshold: f64) -> Result<FinderResult, String> {
+pub fn content(lib: &Library, ctl: &Control, threshold: f64) -> Result<JobResult, String> {
     let found = lib.db.with(|c| duplicates::stl_content_pairs(c, threshold, ctl)).map_err(db)?;
     let Some(pairs) = found else { return Err("stopped".into()) };
     let pairs = pairs
@@ -290,7 +293,7 @@ pub fn content(lib: &Library, ctl: &Control, threshold: f64) -> Result<FinderRes
             similarity: p.sim,
         })
         .collect();
-    Ok(FinderResult::Content { pairs })
+    Ok(JobResult::Content { pairs })
 }
 
 /// Columns of Find Duplicates (metadata): key → (label, index in `DuplicateRow::texts`, or scales).
@@ -308,7 +311,7 @@ pub const COLUMNS: &[(&str, &str, Option<usize>)] = &[
 
 /// Find Duplicates (metadata): models with identical, near (Levenshtein) or
 /// phonetically similar (Soundex) values, as the desktop's search worker.
-pub fn metadata(lib: &Library, ctl: &Control, columns: &[String], method: &str, max_distance: u32) -> Result<FinderResult, String> {
+pub fn metadata(lib: &Library, ctl: &Control, columns: &[String], method: &str, max_distance: u32) -> Result<JobResult, String> {
     let rows = lib.db.with(views::duplicate_rows).map_err(db)?;
     ctl.set_total(columns.len() as u64);
     let mut groups = Vec::new();
@@ -396,5 +399,5 @@ pub fn metadata(lib: &Library, ctl: &Control, columns: &[String], method: &str, 
         }
         ctl.advance(1);
     }
-    Ok(FinderResult::Metadata { groups })
+    Ok(JobResult::Metadata { groups })
 }

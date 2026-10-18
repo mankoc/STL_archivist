@@ -82,7 +82,8 @@ the native core owns the schema from Phase 4b).
   `run` arm that reports through `job.ctl` (progress) and `lib.job_log` and checks
   `job.stopped()` between batches. Crawls run `stl_core::crawler::crawl` with `ServerHost`,
   which answers `Response::None` until 5d-2 adds native PDF and CLIP. Read-only jobs
-  (the duplicate finders in `dupes.rs`) return a typed result in `JobDetail.result` and
+  (the duplicate finders in `dupes.rs`, maintenance lists in `maint.rs`) return a typed
+  `JobResult` in `JobDetail.result` and
   are listed in `JobRequest::read_only`; validate arguments in `JobRequest::validate`. Events go through
   `lib.jobs.events`; writes are announced by the `announce_changes` middleware.
 - **Server PDF / CLIP:** `stl-server/src/tools.rs` loads pdfium and ONNX Runtime at
@@ -90,9 +91,10 @@ the native core owns the schema from Phase 4b).
   `stl_core::clip` (golden-tested against Python); keep it in step with
   `image_embedding._preprocess`. Decode JPEGs in Rust with `jpeg-decoder`, not the `image`
   crate (zune-jpeg misreads the core encoder's output).
-- **Server files:** browsing and crawling go through `api::files::check_access` (editors
-  inside roots, admins anywhere; canonical paths). Never serve a file by a client-given
-  path: downloads go by model id.
+- **Server files:** browsing, crawling and any job given a folder (Search in Folder) go
+  through `api::files::check_access` (editors inside roots, admins anywhere; canonical
+  paths). A crawl of a known folder takes its stored spelling (`files::known_spelling`).
+  Never serve a file by a client-given path: downloads go by model id.
 - **Web client (`web/`):** React 19 + Mantine 8 + TanStack Query/Table/Virtual. All requests
   go through `src/api/client.ts` (`api.GET/POST…` typed from `schema.d.ts`, `unwrap` for
   errors); never hand-write API types. After a server route or schema change run
