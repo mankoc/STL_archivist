@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Rust migration, step 4g-5b: the crawl itself runs natively** (on Windows): listing, hashing, extraction and thumbnails in parallel, saving, sidecars, and move and deletion handling. Results are identical to the Python crawler (golden-tested, and on real library folders); PDF previews, CLIP embeddings and the few image formats only Pillow reads are still produced by the Python code during a native crawl.
+- **Fix:** crawling a folder without subfolders no longer treats its own `METADATA.7z` sidecar as an archive.
+
 - **Rust migration, step 4g-5a: RAR archives are listed and read natively.** Archive contents and fingerprints come from a port of the `rarfile` reader (verified against every RAR archive of a 60,000-archive library), and data is read through the UnRAR tool as before. Listing a RAR archive is now near-instant.
 
 - **Rust migration, step 4g-6: Generate Thumbnails, Rescan, Recrawl and Update Crawled Folders save natively** (on Windows), with results identical to the Python code.

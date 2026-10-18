@@ -162,7 +162,7 @@ fn win_parts(path: &str) -> Vec<String> {
 }
 
 /// `Path(path).relative_to(base).parts` on Windows (case-insensitive), or `None`.
-fn win_relative_parts(path: &str, base: &str) -> Option<Vec<String>> {
+pub(crate) fn win_relative_parts(path: &str, base: &str) -> Option<Vec<String>> {
     let p = win_parts(path);
     let b = win_parts(base);
     if b.len() > p.len() {

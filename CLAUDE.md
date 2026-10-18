@@ -148,8 +148,11 @@ Handles all archive I/O and metadata extraction.
   1. Hash (parallel) → 2. DB query (batch) → 3. Extract (parallel) → 4. Upsert (serial)
   With the native core, the database phases run in `storage::crawl` (`_native_diff`,
   `_native_upsert`, …); Python passes in metadata, rule results, pattern matches,
-  thumbnails and vectors. Keep both paths equivalent; `tests/golden/test_crawl_golden.py`
-  compares them. The upsert flushes before applying the path pattern.
+  thumbnails and vectors. With `LibraryDb.crawl` available, `run()` hands the whole crawl to
+  `stl_core::crawler`, which asks Python only for what it cannot do exactly
+  (`_NativeCrawlServices`: refused archives, Pillow-only images, PDF pages, CLIP, …).
+  Keep all paths equivalent; `tests/golden/test_crawl_golden.py` compares them. The upsert
+  flushes before applying the path pattern.
 
 ### `app/database/`
 
