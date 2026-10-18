@@ -606,6 +606,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/search/image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Search with an image (multipart, one file). */
+        post: operations["post_search_image"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/library": {
         parameters: {
             query?: never;
@@ -620,6 +637,40 @@ export interface paths {
          *     desktop app reads the same file.
          */
         put: operations["put_settings_library"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/stats/column": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** How the models spread over one column's values, most frequent first. */
+        get: operations["get_stats_column"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/stats/library": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Counts, sums and rankings for the Statistics view. */
+        get: operations["get_stats_library"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -796,6 +847,19 @@ export interface components {
             id: number;
             name: string;
             subcollections: components["schemas"]["NamedId"][];
+        };
+        ColumnRow: {
+            /** Format: int64 */
+            count: number;
+            label: string;
+        };
+        ColumnStats: {
+            rows: components["schemas"]["ColumnRow"][];
+            /**
+             * Format: int64
+             * @description Models in the library.
+             */
+            total: number;
         };
         Count: {
             /** Format: int64 */
@@ -1066,6 +1130,16 @@ export interface components {
         };
         /** @enum {string} */
         JobState: "queued" | "running" | "done" | "failed" | "cancelled";
+        LibraryStats: {
+            /** @description `by_source`, `by_year`, `top_sculptors`, … each most frequent first. */
+            rankings: {
+                [key: string]: components["schemas"]["RankEntry"][];
+            };
+            /** @description `total_models`, `total_images`, `total_archive_size`, `presupported`, … */
+            scalars: {
+                [key: string]: number;
+            };
+        };
         Listing: {
             /** @description Folders first, then archives, each by name. */
             entries: components["schemas"]["Entry"][];
@@ -1153,6 +1227,18 @@ export interface components {
             models: number;
             /** @description Models whose archive path matched `pattern`. */
             pattern_matches: number;
+        };
+        Match: {
+            archive: string;
+            /** Format: int64 */
+            model_id: number;
+            /**
+             * Format: double
+             * @description Bits differing (dHash) or cosine similarity (CLIP).
+             */
+            score: number;
+            thumbnail?: string | null;
+            title: string;
         };
         Merge: {
             /**
@@ -1252,6 +1338,12 @@ export interface components {
             /** @default null */
             patreon_url: string | null;
         };
+        RankEntry: {
+            /** Format: int64 */
+            count: number;
+            /** @description The value (a name, a year, …); null for "none". */
+            value: Record<string, never>;
+        };
         Rename: {
             name: string;
         };
@@ -1297,6 +1389,15 @@ export interface components {
         };
         RowsRequest: {
             ids: number[];
+        };
+        SearchResult: {
+            /** @description All of the closest images matched: more may exist (tighten the threshold). */
+            capped: boolean;
+            /** @description Best first. */
+            matches: components["schemas"]["Match"][];
+            method: string;
+            /** @description dHash: stored hashes in an older format, not compared (run Recompute image hashes). */
+            outdated: number;
         };
         /** @description What WebSocket clients receive (`/api/events`), as JSON text frames. */
         ServerEvent: {
@@ -2642,6 +2743,45 @@ export interface operations {
             };
         };
     };
+    post_search_image: {
+        parameters: {
+            query?: {
+                /** @description `dhash` (default) or `clip`. */
+                method?: string | null;
+                /** @description dHash: most differing bits (0 = identical; default 10). */
+                max_distance?: number | null;
+                /** @description CLIP: least cosine similarity (default 0.85). */
+                threshold?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The image */
+        requestBody?: {
+            content: {
+                "multipart/form-data": unknown;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResult"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     get_settings_library: {
         parameters: {
             query?: never;
@@ -2696,6 +2836,61 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_stats_column: {
+        parameters: {
+            query: {
+                /**
+                 * @description One of `category`, `collection`, `creator`, `presupports`, `release`,
+                 *     `release_month`, `release_year`, `scale`, `sculptor`, `source`,
+                 *     `subcollection`, `tag`.
+                 */
+                key: string;
+                /** @description Most frequent values to return (all when absent). */
+                top?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ColumnStats"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_stats_library: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryStats"];
                 };
             };
         };
