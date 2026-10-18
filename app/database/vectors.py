@@ -16,3 +16,21 @@ MAX_KNN = 4096
 def available() -> bool:
     """Whether embeddings can be stored: always, the native core bundles sqlite-vec."""
     return True
+
+
+def legacy_embeddings_present(db_path: str) -> bool:
+    """Whether the file still keeps embeddings on ``images`` (moved by the next
+    :func:`app.database.db.init_db`); for the splash screen."""
+    import sqlite3
+    from pathlib import Path
+
+    if not Path(db_path).is_file():
+        return False
+    try:
+        con = sqlite3.connect(f"file:{Path(db_path).as_posix()}?mode=ro", uri=True)
+        try:
+            return any(r[1] == "embedding" for r in con.execute("PRAGMA table_info(images)"))
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return False
