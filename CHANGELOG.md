@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Web client step 6e: mass editor and lookup editors.** Select models and use *Mass edit*: path patterns with a preview of what they extract, manual fields, lookups, tags, find & replace and trimming. The *Lookups* page edits tags, categories, collections, subcollections and scales (add, rename, delete, merge, delete unused tags) and creators (rename, merge, clear, profiles).
+
 - **Web client step 6d: settings.** The Settings page sets your colour scheme, shows the library's crawler, warning and sidecar settings (administrators change them in the same `settings.json` the desktop app uses), and lets administrators manage users: add, change roles, disable, reset passwords, delete.
 
 - **Web client step 6c: the Jobs page.** Add folders by browsing the server's disks, crawl them with a path pattern, run maintenance (verify archives, image hashes, embeddings, prune images, compact the database) and follow each job's progress and log live. Fixes: the server's folder browser no longer counts `METADATA.7z` as an archive, and job logs no longer repeat a line.

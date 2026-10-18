@@ -274,7 +274,6 @@ pub struct MassEdit {
     pub overwrite: bool,
     /// `source`, `creator`, `release_date`, `url`, `title` → template
     /// (`{token}`s from the path pattern and file name), or null to clear.
-    #[schema(value_type = Object)]
     pub manual: BTreeMap<String, Option<String>>,
     /// Fields to clear.
     pub clearing: Vec<String>,
@@ -351,6 +350,48 @@ pub async fn mass_edit(State(lib): State<AppState>, me: CurrentUser, Json(m): Js
         .await?;
     lib.schedule_sidecars(paths);
     Ok(Json(result))
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ParseRequest {
+    pub ids: Vec<i64>,
+    pub pattern: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct Parsed {
+    pub id: i64,
+    pub archive_path: String,
+    /// What the pattern extracted (`title`, `sculptor_name`, `release_name`, …), in
+    /// pattern order; empty when the path does not match.
+    pub fields: Vec<(String, String)>,
+}
+
+/// What a path pattern extracts from each model's archive path (the mass
+/// editor's "Show parsed values"); nothing is saved.
+#[utoipa::path(post, path = "/api/models/parse-paths", tag = "editing", request_body = ParseRequest,
+    responses((status = 200, body = Vec<Parsed>)))]
+pub async fn parse_paths(State(lib): State<AppState>, _me: CurrentUser, Json(req): Json<ParseRequest>) -> Result<Json<Vec<Parsed>>, ApiError> {
+    if req.ids.len() > 10_000 {
+        return Err(ApiError::bad_request("at most 10000 models"));
+    }
+    let out = lib
+        .run(move |lib| {
+            let paths = lib.db.with(|c| model_edit::archive_paths(c, &req.ids))?;
+            let pattern = req.pattern.trim().to_string();
+            Ok(req
+                .ids
+                .iter()
+                .filter_map(|id| paths.get(id).map(|p| (*id, p.clone())))
+                .map(|(id, archive_path)| {
+                    let fields = if pattern.is_empty() { Vec::new() } else { stl_core::path_pattern::parse_path(&pattern, &archive_path) };
+                    Parsed { id, archive_path, fields }
+                })
+                .collect())
+        })
+        .await?;
+    Ok(Json(out))
 }
 
 // ── removing models ──────────────────────────────────────────────────────────

@@ -1077,6 +1077,24 @@ Ctrl-selected models.
   added a viewer. Signed in as that viewer, the editing controls and the Users tab were
   hidden and the library settings read-only, showing the saved value.
 
+**6e: done 2026-10-18 (lookup editors, mass editor).**
+
+- Server: `POST /api/models/parse-paths` previews a path pattern per model (the mass
+  editor's "Show parsed values"); the mass edit's `manual` map is typed in the OpenAPI
+  document.
+- Web:
+  - The mass editor drawer (Mass edit on a selection): path pattern with a parsed-values
+    table, the manual fields with Clear, presupports, lookups, scale and tags, find &
+    replace (case, regex, fields), Overwrite and Trim. `massEdit.ts` builds the request
+    (tested).
+  - The Lookups page: Tags, Categories, Collections, Subcollections (by collection) and
+    Scales, with search, add, rename, delete (showing what loses the value) and merge
+    two. Tags can be merged into a name and unused tags deleted. Creators can be renamed,
+    merged into another, cleared, and have their profile edited.
+- Verified in headless Edge: a Shift-selected mass edit with a pattern preview (sculptors
+  from the folders, creator and tags applied); adding and deleting an unused tag; and
+  adding, renaming and deleting a category.
+
 ### Phase 7: Desktop shell (small)
 
 Tauri app that hosts the web client: connect to a remote server or start a bundled local one on

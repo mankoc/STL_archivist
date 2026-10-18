@@ -194,7 +194,8 @@ the archive download. Editors can edit cells in place (double-click), open the m
 add images by dropping them on the detail pane, remove images, and remove selected models
 from the library. The **Jobs** page tracks crawled folders (add them by browsing the
 server's disks, crawl them with a path pattern) and runs maintenance, with live progress and
-logs. **Settings** holds your colour scheme, the library's crawler and sidecar settings
+logs. **Mass edit** (on a selection) and the **Lookups** page (tags, categories,
+collections, subcollections, scales, creators) work as in the desktop app. **Settings** holds your colour scheme, the library's crawler and sidecar settings
 (administrators change them; they are the same `settings.json` the desktop app uses), and
 user administration.
 

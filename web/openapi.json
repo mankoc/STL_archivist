@@ -1336,6 +1336,40 @@
         }
       }
     },
+    "/api/models/parse-paths": {
+      "post": {
+        "tags": [
+          "editing"
+        ],
+        "summary": "What a path pattern extracts from each model's archive path (the mass\neditor's \"Show parsed values\"); nothing is saved.",
+        "operationId": "post_models_parse_paths",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ParseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Parsed"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/models/rows": {
       "post": {
         "tags": [
@@ -3178,7 +3212,17 @@
           },
           "manual": {
             "type": "object",
-            "description": "`source`, `creator`, `release_date`, `url`, `title` → template\n(`{token}`s from the path pattern and file name), or null to clear."
+            "description": "`source`, `creator`, `release_date`, `url`, `title` → template\n(`{token}`s from the path pattern and file name), or null to clear.",
+            "default": {},
+            "additionalProperties": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "propertyNames": {
+              "type": "string"
+            }
           },
           "overwrite": {
             "type": "boolean",
@@ -3387,6 +3431,59 @@
           }
         },
         "additionalProperties": false
+      },
+      "ParseRequest": {
+        "type": "object",
+        "required": [
+          "ids",
+          "pattern"
+        ],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "pattern": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "Parsed": {
+        "type": "object",
+        "required": [
+          "id",
+          "archive_path",
+          "fields"
+        ],
+        "properties": {
+          "archive_path": {
+            "type": "string"
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": false,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "What the pattern extracted (`title`, `sculptor_name`, `release_name`, …), in\npattern order; empty when the path does not match."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
       },
       "PasswordChange": {
         "type": "object",
