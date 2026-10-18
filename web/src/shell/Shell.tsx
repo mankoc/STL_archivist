@@ -1,16 +1,18 @@
 // The signed-in application frame: header with the user menu, and the pages.
-import { AppShell, Avatar, Button, Group, Menu, Modal, PasswordInput, SegmentedControl, Stack, Text, Title, UnstyledButton } from "@mantine/core";
+import { AppShell, Avatar, Button, Group, Menu, Modal, PasswordInput, SegmentedControl, Stack, Text, Title, UnstyledButton, useMantineColorScheme } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import { IconKey, IconLogout } from "@tabler/icons-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { type FormEvent, useEffect, useState } from "react";
 
 import { api, type Schemas, unwrap } from "../api/client";
 import { useServerEvents } from "../api/events";
 import { UserContext } from "../auth/user";
 import { BrowserPage } from "../browser/BrowserPage";
 import { JobsPage } from "../jobs/JobsPage";
+import { SettingsPage } from "../settings/SettingsPage";
 import { type Page, usePage } from "./route";
 
 export function Shell({ user }: { user: Schemas["User"] }) {
@@ -18,6 +20,13 @@ export function Shell({ user }: { user: Schemas["User"] }) {
   const queryClient = useQueryClient();
   const [passwordOpen, password] = useDisclosure(false);
   const [page, setPage] = usePage();
+  // The colour scheme this user chose (Settings → Account).
+  const { setColorScheme } = useMantineColorScheme();
+  const prefs = useQuery({ queryKey: ["me-settings"], queryFn: async () => unwrap(await api.GET("/api/me/settings")) as Record<string, unknown> });
+  useEffect(() => {
+    const scheme = prefs.data?.color_scheme;
+    if (scheme === "light" || scheme === "dark" || scheme === "auto") setColorScheme(scheme);
+  }, [prefs.data, setColorScheme]);
   const logout = async () => {
     await api.POST("/api/auth/logout");
     await queryClient.invalidateQueries({ queryKey: ["auth"] });
@@ -36,6 +45,7 @@ export function Shell({ user }: { user: Schemas["User"] }) {
                 data={[
                   { value: "library", label: "Library" },
                   { value: "jobs", label: "Jobs" },
+                  { value: "settings", label: "Settings" },
                 ]}
                 data-testid="pages"
               />
@@ -66,7 +76,7 @@ export function Shell({ user }: { user: Schemas["User"] }) {
           </Group>
         </AppShell.Header>
         <AppShell.Main style={{ height: "100vh", paddingTop: 48, display: "flex", flexDirection: "column" }}>
-          {page === "jobs" ? <JobsPage /> : <BrowserPage />}
+          {page === "jobs" ? <JobsPage /> : page === "settings" ? <SettingsPage /> : <BrowserPage />}
         </AppShell.Main>
         <PasswordModal opened={passwordOpen} onClose={password.close} />
       </AppShell>

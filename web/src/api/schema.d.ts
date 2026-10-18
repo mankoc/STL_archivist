@@ -586,6 +586,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/library": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The library settings. */
+        get: operations["get_settings_library"];
+        /**
+         * Change the library settings (administrators). Takes every field; the
+         *     desktop app reads the same file.
+         */
+        put: operations["put_settings_library"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/system/info": {
         parameters: {
             query?: never;
@@ -1270,6 +1291,38 @@ export interface components {
             /** @description For `Authorization: Bearer`; browsers can rely on the cookie instead. */
             token: string;
             user: components["schemas"]["User"];
+        };
+        /** @description The settings, with their effective values (defaults filled in). */
+        Settings: {
+            ai_embeddings_during_crawl: boolean;
+            ai_embeddings_enabled: boolean;
+            /**
+             * Format: double
+             * @description Compression rate above which an archive counts as poorly compressed.
+             */
+            low_compression_threshold: number;
+            /**
+             * Format: int32
+             * @description Longest thumbnail edge in pixels.
+             */
+            max_thumb_size: number;
+            /** @description Thumbnails taken per archive. */
+            max_thumbnails: number;
+            /** @description Parallel crawl workers. */
+            max_workers: number;
+            /** @description Write `METADATA.7z` sidecars into archive folders. */
+            metadata_sidecar_enabled: boolean;
+            /** @description Include thumbnails in sidecars. */
+            metadata_thumbnails: boolean;
+            /** @description Regular expressions for presupported STL file names (the portable subset). */
+            presupport_patterns: string[];
+            recurse_subdirs: boolean;
+            store_stl_file_list: boolean;
+            warn_low_compression: boolean;
+            warn_nested_archive: boolean;
+            warn_no_images: boolean;
+            warn_no_printable: boolean;
+            warn_presupported_stl: boolean;
         };
         Sort: {
             /**
@@ -2517,6 +2570,64 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_settings_library: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Settings"];
+                };
+            };
+        };
+    };
+    put_settings_library: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Settings"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Settings"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

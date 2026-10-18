@@ -1062,6 +1062,21 @@ Ctrl-selected models.
   (the folder shows its pattern afterwards), Verify archives, and the new models in the
   library.
 
+**6d: done 2026-10-18 (settings).**
+
+- Server: `GET|PUT /api/settings/library` (`api/settings.rs`) over the desktop's
+  `settings.json`. Anyone signed in can read it; administrators can change it. A PUT
+  carries every field, keeps the keys the server does not know (the desktop's
+  appearance and file settings), writes atomically (temporary file, then rename), and
+  validates ranges and presupport patterns with `rules::portable_pattern`.
+- Web: the Settings page has three tabs. *Account* sets the colour scheme, saved as
+  `color_scheme` in `/api/me/settings` and applied at sign-in. *Library* is the crawler,
+  warning and sidecar settings, read-only for non-admins. *Users* (admins) adds users,
+  changes roles, enables or disables accounts, sets passwords and deletes users.
+- Verified in headless Edge: an admin saved a setting, switched to the light theme and
+  added a viewer. Signed in as that viewer, the editing controls and the Users tab were
+  hidden and the library settings read-only, showing the saved value.
+
 ### Phase 7: Desktop shell (small)
 
 Tauri app that hosts the web client: connect to a remote server or start a bundled local one on

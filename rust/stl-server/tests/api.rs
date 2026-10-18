@@ -215,6 +215,7 @@ async fn openapi_lists_every_route() {
         "/api/lookups/{kind}", "/api/lookups/{kind}/merge", "/api/lookups/{kind}/{id}", "/api/tags/merge",
         "/api/tags/unused", "/api/authors", "/api/authors/profile",
         "/api/jobs", "/api/jobs/{id}", "/api/events", "/api/crawled-folders", "/api/crawled-folders/remove",
+        "/api/files/browse", "/api/models/{id}/archive", "/api/settings/library",
     ] {
         assert!(paths.contains(&p), "{p} missing from {paths:?}");
     }

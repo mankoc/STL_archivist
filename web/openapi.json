@@ -1605,6 +1605,76 @@
         }
       }
     },
+    "/api/settings/library": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "The library settings.",
+        "operationId": "get_settings_library",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Settings"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Change the library settings (administrators). Takes every field; the\ndesktop app reads the same file.",
+        "operationId": "put_settings_library",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Settings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Settings"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/system/info": {
       "get": {
         "tags": [
@@ -3681,6 +3751,94 @@
             "$ref": "#/components/schemas/User"
           }
         }
+      },
+      "Settings": {
+        "type": "object",
+        "description": "The settings, with their effective values (defaults filled in).",
+        "required": [
+          "max_thumbnails",
+          "max_thumb_size",
+          "max_workers",
+          "recurse_subdirs",
+          "store_stl_file_list",
+          "metadata_sidecar_enabled",
+          "metadata_thumbnails",
+          "warn_presupported_stl",
+          "warn_no_images",
+          "warn_nested_archive",
+          "warn_no_printable",
+          "warn_low_compression",
+          "low_compression_threshold",
+          "presupport_patterns",
+          "ai_embeddings_enabled",
+          "ai_embeddings_during_crawl"
+        ],
+        "properties": {
+          "ai_embeddings_during_crawl": {
+            "type": "boolean"
+          },
+          "ai_embeddings_enabled": {
+            "type": "boolean"
+          },
+          "low_compression_threshold": {
+            "type": "number",
+            "format": "double",
+            "description": "Compression rate above which an archive counts as poorly compressed."
+          },
+          "max_thumb_size": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Longest thumbnail edge in pixels.",
+            "minimum": 0
+          },
+          "max_thumbnails": {
+            "type": "integer",
+            "description": "Thumbnails taken per archive.",
+            "minimum": 0
+          },
+          "max_workers": {
+            "type": "integer",
+            "description": "Parallel crawl workers.",
+            "minimum": 0
+          },
+          "metadata_sidecar_enabled": {
+            "type": "boolean",
+            "description": "Write `METADATA.7z` sidecars into archive folders."
+          },
+          "metadata_thumbnails": {
+            "type": "boolean",
+            "description": "Include thumbnails in sidecars."
+          },
+          "presupport_patterns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Regular expressions for presupported STL file names (the portable subset)."
+          },
+          "recurse_subdirs": {
+            "type": "boolean"
+          },
+          "store_stl_file_list": {
+            "type": "boolean"
+          },
+          "warn_low_compression": {
+            "type": "boolean"
+          },
+          "warn_nested_archive": {
+            "type": "boolean"
+          },
+          "warn_no_images": {
+            "type": "boolean"
+          },
+          "warn_no_printable": {
+            "type": "boolean"
+          },
+          "warn_presupported_stl": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
       },
       "Sort": {
         "type": "object",
