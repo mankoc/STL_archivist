@@ -3,7 +3,10 @@
 use std::collections::BTreeMap;
 
 use axum::Json;
-use axum::extract::{Path, State};
+use std::net::SocketAddr;
+
+use axum::extract::{ConnectInfo, Path, State};
+use axum::http::HeaderMap;
 use rusqlite::types::Value;
 use serde::{Deserialize, Serialize};
 use stl_core::storage::{browser, library};
@@ -157,6 +160,10 @@ pub struct ModelDetail {
     #[schema(value_type = Object)]
     pub fields: BTreeMap<String, serde_json::Value>,
     pub images: Vec<ImageRef>,
+    /// The archive's path as this client sees it, when it can open it there
+    /// (a client on the server's machine, or a `path_map` entry); otherwise
+    /// offer `/api/models/{id}/archive`.
+    pub client_path: Option<String>,
 }
 
 fn json_value(v: Value) -> serde_json::Value {
@@ -173,7 +180,13 @@ fn json_value(v: Value) -> serde_json::Value {
 #[utoipa::path(get, path = "/api/models/{id}", tag = "library",
     params(("id" = i64, Path, description = "Model id")),
     responses((status = 200, body = ModelDetail), (status = 404, body = crate::error::ErrorBody)))]
-pub async fn detail(State(lib): State<AppState>, _me: CurrentUser, Path(id): Path<i64>) -> Result<Json<ModelDetail>, ApiError> {
+pub async fn detail(
+    State(lib): State<AppState>,
+    _me: CurrentUser,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> Result<Json<ModelDetail>, ApiError> {
     let detail = lib
         .run(move |lib| {
             let (summary, images) = lib.db.with(|c| {
@@ -190,8 +203,13 @@ pub async fn detail(State(lib): State<AppState>, _me: CurrentUser, Path(id): Pat
                     thumbnail: digests.get(&(image_id as u64)).map(|d| thumbnail_url(image_id, d.as_deref())),
                 })
                 .collect();
+            let client_path = summary
+                .iter()
+                .find(|(k, _)| k == "archive_path")
+                .and_then(|(_, v)| if let Value::Text(p) = v { Some(p.clone()) } else { None })
+                .and_then(|p| super::files::client_path(&p, &peer, &headers, &lib.config.path_map));
             let fields = summary.into_iter().filter(|(k, _)| k != "id").map(|(k, v)| (k, json_value(v))).collect();
-            Ok(Some(ModelDetail { id, fields, images }))
+            Ok(Some(ModelDetail { id, fields, images, client_path }))
         })
         .await?;
     detail.map(Json).ok_or_else(|| ApiError::not_found(format!("no model {id}")))

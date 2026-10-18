@@ -81,6 +81,9 @@ the native core owns the schema from Phase 4b).
   `stl_core::clip` (golden-tested against Python); keep it in step with
   `image_embedding._preprocess`. Decode JPEGs in Rust with `jpeg-decoder`, not the `image`
   crate (zune-jpeg misreads the core encoder's output).
+- **Server files:** browsing and crawling go through `api::files::check_access` (editors
+  inside roots, admins anywhere; canonical paths). Never serve a file by a client-given
+  path: downloads go by model id.
 - **Library lock (rule 7):** `stl_core::lock::LibraryLock` (`library.lock` + `library.owner`
   in the data directory). The server and `main.py` both hold it for their lifetime; never
   open a library's database or store from a second process without it.

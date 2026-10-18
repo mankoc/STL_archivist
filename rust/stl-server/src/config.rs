@@ -26,6 +26,19 @@ pub struct Config {
     pub onnxruntime: Option<String>,
     /// The pdfium library for PDF previews (see `tools`).
     pub pdfium: Option<String>,
+    /// Folders editors may browse and crawl (admins: anywhere). Crawled
+    /// folders count as roots too.
+    pub roots: Vec<String>,
+    /// How clients see the server's paths, for "open folder" (see `api::files`).
+    pub path_map: Vec<PathMap>,
+}
+
+/// A server path prefix and how clients reach it (`"D:/STL"` → `"\\nas\stl"`).
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PathMap {
+    pub server: String,
+    pub client: String,
 }
 
 /// What `server.json` may set.
@@ -36,6 +49,10 @@ struct FileSettings {
     unrar: Option<String>,
     onnxruntime: Option<String>,
     pdfium: Option<String>,
+    #[serde(default)]
+    roots: Vec<String>,
+    #[serde(default)]
+    path_map: Vec<PathMap>,
 }
 
 impl Config {
@@ -77,7 +94,7 @@ impl Config {
         let bind = bind_arg.or_else(|| env("STL_BIND")).or(file.bind).unwrap_or_else(|| DEFAULT_BIND.into());
         let bind = bind.parse().map_err(|e| format!("bind address {bind:?}: {e}"))?;
         let unrar = env("STL_UNRAR_PATH").or(file.unrar).filter(|u| !u.is_empty());
-        Ok(Config { data_dir, bind, unrar, onnxruntime: file.onnxruntime, pdfium: file.pdfium })
+        Ok(Config { data_dir, bind, unrar, onnxruntime: file.onnxruntime, pdfium: file.pdfium, roots: file.roots, path_map: file.path_map })
     }
 }
 

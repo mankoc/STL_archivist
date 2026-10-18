@@ -96,6 +96,15 @@ pub enum AccountError {
     Db(String),
 }
 
+impl std::fmt::Display for AccountError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AccountError::Invalid(m) | AccountError::Conflict(m) | AccountError::Db(m) => f.write_str(m),
+            AccountError::NotFound => f.write_str("no such user"),
+        }
+    }
+}
+
 impl From<rusqlite::Error> for AccountError {
     fn from(e: rusqlite::Error) -> Self {
         AccountError::Db(e.to_string())

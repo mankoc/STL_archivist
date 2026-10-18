@@ -157,6 +157,21 @@ still cannot read the few images only Pillow decodes (AVIF, CMYK JPEG).
 Accounts are kept in `<data dir>/server.db`, separate from the library database. Put the
 server behind an HTTPS reverse proxy before exposing it beyond `127.0.0.1`.
 
+Editors pick folders to crawl by browsing the server's disks (`/api/files/browse`) within
+the library's roots: the crawled folders and any `"roots"` listed in `server.json`.
+Administrators can browse anywhere. Anyone signed in can download an archive
+(`/api/models/{id}/archive`). To let remote clients open an archive's folder, map the
+server's paths to theirs in `server.json`:
+
+```json
+{"bind": "0.0.0.0:8770", "roots": ["D:/STL"], "path_map": [{"server": "D:/STL", "client": "\\\\nas\\stl"}]}
+```
+
+On a headless machine or in a container, create the first administrator with
+`stl-server create-admin admin` (the password comes from `STL_ADMIN_PASSWORD` or is asked
+for). A `Dockerfile` builds the server with pdfium and ONNX Runtime included; see the
+comments at its top. It has not been test-built yet.
+
 A library can be open in only one process at a time: the desktop app refuses a library the
 server has open (and a second app instance on the same library), and the server refuses one
 the app has open.

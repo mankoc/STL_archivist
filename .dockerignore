@@ -1,0 +1,4 @@
+# Docker builds only need the Rust workspace.
+*
+!rust/
+rust/target/
