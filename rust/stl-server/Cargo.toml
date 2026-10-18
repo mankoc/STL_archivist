@@ -18,7 +18,8 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.140"
 sha2 = "0.10.9"
 stl-core = { version = "0.1.0", path = "../stl-core" }
-tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "net", "signal", "time"] }
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "net", "signal", "time", "fs"] }
+tokio-util = { version = "0.7.20", features = ["io"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 utoipa = { version = "5", features = ["axum_extras"] }

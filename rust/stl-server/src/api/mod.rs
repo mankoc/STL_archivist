@@ -2,6 +2,7 @@
 
 pub mod auth;
 pub mod edit;
+pub mod files;
 pub mod filter;
 pub mod jobs;
 pub mod lookups;
@@ -76,6 +77,8 @@ use crate::AppState;
         jobs::crawled_folders,
         jobs::add_folder,
         jobs::remove_folder,
+        files::browse,
+        files::download,
     ),
     components(schemas(crate::error::ErrorBody))
 )]
@@ -119,6 +122,8 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/events", get(jobs::events))
         .route("/api/crawled-folders", get(jobs::crawled_folders).post(jobs::add_folder))
         .route("/api/crawled-folders/remove", post(jobs::remove_folder))
+        .route("/api/files/browse", get(files::browse))
+        .route("/api/models/{id}/archive", get(files::download))
         .route("/api/openapi.json", get(openapi))
         .layer(middleware::from_fn_with_state(state, announce_changes))
 }

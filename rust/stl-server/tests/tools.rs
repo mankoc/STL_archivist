@@ -39,6 +39,8 @@ fn library(ort: Option<PathBuf>, pdf: Option<PathBuf>) -> TestLib {
         unrar: None,
         onnxruntime: ort.map(|p| p.to_string_lossy().into_owned()),
         pdfium: pdf.map(|p| p.to_string_lossy().into_owned()),
+        roots: vec![dir.path().to_string_lossy().into_owned()],
+        path_map: vec![],
     };
     TestLib { state: Arc::new(Library::open(config).unwrap()), dir }
 }

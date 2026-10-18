@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Server step 5e, completing Phase 5: server files and Docker.** Editors choose folders to crawl by browsing the server's disks, limited to the library's folders unless they are administrators. Anyone signed in can download an archive. Remote clients get a folder path to open only where `server.json` maps the server's paths to theirs. `stl-server create-admin` sets up the first administrator on headless machines and in containers. A `Dockerfile` builds the server with PDF and AI-embedding support included (not yet test-built).
+
 - **Server step 5d-2: PDF previews and AI embeddings without Python.** When it finds pdfium and ONNX Runtime, the server renders PDF previews and computes CLIP embeddings itself, during crawls and as a *compute embeddings* job. Its vectors match the desktop app's (cosine above 0.9999), so both can share one library. The image preparation for CLIP is native and checked against the Python version.
 
 - **Server step 5d-1: jobs and live events.** The server runs crawls and maintenance (verify archives, recompute image hashes, prune images, compact the database) as jobs, one at a time, which can be cancelled. Progress, log lines and library changes stream to clients over a WebSocket (`/api/events`). A server crawl catalogues a folder exactly as the desktop app does. The exceptions are PDF previews, AI embeddings and AVIF or CMYK JPEG images, which the server cannot produce yet.

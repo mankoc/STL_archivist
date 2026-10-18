@@ -32,6 +32,10 @@ pub async fn submit(
     Json(request): Json<JobRequest>,
 ) -> Result<(StatusCode, Json<JobInfo>), ApiError> {
     me.require(if matches!(request, JobRequest::CompactDatabase) { Role::Admin } else { Role::Editor })?;
+    if let JobRequest::Crawl { folder, .. } = &request {
+        let (lib2, me2, folder) = (std::sync::Arc::clone(&lib), me.clone(), std::path::PathBuf::from(folder));
+        lib2.run(move |lib| super::files::check_access(lib, &me2, &folder)).await?;
+    }
     let info = lib.submit_job(request, &me.user.name);
     tracing::info!(job = info.id, kind = info.kind, user = %me.user.name, "job queued");
     Ok((StatusCode::ACCEPTED, Json(info)))

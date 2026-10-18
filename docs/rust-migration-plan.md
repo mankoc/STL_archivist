@@ -811,7 +811,7 @@ committed: a native connection cannot see them, and native reads used to miss th
   sqlite-vec nor the per-connection delete trigger.
 - Dependencies dropped: SQLAlchemy, lmdb, sqlite-vec (Python package).
 
-### Phase 5: Server (medium)
+### Phase 5: Server (medium) — done 2026-10-18
 
 `stl-server` on axum, the product's centre from here on:
 
@@ -961,6 +961,31 @@ crawl host's PDF and CLIP requests natively.
   thumbnails (non-interleaved baseline scans, component ids 0–2); libjpeg-turbo, and so
   Pillow and browsers, read them correctly. Rust code decodes JPEGs with `jpeg-decoder`,
   as the core does.
+
+**5e: done 2026-10-18 (server files, Docker).**
+
+- `api/files.rs`: `GET /api/files/browse?path=` (editor) lists subfolders and archives.
+  Editors are limited to the library's roots (`roots` in `server.json` plus the crawled
+  folders); administrators can browse anywhere, and the starting points include the drives
+  or `/`. Paths are compared canonically (links and `..` resolved, case-folded on
+  Windows). Crawl jobs follow the same rule, and a missing folder is refused at submission.
+- `GET /api/models/{id}/archive` streams the archive (`Content-Disposition` with an
+  RFC 6266 UTF-8 name). Model details carry `client_path`: the archive path for a client
+  on the server's machine (loopback, not proxied), the mapped path where `path_map` in
+  `server.json` covers it (`[{"server": "D:/STL", "client": "\\\\nas\\stl"}]`), otherwise
+  null. The web client offers "open folder" only with a `client_path`, and the download
+  otherwise.
+- `stl-server create-admin NAME` creates the first administrator in `server.db` (only
+  while no user exists; password from `STL_ADMIN_PASSWORD` or standard input). It does not
+  take the library lock, so it works beside a running server, in a container or on a
+  headless host, where setup cannot come from loopback.
+- `Dockerfile`: a multi-stage build of `stl-server` on Debian trixie, with pdfium (build
+  7881) and ONNX Runtime 1.22.0 preinstalled and their paths set. Data lives in `/data`,
+  on port 8770, running as uid 1000. UnRAR is not free software and is left to a derived
+  image. **Not built here** (Docker is not installed on the development machine).
+- Open for later: a server on another OS than the library's creator sees Windows paths
+  (`D:\...`); moving a library between machines still goes through re-crawling or the
+  sidecars.
 
 ### Phase 6: Web client (largest)
 

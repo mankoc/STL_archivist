@@ -166,10 +166,11 @@ async fn jobs_queue_and_cancel() {
     assert_eq!(call(&lib.state, "DELETE", &format!("/api/jobs/{second}"), Some(&ed), None).await.status, StatusCode::CONFLICT);
     assert_eq!(call(&lib.state, "DELETE", "/api/jobs/999", Some(&ed), None).await.status, StatusCode::NOT_FOUND);
 
-    let missing = submit(&lib, &ed, json!({"kind": "crawl", "folder": lib.dir.path().join("nowhere").to_string_lossy()})).await;
-    let v = wait(&lib, &ed, missing).await;
-    assert_eq!(v["job"]["state"], "failed");
-    assert!(v["job"]["message"].as_str().unwrap().contains("not a folder"));
+    // A folder that does not exist is refused before a job is queued.
+    let body = json!({"kind": "crawl", "folder": lib.dir.path().join("nowhere").to_string_lossy()});
+    let r = call(&lib.state, "POST", "/api/jobs", Some(&ed), Some(body)).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    assert!(r.json()["error"].as_str().unwrap().contains("does not exist"));
 }
 
 #[tokio::test(flavor = "multi_thread")]
