@@ -1,6 +1,7 @@
 // Database Maintenance (the desktop dialog): checks that produce a record list
 // (Verify, duplicate entries), the actions on that list (Find Moved in DB,
-// Search in Folder, Merge Moved, Remove), warning re-checks and the store jobs.
+// Search in Folder, Merge Moved, Remove), warning re-checks, the store jobs,
+// sidecars and backups.
 import { Alert, Badge, Button, Card, Checkbox, Group, Modal, NumberInput, Progress, Stack, Table, Text, Title, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -8,6 +9,7 @@ import { useMemo, useState } from "react";
 
 import { api, unwrap } from "../api/client";
 import { hasRole, useUser } from "../auth/user";
+import { BackupCard, SidecarCard } from "./BackupCards";
 import { FolderPicker } from "./FolderPicker";
 import { addJob, describe, isActive, type Job, type JobRequest, percent } from "./jobs";
 import { JobLog } from "./JobsPage";
@@ -107,6 +109,8 @@ export function MaintenancePage() {
             </Group>
           </Stack>
         </Card>
+        <SidecarCard editor={editor} start={start} />
+        {admin && <BackupCard jobs={jobs.data} start={start} />}
         {current && <JobLog id={current.id} job={current} />}
       </Stack>
       <Stack gap="md" className={classes.column}>

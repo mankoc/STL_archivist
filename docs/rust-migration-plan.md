@@ -975,6 +975,7 @@ crawl host's PDF and CLIP requests natively.
   `server.json` covers it (`[{"server": "D:/STL", "client": "\\\\nas\\stl"}]`), otherwise
   null. The web client offers "open folder" only with a `client_path`, and the download
   otherwise.
+- `stl-server restore FILE.7z` (6i) restores a backup with the library closed.
 - `stl-server create-admin NAME` creates the first administrator in `server.db` (only
   while no user exists; password from `STL_ADMIN_PASSWORD` or standard input). It does not
   take the library lock, so it works beside a running server, in a container or on a
@@ -1171,6 +1172,28 @@ Ctrl-selected models.
 - Verified in headless Edge: an archive moved and found by Search in folder; a copy
   crawled elsewhere, Find moved in DB and Merge moved; a duplicate entry removed; the
   images warning re-check.
+
+**6i: done 2026-10-18 (sidecars, backup and restore).**
+
+- Core: `stl_core::backup`. `write` takes snapshots of the open library (`VACUUM INTO`
+  for the database, `ThumbStore::copy_compacted` for the thumbnails) and packs them with
+  `settings.json` into the desktop's layout (`stlLibrary.db`, `settings.json`,
+  `thumbnails.lmdb/data.mdb`; thumbnails stored, not compressed again), through a
+  temporary file renamed into place. `restore` extracts only those entries (no paths
+  out of the folder), checks the database has a `models` table, moves the files it
+  replaces (and the old `-wal` / `-shm`) to `pre-restore-<stamp>`, then moves the new
+  ones in. `py7zr` (the desktop's reader) lists and extracts the server's backups.
+- Server:
+  - Jobs `generate_sidecars` (refused while sidecars are disabled), `remove_sidecars`,
+    and `backup` (admin) writing `<data dir>/backups/stlLibrary_backup_<UTC stamp>.7z`.
+  - `GET /api/backups`, `GET|DELETE /api/backups/{name}` (admin; names validated).
+  - `stl-server restore FILE.7z [--data-dir DIR]` takes the library lock, so it refuses
+    while the server or the desktop app has the library open.
+- Web: Maintenance page cards for sidecars (generate, remove all) and backups (back up
+  now, download, delete, the restore command).
+- Verified in headless Edge: removing and regenerating the sidecars of three folders and
+  a backup downloaded through the page; `stl-server restore` refused while the server ran
+  and restored into a copy of the data directory.
 
 ### Phase 7: Desktop shell (small)
 

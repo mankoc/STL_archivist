@@ -4,6 +4,9 @@
 //! installs where `POST /api/auth/setup` cannot come from the server's own machine
 //! (a container, a headless host).
 //! `stl-server openapi`: print the OpenAPI document (`web/` generates its types from it).
+//! `stl-server restore BACKUP.7z [--data-dir DIR]`: restore a backup (the server's or the
+//! desktop app's) into the data directory, with the library closed: the server and the
+//! desktop app must not be running. The replaced files go to `pre-restore-<stamp>`.
 
 use std::sync::Arc;
 
@@ -18,6 +21,7 @@ async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("create-admin") => create_admin(&args[1..]),
+        Some("restore") => restore(&args[1..]),
         Some("openapi") => {
             print!("{}", stl_server::api::openapi_json());
             Ok(())
@@ -74,5 +78,26 @@ fn create_admin(args: &[String]) -> Result<(), String> {
         })
         .map_err(|e| e.to_string())?;
     println!("Created administrator {:?}.", user.name);
+    Ok(())
+}
+
+fn restore(args: &[String]) -> Result<(), String> {
+    let (src, rest) = args.split_first().ok_or("usage: stl-server restore BACKUP.7z [--data-dir DIR]")?;
+    let config = Config::load(rest)?;
+    let src = std::path::Path::new(src);
+    if !src.is_file() {
+        return Err(format!("{} is not a file", src.display()));
+    }
+    // Refuses while the server or the desktop app has the library open.
+    let _lock = stl_core::lock::LibraryLock::acquire(&config.data_dir, "stl-server restore").map_err(|e| e.to_string())?;
+    let stamp: String = stl_core::storage::edit::utc_now_text().chars().take(19).filter(char::is_ascii_digit).collect();
+    let r = stl_core::backup::restore(src, &config.data_dir, &stamp).map_err(|e| e.to_string())?;
+    println!("Restored {} into {}.", src.display(), config.data_dir.display());
+    if let Some(previous) = &r.previous {
+        println!("Replaced files were moved to {}.", previous.display());
+    }
+    if !r.thumbnails {
+        println!("The backup held no thumbnails; the current thumbnail store was kept.");
+    }
     Ok(())
 }

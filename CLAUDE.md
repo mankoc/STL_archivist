@@ -91,6 +91,9 @@ the native core owns the schema from Phase 4b).
   `stl_core::clip` (golden-tested against Python); keep it in step with
   `image_embedding._preprocess`. Decode JPEGs in Rust with `jpeg-decoder`, not the `image`
   crate (zune-jpeg misreads the core encoder's output).
+- **Server backups:** `stl_core::backup` (desktop layout); the `backup` job and
+  `/api/backups` are admin-only, and restoring is the offline `stl-server restore`
+  command (it takes the library lock). Never replace the database of an open library.
 - **Server files:** browsing, crawling and any job given a folder (Search in Folder) go
   through `api::files::check_access` (editors inside roots, admins anywhere; canonical
   paths). A crawl of a known folder takes its stored spelling (`files::known_spelling`).

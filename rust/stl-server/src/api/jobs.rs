@@ -23,7 +23,7 @@ pub async fn list(State(lib): State<AppState>, _me: CurrentUser) -> Json<Vec<Job
 }
 
 /// Queue a job. Jobs run one at a time, in order. Needs the editor role
-/// (compacting the database: admin).
+/// (compacting the database and backups: admin).
 #[utoipa::path(post, path = "/api/jobs", tag = "jobs", request_body = JobRequest,
     responses((status = 202, body = JobInfo), (status = 403, body = crate::error::ErrorBody)))]
 pub async fn submit(
@@ -31,7 +31,7 @@ pub async fn submit(
     me: CurrentUser,
     Json(mut request): Json<JobRequest>,
 ) -> Result<(StatusCode, Json<JobInfo>), ApiError> {
-    me.require(if matches!(request, JobRequest::CompactDatabase) { Role::Admin } else { Role::Editor })?;
+    me.require(if matches!(request, JobRequest::CompactDatabase | JobRequest::Backup) { Role::Admin } else { Role::Editor })?;
     request.validate().map_err(ApiError::bad_request)?;
     // A searched folder is read and records may point into it: the same access as a crawl.
     if let JobRequest::SearchFolder { folder, .. } = &request {

@@ -172,6 +172,12 @@ On a headless machine or in a container, create the first administrator with
 for). A `Dockerfile` builds the server with pdfium and ONNX Runtime included; see the
 comments at its top. It has not been test-built yet.
 
+Administrators back up the library from the web client (Maintenance → Backups); backups
+are kept in `<data dir>/backups` and use the desktop app's Backup / Restore format, so
+either side restores the other's. To restore one, stop the server and run
+`stl-server restore FILE.7z --data-dir DIR`; the files it replaces are moved to
+`pre-restore-<time>` in the data directory.
+
 A library can be open in only one process at a time: the desktop app refuses a library the
 server has open (and a second app instance on the same library), and the server refuses one
 the app has open.
@@ -200,7 +206,8 @@ ONNX Runtime and the CLIP model) work as their desktop dialogs. **Duplicates** f
 sharing STL files, archives with matching images and models with similar metadata, and
 compares two archives side by side. **Maintenance** verifies archives, finds duplicate
 entries and moved records (by content, in the database or under a folder), merges and
-removes records, re-checks warnings and runs the image and storage jobs. **Settings** holds your colour scheme, the library's crawler and sidecar settings
+removes records, re-checks warnings, generates or removes the metadata sidecars, runs the
+image and storage jobs and (administrators) makes backups. **Settings** holds your colour scheme, the library's crawler and sidecar settings
 (administrators change them; they are the same `settings.json` the desktop app uses), and
 user administration.
 

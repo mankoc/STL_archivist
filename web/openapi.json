@@ -310,6 +310,118 @@
         }
       }
     },
+    "/api/backups": {
+      "get": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "The backups on the server, newest first.",
+        "operationId": "get_backups",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BackupFile"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/backups/{name}": {
+      "get": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Download a backup.",
+        "operationId": "get_backups_by_name",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/x-7z-compressed": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "format": "int32",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Delete a backup.",
+        "operationId": "delete_backups_by_name",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/crawled-folders": {
       "get": {
         "tags": [
@@ -657,7 +769,7 @@
         "tags": [
           "jobs"
         ],
-        "summary": "Queue a job. Jobs run one at a time, in order. Needs the editor role\n(compacting the database: admin).",
+        "summary": "Queue a job. Jobs run one at a time, in order. Needs the editor role\n(compacting the database and backups: admin).",
         "operationId": "post_jobs",
         "requestBody": {
           "content": {
@@ -2355,6 +2467,29 @@
           "type": "string"
         }
       },
+      "BackupFile": {
+        "type": "object",
+        "required": [
+          "name",
+          "size",
+          "modified"
+        ],
+        "properties": {
+          "modified": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix seconds."
+          },
+          "name": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
       "CellEdit": {
         "type": "object",
         "required": [
@@ -3608,6 +3743,51 @@
                 "type": "number",
                 "format": "float",
                 "description": "Least cosine similarity (`clip`)."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Write `METADATA.7z` in every folder holding catalogued archives (needs\nsidecars enabled in the library settings).",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "generate_sidecars"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Delete `METADATA.7z` from every folder holding catalogued archives.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "remove_sidecars"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Back up the database, thumbnails and settings to\n`<data dir>/backups/stlLibrary_backup_<stamp>.7z` (administrators).",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "backup"
+                ]
               }
             }
           },

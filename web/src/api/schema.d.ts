@@ -128,6 +128,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The backups on the server, newest first. */
+        get: operations["get_backups"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download a backup. */
+        get: operations["get_backups_by_name"];
+        put?: never;
+        post?: never;
+        /** Delete a backup. */
+        delete: operations["delete_backups_by_name"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/crawled-folders": {
         parameters: {
             query?: never;
@@ -301,7 +336,7 @@ export interface paths {
         put?: never;
         /**
          * Queue a job. Jobs run one at a time, in order. Needs the editor role
-         *     (compacting the database: admin).
+         *     (compacting the database and backups: admin).
          */
         post: operations["post_jobs"];
         delete?: never;
@@ -863,6 +898,16 @@ export interface components {
                 [key: string]: number;
             };
         };
+        BackupFile: {
+            /**
+             * Format: int64
+             * @description Unix seconds.
+             */
+            modified: number;
+            name: string;
+            /** Format: int64 */
+            size: number;
+        };
         CellEdit: {
             /**
              * @description `title`, `creator`, `source`, `date`, `tags`, `sculptor`, `collection`,
@@ -1261,6 +1306,15 @@ export interface components {
              * @description Least cosine similarity (`clip`).
              */
             threshold?: number;
+        } | {
+            /** @enum {string} */
+            kind: "generate_sidecars";
+        } | {
+            /** @enum {string} */
+            kind: "remove_sidecars";
+        } | {
+            /** @enum {string} */
+            kind: "backup";
         } | {
             /** @enum {string} */
             kind: "find_duplicate_entries";
@@ -1978,6 +2032,89 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_backups: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupFile"][];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_backups_by_name: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-7z-compressed": number[];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_backups_by_name: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
             };
         };
     };

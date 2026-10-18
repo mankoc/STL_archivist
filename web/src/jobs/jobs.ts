@@ -38,6 +38,9 @@ const KIND_LABEL: Record<string, string> = {
   find_moved: "Find moved in DB",
   search_folder: "Search in folder",
   recheck_warnings: "Re-check warnings",
+  generate_sidecars: "Generate sidecars",
+  remove_sidecars: "Remove sidecars",
+  backup: "Backup",
 };
 
 /** "Crawl D:/STL/Patreon", "Verify archives", … */
