@@ -107,6 +107,8 @@ def render() -> str:
     lines.append(f"pub const VECTOR_INFO: &str = {_rust_str(vectors._INFO)};")
     lines.append(f"pub const VECTOR_INFO_CREATE: &str = {_rust_str(vectors._CREATE_INFO)};")
     lines.append(f"pub const VECTOR_TABLE_CREATE: &str = {_rust_str(vectors._CREATE_TABLE)};")
+    lines.append("/// `vectors._CREATE_TRIGGER`: per connection, deletes a removed image's vector.")
+    lines.append(f"pub const VECTOR_DELETE_TRIGGER: &str = {_rust_str(vectors._CREATE_TRIGGER)};")
     return "\n".join(lines) + "\n"
 
 

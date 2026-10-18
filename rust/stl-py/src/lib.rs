@@ -259,6 +259,47 @@ impl PyLibraryDb {
     }
 }
 
+impl PyLibraryDb {
+    /// Run `f` in one `BEGIN IMMEDIATE` transaction on a pooled connection;
+    /// commits on `Ok`, rolls back on `Err`.
+    fn with_tx<T: Send, E: Send>(
+        &self,
+        py: Python<'_>,
+        f: impl FnOnce(&rusqlite::Transaction) -> Result<T, E> + Send,
+        err: fn(E) -> PyErr,
+    ) -> PyResult<T> {
+        py.detach(|| {
+            let conn = self.pool.lock().unwrap_or_else(|e| e.into_inner()).pop();
+            let mut conn = match conn {
+                Some(c) => c,
+                None => storage::open(&self.path).map_err(db_err)?,
+            };
+            let out = (|| {
+                let tx = conn
+                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                    .map_err(db_err)?;
+                let v = f(&tx).map_err(err)?;
+                tx.commit().map_err(db_err)?;
+                Ok(v)
+            })();
+            let mut pool = self.pool.lock().unwrap_or_else(|e| e.into_inner());
+            if pool.len() < 8 {
+                pool.push(conn);
+            }
+            out
+        })
+    }
+}
+
+fn edit_err(e: stl_core::storage::edit::EditError) -> PyErr {
+    use stl_core::storage::edit::EditError;
+    match e {
+        EditError::Db(e) => db_err(e),
+        EditError::Unsupported(m) => PyValueError::new_err(m),
+        EditError::UnknownField(f) => pyo3::exceptions::PyKeyError::new_err(f),
+    }
+}
+
 fn filter_value(v: &Bound<'_, PyAny>) -> PyResult<library::FilterValue> {
     if let Ok((y, m)) = v.extract::<(i64, Option<i64>)>() {
         return Ok(library::FilterValue::Date(y, m));
@@ -429,6 +470,50 @@ impl PyLibraryDb {
             out.set_item(k, sql_value_to_py(py, v)?)?;
         }
         Ok(Some(out))
+    }
+
+    /// `editing.apply_cell_edit` for `[(model_id, field, text | None)]`, in order,
+    /// in one transaction. Returns the archive paths of the models that exist.
+    /// Raises `ValueError` for input Python handles differently (non-ASCII
+    /// digits) and `KeyError` for an unknown field; nothing is written then.
+    fn apply_cell_edits(&self, py: Python<'_>, edits: Vec<(i64, String, Option<String>)>) -> PyResult<Vec<String>> {
+        use stl_core::storage::edit;
+        self.with_tx(py, |tx| edit::apply_cell_edits(tx, &edits), edit_err)
+    }
+
+    /// `moves.relocate`.
+    #[pyo3(signature = (model_id, new_path, archive_hash, size, mtime_ns, compression=None))]
+    #[allow(clippy::too_many_arguments)] // mirrors moves.relocate
+    fn relocate(
+        &self,
+        py: Python<'_>,
+        model_id: i64,
+        new_path: String,
+        archive_hash: String,
+        size: Option<i64>,
+        mtime_ns: Option<i64>,
+        compression: Option<f64>,
+    ) -> PyResult<()> {
+        use stl_core::storage::edit;
+        self.with_tx(py, |tx| edit::relocate(tx, model_id, &new_path, &archive_hash, size, mtime_ns, compression), db_err)
+    }
+
+    /// `moves.delete_model`: returns the thumbnail references to delete after commit.
+    fn delete_model(&self, py: Python<'_>, model_id: i64) -> PyResult<Vec<String>> {
+        use stl_core::storage::edit;
+        self.with_tx(py, |tx| edit::delete_model(tx, model_id), db_err)
+    }
+
+    /// `moves.merge_into_missing` by ids: returns the deleted record's thumbnail references.
+    fn merge_into_missing(&self, py: Python<'_>, old_id: i64, new_id: i64) -> PyResult<Vec<String>> {
+        use stl_core::storage::edit;
+        self.with_tx(py, |tx| edit::merge_into_missing(tx, old_id, new_id), db_err)
+    }
+
+    /// `helpers.prune_unused_lookups`: `{table: rows deleted}` for non-zero counts.
+    fn prune_unused_lookups(&self, py: Python<'_>) -> PyResult<std::collections::HashMap<&'static str, usize>> {
+        use stl_core::storage::edit;
+        Ok(self.with_tx(py, edit::prune_unused_lookups, db_err)?.into_iter().collect())
     }
 
     /// Close the pooled connections (they reopen on the next call).

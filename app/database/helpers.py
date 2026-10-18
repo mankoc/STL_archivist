@@ -124,9 +124,19 @@ def prune_unused_lookups(session: Session) -> dict[str, int]:
     removed in the same call.
 
     Returns a mapping of ``{table_label: rows_deleted}`` for non-zero counts.
+
+    Runs natively in its own transaction when *session* has not started one
+    (``app.database.native_db``); otherwise inside *session*.
     """
     from sqlalchemy import select
+    from app.database import native_db
     from app.database.models import model_scales
+
+    lib = native_db.library() if not session.in_transaction() else None
+    if lib is not None:
+        counts = lib.prune_unused_lookups()
+        order = ("subcollections", "collections", "sculptors", "categories", "releases", "scales")
+        return {label: counts[label] for label in order if label in counts}
 
     deleted: dict[str, int] = {}
 

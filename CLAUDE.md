@@ -91,6 +91,12 @@ the native core owns the schema from Phase 4b).
   only) and fall back to the `_..._py` implementations. A change to their semantics goes into
   `rust/stl-core/src/storage/library.rs` as well; `tests/golden/test_library_golden.py`
   compares the two on a random library.
+- **Native writes:** `rust/stl-core/src/storage/edit.rs` mirrors `editing.py`, `moves.py` and
+  `helpers.py` by model id (`LibraryDb.apply_cell_edits`, `relocate`, `delete_model`,
+  `merge_into_missing`, `prune_unused_lookups`). Change both sides together;
+  `tests/golden/test_edit_golden.py` compares them. Use a native write only where the whole
+  transaction is that write. Never run one while a SQLAlchemy session in the same thread
+  holds the write lock (it would wait for itself until `busy_timeout`).
 - Crawler rules (`rules.py`) use the native port only with the built-in presupport
   patterns; a custom pattern list always runs in Python, because fancy-regex and `re` read
   some syntax differently without raising. Keep `_native_patterns_ok` when touching them.
