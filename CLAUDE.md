@@ -2,7 +2,7 @@
 
 ## Overview
 
-stlLibrary is a PyQt6/SQLAlchemy desktop application for cataloguing and browsing local collections
+stlLibrary is a PyQt6 desktop application over a Rust core for cataloguing and browsing local collections
 of 3D-printable STL model archives. It scans folders of `.zip`, `.7z`, and `.rar` archives, extracts
 metadata and thumbnails, persists everything in SQLite + LMDB, and provides a full-featured browser UI.
 
@@ -27,7 +27,7 @@ stl_database/
 │   ├── core/                # Qt-free core (settings provider; see docs/server-migration-plan.md)
 │   ├── services/            # Qt-free business logic (filter model, editing, lookups, maintenance)
 │   ├── crawler/             # Archive processing pipeline
-│   ├── database/            # SQLAlchemy ORM + session helpers
+│   ├── database/            # init_db, native LibraryDb pool, filter cache
 │   ├── ui/                  # PyQt6 widgets and dialogs
 │   └── utils/               # Shared utilities (thumbnails, logging, string ops, path patterns)
 ├── resources/
@@ -38,7 +38,7 @@ stl_database/
 │   └── material-icons/      # Cached Material Design Icons (pre-downloaded for offline use)
 ├── rust/                    # Rust workspace: stl-core (library), stl-py (PyO3 → `stl_native`)
 ├── tools/build_native.py    # maturin develop into the running interpreter's environment
-└── tests/                   # pytest test suite; tests/golden/ = Rust vs Python equality
+└── tests/                   # pytest; tests/factory.py builds data; tests/golden/ = Rust vs Python
 ```
 
 ## Rust migration (in progress)
@@ -48,15 +48,18 @@ The app is moving to Rust incrementally, towards a Jellyfin-style server + React
 particular its compatibility rules (bit-identical `archive_hash`, one LMDB owner per process,
 the native core owns the schema from Phase 4b).
 
-- Ported functions are called through `app/native.py` and always keep a Python fallback
-  (`native.module()` is `None` when the module is missing or `STL_NATIVE=0`). Catch
-  `TypeError` / `ValueError` / `OverflowError` / `UnicodeError` from the native call and fall
-  back; never let the app require `stl_native`.
+- The native core is **required** (Phase 4h): `app/native.py`'s `module()` raises
+  `RuntimeError` when `stl_native` is missing; there is no `STL_NATIVE` switch. Python
+  implementations remain only where the port refuses input (archive readers, Pillow
+  thumbnails, non-portable rule patterns, metadata edge cases): catch `TypeError` /
+  `ValueError` / `OverflowError` / `UnicodeError` from the native call and fall back, or
+  answer the crawl host's request.
 - Logic lives in `rust/stl-core`; `rust/stl-py` only converts arguments and releases the GIL
   (`py.detach`). Long operations take `progress` / `log` / `should_stop` callbacks, as in
   `app/services`.
-- Every port gets a golden test in `tests/golden/` (skipped when `stl_native` is not built)
-  and `cargo test` in the crate. Run pytest with and without `STL_NATIVE=0`, plus
+- A function that keeps a Python implementation gets a golden test in `tests/golden/`
+  (to exercise the Python side, `monkeypatch.setattr(native, "module", lambda: None)` at the
+  call site under test). Everything gets `cargo test` in the crate. Run pytest plus
   `cargo clippy --workspace --all-targets -- -D warnings`.
 - After changing Rust code, rebuild with `python tools/build_native.py` before running pytest.
   It runs Cargo from `rust/` so `rust/.cargo/config.toml` (x86-64-v2, hardware popcount)
@@ -67,8 +70,8 @@ the native core owns the schema from Phase 4b).
   `render_path_pattern`, `soundex`, `hamming_pairs`, `cosine_pairs`, `levenshtein_pairs`. Long ones take `progress` / `should_stop` and raise
   `stl_native.Stopped`; the binding's `run_job` polls them from the calling thread, so
   Python callbacks never run on Rust threads. Arrays cross as NumPy buffers in and bytes out
-  (`np.frombuffer`). Tests for code with a native path should run in both modes (see the
-  `implementation` fixture in `tests/test_image_duplicates.py`).
+  (`np.frombuffer`). The NumPy scans in `image_duplicates.py` still have Python versions;
+  the `implementation` fixture in `tests/test_image_duplicates.py` runs both.
 - Native archive reading (`rust/stl-core/src/archive/`: `.zip`, `.7z`, and `.rar` with
   `rar.rs` porting `rarfile`'s header parsing and reading data through UnRAR) must return
   exactly what the Python readers return, or raise. When in doubt it
@@ -76,28 +79,17 @@ the native core owns the schema from Phase 4b).
   falls back to the Python reader for that archive. `zip.rs` is a port of CPython's `zipfile`
   catalog and `ZipFile.open` checks. Do not use `sevenz-rust2`'s `BlockDecoder` on a block
   with an empty entry inside it: it silently drops that block's last files.
-- **Schema changes:** the native core migrates file databases
-  (`rust/stl-core/src/storage`, called from `db.init_db`); the Python steps in `db.py` are the
-  fallback and must stay equivalent. After editing `models.py`, `db.ENSURE_INDEXES`,
-  `db.MODELS_VIEW_SQL` or the vec0 DDL, run `python tools/gen_schema.py`;
-  `tests/golden/test_schema_golden.py` fails until you do, and compares the two migrations
-  on fresh and legacy databases. A new data migration step goes into both.
-- **Two SQLite copies:** rusqlite bundles its own SQLite. On POSIX, a native connection must
-  not hold the database while SQLAlchemy has it open in the same process (lock loss can
-  corrupt it); keep native database access Windows-only, or sequential, until SQLAlchemy is
-  removed (step 4h).
-- **Native reads:** the browser/editor read services (`library_query.table_ids` / `page_rows`,
-  `filter_tree.filter_tree_data`, `lookups.usage_counts`, `model_summary`) go through
-  `app.database.native_db.library()` (`stl_native.LibraryDb`, Windows and file databases
-  only) and fall back to the `_..._py` implementations. A change to their semantics goes into
-  `rust/stl-core/src/storage/library.rs` as well; `tests/golden/test_library_golden.py`
-  compares the two on a random library.
-- **Native writes:** `rust/stl-core/src/storage/edit.rs` mirrors `editing.py`, `moves.py` and
-  `helpers.py` by model id (`LibraryDb.apply_cell_edits`, `relocate`, `delete_model`,
-  `merge_into_missing`, `prune_unused_lookups`). Change both sides together;
-  `tests/golden/test_edit_golden.py` compares them. Use a native write only where the whole
-  transaction is that write. Never run one while a SQLAlchemy session in the same thread
-  holds the write lock (it would wait for itself until `busy_timeout`).
+- **Schema changes:** the schema lives in `rust/stl-core/src/storage/schema_sql.rs` (the
+  source of truth; `TABLES` plus `ADD_COLUMNS` for columns added to existing tables) and is
+  migrated by `storage::migrate`, called from `db.init_db`. A data migration step goes into
+  `storage/mod.rs`. `init_db` refuses `:memory:`.
+- **All database access is native:** `app.database.native_db.library()` returns the
+  `stl_native.LibraryDb` pool (any platform; raises before `init_db`). Services call its
+  methods; semantics live in `rust/stl-core/src/storage/*.rs` (`library.rs` reads, `edit.rs`
+  cell edits / moves / lookups, `model_edit.rs`, `admin.rs`, `browser.rs`, `stats.rs`,
+  `views.rs`, `duplicates.rs`, `maintenance.rs`, `crawl.rs`, `jobs.rs`, `sidecar.rs`,
+  `vectors.rs`). Plain `sqlite3` connections (tests) have no sqlite-vec and no vec0 delete
+  trigger: write and read vectors through `LibraryDb`.
 - **Dialogs do not query the database.** Each one uses a service:
   - lookup editors: `services/lookup_admin.py`;
   - model editors: `services/model_edit.py`;
@@ -106,27 +98,21 @@ the native core owns the schema from Phase 4b).
   - viewers: `services/model_views.py`;
   - content duplicates and folder lists: `services/content_duplicates.py`;
   - Database Maintenance: `services/maintenance.py`;
+  - archive jobs (rescan, thumbnails, reconciliation): `services/archive_jobs.py`;
   - cell edits: `editing.apply_cell_edits`.
 
-  The only ORM left in `app/ui` is crawler-driven (rescan, thumbnail generation, re-crawl,
-  Update Crawled Folders reconciliation), and it moves with the crawler in step 4g. New
-  database work in a dialog belongs in a service with a native implementation and a golden
-  test, never inline ORM.
+  New database work belongs in a service backed by a `LibraryDb` method, never in a dialog.
 - Crawler rules (`rules.py`) use the native port with the built-in presupport patterns and
   with custom lists whose patterns are all portable (`rules.portable_pattern_error`,
   mirrored by `rules::portable_pattern`; change both together). Other lists run in Python,
   because fancy-regex and `re` read some syntax differently without raising. Keep `_native_patterns_ok` when touching them.
-- Tests that toggle `STL_NATIVE` need no cleanup of their own: the autouse
-  `native_follows_environment` fixture in `tests/conftest.py` reloads the native core after
-  every test, once monkeypatch has restored the environment.
 - Thumbnails: `thumbnailer.make_thumbnail` tries the native `make_thumbnail`
   (`rust/stl-core/src/thumbnail.rs`) and falls back to Pillow (`_make_thumbnail_py`) on
   `ValueError` (AVIF, CMYK JPEG, corrupt data). Output sizes follow `Image.thumbnail`.
 - **Perceptual hashes are native-only (format 2).** Stored as `"2:" + 32 hex`
   (`format_dhash`); test a stored value with `is_current_dhash`, never with a length check on
-  `DHASH_HEX_LEN`. Older Pillow hashes (bare hex) count as missing. Without the native core
-  `_dhash` / `compute_dhashes` return `None`; never add a Python fallback that writes hashes,
-  because one library must not mix two algorithms. Batch work goes through `compute_dhashes`
+  `DHASH_HEX_LEN`. Older Pillow hashes (bare hex) count as missing. Never add a Python
+  fallback that writes hashes, because one library must not mix two algorithms. Batch work goes through `compute_dhashes`
   (one parallel native call); see `services.maintenance.recompute_dhashes`.
 
 ## Module Responsibilities
@@ -141,39 +127,29 @@ Handles all archive I/O and metadata extraction.
 - **`rules.py`** — stateless rule functions: `detect_presupport()`, `detect_warnings()`,
   `detect_scale()` applied to archive member lists.
 - **`folder_metadata.py`** — reads and writes `METADATA.7z` sidecars (per-folder snapshots that
-  allow fast restore on a new machine without re-crawling every archive). With `session=None`
-  both directions run natively (`storage::sidecar`, through `thumbnailer.native_store()`);
-  change both implementations together.
+  allow fast restore on a new machine without re-crawling every archive). Both directions
+  run natively (`storage::sidecar`, through `thumbnailer.native_store()`).
 - **`crawler.py`** — `CrawlerWorker(QThread)` orchestrates the four-phase pipeline:
   1. Hash (parallel) → 2. DB query (batch) → 3. Extract (parallel) → 4. Upsert (serial)
-  With the native core, the database phases run in `storage::crawl` (`_native_diff`,
-  `_native_upsert`, …); Python passes in metadata, rule results, pattern matches,
-  thumbnails and vectors. With `LibraryDb.crawl` available, `run()` hands the whole crawl to
-  `stl_core::crawler`, which asks Python only for what it cannot do exactly
-  (`_NativeCrawlServices`: refused archives, Pillow-only images, PDF pages, CLIP, …).
-  Keep all paths equivalent; `tests/golden/test_crawl_golden.py` compares them. The upsert
-  flushes before applying the path pattern.
+  `run()` hands the whole crawl to `stl_core::crawler` (`LibraryDb.crawl`), which asks
+  Python only for what it cannot do exactly (`_NativeCrawlServices`: refused archives,
+  Pillow-only images, PDF pages, CLIP, non-portable rules, …). `recrawl` uses the native
+  database phases (`_native_diff`, `_native_upsert`).
 
 ### `app/database/`
 
-- **`models.py`** — SQLAlchemy ORM classes: `STLModel` (central), `Tag`, `Image`, `Sculptor`,
-  `Category`, `Subcategory`, `Release`, `Scale`. Tags use a many-to-many join table.
-- **`native_db.py`** — `library()`: the native read connection pool for the open
-  database, or `None` (not Windows, in-memory database, no native core).
-- **`db.py`** — engine/session factory (`init_db`, `session_scope`), WAL-mode pragmas;
-  schema migration through the native core (`_migrate_natively`), with the Python steps
-  (`_migrate_schema`, `_ensure_columns`, …) as the fallback.
-- **`vectors.py`** — CLIP embeddings in the sqlite-vec `vec0` table `image_vec` (keyed by
-  `Image.id`; `images` has no embedding column). sqlite-vec is loaded per connection in the
-  engine's `connect` event; if it fails, `vectors.available()` is False and embedding features
-  disable themselves. Image deletes reach `image_vec` through a **TEMP** trigger created per
-  connection — never make it a persistent trigger, which breaks image deletes in any connection
-  without the extension. vec0 has no `INSERT OR REPLACE` (use `vectors.store`), caps KNN `k`
-  at 4096, and must not be joined inside a KNN query: put the `MATCH` in a `MATERIALIZED` CTE.
-  Searches go through `app/services/image_similarity.py`. For whole-table reads use
-  `vectors.read_all()`, which decodes sqlite-vec's chunk shadow tables (4.7x faster than a
-  row scan). It is gated on `_CHUNK_LAYOUT_VERSIONS`; after upgrading sqlite-vec, run
-  `tests/test_vectors.py` and add the new version only if the layout test passes.
+- **`native_db.py`** — `library()`: the native `LibraryDb` connection pool for the open
+  database (raises before `init_db`); `reset()` drops it.
+- **`db.py`** — `init_db(path)` (migrates through the native core and opens the thumbnail
+  store beside the database), `database_path()`, `clear_db()`, `backfill_archive_folder()`.
+- **`filter_cache.py`** — the unscoped filter-tree payload, stored through `LibraryDb`.
+- **`vectors.py`** — constants for the sqlite-vec `vec0` table `image_vec` (keyed by
+  `Image.id`; `images` has no embedding column). The native core bundles sqlite-vec and owns
+  the table (`storage/vectors.rs`): writes, KNN searches (in a `MATERIALIZED` CTE, `k` capped
+  at 4096) and whole-table reads from the chunk shadow tables. Image deletes reach
+  `image_vec` through a **TEMP** trigger created per native connection — never make it a
+  persistent trigger, which breaks image deletes in any connection without the extension.
+  Searches go through `app/services/image_similarity.py`.
 
 ### `app/ui/`
 
@@ -210,17 +186,15 @@ the `QThread` only wraps it (see `VerifyWorker` → `services.maintenance.verify
 
 Qt-free business logic, testable without a `QApplication`:
 
-- **`library_query.py`** — the browser's `FilterSpec` and the single predicate builder used by
-  both the table (`table_where`) and the faceted filter-pane counts (`facet_scopes`), plus the
-  search condition; `table_ids` / `page_rows` are what the table model loads (ties ordered by
-  id). Add a new filter here once; never re-implement predicates in a widget.
+- **`library_query.py`** — the browser's `FilterSpec` (facets, groups, path pruning);
+  `table_ids` / `page_rows` are what the table model loads (ties ordered by id). Predicates
+  live in `storage/library.rs`, shared by the table and the filter-pane counts. Add a new
+  filter there once; never re-implement predicates in a widget.
 - **`filter_tree.py`** — `filter_tree_data(spec, show, show_counts)`: every value list and
   count the filter pane shows; `_FilterTreeWorker` wraps it and caches the unfiltered result.
-- **`editing.py`** — field-level model edits (`apply_cell_edit`, `assign_tags`, `set_collection`,
-  …) built on the `database/helpers.py` get-or-create functions. Use these instead of inline
-  `query(...).filter_by(name=…).first()` + `add` + `flush`.
-- **`lookups.py`** — `usage_counts(session, kind)`: one `GROUP BY` instead of `len(x.models)`,
-  which lazy-loads every referencing model row.
+- **`editing.py`** — `apply_cell_edits([(model_id, field, text)])`: browser cell edits in
+  one transaction (`CELL_FIELDS`); returns the touched folders for sidecar export.
+- **`lookups.py`** — `usage_counts(kind)` / `usage_count(kind, id)`.
 - **`image_similarity.py`** — CLIP searches: `find_similar_models` (KNN over the
   `MAX_RESULT_IMAGES` = 1024 nearest images, best image per model, returns `(results, capped)`)
   and `load_model_vectors` for the all-pairs duplicate scan.
@@ -243,7 +217,7 @@ Qt-free business logic, testable without a `QApplication`:
   and cells, image grid, Find Duplicates metadata rows, Find by Image dHash rows.
 - **`content_duplicates.py`** — Find Duplicate Archives (content): STL file-list overlap
   scan, popup thumbnail ids, image-scan reads; crawled-folder list; sidecar folder list.
-- **`model_summary.py`** — `model_summary(session, model_id)`: one-statement display row
+- **`model_summary.py`** — `model_summary(_session, model_id)`: one-statement display row
   (names, tags, image count) for detail panels; cheap enough for the GUI thread.
 - **`maintenance.py`** — Database Maintenance operations (the dialog's reads and writes:
   embedding targets / store, warning re-check, moved-record merge, record removal; verify,
@@ -253,25 +227,23 @@ Qt-free business logic, testable without a `QApplication`:
   writes (native in `storage::jobs`).
 - **`file_deletion.py`** — archive deletion / trash (`delete_archives(ids, use_trash, trash)`
   manages its own transaction).
-- **`moves.py`** — moved archives: `relocate`, `merge_into_missing`, `delete_model`,
-  `index_by_hash`, `archive_folder_for`. Always set `archive_folder` through it (forward
-  slashes; views compare the string). The crawler matches moves by hash in Phase 2, before
+- **`moves.py`** — `archive_folder_for` (forward slashes; views compare the string) and
+  `index_by_hash`. Relocation, merging into a missing record and deletion are `LibraryDb`
+  methods (`relocate`, `merge_into_missing`, `delete_model`), which set `archive_folder`. The crawler matches moves by hash in Phase 2, before
   extraction (`CrawlerWorker._match_early_move`).
 
 **Thumbnail deletes:** never call `delete_thumbnail()` in a loop. Each LMDB write transaction
 ends with a disk flush (~160 ms on a hard disk). Collect the refs and call
-`delete_thumbnails(refs)` once, after the session commits.
+`delete_thumbnails(refs)` once, after the database write commits.
 
 ### `app/utils/`
 
 - **`thumbnailer.py`** — LMDB key-value store for JPEG thumbnails (keyed by `Image.id`).
   Key API: `save_thumbnail(bytes, image_id)` resizes and writes; `pixmap_from_path(str)` reads
-  back a `QPixmap`; `delete_thumbnail(id)` removes an entry. The store is held by one of two
-  backends, picked in `init_thumbnail_store`: `_NativeBackend` (`stl_native.ThumbStore`,
-  heed) or `_LmdbBackend` (py-lmdb), same on-disk format. Never open the store with the
-  other backend (or plain `lmdb.open`) in the same process; call `close_thumbnail_store()`
-  first. Go through the module functions or `_store` methods, never a raw environment.
-  `tests/golden/test_thumbstore_golden.py` checks that both backends write identical keys.
+  back a `QPixmap`; `delete_thumbnail(id)` removes an entry. The store is held by
+  `_NativeBackend` (`stl_native.ThumbStore`, heed; key layout in `thumbstore.rs`). Never open
+  it a second time in the same process (LMDB forbids it); call `close_thumbnail_store()`
+  first. Go through the module functions or `_store` methods.
 - **`material_icons.py`** — application icons. Maps icon roles (`ICON_MAP` keys) to Material
   Icon symbols (pre-cached via `setup_material_icons.py`, tinted for light/dark), or, when the
   user picks a colour set in Appearance (`icon_set` setting), to
@@ -281,7 +253,8 @@ ends with a disk flush (~160 ms on a hard disk). Collect the refs and call
   add a row to `ROLES`, re-run `setup_iconsets.py`. `tests/test_icon_sets.py` fails until every
   set covers every role.
 - **`path_pattern.py`** — parses structured folder paths using `{sculptor}/{release}/{title}`
-  syntax and maps extracted values onto ORM model fields.
+  syntax and renders sort patterns; applying the values to a model happens natively (crawl
+  upsert, mass save).
 - **`string_utils.py`** — Levenshtein distance and Soundex (used for fuzzy name matching).
 - **`image_hash.py`** — 128-bit dHash (format 2, computed natively; storage format and
   parsing here) and NumPy batch Hamming distance (crawler, maintenance, Find by Image,
@@ -293,9 +266,9 @@ ends with a disk flush (~160 ms on a hard disk). Collect the refs and call
 
 ```
 Phase 1  archive_hash()         — parallel  — read CRCs from archive catalog (no decompression)
-Phase 2  session.query(batch)   — serial    — check which archives are new or hash-changed
+Phase 2  crawl diff (native)    — serial    — check which archives are new or hash-changed
 Phase 3  extract_archive_contents() — parallel — decompress only new/changed archives
-Phase 4  _upsert_archive()      — serial    — write to DB (SQLite requires single writer)
+Phase 4  upsert (native)        — serial    — write to DB (SQLite requires single writer)
 Post     export_folder_metadata() — serial  — update METADATA.7z for modified folders
 ```
 
@@ -344,8 +317,10 @@ Always update the readme, help and changelog with the changes that are made.
 ## Test Conventions
 
 - Framework: `pytest`
-- Database: in-memory SQLite via `init_db(":memory:")` — no test file left on disk.
-- Fixtures: `@pytest.fixture(autouse=True)` resets global engine state between tests.
+- Database: the autouse `library_db` fixture (`tests/conftest.py`) gives every test its own
+  database file and thumbnail store under `tmp_path`. Build and read data with
+  `tests/factory.py` (`add_model`, `add_image`, `link_tags`, `row`, `rows`, `count`, …,
+  plain `sqlite3`), then call the services.
 - Archive tests use small synthetic archives built in `tempfile.TemporaryDirectory`.
 - UI is not covered by automated tests.
 

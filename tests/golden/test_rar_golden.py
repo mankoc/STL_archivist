@@ -80,9 +80,6 @@ def test_rar_catalog_and_reads(tmp_path, name):
 
 
 def test_archive_module_uses_native_for_rar(tmp_path, monkeypatch):
-    from app import native
-    monkeypatch.delenv("STL_NATIVE", raising=False)
-    native.reload()
     path = _make(tmp_path, "plain", [])
     monkeypatch.setattr(A, "_RarReader", None)     # the Python reader must not be needed
     assert A.list_contents(path, UNRAR)

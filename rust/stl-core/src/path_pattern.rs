@@ -31,17 +31,19 @@ pub fn token_field(token: &str) -> Option<&'static str> {
     })
 }
 
-/// `(year, month)` from `"YYYY-MM"`, `"YYYY_MM"` or `"YYYY"` (surrounding space ignored).
-/// ASCII digits only; see [`py_int`].
+/// `(year, month)` from `"YYYY-MM"`, `"YYYY_MM"` or `"YYYY"` (surrounding space
+/// ignored), with decimal digits of any script as Python's `\d` and `int()` read them.
 pub fn parse_release_date(s: &str) -> (Option<i64>, Option<i64>) {
-    static YM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([0-9]{4})[-_]([0-9]{1,2})$").unwrap());
-    static Y: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([0-9]{4})$").unwrap());
+    use crate::pyunicode::{is_digits, py_int};
     let t = py_strip(s);
-    if let Some(c) = YM.captures(t) {
-        return (py_int(&c[1]), py_int(&c[2]));
+    if let Some((y, m)) = t.split_once(['-', '_'])
+        && is_digits(y, 4..=4)
+        && is_digits(m, 1..=2)
+    {
+        return (py_int(y), py_int(m));
     }
-    if let Some(c) = Y.captures(t) {
-        return (py_int(&c[1]), None);
+    if is_digits(t, 4..=4) {
+        return (py_int(t), None);
     }
     (None, None)
 }
@@ -51,14 +53,9 @@ fn py_strip(s: &str) -> &str {
     s.trim_matches(|c: char| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
 }
 
-/// `int()` of ASCII digits. Python's `int()` also takes other Unicode decimal
-/// digits; release dates and `{token:n}` limits written with them are not
-/// supported here (deliberately: none exist in practice).
+/// `int()` of a run of decimal digits (any script).
 fn py_int(digits: &str) -> Option<i64> {
-    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    digits.parse().ok()
+    crate::pyunicode::py_int(digits)
 }
 
 /// `format_release_date`: `""`, `"YYYY"` or `"YYYY-MM"`.
@@ -266,7 +263,7 @@ mod tests {
         assert_eq!(parse_release_date("2024_7"), (Some(2024), Some(7)));
         assert_eq!(parse_release_date("2024"), (Some(2024), None));
         assert_eq!(parse_release_date("24-03"), (None, None));
-        assert_eq!(parse_release_date("२०२४"), (None, None)); // ASCII digits only (Python: 2024)
+        assert_eq!(parse_release_date("२०२४"), (Some(2024), None)); // Unicode digits, as in Python
         assert_eq!(format_release_date(Some(2024), Some(3)), "2024-03");
         assert_eq!(format_release_date(None, Some(3)), "");
     }

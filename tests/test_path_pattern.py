@@ -1,18 +1,14 @@
 """
 Unit tests for app.utils.path_pattern.
-Covers pattern_to_regex, parse_path, parse_release_date, render_path_pattern,
-and apply_extracted_to_model.
+Covers pattern_to_regex, parse_path, parse_release_date and render_path_pattern.
 """
 from app.utils.path_pattern import (
-    apply_extracted_to_model,
     format_release_date,
     parse_path,
     parse_release_date,
     pattern_to_regex,
     render_path_pattern,
 )
-from app.database.db import session_scope
-from app.database.models import Collection, STLModel, Subcollection, Sculptor
 
 
 # ---------------------------------------------------------------------------
@@ -134,147 +130,6 @@ def test_render_path_pattern_sanitises_path_chars():
     m = _StubModel(source="S", creator="A", title="a/b")
     out = render_path_pattern("/{source}/{creator}/{title}", m)
     assert out == "/S/A/a_b"
-
-
-# ---------------------------------------------------------------------------
-# apply_extracted_to_model
-# ---------------------------------------------------------------------------
-
-def test_apply_extracted_creates_fk_entities():
-    with session_scope() as session:
-        model = STLModel(archive_path="/x.7z", archive_hash="h")
-        session.add(model)
-        session.flush()
-
-        apply_extracted_to_model(
-            session,
-            model,
-            {
-                "sculptor_name":      "New Sculptor",
-                "collection_name":    "New Col",
-                "subcollection_name": "New Sub",
-            },
-            overwrite=True,
-        )
-
-        assert session.query(Sculptor).filter_by(name="New Sculptor").count() == 1
-        assert session.query(Collection).filter_by(name="New Col").count() == 1
-        # Subcollection is created only when a collection is set
-        assert session.query(Subcollection).filter_by(name="New Sub").count() == 1
-
-
-def test_apply_extracted_parses_release_date():
-    with session_scope() as session:
-        model = STLModel(archive_path="/x.7z", archive_hash="h")
-        session.add(model)
-        session.flush()
-
-        apply_extracted_to_model(
-            session, model, {"release_date": "2024-05"}, overwrite=True,
-        )
-        assert model.release_year == 2024
-        assert model.release_month == 5
-
-
-def test_apply_extracted_overwrite_false_preserves_existing():
-    with session_scope() as session:
-        sc = Sculptor(name="Existing")
-        session.add(sc)
-        session.flush()
-        model = STLModel(
-            archive_path="/x.7z",
-            archive_hash="h",
-            title="Original",
-            sculptor=sc,
-        )
-        session.add(model)
-        session.flush()
-
-        apply_extracted_to_model(
-            session,
-            model,
-            {"title": "New", "sculptor_name": "Other"},
-            overwrite=False,
-        )
-        assert model.title == "Original"
-        assert model.sculptor.name == "Existing"
-
-
-# ---------------------------------------------------------------------------
-# apply_extracted_to_model — sequence and release_name
-# ---------------------------------------------------------------------------
-
-def test_apply_extracted_sets_sequence():
-    with session_scope() as session:
-        model = STLModel(archive_path="/seq.7z", archive_hash="h")
-        session.add(model)
-        session.flush()
-
-        apply_extracted_to_model(session, model, {"sequence": "3"}, overwrite=True)
-        assert model.sequence == 3
-
-
-def test_apply_extracted_sequence_non_numeric_skipped():
-    with session_scope() as session:
-        model = STLModel(archive_path="/seq2.7z", archive_hash="h")
-        session.add(model)
-        session.flush()
-
-        apply_extracted_to_model(session, model, {"sequence": "not-a-number"}, overwrite=True)
-        assert model.sequence is None
-
-
-def test_apply_extracted_creates_release():
-    from app.database.models import Release
-    with session_scope() as session:
-        model = STLModel(archive_path="/rel.7z", archive_hash="h")
-        session.add(model)
-        session.flush()
-
-        apply_extracted_to_model(
-            session, model, {"release_name": "March Bundle"}, overwrite=True
-        )
-        assert model.release is not None
-        assert model.release.name == "March Bundle"
-
-    with session_scope() as session:
-        assert session.query(Release).filter_by(name="March Bundle").count() == 1
-
-
-def test_apply_extracted_reuses_existing_release():
-    from app.database.models import Release
-    with session_scope() as session:
-        existing = Release(name="Shared Bundle")
-        session.add(existing)
-        session.flush()
-
-        m1 = STLModel(archive_path="/r1.7z", archive_hash="h1")
-        m2 = STLModel(archive_path="/r2.7z", archive_hash="h2")
-        session.add_all([m1, m2])
-        session.flush()
-
-        apply_extracted_to_model(session, m1, {"release_name": "Shared Bundle"}, overwrite=True)
-        apply_extracted_to_model(session, m2, {"release_name": "Shared Bundle"}, overwrite=True)
-
-    with session_scope() as session:
-        assert session.query(Release).filter_by(name="Shared Bundle").count() == 1
-
-
-# ---------------------------------------------------------------------------
-# apply_extracted_to_model — subcategory without a category is skipped
-# ---------------------------------------------------------------------------
-
-def test_apply_extracted_subcollection_without_collection_not_created():
-    """If no collection is set, a subcollection cannot be created."""
-    with session_scope() as session:
-        model = STLModel(archive_path="/nocat.7z", archive_hash="h")
-        session.add(model)
-        session.flush()
-
-        apply_extracted_to_model(
-            session, model, {"subcollection_name": "Orphan Sub"}, overwrite=True
-        )
-        assert model.subcollection is None
 
 
 # ---------------------------------------------------------------------------

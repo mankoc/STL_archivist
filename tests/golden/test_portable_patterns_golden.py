@@ -53,9 +53,6 @@ def test_validators_agree_and_rules_match():
 
 def test_custom_portable_list_runs_natively(monkeypatch):
     """A portable custom list goes to the native rules; a non-portable one stays in Python."""
-    from app import native
-    monkeypatch.delenv("STL_NATIVE", raising=False)
-    native.reload()
     calls = []
     real = stl_native.detect_warnings
     monkeypatch.setattr(stl_native, "detect_warnings", lambda *a, **k: calls.append(1) or real(*a, **k))

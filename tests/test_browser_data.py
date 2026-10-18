@@ -1,28 +1,20 @@
-"""Functional tests for services.library_stats and services.browser_data (Python path)."""
+"""Functional tests for services.library_stats and services.browser_data."""
 import pytest
 
-from app.database.db import init_db, session_scope
-from app.database.models import Collection, Image, Sculptor, STLModel, Tag
 from app.services import browser_data as BD
 from app.services import library_stats as LS
 from app.utils.path_pattern import render_path_pattern
+from tests import factory
 
 
 @pytest.fixture
 def lib():
-    init_db(":memory:")
-    with session_scope() as s:
-        alice = Sculptor(name="Alice")
-        comics = Collection(name="Comics")
-        s.add_all([
-            STLModel(title="A", archive_path="F:/x/a.7z", archive_hash="1", release_year=2024,
-                     release_month=3, source="patreon", sculptor=alice, collection=comics),
-            STLModel(title="B", archive_path="F:/x/b.7z", archive_hash="2", release_year=2024,
-                     source=None, presupports="Lychee", sculptor=alice),
-            STLModel(title="C", archive_path="F:/y/c.7z", archive_hash="3", source="patreon",
-                     presupports="No"),
-        ])
-        s.add(Tag(name="dragon"))
+    factory.add_model("F:/x/a.7z", "1", title="A", release_year=2024, release_month=3,
+                      source="patreon", sculptor="Alice", collection="Comics")
+    factory.add_model("F:/x/b.7z", "2", title="B", release_year=2024, source=None,
+                      presupports="Lychee", sculptor="Alice")
+    factory.add_model("F:/y/c.7z", "3", title="C", source="patreon", presupports="No")
+    factory.lookup("tags", "dragon")
 
 
 def test_column_labels(lib):
@@ -52,17 +44,13 @@ def test_browser_writes(lib):
     assert len(imgs) == 1 and imgs[0][1] == str(imgs[0][0])
     assert BD.delete_image(imgs[0][0]) and not BD.delete_image(imgs[0][0])
     BD.set_archive_paths([(1, "G:\\sorted\\a.7z")])
-    with session_scope() as s:
-        m = s.get(STLModel, 1)
-        assert (m.archive_path, m.archive_folder) == ("G:\\sorted\\a.7z", "G:/sorted")
-        assert s.query(Image).count() == 0
+    m = factory.row("models", 1)
+    assert (m["archive_path"], m["archive_folder"]) == ("G:\\sorted\\a.7z", "G:/sorted")
+    assert factory.count("images") == 0
     assert BD.lookup_names("source") == ["patreon"]
 
 
 def test_render_path_pattern_takes_fields(lib):
     fields = BD.sort_sources([1])[1]
-    with session_scope() as s:
-        m = s.get(STLModel, 1)
-        pattern = "{sculptor}/{collection}/{date} {name:1}/{release}"
-        assert render_path_pattern(pattern, fields) == render_path_pattern(pattern, m)
+    pattern = "{sculptor}/{collection}/{date} {name:1}/{release}"
     assert render_path_pattern(pattern, fields) == "Alice/Comics/2024-03 A/_unknown"

@@ -5,12 +5,10 @@ import numpy as np
 import pytest
 from PIL import Image as PILImage
 
-from app import native
-from app.database.db import session_scope
-from app.database.models import Image, STLModel
 from app.services.maintenance import recompute_dhashes
 from app.utils.image_hash import compute_dhash_from_jpeg, dhash_available, format_dhash, is_current_dhash
 from app.utils.thumbnailer import write_raw_thumbnail
+from tests import factory
 
 
 def _jpeg(seed: int) -> bytes:
@@ -22,22 +20,17 @@ def _jpeg(seed: int) -> bytes:
 
 def _library():
     """Images: current hash, Pillow-format hash, no hash, no thumbnail. Returns their ids."""
-    with session_scope() as s:
-        m = STLModel(title="M", archive_path="/lib/m.7z", archive_hash="h", archive_size=1)
-        s.add(m)
-        imgs = [Image(model=m, filename=f"{k}.jpg", dhash=d)
-                for k, d in enumerate([format_dhash(5), "f" * 32, None, None])]
-        s.add_all(imgs)
-        s.flush()
-        for k, img in enumerate(imgs[:3]):
-            img.thumbnail_path = str(img.id)
-            write_raw_thumbnail(img.id, _jpeg(k))
-        return [img.id for img in imgs]
+    mid = factory.add_model("/lib/m.7z", "h", title="M", archive_size=1)
+    ids = [factory.add_image(mid, f"{k}.jpg", dhash=d)
+           for k, d in enumerate([format_dhash(5), "f" * 32, None, None])]
+    for k, image_id in enumerate(ids[:3]):
+        factory.execute("UPDATE images SET thumbnail_path = ? WHERE id = ?", str(image_id), image_id)
+        write_raw_thumbnail(image_id, _jpeg(k))
+    return ids
 
 
 def _hashes(ids):
-    with session_scope() as s:
-        return [s.get(Image, i).dhash for i in ids]
+    return [factory.row("images", i)["dhash"] for i in ids]
 
 
 @pytest.mark.skipif(not dhash_available(), reason="dHash needs the native core")
@@ -59,17 +52,3 @@ def test_recompute_all_and_stop(thumb_store):
     assert recompute_dhashes(recompute_all=True) == (3, 1)
     assert _hashes(ids)[0] == format_dhash(compute_dhash_from_jpeg(_jpeg(0)))
     assert recompute_dhashes(recompute_all=True, should_stop=lambda: True) == (0, 0)
-
-
-def test_without_native_nothing_changes(thumb_store, monkeypatch):
-    ids = _library()
-    monkeypatch.setenv("STL_NATIVE", "0")
-    native.reload()
-    try:
-        logs = []
-        assert recompute_dhashes(recompute_all=True, log=logs.append) == (0, 0)
-        assert "native core" in logs[0]
-        assert _hashes(ids) == [format_dhash(5), "f" * 32, None, None]
-    finally:
-        monkeypatch.delenv("STL_NATIVE")
-        native.reload()

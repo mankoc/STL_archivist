@@ -61,10 +61,11 @@ pub fn utc_now_text() -> String {
 #[derive(Debug)]
 pub enum EditError {
     Db(rusqlite::Error),
-    /// Input whose Python handling this port does not reproduce (e.g. a date
-    /// or sequence written with non-ASCII digits); the caller uses Python.
+    /// Input this port does not handle.
     Unsupported(String),
     UnknownField(String),
+    /// Invalid user input (a find pattern or replacement template).
+    Invalid(String),
 }
 
 impl From<rusqlite::Error> for EditError {
@@ -78,6 +79,7 @@ impl std::fmt::Display for EditError {
         match self {
             EditError::Db(e) => write!(f, "{e}"),
             EditError::Unsupported(m) => write!(f, "unsupported: {m}"),
+            EditError::Invalid(m) => write!(f, "{m}"),
             EditError::UnknownField(m) => write!(f, "unknown field {m}"),
         }
     }
@@ -224,30 +226,15 @@ pub(crate) fn store_row(tx: &Transaction, model_id: i64, old: &Row, new: &Row) -
     Ok(())
 }
 
-/// `parse_release_date` for typed input; non-ASCII digits are left to Python.
+/// `parse_release_date` for typed input.
 pub(crate) fn release_date(value: &str) -> std::result::Result<(Option<i64>, Option<i64>), EditError> {
-    if value.chars().any(|c| c.is_numeric() && !c.is_ascii_digit()) {
-        return Err(EditError::Unsupported("date with non-ASCII digits".into()));
-    }
     Ok(crate::path_pattern::parse_release_date(value))
 }
 
-/// Python's `int(value)` for a stripped string: sign, ASCII digits, single
-/// underscores between digits. `Ok(None)` where `int()` raises `ValueError`.
+/// Python's `int(value)` for a stripped string (sign, decimal digits of any
+/// script, single underscores between digits); `Ok(None)` where `int()` raises.
 pub(crate) fn py_int(value: &str) -> std::result::Result<Option<i64>, EditError> {
-    if value.chars().any(|c| c.is_numeric() && !c.is_ascii_digit()) {
-        return Err(EditError::Unsupported("number with non-ASCII digits".into()));
-    }
-    let body = value.strip_prefix(['+', '-']).unwrap_or(value);
-    let ok = !body.is_empty()
-        && body.bytes().all(|b| b.is_ascii_digit() || b == b'_')
-        && !body.starts_with('_')
-        && !body.ends_with('_')
-        && !body.contains("__");
-    if !ok {
-        return Ok(None);
-    }
-    value.replace('_', "").parse::<i64>().map(Some).map_err(|_| EditError::Unsupported("integer out of range".into()))
+    Ok(crate::pyunicode::py_int(value))
 }
 
 /// Names of the model's links (`tags` or `scales`), lowercased.
@@ -538,7 +525,7 @@ mod tests {
         assert_eq!(py_int("+3").unwrap(), Some(3));
         assert_eq!(py_int("1__0").unwrap(), None);
         assert_eq!(py_int("x").unwrap(), None);
-        assert!(py_int("٣").is_err());
+        assert_eq!(py_int("٣").unwrap(), Some(3)); // Unicode digits, as in Python
         assert_eq!(split_list(Some(" a, ,b ,")), vec!["a", "b"]);
         let now = utc_now_text();
         assert_eq!(now.len(), 26, "{now}");

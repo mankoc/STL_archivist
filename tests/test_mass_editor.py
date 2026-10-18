@@ -10,8 +10,7 @@ pytest.importorskip("PyQt6")
 
 from PyQt6.QtWidgets import QApplication
 
-from app.database.db import session_scope
-from app.database.models import STLModel
+from tests import factory
 
 PATTERN = "{release} - {title}"
 PATHS = [
@@ -30,19 +29,12 @@ def qapp():
 
 
 def _models(titles=("old one", "old two")):
-    with session_scope() as s:
-        ids = []
-        for i, (path, title) in enumerate(zip(PATHS, titles)):
-            m = STLModel(title=title, archive_path=path, archive_hash=f"h{i}")
-            s.add(m)
-            s.flush()
-            ids.append(m.id)
-        return ids
+    return [factory.add_model(path, f"h{i}", title=title)
+            for i, (path, title) in enumerate(zip(PATHS, titles))]
 
 
 def _titles(ids):
-    with session_scope() as s:
-        return [s.get(STLModel, i).title for i in ids]
+    return [factory.row("models", i)["title"] for i in ids]
 
 
 def _dialog(ids, pattern=PATTERN, overwrite=True):
@@ -168,11 +160,7 @@ def test_parsed_value_rows_lists_every_selected_model(qapp):
 
 def test_parsed_value_rows_marks_non_matching_paths(qapp):
     """A path the pattern misses still gets a row, with nothing extracted."""
-    with session_scope() as s:
-        m = STLModel(title="odd", archive_path=r"F:\Lib\no-dash-here.7z", archive_hash="hx")
-        s.add(m)
-        s.flush()
-        odd = m.id
+    odd = factory.add_model(r"F:\Lib\no-dash-here.7z", "hx", title="odd")
     ids = _models() + [odd]
 
     dlg = _dialog(ids)
@@ -213,19 +201,13 @@ def test_parsed_value_rows_empty_for_a_non_matching_pattern(qapp):
 # ---------------------------------------------------------------------------
 
 def _make_padded():
-    with session_scope() as s:
-        m = STLModel(title="  padded  ", creator=" Onicron ", source=" patreon ",
-                     url="  http://x  ", description="   ",
-                     archive_path=PATHS[0], archive_hash="h0")
-        s.add(m)
-        s.flush()
-        return m.id
+    return factory.add_model(PATHS[0], "h0", title="  padded  ", creator=" Onicron ",
+                             source=" patreon ", url="  http://x  ", description="   ")
 
 
 def _fields(mid):
-    with session_scope() as s:
-        m = s.get(STLModel, mid)
-        return (m.title, m.creator, m.source, m.url, m.description)
+    m = factory.row("models", mid)
+    return (m["title"], m["creator"], m["source"], m["url"], m["description"])
 
 
 def test_trim_strips_text_fields(qapp):

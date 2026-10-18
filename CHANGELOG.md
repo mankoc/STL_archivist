@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Rust migration, step 4h: the native core is now required, and SQLAlchemy is gone.** Every database read and write, on every platform, goes through the Rust core, which also owns the schema. The `STL_NATIVE` switch is removed. Python remains only for what the core hands back: archives it cannot read exactly, images only Pillow decodes, PDF pages and CLIP embeddings.
+  - Dependencies dropped: SQLAlchemy, lmdb and the sqlite-vec Python package. sqlite-vec is built into the native core.
+  - Mass Editor → Find & Replace in regex mode now runs natively. It uses the Rust `fancy-regex` dialect, which is Unicode-aware and supports lookarounds and backreferences, with Python's replacement rules (`\1`, `\g<name>`, `\n`). A pattern it cannot read is reported and nothing is saved. A tag listed twice is linked once instead of failing.
+  - Dates and sequence numbers written with non-ASCII digits (for example Arabic-Indic) are parsed natively.
+  - Configuration → Debug: the *Log SQL statement timings* option is removed, because it timed SQLAlchemy statements.
+  - Tests: every test gets its own database file, and test data is built with plain `sqlite3` (`tests/factory.py`).
+
 - **Rust migration, step 4g-5b: the crawl itself runs natively** (on Windows): listing, hashing, extraction and thumbnails in parallel, saving, sidecars, and move and deletion handling. Results are identical to the Python crawler (golden-tested, and on real library folders); PDF previews, CLIP embeddings and the few image formats only Pillow reads are still produced by the Python code during a native crawl.
 - **Fix:** crawling a folder without subfolders no longer treats its own `METADATA.7z` sidecar as an archive.
 

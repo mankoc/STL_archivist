@@ -8,11 +8,10 @@ derived from the thumbnail's content hash, and the bytes live under that blob
 key.  See the key-layout comment below.  The public API is still addressed by
 ``Image.id`` throughout, so callers never see the indirection.
 
-Two interchangeable backends hold the store, chosen when it is opened: the
-native core's ``ThumbStore`` (heed, ``rust/stl-core/src/thumbstore.rs``) when
-available, else py-lmdb.  Both use the same on-disk format.  A process uses one
-of them for a store, never both: LMDB forbids opening an environment twice in
-one process (compatibility rule 3 in ``docs/rust-migration-plan.md``).
+The store is held by the native core's ``ThumbStore`` (heed,
+``rust/stl-core/src/thumbstore.rs``).  A process opens it once: LMDB forbids
+opening an environment twice in one process (compatibility rule 3 in
+``docs/rust-migration-plan.md``).
 """
 import io
 import logging
@@ -22,10 +21,7 @@ from pathlib import Path
 from typing import Optional
 
 import threading
-import time
 
-import lmdb
-import xxhash
 from PIL import Image, ImageSequence
 
 log = logging.getLogger(__name__)
@@ -41,18 +37,8 @@ THUMB_QUALITY = 75
 GIF_MAX_FRAMES = 60
 GIF_MAX_BYTES = 2 * 1024 ** 2
 
-_store = None                      # the open backend (_NativeBackend / _LmdbBackend)
+_store = None                      # the open _NativeBackend
 _lmdb_dir: Optional[Path] = None
-
-# 10 GB virtual address space reserved for the LMDB map.
-# On Linux this is *not* pre-allocated; actual disk usage grows on demand.
-# This is only the *initial* ceiling — _write() grows the map automatically
-# when a write hits MDB_MAP_FULL, so the store is not capped at this size.
-_MAP_SIZE = 10 * 1024 ** 3
-
-# Amount to enlarge the LMDB map by each time a write fills it up.
-_GROW_STEP = 2 * 1024 ** 3
-
 
 # ── Key layout ───────────────────────────────────────────────────────────────
 # The store is content-addressed so identical thumbnails are held once:
@@ -63,8 +49,7 @@ _GROW_STEP = 2 * 1024 ** 3
 # Both prefixes are ASCII letters, while a legacy key is a bare big-endian
 # image id whose first byte is 0x00 for every id below 2**56 — so old and new
 # keys cannot be confused, and a part-migrated store still reads correctly.
-_REF_PREFIX  = b"R"
-_BLOB_PREFIX = b"D"
+# The layout is implemented in rust/stl-core/src/thumbstore.rs.
 
 
 def _key(image_id: int) -> bytes:
@@ -72,187 +57,8 @@ def _key(image_id: int) -> bytes:
     return image_id.to_bytes(8, "big")
 
 
-def _ref_key(image_id: int) -> bytes:
-    return _REF_PREFIX + image_id.to_bytes(8, "big")
-
-
-def _blob_key(digest: bytes, slot: int = 0) -> bytes:
-    """Key for a blob's bytes.  *slot* disambiguates a hash collision."""
-    return _BLOB_PREFIX + digest + (bytes([slot]) if slot else b"")
-
-
-def _put_blob(txn, data: bytes) -> bytes:
-    """Store *data* if new and return the blob key holding it.
-
-    xxh3-128 is fast but not collision-resistant by construction, so a hash hit
-    is confirmed by comparing the bytes.  On the (astronomically unlikely) event
-    of a genuine collision the new blob goes to the next free slot rather than
-    silently overwriting an unrelated thumbnail.
-    """
-    digest = xxhash.xxh3_128_digest(data)
-    for slot in range(256):
-        key = _blob_key(digest, slot)
-        existing = txn.get(key)
-        if existing is None:
-            txn.put(key, data)
-            return key
-        if existing == data:
-            return key
-        log.warning("xxh3-128 collision on thumbnail digest %s slot %d",
-                    digest.hex(), slot)
-    # 256 distinct payloads sharing one digest: store uncollapsed rather than fail.
-    key = _blob_key(digest, 255)
-    txn.put(key, data)
-    return key
-
-
-def _put_thumbnail(txn, image_id: int, data: bytes) -> None:
-    """Point *image_id* at *data*, sharing the blob with any identical thumbnail."""
-    txn.put(_ref_key(image_id), _put_blob(txn, data))
-    txn.delete(_key(image_id))   # drop the pre-dedup entry if one is still there
-
-
-def _get_thumbnail(txn, image_id: int) -> Optional[bytes]:
-    """Read *image_id*, transparently handling not-yet-migrated entries."""
-    blob_key = txn.get(_ref_key(image_id))
-    if blob_key is not None:
-        return txn.get(bytes(blob_key))
-    return txn.get(_key(image_id))
-
-
-def _write(env: "lmdb.Environment", put_fn) -> None:
-    """Run *put_fn(txn)* in a write transaction, growing the map on MDB_MAP_FULL.
-
-    LMDB has a fixed map size; once the data reaches it, every write raises
-    :class:`lmdb.MapFullError`.  We catch that, enlarge the map via
-    ``set_mapsize`` (safe with no open transactions — the failed one has already
-    aborted), and retry until the write succeeds.
-    """
-    while True:
-        try:
-            with env.begin(write=True) as txn:
-                put_fn(txn)
-            return
-        except lmdb.MapFullError:
-            new_size = env.info()["map_size"] + _GROW_STEP
-            env.set_mapsize(new_size)
-
-
-class _LmdbBackend:
-    """The store through py-lmdb (used when the native core is unavailable)."""
-
-    native = False
-
-    def __init__(self, path: Path) -> None:
-        # Keep a grow-step of headroom beyond the pages in use, so a store that
-        # previously grew past _MAP_SIZE reopens without hitting MDB_MAP_FULL on
-        # the first write.  Sized from the pages in use, not the file: on Windows
-        # LMDB extends data.mdb to the map size, so sizing from the file grew the
-        # map (and the file) by a step on every open.  LMDB raises a smaller map
-        # to the pages in use by itself.
-        self.env = lmdb.open(str(path), map_size=_MAP_SIZE)
-        used = (self.env.info()["last_pgno"] + 1) * self.env.stat()["psize"]
-        if self.env.info()["map_size"] < used + _GROW_STEP:
-            self.env.set_mapsize(used + _GROW_STEP)
-
-    def put_many(self, items) -> None:
-        def _put(txn):
-            for image_id, data in items:
-                if data:
-                    _put_thumbnail(txn, image_id, data)
-        _write(self.env, _put)
-
-    def get_many(self, ids) -> "dict[int, bytes]":
-        out: dict[int, bytes] = {}
-        with self.env.begin() as txn:
-            for image_id in ids:
-                data = _get_thumbnail(txn, image_id)
-                if data is not None:
-                    out[image_id] = data
-        return out
-
-    def get(self, image_id: int) -> Optional[bytes]:
-        with self.env.begin() as txn:
-            return _get_thumbnail(txn, image_id)
-
-    def delete_many(self, ids) -> None:
-        with self.env.begin(write=True) as txn:
-            # Only the references go: a blob may still be shared with other
-            # images.  Unreferenced blobs are reclaimed by deduplicate_store().
-            for image_id in ids:
-                txn.delete(_ref_key(image_id))
-                txn.delete(_key(image_id))
-
-    def stats(self) -> "dict[str, int]":
-        thumbnails = blobs = legacy = payload = 0
-        with self.env.begin(buffers=True) as txn:
-            for key, value in txn.cursor():
-                key = bytes(key)
-                if key.startswith(_REF_PREFIX):
-                    thumbnails += 1
-                elif key.startswith(_BLOB_PREFIX):
-                    blobs += 1
-                    payload += len(value)
-                else:
-                    legacy += 1
-                    thumbnails += 1
-                    payload += len(value)
-        return {"thumbnails": thumbnails, "blobs": blobs,
-                "legacy": legacy, "payload_bytes": payload}
-
-    def convert_legacy(self, limit: int) -> int:
-        batch: list[tuple[int, bytes]] = []
-        with self.env.begin(buffers=True) as txn:
-            for key, value in txn.cursor():
-                key = bytes(key)
-                if key.startswith(_REF_PREFIX) or key.startswith(_BLOB_PREFIX):
-                    continue
-                batch.append((int.from_bytes(key, "big"), bytes(value)))
-                if len(batch) >= limit:
-                    break
-        if batch:
-            self.put_many(batch)
-        return len(batch)
-
-    def orphan_blobs(self) -> "list[bytes]":
-        live: set = set()
-        orphans: list = []
-        with self.env.begin(buffers=True) as txn:
-            for key, value in txn.cursor():
-                if bytes(key).startswith(_REF_PREFIX):
-                    live.add(bytes(value))
-            for key, _value in txn.cursor():
-                key = bytes(key)
-                if key.startswith(_BLOB_PREFIX) and key not in live:
-                    orphans.append(key)
-        return orphans
-
-    def delete_keys(self, keys) -> None:
-        def _drop(txn):
-            for key in keys:
-                txn.delete(key)
-        _write(self.env, _drop)
-
-    def put_raw(self, items) -> None:
-        def _put(txn):
-            for key, value in items:
-                txn.put(key, value)
-        _write(self.env, _put)
-
-    def copy_compacted(self, dest_dir: Path) -> None:
-        self.env.copy(str(dest_dir), compact=True)
-
-    def map_size(self) -> int:
-        return self.env.info()["map_size"]
-
-    def close(self) -> None:
-        self.env.close()
-
-
 class _NativeBackend:
     """The store through the native core's ``ThumbStore`` (heed)."""
-
-    native = True
 
     def __init__(self, store) -> None:
         self.s = store
@@ -294,32 +100,23 @@ class _NativeBackend:
         self.s.close()
 
 
-# Errors either backend raises for a failed store operation.
-_STORE_ERRORS: tuple = (lmdb.Error, OSError, RuntimeError)
+# Errors the store raises for a failed operation.
+_STORE_ERRORS: tuple = (OSError, RuntimeError)
 
 
 def _open_backend(path: Path):
-    """The native store when the core provides one, else py-lmdb."""
     from app import native
-    mod = native.module()
-    if mod is not None and hasattr(mod, "ThumbStore"):
-        try:
-            return _NativeBackend(mod.ThumbStore(str(path)))
-        except (OSError, RuntimeError, ValueError) as exc:
-            log.warning("Native thumbnail store failed to open %s (%s); using py-lmdb", path, exc)
-    return _LmdbBackend(path)
+    return _NativeBackend(native.module().ThumbStore(str(path)))
 
 
 def native_store():
-    """The open ``stl_native.ThumbStore``, or ``None`` (closed, or the Python backend)."""
-    return _store.s if _store is not None and _store.native else None
+    """The open ``stl_native.ThumbStore``, or ``None`` when the store is closed."""
+    return _store.s if _store is not None else None
 
 
 def store_backend() -> str:
-    """``"native"``, ``"lmdb"`` or ``"closed"``: which backend holds the store."""
-    if _store is None:
-        return "closed"
-    return "native" if _store.native else "lmdb"
+    """``"native"`` or ``"closed"``."""
+    return "closed" if _store is None else "native"
 
 
 def _require_store():

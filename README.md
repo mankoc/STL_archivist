@@ -2,7 +2,7 @@
 
 **stlLibrary** is a desktop application for managing local collections of 3D-printable model archives. It scans folders of `.zip`, `.7z`, and `.rar` files, extracts metadata and thumbnails, and stores everything in a local database so you can browse and search your collection without unpacking anything manually.
 
-Built with PyQt6 and SQLAlchemy.
+Built with PyQt6 and a Rust core (`stl_native`).
 
 Version: 2026.24
 
@@ -31,7 +31,7 @@ Version: 2026.24
 - **File Size column** — browser table shows each archive's size on disk (B / KB / MB / GB), sortable numerically
 - **STL file list** — optionally records the name and uncompressed size of every `.stl` file inside each archive (enable *Store STL file list* in Configuration); included in METADATA.7z sidecars
 - **Find Metadata Duplicates** — finds models with identical or phonetically similar field values; supports exact match, Levenshtein (configurable distance), and Soundex; results can be sent directly to the browser table
-- **Find Archives by Content** — two-tab tool: the *STL Files* tab flags archive pairs that share a configurable fraction of identical files; the *Images* tab finds archives with similar thumbnails (selecting a result previews both archives' images), comparing every pair of distinct images (on a 363k-image library about 4 s by perceptual hash and 35 s by AI embedding with the native core, or 15 s and a minute without it) and skipping banners and logos shared by more than a chosen number of archives (default 10); hover any row to see thumbnails in a popup; right-click any result row to open the archive's folder in the configured file manager, compare archive contents, or delete the archive from disk
+- **Find Archives by Content** — two-tab tool: the *STL Files* tab flags archive pairs that share a configurable fraction of identical files; the *Images* tab finds archives with similar thumbnails (selecting a result previews both archives' images), comparing every pair of distinct images (on a 363k-image library about 4 s by perceptual hash and 35 s by AI embedding) and skipping banners and logos shared by more than a chosen number of archives (default 10); hover any row to see thumbnails in a popup; right-click any result row to open the archive's folder in the configured file manager, compare archive contents, or delete the archive from disk
 - **Image similarity matching** — two methods, selectable in the *Images* tab and *Find by Image*: a built-in **128-bit perceptual hash (dHash)** for near-duplicates (computed by the native core), and an optional **AI embedding (CLIP)** for semantic matching of the same model across different renders, angles, and colours. Embeddings are an optional, dependency-light add-on (`onnxruntime` + a CLIP ONNX model); compute them via **Database Maintenance → Compute Image Embeddings**
 - **Find by Image** — pick an image file and find catalogued models whose thumbnails look like it, by perceptual hash or AI embedding. Results show the best-matching image per model, from at most the 1024 closest images (the status line says when more match, so you can tighten the threshold). Click a result to see its full thumbnail with the model's title, creator, sculptor, collection, release, tags, image count, archive path and size; **Go to Model** (or a double-click on the result) shows the model in the main table
 - **AI Tagging** — right-click any row and choose *AI Tagging…* to let Qwen2.5-VL analyse the model's thumbnails — along with the archive path, filenames, and any metadata already catalogued — and suggest tags, title, creator, sculptor, collection, subcollection, scale, source, year, and description (it picks the most specific collection — e.g. Batman → *comics* / *DC* — rather than defaulting to a generic genre). Each suggestion is editable before saving; tags are merged with (not replaced by) existing ones. Select several rows for one-by-one review, or click **Process All** to run every selected model unattended and save results automatically. By default existing values are kept (only empty fields filled, new tags added); tick **Overwrite existing values** to let the suggestions replace current field values instead. Tick **Ignore existing metadata** to withhold the catalogued metadata and file list from the prompt, using only the images, archive path, and image filenames (re-tag from scratch). The whole feature can be switched off with **Enable AI tagging** in *Configuration → AI* (which hides the action from the toolbar, Tools menu, and right-click menu). The model's **temperature** is configurable in *Configuration → AI → AI Tagging* (lower = more literal and grounded, higher = more creative). Runs locally via the [llama.cpp](https://github.com/ggml-org/llama.cpp) `llama-server` binary — **no torch, no Python AI packages**. On first use the small runtime and the ~3.3 GB GGUF model are downloaded once into your data folder; pick a **CPU** or **NVIDIA GPU (CUDA)** build in the setup dialog (CPU works on any machine)
@@ -55,12 +55,10 @@ Version: 2026.24
 - Python 3.10+
 - Dependencies listed in `requirements.txt`:
   - PyQt6
-  - SQLAlchemy
   - Pillow
   - py7zr
   - rarfile
   - xxhash
-  - lmdb
   - qt-material
   - onnxruntime
   - numpy
@@ -92,21 +90,18 @@ source .venv/bin/activate      # Linux / macOS
 # 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. Optional: build the native (Rust) core
+# 4. Build the native (Rust) core
 python tools/build_native.py
 
 # 5. Run the application
 python main.py
 ```
 
-The native core (`rust/`, installed as the `stl_native` module) is optional: without it the app
-runs its Python implementations. With it, the crawler reads `.zip` and `.7z` catalogs and
-extracts their images natively (RAR always uses UnRAR), the thumbnail store is opened natively
-(same format as without it), thumbnails are made natively
-(AVIF and a few rare variants still go through Pillow), and the duplicate searches run
-several times faster. Perceptual hashes (dHash) are computed only by the native core; without
-it, perceptual-hash searches use only the hashes already stored. Building it needs [Rust](https://rustup.rs) and, on Windows,
-the Visual Studio C++ Build Tools. The codebase is moving to Rust step by step; see
+The native core (`rust/`, installed as the `stl_native` module) is required: it owns the
+database (schema, queries and writes, with sqlite-vec built in), the thumbnail store and the
+crawl. Python handles what the core hands back: archives it cannot read exactly, images only
+Pillow decodes (AVIF, CMYK JPEG), PDF pages and CLIP embeddings. Building it needs
+[Rust](https://rustup.rs) and, on Windows, the Visual Studio C++ Build Tools. The codebase is moving to Rust step by step; see
 [docs/rust-migration-plan.md](docs/rust-migration-plan.md).
 
 > **Note for RAR support:** `rarfile` requires the `unrar` binary to be installed on your system.
@@ -122,8 +117,6 @@ These optional environment variables take precedence over the values set in Conf
 |---|---|
 | `STL_DATA_DIR` | Data directory (database, thumbnails, logs, `settings.json`) |
 | `STL_UNRAR_PATH` | Path to the `unrar` executable |
-| `STL_SQL_PROFILING` | `1` / `0` forces SQL statement timing on or off |
-| `STL_NATIVE` | `0` turns the native (Rust) core off and uses the Python implementations; useful when reporting a problem |
 
 ## Usage
 
@@ -241,8 +234,8 @@ stl_database/
 │   │   ├── rules.py         # Scale / presupport / warning detection rules
 │   │   └── folder_metadata.py  # METADATA.7z sidecar read/write
 │   ├── database/
-│   │   ├── db.py            # SQLAlchemy engine / session helpers
-│   │   └── models.py        # ORM models (STLModel, Tag, Image, Sculptor, Category, Subcategory, Release, Scale)
+│   │   ├── db.py            # init_db (schema migration in the native core), clear / backfill
+│   │   └── native_db.py     # library(): the native LibraryDb connection pool
 │   ├── ui/
 │   │   ├── main_window.py   # Main application window
 │   │   ├── browser_tab.py   # Collection browser with inline editing and multi-value filters
@@ -328,13 +321,10 @@ Embeddings** to populate embeddings for existing thumbnails. The **AI embedding
 Archives → Images*.
 
 **Storage** — embeddings are stored with the
-[sqlite-vec](https://github.com/asg017/sqlite-vec) extension (`sqlite-vec` in
-`requirements.txt`) in a `vec0` table, `image_vec`, inside the main database.
+[sqlite-vec](https://github.com/asg017/sqlite-vec) extension (built into the native
+core) in a `vec0` table, `image_vec`, inside the main database.
 *Find by Image* searches it with a nearest-neighbour query inside SQLite
-(about 0.2 s on 334k embeddings), over the 1024 nearest images. sqlite-vec needs a
-Python whose `sqlite3` module can load extensions (the python.org and
-Windows-executable builds can); otherwise the embedding features are disabled
-and everything else keeps working.
+(about 0.2 s on 334k embeddings), over the 1024 nearest images.
 
 Databases from earlier versions kept embeddings on the `images` table. The first
 start with this version moves them into `image_vec` and compacts the file

@@ -9,6 +9,10 @@ This allows a library to be restored on a new machine without re-crawling
 every archive: the crawler imports the sidecar first, then only re-extracts
 archives whose hash has changed since the snapshot was written.
 
+Both directions run in the native core (``rust/stl-core/src/storage/sidecar.rs``),
+reading and writing thumbnails through the thumbnail store this process
+holds (``thumbnailer.native_store()``).
+
 Public API
 ----------
 export_folder_metadata(folder, session, thumb_base_dir)
@@ -19,517 +23,78 @@ import_folder_metadata(folder, session, thumb_base_dir)
 
 folder_has_db_records(folder, session)
     Return True if any direct-child archive of *folder* is already in the DB.
+
+The *session* arguments are unused (kept for existing callers).
 """
-import io
-import json
+from __future__ import annotations
+
 import logging
-import os
-import tempfile
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
-
-import py7zr
-from sqlalchemy.orm import Session
-
-from app.database.helpers import (
-    get_or_create_category,
-    get_or_create_collection,
-    get_or_create_release,
-    get_or_create_scale,
-    get_or_create_sculptor,
-    get_or_create_subcollection,
-    get_or_create_tag,
-)
 
 logger = logging.getLogger(__name__)
 
 METADATA_FILENAME = "METADATA.7z"
-_JSON_MEMBER      = "metadata.json"
-_THUMBS_DIR       = "thumbnails"
-_SCHEMA_VERSION   = 1
 
 
-# ---------------------------------------------------------------------------
-# Public helpers
-# ---------------------------------------------------------------------------
-
-def folder_has_db_records(folder: Path, session: Session) -> bool:
+def folder_has_db_records(folder: Path, _session=None) -> bool:
     """Return True when at least one direct-child archive of *folder* is in DB."""
-    from app.crawler.archive import ARCHIVE_SUFFIXES, METADATA_FILENAME as _MF
-    from app.database.models import STLModel
+    from app.crawler.archive import ARCHIVE_SUFFIXES
+    from app.database import native_db
 
     try:
         child_paths = [
             str(p)
-            for p in folder.iterdir()
-            if p.suffix.lower() in ARCHIVE_SUFFIXES and p.name != _MF
+            for p in Path(folder).iterdir()
+            if p.suffix.lower() in ARCHIVE_SUFFIXES and p.name != METADATA_FILENAME
         ]
     except OSError:
         return False
-
-    if not child_paths:
-        return False
-
-    return (
-        session.query(STLModel.id)
-        .filter(STLModel.archive_path.in_(child_paths))
-        .first()
-    ) is not None
+    return bool(child_paths) and native_db.library().any_archive_path(child_paths)
 
 
 def export_folder_metadata(
     folder: Path,
-    session: Session,
-    thumb_base_dir: Path,
+    _session=None,
+    thumb_base_dir: "Path | None" = None,
     include_thumbnails: bool = True,
 ) -> bool:
     """
     Create or replace METADATA.7z in *folder* with a snapshot of all
     direct-child archive records currently in the DB.
 
-    Parameters
-    ----------
-    include_thumbnails:
-        When True (default), thumbnail JPEG files are embedded in the archive
-        and referenced from the JSON.  When False the ``images`` list in the
-        JSON is cleared and no image files are written — useful to save disk
-        space when thumbnails are not needed for restore.
-
-    Returns True when the file was written, False when there was nothing to do
-    (no matching DB records or a write error).  *session* may be ``None``: a
-    session of its own is used.
+    When *include_thumbnails* is False the ``images`` lists are empty and no
+    image files are written.  Returns True when the file was written, False
+    when there was nothing to do (no matching records) or the write failed.
     """
-    from app.database.models import STLModel
-
-    if session is None:
-        done = _export_native(Path(folder), include_thumbnails)
-        if done is not None:
-            return done
-        from app.database.db import session_scope
-        with session_scope() as own:
-            return export_folder_metadata(folder, own, thumb_base_dir, include_thumbnails)
-
-    folder = Path(folder)
-    thumb_base_dir = Path(thumb_base_dir)
-
-    # Collect all STLModel records whose archive file lives directly in folder.
-    # archive_path is stored with OS-native separators, so the LIKE prefilter must
-    # use os.sep too (a hardcoded "/" never matches backslash paths on Windows);
-    # the exact parent check below is authoritative.
-    all_models = (
-        session.query(STLModel)
-        .filter(STLModel.archive_path.like(str(folder) + os.sep + "%"))
-        .order_by(STLModel.id)
-        .all()
-    )
-    models = [m for m in all_models if Path(m.archive_path).parent == folder]
-
-    if not models:
-        logger.debug("export_folder_metadata: no records for %s — skipping", folder)
-        return False
-
-    logger.debug(
-        "export_folder_metadata: exporting %d record(s) from %s (thumbnails=%s)",
-        len(models), folder, include_thumbnails,
-    )
-
-    data = _serialize_models(models, thumb_base_dir, include_thumbnails=include_thumbnails)
-
-    # Persist the crawl pattern so it can be restored on a new machine.
-    from app.database.models import CrawledFolder
-    crawled_folder = session.query(CrawledFolder).filter_by(path=str(folder)).first()
-    data["pattern"] = crawled_folder.pattern if crawled_folder else None
-
-    metadata_path = folder / METADATA_FILENAME
-    try:
-        _write_metadata_7z(
-            metadata_path, data, models, thumb_base_dir,
-            include_thumbnails=include_thumbnails,
-        )
-        logger.info("Wrote %s (%d model(s), thumbnails=%s)", metadata_path, len(models), include_thumbnails)
-        return True
-    except Exception as exc:
-        logger.error("Failed to write %s: %s", metadata_path, exc, exc_info=True)
-        return False
-
-
-def _export_native(folder: Path, include_thumbnails: bool) -> "bool | None":
-    """``export_folder_metadata`` through the native core, or ``None`` to use Python."""
     from app.database import native_db
     from app.utils.thumbnailer import native_store
-    lib = native_db.library()
+
     store = native_store()
-    if lib is None or not hasattr(lib, "sidecar_export") or (include_thumbnails and store is None):
-        return None
     try:
-        return lib.sidecar_export(str(folder), include_thumbnails, store)
-    except ValueError:
-        return None
+        return native_db.library().sidecar_export(str(Path(folder)), bool(include_thumbnails and store),
+                                                  store)
+    except ValueError as exc:
+        logger.warning("METADATA.7z not written in %s: %s", folder, exc)
+        return False
     except OSError as exc:
         logger.error("%s", exc)
         return False
 
 
-def _import_native(folder: Path) -> "list[str] | None":
-    """``import_folder_metadata`` through the native core, or ``None`` to use Python."""
+def import_folder_metadata(folder: Path, _session=None, thumb_base_dir: "Path | None" = None) -> list[str]:
+    """
+    Read METADATA.7z from *folder* and add the records whose archive file
+    exists on disk but is not yet in the DB.  Returns the archive paths
+    inserted (none for a sidecar this library cannot read).
+    """
     from app.database import native_db
     from app.utils.thumbnailer import native_store
-    lib = native_db.library()
+
     store = native_store()
-    if lib is None or store is None or not hasattr(lib, "sidecar_import"):
-        return None
-    try:
-        return lib.sidecar_import(str(folder), store)
-    except ValueError:
-        return None
-
-
-def import_folder_metadata(folder: Path, session: Session, thumb_base_dir: Path) -> list[str]:
-    """
-    Read METADATA.7z from *folder* and populate the DB with any records whose
-    archive file exists on disk but is not yet in the DB.
-
-    Returns a list of archive_path strings that were newly inserted.  *session*
-    may be ``None``: the import then runs natively, or in a session of its own.
-    """
-    from app.database.models import STLModel, Image, STLFile
-    from app.services.moves import archive_folder_for
-    from app.utils.thumbnailer import write_raw_thumbnail
-
-    if session is None:
-        imported = _import_native(Path(folder))
-        if imported is not None:
-            return imported
-        from app.database.db import session_scope
-        with session_scope() as own:
-            return import_folder_metadata(folder, own, thumb_base_dir)
-
-    folder = Path(folder)
-    metadata_path = folder / METADATA_FILENAME
-    if not metadata_path.exists():
+    if store is None:
         return []
-
-    logger.debug("import_folder_metadata: reading %s", metadata_path)
-
     try:
-        data, thumb_bytes_map = _read_metadata_7z(metadata_path)
-    except Exception as exc:
-        logger.error("Failed to read %s: %s", metadata_path, exc, exc_info=True)
+        return native_db.library().sidecar_import(str(Path(folder)), store)
+    except ValueError as exc:
+        logger.warning("METADATA.7z in %s not imported: %s", folder, exc)
         return []
-
-    version = data.get("version", 0)
-    if version != _SCHEMA_VERSION:
-        logger.warning("Unsupported METADATA.7z schema version %s in %s — skipping import", version, folder)
-        return []
-
-    # Restore folder-level crawl pattern into CrawledFolder, if available.
-    folder_pattern = data.get("pattern")
-    if folder_pattern:
-        from app.database.models import CrawledFolder
-        crawled = session.query(CrawledFolder).filter_by(path=str(folder)).first()
-        if crawled is None:
-            crawled = CrawledFolder(path=str(folder), pattern=folder_pattern)
-            session.add(crawled)
-        elif not crawled.pattern:
-            crawled.pattern = folder_pattern
-
-    imported: list[str] = []
-
-    for model_data in data.get("models", []):
-        archive_name = model_data.get("archive_name")
-        if not archive_name:
-            continue
-
-        archive_path = folder / archive_name
-        archive_str  = str(archive_path)
-
-        # Skip if archive file doesn't exist on disk
-        if not archive_path.exists():
-            logger.debug("  import: archive not on disk, skipping — %s", archive_name)
-            continue
-
-        # Skip if already in DB (will be handled by normal hash-based upsert)
-        if session.query(STLModel.id).filter_by(archive_path=archive_str).first():
-            logger.debug("  import: already in DB, skipping — %s", archive_name)
-            continue
-
-        logger.debug("  import: restoring %s", archive_name)
-
-        model = STLModel(
-            archive_path  = archive_str,
-            archive_folder = archive_folder_for(archive_str),
-            archive_hash     = model_data.get("archive_hash", ""),
-            title            = model_data.get("title"),
-            creator          = model_data.get("creator") or model_data.get("author"),
-            source           = model_data.get("source"),
-            release_year     = model_data.get("release_year"),
-            release_month    = model_data.get("release_month"),
-            url              = model_data.get("url"),
-            description      = model_data.get("description"),
-            sequence         = model_data.get("sequence"),
-            presupports      = model_data.get("presupports"),
-            warning          = model_data.get("warning"),
-            compression_rate = model_data.get("compression_rate"),
-        )
-        session.add(model)
-
-        # FK relations — resolve/create by name
-        _restore_fk(session, model, model_data)
-
-        # Tags
-        for tag_name in model_data.get("tags", []):
-            if tag_name.strip():
-                model.tags.append(get_or_create_tag(session, tag_name))
-
-        session.flush()  # get model.id
-
-        # Images / thumbnails
-        for img_data in model_data.get("images", []):
-            thumb_key = img_data.get("thumbnail", "")
-            raw_bytes = thumb_bytes_map.get(thumb_key)
-            if not raw_bytes:
-                continue
-            img = Image(model=model, filename=img_data.get("filename", ""))
-            session.add(img)
-            session.flush()  # get img.id
-            # Thumbnails in METADATA.7z are already sized + JPEG-encoded; store
-            # the bytes as-is rather than re-decoding through Pillow.
-            rel_path = write_raw_thumbnail(img.id, raw_bytes)
-            if rel_path:
-                img.thumbnail_path = rel_path
-            else:
-                session.delete(img)
-
-        # STL file list
-        for sf_data in model_data.get("stl_files", []):
-            fname = sf_data.get("filename")
-            if fname:
-                session.add(STLFile(
-                    model=model,
-                    filename=fname,
-                    file_size=sf_data.get("file_size"),
-                    archive_hash=sf_data.get("archive_hash"),
-                ))
-
-        imported.append(archive_str)
-
-    logger.debug("import_folder_metadata: imported %d record(s) from %s", len(imported), folder)
-    return imported
-
-
-# ---------------------------------------------------------------------------
-# Internal serialisation helpers
-# ---------------------------------------------------------------------------
-
-def _by_id(rows) -> list:
-    """ORM collection rows in id order (both the Python and the native export use it)."""
-    return sorted(rows, key=lambda r: r.id)
-
-
-def _serialize_models(models: list, thumb_base_dir: Path, include_thumbnails: bool = True) -> dict:
-    """Build the ``metadata.json`` payload dict from a list of ``STLModel`` instances.
-
-    Args:
-        models: List of ``STLModel`` ORM objects to serialise.
-        thumb_base_dir: Base directory of the LMDB thumbnail store (currently
-            unused in the payload itself; thumbnails are fetched from LMDB).
-        include_thumbnails: When ``True``, each image entry includes a
-            ``thumbnail`` key referencing its position in the sidecar archive.
-
-    Returns:
-        Dict ready for JSON serialisation, containing ``version``,
-        ``generated_at``, and a ``models`` list.
-    """
-    entries = []
-    for m_idx, model in enumerate(models):
-        images_list = []
-        if include_thumbnails:
-            for i_idx, img in enumerate(_by_id(model.images)):
-                if img.thumbnail_path:
-                    images_list.append({
-                        "filename":  img.filename or "",
-                        "thumbnail": f"{_THUMBS_DIR}/{m_idx}_{i_idx}.jpg",
-                    })
-
-        entries.append({
-            "archive_name":     Path(model.archive_path).name,
-            "archive_hash":     model.archive_hash or "",
-            "title":            model.title,
-            "creator":          model.creator,
-            "source":           model.source,
-            "release_year":     model.release_year,
-            "release_month":    model.release_month,
-            "url":              model.url,
-            "description":      model.description,
-            "sequence":         model.sequence,
-            "presupports":      model.presupports,
-            "warning":          model.warning,
-            "compression_rate": model.compression_rate,
-            "sculptor":      model.sculptor.name     if model.sculptor     else None,
-            "collection":    model.collection.name   if model.collection   else None,
-            "subcollection": model.subcollection.name if model.subcollection else None,
-            "category":      model.category.name     if model.category     else None,
-            "release":       model.release.name      if model.release      else None,
-            "scales":        [s.name for s in _by_id(model.scales)],
-            "tags":          [t.name for t in _by_id(model.tags)],
-            "images":        images_list,
-            "stl_files":     [
-                {
-                    "filename":     sf.filename,
-                    "file_size":    sf.file_size,
-                    "archive_hash": sf.archive_hash,
-                }
-                for sf in sorted(model.stl_files, key=lambda f: f.filename)
-            ],
-        })
-
-    return {
-        "version":      _SCHEMA_VERSION,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "models":       entries,
-    }
-
-
-def _write_metadata_7z(
-    dest: Path,
-    data: dict,
-    models: list,
-    thumb_base_dir: Path,
-    include_thumbnails: bool = True,
-) -> None:
-    """Write *data* as ``metadata.json`` plus thumbnails into a 7z archive at *dest*.
-
-    Uses a temp file + atomic rename so that a failure never leaves a corrupt
-    or truncated sidecar archive at *dest*.
-
-    Args:
-        dest: Target path for the ``.7z`` sidecar file.
-        data: Serialised metadata payload from ``_serialize_models()``.
-        models: ``STLModel`` list (used to iterate ``Image`` records for thumbnails).
-        thumb_base_dir: Unused — thumbnails are fetched from LMDB by image ID.
-        include_thumbnails: When ``False``, the archive contains only
-            ``metadata.json`` and no image files.
-    """
-    tmp_path = dest.with_suffix(".7z.tmp")
-
-    try:
-        with py7zr.SevenZipFile(str(tmp_path), mode="w") as zf:
-            # Add metadata.json
-            json_bytes = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
-            zf.writef(io.BytesIO(json_bytes), _JSON_MEMBER)
-
-            # Add thumbnails only when the option is enabled
-            if include_thumbnails:
-                from app.utils.thumbnailer import get_thumbnail_bytes
-                for m_idx, model in enumerate(models):
-                    for i_idx, img in enumerate(_by_id(model.images)):
-                        if not img.thumbnail_path:
-                            continue
-                        thumb_bytes = get_thumbnail_bytes(img.id)
-                        if not thumb_bytes:
-                            logger.debug("  thumbnail missing in LMDB: image_id=%s", img.id)
-                            continue
-                        arc_name = f"{_THUMBS_DIR}/{m_idx}_{i_idx}.jpg"
-                        zf.writef(io.BytesIO(thumb_bytes), arc_name)
-
-        # Atomic replace
-        tmp_path.replace(dest)
-    except Exception:
-        tmp_path.unlink(missing_ok=True)
-        raise
-
-
-def _read_metadata_7z(metadata_path: Path) -> tuple[dict, dict[str, bytes]]:
-    """Extract ``metadata.json`` and all thumbnails from a METADATA.7z sidecar.
-
-    Extracts to a temporary directory (on ``/dev/shm`` when available for
-    in-memory speed), then reads the JSON and all thumbnail files.
-
-    Args:
-        metadata_path: Path to the ``METADATA.7z`` sidecar file.
-
-    Returns:
-        A 2-tuple of:
-        - ``data``: Parsed JSON dict from ``metadata.json``.
-        - ``thumb_bytes``: Mapping of in-archive path to raw JPEG bytes,
-          e.g. ``{"thumbnails/0_0.jpg": b"..."}``.
-
-    Raises:
-        ValueError: If ``metadata.json`` is not found inside the archive.
-        Exception: Propagates any ``py7zr`` or I/O error to the caller.
-    """
-    _shm = "/dev/shm" if Path("/dev/shm").is_dir() else None
-    with tempfile.TemporaryDirectory(dir=_shm) as tmpdir:
-        tmp = Path(tmpdir)
-        with py7zr.SevenZipFile(str(metadata_path), mode="r") as zf:
-            zf.extractall(path=tmpdir)
-
-        # py7zr may preserve restrictive archive permissions — ensure files are readable
-        for _f in tmp.rglob("*"):
-            if _f.is_file():
-                _f.chmod(_f.stat().st_mode | 0o644)
-
-        # Read JSON
-        json_file = tmp / _JSON_MEMBER
-        if not json_file.exists():
-            raise ValueError(f"metadata.json not found in {metadata_path}")
-        data = json.loads(json_file.read_bytes())
-
-        # Read thumbnails
-        thumb_bytes: dict[str, bytes] = {}
-        thumbs_dir = tmp / _THUMBS_DIR
-        if thumbs_dir.is_dir():
-            for f in thumbs_dir.iterdir():
-                if f.is_file():
-                    arc_name = f"{_THUMBS_DIR}/{f.name}"
-                    thumb_bytes[arc_name] = f.read_bytes()
-
-    return data, thumb_bytes
-
-
-def _restore_fk(session: Session, model, model_data: dict) -> None:
-    """Resolve or create FK-backed lookup entities and attach them to *model*.
-
-    For each named FK field (sculptor, category, subcategory, release, scale)
-    the function looks up an existing record by name, creates one if it does not
-    exist yet, and assigns the relationship on *model*.  Subcategory lookup is
-    scoped to the already-resolved category.
-
-    Args:
-        session: Active SQLAlchemy session.
-        model: The ``STLModel`` being populated.
-        model_data: Deserialised dict for this archive from ``metadata.json``.
-    """
-    sculptor_name = model_data.get("sculptor")
-    if sculptor_name:
-        model.sculptor = get_or_create_sculptor(session, sculptor_name)
-
-    # "collection" key is new; fall back to "category" for old sidecar files
-    collection_name = model_data.get("collection") or model_data.get("category")
-    if collection_name:
-        model.collection = get_or_create_collection(session, collection_name)
-
-    # "subcollection" key is new; fall back to "subcategory" for old sidecar files
-    subcollection_name = model_data.get("subcollection") or model_data.get("subcategory")
-    if subcollection_name and model.collection:
-        model.subcollection = get_or_create_subcollection(
-            session, subcollection_name, model.collection.id,
-        )
-
-    category_name = model_data.get("category") if "collection" in model_data else None
-    if category_name:
-        model.category = get_or_create_category(session, category_name)
-
-    release_name = model_data.get("release")
-    if release_name:
-        model.release = get_or_create_release(session, release_name)
-
-    # Scale is many-to-many; read the new "scales" list and fall back to the
-    # legacy single "scale" key for sidecars written before multi-scale support.
-    scale_names = model_data.get("scales")
-    if scale_names is None:
-        _legacy = model_data.get("scale")
-        scale_names = [_legacy] if _legacy else []
-    if scale_names:
-        model.scales = [get_or_create_scale(session, s) for s in scale_names if s]

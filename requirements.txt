@@ -1,15 +1,12 @@
 PyQt6>=6.6
-SQLAlchemy>=2.0
 py7zr>=0.21
 rarfile>=4.1
 Pillow>=11.3     # >=11.3 ships the built-in AVIF codec (no pillow-avif-plugin needed)
 pymupdf>=1.24
 qt-material>=2.14
 xxhash>=3.4
-lmdb>=1.4
 rapidfuzz>=3.0   # fast fuzzy string matching (Tag Editor → Merge Similar)
 numpy>=1.24      # vectorised perceptual-hash scans (Find by Image / Content Duplicates)
-sqlite-vec>=0.1.6  # vec0 table + KNN search for CLIP image embeddings (metadata columns need 0.1.6)
 
 # AI tagger — runs Qwen2.5-VL through the external llama.cpp `llama-server`
 # binary, which is downloaded on demand into <data_dir>/ai/ at first use.
@@ -18,4 +15,4 @@ sqlite-vec>=0.1.6  # vec0 table + KNN search for CLIP image embeddings (metadata
 # Dev / test
 pytest>=8.0
 pytest-cov>=5.0
-maturin>=1.15    # builds the optional Rust core: python tools/build_native.py
+maturin>=1.15    # builds the required Rust core: python tools/build_native.py

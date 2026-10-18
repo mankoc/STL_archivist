@@ -6,14 +6,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 from PIL import Image as PILImage
-from sqlalchemy import text
 
 import app.utils.thumbnailer as T
 from app.config import CrawlerConfig
 from app.crawler.crawler import CrawlerWorker
-from app.database.db import backfill_archive_folder, session_scope
-from app.database.models import Image, STLModel, Tag
+from app.database import native_db
+from app.database.db import backfill_archive_folder
 from app.services import moves
+from tests import factory
 
 
 def _jpeg(color) -> bytes:
@@ -54,25 +54,20 @@ def test_index_by_hash_skips_empty_fallback_and_shared():
 
 
 def test_merge_into_missing_keeps_old_metadata(thumb_store):
-    with session_scope() as s:
-        old = STLModel(title="Edited title", archive_path=r"F:\old\a.7z", archive_hash="h",
-                       is_missing=True, tags=[Tag(name="mine")],
-                       images=[Image(filename="old.jpg")])
-        new = STLModel(title="Shallow", archive_path=r"F:\new\a.7z", archive_hash="h",
-                       archive_size=10, archive_mtime_ns=5, images=[Image(filename="n.jpg")])
-        s.add_all([old, new])
-        s.flush()
-        new_ref = new.images[0].thumbnail_path = str(new.images[0].id)
-        refs = moves.merge_into_missing(s, old, new)
-        old_id = old.id
+    old = factory.add_model(r"F:\old\a.7z", "h", title="Edited title", is_missing=1, tags=("mine",))
+    factory.add_image(old, "old.jpg")
+    new = factory.add_model(r"F:\new\a.7z", "h", title="Shallow", archive_size=10, archive_mtime_ns=5)
+    new_img = factory.add_image(new, "n.jpg", thumbnail_path="x")
+    new_ref = str(new_img)
+    factory.execute("UPDATE images SET thumbnail_path = ? WHERE id = ?", new_ref, new_img)
+    refs = native_db.library().merge_into_missing(old, new)
     assert refs == [new_ref]
-    with session_scope() as s:
-        (m,) = s.query(STLModel).all()
-        assert m.id == old_id and m.title == "Edited title"
-        assert m.archive_path == r"F:\new\a.7z" and m.archive_folder == "F:/new"
-        assert (m.archive_size, m.archive_mtime_ns, m.is_missing) == (10, 5, False)
-        assert [t.name for t in m.tags] == ["mine"]
-        assert [i.filename for i in m.images] == ["old.jpg"]
+    (m,) = [dict(r) for r in factory.rows("SELECT * FROM models")]
+    assert m["id"] == old and m["title"] == "Edited title"
+    assert m["archive_path"] == r"F:\new\a.7z" and m["archive_folder"] == "F:/new"
+    assert (m["archive_size"], m["archive_mtime_ns"], m["is_missing"]) == (10, 5, 0)
+    assert factory.names(old, "tags") == ["mine"]
+    assert [r[0] for r in factory.rows("SELECT filename FROM images WHERE model_id = ?", old)] == ["old.jpg"]
 
 
 def test_delete_thumbnails_removes_all_in_one_call(thumb_store):
@@ -84,11 +79,9 @@ def test_delete_thumbnails_removes_all_in_one_call(thumb_store):
 
 
 def test_backfill_normalises_backslash_folders():
-    with session_scope() as s:
-        s.add(STLModel(archive_path=r"F:\x\a.7z", archive_hash="h", archive_folder=r"F:\x"))
+    factory.add_model(r"F:\x\a.7z", "h", archive_folder=r"F:\x")
     backfill_archive_folder()
-    with session_scope() as s:
-        assert s.execute(text("SELECT archive_folder FROM models")).scalar_one() == "F:/x"
+    assert factory.scalar("SELECT archive_folder FROM models") == "F:/x"
 
 
 # ── crawler ──────────────────────────────────────────────────────────────────
@@ -96,10 +89,9 @@ def test_backfill_normalises_backslash_folders():
 def test_crawler_matches_moved_archive_before_extracting(tmp_path, thumb_store):
     src = _zip(tmp_path / "old" / "Knight.zip", "knight")
     _crawl(tmp_path / "old")
-    with session_scope() as s:
-        m = s.query(STLModel).one()
-        m.title = "My edited title"
-        model_id, image_ids = m.id, [i.id for i in m.images]
+    model_id = factory.scalar("SELECT id FROM models")
+    factory.execute("UPDATE models SET title = 'My edited title'")
+    image_ids = [r[0] for r in factory.rows("SELECT id FROM images ORDER BY id")]
     assert image_ids, "first crawl should have stored a thumbnail"
 
     dest = tmp_path / "new" / "sub" / "Knight.zip"
@@ -115,13 +107,12 @@ def test_crawler_matches_moved_archive_before_extracting(tmp_path, thumb_store):
     assert "Knight.zip" not in extracted          # no re-extraction of the moved file
     assert moved == [(str(src), str(dest))]
     assert worker._stats_new == 0
-    with session_scope() as s:
-        (m,) = s.query(STLModel).all()           # no shallow duplicate
-        assert m.id == model_id and m.title == "My edited title"
-        assert m.archive_path == str(dest)
-        assert m.archive_folder == dest.parent.as_posix()
-        assert not m.is_missing
-        assert [i.id for i in m.images] == image_ids
+    (m,) = [dict(r) for r in factory.rows("SELECT * FROM models")]   # no shallow duplicate
+    assert m["id"] == model_id and m["title"] == "My edited title"
+    assert m["archive_path"] == str(dest)
+    assert m["archive_folder"] == dest.parent.as_posix()
+    assert not m["is_missing"]
+    assert [r[0] for r in factory.rows("SELECT id FROM images ORDER BY id")] == image_ids
     assert all(T.get_thumbnail_bytes(i) for i in image_ids)   # thumbnails kept
 
 
@@ -129,11 +120,9 @@ def test_crawler_still_reconciles_name_size_matches_after_crawl(tmp_path, thumb_
     # Different content hash but same name and size: matched after the crawl.
     _zip(tmp_path / "old" / "Orc.zip", "orc-a")
     _crawl(tmp_path / "old")
-    with session_scope() as s:
-        m = s.query(STLModel).one()
-        model_id = m.id
-        m.archive_hash = "stale-hash"            # forces the fallback path
-        m.archive_size = (tmp_path / "old" / "Orc.zip").stat().st_size
+    model_id = factory.scalar("SELECT id FROM models")
+    factory.execute("UPDATE models SET archive_hash = 'stale-hash', archive_size = ?",   # forces the fallback path
+                    (tmp_path / "old" / "Orc.zip").stat().st_size)
     (tmp_path / "old" / "Orc.zip").rename(tmp_path / "Orc.zip.bak")
     dest = tmp_path / "new" / "Orc.zip"
     dest.parent.mkdir()
@@ -141,7 +130,6 @@ def test_crawler_still_reconciles_name_size_matches_after_crawl(tmp_path, thumb_
 
     _worker, moved = _crawl(tmp_path / "new")
     assert len(moved) == 1
-    with session_scope() as s:
-        (m,) = s.query(STLModel).all()
-        assert m.id == model_id and m.archive_path == str(dest)
-        assert m.archive_folder == dest.parent.as_posix()
+    (m,) = [dict(r) for r in factory.rows("SELECT * FROM models")]
+    assert m["id"] == model_id and m["archive_path"] == str(dest)
+    assert m["archive_folder"] == dest.parent.as_posix()

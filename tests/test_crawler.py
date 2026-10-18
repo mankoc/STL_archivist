@@ -1,49 +1,41 @@
 """
-Tests for crawler utilities: file hashing, archive extraction, path-pattern
-behaviour, apply_extracted_to_model, and CrawlerWorker._upsert_archive logic.
+Tests for crawler utilities: archive hashing and extraction, path-pattern
+behaviour, and end-to-end crawls (unchanged archives are skipped, changed
+ones get fresh thumbnails).
 """
 import io
 import tempfile
-import types
 import zipfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
+
+from PIL import Image as PILImage
 
 from app.config import CrawlerConfig
-from app.database.db import session_scope
-from app.database.models import Image, STLModel
+from tests import factory
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+def _jpeg(color) -> bytes:
+    buf = io.BytesIO()
+    PILImage.new("RGB", (64, 48), color).save(buf, "JPEG")
+    return buf.getvalue()
 
-def _make_worker(source_dir: str = "/tmp", pattern: str = ""):
-    """Return a duck-typed stand-in for CrawlerWorker.
 
-    CrawlerWorker inherits from QThread; creating a real instance requires Qt
-    internals.  Instead we build a SimpleNamespace with the attributes that
-    _upsert_archive reads from `self`, then call the method as an unbound
-    function so no Qt initialisation is needed.
-    """
+def _zip(path: Path, color, marker: str = "m") -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("model.stl", f"solid {marker}\nendsolid\n")
+        zf.writestr("render.jpg", _jpeg(color))
+    return path
+
+
+def _crawl(folder: Path):
     from app.crawler.crawler import CrawlerWorker
-
-    ns = types.SimpleNamespace(
-        source_dir=Path(source_dir),
-        _pattern=pattern,
-        _config=CrawlerConfig(),
-        _stop_requested=False,
-        log=MagicMock(),
-    )
-    # Bind all real CrawlerWorker methods that _upsert_archive delegates to.
-    ns._upsert_archive             = lambda *a, **kw: CrawlerWorker._upsert_archive(ns, *a, **kw)
-    ns._apply_pattern_to_unchanged = lambda *a, **kw: CrawlerWorker._apply_pattern_to_unchanged(ns, *a, **kw)
-    ns._log_metadata               = lambda *a, **kw: CrawlerWorker._log_metadata(ns, *a, **kw)
-    ns._detect_rules               = lambda *a, **kw: CrawlerWorker._detect_rules(ns, *a, **kw)
-    ns._assign_metadata            = lambda *a, **kw: CrawlerWorker._assign_metadata(ns, *a, **kw)
-    ns._update_thumbnails          = lambda *a, **kw: CrawlerWorker._update_thumbnails(ns, *a, **kw)
-    ns._store_folder_images        = lambda *a, **kw: CrawlerWorker._store_folder_images(ns, *a, **kw)
-    return ns
+    cfg = CrawlerConfig()
+    cfg.metadata_sidecar_enabled = False
+    worker = CrawlerWorker(str(folder), config=cfg)
+    worker.run()        # synchronously, no thread
+    return worker
 
 
 # ---------------------------------------------------------------------------
@@ -139,135 +131,44 @@ def test_pattern_to_regex_no_dir_crossing():
 
 
 # ---------------------------------------------------------------------------
-# test_apply_extracted_overwrite_false
+# End-to-end crawls
 # ---------------------------------------------------------------------------
 
-def test_apply_extracted_overwrite_false():
-    """Fields already set on a model are preserved when overwrite=False."""
-    from app.utils.path_pattern import apply_extracted_to_model
-
-    with session_scope() as session:
-        model = STLModel(
-            archive_path="/tmp/test.7z",
-            archive_hash="aaa",
-            title="Original Title",
-            creator="Original Creator",
-        )
-        session.add(model)
-        session.flush()
-
-        extracted = {
-            "title":   "New Title",
-            "creator": "New Creator",
-            "source":  "Patreon",   # was empty → should be filled
-        }
-        apply_extracted_to_model(session, model, extracted, overwrite=False)
-
-        assert model.title   == "Original Title"    # must NOT be overwritten
-        assert model.creator == "Original Creator"  # must NOT be overwritten
-        assert model.source  == "Patreon"           # was None → filled in
+def test_crawl_stores_model_and_thumbnail(tmp_path):
+    from app.utils.thumbnailer import get_thumbnail_bytes
+    _zip(tmp_path / "lib" / "Knight.zip", (10, 120, 200))
+    _crawl(tmp_path / "lib")
+    (m,) = factory.rows("SELECT * FROM models")
+    assert m["archive_path"] == str(tmp_path / "lib" / "Knight.zip")
+    assert m["archive_folder"] == (tmp_path / "lib").as_posix()
+    (img,) = factory.rows("SELECT id FROM images WHERE model_id = ?", m["id"])
+    assert get_thumbnail_bytes(img["id"])
 
 
-# ---------------------------------------------------------------------------
-# test_crawler_skips_unchanged_hash
-# ---------------------------------------------------------------------------
-
-def test_crawler_skips_unchanged_hash():
-    """When archive hash matches the DB record, extract_metadata is never called.
-
-    In the new design the caller pre-computes the hash and passes contents=None
-    to signal that the archive is unchanged.
-    """
-    KNOWN_HASH = "deadbeefdeadbeef"
-
-    with session_scope() as session:
-        session.add(STLModel(
-            archive_path="/tmp/unchanged.zip",
-            archive_hash=KNOWN_HASH,
-            title="Existing",
-        ))
-
-    worker = _make_worker()
-
-    with patch("app.crawler.crawler.extract_metadata") as mock_meta:
-        with session_scope() as session:
-            existing = session.query(STLModel).filter_by(
-                archive_path="/tmp/unchanged.zip"
-            ).first()
-            worker._upsert_archive(
-                Path("/tmp/unchanged.zip"), session, 5, 512,
-                current_hash=KNOWN_HASH,
-                existing=existing,
-                contents=None,   # None → hash unchanged, skip extraction
-            )
-
-        mock_meta.assert_not_called()
+def test_crawler_skips_unchanged_archive(tmp_path):
+    import app.crawler.crawler as crawler_mod
+    _zip(tmp_path / "lib" / "Knight.zip", (10, 120, 200))
+    _crawl(tmp_path / "lib")
+    factory.execute("UPDATE models SET title = 'Edited'")
+    with patch.object(crawler_mod, "extract_archive_contents",
+                      wraps=crawler_mod.extract_archive_contents) as extract:
+        _crawl(tmp_path / "lib")
+    assert extract.call_count == 0
+    assert factory.scalar("SELECT title FROM models") == "Edited"
 
 
-# ---------------------------------------------------------------------------
-# test_thumbnail_refresh_on_hash_change
-# ---------------------------------------------------------------------------
+def test_thumbnail_refresh_on_hash_change(tmp_path):
+    from app.utils.thumbnailer import get_thumbnail_bytes
+    path = _zip(tmp_path / "lib" / "Orc.zip", (200, 10, 10), "a")
+    _crawl(tmp_path / "lib")
+    old_hash = factory.scalar("SELECT archive_hash FROM models")
+    (old_img,) = [r[0] for r in factory.rows("SELECT id FROM images")]
+    old_thumb = get_thumbnail_bytes(old_img)
 
-def test_thumbnail_refresh_on_hash_change():
-    """Old thumbnails are deleted and new ones generated when the hash changes."""
-    from app.crawler.metadata import ModelMetadata
+    _zip(path, (10, 200, 10), "changed")
+    _crawl(tmp_path / "lib")
 
-    OLD_HASH = "oldhash"
-    NEW_HASH = "newhash"
-
-    with session_scope() as session:
-        model = STLModel(
-            archive_path="/tmp/changed.zip",
-            archive_hash=OLD_HASH,
-            title="OldModel",
-        )
-        img = Image(
-            model=model,
-            filename="thumb.jpg",
-            thumbnail_path="thumbs/1.jpg",
-        )
-        session.add(model)
-        session.add(img)
-
-    worker = _make_worker()
-
-    # Minimal PNG-like bytes so save_thumbnail gets real image data
-    import struct, zlib
-    def _minimal_png() -> bytes:
-        sig = b"\x89PNG\r\n\x1a\n"
-        def chunk(name, data):
-            return struct.pack(">I", len(data)) + name + data + struct.pack(">I", zlib.crc32(name + data) & 0xFFFFFFFF)
-        ihdr = chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
-        idat_data = zlib.compress(b"\x00\xff\xff\xff")
-        idat = chunk(b"IDAT", idat_data)
-        iend = chunk(b"IEND", b"")
-        return sig + ihdr + idat + iend
-
-    img_bytes = _minimal_png()
-
-    with (
-        patch("app.crawler.crawler.extract_metadata",
-              return_value=ModelMetadata(title="NewModel")),
-        patch("app.crawler.crawler.delete_thumbnails") as mock_delete,
-        patch("app.crawler.crawler.save_thumbnail", return_value="thumbs/2.jpg"),
-    ):
-        with session_scope() as session:
-            existing = session.query(STLModel).filter_by(
-                archive_path="/tmp/changed.zip"
-            ).first()
-            worker._upsert_archive(
-                Path("/tmp/changed.zip"), session, 5, 512,
-                current_hash=NEW_HASH,
-                existing=existing,
-                contents={"thumb.jpg": img_bytes},  # pre-extracted by caller
-            )
-
-        # Old thumbnail must have been deleted, in one batched call
-        mock_delete.assert_called_once_with(["thumbs/1.jpg"])
-
-    # DB must reflect the updated hash and new title
-    with session_scope() as session:
-        m = session.query(STLModel).filter_by(archive_path="/tmp/changed.zip").first()
-        assert m is not None
-        assert m.archive_hash == NEW_HASH
-        assert m.title == "NewModel"
+    assert factory.count("models") == 1
+    assert factory.scalar("SELECT archive_hash FROM models") != old_hash
+    (new_img,) = [r[0] for r in factory.rows("SELECT id FROM images")]
+    assert get_thumbnail_bytes(new_img) not in (None, old_thumb)

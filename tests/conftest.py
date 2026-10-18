@@ -20,21 +20,6 @@ from app.utils.thumbnailer import init_thumbnail_store
 
 
 @pytest.fixture(autouse=True)
-def native_follows_environment():
-    """After each test, load or drop the native core to match ``STL_NATIVE`` again.
-
-    Tests switch the native core with ``monkeypatch.setenv`` / ``delenv`` and
-    ``native.reload()``.  A reload made before monkeypatch restores the
-    environment would leave the next tests on the wrong implementation (in an
-    ``STL_NATIVE=0`` run, on the native one).  Being autouse and defined here,
-    this fixture is set up first and torn down last, after every monkeypatch.
-    """
-    yield
-    from app import native
-    native.reload()
-
-
-@pytest.fixture(autouse=True)
 def library_db(tmp_path):
     """A fresh library database file (and thumbnail store) per test.
 

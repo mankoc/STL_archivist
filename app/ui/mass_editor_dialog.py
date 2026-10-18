@@ -17,7 +17,6 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QBrush, QColor, QCursor
 
 from app.services import model_edit
-import re
 
 from app.utils.path_pattern import (
     parse_path,
@@ -49,7 +48,8 @@ _TOKEN_HELP = (
 )
 
 _REGEX_HELP = (
-    "Python regular expression syntax for Find & Replace.\n\n"
+    "Regular expression syntax for Find & Replace (the Rust fancy-regex\n"
+    "dialect: Unicode-aware, with lookarounds and backreferences).\n\n"
     "BASIC PATTERNS:\n"
     "  .        — any character\n"
     "  \\d       — digit (0-9)\n"
@@ -71,7 +71,7 @@ _REGEX_HELP = (
     "  (?:...)  — non-capturing group\n"
     "  |        — alternation (or)\n\n"
     "REPLACEMENT:\n"
-    "  \\0 or \\g<0> — entire match\n"
+    "  \\g<0>       — entire match\n"
     "  \\1, \\2, …   — capture groups\n"
     "  \\g<name>    — named group\n\n"
     "EXAMPLES:\n"
@@ -434,7 +434,6 @@ class MassEditorDialog(QDialog):
     # ------------------------------------------------------------------
     # Token resolution
     # ------------------------------------------------------------------
-    _token_context = staticmethod(model_edit.token_context)
     _resolve_tokens = staticmethod(model_edit.resolve_tokens)
 
     def _on_collection_changed(self, collection_name: str) -> None:
@@ -709,9 +708,10 @@ class MassEditorDialog(QDialog):
         }
         try:
             model_edit.mass_save(plan)
-        except re.error as exc:
+        except ValueError as exc:
             from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.warning(self, self.tr("Invalid Regex"), f"The pattern is not valid:\n{exc}")
+            QMessageBox.warning(self, self.tr("Invalid Find & Replace"),
+                                f"The find pattern or replacement is not valid:\n{exc}")
             return
 
         from app.ui import lookup_cache as _lookup_cache

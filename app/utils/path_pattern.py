@@ -14,15 +14,7 @@ to resolve them into the correct DB objects.
 import re
 from functools import lru_cache
 
-from sqlalchemy.orm import Session
 
-from app.database.helpers import (
-    get_or_create_collection,
-    get_or_create_release,
-    get_or_create_sculptor,
-    get_or_create_subcollection,
-)
-from app.database.models import STLModel, Subcollection
 
 
 def parse_release_date(s: str) -> tuple[int | None, int | None]:
@@ -281,7 +273,6 @@ def render_path_pattern(pattern: str, model) -> str:
     *model* is an ``STLModel`` or a dict of its fields with lookups by name
     (as ``services.browser_data.sort_sources`` returns them).
     """
-    import os
     import re
 
     if not isinstance(model, dict):
@@ -337,85 +328,3 @@ def render_path_pattern(pattern: str, model) -> str:
     return rendered
 
 
-def apply_extracted_to_model(
-    session: Session,
-    model: STLModel,
-    extracted: dict[str, str],
-    overwrite: bool = True,
-) -> None:
-    """Write *extracted* field values onto *model* inside *session*.
-
-    Simple string fields are set directly.  FK-backed fields (``sculptor_name``,
-    ``collection_name``, ``subcollection_name``, ``release_name``) trigger a DB
-    lookup-and-create via :mod:`app.database.helpers`.
-
-    Args:
-        session: Active SQLAlchemy session.  Caller commits.
-        model: The ``STLModel`` row being updated.
-        extracted: Field values from ``parse_path()``.  Unknown keys are
-            ignored silently.
-        overwrite: When ``False`` (the crawler's use case), only fields whose
-            current value is falsy (None / empty string / 0) are written, so
-            user-edited values survive a re-crawl.
-    """
-
-    def _should_set(current_value) -> bool:
-        return True if overwrite else not current_value
-
-    for attr, value in extracted.items():
-        if not value:
-            continue
-
-        if attr in _SIMPLE_ATTRS:
-            if _should_set(getattr(model, attr, None)):
-                setattr(model, attr, value)
-
-        elif attr == "release_date":
-            if _should_set(model.release_year):
-                year, month = parse_release_date(value)
-                if year is not None:
-                    model.release_year = year
-                    model.release_month = month
-
-        elif attr == "sculptor_name":
-            if _should_set(model.sculptor_id):
-                model.sculptor = get_or_create_sculptor(session, value)
-
-        elif attr == "collection_name":
-            if _should_set(model.collection_id):
-                model.collection = get_or_create_collection(session, value)
-
-        elif attr == "subcollection_name":
-            if _should_set(model.subcollection_id):
-                # Subcollection is unique per parent collection, so the
-                # lookup needs both the name and the parent ID.  Read from
-                # the relationship attribute (`model.collection`) rather
-                # than the FK column (`model.collection_id`): a relationship
-                # set earlier in this same loop is visible immediately, but
-                # the FK column is not synced until the next flush.
-                parent = model.collection
-                if parent is not None:
-                    session.flush()  # ensure parent.id is populated
-                    model.subcollection = get_or_create_subcollection(
-                        session, value, parent.id,
-                    )
-                else:
-                    sc = (
-                        session.query(Subcollection)
-                        .filter_by(name=value)
-                        .order_by(Subcollection.id)
-                        .first()
-                    )
-                    if sc is not None:
-                        model.subcollection = sc
-
-        elif attr == "sequence":
-            if _should_set(model.sequence):
-                try:
-                    model.sequence = int(value)
-                except ValueError:
-                    pass
-
-        elif attr == "release_name":
-            if _should_set(model.release_id):
-                model.release = get_or_create_release(session, value)
