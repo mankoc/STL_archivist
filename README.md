@@ -121,10 +121,23 @@ cargo run --release -p stl-server -- --data-dir <data dir> --bind 127.0.0.1:8770
 ```
 
 It reads `<data dir>/server.json` (`{"bind": "127.0.0.1:8770"}`) and the `STL_DATA_DIR` /
-`STL_BIND` environment variables; the API is described at `/api/openapi.json`. There is no
-authentication yet, so keep it on `127.0.0.1`. A library can be open in only one process at
-a time: the desktop app refuses a library the server has open (and a second app instance
-on the same library), and the server refuses one the app has open.
+`STL_BIND` environment variables; the API is described at `/api/openapi.json`.
+
+The server has user accounts with three roles: *viewer* (read only), *editor* and *admin*
+(also manages users). On first start, create the administrator **on the server's own
+machine** (setup is refused from other machines and through a proxy):
+
+```bash
+curl -X POST http://127.0.0.1:8770/api/auth/setup -H "content-type: application/json" \
+     -d '{"name": "admin", "password": "at least 8 characters"}'
+```
+
+Accounts are kept in `<data dir>/server.db`, separate from the library database. Put the
+server behind an HTTPS reverse proxy before exposing it beyond `127.0.0.1`.
+
+A library can be open in only one process at a time: the desktop app refuses a library the
+server has open (and a second app instance on the same library), and the server refuses one
+the app has open.
 
 ### Environment overrides
 

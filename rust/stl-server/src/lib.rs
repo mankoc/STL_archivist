@@ -1,12 +1,14 @@
 //! stlLibrary server (Phase 5 of `docs/rust-migration-plan.md`): the HTTP API
 //! over `stl-core`. The server owns the data directory (compatibility rule 7):
 //! it holds the library lock, migrates the database and opens the thumbnail
-//! store once.
+//! store once. Accounts live in their own database (`accounts`).
 //!
 //! Database and store work is blocking; handlers run it on tokio's blocking
-//! pool through [`AppState::run`].
+//! pool through [`Library::run`].
 
+pub mod accounts;
 pub mod api;
+pub mod auth;
 pub mod config;
 pub mod error;
 
@@ -24,6 +26,9 @@ pub struct Library {
     pub config: Config,
     pub db: Pool,
     pub thumbs: ThumbStore,
+    /// `server.db`: users, sessions, per-user settings.
+    pub accounts: Pool,
+    pub logins: auth::LoginThrottle,
     _lock: LibraryLock,
 }
 
@@ -39,7 +44,19 @@ impl Library {
         tracing::info!(?report, "database ready");
         let thumbs = ThumbStore::open(&config.thumb_dir())
             .map_err(|e| format!("thumbnail store {}: {e}", config.thumb_dir().display()))?;
-        Ok(Library { db: Pool::new(&config.db_path()), thumbs, config, _lock: lock })
+        let accounts_path = config.data_dir.join(accounts::DB_FILE);
+        let accounts = Pool::new(&accounts_path);
+        accounts
+            .with(accounts::ensure_schema)
+            .map_err(|e| format!("accounts {}: {e}", accounts_path.display()))?;
+        Ok(Library {
+            db: Pool::new(&config.db_path()),
+            thumbs,
+            accounts,
+            logins: auth::LoginThrottle::default(),
+            config,
+            _lock: lock,
+        })
     }
 
     /// Run blocking work `f` on the blocking pool.
@@ -52,7 +69,9 @@ impl Library {
     }
 }
 
-/// The application router.
+/// The application router. Serve it with
+/// `into_make_service_with_connect_info::<SocketAddr>()`: first-run setup
+/// checks the peer address.
 pub fn app(state: AppState) -> axum::Router {
     api::router().with_state(state)
 }
