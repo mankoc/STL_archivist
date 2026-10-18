@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Rust migration, step 4g-5a: RAR archives are listed and read natively.** Archive contents and fingerprints come from a port of the `rarfile` reader (verified against every RAR archive of a 60,000-archive library), and data is read through the UnRAR tool as before. Listing a RAR archive is now near-instant.
+
 - **Rust migration, step 4g-6: Generate Thumbnails, Rescan, Recrawl and Update Crawled Folders save natively** (on Windows), with results identical to the Python code.
 - **Fix:** *Recrawl* now uses the configured UnRAR tool and crawler settings, so `.rar` archives no longer fail to re-extract.
 

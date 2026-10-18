@@ -69,8 +69,9 @@ the native core owns the schema from Phase 4b).
   Python callbacks never run on Rust threads. Arrays cross as NumPy buffers in and bytes out
   (`np.frombuffer`). Tests for code with a native path should run in both modes (see the
   `implementation` fixture in `tests/test_image_duplicates.py`).
-- Native archive reading (`rust/stl-core/src/archive/`, `.zip` and `.7z` only; RAR stays in
-  `rarfile`) must return exactly what the Python readers return, or raise. When in doubt it
+- Native archive reading (`rust/stl-core/src/archive/`: `.zip`, `.7z`, and `.rar` with
+  `rar.rs` porting `rarfile`'s header parsing and reading data through UnRAR) must return
+  exactly what the Python readers return, or raise. When in doubt it
   raises (`Unsupported`) and `app/crawler/archive.py` (`_native_catalog`, `_read_members`)
   falls back to the Python reader for that archive. `zip.rs` is a port of CPython's `zipfile`
   catalog and `ZipFile.open` checks. Do not use `sevenz-rust2`'s `BlockDecoder` on a block

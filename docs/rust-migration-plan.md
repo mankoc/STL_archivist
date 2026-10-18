@@ -710,6 +710,30 @@ real archives, all through the native paths.
 What is left of SQLAlchemy in `app/ui`: engine-level actions (Compact Database's
 `get_engine`, Clear Database), which go with 4h.
 
+**4g-5a: done 2026-10-18 (RAR in Rust).** `archive/rar.rs` ports what `rarfile` 4.2 returns:
+- **The catalog:** RAR 2.9 / 3 / 4 and RAR5 headers, with `rarfile`'s stop rules (header CRC
+  error, EOF, an unknown RAR5 block, encrypted headers). Names are decoded the same way:
+  RAR3's compressed-Unicode names, then UTF-8, then UTF-16LE, then cp1252 with replacement.
+  Directories and old file versions are dropped.
+- **Member reads:** stored members are read directly; compressed ones through
+  `UnRAR.exe p`, the tool `rarfile` uses. Data with a wrong size or CRC is left out, as
+  `rarfile`'s read raises for it.
+
+These are left to the Python reader:
+- SFX archives, volumes and comments;
+- malformed headers, and time fields `rarfile` would reject;
+- encrypted members, BLAKE2-only members, and member names UnRAR would read as a pattern.
+
+`archive.py` routes `.rar` to it (`_native_catalog`, `_read_members` with `_unrar_tool`).
+`tests/golden/test_rar_golden.py` builds RAR5 archives with `Rar.exe` (stored, compressed,
+solid, Unicode names, directories, empty files, comments, encrypted headers and data,
+volumes, extra times, BLAKE2), and compares catalogs and reads with `rarfile`, or checks the
+native refusal. WinRAR 7 no longer writes RAR4, so RAR4 is covered by the gate.
+
+Gate: all 106 `.rar` archives of the reference library give identical catalogs; every
+stored `archive_hash` is reproduced; 36 sampled archives read identically. The catalog
+reads take a few milliseconds, against 6 s through `rarfile`.
+
 ### Phase 5: Server (medium)
 
 `stl-server` on axum, the product's centre from here on:
