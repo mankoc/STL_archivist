@@ -49,6 +49,32 @@ fn roots(lib: &Library) -> Result<Vec<String>, ApiError> {
     Ok(out)
 }
 
+/// The spelling under which the library knows the folder `path`: the crawled
+/// folder that is (or contains) the same directory, with the rest appended in
+/// its separator style. Archive paths are compared as strings, so a crawl of
+/// `C:/STL` must not duplicate every record of `C:\STL`. `None` when no crawled
+/// folder covers it.
+pub fn known_spelling(lib: &Library, path: &Path) -> Result<Option<String>, ApiError> {
+    let Ok(real) = std::fs::canonicalize(path) else { return Ok(None) };
+    let mut best: Option<(usize, String)> = None;
+    for (stored, _) in lib.db.with(duplicates::crawled_folders)? {
+        let Ok(root) = std::fs::canonicalize(&stored) else { continue };
+        let Ok(rest) = real.strip_prefix(&root) else { continue };
+        let depth = root.components().count();
+        if best.as_ref().is_some_and(|(d, _)| *d >= depth) {
+            continue;
+        }
+        let sep = if stored.contains('\\') { "\\" } else { "/" };
+        let mut spelled = stored.trim_end_matches(['/', '\\']).to_string();
+        for part in rest.components() {
+            spelled.push_str(sep);
+            spelled.push_str(&part.as_os_str().to_string_lossy());
+        }
+        best = Some((depth, if rest.as_os_str().is_empty() { stored } else { spelled }));
+    }
+    Ok(best.map(|(_, s)| s))
+}
+
 /// 403 unless `me` may read or crawl `path` (it must exist).
 pub fn check_access(lib: &Library, me: &CurrentUser, path: &Path) -> Result<(), ApiError> {
     let target = canonical(path).ok_or_else(|| ApiError::not_found(format!("{} does not exist", path.display())))?;

@@ -1,4 +1,4 @@
-import { describe as label, duration, elapsed, percent, sortJobs, type Job } from "./jobs";
+import { addJob, describe as label, duration, elapsed, percent, sortJobs, type Job } from "./jobs";
 
 const job = (over: Partial<Job>): Job =>
   ({
@@ -33,5 +33,12 @@ describe("jobs", () => {
   it("sorts active jobs first, then newest", () => {
     const sorted = sortJobs([job({ id: 1, state: "done" }), job({ id: 2, state: "queued" }), job({ id: 3, state: "failed" })]);
     expect(sorted.map((j) => j.id)).toEqual([2, 3, 1]);
+  });
+
+  it("adds a submitted job unless its events came first", () => {
+    const queued = job({ id: 7, state: "queued" });
+    expect(addJob(undefined, queued)).toEqual([queued]);
+    const done = job({ id: 7, state: "done" });
+    expect(addJob([done], queued)).toEqual([done]);
   });
 });

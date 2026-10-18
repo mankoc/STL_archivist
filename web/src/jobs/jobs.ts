@@ -31,6 +31,9 @@ const KIND_LABEL: Record<string, string> = {
   prune_images: "Prune images",
   compact_database: "Compact database",
   compute_embeddings: "Compute embeddings",
+  find_content_duplicates: "Find duplicate STL files",
+  find_image_duplicates: "Find duplicate images",
+  find_metadata_duplicates: "Find duplicate metadata",
 };
 
 /** "Crawl D:/STL/Patreon", "Verify archives", … */
@@ -60,4 +63,11 @@ export function elapsed(job: Job, now: number): string | null {
 /** Newest first, with active jobs on top. */
 export function sortJobs(jobs: Job[]): Job[] {
   return [...jobs].sort((a, b) => Number(isActive(b)) - Number(isActive(a)) || b.id - a.id);
+}
+
+/** Add a job just submitted to a cached list, unless its events got there
+ *  first (a quick job can finish before the submit response arrives). */
+export function addJob(old: Job[] | undefined, job: Job): Job[] {
+  const list = old ?? [];
+  return list.some((j) => j.id === job.id) ? list : [...list, job];
 }

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Web client step 6g: duplicate finders.** The *Duplicates* page finds archives sharing STL files, archives with matching images (perceptual hash or AI embedding, skipping banners shared by many models) and models with equal or similar metadata (exact, Levenshtein, Soundex). Each search runs as a server job; its result stays with the job, and *Compare* shows two archives side by side. A crawl of a folder the library already knows under another spelling (`C:/STL` for `C:\STL`, or a folder inside it) now uses the stored spelling instead of adding every archive again.
+
 - **Web client step 6f: statistics and Find by Image.** The Statistics page shows library totals, rankings and the distribution of any column. Find by Image takes a dropped picture and finds models with similar thumbnails, by perceptual hash or (when the server has ONNX Runtime and the CLIP model) AI embedding.
 
 - **Web client step 6e: mass editor and lookup editors.** Select models and use *Mass edit*: path patterns with a preview of what they extract, manual fields, lookups, tags, find & replace and trimming. The *Lookups* page edits tags, categories, collections, subcollections and scales (add, rename, delete, merge, delete unused tags) and creators (rename, merge, clear, profiles).

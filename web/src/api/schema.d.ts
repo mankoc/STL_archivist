@@ -861,6 +861,31 @@ export interface components {
              */
             total: number;
         };
+        /** @description Two archives sharing STL files (name and size). */
+        ContentRow: {
+            /** Format: int64 */
+            id_a: number;
+            /** Format: int64 */
+            id_b: number;
+            /**
+             * Format: int64
+             * @description Files in both.
+             */
+            overlap: number;
+            path_a?: string | null;
+            path_b?: string | null;
+            /**
+             * Format: double
+             * @description `overlap` over the larger list.
+             */
+            similarity: number;
+            title_a?: string | null;
+            title_b?: string | null;
+            /** Format: int64 */
+            total_a: number;
+            /** Format: int64 */
+            total_b: number;
+        };
         Count: {
             /** Format: int64 */
             count: number;
@@ -1050,6 +1075,19 @@ export interface components {
             regex?: boolean;
             replace: string;
         };
+        /** @description What a finder job found (`JobDetail.result`). */
+        FinderResult: {
+            pairs: components["schemas"]["ContentRow"][];
+            /** @enum {string} */
+            type: "content";
+        } | (components["schemas"]["ImageResult"] & {
+            /** @enum {string} */
+            type: "images";
+        }) | {
+            groups: components["schemas"]["MetadataGroup"][];
+            /** @enum {string} */
+            type: "metadata";
+        };
         FolderPath: {
             path: string;
         };
@@ -1059,16 +1097,63 @@ export interface components {
         IdsRequest: {
             ids: number[];
         };
+        /** @description Two archives with matching images. */
+        ImagePair: {
+            /**
+             * Format: double
+             * @description The best match: differing bits (`dhash`) or cosine similarity (`clip`).
+             */
+            best: number;
+            /** Format: int64 */
+            id_a: number;
+            /** Format: int64 */
+            id_b: number;
+            /**
+             * Format: int64
+             * @description Images of the model compared.
+             */
+            imgs_a: number;
+            /** Format: int64 */
+            imgs_b: number;
+            /**
+             * Format: int64
+             * @description Matching image pairs.
+             */
+            pairs: number;
+            path_a: string;
+            path_b: string;
+            /** Format: int64 */
+            size_a?: number | null;
+            /** Format: int64 */
+            size_b?: number | null;
+            title_a: string;
+            title_b: string;
+        };
         ImageRef: {
             /** Format: int64 */
             id: number;
             /** @description Where the thumbnail is served; absent when the image has none. */
             thumbnail?: string | null;
         };
+        ImageResult: {
+            /** @description Images compared. */
+            images: number;
+            /** @description Distinct images (identical ones collapsed). */
+            items: number;
+            /** @description `dhash` or `clip`. */
+            method: string;
+            near_pairs: number;
+            pairs: components["schemas"]["ImagePair"][];
+            /** @description Distinct images left out as shared by too many models. */
+            shared_skipped: number;
+            /** @description More pairs matched than are kept. */
+            truncated: boolean;
+        };
         JobDetail: {
             job: components["schemas"]["JobInfo"];
             /** @description The job's log, oldest line first (at most the last 2,000 lines). */
             log: string[];
+            result?: null | components["schemas"]["FinderResult"];
         };
         JobInfo: {
             /** Format: int64 */
@@ -1127,6 +1212,43 @@ export interface components {
             all?: boolean;
             /** @enum {string} */
             kind: "compute_embeddings";
+        } | {
+            /** @enum {string} */
+            kind: "find_content_duplicates";
+            /** Format: double */
+            threshold?: number;
+        } | {
+            /** @enum {string} */
+            kind: "find_image_duplicates";
+            /**
+             * Format: int32
+             * @description Most differing bits (`dhash`).
+             */
+            max_distance?: number;
+            /** @description Images found in more models than this (banners, logos) are left out. */
+            max_models?: number;
+            /** @description `dhash` (perceptual hash) or `clip` (AI embedding). */
+            method: string;
+            /**
+             * Format: float
+             * @description Least cosine similarity (`clip`).
+             */
+            threshold?: number;
+        } | {
+            /**
+             * @description Column keys: title, creator, source, sculptor, collection,
+             *     subcollection, category, release, scale.
+             */
+            columns: string[];
+            /** @enum {string} */
+            kind: "find_metadata_duplicates";
+            /**
+             * Format: int32
+             * @description Most edits (`levenshtein`).
+             */
+            max_distance?: number;
+            /** @description `exact`, `levenshtein` or `soundex`. */
+            method: string;
         };
         /** @enum {string} */
         JobState: "queued" | "running" | "done" | "failed" | "cancelled";
@@ -1251,6 +1373,20 @@ export interface components {
              * @description The row merged into it and deleted.
              */
             remove: number;
+        };
+        /** @description Models with equal or similar values in one column. */
+        MetadataGroup: {
+            /** @description The column's label. */
+            column: string;
+            models: components["schemas"]["MetadataModel"][];
+            /** @description `Exact`, `Levenshtein: n` or `Soundex: code`. */
+            similarity: string;
+        };
+        MetadataModel: {
+            /** Format: int64 */
+            id: number;
+            title: string;
+            value: string;
         };
         ModelDetail: {
             /**

@@ -2385,6 +2385,70 @@
           }
         }
       },
+      "ContentRow": {
+        "type": "object",
+        "description": "Two archives sharing STL files (name and size).",
+        "required": [
+          "id_a",
+          "total_a",
+          "id_b",
+          "total_b",
+          "overlap",
+          "similarity"
+        ],
+        "properties": {
+          "id_a": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "id_b": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "overlap": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Files in both."
+          },
+          "path_a": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "path_b": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "similarity": {
+            "type": "number",
+            "format": "double",
+            "description": "`overlap` over the larger list."
+          },
+          "title_a": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title_b": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "total_a": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total_b": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "Count": {
         "type": "object",
         "required": [
@@ -3001,6 +3065,74 @@
         },
         "additionalProperties": false
       },
+      "FinderResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "pairs",
+              "type"
+            ],
+            "properties": {
+              "pairs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ContentRow"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "content"
+                ]
+              }
+            }
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImageResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "images"
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "type": "object",
+            "required": [
+              "groups",
+              "type"
+            ],
+            "properties": {
+              "groups": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/MetadataGroup"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "metadata"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "What a finder job found (`JobDetail.result`)."
+      },
       "FolderPath": {
         "type": "object",
         "required": [
@@ -3044,6 +3176,77 @@
         },
         "additionalProperties": false
       },
+      "ImagePair": {
+        "type": "object",
+        "description": "Two archives with matching images.",
+        "required": [
+          "id_a",
+          "title_a",
+          "path_a",
+          "imgs_a",
+          "id_b",
+          "title_b",
+          "path_b",
+          "imgs_b",
+          "pairs",
+          "best"
+        ],
+        "properties": {
+          "best": {
+            "type": "number",
+            "format": "double",
+            "description": "The best match: differing bits (`dhash`) or cosine similarity (`clip`)."
+          },
+          "id_a": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "id_b": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "imgs_a": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Images of the model compared."
+          },
+          "imgs_b": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "pairs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Matching image pairs."
+          },
+          "path_a": {
+            "type": "string"
+          },
+          "path_b": {
+            "type": "string"
+          },
+          "size_a": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "size_b": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "title_a": {
+            "type": "string"
+          },
+          "title_b": {
+            "type": "string"
+          }
+        }
+      },
       "ImageRef": {
         "type": "object",
         "required": [
@@ -3063,6 +3266,53 @@
           }
         }
       },
+      "ImageResult": {
+        "type": "object",
+        "required": [
+          "method",
+          "images",
+          "items",
+          "near_pairs",
+          "shared_skipped",
+          "truncated",
+          "pairs"
+        ],
+        "properties": {
+          "images": {
+            "type": "integer",
+            "description": "Images compared.",
+            "minimum": 0
+          },
+          "items": {
+            "type": "integer",
+            "description": "Distinct images (identical ones collapsed).",
+            "minimum": 0
+          },
+          "method": {
+            "type": "string",
+            "description": "`dhash` or `clip`."
+          },
+          "near_pairs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pairs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImagePair"
+            }
+          },
+          "shared_skipped": {
+            "type": "integer",
+            "description": "Distinct images left out as shared by too many models.",
+            "minimum": 0
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "More pairs matched than are kept."
+          }
+        }
+      },
       "JobDetail": {
         "type": "object",
         "required": [
@@ -3079,6 +3329,17 @@
               "type": "string"
             },
             "description": "The job's log, oldest line first (at most the last 2,000 lines)."
+          },
+          "result": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FinderResult",
+                "description": "What a duplicate finder found, once it is done (`pairs` or `groups`)."
+              }
+            ]
           }
         }
       },
@@ -3278,6 +3539,95 @@
                 "enum": [
                   "compute_embeddings"
                 ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Find Duplicate Archives → STL files: archive pairs whose file lists\n(name and size) overlap by at least `threshold` (0–1) of the larger list.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "find_content_duplicates"
+                ]
+              },
+              "threshold": {
+                "type": "number",
+                "format": "double"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Find Duplicate Archives → Images: archive pairs with matching images.",
+            "required": [
+              "method",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "find_image_duplicates"
+                ]
+              },
+              "max_distance": {
+                "type": "integer",
+                "format": "int32",
+                "description": "Most differing bits (`dhash`).",
+                "minimum": 0
+              },
+              "max_models": {
+                "type": "integer",
+                "description": "Images found in more models than this (banners, logos) are left out.",
+                "minimum": 0
+              },
+              "method": {
+                "type": "string",
+                "description": "`dhash` (perceptual hash) or `clip` (AI embedding)."
+              },
+              "threshold": {
+                "type": "number",
+                "format": "float",
+                "description": "Least cosine similarity (`clip`)."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Find Duplicates (metadata): models with equal or similar values.",
+            "required": [
+              "columns",
+              "method",
+              "kind"
+            ],
+            "properties": {
+              "columns": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Column keys: title, creator, source, sculptor, collection,\nsubcollection, category, release, scale."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "find_metadata_duplicates"
+                ]
+              },
+              "max_distance": {
+                "type": "integer",
+                "format": "int32",
+                "description": "Most edits (`levenshtein`).",
+                "minimum": 0
+              },
+              "method": {
+                "type": "string",
+                "description": "`exact`, `levenshtein` or `soundex`."
               }
             }
           }
@@ -3563,6 +3913,51 @@
           }
         },
         "additionalProperties": false
+      },
+      "MetadataGroup": {
+        "type": "object",
+        "description": "Models with equal or similar values in one column.",
+        "required": [
+          "column",
+          "similarity",
+          "models"
+        ],
+        "properties": {
+          "column": {
+            "type": "string",
+            "description": "The column's label."
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MetadataModel"
+            }
+          },
+          "similarity": {
+            "type": "string",
+            "description": "`Exact`, `Levenshtein: n` or `Soundex: code`."
+          }
+        }
+      },
+      "MetadataModel": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "value"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "title": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        }
       },
       "ModelDetail": {
         "type": "object",

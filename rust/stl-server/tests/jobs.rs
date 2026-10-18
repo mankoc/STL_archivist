@@ -106,6 +106,19 @@ async fn crawl_job_catalogues_a_folder() {
     assert_eq!(folders[0]["pattern"], "{sculptor}/{title}");
     let id = submit(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy()})).await;
     assert_eq!(wait(&lib, &ed, id).await["job"]["message"], "0 new, 0 updated, 2 unchanged");
+
+    // Another spelling of the same folder is crawled under the stored one,
+    // and so is a folder inside it, rather than duplicating every record.
+    let other = format!("{}/./", root.to_string_lossy().replace('\\', "/"));
+    let id = submit(&lib, &ed, json!({"kind": "crawl", "folder": other})).await;
+    let v = wait(&lib, &ed, id).await;
+    assert_eq!(v["job"]["message"], "0 new, 0 updated, 2 unchanged");
+    assert_eq!(v["job"]["request"]["folder"], json!(root.to_string_lossy()));
+    let sub = format!("{}/Studio", root.to_string_lossy().replace('\\', "/"));
+    let id = submit(&lib, &ed, json!({"kind": "crawl", "folder": sub})).await;
+    let v = wait(&lib, &ed, id).await;
+    assert_eq!(v["job"]["request"]["folder"], json!(root.join("Studio").to_string_lossy()));
+    assert_eq!(count(&lib, "SELECT count(*) FROM models"), 2);
 }
 
 #[tokio::test(flavor = "multi_thread")]

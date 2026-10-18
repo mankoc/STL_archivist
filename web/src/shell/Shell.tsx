@@ -13,6 +13,7 @@ import { UserContext } from "../auth/user";
 import { BrowserPage } from "../browser/BrowserPage";
 import { JobsPage } from "../jobs/JobsPage";
 import { LookupsPage } from "../lookups/LookupsPage";
+import { DuplicatesPage } from "../tools/DuplicatesPage";
 import { FindByImagePage } from "../tools/FindByImagePage";
 import { StatsPage } from "../tools/StatsPage";
 import { SettingsPage } from "../settings/SettingsPage";
@@ -48,6 +49,7 @@ export function Shell({ user }: { user: Schemas["User"] }) {
                 data={[
                   { value: "library", label: "Library" },
                   { value: "find", label: "Find by Image" },
+                  { value: "duplicates", label: "Duplicates" },
                   { value: "lookups", label: "Lookups" },
                   { value: "jobs", label: "Jobs" },
                   { value: "stats", label: "Statistics" },
@@ -90,6 +92,8 @@ export function Shell({ user }: { user: Schemas["User"] }) {
             <LookupsPage />
           ) : page === "stats" ? (
             <StatsPage />
+          ) : page === "duplicates" ? (
+            <DuplicatesPage />
           ) : page === "find" ? (
             <FindByImagePage />
           ) : (

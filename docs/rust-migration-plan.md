@@ -1114,6 +1114,34 @@ Ctrl-selected models.
 - Verified in headless Edge: the totals, the distribution by tag, and a dHash search
   through the drop zone that opened a match.
 
+**6g: done 2026-10-18 (duplicate finders).**
+
+- Core: `stl_core::image_pairs::model_pairs` ports `image_duplicates.shared_items` /
+  `model_pairs` (items shared by more than N models, with their near variants, are left
+  out); `stl_native.model_pairs` and `tests/golden/test_image_pairs_golden.py` (200
+  random cases) keep it equal to the Python version.
+- Server (`stl-server/src/dupes.rs`), three job kinds whose typed result
+  (`FinderResult`) is returned in `JobDetail.result`:
+  - `find_content_duplicates { threshold }`: `duplicates::stl_content_pairs`.
+  - `find_image_duplicates { method, max_distance, threshold, max_models }`: dHash
+    (stored format-2 hashes, missing ones computed from thumbnails and not saved) or CLIP
+    vectors, collapsed into distinct items, `near_pairs_128` / `near_pairs_cosine`, then
+    `model_pairs`; best first, at most 100,000 pairs.
+  - `find_metadata_duplicates { columns, method, max_distance }`: the desktop Find
+    Duplicates search (exact, Levenshtein over lowercased distinct values, Soundex
+    groups without code 0000 or all-identical values).
+  - Arguments are validated before queueing (400); finders are read-only, so no
+    `library_changed` follows them.
+  - A crawl of a folder known under another spelling (or inside a crawled folder) is
+    rewritten to the stored spelling (`files::known_spelling`): archive paths are
+    compared as strings, so `C:/STL` used to duplicate every record of `C:\STL`.
+- Web: the Duplicates page (STL files / Images / Metadata tabs) submits the job, shows
+  its progress, and shows the newest finished job's result (filter, pages of 100,
+  *Compare* opens up to three detail panes side by side). `jobs.addJob` keeps a quick
+  job's events from being overwritten by the submit response.
+- Verified in headless Edge: a duplicated archive found by STL files, Levenshtein on
+  titles, the image scan and Compare, and the results shown again after a reload.
+
 ### Phase 7: Desktop shell (small)
 
 Tauri app that hosts the web client: connect to a remote server or start a bundled local one on
