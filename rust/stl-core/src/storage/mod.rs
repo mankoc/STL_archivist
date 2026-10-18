@@ -21,6 +21,7 @@
 //! drops the other's POSIX locks), so [`migrate`] opens, migrates and closes
 //! before SQLAlchemy connects.
 
+pub mod edit;
 pub mod library;
 pub mod schema_sql;
 
@@ -64,7 +65,23 @@ pub fn open(path: &Path) -> Result<Connection> {
          PRAGMA busy_timeout=5000;
          PRAGMA wal_autocheckpoint=1000;",
     )?;
+    add_vector_delete_trigger(&conn)?;
     Ok(conn)
+}
+
+/// The TEMP trigger `vectors.on_connect` adds: an image delete removes its
+/// `image_vec` row (a virtual table has no foreign keys). Skipped until both
+/// tables exist; deliberately not persistent (see `vectors.py`).
+pub fn add_vector_delete_trigger(conn: &Connection) -> Result<()> {
+    let n: i64 = conn.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE name IN ('images', ?1)",
+        [schema_sql::VECTOR_TABLE],
+        |r| r.get(0),
+    )?;
+    if n == 2 {
+        conn.execute_batch(schema_sql::VECTOR_DELETE_TRIGGER)?;
+    }
+    Ok(())
 }
 
 /// What [`migrate`] changed (for the log).

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Rust migration, step 4d: edits made in the browser table are saved natively** (on Windows), with the same rules as before: tags are lowercased and de-duplicated, a subcollection belongs to its collection, and the modification time only changes when a field really changes. Removing unused lookup values also runs natively. Moving and deleting records are ported too, and switch over with the crawler and dialogs later. Edits containing non-Latin digits (a date such as ٢٠٢٤) are saved by the Python code, as before.
+
 - **Rust migration, step 4c: the browser's queries run natively.** On Windows, the main table's row ids and rows, the filter pane's values and counts, and the lookup editors' usage counts come from the native core. On the reference library they returned identical results to the Python queries. Loading rows is 4x faster and rebuilding a filtered filter pane is 2.9x faster (27 filter combinations: 5.4 s instead of 15.5 s). Other platforms keep the Python queries until the move away from SQLAlchemy is complete, because two SQLite libraries in one process can corrupt a database there.
 
 - **Browser table order is now reproducible.** Rows that tie on the sort column (same title, same creator) are ordered by when they were added, instead of by whatever order SQLite's query plan happened to give. A model's tags and scales are always listed in the order they were created. Internally, the browser's queries moved into Qt-free services (`library_query.table_ids` / `page_rows` and the new `services/filter_tree.py`), ready for the native core.

@@ -405,3 +405,5 @@ pub const VECTOR_TABLE: &str = r#"image_vec"#;
 pub const VECTOR_INFO: &str = r#"vector_store_info"#;
 pub const VECTOR_INFO_CREATE: &str = r#"CREATE TABLE IF NOT EXISTS vector_store_info (model TEXT NOT NULL, dim INTEGER NOT NULL)"#;
 pub const VECTOR_TABLE_CREATE: &str = r#"CREATE VIRTUAL TABLE IF NOT EXISTS image_vec USING vec0(image_id INTEGER PRIMARY KEY, embedding float[512] distance_metric=cosine)"#;
+/// `vectors._CREATE_TRIGGER`: per connection, deletes a removed image's vector.
+pub const VECTOR_DELETE_TRIGGER: &str = r#"CREATE TEMP TRIGGER IF NOT EXISTS image_vec_image_deleted AFTER DELETE ON main.images BEGIN DELETE FROM image_vec WHERE image_id = OLD.id; END"#;

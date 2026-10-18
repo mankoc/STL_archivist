@@ -389,6 +389,29 @@ file database (see the two-SQLite note above); otherwise the Python services run
 - The unfiltered filter tree is still cached as JSON by the Python worker
   (`filter_cache.py`).
 
+**4d: done 2026-10-18.** `storage::edit`: lookup get-or-create, `apply_cell_edit(s)` (every
+browser cell field, with the tag/scale/subcollection rules), `relocate`, `delete_model`,
+`merge_into_missing` and `prune_unused_lookups`. All of them work on ids inside one
+`BEGIN IMMEDIATE` transaction (`LibraryDb.with_tx`).
+
+- In use now: the browser's cell edits (`_CellEditRunnable`), and `prune_unused_lookups`
+  when its session has not started a transaction. The Python services take an ORM session
+  and leave the commit to the caller, so callers that mix them into larger ORM transactions
+  (editor dialog, AI tagger, crawler, maintenance merges) switch over with their own steps
+  (4f, 4g). The Rust functions are ready and golden-tested for them.
+- ORM behaviour kept:
+  - `updated_at` changes only when a column of the model row really changes.
+  - Deletes rely on the schema's `ON DELETE CASCADE`, plus Python's TEMP trigger for
+    `image_vec`, which `storage::open` now adds to every native connection.
+  - `str.strip()` / `str.lower()` semantics and Python's `int()` rules for the sequence
+    field (sign, underscores).
+  - `archive_folder_for` uses `PurePosixPath`.
+- Input the port does not reproduce (dates or numbers in non-ASCII digits) raises
+  `ValueError` before anything is written, and the edit runs in Python.
+- Gate: `tests/golden/test_edit_golden.py` applies 60 random edit batches, plus moves,
+  deletes and pruning, to two copies of a library, one through the Python services and one
+  natively, and compares every table.
+
 ### Phase 5: Server (medium)
 
 `stl-server` on axum, the product's centre from here on:

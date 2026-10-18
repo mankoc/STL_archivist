@@ -71,9 +71,24 @@ class _CellEditRunnable(QRunnable):
 
     def run(self):
         from pathlib import Path
+        from app.database import native_db
         from app.database.models import STLModel
         from app.services.editing import apply_cell_edit
         folders: set[str] = set()
+        lib = native_db.library()
+        if lib is not None:
+            try:
+                paths = lib.apply_cell_edits(
+                    [(int(mid), field, text) for mid, field, text in self._edits])
+                self.signals.done.emit(sorted({str(Path(p).parent) for p in paths}), "")
+                return
+            except ValueError:
+                pass   # input the native port leaves to Python (nothing was written)
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).error("Saving cell edits failed", exc_info=True)
+                self.signals.done.emit([], str(exc))
+                return
         try:
             with session_scope() as session:
                 for model_id, field, text in self._edits:
