@@ -100,7 +100,8 @@ the native core owns the schema from Phase 4b).
 - **Dialogs do not query the database.** Lookup editors go through `services/lookup_admin.py`
   the model editors through `services/model_edit.py`, the browser panel, lookup lists and
   sort dialog through `services/browser_data.py`, and statistics through
-  `services/library_stats.py` (step 4f moves the remaining dialogs the same way). New database work in a dialog
+  `services/library_stats.py`, and the viewers through `services/model_views.py` (step 4f
+  moves the remaining dialogs the same way). New database work in a dialog
   belongs in a service with a native implementation and a golden test, never inline ORM.
 - Crawler rules (`rules.py`) use the native port only with the built-in presupport
   patterns; a custom pattern list always runs in Python, because fancy-regex and `re` read
@@ -219,6 +220,8 @@ Qt-free business logic, testable without a `QApplication`:
   (`set_archive_paths` also sets `archive_folder`).
 - **`library_stats.py`** — Statistics and Column Distribution queries; ties ranked by value
   or id so both implementations agree.
+- **`model_views.py`** — read-only viewer data: archive contents, archive browser folders
+  and cells, image grid, Find Duplicates metadata rows, Find by Image dHash rows.
 - **`model_summary.py`** — `model_summary(session, model_id)`: one-statement display row
   (names, tags, image count) for detail panels; cheap enough for the GUI thread.
 - **`maintenance.py`** — Database Maintenance operations (verify, duplicate entries, prune images,

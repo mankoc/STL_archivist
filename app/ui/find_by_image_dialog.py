@@ -17,8 +17,6 @@ from PyQt6.QtWidgets import (
     QDoubleSpinBox, QComboBox, QSplitter, QVBoxLayout, QWidget, QFrame,
 )
 
-from app.database.db import session_scope
-from app.database.models import Image as DBImage, STLModel
 from app.services.image_similarity import MAX_RESULT_IMAGES
 from app.utils.thumbnailer import pixmap_from_path
 from app.utils import image_embedding as _emb
@@ -231,8 +229,7 @@ class _MatchDetail(QWidget):
             self._image.set_source(px)
         self._score.setText(score_text)
 
-        with session_scope() as session:
-            info = model_summary(session, model_id)
+        info = model_summary(None, model_id)
         if info is None:
             self.clear()
             self._image.setText(self.tr("This model no longer exists."))
@@ -580,19 +577,8 @@ class FindByImageDialog(QDialog):
         qlo = np.array([query_hash & _U64], dtype=np.uint64)
         qhi = np.array([query_hash >> 64],  dtype=np.uint64)
 
-        with session_scope() as session:
-            rows = (
-                session.query(
-                    DBImage.model_id,
-                    DBImage.dhash,
-                    DBImage.thumbnail_path,
-                    STLModel.title,
-                    STLModel.archive_path,
-                )
-                .join(STLModel, DBImage.model_id == STLModel.id)
-                .filter(DBImage.dhash.isnot(None))
-                .all()
-            )
+        from app.services.model_views import image_hash_rows
+        rows = image_hash_rows()
 
         # Parse stored hashes, skipping outdated (16-char) entries.
         outdated = 0
@@ -649,8 +635,7 @@ class FindByImageDialog(QDialog):
             return [], False
 
         from app.services.image_similarity import find_similar_models
-        with session_scope() as session:
-            return find_similar_models(session, self._query_embed, threshold)
+        return find_similar_models(None, self._query_embed, threshold)
 
     def _on_result_clicked(self, cell: _ResultCell) -> None:
         if self._selected_cell is not None:

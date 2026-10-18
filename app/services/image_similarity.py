@@ -36,11 +36,16 @@ def find_similar_models(
     per model (its best-matching image), most similar first.  Similarity is
     cosine similarity (1.0 = identical).  *capped* is True when all *limit*
     nearest images cleared the threshold, so more matches may exist.
+    *session* may be ``None``: the native core or a session of its own is used.
     """
     from app.database import native_db
-    lib = native_db.library() if native_db.session_clean(session) else None
+    lib = native_db.library() if session is None or native_db.session_clean(session) else None
     if lib is not None:
         return lib.find_similar_models(to_blob(query_vec), float(threshold), int(limit))
+    if session is None:
+        from app.database.db import session_scope
+        with session_scope() as s:
+            return find_similar_models(s, query_vec, threshold, limit)
     k = min(limit, vectors.MAX_KNN)
     maxd = 1.0 - threshold
     rows = session.execute(text(_KNN_SQL), {"q": to_blob(query_vec), "k": k}).all()

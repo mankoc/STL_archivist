@@ -495,6 +495,25 @@ identical. `sort_sources` for 2,000 models takes 4.6 ms natively against 66 ms i
 Still in Python: the browser's re-crawl and rescan actions, which run the crawler's upsert
 and move with it in 4g.
 
+**4f-4a: done 2026-10-18 (viewers).** `services/model_views.py`, backed natively by
+`storage::views`, serves these dialogs:
+- the archive contents list and compare;
+- the archive browser (folders, and the cells of a folder with or without subfolders,
+  matched with the same `LIKE`);
+- the image grid;
+- Find Duplicate Archives' metadata rows;
+- Find by Image's dHash rows.
+
+`model_summary` and `find_similar_models` accept `session=None`, so Find by Image
+opens no session itself. Models, images, tags and scales come in id order, and STL files
+by name.
+- `tests/golden/test_views_golden.py` covers every read.
+- On the reference library every read is identical. `duplicate_rows` takes 0.13 s
+  against 5.0 s in Python, and `grid_models` for 500 models takes 5 ms against 242 ms.
+
+Moved to 4g, because they are crawler work: the Update Crawled Folders reconciliation, the
+crawler tab, and the browser's rescan and thumbnail jobs.
+
 ### Phase 5: Server (medium)
 
 `stl-server` on axum, the product's centre from here on:
