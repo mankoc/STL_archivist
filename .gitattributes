@@ -1,5 +1,5 @@
-# Generated SQL embedded in Rust raw strings: SQLite keeps the exact statement
-# text, so line endings must not change on checkout (tools/gen_schema.py).
+# SQL embedded in Rust raw strings: SQLite keeps the exact statement text, so
+# line endings must not change on checkout (the schema's source of truth).
 rust/stl-core/src/storage/schema_sql.rs text eol=lf
 Dockerfile text eol=lf
 .dockerignore text eol=lf

@@ -33,6 +33,7 @@ pub fn empty_library() -> TestLib {
         // Editors may crawl anything in the test's directory.
         roots: vec![dir.path().to_string_lossy().into_owned()],
         path_map: vec![],
+        web_dir: None,
     };
     let state = Arc::new(Library::open(config).unwrap());
     TestLib { dir, state }

@@ -1,0 +1,199 @@
+// The browser table: every matching id in display order (one request), rows
+// fetched in blocks as they scroll into view, virtualised rendering. Sorting
+// runs on the server (`/api/models/ids`), ties ordered by id.
+import { Box, Center, Group, Loader, Text, UnstyledButton } from "@mantine/core";
+import { IconChevronDown, IconChevronUp } from "@tabler/icons-react";
+import { useQueries, useQuery } from "@tanstack/react-query";
+import {
+  type ColumnDef,
+  type ColumnSizingState,
+  flexRender,
+  getCoreRowModel,
+  useReactTable,
+} from "@tanstack/react-table";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { type ReactNode, useMemo, useRef, useState } from "react";
+
+import { api, type Schemas, unwrap } from "../api/client";
+import { baseName, formatDate, formatSize } from "../format";
+import type { FilterSpec } from "./filters";
+import { blockIds, blocksFor } from "./rowBlocks";
+import classes from "./ModelTable.module.css";
+
+export type Row = Schemas["Row"];
+export interface Sort {
+  column: string;
+  descending: boolean;
+}
+export interface Query {
+  filter: FilterSpec;
+  search: string;
+  sort: Sort | null;
+}
+
+interface Column {
+  id: string;
+  header: string;
+  size: number;
+  /** The server's sort column, when the column can be sorted. */
+  sortKey?: string;
+  render: (row: Row) => ReactNode;
+}
+
+const COLUMNS: Column[] = [
+  { id: "title", header: "Title", size: 280, sortKey: "title", render: (r) => r.title ?? baseName(r.archive_path) },
+  { id: "creator", header: "Creator", size: 140, sortKey: "creator", render: (r) => r.creator },
+  { id: "source", header: "Type", size: 110, sortKey: "source", render: (r) => r.source },
+  { id: "date", header: "Date", size: 80, render: (r) => formatDate(r.release_year, r.release_month) },
+  { id: "sculptor", header: "Sculptor", size: 130, sortKey: "sculptor_name", render: (r) => r.sculptor },
+  { id: "collection", header: "Collection", size: 130, sortKey: "collection_name", render: (r) => r.collection },
+  { id: "subcollection", header: "Subcollection", size: 130, sortKey: "subcollection_name", render: (r) => r.subcollection },
+  { id: "category", header: "Category", size: 110, sortKey: "category_name", render: (r) => r.category },
+  { id: "release", header: "Release", size: 120, sortKey: "release_name", render: (r) => r.release },
+  { id: "scales", header: "Scale", size: 90, render: (r) => r.scales },
+  { id: "tags", header: "Tags", size: 200, render: (r) => r.tags },
+  { id: "presupports", header: "Presupports", size: 110, sortKey: "presupports", render: (r) => r.presupports },
+  { id: "size", header: "File Size", size: 90, sortKey: "archive_size", render: (r) => formatSize(r.archive_size) },
+  { id: "path", header: "Path", size: 360, sortKey: "archive_path", render: (r) => r.archive_path },
+];
+
+const ROW_HEIGHT = 30;
+
+export function useModelIds(query: Query) {
+  return useQuery({
+    queryKey: ["ids", query],
+    queryFn: async () =>
+      unwrap(await api.POST("/api/models/ids", { body: { filter: query.filter, search: query.search, sort: query.sort } }))
+        .ids,
+    placeholderData: (previous) => previous,
+  });
+}
+
+interface Props {
+  query: Query;
+  onSort: (sort: Sort | null) => void;
+  selected: number | null;
+  onSelect: (id: number) => void;
+}
+
+export function ModelTable({ query, onSort, selected, onSelect }: Props) {
+  const ids = useModelIds(query);
+  const all = ids.data ?? [];
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [sizing, setSizing] = useState<ColumnSizingState>({});
+
+  const columns = useMemo<ColumnDef<number>[]>(
+    () => COLUMNS.map((c) => ({ id: c.id, header: c.header, size: c.size, minSize: 50, enableResizing: true })),
+    [],
+  );
+  const table = useReactTable({
+    data: all,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+    columnResizeMode: "onChange",
+    state: { columnSizing: sizing },
+    onColumnSizingChange: setSizing,
+    manualSorting: true,
+  });
+
+  const virtualizer = useVirtualizer({
+    count: all.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 20,
+  });
+  const items = virtualizer.getVirtualItems();
+  const blocks = blocksFor(items[0]?.index ?? 0, items[items.length - 1]?.index ?? -1, all.length);
+  const rowQueries = useQueries({
+    queries: blocks.map((b) => {
+      const blockIdList = blockIds(all, b);
+      return {
+        queryKey: ["rows", blockIdList],
+        queryFn: async () => unwrap(await api.POST("/api/models/rows", { body: { ids: blockIdList } })).rows,
+        staleTime: 30_000,
+      };
+    }),
+  });
+  const rows = new Map<number, Row>();
+  for (const q of rowQueries) for (const r of q.data ?? []) rows.set(r.id, r);
+
+  const width = table.getTotalSize();
+  const sortOf = (c: Column) => (query.sort?.column === c.sortKey ? query.sort : null);
+  const clickHeader = (c: Column) => {
+    if (!c.sortKey) return;
+    const current = sortOf(c);
+    // ascending → descending → unsorted (id order)
+    onSort(!current ? { column: c.sortKey, descending: false } : !current.descending ? { column: c.sortKey, descending: true } : null);
+  };
+
+  if (ids.isPending) {
+    return (
+      <Center h="100%">
+        <Loader />
+      </Center>
+    );
+  }
+  if (ids.isError) {
+    return (
+      <Center h="100%">
+        <Text c="red">{String(ids.error.message)}</Text>
+      </Center>
+    );
+  }
+
+  return (
+    <div ref={scrollRef} className={classes.scroll} data-testid="model-table">
+      <div className={classes.header} style={{ width }}>
+        {table.getHeaderGroups()[0].headers.map((h, i) => {
+          const c = COLUMNS[i];
+          const sort = sortOf(c);
+          return (
+            <div key={h.id} className={classes.headerCell} style={{ width: h.getSize() }}>
+              <UnstyledButton className={classes.headerButton} onClick={() => clickHeader(c)} disabled={!c.sortKey}>
+                <Group gap={4} wrap="nowrap">
+                  <Text size="xs" fw={600} tt="uppercase" truncate>
+                    {flexRender(h.column.columnDef.header, h.getContext())}
+                  </Text>
+                  {sort && (sort.descending ? <IconChevronDown size={14} /> : <IconChevronUp size={14} />)}
+                </Group>
+              </UnstyledButton>
+              <div
+                onMouseDown={h.getResizeHandler()}
+                onTouchStart={h.getResizeHandler()}
+                className={classes.resizer}
+                data-resizing={h.column.getIsResizing() || undefined}
+              />
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ height: virtualizer.getTotalSize(), width, position: "relative" }}>
+        {items.map((item) => {
+          const id = all[item.index];
+          const row = rows.get(id);
+          return (
+            <Box
+              key={id}
+              className={classes.row}
+              data-testid="row"
+              data-selected={id === selected || undefined}
+              style={{ transform: `translateY(${item.start}px)`, height: ROW_HEIGHT, width }}
+              onClick={() => onSelect(id)}
+            >
+              {table.getHeaderGroups()[0].headers.map((h, i) => (
+                <div key={h.id} className={classes.cell} style={{ width: h.getSize() }}>
+                  {row ? COLUMNS[i].render(row) : i === 0 ? "…" : null}
+                </div>
+              ))}
+            </Box>
+          );
+        })}
+      </div>
+      {all.length === 0 && (
+        <Center p="xl">
+          <Text c="dimmed">No models match.</Text>
+        </Center>
+      )}
+    </div>
+  );
+}
