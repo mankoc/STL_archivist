@@ -933,6 +933,35 @@ crawl host's PDF and CLIP requests natively.
   info.json, .url, nested archive, presupported STL, GIF) gave identical models, tags,
   scales, images, perceptual hashes and thumbnail bytes.
 
+**5d-2: done 2026-10-18 (native PDF and CLIP).**
+
+- `stl_core::clip::preprocess` ports `image_embedding._preprocess` (full-size decode,
+  shorter side to 224 with Python's round-half-even, Catmull-Rom bicubic, centre crop,
+  CLIP normalisation). `tests/golden/test_clip_golden.py` compares it with Python through
+  `stl_native.clip_preprocess`: mean difference under 0.01, tensor cosine above 0.9999.
+- `stl-server/src/tools.rs` loads both libraries at runtime, so the server runs without
+  them (the feature is then off, as a missing package turns it off in the app):
+  - `Embedder`: ONNX Runtime through `ort` 2.0.0-rc.14 with `load-dynamic`, `api-17`
+    (runtime 1.17 or newer). It is found through `onnxruntime` in `server.json`,
+    `ORT_DYLIB_PATH`, or beside the server or in the data directory. The model is found as
+    `model_path` finds it, and `pooler_output` is preferred as in Python. Vectors are
+    L2-normalised and stored under the same `EMBED_MODEL_ID`.
+  - `PdfRenderer`: pdfium through `pdfium-render` 0.9 (`pdfium_7881`). It renders page 1
+    at 2× on white, as `pdf_first_page_to_image_bytes`, then applies the usual thumbnail
+    rules.
+- The crawl host answers `Thumbnail { pdf: true }` and `Embed` with them. Crawls embed
+  when `ai_embeddings_enabled` and `ai_embeddings_during_crawl` are on and the embedder
+  loads. A new job, `compute_embeddings {all}`, mirrors Database Maintenance → Compute
+  Image Embeddings (orphans pruned first). Pillow-only images and archives the native
+  readers refuse still get `Response::None` until Phase 8.
+- Gate: with the same model on the same thumbnails, server and desktop vectors agreed to
+  cosine ≥ 0.99997. The tests use a 6 KB stand-in model (`tests/data/tiny_clip.onnx`) and
+  skip without the runtime libraries.
+- Quirk found: zune-jpeg (the `image` crate's JPEG decoder) misreads the core encoder's
+  thumbnails (non-interleaved baseline scans, component ids 0–2); libjpeg-turbo, and so
+  Pillow and browsers, read them correctly. Rust code decodes JPEGs with `jpeg-decoder`,
+  as the core does.
+
 ### Phase 6: Web client (largest)
 
 React + TypeScript in `web/`, served by the server, built against the API while the PyQt app

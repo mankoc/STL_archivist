@@ -182,6 +182,15 @@ fn make_thumbnail<'py>(
     Ok(PyBytes::new(py, &out))
 }
 
+/// The CLIP input tensor of an image (`stl_core::clip::preprocess`): 3 x 224 x
+/// 224 float32, channel-major, as little-endian bytes. Raises `ValueError`
+/// for an image the native decoder cannot read.
+#[pyfunction]
+fn clip_preprocess<'py>(py: Python<'py>, data: &[u8]) -> PyResult<Bound<'py, PyBytes>> {
+    let t = py.detach(|| stl_core::clip::preprocess(data)).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(PyBytes::new(py, bytemuck::cast_slice(&t)))
+}
+
 /// Perceptual hash (format 2) of an encoded image, as a 128-bit int.
 ///
 /// Raises `ValueError` for data it cannot decode.
@@ -2069,6 +2078,7 @@ fn stl_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(archive_hash_file, m)?)?;
     m.add_function(wrap_pyfunction!(read_archive_members, m)?)?;
     m.add_function(wrap_pyfunction!(make_thumbnail, m)?)?;
+    m.add_function(wrap_pyfunction!(clip_preprocess, m)?)?;
     m.add_function(wrap_pyfunction!(dhash, m)?)?;
     m.add_function(wrap_pyfunction!(dhash_many, m)?)?;
     m.add_class::<PyThumbStore>()?;

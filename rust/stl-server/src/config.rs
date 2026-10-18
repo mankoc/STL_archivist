@@ -22,6 +22,10 @@ pub struct Config {
     pub bind: SocketAddr,
     /// The UnRAR tool for `.rar` archives (a name on `PATH` or a path); `None`: `unrar`.
     pub unrar: Option<String>,
+    /// The ONNX Runtime library for CLIP embeddings (see `tools`).
+    pub onnxruntime: Option<String>,
+    /// The pdfium library for PDF previews (see `tools`).
+    pub pdfium: Option<String>,
 }
 
 /// What `server.json` may set.
@@ -30,6 +34,8 @@ pub struct Config {
 struct FileSettings {
     bind: Option<String>,
     unrar: Option<String>,
+    onnxruntime: Option<String>,
+    pdfium: Option<String>,
 }
 
 impl Config {
@@ -71,7 +77,7 @@ impl Config {
         let bind = bind_arg.or_else(|| env("STL_BIND")).or(file.bind).unwrap_or_else(|| DEFAULT_BIND.into());
         let bind = bind.parse().map_err(|e| format!("bind address {bind:?}: {e}"))?;
         let unrar = env("STL_UNRAR_PATH").or(file.unrar).filter(|u| !u.is_empty());
-        Ok(Config { data_dir, bind, unrar })
+        Ok(Config { data_dir, bind, unrar, onnxruntime: file.onnxruntime, pdfium: file.pdfium })
     }
 }
 

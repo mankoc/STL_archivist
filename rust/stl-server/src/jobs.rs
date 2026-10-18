@@ -58,6 +58,11 @@ pub enum JobRequest {
     PruneImages { keep: usize },
     /// `VACUUM` the database and truncate its write-ahead log.
     CompactDatabase,
+    /// Compute CLIP embeddings from stored thumbnails (all, or only images without one).
+    ComputeEmbeddings {
+        #[serde(default)]
+        all: bool,
+    },
 }
 
 impl JobRequest {
@@ -68,6 +73,7 @@ impl JobRequest {
             JobRequest::RecomputeDhashes { .. } => "recompute_dhashes",
             JobRequest::PruneImages { .. } => "prune_images",
             JobRequest::CompactDatabase => "compact_database",
+            JobRequest::ComputeEmbeddings { .. } => "compute_embeddings",
         }
     }
 }
@@ -340,22 +346,36 @@ fn run(lib: &Library, job: &Job) -> Result<String, String> {
         JobRequest::RecomputeDhashes { all } => recompute_dhashes(lib, job, all),
         JobRequest::PruneImages { keep } => prune_images(lib, job, keep),
         JobRequest::CompactDatabase => compact(lib, job),
+        JobRequest::ComputeEmbeddings { all } => compute_embeddings(lib, job, all),
     }
 }
 
 // ── crawl ────────────────────────────────────────────────────────────────────
 
-/// The crawl's host on the server: there is no Python, so the requests the
-/// core cannot answer natively get `Response::None` and the crawl goes on
-/// without that piece (see `stl_core::crawler`).
+/// The crawl's host on the server. There is no Python: PDF previews and CLIP
+/// vectors come from [`crate::tools`] when their libraries are present; every
+/// other request gets `Response::None` and the crawl goes on without that
+/// piece (see `stl_core::crawler`).
 struct ServerHost<'a> {
     lib: &'a Library,
     job: &'a Job,
+    max_thumb_size: u32,
 }
 
 impl Host for ServerHost<'_> {
-    fn call(&self, _request: Request) -> Response {
-        Response::None
+    fn call(&self, request: Request) -> Response {
+        let config = &self.lib.config;
+        match request {
+            Request::Thumbnail { data, pdf: true } => match self.lib.tools.pdf(config) {
+                Some(r) => Response::Thumbnail(r.thumbnail(&data, self.max_thumb_size)),
+                None => Response::None,
+            },
+            Request::Embed(images) => match self.lib.tools.embedder(config) {
+                Some(e) => Response::Vectors(e.embed(&images)),
+                None => Response::None,
+            },
+            _ => Response::None,
+        }
     }
 
     fn emit(&self, event: Event) {
@@ -424,8 +444,7 @@ fn crawl(
         sidecar_thumbnails: settings.sidecar_thumbnails(),
         warn: settings.checks(),
         presupport_patterns: patterns,
-        // CLIP needs the ONNX runtime; the server computes no embeddings yet.
-        embed: false,
+        embed: settings.embed_during_crawl() && lib.tools.embedder(&lib.config).is_some(),
         log_unchanged: false,
         defer_missing_deletion: false,
         upsert: crawl_db::UpsertConfig {
@@ -436,7 +455,7 @@ fn crawl(
             ..Default::default()
         },
     };
-    let host = ServerHost { lib, job };
+    let host = ServerHost { lib, job, max_thumb_size: cfg.max_thumb_size };
     let summary = crawler::crawl(&lib.config.db_path(), Some(&lib.thumbs), &cfg, &host).map_err(|e| e.to_string())?;
     Ok(format!("{} new, {} updated, {} unchanged", summary.new, summary.updated, summary.unchanged))
 }
@@ -517,6 +536,43 @@ fn prune_images(lib: &Library, job: &Job, keep: usize) -> Result<String, String>
         job.ctl.advance(chunk.len() as u64);
     }
     Ok(format!("{images} image(s) removed from {models} model(s)"))
+}
+
+fn compute_embeddings(lib: &Library, job: &Job, all: bool) -> Result<String, String> {
+    use stl_core::storage::vectors;
+    let embedder = lib.tools.embedder(&lib.config).ok_or_else(|| {
+        "CLIP embeddings are unavailable: the server needs ONNX Runtime and the CLIP model (see the server log)".to_string()
+    })?;
+    let orphans = lib.db.with_tx(vectors::prune_orphans).map_err(db_err)?;
+    if orphans > 0 {
+        lib.job_log(job, format!("Removed {orphans} embedding(s) of deleted images."));
+    }
+    let rows = lib.db.with(|c| maintenance::embedding_targets(c, all)).map_err(db_err)?;
+    job.ctl.set_total(rows.len() as u64);
+    let dim = storage::schema_sql::EMBED_DIM as usize;
+    let (mut computed, mut skipped) = (0usize, 0usize);
+    for chunk in rows.chunks(crate::tools::BATCH * 4) {
+        if job.stopped() {
+            break;
+        }
+        let ids: Vec<u64> = chunk.iter().map(|(i, _)| *i as u64).collect();
+        let mut thumbs: std::collections::HashMap<i64, Vec<u8>> =
+            lib.thumbs.get_many(&ids).map_err(|e| e.to_string())?.into_iter().map(|(i, b)| (i as i64, b)).collect();
+        for (id, legacy) in chunk {
+            if let (false, Some(b)) = (thumbs.contains_key(id), legacy) {
+                thumbs.insert(*id, b.clone());
+            }
+        }
+        let have: Vec<i64> = chunk.iter().map(|(i, _)| *i).filter(|i| thumbs.contains_key(i)).collect();
+        let images: Vec<Vec<u8>> = have.iter().map(|i| thumbs.remove(i).unwrap_or_default()).collect();
+        let items: Vec<(i64, Vec<u8>)> =
+            have.iter().zip(embedder.embed(&images)).filter_map(|(&i, v)| v.map(|v| (i, v))).collect();
+        let stored = lib.db.with_tx(|tx| vectors::store(tx, dim, &items)).map_err(db_err)?;
+        computed += stored;
+        skipped += chunk.len() - stored;
+        job.ctl.advance(chunk.len() as u64);
+    }
+    Ok(format!("{computed} computed, {skipped} skipped (no thumbnail, not decodable or a wrong model output)"))
 }
 
 fn compact(lib: &Library, job: &Job) -> Result<String, String> {

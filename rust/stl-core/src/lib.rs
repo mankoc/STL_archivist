@@ -6,6 +6,7 @@
 //! app (`stl-py`) and, later, the server. See `docs/rust-migration-plan.md`.
 
 pub mod archive;
+pub mod clip;
 pub mod control;
 pub mod crawler;
 pub mod dhash;
