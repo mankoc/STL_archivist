@@ -12,6 +12,7 @@ pub mod dhash;
 pub mod embedding;
 pub mod fingerprint;
 pub mod hamming;
+pub mod lock;
 pub mod metadata;
 pub mod path_pattern;
 pub mod pyunicode;

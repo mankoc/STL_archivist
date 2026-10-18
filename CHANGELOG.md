@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Rust migration, Phase 5 begins: the stlLibrary server (step 5a).** `rust/stl-server` serves a library read-only over HTTP: the browser table's ids and rows with filters, search and sorting, the filter pane's values and counts, model details and thumbnails (cacheable forever, because the store is content-addressed), with an OpenAPI description. Run it with `cargo run --release -p stl-server -- --data-dir <dir>`. There is no authentication yet, so it listens on `127.0.0.1` only.
+- **A library is open in one process at a time.** The desktop app now refuses to open a library that another app instance or the server has open, and says which process holds it. The lock is released when that process ends, even after a crash.
+
 - **Rust migration, step 4h: the native core is now required, and SQLAlchemy is gone.** Every database read and write, on every platform, goes through the Rust core, which also owns the schema. The `STL_NATIVE` switch is removed. Python remains only for what the core hands back: archives it cannot read exactly, images only Pillow decodes, PDF pages and CLIP embeddings.
   - Dependencies dropped: SQLAlchemy, lmdb and the sqlite-vec Python package. sqlite-vec is built into the native core.
   - Mass Editor → Find & Replace in regex mode now runs natively. It uses the Rust `fancy-regex` dialect, which is Unicode-aware and supports lookarounds and backreferences, with Python's replacement rules (`\1`, `\g<name>`, `\n`). A pattern it cannot read is reported and nothing is saved. A tag listed twice is linked once instead of failing.

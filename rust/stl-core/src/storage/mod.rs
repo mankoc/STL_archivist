@@ -23,6 +23,7 @@ pub mod jobs;
 pub mod library;
 pub mod maintenance;
 pub mod model_edit;
+pub mod pool;
 pub mod schema_sql;
 pub mod sidecar;
 pub mod stats;

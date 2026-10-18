@@ -30,3 +30,11 @@ def test_missing_module_raises_a_clear_error(monkeypatch):
     assert native.status().startswith("native core unavailable: not installed")
     with pytest.raises(RuntimeError, match="build it with"):
         native.module()
+
+
+def test_library_lock_refuses_a_second_owner(tmp_path):
+    first = native.module().LibraryLock(str(tmp_path), "first owner")
+    with pytest.raises(native.module().LibraryLocked, match="first owner"):
+        native.module().LibraryLock(str(tmp_path), "second")
+    first.release()
+    assert native.module().LibraryLock(str(tmp_path), "second").held

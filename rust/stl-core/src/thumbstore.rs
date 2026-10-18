@@ -1,7 +1,7 @@
 //! Thumbnail store: the content-addressed LMDB environment `thumbnails.lmdb`.
 //!
-//! Same on-disk format as the py-lmdb implementation in `app/utils/thumbnailer.py`
-//! (compatibility rule 6), so a library opens with either:
+//! The on-disk format older versions (py-lmdb) wrote, unchanged (compatibility
+//! rule 6):
 //!
 //! ```text
 //! R<image_id: u64 BE>        -> blob key of that image's thumbnail
@@ -11,7 +11,10 @@
 //!
 //! The prefixes are ASCII letters while a legacy key starts with 0x00 for every
 //! id below 2^56, so the layouts never clash. Rule 3: a process opens the store
-//! with this module **or** py-lmdb, never both.
+//! once.
+//!
+//! A blob's digest (the key without its `D` prefix) is a content address: the
+//! server serves it at `/api/thumb/<hex>` as an immutable resource.
 //!
 //! LMDB's map has a fixed size; a write that fills it grows the map and retries.
 //! Growing requires that no transaction is open in the process, so every
@@ -222,6 +225,36 @@ impl ThumbStore {
         Ok(out)
     }
 
+    /// The digest each existing id's thumbnail is stored under: `Some(digest)`
+    /// (16 bytes, plus a slot byte after a hash collision), or `None` for a
+    /// legacy entry, which has no content address yet. Missing ids are left out.
+    pub fn digests(&self, ids: &[u64]) -> Result<Vec<(u64, Option<Vec<u8>>)>> {
+        let _shared = self.resize.read().unwrap_or_else(|e| e.into_inner());
+        let txn = self.env.read_txn()?;
+        let mut out = Vec::with_capacity(ids.len());
+        for &id in ids {
+            if let Some(blob) = self.db.get(&txn, &ref_key(id))? {
+                out.push((id, Some(blob[1..].to_vec())));
+            } else if self.db.get(&txn, &legacy_key(id))?.is_some() {
+                out.push((id, None));
+            }
+        }
+        Ok(out)
+    }
+
+    /// The bytes stored under `digest` (see [`Self::digests`]), if any.
+    pub fn blob(&self, digest: &[u8]) -> Result<Option<Vec<u8>>> {
+        if !(digest.len() == 16 || digest.len() == 17) {
+            return Ok(None);
+        }
+        let mut key = Vec::with_capacity(18);
+        key.push(BLOB_PREFIX);
+        key.extend_from_slice(digest);
+        let _shared = self.resize.read().unwrap_or_else(|e| e.into_inner());
+        let txn = self.env.read_txn()?;
+        Ok(self.db.get(&txn, &key)?.map(<[u8]>::to_vec))
+    }
+
     /// Remove the references of `ids` (blobs stay; [`Self::orphan_blobs`] finds them).
     pub fn delete_many(&self, ids: &[u64]) -> Result<()> {
         if ids.is_empty() {
@@ -358,6 +391,21 @@ mod tests {
         assert_eq!(get(&s, 2).as_deref(), Some(&b"same"[..]));
         let st = s.stats().unwrap();
         assert_eq!((st.thumbnails, st.blobs, st.payload_bytes), (3, 2, 9));
+    }
+
+    #[test]
+    fn digests_address_blobs() {
+        let (_d, s) = store();
+        s.put_many(&[(1, b"same"), (2, b"same")]).unwrap();
+        s.put_raw(&[(legacy_key(3).to_vec(), b"old".to_vec())]).unwrap();
+        let d = s.digests(&[1, 2, 3, 4]).unwrap();
+        assert_eq!(d.len(), 3, "missing id 4 is left out");
+        assert_eq!(d[0].1, d[1].1, "shared payload, one address");
+        assert_eq!(d[0].1.as_deref(), Some(&xxh3_digest(b"same")[..]));
+        assert_eq!(d[2], (3, None), "legacy entry has no address");
+        assert_eq!(s.blob(d[0].1.as_ref().unwrap()).unwrap().as_deref(), Some(&b"same"[..]));
+        assert_eq!(s.blob(&[0; 16]).unwrap(), None);
+        assert_eq!(s.blob(b"short").unwrap(), None);
     }
 
     #[test]

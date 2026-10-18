@@ -109,6 +109,23 @@ Pillow decodes (AVIF, CMYK JPEG), PDF pages and CLIP embeddings. Building it nee
 > - Windows: install [WinRAR](https://www.rarlab.com/) or the standalone `UnRAR` tool and make sure it is on your `PATH`.
 > You can also set a custom path to the executable in **Configuration → Crawler → RAR tool**.
 
+### Server (preview)
+
+The Rust server that will replace the desktop app (see
+[docs/rust-migration-plan.md](docs/rust-migration-plan.md), Phase 5) can already serve a
+library read-only over HTTP:
+
+```bash
+cd rust
+cargo run --release -p stl-server -- --data-dir <data dir> --bind 127.0.0.1:8770
+```
+
+It reads `<data dir>/server.json` (`{"bind": "127.0.0.1:8770"}`) and the `STL_DATA_DIR` /
+`STL_BIND` environment variables; the API is described at `/api/openapi.json`. There is no
+authentication yet, so keep it on `127.0.0.1`. A library can be open in only one process at
+a time: the desktop app refuses a library the server has open (and a second app instance
+on the same library), and the server refuses one the app has open.
+
 ### Environment overrides
 
 These optional environment variables take precedence over the values set in Configuration. They are useful for portable or headless setups.
