@@ -1,0 +1,23 @@
+[package]
+name = "stl-server"
+description = "stlLibrary server: HTTP + WebSocket API over stl-core (Phase 5)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+axum = "0.8.9"
+heed = "0.22.1"
+rusqlite = "0.40.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.140"
+stl-core = { version = "0.1.0", path = "../stl-core" }
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "net", "signal"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+utoipa = { version = "5", features = ["axum_extras"] }
+
+[dev-dependencies]
+http-body-util = "0.1.5"
+tempfile = "3.27.0"
+tower = { version = "0.5.3", features = ["util"] }

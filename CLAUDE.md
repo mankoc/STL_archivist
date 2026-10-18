@@ -14,6 +14,9 @@ python main.py
 
 # Tests
 python -m pytest tests/ -v
+
+# Server (Phase 5; takes the library lock, so not while the app has the library open)
+cd rust && cargo run -p stl-server -- --data-dir <dir> --bind 127.0.0.1:8770
 ```
 
 ## Architecture
@@ -36,7 +39,8 @@ stl_database/
 │   ├── icon.svg             # Scalable vector version
 │   ├── icons/               # Toolbar / tree-view SVG icon set (light + dark variants)
 │   └── material-icons/      # Cached Material Design Icons (pre-downloaded for offline use)
-├── rust/                    # Rust workspace: stl-core (library), stl-py (PyO3 → `stl_native`)
+├── rust/                    # Rust workspace: stl-core (library), stl-py (PyO3 → `stl_native`),
+│                            #   stl-server (axum HTTP API, Phase 5)
 ├── tools/build_native.py    # maturin develop into the running interpreter's environment
 └── tests/                   # pytest; tests/factory.py builds data; tests/golden/ = Rust vs Python
 ```
@@ -54,6 +58,14 @@ the native core owns the schema from Phase 4b).
   thumbnails, non-portable rule patterns, metadata edge cases): catch `TypeError` /
   `ValueError` / `OverflowError` / `UnicodeError` from the native call and fall back, or
   answer the crawl host's request.
+- **Server (`rust/stl-server`):** handlers convert JSON and call `stl-core`; blocking work
+  goes through `Library::run` (tokio blocking pool). Every route gets a `#[utoipa::path]`
+  and an entry in `api::ApiDoc`, and a test in `stl-server/tests/api.rs` (the router on a
+  temporary library). Request types use `deny_unknown_fields` and validate names (facets,
+  groups, sort columns) before reaching the core.
+- **Library lock (rule 7):** `stl_core::lock::LibraryLock` (`library.lock` + `library.owner`
+  in the data directory). The server and `main.py` both hold it for their lifetime; never
+  open a library's database or store from a second process without it.
 - Logic lives in `rust/stl-core`; `rust/stl-py` only converts arguments and releases the GIL
   (`py.detach`). Long operations take `progress` / `log` / `should_stop` callbacks, as in
   `app/services`.

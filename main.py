@@ -125,6 +125,36 @@ def _migrate_db_filename(new_db_path: str) -> None:
         shutil.move(str(old), str(new))
 
 
+_library_lock = None   # held for the process lifetime (compatibility rule 7)
+
+
+def _lock_library(data_dir: Path, splash=None):
+    """Take the library lock, or explain who holds it and exit.
+
+    The server and other app instances take the same lock, so two processes
+    never open one library at once.
+    """
+    import os
+    from app import native
+    mod = native.module()
+    try:
+        return mod.LibraryLock(str(data_dir), f"stlLibrary {__version__} desktop app, pid {os.getpid()}")
+    except mod.LibraryLocked as exc:
+        if splash is not None:
+            splash.close()
+        from PyQt6.QtWidgets import QMessageBox
+        owner = str(exc) or QCoreApplication.translate("main", "another process")
+        QMessageBox.critical(
+            None,
+            QCoreApplication.translate("main", "Library In Use"),
+            QCoreApplication.translate(
+                "main", "The library in {0} is already open in {1}.\n\n"
+                "Close it there (or stop the server) and start stlLibrary again."
+            ).format(data_dir, owner),
+        )
+        sys.exit(1)
+
+
 def main() -> None:
     app = QApplication(sys.argv)
     app.setStyle("Fusion")  # flat base style — QSS overrides work fully on all platforms
@@ -162,6 +192,8 @@ def main() -> None:
     db_path = get_db_path()
     _migrate_db_filename(db_path)
     db_path = _check_db_on_startup(db_path, splash)
+    global _library_lock
+    _library_lock = _lock_library(Path(db_path).parent, splash)
     from app.database.vectors import legacy_embeddings_present
     if legacy_embeddings_present(db_path):
         _update_splash(splash, "Moving image embeddings to sqlite-vec (one time, about a minute)…")

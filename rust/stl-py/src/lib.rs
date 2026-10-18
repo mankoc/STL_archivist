@@ -26,6 +26,13 @@ create_exception!(
     "Raised when a long operation stops because should_stop() returned True."
 );
 
+create_exception!(
+    stl_native,
+    LibraryLocked,
+    PyRuntimeError,
+    "Raised when another process (the server or another app instance) has the library open."
+);
+
 /// How often a running job reports progress and polls `should_stop`.
 const POLL: Duration = Duration::from_millis(100);
 
@@ -235,8 +242,7 @@ type MaintRow<T> = (i64, String, String, String, Option<i64>, T);
 
 #[pyclass(frozen, name = "LibraryDb")]
 struct PyLibraryDb {
-    path: std::path::PathBuf,
-    pool: std::sync::Mutex<Vec<rusqlite::Connection>>,
+    db: storage::pool::Pool,
 }
 
 fn db_err(e: rusqlite::Error) -> PyErr {
@@ -250,22 +256,11 @@ impl PyLibraryDb {
         f: impl FnOnce(&rusqlite::Connection) -> rusqlite::Result<T> + Send,
     ) -> PyResult<T> {
         py.detach(|| {
-            let conn = self.pool.lock().unwrap_or_else(|e| e.into_inner()).pop();
-            let conn = match conn {
-                Some(c) => c,
-                None => storage::open(&self.path).map_err(db_err)?,
-            };
-            let out = f(&conn).map_err(db_err);
-            let mut pool = self.pool.lock().unwrap_or_else(|e| e.into_inner());
-            if pool.len() < 8 {
-                pool.push(conn);
-            }
-            out
+            let conn = self.db.get().map_err(db_err)?;
+            f(&conn).map_err(db_err)
         })
     }
-}
 
-impl PyLibraryDb {
     /// [`Self::with`] for functions with their own error type.
     fn with_map<T: Send, E: Send>(
         &self,
@@ -274,17 +269,8 @@ impl PyLibraryDb {
         err: fn(E) -> PyErr,
     ) -> PyResult<T> {
         py.detach(|| {
-            let conn = self.pool.lock().unwrap_or_else(|e| e.into_inner()).pop();
-            let conn = match conn {
-                Some(c) => c,
-                None => storage::open(&self.path).map_err(db_err)?,
-            };
-            let out = f(&conn).map_err(err);
-            let mut pool = self.pool.lock().unwrap_or_else(|e| e.into_inner());
-            if pool.len() < 8 {
-                pool.push(conn);
-            }
-            out
+            let conn = self.db.get().map_err(db_err)?;
+            f(&conn).map_err(err)
         })
     }
 
@@ -297,24 +283,13 @@ impl PyLibraryDb {
         err: fn(E) -> PyErr,
     ) -> PyResult<T> {
         py.detach(|| {
-            let conn = self.pool.lock().unwrap_or_else(|e| e.into_inner()).pop();
-            let mut conn = match conn {
-                Some(c) => c,
-                None => storage::open(&self.path).map_err(db_err)?,
-            };
-            let out = (|| {
-                let tx = conn
-                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                    .map_err(db_err)?;
-                let v = f(&tx).map_err(err)?;
-                tx.commit().map_err(db_err)?;
-                Ok(v)
-            })();
-            let mut pool = self.pool.lock().unwrap_or_else(|e| e.into_inner());
-            if pool.len() < 8 {
-                pool.push(conn);
-            }
-            out
+            let mut conn = self.db.get().map_err(db_err)?;
+            let tx = conn
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .map_err(db_err)?;
+            let v = f(&tx).map_err(err)?;
+            tx.commit().map_err(db_err)?;
+            Ok(v)
         })
     }
 }
@@ -628,7 +603,7 @@ fn crawl_config(d: &Bound<'_, PyDict>) -> PyResult<stl_core::crawler::CrawlConfi
 impl PyLibraryDb {
     #[new]
     fn new(path: std::path::PathBuf) -> Self {
-        PyLibraryDb { path, pool: std::sync::Mutex::new(Vec::new()) }
+        PyLibraryDb { db: storage::pool::Pool::new(&path) }
     }
 
     /// `library_query.table_ids`; `sort` is `(column, descending)` or `None`.
@@ -796,11 +771,7 @@ impl PyLibraryDb {
         should_stop: Option<Bound<'py, PyAny>>,
     ) -> PyResult<(usize, Vec<MaintRow<&'static str>>, bool, usize)> {
         use stl_core::storage::maintenance;
-        let conn = self.pool.lock().unwrap_or_else(|e| e.into_inner()).pop();
-        let conn = match conn {
-            Some(c) => c,
-            None => storage::open(&self.path).map_err(db_err)?,
-        };
+        let conn = self.db.get().map_err(db_err)?.detach();
         let outcome = run_job(py, progress.as_ref(), should_stop.as_ref(), move |ctl| {
             let v = maintenance::verify(&conn, ctl);
             Ok((v, conn))
@@ -814,7 +785,7 @@ impl PyLibraryDb {
             }
             Err(e) => return Err(e),
         };
-        self.pool.lock().unwrap_or_else(|e| e.into_inner()).push(conn);
+        drop(conn);
         let v = verified.map_err(db_err)?;
         let cleared = if v.reappeared.is_empty() {
             0
@@ -1326,16 +1297,10 @@ impl PyLibraryDb {
         Vec<(i64, i64, i64, i64, i64, f64, Option<String>, Option<String>, Option<String>, Option<String>)>,
     > {
         use stl_core::storage::duplicates;
-        let conn = self.pool.lock().unwrap_or_else(|e| e.into_inner()).pop();
-        let conn = match conn {
-            Some(c) => c,
-            None => storage::open(&self.path).map_err(db_err)?,
-        };
-        let (found, conn) = run_job(py, progress.as_ref(), should_stop.as_ref(), move |ctl| {
-            let found = duplicates::stl_content_pairs(&conn, threshold, ctl);
-            Ok((found, conn))
+        let conn = self.db.get().map_err(db_err)?.detach();
+        let found = run_job(py, progress.as_ref(), should_stop.as_ref(), move |ctl| {
+            Ok(duplicates::stl_content_pairs(&conn, threshold, ctl))
         })?;
-        self.pool.lock().unwrap_or_else(|e| e.into_inner()).push(conn);
         let Some(pairs) = found.map_err(db_err)? else {
             return Err(Stopped::new_err("stopped"));
         };
@@ -1648,7 +1613,7 @@ impl PyLibraryDb {
             stop: std::sync::atomic::AtomicBool::new(false),
         };
         let store_ref = store.as_ref().map(|b| b.get());
-        let path = self.path.clone();
+        let path = self.db.path().to_path_buf();
         let outcome = thread::scope(|s| -> PyResult<_> {
             let worker = s.spawn(|| {
                 let guard = store_ref.map(|st| st.inner.read().unwrap_or_else(|e| e.into_inner()));
@@ -1763,12 +1728,12 @@ impl PyLibraryDb {
 
     /// The database file this pool opens.
     fn path(&self) -> std::path::PathBuf {
-        self.path.clone()
+        self.db.path().to_path_buf()
     }
 
     /// Close the pooled connections (they reopen on the next call).
     fn close(&self, py: Python<'_>) {
-        py.detach(|| self.pool.lock().unwrap_or_else(|e| e.into_inner()).clear());
+        py.detach(|| self.db.close());
     }
 }
 
@@ -2063,10 +2028,42 @@ fn levenshtein_pairs(py: Python<'_>, values: Vec<String>, max_distance: u32) -> 
     py.detach(|| strings::levenshtein_pairs(&values, max_distance))
 }
 
+/// The library lock (`stl_core::lock`, compatibility rule 7): held until
+/// `release()` or until the object is collected. Raises `LibraryLocked` when
+/// another process holds it.
+#[pyclass(name = "LibraryLock")]
+struct PyLibraryLock {
+    inner: Option<stl_core::lock::LibraryLock>,
+}
+
+#[pymethods]
+impl PyLibraryLock {
+    #[new]
+    fn new(data_dir: std::path::PathBuf, owner: &str) -> PyResult<Self> {
+        use stl_core::lock::{LibraryLock, LockError};
+        match LibraryLock::acquire(&data_dir, owner) {
+            Ok(lock) => Ok(PyLibraryLock { inner: Some(lock) }),
+            Err(LockError::Held(who)) => Err(LibraryLocked::new_err(who)),
+            Err(LockError::Io(e)) => Err(e.into()),
+        }
+    }
+
+    fn release(&mut self) {
+        self.inner = None;
+    }
+
+    #[getter]
+    fn held(&self) -> bool {
+        self.inner.is_some()
+    }
+}
+
 #[pymodule]
 fn stl_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", stl_core::VERSION)?;
     m.add("Stopped", m.py().get_type::<Stopped>())?;
+    m.add("LibraryLocked", m.py().get_type::<LibraryLocked>())?;
+    m.add_class::<PyLibraryLock>()?;
     m.add_function(wrap_pyfunction!(archive_fingerprint, m)?)?;
     m.add_function(wrap_pyfunction!(archive_members, m)?)?;
     m.add_function(wrap_pyfunction!(archive_hash_file, m)?)?;

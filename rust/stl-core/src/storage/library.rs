@@ -28,6 +28,18 @@ pub const FACETS: &[&str] = &[
     "release", "scale", "presupports", "warning", "filetype",
 ];
 
+/// Keys accepted by the has-value / no-value group filters (`GROUPS`).
+pub const GROUPS: &[&str] = &[
+    "creator", "tag", "source", "date", "sculptor", "collection", "subcollection", "category",
+    "release", "scale", "presupports", "warning", "path",
+];
+
+/// Sections `filter_tree` can be asked to show (`Show`).
+pub const SHOW: &[&str] = &[
+    "author", "tags", "source", "date", "sculptor", "collection", "subcollection", "category", "release",
+    "scale", "presupports", "path",
+];
+
 /// Facets compared against a lookup FK column.
 const ID_FACETS: &[(&str, &str)] = &[
     ("sculptor", "sculptor_id"),

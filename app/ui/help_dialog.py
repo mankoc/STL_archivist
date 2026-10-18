@@ -815,6 +815,8 @@ The dialog is divided into sections shown in a tree on the left.</p>
 </table>
 <div class="note">The environment variables <code>STL_DATA_DIR</code> and
 <code>STL_UNRAR_PATH</code>, when set, take precedence over these two settings.
+A library can be open in only one process at a time: stlLibrary refuses to open a library
+that another instance or the stlLibrary server already has open, and names that process.
 The native (Rust) core is required; the log's first line shows its version. It reads
 <code>.zip</code>, <code>.7z</code> and <code>.rar</code> archives itself and hands any
 archive it cannot read exactly to the Python readers, so nothing is catalogued

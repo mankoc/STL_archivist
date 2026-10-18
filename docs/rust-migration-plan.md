@@ -829,6 +829,42 @@ committed: a native connection cannot see them, and native reads used to miss th
   path (local server or a configured path mapping), otherwise "download archive".
 - Library lock (rule 7); configuration through environment and a settings file; Docker image.
 
+Phase 5 runs in steps:
+
+| Step | Scope |
+|---|---|
+| 5a | `stl-server` crate: configuration, library lock, read-only library API (table ids and rows, filter tree, model detail, thumbnails), OpenAPI |
+| 5b | User accounts and authentication: users, roles (admin, editor, read-only), sessions or tokens, per-user settings |
+| 5c | Write endpoints: cell edits, model editor, lookup editors, mass editor, deletes, image upload |
+| 5d | Jobs over a WebSocket (crawl, maintenance, duplicate scans, embeddings) with progress, logs and cancellation; library-change events; native PDF (pdfium) and CLIP (ort) so a crawl needs no Python |
+| 5e | Server-side files (folder browsing, archive download, path mapping), Docker image |
+
+**5a: done 2026-10-18.**
+
+- `rust/stl-server` (axum 0.8, tokio, utoipa 5): `Library::open` takes the lock, migrates
+  the database and opens the thumbnail store; handlers run database and store work on the
+  blocking pool (`Library::run`). Configuration: defaults, then `<data_dir>/server.json`
+  (`{"bind": ...}`), then `STL_DATA_DIR` / `STL_BIND`, then `--data-dir` / `--bind`. The
+  default data directory is the desktop app's platform default; the default address is
+  `127.0.0.1:8770` (no authentication yet, so localhost only).
+- Routes: `GET /api/system/info`, `POST /api/models/ids` (filter, search, sort → ids in
+  display order), `POST /api/models/rows` (at most 2,000 ids), `GET /api/models/{id}`,
+  `POST /api/filter-tree`, `GET /api/images/{id}/thumbnail` (308 to the content address),
+  `GET /api/thumb/{digest}` (`Cache-Control: immutable`), `GET /api/openapi.json`.
+  The filter crosses as `{include: {facet: [values]}, exclude, has_value, no_value, ids}`
+  with ids for lookup facets and `{year, month}` for dates; filter-tree counts are keyed by
+  facet name (the core's `sculptor_id` kinds are renamed).
+- `stl_core::storage::pool::Pool` replaces the bindings' own pool, and
+  `ThumbStore::digests` / `blob` expose content addresses.
+- **Rule 7:** `stl_core::lock::LibraryLock` holds an OS file lock on `library.lock` for the
+  owner's lifetime (released by the OS on a crash); `library.owner` names the owner for the
+  refusal message, because Windows locks are mandatory. The server and the desktop app
+  (`main.py`, `stl_native.LibraryLock`) both take it, so a second app instance on the same
+  library is refused too.
+- Verified with the release binary on a crawled library: ids, rows, detail, thumbnails
+  (JPEG, immutable, redirect), scoped filter tree, a second server and the desktop app
+  refused, and the lock free again after the server was killed.
+
 ### Phase 6: Web client (largest)
 
 React + TypeScript in `web/`, served by the server, built against the API while the PyQt app
