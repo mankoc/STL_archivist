@@ -182,6 +182,36 @@ def extract_metadata(
         Populated ``ModelMetadata`` instance.
     """
     logger.debug("Extracting metadata for: %s", archive_path.name)
+    native_meta = _extract_native(archive_path, contents, source_dir)
+    if native_meta is not None:
+        return native_meta
+    return _extract_metadata_py(archive_path, contents, source_dir)
+
+
+def _extract_native(archive_path, contents, source_dir) -> Optional[ModelMetadata]:
+    """The native port (``rust/stl-core/src/metadata.rs``), or ``None`` to use Python."""
+    from app import native
+    mod = native.module()
+    if mod is None or not hasattr(mod, "extract_metadata"):
+        return None
+    try:
+        # Only .url and info.json members matter; images stay on this side.
+        relevant = [(n, bytes(b)) for n, b in (contents or {}).items()
+                    if n.lower().endswith((".url", "info.json"))]
+        d = mod.extract_metadata(
+            str(archive_path), relevant,
+            str(source_dir) if source_dir is not None else None)
+    except (ValueError, TypeError, OverflowError, UnicodeError):
+        return None
+    return ModelMetadata(**d)
+
+
+def _extract_metadata_py(
+    archive_path: Path,
+    contents: Optional[dict[str, bytes]] = None,
+    source_dir: Optional[Path] = None,
+) -> ModelMetadata:
+    """The Python implementation of :func:`extract_metadata`."""
     meta = _infer_from_path(archive_path, source_dir=source_dir)
 
     # .url file — check archive contents first, then filesystem
