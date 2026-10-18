@@ -7,6 +7,7 @@
 
 pub mod archive;
 pub mod control;
+pub mod crawler;
 pub mod dhash;
 pub mod embedding;
 pub mod fingerprint;

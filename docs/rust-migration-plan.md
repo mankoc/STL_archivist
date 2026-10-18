@@ -734,6 +734,45 @@ Gate: all 106 `.rar` archives of the reference library give identical catalogs; 
 stored `archive_hash` is reproduced; 36 sampled archives read identically. The catalog
 reads take a few milliseconds, against 6 s through `rarfile`.
 
+**4g-5b: done 2026-10-18 (the crawl in Rust).** `stl-core/src/crawler.rs` runs the whole
+pipeline:
+- listing;
+- pre-crawl sidecar import;
+- per batch: hashing (parallel, reusing stored hashes), diff and early moves, extraction
+  and thumbnail precomputation (parallel), and the upsert;
+- sidecar export, move reconciliation, missing records, the crawled-folder record and
+  lookup pruning.
+
+`CrawlerWorker.run()` calls it through `LibraryDb.crawl` when the native database and
+thumbnail store are available. Recrawl keeps the Python orchestration over the native
+database phases.
+
+**Requests to the host.** What the core cannot do as the Python app does becomes a
+`crawler::Request` to its `Host`:
+- archives the native readers refuse;
+- Pillow-only images, and PDF pages (PyMuPDF);
+- CLIP vectors;
+- metadata and rules the native ports leave to Python, and Unicode-digit parses;
+- sidecars the native port refuses.
+
+The PyO3 host queues requests and events and serves them on the calling Python thread
+(woken by a condition variable), so Python callbacks still never run on Rust threads.
+`_NativeCrawlServices` answers them with the functions the Python pipeline uses, so a
+native crawl gives the Python crawl's results. A host without Python (the server) answers
+`Response::None` for now; pdfium and `ort` will answer there later (Phase 5).
+
+**Behaviour change (both implementations):** a non-recursive crawl no longer treats the
+folder's own `METADATA.7z` as an archive.
+
+`tests/golden/test_crawl_golden.py` runs its scenario in two modes against the ORM crawl,
+and compares databases, thumbnails and signals after each step:
+- the whole native crawl;
+- Python orchestration over the native database phases.
+
+The scenario now also covers a PDF page and a CMYK JPEG, both answered by the host. Gate:
+three real library folders, including one of RAR archives (57 archives, 127 thumbnails),
+crawl to identical databases and stores.
+
 ### Phase 5: Server (medium)
 
 `stl-server` on axum, the product's centre from here on:

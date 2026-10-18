@@ -471,7 +471,7 @@ fn crawl_changed(v: &Bound<'_, PyAny>) -> PyResult<Option<stl_core::storage::cra
     }))
 }
 
-fn crawl_config(d: &Bound<'_, PyDict>) -> PyResult<stl_core::storage::crawl::UpsertConfig> {
+fn crawl_upsert_config(d: &Bound<'_, PyDict>) -> PyResult<stl_core::storage::crawl::UpsertConfig> {
     Ok(stl_core::storage::crawl::UpsertConfig {
         store_stl: opt_item(d, "store_stl")?.unwrap_or(false),
         warn_low_compression: opt_item(d, "warn_low_compression")?.unwrap_or(false),
@@ -485,6 +485,146 @@ fn crawl_config(d: &Bound<'_, PyDict>) -> PyResult<stl_core::storage::crawl::Ups
         force_scale: opt_item(d, "force_scale")?,
         force_date: opt_item(d, "force_date")?,
         embed_dim: opt_item(d, "embed_dim")?.unwrap_or(512),
+    })
+}
+
+
+// ── the native crawl (stl_core::crawler) ─────────────────────────────────────
+
+/// The crawl's [`crawler::Host`]: requests and events queue up here and are
+/// served by the calling Python thread (`LibraryDb.crawl`), never on a worker.
+struct PyCrawlHost {
+    queue: std::sync::Mutex<PyCrawlQueue>,
+    wake: std::sync::Condvar,
+    stop: std::sync::atomic::AtomicBool,
+}
+
+#[derive(Default)]
+struct PyCrawlQueue {
+    requests: Vec<(stl_core::crawler::Request, std::sync::mpsc::Sender<stl_core::crawler::Response>)>,
+    events: Vec<stl_core::crawler::Event>,
+    done: bool,
+}
+
+impl stl_core::crawler::Host for PyCrawlHost {
+    fn call(&self, request: stl_core::crawler::Request) -> stl_core::crawler::Response {
+        let (tx, rx) = std::sync::mpsc::channel();
+        {
+            let mut q = self.queue.lock().unwrap_or_else(|e| e.into_inner());
+            q.requests.push((request, tx));
+        }
+        self.wake.notify_all();
+        rx.recv().unwrap_or(stl_core::crawler::Response::None)
+    }
+
+    fn emit(&self, event: stl_core::crawler::Event) {
+        self.queue.lock().unwrap_or_else(|e| e.into_inner()).events.push(event);
+        self.wake.notify_all();
+    }
+
+    fn should_stop(&self) -> bool {
+        self.stop.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+fn crawl_event(sink: &Bound<'_, PyAny>, e: stl_core::crawler::Event) -> PyResult<()> {
+    use stl_core::crawler::Event;
+    match e {
+        Event::Log(s) => sink.call1(("log", s))?,
+        Event::Phase(s) => sink.call1(("phase", s))?,
+        Event::Warning(s) => sink.call1(("warning", s))?,
+        Event::Progress(a, b) => sink.call1(("progress", a, b))?,
+        Event::Counts(a, b, c) => sink.call1(("counts", a, b, c))?,
+        Event::Result(p, k) => sink.call1(("result", p, k))?,
+        Event::Moved(a, b) => sink.call1(("moved", a, b))?,
+        Event::Deleted(p) => sink.call1(("deleted", p))?,
+    };
+    Ok(())
+}
+
+#[allow(clippy::type_complexity)]
+fn crawl_answer(
+    services: &Bound<'_, PyAny>,
+    r: stl_core::crawler::Request,
+) -> PyResult<stl_core::crawler::Response> {
+    use stl_core::crawler::{Extracted, Request, Response};
+    let py = services.py();
+    Ok(match r {
+        Request::Hash(path) => Response::Hash(services.call_method1("hash", (path,))?.extract()?),
+        Request::Extract(path) => {
+            let (contents, names, stl_info, uncompressed): (
+                Vec<(String, Vec<u8>)>,
+                Vec<String>,
+                Vec<(String, Option<i64>)>,
+                Option<i64>,
+            ) = services.call_method1("extract", (path,))?.extract()?;
+            Response::Extracted(Extracted { contents, names, stl_info, uncompressed })
+        }
+        Request::ListStl(path) => Response::Stl(services.call_method1("list_stl", (path,))?.extract()?),
+        Request::Thumbnail { data, pdf } => {
+            Response::Thumbnail(services.call_method1("thumbnail", (PyBytes::new(py, &data), pdf))?.extract()?)
+        }
+        Request::Embed(jpegs) => {
+            let items: Vec<Bound<'_, PyBytes>> = jpegs.iter().map(|j| PyBytes::new(py, j)).collect();
+            Response::Vectors(services.call_method1("embed", (items,))?.extract()?)
+        }
+        Request::Metadata { path, files } => {
+            let files: Vec<(String, Bound<'_, PyBytes>)> = files.iter().map(|(n, b)| (n.clone(), PyBytes::new(py, b))).collect();
+            let d = services.call_method1("metadata", (path, files))?;
+            let d = d.cast::<PyDict>()?;
+            Response::Metadata(stl_core::metadata::Metadata {
+                title: opt_item(d, "title")?,
+                creator: opt_item(d, "creator")?,
+                distributor: opt_item(d, "distributor")?,
+                release_date: opt_item(d, "release_date")?,
+                url: opt_item(d, "url")?,
+                description: opt_item(d, "description")?,
+                tags: opt_item(d, "tags")?.unwrap_or_default(),
+                release: opt_item(d, "release")?,
+            })
+        }
+        Request::Rules { archive_name, names } => {
+            let (presupports, warnings, scales): (String, String, Vec<String>) =
+                services.call_method1("rules", (archive_name, names))?.extract()?;
+            Response::Rules { presupports, warnings, scales }
+        }
+        Request::ParseDate(s) => {
+            let (y, m): (Option<i64>, Option<i64>) = services.call_method1("parse_date", (s,))?.extract()?;
+            Response::Date(y, m)
+        }
+        Request::ParseInt(s) => Response::Int(services.call_method1("parse_int", (s,))?.extract()?),
+        Request::SidecarImport(folder) => Response::Imported(services.call_method1("sidecar_import", (folder,))?.extract()?),
+        Request::SidecarExport(folder) => {
+            services.call_method1("sidecar_export", (folder,))?;
+            Response::None
+        }
+    })
+}
+
+fn crawl_config(d: &Bound<'_, PyDict>) -> PyResult<stl_core::crawler::CrawlConfig> {
+    Ok(stl_core::crawler::CrawlConfig {
+        source_dir: opt_item(d, "source_dir")?.unwrap_or_default(),
+        pattern: opt_item(d, "pattern")?.unwrap_or_default(),
+        recurse: opt_item(d, "recurse")?.unwrap_or(true),
+        force_rescan: opt_item(d, "force_rescan")?.unwrap_or(false),
+        store_stl: opt_item(d, "store_stl")?.unwrap_or(false),
+        max_thumbnails: opt_item(d, "max_thumbnails")?.unwrap_or(5),
+        max_thumb_size: opt_item(d, "max_thumb_size")?.unwrap_or(512),
+        max_workers: opt_item(d, "max_workers")?.unwrap_or(4),
+        unrar: opt_item(d, "unrar")?.unwrap_or_default(),
+        sidecars: opt_item(d, "sidecars")?.unwrap_or(false),
+        sidecar_thumbnails: opt_item(d, "sidecar_thumbnails")?.unwrap_or(true),
+        warn: stl_core::rules::Checks {
+            presupported: opt_item(d, "warn_presupported")?.unwrap_or(true),
+            no_images: opt_item(d, "warn_no_images")?.unwrap_or(true),
+            nested_archive: opt_item(d, "warn_nested_archive")?.unwrap_or(true),
+            no_printable: opt_item(d, "warn_no_printable")?.unwrap_or(true),
+        },
+        presupport_patterns: opt_item(d, "presupport_patterns")?.unwrap_or_default(),
+        embed: opt_item(d, "embed")?.unwrap_or(false),
+        log_unchanged: opt_item(d, "log_unchanged")?.unwrap_or(false),
+        defer_missing_deletion: opt_item(d, "defer_missing_deletion")?.unwrap_or(false),
+        upsert: crawl_upsert_config(d)?,
     })
 }
 
@@ -1343,7 +1483,7 @@ impl PyLibraryDb {
         max_failures: usize,
     ) -> PyResult<Vec<(Option<String>, usize, usize)>> {
         use stl_core::storage::crawl;
-        let cfg = crawl_config(config)?;
+        let cfg = crawl_upsert_config(config)?;
         let inputs = inputs
             .iter()
             .map(|d| {
@@ -1490,6 +1630,87 @@ impl PyLibraryDb {
 
     fn jobs_delete_missing_under(&self, py: Python<'_>, roots: Vec<String>) -> PyResult<(Vec<String>, Vec<String>)> {
         self.with_tx(py, |tx| stl_core::storage::jobs::delete_missing_under(tx, &roots), db_err)
+    }
+
+    /// The whole crawl (`CrawlerWorker.run`) natively. Requests the core leaves
+    /// to Python go to `services.<name>(...)` and events to `sink(kind, *args)`,
+    /// both on this thread; `should_stop()` is polled. Returns the summary.
+    #[pyo3(signature = (config, services, sink, store=None, should_stop=None))]
+    fn crawl<'py>(
+        &self,
+        py: Python<'py>,
+        config: &Bound<'py, PyDict>,
+        services: Bound<'py, PyAny>,
+        sink: Bound<'py, PyAny>,
+        store: Option<Bound<'py, PyThumbStore>>,
+        should_stop: Option<Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let cfg = crawl_config(config)?;
+        let host = PyCrawlHost {
+            queue: std::sync::Mutex::new(PyCrawlQueue::default()),
+            wake: std::sync::Condvar::new(),
+            stop: std::sync::atomic::AtomicBool::new(false),
+        };
+        let store_ref = store.as_ref().map(|b| b.get());
+        let path = self.path.clone();
+        let outcome = thread::scope(|s| -> PyResult<_> {
+            let worker = s.spawn(|| {
+                let guard = store_ref.map(|st| st.inner.read().unwrap_or_else(|e| e.into_inner()));
+                let st = guard.as_ref().and_then(|g| g.as_ref());
+                let r = stl_core::crawler::crawl(&path, st, &cfg, &host);
+                host.queue.lock().unwrap_or_else(|e| e.into_inner()).done = true;
+                host.wake.notify_all();
+                r
+            });
+            let mut failure: Option<PyErr> = None;
+            loop {
+                let (requests, events, done) = py.detach(|| {
+                    let mut q = host.queue.lock().unwrap_or_else(|e| e.into_inner());
+                    if q.requests.is_empty() && q.events.is_empty() && !q.done {
+                        q = host.wake.wait_timeout(q, Duration::from_millis(100)).unwrap_or_else(|e| e.into_inner()).0;
+                    }
+                    (std::mem::take(&mut q.requests), std::mem::take(&mut q.events), q.done)
+                });
+                for e in events {
+                    if let Err(err) = crawl_event(&sink, e) {
+                        failure.get_or_insert(err);
+                    }
+                }
+                for (request, reply) in requests {
+                    let answer = crawl_answer(&services, request).unwrap_or_else(|err| {
+                        failure.get_or_insert(err);
+                        stl_core::crawler::Response::None
+                    });
+                    let _ = reply.send(answer);
+                }
+                if failure.is_some() {
+                    host.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                if let Some(cb) = &should_stop
+                    && cb.call0()?.is_truthy()?
+                {
+                    host.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                if done {
+                    let q = host.queue.lock().unwrap_or_else(|e| e.into_inner());
+                    if q.requests.is_empty() && q.events.is_empty() {
+                        break;
+                    }
+                }
+            }
+            let result = worker.join().map_err(|_| PyRuntimeError::new_err("native crawl thread panicked"))?;
+            if let Some(err) = failure {
+                return Err(err);
+            }
+            result.map_err(|e| PyRuntimeError::new_err(format!("crawl: {e}")))
+        })?;
+        let out = PyDict::new(py);
+        out.set_item("total", outcome.total)?;
+        out.set_item("new", outcome.new)?;
+        out.set_item("updated", outcome.updated)?;
+        out.set_item("unchanged", outcome.unchanged)?;
+        out.set_item("new_paths", outcome.new_paths)?;
+        Ok(out)
     }
 
     /// Close the pooled connections (they reopen on the next call).

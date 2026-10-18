@@ -33,6 +33,9 @@ MTIME = 1_700_000_000
 TIMESTAMPS = {"created_at", "updated_at", "last_crawled_at"}
 
 
+CrawlerWorker._native_library_real = staticmethod(CrawlerWorker._native_library)
+
+
 @pytest.fixture(autouse=True)
 def _native_on(monkeypatch):
     monkeypatch.delenv("STL_NATIVE", raising=False)
@@ -44,6 +47,27 @@ def _native_on(monkeypatch):
 def _png(color) -> bytes:
     buf = io.BytesIO()
     PILImage.new("RGB", (40, 30), color).save(buf, "PNG")
+    return buf.getvalue()
+
+
+_PDF_CACHE: list[bytes] = []
+
+
+def _pdf() -> bytes:
+    """One PDF per test run (PyMuPDF writes a timestamp into each new one)."""
+    if _PDF_CACHE:
+        return _PDF_CACHE[0]
+    import fitz
+    doc = fitz.open()
+    page = doc.new_page(width=200, height=150)
+    page.insert_text((20, 60), "Assembly guide")
+    _PDF_CACHE.append(doc.tobytes())
+    return _PDF_CACHE[0]
+
+
+def _cmyk_jpeg() -> bytes:
+    buf = io.BytesIO()
+    PILImage.new("CMYK", (30, 20), (0, 128, 255, 0)).save(buf, "JPEG")
     return buf.getvalue()
 
 
@@ -70,6 +94,7 @@ def _build(src: Path) -> None:
     })
     _zip(pat / "Elf 28mm.zip", {"elf.stl": b"solid", "elf.jpg": _png("green")})
     _zip(src / "Other" / "orc.zip", {"orc.stl": b"solid"})
+    _zip(src / "Other" / "manual.zip", {"guide.pdf": _pdf(), "cmyk.jpg": _cmyk_jpeg(), "m.stl": b"solid m"})
     _zip(src / "Other" / "same_content_1.zip", {"x.stl": b"solid x"})
     (src / "Other" / "cover.png").write_bytes(_png("yellow"))
     (src / "Patreon" / "Sanix" / "banner.jpg").write_bytes(_png("purple"))
@@ -119,7 +144,7 @@ def _crawl(src: Path, pattern: str, **config):
     return events
 
 
-def _scenario(tmp_path: Path, name: str, use_native: bool, monkeypatch):
+def _scenario(tmp_path: Path, name: str, use_native: bool, monkeypatch, keep_patches: bool = False):
     src = tmp_path / "src"
     _build(src)
     data = tmp_path / name
@@ -128,7 +153,9 @@ def _scenario(tmp_path: Path, name: str, use_native: bool, monkeypatch):
     if not use_native:
         monkeypatch.setattr(CrawlerWorker, "_native_library", staticmethod(lambda: None))
     else:
-        monkeypatch.undo()          # the real _native_library again
+        if not keep_patches:
+            monkeypatch.undo()      # the real _native_library again
+        monkeypatch.setattr(CrawlerWorker, "_native_library", staticmethod(CrawlerWorker._native_library_real))
         monkeypatch.delenv("STL_NATIVE", raising=False)
         native.reload()
         assert CrawlerWorker._native_library() is not None
@@ -143,9 +170,42 @@ def _scenario(tmp_path: Path, name: str, use_native: bool, monkeypatch):
     return steps
 
 
-def test_crawl_native_matches_orm(tmp_path, monkeypatch):
+def _modes(monkeypatch, mode):
+    """``"py"``: the ORM phases; ``"db"``: Python orchestration over the native
+    database phases; ``"rs"``: the whole crawl in the native core."""
+    runs = []
+    real = CrawlerWorker._run_native
+    monkeypatch.setattr(CrawlerWorker, "_run_native", lambda self: runs.append(1) or real(self))
+    if mode == "db":
+        monkeypatch.setattr(CrawlerWorker, "_run_native", lambda self: pytest.fail("native crawl used"))
+        orig = CrawlerWorker._reset_state
+
+        def reset(self):
+            orig(self)
+            if self._lib is not None:
+                self._lib = _NoCrawl(self._lib)
+        monkeypatch.setattr(CrawlerWorker, "_reset_state", reset)
+    return runs
+
+
+class _NoCrawl:
+    """A ``LibraryDb`` without ``crawl``: the worker orchestrates in Python."""
+
+    def __init__(self, lib):
+        self._lib = lib
+
+    def __getattr__(self, name):
+        if name == "crawl":
+            raise AttributeError(name)
+        return getattr(self._lib, name)
+
+
+@pytest.mark.parametrize("mode", ["rs", "db"])
+def test_crawl_native_matches_orm(tmp_path, monkeypatch, mode):
     py = _scenario(tmp_path, "py", False, monkeypatch)
-    rs = _scenario(tmp_path, "rs", True, monkeypatch)
+    runs = _modes(monkeypatch, mode)
+    rs = _scenario(tmp_path, "rs", True, monkeypatch, keep_patches=True)
+    assert bool(runs) == (mode == "rs")
     for k, ((py_events, py_db), (rs_events, rs_db)) in enumerate(zip(py, rs)):
         assert rs_events == py_events, f"step {k}: signals"
         for table in py_db:
@@ -154,5 +214,6 @@ def test_crawl_native_matches_orm(tmp_path, monkeypatch):
                 pytest.fail(f"step {k}: {table}: {len(py_db[table])} vs {len(rs_db[table])} rows; py/rs {diff}")
     # The scenario exercised what it is meant to.
     first_db = py[0][1]
-    assert len(first_db["models"]) == 5 and first_db["thumbs"]
+    assert len(first_db["models"]) == 6 and first_db["thumbs"]
+    assert sum(1 for r in first_db["images"] if "guide.pdf" in str(r) or "cmyk.jpg" in str(r)) == 2
     assert any(e[0] == "moved" for e in py[1][0]) and any(e[0] == "deleted" for e in py[1][0])

@@ -104,6 +104,9 @@ class CrawlerWorker(QThread):
     def run(self) -> None:
         """Main thread entry point — orchestrates the full crawl pipeline."""
         self._reset_state()
+        if self._lib is not None and hasattr(self._lib, "crawl"):
+            self._run_native()
+            return
         logger.info("Crawl started — source: %s, pattern: %r, workers: %d",
                     self.source_dir, self._pattern, self._config.max_workers)
         self.phase.emit("Scanning for deleted files…")
@@ -118,7 +121,9 @@ class CrawlerWorker(QThread):
             archives = sorted(iter_archives(self.source_dir))
         else:
             # Only list archives directly in the selected folder (no recursion)
-            archives = sorted([p for p in self.source_dir.iterdir() if p.is_file() and p.suffix.lower() in ('.zip', '.7z', '.rar')])
+            archives = sorted([p for p in self.source_dir.iterdir()
+                               if p.is_file() and p.suffix.lower() in ('.zip', '.7z', '.rar')
+                               and p.name != "METADATA.7z"])
         total    = len(archives)
         msg      = f"Found {total} archives in {self.source_dir}"
         self.log.emit(msg)
@@ -173,6 +178,60 @@ class CrawlerWorker(QThread):
         msg = "Crawl complete."
         self.log.emit(msg)
         logger.info(msg)
+        self.crawl_finished.emit()
+
+    def _run_native(self) -> None:
+        """The whole crawl in the native core (``stl_core::crawler``).
+
+        What the core leaves to Python comes back as calls on
+        :class:`_NativeCrawlServices`; its events become this worker's signals.
+        """
+        from app.crawler.archive import _unrar_tool
+        from app.utils.thumbnailer import native_store
+        cfg = self._config
+        logger.info("Native crawl started — source: %s, pattern: %r, workers: %d",
+                    self.source_dir, self._pattern, cfg.max_workers)
+        config = dict(self._native_config())
+        config.update({
+            "source_dir": str(self.source_dir), "pattern": self._pattern,
+            "recurse": bool(cfg.recurse_subdirs), "force_rescan": bool(cfg.force_rescan),
+            "max_thumbnails": int(cfg.max_thumbnails), "max_thumb_size": int(cfg.max_thumb_size),
+            "max_workers": int(cfg.max_workers), "unrar": _unrar_tool(cfg.unrar_path),
+            "sidecars": bool(cfg.metadata_sidecar_enabled and get_thumbnail_base_dir() is not None),
+            "sidecar_thumbnails": bool(cfg.metadata_thumbnails),
+            "warn_presupported": bool(cfg.warn_presupported_stl), "warn_no_images": bool(cfg.warn_no_images),
+            "warn_nested_archive": bool(cfg.warn_nested_archive),
+            "warn_no_printable": bool(cfg.warn_no_printable),
+            "presupport_patterns": list(cfg.presupport_patterns),
+            "embed": bool(cfg.embed_during_crawl), "log_unchanged": bool(cfg.log_unchanged),
+            "defer_missing_deletion": bool(cfg.defer_missing_deletion),
+        })
+
+        def sink(kind, *args):
+            if kind == "log":
+                self.log.emit(args[0])
+            elif kind == "phase":
+                self.phase.emit(args[0])
+            elif kind == "warning":
+                self.warning.emit(args[0])
+            elif kind == "progress":
+                self.progress.emit(*args)
+            elif kind == "counts":
+                self._stats_new, self._stats_updated, self._stats_unchanged = args
+                self.counts_changed.emit(*args)
+            elif kind == "result":
+                self.archive_result.emit(*args)
+            elif kind == "moved":
+                self.file_moved.emit(*args)
+            elif kind == "deleted":
+                self.file_deleted.emit(args[0])
+
+        summary = self._lib.crawl(config, _NativeCrawlServices(self), sink, native_store(),
+                                  lambda: self._stop_requested)
+        self._stats_new = summary["new"]
+        self._stats_updated = summary["updated"]
+        self._stats_unchanged = summary["unchanged"]
+        self._new_archive_paths = set(summary["new_paths"])
         self.crawl_finished.emit()
 
     def _reset_state(self) -> None:
@@ -1710,3 +1769,84 @@ class CrawlerWorker(QThread):
             logger.debug("  metadata: %s", ", ".join(meta_parts))
         else:
             self.log.emit("  metadata: (none found)")
+
+
+class _NativeCrawlServices:
+    """What the native crawl asks Python for (see ``stl_core::crawler::Request``).
+
+    Each method answers one request with the same functions the Python
+    pipeline uses, so a native crawl gives the Python crawl's results.
+    """
+
+    def __init__(self, worker: "CrawlerWorker") -> None:
+        self._w = worker
+        self._cfg = worker._config
+
+    def hash(self, path: str) -> str:
+        return archive_hash(Path(path), unrar_path=self._cfg.unrar_path)
+
+    def extract(self, path: str):
+        names: list[str] = []
+        stl: dict = {}
+        unc: list[int] = []
+        try:
+            data = extract_archive_contents(Path(path), unrar_path=self._cfg.unrar_path, all_names_out=names,
+                                            stl_info_out=stl, uncompressed_size_out=unc)
+        except Exception as exc:
+            self._w.warning.emit(f"WARNING: Failed to extract {Path(path).name} — file may be corrupted: {exc}")
+            logger.error("Extraction failed for %s: %s", path, exc, exc_info=True)
+            return [], [], [], None
+        return list(data.items()), names, list(stl.items()), (unc[0] if unc else None)
+
+    def list_stl(self, path: str):
+        return list(list_stl_members(Path(path), unrar_path=self._cfg.unrar_path).items())
+
+    def thumbnail(self, data: bytes, pdf: bool):
+        from app.utils.thumbnailer import _make_thumbnail_py, make_thumbnail, pdf_first_page_to_image_bytes
+        if pdf:
+            raw = pdf_first_page_to_image_bytes(data) or b""
+            return make_thumbnail(raw, self._cfg.max_thumb_size) if raw else None
+        return _make_thumbnail_py(data, self._cfg.max_thumb_size)
+
+    def embed(self, jpegs: list):
+        try:
+            from app.utils import image_embedding as _emb
+            from app.utils.image_embedding import to_blob
+            return [to_blob(v) if v is not None else None for v in _emb.embed_batch(list(jpegs))]
+        except Exception:
+            logger.debug("Embedding during crawl failed", exc_info=True)
+            return [None] * len(jpegs)
+
+    def metadata(self, path: str, files: list):
+        from app.crawler.metadata import _extract_metadata_py
+        m = _extract_metadata_py(Path(path), dict(files), self._w.source_dir)
+        return {"title": m.title, "creator": m.creator, "distributor": m.distributor,
+                "release_date": m.release_date, "url": m.url, "description": m.description,
+                "tags": [str(t) for t in m.tags], "release": m.release}
+
+    def rules(self, archive_name: str, names: list):
+        cfg = self._cfg
+        warnings = detect_warnings(
+            names, check_presupported=cfg.warn_presupported_stl, check_no_images=cfg.warn_no_images,
+            check_nested_archive=cfg.warn_nested_archive, check_no_printable=cfg.warn_no_printable,
+            presupport_patterns=cfg.presupport_patterns)
+        return detect_presupport(names), warnings or "", detect_scale([archive_name] + list(names))
+
+    def parse_date(self, text: str):
+        return parse_release_date(text)
+
+    def parse_int(self, text: str):
+        try:
+            return int(text)
+        except ValueError:
+            return None
+
+    def sidecar_import(self, folder: str) -> int:
+        return len(import_folder_metadata(Path(folder), None, get_thumbnail_base_dir()))
+
+    def sidecar_export(self, folder: str) -> None:
+        try:
+            export_folder_metadata(Path(folder), None, get_thumbnail_base_dir(),
+                                   include_thumbnails=self._cfg.metadata_thumbnails)
+        except Exception as exc:
+            logger.error("Failed to update METADATA.7z in %s: %s", folder, exc, exc_info=True)
