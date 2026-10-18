@@ -121,7 +121,7 @@ fn archive_err(e: ArchiveError) -> PyErr {
 ///
 /// Same names and CRCs as the Python readers in `app.crawler.archive`.
 /// Raises `OSError` or `ValueError` for anything it cannot read exactly; the
-/// caller then falls back to the Python reader (and always does for `.rar`).
+/// caller then falls back to the Python reader.
 #[pyfunction]
 fn archive_members(py: Python<'_>, path: std::path::PathBuf) -> PyResult<Vec<(String, u32, Option<u64>)>> {
     let members = py.detach(|| archive::list_members(&path)).map_err(archive_err)?;
@@ -139,13 +139,16 @@ fn archive_hash_file(py: Python<'_>, path: std::path::PathBuf) -> PyResult<Strin
 /// Same result as the Python readers' `read_batch`: missing, empty and
 /// unreadable members are left out. Raises `OSError` or `ValueError` when the
 /// archive needs the Python reader instead.
+/// `unrar_path` is the UnRAR tool compressed `.rar` members need.
 #[pyfunction]
+#[pyo3(signature = (path, names, unrar_path=String::new()))]
 fn read_archive_members<'py>(
     py: Python<'py>,
     path: std::path::PathBuf,
     names: Vec<String>,
+    unrar_path: String,
 ) -> PyResult<Bound<'py, PyDict>> {
-    let members = py.detach(|| archive::read_members(&path, &names)).map_err(archive_err)?;
+    let members = py.detach(|| archive::read_members_with(&path, &names, &unrar_path)).map_err(archive_err)?;
     let out = PyDict::new(py);
     for (name, data) in members {
         out.set_item(name, PyBytes::new(py, &data))?;

@@ -242,16 +242,17 @@ def is_archive(path: Path) -> bool:
 
 
 def _native_catalog(path: Path) -> Optional[list[MemberInfo]]:
-    """Catalog from the native core for ``.zip`` / ``.7z``, or None to use Python.
+    """Catalog from the native core for ``.zip`` / ``.7z`` / ``.rar``, or None to use Python.
 
     ``rust/stl-core/src/archive`` reproduces the Python readers' names and
     CRCs exactly (golden-tested, and checked against every stored hash of the
-    reference library). It raises for anything it cannot read exactly, and for
-    ``.rar``; the Python readers then decide, errors included.
+    reference library; ``rar.rs`` ports ``rarfile``'s header parsing). It
+    raises for anything it cannot read exactly; the Python readers then
+    decide, errors included.
     """
     from app import native
     mod = native.module()
-    if mod is None or path.suffix.lower() not in (".zip", ".7z"):
+    if mod is None or path.suffix.lower() not in (".zip", ".7z", ".rar"):
         return None
     try:
         return [MemberInfo(name, crc, size) for name, crc, size in mod.archive_members(str(path))]
@@ -269,7 +270,7 @@ def _catalog(path: Path, unrar_path: str = "") -> list[MemberInfo]:
 
 
 def _read_members(path: Path, names: list[str], unrar_path: str = "") -> dict[str, bytes]:
-    """``read_batch(names)``: native for ``.zip`` / ``.7z`` when possible, else Python.
+    """``read_batch(names)``: native for ``.zip`` / ``.7z`` / ``.rar`` when possible, else Python.
 
     The native reader returns what ``read_batch`` would (missing, empty and
     unreadable members left out) and raises when the archive needs the Python
@@ -279,13 +280,24 @@ def _read_members(path: Path, names: list[str], unrar_path: str = "") -> dict[st
         return {}
     from app import native
     mod = native.module()
-    if mod is not None and path.suffix.lower() in (".zip", ".7z"):
+    suffix = path.suffix.lower()
+    if mod is not None and suffix in (".zip", ".7z", ".rar"):
         try:
+            if suffix == ".rar":
+                return mod.read_archive_members(str(path), names, _unrar_tool(unrar_path))
             return mod.read_archive_members(str(path), names)
         except (OSError, ValueError, AttributeError) as exc:
             logger.debug("Native read of %s fell back to Python: %s", path.name, exc)
     with open_archive(path, unrar_path) as ar:
         return ar.read_batch(names)
+
+
+def _unrar_tool(unrar_path: str) -> str:
+    """The UnRAR executable ``rarfile`` would run, as a full path ("" if none)."""
+    import shutil
+    tool = unrar_path or rarfile.UNRAR_TOOL
+    found = shutil.which(tool) if tool else None
+    return found or (tool if tool and Path(tool).is_file() else "")
 
 
 def archive_hash(path: Path, unrar_path: str = "") -> str:

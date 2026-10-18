@@ -13,6 +13,7 @@
 //! fail wherever the Python reader fails, so the two never disagree about an
 //! archive that only one of them can read.
 
+mod rar;
 mod sevenz;
 mod zip;
 
@@ -73,6 +74,7 @@ pub fn list_members(path: &Path) -> Result<Vec<ArchiveMember>, ArchiveError> {
     match extension(path).as_str() {
         "zip" => zip::list_members(path),
         "7z" => sevenz::list_members(path),
+        "rar" => rar::list_members(path),
         other => Err(ArchiveError::Unsupported(format!("archive type .{other}"))),
     }
 }
@@ -83,9 +85,16 @@ pub fn list_members(path: &Path) -> Result<Vec<ArchiveMember>, ArchiveError> {
 /// (bad CRC and the like, per member for ZIP) are left out; anything this
 /// reader does not handle exactly fails the whole call instead.
 pub fn read_members(path: &Path, names: &[String]) -> Result<Vec<(String, Vec<u8>)>, ArchiveError> {
+    read_members_with(path, names, "")
+}
+
+/// [`read_members`] with the UnRAR tool `.rar` members need (`""`: none, so
+/// compressed RAR members are unsupported).
+pub fn read_members_with(path: &Path, names: &[String], unrar: &str) -> Result<Vec<(String, Vec<u8>)>, ArchiveError> {
     match extension(path).as_str() {
         "zip" => zip::read_members(path, names),
         "7z" => sevenz::read_members(path, names),
+        "rar" => rar::read_members(path, names, unrar),
         other => Err(ArchiveError::Unsupported(format!("archive type .{other}"))),
     }
 }

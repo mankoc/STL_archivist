@@ -145,11 +145,17 @@ def test_7z_catalog_matches_py7zr(tmp_path):
         [(n, c) for n, c, _ in py_cat])
 
 
-def test_rar_is_left_to_python(tmp_path):
+def test_rar_edge_cases(tmp_path):
+    """A bare RAR signature lists as empty (as rarfile does); an SFX archive
+    (signature not at the start) is left to Python.  tests/golden/test_rar_golden.py
+    covers real archives."""
     path = tmp_path / "t.rar"
     path.write_bytes(b"Rar!\x1a\x07\x00")
+    assert stl_native.archive_members(str(path)) == []
+    sfx = tmp_path / "s.rar"
+    sfx.write_bytes(b"MZ" + b"\0" * 100 + b"Rar!\x1a\x07\x00")
     with pytest.raises(ValueError):
-        stl_native.archive_members(str(path))
+        stl_native.archive_members(str(sfx))
 
 
 # --- extraction: read_archive_members must equal read_batch ---------------------------
