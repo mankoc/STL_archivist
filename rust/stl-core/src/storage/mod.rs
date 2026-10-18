@@ -23,6 +23,7 @@
 
 pub mod admin;
 pub mod browser;
+pub mod crawl;
 pub mod duplicates;
 pub mod edit;
 pub mod library;
