@@ -14,6 +14,7 @@ pub mod error;
 pub mod jobs;
 pub mod library_settings;
 pub mod sidecars;
+pub mod tools;
 
 use std::sync::Arc;
 
@@ -34,6 +35,7 @@ pub struct Library {
     pub logins: auth::LoginThrottle,
     pub sidecars: sidecars::SidecarQueue,
     pub jobs: jobs::Jobs,
+    pub tools: tools::Tools,
     _lock: LibraryLock,
 }
 
@@ -61,6 +63,7 @@ impl Library {
             logins: auth::LoginThrottle::default(),
             sidecars: sidecars::SidecarQueue::default(),
             jobs: jobs::Jobs::default(),
+            tools: tools::Tools::default(),
             config,
             _lock: lock,
         })

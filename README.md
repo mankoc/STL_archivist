@@ -138,9 +138,20 @@ refresh the folder's `METADATA.7z` as the desktop app does.
 
 Editors run crawls and maintenance as jobs (`POST /api/jobs`, for example
 `{"kind": "crawl", "folder": "D:/STL/Patreon"}`), one at a time, with progress and logs
-streamed over the `/api/events` WebSocket. Crawls use the library's crawler settings. The
-server cannot yet render PDF previews, compute AI embeddings or read the few images only
-Pillow decodes (AVIF, CMYK JPEG); those archives are catalogued without that preview.
+streamed over the `/api/events` WebSocket. Crawls use the library's crawler settings.
+
+PDF previews and AI embeddings need two runtime libraries, which the server loads when it
+finds them (beside the server, in the data directory, or at a configured path):
+
+| Feature | Library | Configure with |
+|---|---|---|
+| PDF previews | pdfium ([prebuilt binaries](https://github.com/bblanchon/pdfium-binaries), build 7881) | `"pdfium"` in `server.json` or `STL_PDFIUM_PATH` |
+| AI embeddings | ONNX Runtime 1.17 or newer (the `onnxruntime` Python package ships one) | `"onnxruntime"` in `server.json` or `ORT_DYLIB_PATH` |
+
+The CLIP model is found as in the desktop app (`<data dir>/models/clip_image_encoder.onnx`
+or `STLLIBRARY_CLIP_MODEL`). An editor can then run `{"kind": "compute_embeddings"}`, and
+crawls embed new thumbnails when *compute embeddings during crawl* is on. The server
+still cannot read the few images only Pillow decodes (AVIF, CMYK JPEG).
 `.rar` archives need UnRAR on `PATH`, or `"unrar"` in `server.json` / `STL_UNRAR_PATH`.
 
 Accounts are kept in `<data dir>/server.db`, separate from the library database. Put the

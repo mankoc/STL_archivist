@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Server step 5d-2: PDF previews and AI embeddings without Python.** When it finds pdfium and ONNX Runtime, the server renders PDF previews and computes CLIP embeddings itself, during crawls and as a *compute embeddings* job. Its vectors match the desktop app's (cosine above 0.9999), so both can share one library. The image preparation for CLIP is native and checked against the Python version.
+
 - **Server step 5d-1: jobs and live events.** The server runs crawls and maintenance (verify archives, recompute image hashes, prune images, compact the database) as jobs, one at a time, which can be cancelled. Progress, log lines and library changes stream to clients over a WebSocket (`/api/events`). A server crawl catalogues a folder exactly as the desktop app does. The exceptions are PDF previews, AI embeddings and AVIF or CMYK JPEG images, which the server cannot produce yet.
 
 - **Server step 5c: editing.** Editors can now change the library through the server: browser cell edits, the model editor, the mass editor (path patterns, templates, find & replace), removing models, adding and removing images, and the tag, category, collection, subcollection, scale and creator editors. As in the desktop app, edits refresh the folder's `METADATA.7z` in the background (when sidecars are enabled), and a sidecar written by the server restores in the desktop app.
