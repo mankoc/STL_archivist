@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Server step 5c: editing.** Editors can now change the library through the server: browser cell edits, the model editor, the mass editor (path patterns, templates, find & replace), removing models, adding and removing images, and the tag, category, collection, subcollection, scale and creator editors. As in the desktop app, edits refresh the folder's `METADATA.7z` in the background (when sidecars are enabled), and a sidecar written by the server restores in the desktop app.
+
 - **Server step 5b: user accounts.** The server now requires signing in. Users have one of three roles: viewer (read only), editor or admin (also manages users), and each user can store their own settings. The first administrator is created on the server's own machine (`POST /api/auth/setup`); after that, admins create the other accounts. Passwords are stored as Argon2 hashes, sessions end after 30 days without use, and five failed sign-ins lock a name out for 15 minutes. Accounts are kept in `server.db` in the data directory, separate from the library database.
 
 - **Rust migration, Phase 5 begins: the stlLibrary server (step 5a).** `rust/stl-server` serves a library read-only over HTTP: the browser table's ids and rows with filters, search and sorting, the filter pane's values and counts, model details and thumbnails (cacheable forever, because the store is content-addressed), with an OpenAPI description. Run it with `cargo run --release -p stl-server -- --data-dir <dir>`. There is no authentication yet, so it listens on `127.0.0.1` only.

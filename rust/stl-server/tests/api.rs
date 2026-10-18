@@ -210,6 +210,10 @@ async fn openapi_lists_every_route() {
         "/api/users", "/api/users/{id}", "/api/me/settings", "/api/me/settings/{key}",
         "/api/system/info", "/api/models/ids", "/api/models/rows", "/api/models/{id}", "/api/filter-tree",
         "/api/images/{id}/thumbnail", "/api/thumb/{digest}",
+        "/api/models/cells", "/api/models/{id}/editor", "/api/models/mass-edit", "/api/models/delete",
+        "/api/models/{id}/images", "/api/images/{id}", "/api/editor/choices", "/api/editor/subcollections",
+        "/api/lookups/{kind}", "/api/lookups/{kind}/merge", "/api/lookups/{kind}/{id}", "/api/tags/merge",
+        "/api/tags/unused", "/api/authors", "/api/authors/profile",
     ] {
         assert!(paths.contains(&p), "{p} missing from {paths:?}");
     }
