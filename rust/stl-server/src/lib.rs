@@ -11,6 +11,7 @@ pub mod api;
 pub mod auth;
 pub mod config;
 pub mod error;
+pub mod jobs;
 pub mod library_settings;
 pub mod sidecars;
 
@@ -32,6 +33,7 @@ pub struct Library {
     pub accounts: Pool,
     pub logins: auth::LoginThrottle,
     pub sidecars: sidecars::SidecarQueue,
+    pub jobs: jobs::Jobs,
     _lock: LibraryLock,
 }
 
@@ -58,6 +60,7 @@ impl Library {
             accounts,
             logins: auth::LoginThrottle::default(),
             sidecars: sidecars::SidecarQueue::default(),
+            jobs: jobs::Jobs::default(),
             config,
             _lock: lock,
         })
@@ -77,5 +80,5 @@ impl Library {
 /// `into_make_service_with_connect_info::<SocketAddr>()`: first-run setup
 /// checks the peer address.
 pub fn app(state: AppState) -> axum::Router {
-    api::router().with_state(state)
+    api::router(Arc::clone(&state)).with_state(state)
 }

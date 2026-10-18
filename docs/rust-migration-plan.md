@@ -907,6 +907,32 @@ Phase 5 runs in steps:
 - Gate: a cell edit through the release server wrote `METADATA.7z`, and the desktop app
   restored the edited title and tags from it into a fresh library.
 
+**5d-1: done 2026-10-18 (jobs and events).** 5d is split: 5d-1 runs jobs, 5d-2 answers the
+crawl host's PDF and CLIP requests natively.
+
+- `jobs.rs`: one job at a time in submission order (SQLite has one writer, as in the
+  desktop app): `crawl`, `verify_archives`, `recompute_dhashes`, `prune_images`,
+  `compact_database` (admin). Each has a state (queued, running, done, failed,
+  cancelled), a phase, `done` / `total` (published every 500 ms from a
+  `stl_core::control::Control`), a summary or error, and its last 2,000 log lines.
+  Cancelling stops a running job at its next checkpoint (what it finished stays) or drops
+  a queued one.
+- A crawl job builds `CrawlConfig` from the library's `settings.json` with the desktop's
+  keys and defaults (presupport patterns included, with the legacy-default upgrade), the
+  folder's stored pattern unless one is given, and the UnRAR tool from `server.json` /
+  `STL_UNRAR_PATH` or `unrar` on `PATH`. Its host (`ServerHost`) answers every request with
+  `Response::None`, so archives the native readers refuse get the fallback fingerprint,
+  and Pillow-only images and PDFs get no thumbnail. Embeddings are off. A crawl
+  with non-portable custom presupport patterns logs that presupport warnings are skipped.
+- Routes: `GET|POST /api/jobs`, `GET|DELETE /api/jobs/{id}`, `GET|POST
+  /api/crawled-folders`, `POST /api/crawled-folders/remove`, and `GET /api/events`: a
+  WebSocket of `ServerEvent` JSON frames (`job`, `job_log`, `library_changed`, `resync`
+  when a slow client missed events). A middleware announces `library_changed`
+  (`models` / `lookups`) after every successful write; finished jobs announce their kind.
+- Gate: a server crawl job and the desktop crawl of the same folder (zip and 7z;
+  info.json, .url, nested archive, presupported STL, GIF) gave identical models, tags,
+  scales, images, perceptual hashes and thumbnail bytes.
+
 ### Phase 6: Web client (largest)
 
 React + TypeScript in `web/`, served by the server, built against the API while the PyQt app

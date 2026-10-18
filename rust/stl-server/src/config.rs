@@ -1,6 +1,6 @@
 //! Server configuration: defaults, then `<data_dir>/server.json`, then the
-//! environment (`STL_DATA_DIR`, `STL_BIND`), then the command line
-//! (`--data-dir`, `--bind`). Later sources win.
+//! environment (`STL_DATA_DIR`, `STL_BIND`, `STL_UNRAR_PATH`), then the
+//! command line (`--data-dir`, `--bind`). Later sources win.
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -20,6 +20,8 @@ pub const DEFAULT_BIND: &str = "127.0.0.1:8770";
 pub struct Config {
     pub data_dir: PathBuf,
     pub bind: SocketAddr,
+    /// The UnRAR tool for `.rar` archives (a name on `PATH` or a path); `None`: `unrar`.
+    pub unrar: Option<String>,
 }
 
 /// What `server.json` may set.
@@ -27,6 +29,7 @@ pub struct Config {
 #[serde(deny_unknown_fields)]
 struct FileSettings {
     bind: Option<String>,
+    unrar: Option<String>,
 }
 
 impl Config {
@@ -36,6 +39,13 @@ impl Config {
 
     pub fn thumb_dir(&self) -> PathBuf {
         self.data_dir.join(THUMB_DIR)
+    }
+
+    /// The UnRAR executable as a full path, or `""` when none is found (as
+    /// `archive._unrar_tool`: a name is looked up on `PATH`, a path must exist).
+    pub fn unrar_tool(&self) -> String {
+        let tool = self.unrar.clone().unwrap_or_else(|| "unrar".into());
+        which(&tool).unwrap_or_else(|| if Path::new(&tool).is_file() { tool } else { String::new() })
     }
 
     /// Resolve the configuration from `args` (without the program name) and the
@@ -60,7 +70,8 @@ impl Config {
         let file = read_settings(&data_dir)?;
         let bind = bind_arg.or_else(|| env("STL_BIND")).or(file.bind).unwrap_or_else(|| DEFAULT_BIND.into());
         let bind = bind.parse().map_err(|e| format!("bind address {bind:?}: {e}"))?;
-        Ok(Config { data_dir, bind })
+        let unrar = env("STL_UNRAR_PATH").or(file.unrar).filter(|u| !u.is_empty());
+        Ok(Config { data_dir, bind, unrar })
     }
 }
 
@@ -71,6 +82,18 @@ fn read_settings(data_dir: &Path) -> Result<FileSettings, String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(FileSettings::default()),
         Err(e) => Err(format!("{}: {e}", path.display())),
     }
+}
+
+/// `shutil.which`: `name` on `PATH` (with `.exe` / `.cmd` / `.bat` on Windows).
+fn which(name: &str) -> Option<String> {
+    let path = Path::new(name);
+    if path.components().count() > 1 {
+        return None;
+    }
+    let exts: &[&str] = if cfg!(windows) { &["", ".exe", ".cmd", ".bat"] } else { &[""] };
+    std::env::split_paths(&std::env::var_os("PATH")?).find_map(|dir| {
+        exts.iter().map(|e| dir.join(format!("{name}{e}"))).find(|p| p.is_file()).map(|p| p.to_string_lossy().into_owned())
+    })
 }
 
 /// The desktop app's platform default (`app/core/settings.py`).
@@ -110,6 +133,8 @@ mod tests {
             _ => None,
         };
         assert_eq!(Config::resolve(&[], env2).unwrap().bind.to_string(), "127.0.0.1:5555");
+        std::fs::write(dir.path().join(SETTINGS_FILE), r#"{"unrar": "C:/Tools/UnRAR.exe"}"#).unwrap();
+        assert_eq!(Config::resolve(&[], env).unwrap().unrar.as_deref(), Some("C:/Tools/UnRAR.exe"));
     }
 
     #[test]

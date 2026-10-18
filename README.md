@@ -136,6 +136,13 @@ Viewers can browse; editors can also edit models (cells, the editor, the mass ed
 add and remove images, and manage tags, categories, collections, scales and creators. Edits
 refresh the folder's `METADATA.7z` as the desktop app does.
 
+Editors run crawls and maintenance as jobs (`POST /api/jobs`, for example
+`{"kind": "crawl", "folder": "D:/STL/Patreon"}`), one at a time, with progress and logs
+streamed over the `/api/events` WebSocket. Crawls use the library's crawler settings. The
+server cannot yet render PDF previews, compute AI embeddings or read the few images only
+Pillow decodes (AVIF, CMYK JPEG); those archives are catalogued without that preview.
+`.rar` archives need UnRAR on `PATH`, or `"unrar"` in `server.json` / `STL_UNRAR_PATH`.
+
 Accounts are kept in `<data dir>/server.db`, separate from the library database. Put the
 server behind an HTTPS reverse proxy before exposing it beyond `127.0.0.1`.
 
