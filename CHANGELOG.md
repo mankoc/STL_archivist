@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Web client step 6b: editing.** Editors can edit table cells in place (double-click), open the model editor with completion lists, drop images onto a model, remove images, and remove selected models from the library (Ctrl/Shift-click to select several). Viewers see no editing controls.
+
 - **Rust migration, Phase 6 begins: the web client (step 6a).** `web/` holds the new browser front end (React, TypeScript, Mantine), served by the server. You can sign in, set up the first administrator, and browse the library: the filter pane with include/exclude values, has-value groups and counts, search, a fast virtualised table with server-side sorting, and a detail pane with thumbnails and the archive download. Its API types are generated from the server's OpenAPI description.
 
 - **Server step 5e, completing Phase 5: server files and Docker.** Editors choose folders to crawl by browsing the server's disks, limited to the library's folders unless they are administrators. Anyone signed in can download an archive. Remote clients get a folder path to open only where `server.json` maps the server's paths to theirs. `stl-server create-admin` sets up the first administrator on headless machines and in containers. A `Dockerfile` builds the server with PDF and AI-embedding support included (not yet test-built).
