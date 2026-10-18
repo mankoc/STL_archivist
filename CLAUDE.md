@@ -71,6 +71,11 @@ the native core owns the schema from Phase 4b).
   (debounced `METADATA.7z` refresh, `sidecars.rs`); delete thumbnails with one
   `thumbs.delete_many` after the commit. Library settings come from
   `library_settings::LibrarySettings` (the desktop's `settings.json`, read per use).
+- **Server jobs:** `stl-server/src/jobs.rs`. A new kind is a `JobRequest` variant plus a
+  `run` arm that reports through `job.ctl` (progress) and `lib.job_log` and checks
+  `job.stopped()` between batches. Crawls run `stl_core::crawler::crawl` with `ServerHost`,
+  which answers `Response::None` until 5d-2 adds native PDF and CLIP. Events go through
+  `lib.jobs.events`; writes are announced by the `announce_changes` middleware.
 - **Library lock (rule 7):** `stl_core::lock::LibraryLock` (`library.lock` + `library.owner`
   in the data directory). The server and `main.py` both hold it for their lifetime; never
   open a library's database or store from a second process without it.

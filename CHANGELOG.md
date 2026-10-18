@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Server step 5d-1: jobs and live events.** The server runs crawls and maintenance (verify archives, recompute image hashes, prune images, compact the database) as jobs, one at a time, which can be cancelled. Progress, log lines and library changes stream to clients over a WebSocket (`/api/events`). A server crawl catalogues a folder exactly as the desktop app does. The exceptions are PDF previews, AI embeddings and AVIF or CMYK JPEG images, which the server cannot produce yet.
+
 - **Server step 5c: editing.** Editors can now change the library through the server: browser cell edits, the model editor, the mass editor (path patterns, templates, find & replace), removing models, adding and removing images, and the tag, category, collection, subcollection, scale and creator editors. As in the desktop app, edits refresh the folder's `METADATA.7z` in the background (when sidecars are enabled), and a sidecar written by the server restores in the desktop app.
 
 - **Server step 5b: user accounts.** The server now requires signing in. Users have one of three roles: viewer (read only), editor or admin (also manages users), and each user can store their own settings. The first administrator is created on the server's own machine (`POST /api/auth/setup`); after that, admins create the other accounts. Passwords are stored as Argon2 hashes, sessions end after 30 days without use, and five failed sign-ins lock a name out for 15 minutes. Accounts are kept in `server.db` in the data directory, separate from the library database.

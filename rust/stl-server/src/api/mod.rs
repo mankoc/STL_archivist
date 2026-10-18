@@ -3,6 +3,7 @@
 pub mod auth;
 pub mod edit;
 pub mod filter;
+pub mod jobs;
 pub mod lookups;
 pub mod models;
 pub mod system;
@@ -11,6 +12,10 @@ pub mod users;
 
 use axum::Json;
 use axum::Router;
+use axum::extract::{Request, State};
+use axum::http::Method;
+use axum::middleware::{self, Next};
+use axum::response::Response;
 use axum::routing::{delete, get, patch, post, put};
 use utoipa::OpenApi;
 
@@ -63,12 +68,20 @@ use crate::AppState;
         lookups::change_author,
         lookups::profile,
         lookups::save_profile,
+        jobs::list,
+        jobs::submit,
+        jobs::detail,
+        jobs::cancel,
+        jobs::events,
+        jobs::crawled_folders,
+        jobs::add_folder,
+        jobs::remove_folder,
     ),
     components(schemas(crate::error::ErrorBody))
 )]
 pub struct ApiDoc;
 
-pub fn router() -> Router<AppState> {
+pub fn router(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/api/auth/status", get(auth::status))
         .route("/api/auth/setup", post(auth::setup))
@@ -101,7 +114,32 @@ pub fn router() -> Router<AppState> {
         .route("/api/filter-tree", post(filter::tree))
         .route("/api/images/{id}/thumbnail", get(thumbs::image_thumbnail))
         .route("/api/thumb/{digest}", get(thumbs::thumb))
+        .route("/api/jobs", get(jobs::list).post(jobs::submit))
+        .route("/api/jobs/{id}", get(jobs::detail).delete(jobs::cancel))
+        .route("/api/events", get(jobs::events))
+        .route("/api/crawled-folders", get(jobs::crawled_folders).post(jobs::add_folder))
+        .route("/api/crawled-folders/remove", post(jobs::remove_folder))
         .route("/api/openapi.json", get(openapi))
+        .layer(middleware::from_fn_with_state(state, announce_changes))
+}
+
+/// After a successful write, tell event-stream clients what kind of data changed.
+async fn announce_changes(State(lib): State<AppState>, req: Request, next: Next) -> Response {
+    let (method, path) = (req.method().clone(), req.uri().path().to_string());
+    let resp = next.run(req).await;
+    if method != Method::GET && resp.status().is_success() {
+        let what = match path.as_str() {
+            // POSTs that only read.
+            "/api/models/ids" | "/api/models/rows" | "/api/filter-tree" => None,
+            p if p.starts_with("/api/models") || p.starts_with("/api/images") => Some("models"),
+            p if p.starts_with("/api/lookups") || p.starts_with("/api/tags") || p.starts_with("/api/authors") => Some("lookups"),
+            _ => None,
+        };
+        if let Some(what) = what {
+            lib.changed(what);
+        }
+    }
+    resp
 }
 
 async fn openapi() -> Json<utoipa::openapi::OpenApi> {

@@ -214,6 +214,7 @@ async fn openapi_lists_every_route() {
         "/api/models/{id}/images", "/api/images/{id}", "/api/editor/choices", "/api/editor/subcollections",
         "/api/lookups/{kind}", "/api/lookups/{kind}/merge", "/api/lookups/{kind}/{id}", "/api/tags/merge",
         "/api/tags/unused", "/api/authors", "/api/authors/profile",
+        "/api/jobs", "/api/jobs/{id}", "/api/events", "/api/crawled-folders", "/api/crawled-folders/remove",
     ] {
         assert!(paths.contains(&p), "{p} missing from {paths:?}");
     }
@@ -222,7 +223,7 @@ async fn openapi_lists_every_route() {
 #[test]
 fn a_second_server_is_refused() {
     let dir = tempfile::tempdir().unwrap();
-    let config = Config { data_dir: dir.path().to_path_buf(), bind: "127.0.0.1:0".parse().unwrap() };
+    let config = Config { data_dir: dir.path().to_path_buf(), bind: "127.0.0.1:0".parse().unwrap(), unrar: None };
     let first = Library::open(config.clone()).unwrap();
     let err = Library::open(config.clone()).err().expect("second open must fail");
     assert!(err.contains("stl-server"), "{err}");
