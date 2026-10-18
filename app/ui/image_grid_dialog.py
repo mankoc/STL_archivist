@@ -14,8 +14,7 @@ from PyQt6.QtWidgets import (
     QToolButton, QVBoxLayout, QWidget,
 )
 
-from app.database.db import get_session
-from app.database.models import STLModel
+from app.services.model_views import grid_models
 from app.utils.thumbnailer import pixmap_from_path
 
 THUMB_SIZE_DEFAULT = 150
@@ -345,74 +344,71 @@ class ImageGridDialog(QDialog):
         self._grid.setContentsMargins(GRID_MARGIN, GRID_MARGIN, GRID_MARGIN, GRID_MARGIN)
         self._grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
 
-        session = get_session()
-        try:
-            for idx, model_id in enumerate(model_ids):
-                stl: STLModel = session.get(STLModel, model_id)
-                if stl is None:
-                    continue
+        models = grid_models(model_ids)
+        for idx, model_id in enumerate(model_ids):
+            stl = models.get(model_id)
+            if stl is None:
+                continue
 
-                all_images: list[QPixmap] = []
-                for img in stl.images:
-                    candidate = pixmap_from_path(img.thumbnail_path)
-                    if not candidate.isNull():
-                        all_images.append(candidate)
-                px = all_images[0] if all_images else QPixmap()
+            all_images: list[QPixmap] = []
+            for thumb in stl["thumbs"]:
+                candidate = pixmap_from_path(thumb)
+                if not candidate.isNull():
+                    all_images.append(candidate)
+            px = all_images[0] if all_images else QPixmap()
 
-                title = stl.title or ""
-                creator = stl.creator or ""
-                source = stl.source or ""
-                year  = stl.release_year  or 0
-                month = stl.release_month or 0
-                date_str = (
-                    f"{year}-{month:02d}" if year and month else
-                    str(year) if year else ""
-                )
+            title = stl["title"] or ""
+            creator = stl["creator"] or ""
+            source = stl["source"] or ""
+            year  = stl["release_year"]  or 0
+            month = stl["release_month"] or 0
+            date_str = (
+                f"{year}-{month:02d}" if year and month else
+                str(year) if year else ""
+            )
 
-                archive_path_str = stl.archive_path or ""
-                archive_name_lc = Path(archive_path_str.replace("\\", "/")).name.lower()
-                archive_display = Path(archive_path_str.replace("\\", "/")).name
+            archive_path_str = stl["archive_path"] or ""
+            archive_name_lc = Path(archive_path_str.replace("\\", "/")).name.lower()
+            archive_display = Path(archive_path_str.replace("\\", "/")).name
 
-                try:
-                    archive_size = Path(archive_path_str).stat().st_size if archive_path_str else 0
-                except OSError:
-                    archive_size = 0
+            try:
+                archive_size = Path(archive_path_str).stat().st_size if archive_path_str else 0
+            except OSError:
+                archive_size = 0
 
-                tags_str    = ", ".join(t.name for t in stl.tags)
-                scale_str   = ", ".join(s.name for s in stl.scales)
-                presupports = stl.presupports or ""
-                warning     = stl.warning or ""
-                description = stl.description or ""
-                url         = stl.url or ""
+            tags_str    = ", ".join(stl["tags"])
+            scale_str   = ", ".join(stl["scales"])
+            presupports = stl["presupports"] or ""
+            warning     = stl["warning"] or ""
+            description = stl["description"] or ""
+            url         = stl["url"] or ""
 
-                cell, thumb_lbl, title_lbl = self._make_cell(px, title, idx)
-                self._cells_data.append(_CellData(
-                    original_index=idx,
-                    model_id=model_id,
-                    cell_widget=cell,
-                    thumb_lbl=thumb_lbl,
-                    orig_px=px,
-                    all_images=all_images,
-                    title_lbl=title_lbl,
-                    title=title,
-                    creator=creator,
-                    source=source,
-                    date_str=date_str,
-                    archive_display=archive_display,
-                    tags=tags_str,
-                    scale=scale_str,
-                    presupports=presupports,
-                    warning=warning,
-                    description=description,
-                    url=url,
-                    sort_title=title.lower(),
-                    sort_creator=creator.lower(),
-                    sort_archive=archive_name_lc,
-                    sort_size=archive_size,
-                    sort_date=(year, month),
-                ))
-        finally:
-            session.close()
+            cell, thumb_lbl, title_lbl = self._make_cell(px, title, idx)
+            self._cells_data.append(_CellData(
+                original_index=idx,
+                model_id=model_id,
+                cell_widget=cell,
+                thumb_lbl=thumb_lbl,
+                orig_px=px,
+                all_images=all_images,
+                title_lbl=title_lbl,
+                title=title,
+                creator=creator,
+                source=source,
+                date_str=date_str,
+                archive_display=archive_display,
+                tags=tags_str,
+                scale=scale_str,
+                presupports=presupports,
+                warning=warning,
+                description=description,
+                url=url,
+                sort_title=title.lower(),
+                sort_creator=creator.lower(),
+                sort_archive=archive_name_lc,
+                sort_size=archive_size,
+                sort_date=(year, month),
+            ))
 
         self._scroll.setWidget(container)
 

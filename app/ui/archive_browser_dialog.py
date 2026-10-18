@@ -18,10 +18,8 @@ from PyQt6.QtWidgets import (
     QToolButton, QVBoxLayout, QWidget, QTreeWidget, QTreeWidgetItem,
 )
 
-from app.database.db import get_session
-from app.database.models import STLModel, Image
+from app.services.model_views import archive_folders, folder_models
 from app.utils.thumbnailer import pixmap_from_path
-from sqlalchemy import func, distinct, or_
 
 THUMB_SIZE_DEFAULT = 150
 THUMB_SIZE_MIN = 60
@@ -335,18 +333,8 @@ class ArchiveBrowserDialog(QDialog):
             return
 
         # Cache miss or empty — query database and build from scratch
-        session = get_session()
-        try:
-            folders = session.query(
-                distinct(STLModel.archive_folder)
-            ).filter(STLModel.archive_folder.isnot(None)).order_by(STLModel.archive_folder).all()
-
-            folder_list = [f[0] for f in folders if f[0]]
-            # Build tree structure
-            folder_tree = self._build_folder_tree(folder_list)
-            self._build_tree_from_dict(folder_tree)
-        finally:
-            session.close()
+        folder_tree = self._build_folder_tree(archive_folders())
+        self._build_tree_from_dict(folder_tree)
 
     def _build_folder_tree(self, folders: list[str]) -> list[dict]:
         """Build a hierarchical tree structure from a flat list of folder paths."""
@@ -440,57 +428,35 @@ class ArchiveBrowserDialog(QDialog):
 
         If include_subfolders is True, also include archives from all subfolders.
         """
-        session = get_session()
-        try:
-            if include_subfolders:
-                # Include archives from this folder and all subfolders
-                # Use LIKE to match the folder and any subfolder starting with it
-                folder_pattern = folder.replace("\\", "/")
-                if not folder_pattern.endswith("/"):
-                    folder_pattern += "/"
+        models = folder_models(folder, include_subfolders)
+        for idx, stl in enumerate(models):
+            # Get all images for this model
+            all_images: list[QPixmap] = []
+            for thumb in stl["thumbs"]:
+                candidate = pixmap_from_path(thumb)
+                if not candidate.isNull():
+                    all_images.append(candidate)
 
-                models = session.query(STLModel).filter(
-                    or_(
-                        STLModel.archive_folder == folder,
-                        STLModel.archive_folder.like(folder_pattern + "%")
-                    )
-                ).order_by(STLModel.archive_path).all()
-            else:
-                # Only this folder
-                models = session.query(STLModel).filter(
-                    STLModel.archive_folder == folder
-                ).order_by(STLModel.archive_path).all()
+            px = all_images[0] if all_images else QPixmap()
 
-            for idx, stl in enumerate(models):
-                # Get all images for this model
-                all_images: list[QPixmap] = []
-                for img in stl.images:
-                    candidate = pixmap_from_path(img.thumbnail_path)
-                    if not candidate.isNull():
-                        all_images.append(candidate)
+            title = stl["title"] or ""
+            creator = stl["creator"] or ""
+            archive_path_str = stl["archive_path"] or ""
+            archive_name = Path(archive_path_str.replace("\\", "/")).name
 
-                px = all_images[0] if all_images else QPixmap()
-
-                title = stl.title or ""
-                creator = stl.creator or ""
-                archive_path_str = stl.archive_path or ""
-                archive_name = Path(archive_path_str.replace("\\", "/")).name
-
-                cell, thumb_lbl, title_lbl = self._make_cell(px, archive_name, idx)
-                self._cells_data.append(_ArchiveCell(
-                    model_id=stl.id,
-                    archive_name=archive_name,
-                    archive_path=archive_path_str,
-                    cell_widget=cell,
-                    thumb_lbl=thumb_lbl,
-                    orig_px=px,
-                    all_images=all_images,
-                    title_lbl=title_lbl,
-                    title=title,
-                    creator=creator,
-                ))
-        finally:
-            session.close()
+            cell, thumb_lbl, title_lbl = self._make_cell(px, archive_name, idx)
+            self._cells_data.append(_ArchiveCell(
+                model_id=stl["id"],
+                archive_name=archive_name,
+                archive_path=archive_path_str,
+                cell_widget=cell,
+                thumb_lbl=thumb_lbl,
+                orig_px=px,
+                all_images=all_images,
+                title_lbl=title_lbl,
+                title=title,
+                creator=creator,
+            ))
 
     def _make_cell(self, px: QPixmap, archive_name: str, entry_index: int) -> tuple[QWidget, QLabel, QLabel]:
         """Build a single thumbnail cell; returns (cell_widget, thumb_label, title_label)."""

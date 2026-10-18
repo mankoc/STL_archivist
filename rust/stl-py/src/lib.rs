@@ -982,6 +982,69 @@ impl PyLibraryDb {
         self.with_tx(py, |tx| stl_core::storage::browser::set_archive_paths(tx, &items), db_err)
     }
 
+    // ── viewer dialogs (services.model_views) ─────────────────────────────────
+
+    fn views_stl_files(&self, py: Python<'_>, model_id: i64) -> PyResult<Vec<stl_core::storage::views::StlFileRow>> {
+        self.with(py, |c| stl_core::storage::views::stl_files(c, model_id))
+    }
+
+    fn views_title_path(&self, py: Python<'_>, model_id: i64) -> PyResult<Option<(Option<String>, Option<String>)>> {
+        self.with(py, |c| stl_core::storage::views::title_path(c, model_id))
+    }
+
+    fn views_archive_folders(&self, py: Python<'_>) -> PyResult<Vec<String>> {
+        self.with(py, stl_core::storage::views::archive_folders)
+    }
+
+    /// `(id, title, creator, archive_path, thumbs)` tuples.
+    #[allow(clippy::type_complexity)]
+    fn views_folder_models(
+        &self,
+        py: Python<'_>,
+        folder: String,
+        include_subfolders: bool,
+    ) -> PyResult<Vec<(i64, Option<String>, Option<String>, Option<String>, Vec<Option<String>>)>> {
+        let rows = self.with(py, |c| stl_core::storage::views::folder_models(c, &folder, include_subfolders))?;
+        Ok(rows.into_iter().map(|r| (r.id, r.title, r.creator, r.archive_path, r.thumbs)).collect())
+    }
+
+    fn views_grid_models<'py>(&self, py: Python<'py>, ids: Vec<i64>) -> PyResult<Bound<'py, PyDict>> {
+        let rows = self.with(py, |c| stl_core::storage::views::grid_models(c, &ids))?;
+        let out = PyDict::new(py);
+        for r in rows {
+            let d = PyDict::new(py);
+            for (k, v) in &r.fields {
+                d.set_item(k, sql_value_to_py(py, v)?)?;
+            }
+            d.set_item("tags", r.tags)?;
+            d.set_item("scales", r.scales)?;
+            d.set_item("thumbs", r.thumbs)?;
+            out.set_item(r.id, d)?;
+        }
+        Ok(out)
+    }
+
+    fn views_duplicate_rows<'py>(&self, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict>>> {
+        const KEYS: [&str; 8] =
+            ["title", "creator", "source", "sculptor", "collection", "subcollection", "category", "release"];
+        let rows = self.with(py, stl_core::storage::views::duplicate_rows)?;
+        rows.into_iter()
+            .map(|r| {
+                let d = PyDict::new(py);
+                d.set_item("id", r.id)?;
+                for (k, v) in KEYS.iter().zip(r.texts) {
+                    d.set_item(k, v)?;
+                }
+                d.set_item("scales", r.scales)?;
+                Ok(d)
+            })
+            .collect()
+    }
+
+    fn views_image_hash_rows(&self, py: Python<'_>) -> PyResult<Vec<stl_core::storage::views::HashRow>> {
+        self.with(py, stl_core::storage::views::image_hash_rows)
+    }
+
     /// Close the pooled connections (they reopen on the next call).
     fn close(&self, py: Python<'_>) {
         py.detach(|| self.pool.lock().unwrap_or_else(|e| e.into_inner()).clear());

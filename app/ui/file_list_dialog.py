@@ -6,8 +6,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.ui.config_dialog import get_match_highlight_color
-from app.database.db import session_scope
-from app.database.models import STLFile, STLModel
+from app.services.model_views import model_label, stl_files
 from app.utils.file_matching import match_files
 
 def format_size(size_bytes: int) -> str:
@@ -32,11 +31,9 @@ class FileListDialog(QDialog):
         
         layout = QVBoxLayout(self)
         
-        with session_scope() as session:
-            model = session.get(STLModel, model_id)
-            if model:
-                title = model.title or model.archive_path
-                layout.addWidget(QLabel(f"<b>Archive:</b> {title}"))
+        title = model_label(model_id)
+        if title is not None:
+            layout.addWidget(QLabel(f"<b>Archive:</b> {title}"))
         
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels([self.tr("Filename"), self.tr("Size"), self.tr("Hash")])
@@ -55,18 +52,17 @@ class FileListDialog(QDialog):
         layout.addLayout(btn_layout)
 
     def load_files(self) -> None:
-        with session_scope() as session:
-            files = session.query(STLFile).filter(STLFile.model_id == self.model_id).order_by(STLFile.filename).all()
-            self.table.setRowCount(len(files))
-            for i, f in enumerate(files):
-                self.table.setItem(i, 0, QTableWidgetItem(f.filename))
-                
-                size_str = format_size(f.file_size) if f.file_size is not None else "Unknown"
-                size_item = QTableWidgetItem(size_str)
-                size_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                self.table.setItem(i, 1, size_item)
-                
-                self.table.setItem(i, 2, QTableWidgetItem(f.archive_hash or ""))
+        files = stl_files(self.model_id)
+        self.table.setRowCount(len(files))
+        for i, f in enumerate(files):
+            self.table.setItem(i, 0, QTableWidgetItem(f.filename))
+
+            size_str = format_size(f.file_size) if f.file_size is not None else "Unknown"
+            size_item = QTableWidgetItem(size_str)
+            size_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.table.setItem(i, 1, size_item)
+
+            self.table.setItem(i, 2, QTableWidgetItem(f.archive_hash or ""))
 
 class FileComparisonDialog(QDialog):
     def __init__(self, model_id_a: int, model_id_b: int, parent=None):
@@ -118,14 +114,13 @@ class FileComparisonDialog(QDialog):
         self.rebuild_table()
         
     def load_data(self) -> None:
-        with session_scope() as session:
-            ma = session.get(STLModel, self.model_id_a)
-            mb = session.get(STLModel, self.model_id_b)
-            if ma: self.lbl_a.setText(f"<b>A:</b> {ma.title or ma.archive_path}")
-            if mb: self.lbl_b.setText(f"<b>B:</b> {mb.title or mb.archive_path}")
-            
-            self.files_a = session.query(STLFile).filter(STLFile.model_id == self.model_id_a).all()
-            self.files_b = session.query(STLFile).filter(STLFile.model_id == self.model_id_b).all()
+        la, lb = model_label(self.model_id_a), model_label(self.model_id_b)
+        if la is not None:
+            self.lbl_a.setText(f"<b>A:</b> {la}")
+        if lb is not None:
+            self.lbl_b.setText(f"<b>B:</b> {lb}")
+        self.files_a = stl_files(self.model_id_a)
+        self.files_b = stl_files(self.model_id_b)
 
     def rebuild_table(self) -> None:
         mode = self.match_combo.currentText()

@@ -30,6 +30,7 @@ pub mod model_edit;
 pub mod schema_sql;
 pub mod stats;
 pub mod vectors;
+pub mod views;
 
 use std::collections::HashSet;
 use std::path::Path;

@@ -48,18 +48,14 @@ _COL_VALUE  = 4
 _COL_SCORE  = 5
 
 
-def _resolve(obj, chain: str) -> str:
-    """Resolve a dotted attribute path such as 'sculptor.name' on *obj*."""
-    parts = chain.split(".", 1)
-    val = getattr(obj, parts[0], None)
+def _resolve(row: dict, chain: str) -> str:
+    """The value of *chain* (such as 'sculptor.name') in a ``model_views.duplicate_rows`` row."""
+    val = row.get(chain.split(".", 1)[0])
     if val is None:
         return ""
-    if isinstance(val, (list, set)):
-        # Relationship collection (e.g. scales) — join the sub-attribute values.
-        sub = parts[1] if len(parts) == 2 else "name"
-        return ", ".join(sorted(str(getattr(x, sub, x) or "") for x in val))
-    if len(parts) == 2:
-        return str(getattr(val, parts[1], "") or "")
+    if isinstance(val, list):
+        # Relationship collection (e.g. scales): the sorted names, joined.
+        return ", ".join(sorted(str(x or "") for x in val))
     return str(val)
 
 
@@ -80,34 +76,15 @@ class _SearchWorker(QThread):
         self._stop = True
 
     def run(self) -> None:
-        from sqlalchemy.orm import joinedload, selectinload
+        from app.services.model_views import duplicate_rows
 
-        from app.database.db import get_session
-        from app.database.models import STLModel
-
-        session = get_session()
-        try:
-            models = (
-                session.query(STLModel)
-                .options(
-                    joinedload(STLModel.sculptor),
-                    joinedload(STLModel.collection),
-                    joinedload(STLModel.subcollection),
-                    joinedload(STLModel.category),
-                    joinedload(STLModel.release),
-                    selectinload(STLModel.scales),
-                )
-                .all()
-            )
-            # Materialise all needed values while the session is open
-            rows: list[dict] = []
-            for m in models:
-                row: dict = {"id": m.id, "title": m.title or ""}
-                for disp, chain in self._columns:
-                    row[disp] = _resolve(m, chain)
-                rows.append(row)
-        finally:
-            session.close()
+        # Materialise all needed values
+        rows: list[dict] = []
+        for m in duplicate_rows():
+            row: dict = {"id": m["id"], "title": m["title"] or ""}
+            for disp, chain in self._columns:
+                row[disp] = _resolve(m, chain)
+            rows.append(row)
 
         groups: list[dict] = []
         total = len(self._columns)
