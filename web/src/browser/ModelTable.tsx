@@ -2,8 +2,9 @@
 // fetched in blocks as they scroll into view, virtualised rendering. Sorting
 // runs on the server (`/api/models/ids`), ties ordered by id.
 import { Box, Center, Group, Loader, Text, UnstyledButton } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
 import { IconChevronDown, IconChevronUp } from "@tabler/icons-react";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type ColumnDef,
   type ColumnSizingState,
@@ -12,12 +13,13 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { type ReactNode, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useMemo, useRef, useState } from "react";
 
 import { api, type Schemas, unwrap } from "../api/client";
 import { baseName, formatDate, formatSize } from "../format";
 import type { FilterSpec } from "./filters";
 import { blockIds, blocksFor } from "./rowBlocks";
+import type { Selection } from "./selection";
 import classes from "./ModelTable.module.css";
 
 export type Row = Schemas["Row"];
@@ -38,21 +40,26 @@ interface Column {
   /** The server's sort column, when the column can be sorted. */
   sortKey?: string;
   render: (row: Row) => ReactNode;
+  /** The cell-edit field (`PATCH /api/models/cells`) and the text to start from. */
+  field?: string;
+  text?: (row: Row) => string;
 }
 
+const text = (key: keyof Row) => (r: Row) => String(r[key] ?? "");
+
 const COLUMNS: Column[] = [
-  { id: "title", header: "Title", size: 280, sortKey: "title", render: (r) => r.title ?? baseName(r.archive_path) },
-  { id: "creator", header: "Creator", size: 140, sortKey: "creator", render: (r) => r.creator },
-  { id: "source", header: "Type", size: 110, sortKey: "source", render: (r) => r.source },
-  { id: "date", header: "Date", size: 80, render: (r) => formatDate(r.release_year, r.release_month) },
-  { id: "sculptor", header: "Sculptor", size: 130, sortKey: "sculptor_name", render: (r) => r.sculptor },
-  { id: "collection", header: "Collection", size: 130, sortKey: "collection_name", render: (r) => r.collection },
-  { id: "subcollection", header: "Subcollection", size: 130, sortKey: "subcollection_name", render: (r) => r.subcollection },
-  { id: "category", header: "Category", size: 110, sortKey: "category_name", render: (r) => r.category },
-  { id: "release", header: "Release", size: 120, sortKey: "release_name", render: (r) => r.release },
-  { id: "scales", header: "Scale", size: 90, render: (r) => r.scales },
-  { id: "tags", header: "Tags", size: 200, render: (r) => r.tags },
-  { id: "presupports", header: "Presupports", size: 110, sortKey: "presupports", render: (r) => r.presupports },
+  { id: "title", header: "Title", size: 280, sortKey: "title", render: (r) => r.title ?? baseName(r.archive_path), field: "title", text: text("title") },
+  { id: "creator", header: "Creator", size: 140, sortKey: "creator", render: (r) => r.creator, field: "creator", text: text("creator") },
+  { id: "source", header: "Type", size: 110, sortKey: "source", render: (r) => r.source, field: "source", text: text("source") },
+  { id: "date", header: "Date", size: 80, render: (r) => formatDate(r.release_year, r.release_month), field: "date", text: (r) => formatDate(r.release_year, r.release_month) },
+  { id: "sculptor", header: "Sculptor", size: 130, sortKey: "sculptor_name", render: (r) => r.sculptor, field: "sculptor", text: text("sculptor") },
+  { id: "collection", header: "Collection", size: 130, sortKey: "collection_name", render: (r) => r.collection, field: "collection", text: text("collection") },
+  { id: "subcollection", header: "Subcollection", size: 130, sortKey: "subcollection_name", render: (r) => r.subcollection, field: "subcollection", text: text("subcollection") },
+  { id: "category", header: "Category", size: 110, sortKey: "category_name", render: (r) => r.category, field: "category", text: text("category") },
+  { id: "release", header: "Release", size: 120, sortKey: "release_name", render: (r) => r.release, field: "release", text: text("release") },
+  { id: "scales", header: "Scale", size: 90, render: (r) => r.scales, field: "scale", text: text("scales") },
+  { id: "tags", header: "Tags", size: 200, render: (r) => r.tags, field: "tags", text: text("tags") },
+  { id: "presupports", header: "Presupports", size: 110, sortKey: "presupports", render: (r) => r.presupports, field: "presupports", text: text("presupports") },
   { id: "size", header: "File Size", size: 90, sortKey: "archive_size", render: (r) => formatSize(r.archive_size) },
   { id: "path", header: "Path", size: 360, sortKey: "archive_path", render: (r) => r.archive_path },
 ];
@@ -72,11 +79,46 @@ export function useModelIds(query: Query) {
 interface Props {
   query: Query;
   onSort: (sort: Sort | null) => void;
-  selected: number | null;
-  onSelect: (id: number) => void;
+  selection: Selection;
+  onRowClick: (id: number, mods: { ctrl: boolean; shift: boolean }) => void;
+  /** Cells can be edited (double-click). */
+  editable: boolean;
 }
 
-export function ModelTable({ query, onSort, selected, onSelect }: Props) {
+/** Save one cell (`PATCH /api/models/cells`). */
+async function saveCell(id: number, field: string, value: string) {
+  unwrap(await api.PATCH("/api/models/cells", { body: { edits: [{ id, field, value }] } }));
+}
+
+function CellEditor(props: { initial: string; onDone: (value: string | null) => void }) {
+  const [value, setValue] = useState(props.initial);
+  const done = useRef(false);
+  const finish = (v: string | null) => {
+    if (done.current) return;
+    done.current = true;
+    props.onDone(v !== null && v !== props.initial ? v : null);
+  };
+  const key = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") finish(value);
+    if (e.key === "Escape") finish(null);
+  };
+  return (
+    <input
+      className={classes.editor}
+      value={value}
+      autoFocus
+      onChange={(e) => setValue(e.currentTarget.value)}
+      onKeyDown={key}
+      onBlur={() => finish(value)}
+      onClick={(e) => e.stopPropagation()}
+      data-testid="cell-editor"
+    />
+  );
+}
+
+export function ModelTable({ query, onSort, selection, onRowClick, editable }: Props) {
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState<{ id: number; column: number } | null>(null);
   const ids = useModelIds(query);
   const all = ids.data ?? [];
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -176,15 +218,44 @@ export function ModelTable({ query, onSort, selected, onSelect }: Props) {
               key={id}
               className={classes.row}
               data-testid="row"
-              data-selected={id === selected || undefined}
+              data-selected={selection.ids.has(id) || undefined}
+              data-current={selection.current === id || undefined}
               style={{ transform: `translateY(${item.start}px)`, height: ROW_HEIGHT, width }}
-              onClick={() => onSelect(id)}
+              onClick={(e) => onRowClick(id, { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey })}
             >
-              {table.getHeaderGroups()[0].headers.map((h, i) => (
-                <div key={h.id} className={classes.cell} style={{ width: h.getSize() }}>
-                  {row ? COLUMNS[i].render(row) : i === 0 ? "…" : null}
-                </div>
-              ))}
+              {table.getHeaderGroups()[0].headers.map((h, i) => {
+                const c = COLUMNS[i];
+                const isEditing = editing?.id === id && editing.column === i && row;
+                return (
+                  <div
+                    key={h.id}
+                    className={classes.cell}
+                    style={{ width: h.getSize() }}
+                    data-column={c.id}
+                    onDoubleClick={editable && c.field && row ? () => setEditing({ id, column: i }) : undefined}
+                  >
+                    {isEditing ? (
+                      <CellEditor
+                        initial={c.text!(row)}
+                        onDone={async (value) => {
+                          setEditing(null);
+                          if (value === null) return;
+                          try {
+                            await saveCell(id, c.field!, value);
+                            await queryClient.invalidateQueries({ queryKey: ["rows"] });
+                          } catch (err) {
+                            notifications.show({ color: "red", title: "Could not save", message: String((err as Error).message) });
+                          }
+                        }}
+                      />
+                    ) : row ? (
+                      c.render(row)
+                    ) : i === 0 ? (
+                      "…"
+                    ) : null}
+                  </div>
+                );
+              })}
             </Box>
           );
         })}

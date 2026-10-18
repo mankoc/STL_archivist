@@ -1,15 +1,19 @@
 // The browser: filter pane, table and detail pane (the desktop's main window).
-import { Box, Button, Center, Group, Loader, Text, TextInput } from "@mantine/core";
+import { Box, Button, Center, Group, Loader, Modal, Text, TextInput } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
-import { IconFilterOff, IconSearch } from "@tabler/icons-react";
-import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { notifications } from "@mantine/notifications";
+import { IconFilterOff, IconSearch, IconTrash } from "@tabler/icons-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 
 import { api, unwrap } from "../api/client";
+import { hasRole, useUser } from "../auth/user";
 import { DetailPane } from "./DetailPane";
+import { EditorDrawer } from "./EditorDrawer";
 import { FilterPane } from "./FilterPane";
 import { EMPTY, type FilterSpec, isEmpty } from "./filters";
 import { ModelTable, type Sort, useModelIds } from "./ModelTable";
+import { NONE, click, prune, type Selection } from "./selection";
 import classes from "./BrowserPage.module.css";
 
 const SHOW = ["author", "tags", "source", "date", "sculptor", "collection", "subcollection", "category", "release", "scale", "presupports", "path"];
@@ -19,9 +23,28 @@ export function BrowserPage() {
   const [searchText, setSearchText] = useState("");
   const [search] = useDebouncedValue(searchText, 250);
   const [sort, setSort] = useState<Sort | null>(null);
-  const [selected, setSelected] = useState<number | null>(null);
+  const [selection, setSelection] = useState<Selection>(NONE);
+  const [editing, setEditing] = useState<number | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const user = useUser();
+  const editor = hasRole(user, "editor");
+  const queryClient = useQueryClient();
   const query = { filter, search, sort };
   const ids = useModelIds(query);
+  const order = ids.data ?? [];
+  useEffect(() => setSelection((s) => prune(s, order)), [order]);
+
+  const remove = async () => {
+    setConfirmRemove(false);
+    try {
+      const r = unwrap(await api.POST("/api/models/delete", { body: { ids: [...selection.ids] } }));
+      notifications.show({ message: `Removed ${r.models} model(s) from the library.` });
+      setSelection(NONE);
+      for (const key of ["ids", "rows", "tree"]) await queryClient.invalidateQueries({ queryKey: [key] });
+    } catch (err) {
+      notifications.show({ color: "red", message: (err as Error).message });
+    }
+  };
 
   const tree = useQuery({
     queryKey: ["tree", filter],
@@ -63,16 +86,43 @@ export function BrowserPage() {
             w={320}
           />
           <Text size="xs" c="dimmed">
-            {ids.data ? `${ids.data.length.toLocaleString()} models` : ""}
+            {ids.data ? `${ids.data.length.toLocaleString()} model${ids.data.length === 1 ? "" : "s"}` : ""}
+            {selection.ids.size > 1 ? ` · ${selection.ids.size} selected` : ""}
           </Text>
+          {editor && selection.ids.size > 0 && (
+            <Button size="compact-xs" variant="subtle" color="red" ml="auto" leftSection={<IconTrash size={14} />} onClick={() => setConfirmRemove(true)}>
+              Remove from library
+            </Button>
+          )}
         </Group>
         <Box className={classes.tableBody}>
-          <ModelTable query={query} onSort={setSort} selected={selected} onSelect={setSelected} />
+          <ModelTable
+            query={query}
+            onSort={setSort}
+            selection={selection}
+            onRowClick={(id, mods) => setSelection((s) => click(s, order, id, mods))}
+            editable={editor}
+          />
         </Box>
       </Box>
       <Box className={classes.detail}>
-        <DetailPane id={selected} />
+        <DetailPane id={selection.current} onEdit={setEditing} />
       </Box>
+      <EditorDrawer id={editing} onClose={() => setEditing(null)} />
+      <Modal opened={confirmRemove} onClose={() => setConfirmRemove(false)} title="Remove from library">
+        <Text size="sm">
+          Remove {selection.ids.size} model(s) from the library? Their records, images and thumbnails are deleted;
+          the archive files stay where they are.
+        </Text>
+        <Group justify="flex-end" mt="md">
+          <Button variant="default" onClick={() => setConfirmRemove(false)}>
+            Cancel
+          </Button>
+          <Button color="red" onClick={remove} data-testid="confirm-remove">
+            Remove
+          </Button>
+        </Group>
+      </Modal>
     </div>
   );
 }

@@ -1,11 +1,15 @@
 // The selected model: its fields, thumbnails, and the archive (download, or
 // the folder path when this client can open it there).
-import { Anchor, Badge, Box, Button, Center, CopyButton, Group, Image, Loader, SimpleGrid, Stack, Table, Text, Title } from "@mantine/core";
-import { IconCopy, IconDownload } from "@tabler/icons-react";
-import { useQuery } from "@tanstack/react-query";
+import { ActionIcon, Anchor, Badge, Box, Button, Center, CopyButton, Group, Image, Loader, SimpleGrid, Stack, Table, Text, Title } from "@mantine/core";
+import { Dropzone, IMAGE_MIME_TYPE } from "@mantine/dropzone";
+import { notifications } from "@mantine/notifications";
+import { IconCopy, IconDownload, IconEdit, IconPhotoPlus, IconTrash } from "@tabler/icons-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api, unwrap } from "../api/client";
+import { api, ApiError, type Schemas, unwrap } from "../api/client";
+import { hasRole, useUser } from "../auth/user";
 import { baseName, formatDate, formatSize } from "../format";
+import classes from "./DetailPane.module.css";
 
 const FIELDS: [string, string][] = [
   ["creator", "Creator"],
@@ -17,7 +21,23 @@ const FIELDS: [string, string][] = [
   ["release_name", "Release"],
 ];
 
-export function DetailPane({ id }: { id: number | null }) {
+/** Upload images to a model (multipart; the server makes the thumbnails). */
+async function uploadImages(id: number, files: File[]): Promise<Schemas["AddedImages"]> {
+  const form = new FormData();
+  for (const f of files) form.append("file", f, f.name);
+  const resp = await fetch(`/api/models/${id}/images`, { method: "POST", body: form, credentials: "same-origin" });
+  const body = await resp.json();
+  if (!resp.ok) throw new ApiError(resp.status, body.error ?? resp.statusText);
+  return body;
+}
+
+export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: number) => void }) {
+  const user = useUser();
+  const editor = hasRole(user, "editor");
+  const queryClient = useQueryClient();
+  const refresh = async () => {
+    for (const key of ["model", "rows", "editor"]) await queryClient.invalidateQueries({ queryKey: [key] });
+  };
   const detail = useQuery({
     queryKey: ["model", id],
     queryFn: async () => unwrap(await api.GET("/api/models/{id}", { params: { path: { id: id! } } })),
@@ -57,7 +77,14 @@ export function DetailPane({ id }: { id: number | null }) {
     .filter(Boolean);
   return (
     <Stack gap="sm" p="sm" style={{ height: "100%", overflowY: "auto" }}>
-      <Title order={4}>{(f.title as string) || baseName(path)}</Title>
+      <Group justify="space-between" wrap="nowrap" align="flex-start">
+        <Title order={4}>{(f.title as string) || baseName(path)}</Title>
+        {editor && (
+          <Button size="xs" variant="light" leftSection={<IconEdit size={14} />} onClick={() => onEdit(id)}>
+            Edit
+          </Button>
+        )}
+      </Group>
       {f.is_missing === 1 && (
         <Badge color="red" variant="light">
           Archive missing
@@ -123,9 +150,30 @@ export function DetailPane({ id }: { id: number | null }) {
       <SimpleGrid cols={2} spacing="xs">
         {d.images.map((img) =>
           img.thumbnail ? (
-            <Anchor key={img.id} href={img.thumbnail} target="_blank">
-              <Image src={img.thumbnail} radius="sm" alt="" loading="lazy" />
-            </Anchor>
+            <Box key={img.id} className={classes.thumb}>
+              <Anchor href={img.thumbnail} target="_blank">
+                <Image src={img.thumbnail} radius="sm" alt="" loading="lazy" />
+              </Anchor>
+              {editor && (
+                <ActionIcon
+                  className={classes.remove}
+                  color="red"
+                  variant="filled"
+                  size="sm"
+                  aria-label="Remove image"
+                  onClick={async () => {
+                    try {
+                      unwrap(await api.DELETE("/api/images/{id}", { params: { path: { id: img.id } } }));
+                      await refresh();
+                    } catch (err) {
+                      notifications.show({ color: "red", message: (err as Error).message });
+                    }
+                  }}
+                >
+                  <IconTrash size={14} />
+                </ActionIcon>
+              )}
+            </Box>
           ) : null,
         )}
       </SimpleGrid>
@@ -133,6 +181,29 @@ export function DetailPane({ id }: { id: number | null }) {
         <Text size="sm" c="dimmed">
           No images.
         </Text>
+      )}
+      {editor && (
+        <Dropzone
+          accept={[...IMAGE_MIME_TYPE, "image/tiff"]}
+          onDrop={async (files) => {
+            try {
+              const r = await uploadImages(id, files);
+              if (r.failed.length) notifications.show({ color: "yellow", message: `Not images: ${r.failed.join(", ")}` });
+              await refresh();
+            } catch (err) {
+              notifications.show({ color: "red", message: (err as Error).message });
+            }
+          }}
+          p="sm"
+          data-testid="image-drop"
+        >
+          <Group gap="xs" justify="center" style={{ pointerEvents: "none" }}>
+            <IconPhotoPlus size={18} />
+            <Text size="sm" c="dimmed">
+              Drop images here, or click to add
+            </Text>
+          </Group>
+        </Dropzone>
       )}
     </Stack>
   );

@@ -8,6 +8,7 @@ import { type FormEvent, useState } from "react";
 
 import { api, type Schemas, unwrap } from "../api/client";
 import { useServerEvents } from "../api/events";
+import { UserContext } from "../auth/user";
 import { BrowserPage } from "../browser/BrowserPage";
 
 export function Shell({ user }: { user: Schemas["User"] }) {
@@ -19,40 +20,42 @@ export function Shell({ user }: { user: Schemas["User"] }) {
     await queryClient.invalidateQueries({ queryKey: ["auth"] });
   };
   return (
-    <AppShell header={{ height: 48 }} padding={0}>
-      <AppShell.Header>
-        <Group h="100%" px="md" justify="space-between">
-          <Title order={4}>stlLibrary</Title>
-          <Menu position="bottom-end">
-            <Menu.Target>
-              <UnstyledButton>
-                <Group gap="xs">
-                  <Avatar size="sm" radius="xl">
-                    {user.name.slice(0, 1).toUpperCase()}
-                  </Avatar>
-                  <Text size="sm">{user.name}</Text>
-                  <Text size="xs" c="dimmed">
-                    {user.role}
-                  </Text>
-                </Group>
-              </UnstyledButton>
-            </Menu.Target>
-            <Menu.Dropdown>
-              <Menu.Item leftSection={<IconKey size={14} />} onClick={password.open}>
-                Change password
-              </Menu.Item>
-              <Menu.Item leftSection={<IconLogout size={14} />} onClick={logout}>
-                Sign out
-              </Menu.Item>
-            </Menu.Dropdown>
-          </Menu>
-        </Group>
-      </AppShell.Header>
-      <AppShell.Main style={{ height: "100vh", paddingTop: 48, display: "flex", flexDirection: "column" }}>
-        <BrowserPage />
-      </AppShell.Main>
-      <PasswordModal opened={passwordOpen} onClose={password.close} />
-    </AppShell>
+    <UserContext.Provider value={user}>
+      <AppShell header={{ height: 48 }} padding={0}>
+        <AppShell.Header>
+          <Group h="100%" px="md" justify="space-between">
+            <Title order={4}>stlLibrary</Title>
+            <Menu position="bottom-end">
+              <Menu.Target>
+                <UnstyledButton>
+                  <Group gap="xs">
+                    <Avatar size="sm" radius="xl">
+                      {user.name.slice(0, 1).toUpperCase()}
+                    </Avatar>
+                    <Text size="sm">{user.name}</Text>
+                    <Text size="xs" c="dimmed">
+                      {user.role}
+                    </Text>
+                  </Group>
+                </UnstyledButton>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Item leftSection={<IconKey size={14} />} onClick={password.open}>
+                  Change password
+                </Menu.Item>
+                <Menu.Item leftSection={<IconLogout size={14} />} onClick={logout}>
+                  Sign out
+                </Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
+          </Group>
+        </AppShell.Header>
+        <AppShell.Main style={{ height: "100vh", paddingTop: 48, display: "flex", flexDirection: "column" }}>
+          <BrowserPage />
+        </AppShell.Main>
+        <PasswordModal opened={passwordOpen} onClose={password.close} />
+      </AppShell>
+    </UserContext.Provider>
   );
 }
 

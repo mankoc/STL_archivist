@@ -1031,6 +1031,22 @@ repeat across modules.
   sign-in, filtering by tag (counts and row count), selection, the thumbnail through the
   authenticated content-address route, and no console errors.
 
+**6b: done 2026-10-18 (editing in the browser).** For editors (the UI hides it from viewers;
+the server checks again):
+
+- table selection as in a desktop list (click, Ctrl+click, Shift+click ranges;
+  `selection.ts`, tested);
+- inline cell editing: double-click, Enter or leaving the cell saves, Esc cancels; the
+  desktop's cell fields through `PATCH /api/models/cells`;
+- the editor drawer: every editor field, completion lists from `/api/editor/choices`,
+  subcollections of the chosen collection, tags and scales as tag inputs;
+- images in the detail pane: drag-and-drop (or click) upload, remove on hover;
+- *Remove from library* for the selection, after a confirmation.
+
+Verified in headless Edge: an inline creator edit, a title change through the drawer, an
+image upload through the drop zone's file input and its removal, and removing two
+Ctrl-selected models.
+
 ### Phase 7: Desktop shell (small)
 
 Tauri app that hosts the web client: connect to a remote server or start a bundled local one on
