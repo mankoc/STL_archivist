@@ -68,6 +68,8 @@ def find_similar_models(
 def load_model_vectors(session):
     """``(model_ids, matrix)`` for every vector of a present (not missing) model.
 
+    *session* may be ``None``: the native core or a session of its own is used.
+
     int64 ``(N,)`` and float32 ``(N, EMBED_DIM)``, row-aligned.  Vectors of
     deleted or missing models' images are left out.
     """
@@ -75,11 +77,15 @@ def load_model_vectors(session):
 
     from app.database import native_db
     from app.utils.image_embedding import EMBED_DIM
-    lib = native_db.library() if native_db.session_clean(session) else None
+    lib = native_db.library() if session is None or native_db.session_clean(session) else None
     if lib is not None:
         mids, mat = lib.load_model_vectors(EMBED_DIM)
         return (np.frombuffer(mids, dtype=np.int64).copy(),
                 np.frombuffer(mat, dtype=np.float32).reshape(-1, EMBED_DIM))
+    if session is None:
+        from app.database.db import session_scope
+        with session_scope() as s:
+            return load_model_vectors(s)
 
     ids, mat = vectors.read_all(session)
     # Plain driver rows: building ORM rows for 360k images took 1.7x as long.

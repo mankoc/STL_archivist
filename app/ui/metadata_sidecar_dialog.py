@@ -3,7 +3,6 @@ Dialog for generating or updating METADATA.7z sidecar files across all folders
 that have records in the database.
 """
 import logging
-from pathlib import Path
 
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import (
@@ -42,9 +41,8 @@ class MetadataSidecarWorker(QThread):
 
     def run(self) -> None:
         """Main thread entry point — iterates folders and writes METADATA.7z files."""
-        from app.database.db import session_scope
-        from app.database.models import STLModel
         from app.crawler.folder_metadata import export_folder_metadata
+        from app.services.content_duplicates import sidecar_folders
         from app.utils.thumbnailer import get_thumbnail_base_dir
         from app.ui.config_dialog import (
             get_metadata_sidecar_enabled,
@@ -73,9 +71,7 @@ class MetadataSidecarWorker(QThread):
         if self._folders is not None:
             folders = sorted(self._folders)
         else:
-            with session_scope() as session:
-                rows = session.query(STLModel.archive_path).all()
-            folders = sorted({Path(row.archive_path).parent for row in rows if row.archive_path})
+            folders = sidecar_folders()
 
         total = len(folders)
 
@@ -101,11 +97,10 @@ class MetadataSidecarWorker(QThread):
 
             self.progress.emit(idx, total)
             try:
-                with session_scope() as session:
-                    ok = export_folder_metadata(
-                        folder, session, thumb_base,
-                        include_thumbnails=include_thumbs,
-                    )
+                ok = export_folder_metadata(
+                    folder, None, thumb_base,
+                    include_thumbnails=include_thumbs,
+                )
                 if ok:
                     self.log.emit(f"[{idx}/{total}] Updated: {folder}")
                     written += 1
@@ -145,17 +140,14 @@ class RemoveSidecarsWorker(QThread):
 
     def run(self) -> None:
         """Main thread entry point — iterates folders and removes METADATA.7z files."""
-        from app.database.db import session_scope
-        from app.database.models import STLModel
+        from app.services.content_duplicates import sidecar_folders
 
         self._stop_requested = False
 
         if self._folders is not None:
             folders = sorted(self._folders)
         else:
-            with session_scope() as session:
-                rows = session.query(STLModel.archive_path).all()
-            folders = sorted({Path(row.archive_path).parent for row in rows if row.archive_path})
+            folders = sidecar_folders()
 
         total = len(folders)
 

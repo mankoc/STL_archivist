@@ -97,9 +97,15 @@ def export_folder_metadata(
         space when thumbnails are not needed for restore.
 
     Returns True when the file was written, False when there was nothing to do
-    (no matching DB records or a write error).
+    (no matching DB records or a write error).  *session* may be ``None``: a
+    session of its own is used.
     """
     from app.database.models import STLModel
+
+    if session is None:
+        from app.database.db import session_scope
+        with session_scope() as own:
+            return export_folder_metadata(folder, own, thumb_base_dir, include_thumbnails)
 
     folder = Path(folder)
     thumb_base_dir = Path(thumb_base_dir)

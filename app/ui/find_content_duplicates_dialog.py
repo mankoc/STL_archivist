@@ -8,7 +8,6 @@ Two separate tabs handle the two modes:
   Images     — dHash or CLIP-embedding matching, see app.services.image_duplicates
 """
 import logging
-from collections import defaultdict
 from pathlib import Path
 from typing import Optional
 
@@ -141,108 +140,19 @@ class _ContentDupWorker(QThread):
         self._stop = True
 
     def run(self) -> None:
-        from app.database.db import session_scope
-        from app.database.models import STLFile, STLModel
+        from app.services.content_duplicates import Stopped, find_stl_duplicates
 
         try:
-            with session_scope() as session:
-                self.progress.emit("Loading STL file records…")
-                rows = (
-                    session.query(STLFile.model_id, STLFile.filename, STLFile.file_size)
-                    .join(STLModel, STLModel.id == STLFile.model_id)
-                    .filter(STLFile.file_size.isnot(None))
-                    .filter(STLModel.is_missing.isnot(True))
-                    .all()
-                )
-                if not rows:
-                    self.scan_finished.emit([])
-                    return
-
-                model_files: dict[int, set[tuple]] = defaultdict(set)
-                for model_id, filename, file_size in rows:
-                    if self._stop:
-                        self.scan_finished.emit([])
-                        return
-                    model_files[model_id].add((filename, file_size))
-
-                self.progress.emit(f"Building index over {len(model_files)} archive(s)…")
-                file_to_models: dict[tuple, set[int]] = defaultdict(set)
-                for model_id, files in model_files.items():
-                    if self._stop:
-                        self.scan_finished.emit([])
-                        return
-                    for key in files:
-                        file_to_models[key].add(model_id)
-
-                self.progress.emit("Computing pair overlaps…")
-                pair_overlap: dict[tuple[int, int], int] = defaultdict(int)
-                for key, models in file_to_models.items():
-                    if len(models) < 2:
-                        continue
-                    if self._stop:
-                        self.scan_finished.emit([])
-                        return
-                    ms = sorted(models)
-                    for i in range(len(ms)):
-                        for j in range(i + 1, len(ms)):
-                            pair_overlap[(ms[i], ms[j])] += 1
-
-                self.progress.emit("Filtering by threshold…")
-                model_file_count = {mid: len(f) for mid, f in model_files.items()}
-                candidate_pairs = []
-                for (id_a, id_b), overlap in pair_overlap.items():
-                    if self._stop:
-                        self.scan_finished.emit([])
-                        return
-                    ta = model_file_count.get(id_a, 0)
-                    tb = model_file_count.get(id_b, 0)
-                    if ta == 0 or tb == 0:
-                        continue
-                    sim = overlap / max(ta, tb)
-                    if sim >= self._threshold:
-                        candidate_pairs.append((id_a, id_b, overlap, ta, tb, sim))
-
-                if not candidate_pairs:
-                    self.scan_finished.emit([])
-                    return
-
-                self.progress.emit("Loading model titles…")
-                all_ids: set[int] = set()
-                for id_a, id_b, *_ in candidate_pairs:
-                    all_ids.add(id_a)
-                    all_ids.add(id_b)
-                models_map = {
-                    m.id: m
-                    for m in session.query(STLModel)
-                        .filter(STLModel.id.in_(list(all_ids)))
-                        .all()
-                }
-
+            results = find_stl_duplicates(self._threshold, log=self.progress.emit,
+                                          should_stop=lambda: self._stop)
+        except Stopped:
             results = []
-            for id_a, id_b, overlap, ta, tb, sim in sorted(candidate_pairs, key=lambda x: -x[5]):
-                ma = models_map.get(id_a)
-                mb = models_map.get(id_b)
-                if ma and mb:
-                    results.append({
-                        "id_a":    id_a,
-                        "title_a": ma.title or Path(ma.archive_path).stem,
-                        "path_a":  ma.archive_path or "",
-                        "total_a": ta,
-                        "id_b":    id_b,
-                        "title_b": mb.title or Path(mb.archive_path).stem,
-                        "path_b":  mb.archive_path or "",
-                        "total_b": tb,
-                        "overlap": overlap,
-                        "sim":     sim,
-                    })
-            self.scan_finished.emit(results)
-
         except Exception as exc:
             logger.error("STL content duplicate search failed: %s", exc, exc_info=True)
-            self.scan_finished.emit([])
+            results = []
+        self.scan_finished.emit(results)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Image duplicate worker
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -269,18 +179,16 @@ class _ImageDupWorker(QThread):
         self._stop = True
 
     def run(self) -> None:
-        from app.database.db import session_scope
         from app.services import image_duplicates as dup
 
         find = (dup.find_embedding_duplicates if self._method == "embedding"
                 else dup.find_dhash_duplicates)
         try:
-            with session_scope() as session:
-                self.report = find(
-                    session, self._threshold, self._max_models,
-                    progress=self.prog_val.emit, log=self.progress.emit,
-                    should_stop=lambda: self._stop,
-                )
+            self.report = find(
+                None, self._threshold, self._max_models,
+                progress=self.prog_val.emit, log=self.progress.emit,
+                should_stop=lambda: self._stop,
+            )
         except dup.Stopped:
             self.scan_finished.emit([])
             return
@@ -798,17 +706,9 @@ class FindContentDuplicatesDialog(QDialog):
             return self._stl_thumb_cache[model_id]
         blobs: list[bytes] = []
         try:
-            from app.database.db import session_scope
-            from app.database.models import Image
+            from app.services.content_duplicates import thumbnail_image_ids
             from app.utils.thumbnailer import get_thumbnail_bytes_many
-            with session_scope() as session:
-                ids = [
-                    iid for (iid,) in session.query(Image.id)
-                    .filter(Image.model_id == model_id, Image.thumbnail_path.isnot(None))
-                    .order_by(Image.id)
-                    .limit(limit)
-                    .all()
-                ]
+            ids = thumbnail_image_ids(model_id, limit)
             data = get_thumbnail_bytes_many(ids)
             blobs = [data[i] for i in ids if i in data]
         except Exception as exc:
@@ -1058,13 +958,10 @@ class FindContentDuplicatesDialog(QDialog):
             return self._img_model_thumb[model_id]
         data: Optional[bytes] = None
         try:
-            from app.database.db import session_scope
-            from app.database.models import Image
+            from app.services.content_duplicates import thumbnail_image_ids
             from app.utils.thumbnailer import get_thumbnail_bytes
-            with session_scope() as session:
-                img_id = (session.query(Image.id)
-                          .filter(Image.model_id == model_id, Image.thumbnail_path.isnot(None))
-                          .order_by(Image.id).limit(1).scalar())
+            first = thumbnail_image_ids(model_id, 1)
+            img_id = first[0] if first else None
             data = get_thumbnail_bytes(img_id) if img_id is not None else None
         except Exception as exc:
             logger.warning("Failed to load model thumbnail for popup: %s", exc)
