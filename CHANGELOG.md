@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Rust migration, step 4g-6: Generate Thumbnails, Rescan, Recrawl and Update Crawled Folders save natively** (on Windows), with results identical to the Python code.
+- **Fix:** *Recrawl* now uses the configured UnRAR tool and crawler settings, so `.rar` archives no longer fail to re-extract.
+
 - **Rust migration, step 4g-4: the crawler's database work runs natively** (on Windows): change detection, move matching, saving new and changed archives, and the clean-up of missing records. Results are identical to the Python code (golden-tested over a multi-step crawl, and on real library folders).
 - **Fix:** a folder path pattern no longer overwrites a release, sculptor or collection that the same crawl has just taken from `info.json` or from the crawl's forced values. Before, that depended on internal timing.
 

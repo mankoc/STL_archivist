@@ -55,7 +55,6 @@ from app.ui.browser_common import (
     COL_CATEGORY, COL_COMPRESSION, COL_TO_PRINT, _HEADERS,
     _fmt_size,
 )
-from app.database.models import STLModel
 from app.utils.path_pattern import parse_release_date, format_release_date
 
 
@@ -1556,63 +1555,50 @@ class BrowserTab(QWidget):
             return
 
         from app.ui.recrawl_dialog import RecrawlPreviewDialog
-        from app.crawler.archive import extract_archive_contents, list_contents, archive_hash
+        from app.crawler.archive import extract_archive_contents, list_contents
         from app.crawler.metadata import extract_metadata
-        from app.database.db import session_scope
-        from app.config import CrawlerConfig
+        from app.services.model_views import grid_models, stl_files
+        from app.ui.settings_loader import build_crawler_config
 
+        config = build_crawler_config()
         changes_all: dict[int, list[tuple[str, str, str]]] = {}
+        models = grid_models(model_ids)
 
         # For each selected model, open the archive, extract relevant files and
         # compute the metadata. Build a list of (field, current, new) tuples.
-        with session_scope() as session:
-            models = session.query(STLModel).filter(STLModel.id.in_(model_ids)).all()
-            for m in models:
-                p = m.archive_path
-                try:
-                    archive_path = Path(p)
-                except Exception:
-                    continue
-                # Extract only the relevant files (no thumbnail generation here)
-                contents = extract_archive_contents(archive_path, unrar_path=CrawlerConfig().unrar_path)
-                meta = extract_metadata(archive_path, contents=contents, source_dir=archive_path.parent)
+        for mid, m in models.items():
+            if not m["archive_path"]:
+                continue
+            archive_path = Path(m["archive_path"])
+            # Extract only the relevant files (no thumbnail generation here)
+            contents = extract_archive_contents(archive_path, unrar_path=config.unrar_path)
+            meta = extract_metadata(archive_path, contents=contents, source_dir=archive_path.parent)
 
-                # Compare fields and collect changes
-                changes: list[tuple[str, str, str]] = []
-                def _add_if_diff(field: str, current: str, new: str) -> None:
-                    cur = "" if current is None else str(current)
-                    nw = "" if new is None else str(new)
-                    if cur != nw:
-                        changes.append((field, cur, nw))
+            changes: list[tuple[str, str, str]] = []
+            def _add_if_diff(field: str, current, new) -> None:
+                cur = "" if current is None else str(current)
+                nw = "" if new is None else str(new)
+                if cur != nw:
+                    changes.append((field, cur, nw))
 
-                _add_if_diff("Title", m.title, meta.title)
-                _add_if_diff("Creator", m.creator, meta.creator)
-                # ModelMetadata uses 'distributor' as the field name for the source/platform
-                _add_if_diff("Source", m.source, meta.distributor)
-                # release_date -> year/month
-                if meta.release_date:
-                    ry, rm = parse_release_date(meta.release_date)
-                    new_date = format_release_date(ry, rm)
-                else:
-                    new_date = ""
-                _add_if_diff("Release date", format_release_date(m.release_year, m.release_month), new_date)
-                _add_if_diff("URL", m.url, meta.url)
+            _add_if_diff("Title", m["title"], meta.title)
+            _add_if_diff("Creator", m["creator"], meta.creator)
+            # ModelMetadata uses 'distributor' as the field name for the source/platform
+            _add_if_diff("Source", m["source"], meta.distributor)
+            if meta.release_date:
+                ry, rm = parse_release_date(meta.release_date)
+                new_date = format_release_date(ry, rm)
+            else:
+                new_date = ""
+            _add_if_diff("Release date", format_release_date(m["release_year"], m["release_month"]), new_date)
+            _add_if_diff("URL", m["url"], meta.url)
+            _add_if_diff("Tags", ", ".join(m["tags"]), ", ".join(meta.tags))
+            cur_files = str(len(stl_files(mid)))
+            new_files = str(len([n for n in (list_contents(archive_path, config.unrar_path) or [])
+                                 if Path(n.replace("\\", "/")).suffix.lower() in {".stl", ".obj", ".lys", ".chitubox"}]))
+            _add_if_diff("File list count", cur_files, new_files)
+            changes_all[mid] = changes
 
-                # Tags comparison – join into a comma-separated string for preview
-                cur_tags = ", ".join(t.name for t in m.tags)
-                new_tags = ", ".join(meta.tags)
-                _add_if_diff("Tags", cur_tags, new_tags)
-
-                # STL file list preview – show count change only
-                cur_files = str(len(m.stl_files))
-                new_files = str(len([n for n in (list_contents(archive_path) or []) if Path(n.replace("\\", "/")).suffix.lower() in {".stl", ".obj", ".lys", ".chitubox"}]))
-                _add_if_diff("File list count", cur_files, new_files)
-
-                changes_all[m.id] = changes
-
-        # If no changes for any selected model, inform the user
-        all_changes = [(f"ID {mid}",) + ch for mid, chlist in changes_all.items() for ch in chlist]
-        # Flatten into (field, current, new) with model prefix in the field name
         flat: list[tuple[str, str, str]] = []
         for mid, chlist in changes_all.items():
             for field, cur, nw in chlist:
@@ -1622,30 +1608,21 @@ class BrowserTab(QWidget):
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
-        # User accepted — apply changes by re-running the upsert logic for each archive
-        # We'll reuse the crawler's _upsert_archive via a temporary CrawlerWorker instance
+        # Apply: a forced rescan of these archives through the crawler (its
+        # native database phases when available), one worker per folder.
         from app.crawler.crawler import CrawlerWorker
-        config = CrawlerConfig()
-        worker = CrawlerWorker(str(Path(models[0].archive_path).parent), pattern="", config=config)
-
-        # Run per-model upsert synchronously using session_scope and the crawler helper
-        with session_scope() as session:
-            for mid in model_ids:
-                m = session.query(STLModel).get(mid)
-                if not m:
-                    continue
-                archive_path = Path(m.archive_path)
-                # compute hash and extract contents
-                cur_hash = archive_hash(archive_path, unrar_path=config.unrar_path)
-                data = extract_archive_contents(archive_path, unrar_path=config.unrar_path, all_names_out=None, stl_info_out=None)
-                # call the private upsert method on the worker instance
-                try:
-                    worker._upsert_archive(archive_path, session, config.max_thumbnails, config.max_thumb_size, current_hash=cur_hash, existing=m, contents=data, all_names=None, stl_info=None)
-                    session.commit()
-                except Exception as exc:
-                    session.rollback()
-                    QMessageBox.warning(self, self.tr("Recrawl failed"), f"Failed to recrawl {archive_path}: {exc}")
-                    continue
+        by_folder: dict[Path, list[Path]] = {}
+        for m in models.values():
+            if m["archive_path"] and Path(m["archive_path"]).exists():
+                p = Path(m["archive_path"])
+                by_folder.setdefault(p.parent, []).append(p)
+        errors: list[str] = []
+        for folder, paths in sorted(by_folder.items()):
+            worker = CrawlerWorker(str(folder), pattern="", config=build_crawler_config())
+            worker.log.connect(lambda msg: errors.append(msg) if "ERROR" in msg else None)
+            worker.recrawl(sorted(paths))
+        if errors:
+            QMessageBox.warning(self, self.tr("Recrawl failed"), "\n".join(errors[:20]))
 
         QMessageBox.information(self, self.tr("Recrawl complete"), f"Recrawl applied for {len(model_ids)} model(s).")
 

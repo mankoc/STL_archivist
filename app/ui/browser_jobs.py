@@ -164,11 +164,10 @@ class RescanWorker(QThread):
         from app.crawler.archive import archive_hash, extract_archive_contents
         from app.crawler.metadata import extract_metadata
         from app.crawler.rules import detect_warnings, detect_presupport, detect_scale
-        from app.database.db import session_scope
-        from app.database.models import STLModel, STLFile
-        from app.database.helpers import get_or_create_scale
         from app.ui.settings_loader import build_crawler_config
         from app.utils.path_pattern import parse_release_date
+
+        from app.services.archive_jobs import apply_rescan, rescan_state
 
         _log = logging.getLogger(__name__)
         # Must come from settings, not CrawlerConfig() defaults: a bare config
@@ -178,104 +177,88 @@ class RescanWorker(QThread):
         config = build_crawler_config()
         total = len(self._model_ids)
         updated = 0
+        _stl_exts = {'.stl', '.obj', '.lys', '.chitubox'}
 
         for i, mid in enumerate(self._model_ids, start=1):
             if self._stop:
                 break
-            with session_scope() as session:
-                m = session.get(STLModel, mid)
-                if not m or not m.archive_path:
-                    self.progress.emit(i, total, "")
+            state = rescan_state(mid)
+            if not state or not state[0]:
+                self.progress.emit(i, total, "")
+                continue
+            ap, old_size, old_mtime, old_hash = state
+            p = Path(ap)
+            self.progress.emit(i, total, p.name)
+            try:
+                if not p.exists():
+                    self.file_error.emit(p.name, "Archive not found")
                     continue
-                p = Path(m.archive_path)
-                self.progress.emit(i, total, p.name)
                 try:
-                    if not p.exists():
-                        self.file_error.emit(p.name, "Archive not found")
-                        continue
+                    st = p.stat()
+                    fs_size = int(st.st_size)
+                    fs_mtime = int(st.st_mtime_ns)
+                except Exception:
+                    fs_size = fs_mtime = None
 
-                    try:
-                        st = p.stat()
-                        fs_size  = int(st.st_size)
-                        fs_mtime = int(st.st_mtime_ns)
-                    except Exception:
-                        fs_size = fs_mtime = None
+                need_hash = not (
+                    fs_size is not None and fs_mtime is not None
+                    and old_size is not None and old_mtime is not None
+                    and fs_size == old_size and fs_mtime == old_mtime
+                )
+                new_hash = archive_hash(p, unrar_path=config.unrar_path) if need_hash else old_hash
 
-                    need_hash = not (
-                        fs_size is not None and fs_mtime is not None
-                        and m.archive_size is not None and m.archive_mtime_ns is not None
-                        and fs_size == m.archive_size and fs_mtime == m.archive_mtime_ns
+                all_names: list[str] = []
+                uncompressed_out: list[int] = []
+                contents = extract_archive_contents(
+                    p,
+                    unrar_path=config.unrar_path,
+                    all_names_out=all_names,
+                    stl_info_out=None,
+                    uncompressed_size_out=uncompressed_out,
+                )
+                if not all_names:
+                    # extract_archive_contents() logs and swallows open failures,
+                    # returning an empty member list.  Rewriting the record from
+                    # that would assert "no images"/"no printable files" on an
+                    # archive we simply could not read, so stop before touching it.
+                    self.file_error.emit(
+                        p.name, "Could not read archive contents — left unchanged"
                     )
-                    new_hash = archive_hash(p, unrar_path=config.unrar_path) if need_hash else m.archive_hash
+                    continue
 
-                    all_names: list[str] = []
-                    uncompressed_out: list[int] = []
-                    contents = extract_archive_contents(
-                        p,
-                        unrar_path=config.unrar_path,
-                        all_names_out=all_names,
-                        stl_info_out=None,
-                        uncompressed_size_out=uncompressed_out,
-                    )
-                    if not all_names:
-                        # extract_archive_contents() logs and swallows open failures,
-                        # returning an empty member list.  Rewriting the record from
-                        # that would assert "no images"/"no printable files" on an
-                        # archive we simply could not read, so stop before touching it.
-                        self.file_error.emit(
-                            p.name, "Could not read archive contents — left unchanged"
-                        )
-                        continue
-
-                    uncompressed = uncompressed_out[0] if uncompressed_out else None
-                    meta = extract_metadata(p, contents=contents, source_dir=p.parent)
-
-                    m.archive_hash    = new_hash
-                    m.archive_size    = fs_size
-                    m.archive_mtime_ns = fs_mtime
-                    if uncompressed and uncompressed > 0 and fs_size is not None:
-                        m.compression_rate = round(fs_size / uncompressed, 4)
-
-                    m.title       = meta.title       or m.title
-                    m.creator     = meta.creator     or m.creator
-                    m.source      = meta.distributor or m.source
-                    if meta.release_date:
-                        ry, rm = parse_release_date(meta.release_date)
-                        if ry is not None:
-                            m.release_year  = ry
-                            m.release_month = rm
-                    m.url         = meta.url         or m.url
-                    m.description = meta.description or m.description
-
-                    m.presupports = detect_presupport(all_names)
-                    warnings = detect_warnings(
-                        all_names,
-                        check_presupported=config.warn_presupported_stl,
-                        check_no_images=config.warn_no_images,
-                        check_nested_archive=config.warn_nested_archive,
-                        check_no_printable=config.warn_no_printable,
-                        presupport_patterns=config.presupport_patterns,
-                    )
-                    m.warning = warnings or None
-
-                    scales = detect_scale([p.name] + all_names)
-                    if scales:
-                        m.scales = [get_or_create_scale(session, s) for s in scales]
-
-                    if config.store_stl_file_list:
-                        for old in list(m.stl_files):
-                            session.delete(old)
-                        session.flush()
-                        _stl_exts = {'.stl', '.obj', '.lys', '.chitubox'}
-                        for fname in all_names:
-                            if Path(fname.replace('\\', '/')).suffix.lower() in _stl_exts:
-                                session.add(STLFile(model=m, filename=fname,
-                                                    file_size=None, archive_hash=new_hash))
-
+                uncompressed = uncompressed_out[0] if uncompressed_out else None
+                meta = extract_metadata(p, contents=contents, source_dir=p.parent)
+                release = None
+                if meta.release_date:
+                    ry, rm = parse_release_date(meta.release_date)
+                    if ry is not None:
+                        release = (ry, rm)
+                warnings = detect_warnings(
+                    all_names,
+                    check_presupported=config.warn_presupported_stl,
+                    check_no_images=config.warn_no_images,
+                    check_nested_archive=config.warn_nested_archive,
+                    check_no_printable=config.warn_no_printable,
+                    presupport_patterns=config.presupport_patterns,
+                )
+                values = {
+                    "archive_hash": new_hash, "archive_size": fs_size, "archive_mtime_ns": fs_mtime,
+                    "compression_rate": (round(fs_size / uncompressed, 4)
+                                         if uncompressed and uncompressed > 0 and fs_size is not None
+                                         else None),
+                    "title": meta.title, "creator": meta.creator, "source": meta.distributor,
+                    "release": release, "url": meta.url, "description": meta.description,
+                    "presupports": detect_presupport(all_names), "warning": warnings or None,
+                    "scales": detect_scale([p.name] + all_names),
+                    "stl_files": ([f for f in all_names
+                                   if Path(f.replace('\\', '/')).suffix.lower() in _stl_exts]
+                                  if config.store_stl_file_list else None),
+                }
+                if apply_rescan(mid, values):
                     updated += 1
-                except Exception as exc:
-                    _log.exception("Rescan failed for %s", p)
-                    self.file_error.emit(p.name, str(exc))
+            except Exception as exc:
+                _log.exception("Rescan failed for %s", p)
+                self.file_error.emit(p.name, str(exc))
 
         self.finished_ok.emit(updated)
 
@@ -358,11 +341,14 @@ class ThumbnailGeneratorWorker(QThread):
     def run(self) -> None:
         """Re-extract and save thumbnails for every model in *model_ids*, then update sidecars."""
         from pathlib import Path
-        from app.database.db import session_scope
-        from app.database.models import STLModel, Image as DBImage
         from app.crawler.archive import extract_archive_contents, IMAGE_SUFFIXES
-        from app.utils.thumbnailer import save_thumbnail, delete_thumbnails, get_thumbnail_base_dir
-        from app.ui.config_dialog import get_max_thumb_size, get_unrar_path
+        from app.crawler.rules import detect_warnings
+        from app.services.archive_jobs import replace_thumbnails, rescan_state
+        from app.utils.thumbnailer import make_thumbnail, get_thumbnail_base_dir
+        from app.ui.config_dialog import (
+            get_max_thumb_size, get_unrar_path, get_warn_presupported_stl, get_warn_no_images,
+            get_warn_nested_archive, get_presupport_patterns,
+        )
 
         max_size  = get_max_thumb_size()
         unrar     = get_unrar_path()
@@ -375,82 +361,63 @@ class ThumbnailGeneratorWorker(QThread):
                 break
             self.progress.emit(idx, total)
 
-            with session_scope() as session:
-                stl: STLModel = session.get(STLModel, model_id)
-                if stl is None:
-                    continue
+            state = rescan_state(model_id)
+            if state is None:
+                continue
+            archive_path = Path(state[0])
+            self.log.emit(f"[{idx}/{total}] {archive_path.name}")
 
-                archive_path = Path(stl.archive_path)
-                self.log.emit(f"[{idx}/{total}] {archive_path.name}")
+            if not archive_path.exists():
+                self.log.emit("  WARNING: archive not found, skipping")
+                continue
 
-                if not archive_path.exists():
-                    self.log.emit(f"  WARNING: archive not found, skipping")
-                    continue
+            all_names: list[str] = []
+            contents = extract_archive_contents(
+                archive_path, unrar_path=unrar, all_names_out=all_names,
+            )
+            image_names = sorted(
+                name for name in contents
+                if Path(name.replace("\\", "/")).suffix.lower() in IMAGE_SUFFIXES
+            )
 
-                # Delete existing thumbnails (one LMDB transaction for the model)
-                delete_thumbnails([i.thumbnail_path for i in stl.images if i.thumbnail_path])
-                for old_img in list(stl.images):
-                    session.delete(old_img)
-                session.flush()
+            # Thumbnails until max_thumbnails succeed; failures are recorded too,
+            # as the database rows they create and drop shape the image ids.
+            thumbs: list[tuple[str, "bytes | None"]] = []
+            count = 0
+            for filename in image_names:
+                if self._stop or count >= self._max_thumbnails:
+                    break
+                jpeg = make_thumbnail(contents[filename], max_size)
+                thumbs.append((filename, jpeg))
+                if jpeg:
+                    count += 1
+                else:
+                    self.log.emit(f"  WARNING: thumbnail conversion failed for {filename}")
 
-                # Extract and generate new thumbnails
-                from app.crawler.rules import detect_warnings
-                from app.ui.config_dialog import get_warn_presupported_stl, get_warn_no_images, get_warn_nested_archive, get_presupport_patterns
-
-                all_names: list[str] = []
-                contents = extract_archive_contents(
-                    archive_path, unrar_path=unrar, all_names_out=all_names,
-                )
-                image_names = sorted(
-                    name for name in contents
-                    if Path(name.replace("\\", "/")).suffix.lower() in IMAGE_SUFFIXES
-                )
-
-                count = 0
-                for filename in image_names:
-                    if self._stop:
-                        break
-                    if count >= self._max_thumbnails:
-                        break
-                    raw_bytes = contents[filename]
-                    img = DBImage(model=stl, filename=filename)
-                    session.add(img)
-                    session.flush()
-                    rel_path = save_thumbnail(raw_bytes, img.id, max_size=max_size)
-                    if rel_path:
-                        img.thumbnail_path = rel_path
-                        count += 1
-                    else:
-                        session.delete(img)
-                        self.log.emit(f"  WARNING: thumbnail conversion failed for {filename}")
-
-                self.log.emit(f"  {count} thumbnail(s) stored")
-
-                warnings = detect_warnings(
-                    all_names,
-                    check_presupported=get_warn_presupported_stl(),
-                    check_no_images=get_warn_no_images(),
-                    check_nested_archive=get_warn_nested_archive(),
-                    presupport_patterns=get_presupport_patterns(),
-                )
-                stl.warning = warnings or None
-                if warnings:
-                    self.log.emit(f"  WARNING: {warnings.replace(chr(10), '; ')}")
-
-                modified_folders.add(archive_path.parent)
+            warnings = detect_warnings(
+                all_names,
+                check_presupported=get_warn_presupported_stl(),
+                check_no_images=get_warn_no_images(),
+                check_nested_archive=get_warn_nested_archive(),
+                presupport_patterns=get_presupport_patterns(),
+            )
+            stored = replace_thumbnails(model_id, thumbs, warnings or None)
+            if stored is None:
+                continue
+            self.log.emit(f"  {stored} thumbnail(s) stored")
+            if warnings:
+                self.log.emit(f"  WARNING: {warnings.replace(chr(10), '; ')}")
+            modified_folders.add(archive_path.parent)
 
         # Update METADATA.7z for all affected folders (if option is enabled)
         thumb_base = get_thumbnail_base_dir()
         if modified_folders and thumb_base is not None:
-            from app.ui.config_dialog import get_metadata_thumbnails_enabled, get_metadata_sidecar_enabled
+            from app.ui.config_dialog import get_metadata_sidecar_enabled
             from app.crawler.folder_metadata import export_folder_metadata
-            include_thumbs = get_metadata_thumbnails_enabled()
             if get_metadata_sidecar_enabled():
                 self.log.emit(f"Updating METADATA.7z in {len(modified_folders)} folder(s)…")
-                with session_scope() as session:
-                    for folder in sorted(modified_folders):
-                        export_folder_metadata(folder, session, thumb_base,
-                                               include_thumbnails=True)
-                        self.log.emit(f"  Updated METADATA.7z in {folder.name}")
+                for folder in sorted(modified_folders):
+                    export_folder_metadata(folder, None, thumb_base, include_thumbnails=True)
+                    self.log.emit(f"  Updated METADATA.7z in {folder.name}")
 
         self.generation_finished.emit()

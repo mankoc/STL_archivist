@@ -245,6 +245,8 @@ Qt-free business logic, testable without a `QApplication`:
   embedding targets / store, warning re-check, moved-record merge, record removal; verify,
   duplicate entries, prune images,
   `compact_database` = `VACUUM` + `wal_checkpoint(TRUNCATE)`, run with `temp_store=FILE`).
+- **`archive_jobs.py`** — Generate Thumbnails, Rescan, Update Crawled Folders' reconciliation
+  writes (native in `storage::jobs`).
 - **`file_deletion.py`** — archive deletion / trash (`delete_archives(ids, use_trash, trash)`
   manages its own transaction).
 - **`moves.py`** — moved archives: `relocate`, `merge_into_missing`, `delete_model`,

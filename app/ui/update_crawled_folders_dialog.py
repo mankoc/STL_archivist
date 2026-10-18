@@ -18,9 +18,6 @@ from PyQt6.QtWidgets import (
 )
 
 from app.crawler.crawler import CrawlerWorker
-from app.database.db import session_scope
-from app.database.models import STLModel
-from app.services import moves
 from app.utils.thumbnailer import delete_thumbnails
 
 # ── Change-type colours ───────────────────────────────────────────────────────
@@ -155,82 +152,14 @@ class _UpdateAllWorker(QThread):
 
     def _cross_folder_match(self, all_new_paths: set[str], thumb_refs: list[str]) -> None:
         """Body of :meth:`_cross_folder_reconcile`; collects thumbnail refs to delete."""
-
-        with session_scope() as session:
-            missing_rows = session.query(
-                STLModel.id,
-                STLModel.archive_path,
-                STLModel.archive_hash,
-            ).filter(STLModel.is_missing == True).all()  # noqa: E712
-
-            if not missing_rows:
-                return
-
-            # Build hash → missing-id index, tracking collisions.
-            hash_to_missing_id: dict[str, int]  = {}
-            missing_hash_collision: set[str]    = set()
-            for mid, _mpath, mhash in missing_rows:
-                if not mhash:
-                    continue
-                if mhash in hash_to_missing_id:
-                    missing_hash_collision.add(mhash)
-                else:
-                    hash_to_missing_id[mhash] = mid
-
-            candidate_hashes = [
-                h for h in hash_to_missing_id if h not in missing_hash_collision
-            ]
-            if not candidate_hashes:
-                return
-
-            new_models = {
-                m.archive_path: m
-                for m in session.query(STLModel)
-                    .filter(STLModel.archive_path.in_(list(all_new_paths)))
-                    .all()
-            }
-
-            # Build hash → new-path index, tracking collisions.
-            hash_to_new_path: dict[str, str] = {}
-            new_hash_collision: set[str]     = set()
-            for npath, nm in new_models.items():
-                h = nm.archive_hash
-                if not h:
-                    continue
-                if h in hash_to_new_path:
-                    new_hash_collision.add(h)
-                else:
-                    hash_to_new_path[h] = npath
-
-            used_new: set[str] = set()
-            matched = 0
-
-            for h, missing_id in hash_to_missing_id.items():
-                if h in missing_hash_collision or h in new_hash_collision:
-                    continue
-                new_path = hash_to_new_path.get(h)
-                if new_path is None or new_path in used_new:
-                    continue
-
-                old_model = session.get(STLModel, missing_id)
-                new_model = new_models.get(new_path)
-                if old_model is None or new_model is None:
-                    continue
-
-                old_path = old_model.archive_path
-                new_archive_path = new_model.archive_path
-                # Old record keeps its metadata and thumbnails.
-                thumb_refs += moves.merge_into_missing(session, old_model, new_model)
-
-                matched += 1
-                used_new.add(new_path)
-
-                filename = Path(old_path).name
-                self.log.emit(f"Cross-folder move: {filename}")
-                self.file_moved.emit(old_path, new_archive_path)
-
-            if matched:
-                self.log.emit(f"Detected {matched} cross-folder move(s).")
+        from app.services.archive_jobs import cross_folder_reconcile
+        moved, refs = cross_folder_reconcile(all_new_paths)
+        thumb_refs += refs
+        for old_path, new_path in moved:
+            self.log.emit(f"Cross-folder move: {Path(old_path).name}")
+            self.file_moved.emit(old_path, new_path)
+        if moved:
+            self.log.emit(f"Detected {len(moved)} cross-folder move(s).")
 
     def _cleanup_deferred_deletions(self, crawled_folder_paths: list[str]) -> None:
         """Delete in-scope is_missing records that were not matched as moves.
@@ -238,39 +167,14 @@ class _UpdateAllWorker(QThread):
         These are archives that were genuinely deleted (not moved) from one of
         the crawled folders during this update run.
         """
-        folder_roots = [Path(p) for p in crawled_folder_paths]
-        thumb_refs: list[str] = []
-
-        with session_scope() as session:
-            missing_models = (
-                session.query(STLModel)
-                .filter(STLModel.is_missing == True)  # noqa: E712
-                .all()
-            )
-
-            deleted = 0
-            for model in missing_models:
-                if not model.archive_path:
-                    continue
-                try:
-                    in_scope = any(
-                        Path(model.archive_path).is_relative_to(root)
-                        for root in folder_roots
-                    )
-                except ValueError:
-                    in_scope = False
-                if not in_scope:
-                    continue
-
-                old_path = model.archive_path
-                thumb_refs += moves.delete_model(session, model)
-                deleted += 1
-                self.file_deleted.emit(old_path)
-
-        delete_thumbnails(thumb_refs)   # after commit, one LMDB transaction
+        from app.services.archive_jobs import delete_missing_under
+        deleted, refs = delete_missing_under(crawled_folder_paths)
+        for path in deleted:
+            self.file_deleted.emit(path)
+        delete_thumbnails(refs)   # after commit, one LMDB transaction
         if deleted:
             self.log.emit(
-                f"Deleted {deleted} record(s) removed from crawled folders."
+                f"Deleted {len(deleted)} record(s) removed from crawled folders."
             )
 
 
