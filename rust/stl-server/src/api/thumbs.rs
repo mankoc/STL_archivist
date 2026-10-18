@@ -6,9 +6,11 @@ use axum::extract::{Path, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
 
+use crate::auth::CurrentUser;
 use crate::{ApiError, AppState};
 
-const IMMUTABLE: &str = "public, max-age=31536000, immutable";
+// Private: thumbnails need a session, so shared caches must not keep them.
+const IMMUTABLE: &str = "private, max-age=31536000, immutable";
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
@@ -46,7 +48,7 @@ fn content_type(data: &[u8]) -> &'static str {
     params(("digest" = String, Path, description = "Hex digest from an image's `thumbnail` URL")),
     responses((status = 200, description = "JPEG or GIF bytes", content_type = "image/jpeg"),
               (status = 404, body = crate::error::ErrorBody)))]
-pub async fn thumb(State(lib): State<AppState>, Path(digest): Path<String>) -> Result<Response, ApiError> {
+pub async fn thumb(State(lib): State<AppState>, _me: CurrentUser, Path(digest): Path<String>) -> Result<Response, ApiError> {
     let key = unhex(&digest).ok_or_else(|| ApiError::not_found("no such thumbnail"))?;
     let data = lib.run(move |lib| Ok(lib.thumbs.blob(&key)?)).await?;
     let data = data.ok_or_else(|| ApiError::not_found("no such thumbnail"))?;
@@ -60,7 +62,7 @@ pub async fn thumb(State(lib): State<AppState>, Path(digest): Path<String>) -> R
     responses((status = 308, description = "Redirect to `/api/thumb/<digest>`"),
               (status = 200, description = "Bytes of a legacy entry", content_type = "image/jpeg"),
               (status = 404, body = crate::error::ErrorBody)))]
-pub async fn image_thumbnail(State(lib): State<AppState>, Path(id): Path<i64>) -> Result<Response, ApiError> {
+pub async fn image_thumbnail(State(lib): State<AppState>, _me: CurrentUser, Path(id): Path<i64>) -> Result<Response, ApiError> {
     if id < 0 {
         return Err(ApiError::not_found("no such thumbnail"));
     }

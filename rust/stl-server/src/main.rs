@@ -24,7 +24,7 @@ async fn run(args: &[String]) -> Result<(), String> {
     let library = tokio::task::spawn_blocking(move || Library::open(config)).await.map_err(|e| e.to_string())??;
     let listener = tokio::net::TcpListener::bind(bind).await.map_err(|e| format!("bind {bind}: {e}"))?;
     tracing::info!("listening on http://{bind}");
-    axum::serve(listener, app(Arc::new(library)))
+    axum::serve(listener, app(Arc::new(library)).into_make_service_with_connect_info::<std::net::SocketAddr>())
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
             tracing::info!("shutting down");

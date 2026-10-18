@@ -1,27 +1,26 @@
-//! The API against a small temporary library, through the real router.
+//! The library API against a small temporary library, through the real router.
 
-use std::sync::Arc;
+mod common;
 
-use axum::body::Body;
-use axum::http::{Request, StatusCode, header};
-use http_body_util::BodyExt;
+use axum::http::{StatusCode, header};
+use common::{TestLib, call, empty_library};
 use serde_json::{Value, json};
-use stl_server::{AppState, Config, Library, app};
-use tower::ServiceExt;
+use stl_server::accounts::Role;
+use stl_server::{Config, Library};
 
 struct Fixture {
-    _dir: tempfile::TempDir,
-    state: AppState,
+    lib: TestLib,
     ids: Vec<i64>,
+    /// A viewer's session: reading needs no more.
+    token: String,
 }
 
 /// Three models: two by Alice tagged `dragon` (one with two thumbnails sharing
 /// a payload), one by Bob in another folder.
 fn fixture() -> Fixture {
-    let dir = tempfile::tempdir().unwrap();
-    let config = Config { data_dir: dir.path().to_path_buf(), bind: "127.0.0.1:0".parse().unwrap() };
-    let lib = Library::open(config).unwrap();
+    let lib = empty_library();
     let ids = lib
+        .state
         .db
         .with_tx(|tx| {
             tx.execute_batch(
@@ -49,40 +48,48 @@ fn fixture() -> Fixture {
             Ok::<_, rusqlite::Error>(ids)
         })
         .unwrap();
-    lib.thumbs.put_many(&[(10, b"\xff\xd8jpeg-a"), (11, b"\xff\xd8jpeg-a")]).unwrap();
-    lib.thumbs.put_raw(&[(12u64.to_be_bytes().to_vec(), b"GIF89a-legacy".to_vec())]).unwrap();
-    Fixture { _dir: dir, state: Arc::new(lib), ids }
+    lib.state.thumbs.put_many(&[(10, b"\xff\xd8jpeg-a"), (11, b"\xff\xd8jpeg-a")]).unwrap();
+    lib.state.thumbs.put_raw(&[(12u64.to_be_bytes().to_vec(), b"GIF89a-legacy".to_vec())]).unwrap();
+    let token = lib.user("reader", Role::Viewer);
+    Fixture { lib, ids, token }
 }
 
-async fn send(state: &AppState, req: Request<Body>) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
-    let resp = app(state.clone()).oneshot(req).await.unwrap();
-    let (parts, body) = resp.into_parts();
-    (parts.status, parts.headers, body.collect().await.unwrap().to_bytes().to_vec())
+impl Fixture {
+    async fn get(&self, uri: &str) -> common::Reply {
+        call(&self.lib.state, "GET", uri, Some(&self.token), None).await
+    }
+
+    async fn post(&self, uri: &str, body: Value) -> (StatusCode, Value) {
+        let r = call(&self.lib.state, "POST", uri, Some(&self.token), Some(body)).await;
+        (r.status, r.json())
+    }
 }
 
-async fn get(state: &AppState, uri: &str) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
-    send(state, Request::get(uri).body(Body::empty()).unwrap()).await
-}
-
-async fn post(state: &AppState, uri: &str, body: Value) -> (StatusCode, Value) {
-    let req = Request::post(uri)
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(body.to_string()))
-        .unwrap();
-    let (status, _, bytes) = send(state, req).await;
-    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
-}
-
-fn json_of(bytes: &[u8]) -> Value {
-    serde_json::from_slice(bytes).unwrap()
+#[tokio::test]
+async fn library_routes_need_a_session() {
+    let f = fixture();
+    for (method, uri, body) in [
+        ("GET", "/api/system/info", None),
+        ("POST", "/api/models/ids", Some(json!({}))),
+        ("POST", "/api/models/rows", Some(json!({"ids": [1]}))),
+        ("GET", "/api/models/1", None),
+        ("POST", "/api/filter-tree", Some(json!({}))),
+        ("GET", "/api/images/10/thumbnail", None),
+        ("GET", "/api/thumb/00", None),
+    ] {
+        let r = call(&f.lib.state, method, uri, None, body.clone()).await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED, "{method} {uri}");
+        let r = call(&f.lib.state, method, uri, Some("not-a-session"), body).await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED, "{method} {uri} with a bad token");
+    }
 }
 
 #[tokio::test]
 async fn info_reports_version_and_size() {
     let f = fixture();
-    let (status, _, body) = get(&f.state, "/api/system/info").await;
-    assert_eq!(status, StatusCode::OK);
-    let v = json_of(&body);
+    let r = f.get("/api/system/info").await;
+    assert_eq!(r.status, StatusCode::OK);
+    let v = r.json();
     assert_eq!(v["name"], "stlLibrary");
     assert_eq!(v["models"], 3);
 }
@@ -90,19 +97,18 @@ async fn info_reports_version_and_size() {
 #[tokio::test]
 async fn ids_filter_search_and_sort() {
     let f = fixture();
-    let (s, v) = post(&f.state, "/api/models/ids", json!({})).await;
+    let (s, v) = f.post("/api/models/ids", json!({})).await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(v["ids"], json!(f.ids));
-    let (_, v) = post(&f.state, "/api/models/ids", json!({"sort": {"column": "title"}})).await;
+    let (_, v) = f.post("/api/models/ids", json!({"sort": {"column": "title"}})).await;
     assert_eq!(v["ids"], json!([f.ids[1], f.ids[2], f.ids[0]]));
-    let (_, v) = post(&f.state, "/api/models/ids", json!({"filter": {"include": {"tag": ["dragon"]}}, "search": "red"})).await;
+    let (_, v) = f.post("/api/models/ids", json!({"filter": {"include": {"tag": ["dragon"]}}, "search": "red"})).await;
     assert_eq!(v["ids"], json!([f.ids[0]]));
-    let (_, v) = post(&f.state, "/api/models/ids", json!({"filter": {"include": {"sculptor": [2]}}})).await;
+    let (_, v) = f.post("/api/models/ids", json!({"filter": {"include": {"sculptor": [2]}}})).await;
     assert_eq!(v["ids"], json!([f.ids[2]]));
-    let (_, v) =
-        post(&f.state, "/api/models/ids", json!({"filter": {"include": {"date": [{"year": 2024, "month": 3}]}}})).await;
+    let (_, v) = f.post("/api/models/ids", json!({"filter": {"include": {"date": [{"year": 2024, "month": 3}]}}})).await;
     assert_eq!(v["ids"].as_array().unwrap().len(), 3);
-    let (_, v) = post(&f.state, "/api/models/ids", json!({"filter": {"exclude": {"path": ["F:/lib/Alice"]}}})).await;
+    let (_, v) = f.post("/api/models/ids", json!({"filter": {"exclude": {"path": ["F:/lib/Alice"]}}})).await;
     assert_eq!(v["ids"], json!([f.ids[2]]));
 }
 
@@ -115,22 +121,22 @@ async fn bad_requests_are_refused() {
         json!({"sort": {"column": "tags"}}),
         json!({"unknown": 1}),
     ] {
-        let (s, v) = post(&f.state, "/api/models/ids", body.clone()).await;
+        let (s, v) = f.post("/api/models/ids", body.clone()).await;
         assert!(s.is_client_error(), "{body} gave {s}");
         if s == StatusCode::BAD_REQUEST {
             assert!(v["error"].is_string());
         }
     }
-    let (s, _) = post(&f.state, "/api/models/rows", json!({"ids": vec![1; 2001]})).await;
+    let (s, _) = f.post("/api/models/rows", json!({"ids": vec![1; 2001]})).await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
-    let (s, _) = post(&f.state, "/api/filter-tree", json!({"show": ["nope"]})).await;
+    let (s, _) = f.post("/api/filter-tree", json!({"show": ["nope"]})).await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
 async fn rows_keep_the_requested_order() {
     let f = fixture();
-    let (s, v) = post(&f.state, "/api/models/rows", json!({"ids": [f.ids[2], 999, f.ids[0]]})).await;
+    let (s, v) = f.post("/api/models/rows", json!({"ids": [f.ids[2], 999, f.ids[0]]})).await;
     assert_eq!(s, StatusCode::OK);
     let rows = v["rows"].as_array().unwrap();
     assert_eq!(rows.len(), 2);
@@ -143,7 +149,7 @@ async fn rows_keep_the_requested_order() {
 #[tokio::test]
 async fn filter_tree_counts() {
     let f = fixture();
-    let (s, v) = post(&f.state, "/api/filter-tree", json!({"show": ["author", "sculptor", "tags", "path", "date"]})).await;
+    let (s, v) = f.post("/api/filter-tree", json!({"show": ["author", "sculptor", "tags", "path", "date"]})).await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(v["counts"]["tag"]["dragon"], 2);
     assert_eq!(v["counts"]["sculptor"], json!({"1": 2, "2": 1}));
@@ -152,8 +158,7 @@ async fn filter_tree_counts() {
     assert_eq!(v["path_counts"]["F:/lib"], 3);
     assert_eq!(v["dates"], json!([{"year": 2024, "month": 3}]));
     assert_eq!(v["scoped"], false);
-    let (_, v) =
-        post(&f.state, "/api/filter-tree", json!({"filter": {"include": {"tag": ["dragon"]}}, "show": ["sculptor"]})).await;
+    let (_, v) = f.post("/api/filter-tree", json!({"filter": {"include": {"tag": ["dragon"]}}, "show": ["sculptor"]})).await;
     assert_eq!(v["scoped"], true);
     assert_eq!(v["scoped_counts"]["sculptor"]["1"], 2);
 }
@@ -161,9 +166,9 @@ async fn filter_tree_counts() {
 #[tokio::test]
 async fn model_detail_and_thumbnails() {
     let f = fixture();
-    let (s, _, body) = get(&f.state, &format!("/api/models/{}", f.ids[0])).await;
-    assert_eq!(s, StatusCode::OK);
-    let v = json_of(&body);
+    let r = f.get(&format!("/api/models/{}", f.ids[0])).await;
+    assert_eq!(r.status, StatusCode::OK);
+    let v = r.json();
     assert_eq!(v["fields"]["title"], "Red Dragon");
     assert_eq!(v["fields"]["image_count"], 2);
     let images = v["images"].as_array().unwrap();
@@ -171,36 +176,41 @@ async fn model_detail_and_thumbnails() {
     let url = images[0]["thumbnail"].as_str().unwrap().to_string();
     assert!(url.starts_with("/api/thumb/"));
 
-    let (s, h, body) = get(&f.state, &url).await;
-    assert_eq!(s, StatusCode::OK);
-    assert_eq!(body, b"\xff\xd8jpeg-a");
-    assert_eq!(h[header::CONTENT_TYPE], "image/jpeg");
-    assert!(h[header::CACHE_CONTROL].to_str().unwrap().contains("immutable"));
+    let r = f.get(&url).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.body, b"\xff\xd8jpeg-a");
+    assert_eq!(r.headers[header::CONTENT_TYPE], "image/jpeg");
+    let cache = r.headers[header::CACHE_CONTROL].to_str().unwrap();
+    assert!(cache.contains("immutable") && cache.starts_with("private"), "{cache}");
 
-    let (s, h, _) = get(&f.state, "/api/images/10/thumbnail").await;
-    assert_eq!(s, StatusCode::PERMANENT_REDIRECT);
-    assert_eq!(h[header::LOCATION], url.as_str());
+    let r = f.get("/api/images/10/thumbnail").await;
+    assert_eq!(r.status, StatusCode::PERMANENT_REDIRECT);
+    assert_eq!(r.headers[header::LOCATION], url.as_str());
 
-    let (_, _, body) = get(&f.state, &format!("/api/models/{}", f.ids[2])).await;
-    assert_eq!(json_of(&body)["images"][0]["thumbnail"], "/api/images/12/thumbnail", "legacy entry");
-    let (s, h, body) = get(&f.state, "/api/images/12/thumbnail").await;
-    assert_eq!((s, body.as_slice()), (StatusCode::OK, &b"GIF89a-legacy"[..]));
-    assert_eq!(h[header::CONTENT_TYPE], "image/gif");
+    let v = f.get(&format!("/api/models/{}", f.ids[2])).await.json();
+    assert_eq!(v["images"][0]["thumbnail"], "/api/images/12/thumbnail", "legacy entry");
+    let r = f.get("/api/images/12/thumbnail").await;
+    assert_eq!((r.status, r.body.as_slice()), (StatusCode::OK, &b"GIF89a-legacy"[..]));
+    assert_eq!(r.headers[header::CONTENT_TYPE], "image/gif");
 
     for uri in ["/api/models/999", "/api/images/99/thumbnail", "/api/thumb/00", "/api/thumb/zz", "/api/images/-1/thumbnail"] {
-        assert_eq!(get(&f.state, uri).await.0, StatusCode::NOT_FOUND, "{uri}");
+        assert_eq!(f.get(uri).await.status, StatusCode::NOT_FOUND, "{uri}");
     }
 }
 
 #[tokio::test]
 async fn openapi_lists_every_route() {
     let f = fixture();
-    let (s, _, body) = get(&f.state, "/api/openapi.json").await;
-    assert_eq!(s, StatusCode::OK);
-    let v = json_of(&body);
+    let r = call(&f.lib.state, "GET", "/api/openapi.json", None, None).await;
+    assert_eq!(r.status, StatusCode::OK, "the document is public");
+    let v = r.json();
     let paths: Vec<&str> = v["paths"].as_object().unwrap().keys().map(String::as_str).collect();
-    for p in ["/api/system/info", "/api/models/ids", "/api/models/rows", "/api/models/{id}", "/api/filter-tree",
-              "/api/images/{id}/thumbnail", "/api/thumb/{digest}"] {
+    for p in [
+        "/api/auth/status", "/api/auth/setup", "/api/auth/login", "/api/auth/logout", "/api/auth/password",
+        "/api/users", "/api/users/{id}", "/api/me/settings", "/api/me/settings/{key}",
+        "/api/system/info", "/api/models/ids", "/api/models/rows", "/api/models/{id}", "/api/filter-tree",
+        "/api/images/{id}/thumbnail", "/api/thumb/{digest}",
+    ] {
         assert!(paths.contains(&p), "{p} missing from {paths:?}");
     }
 }

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Server step 5b: user accounts.** The server now requires signing in. Users have one of three roles: viewer (read only), editor or admin (also manages users), and each user can store their own settings. The first administrator is created on the server's own machine (`POST /api/auth/setup`); after that, admins create the other accounts. Passwords are stored as Argon2 hashes, sessions end after 30 days without use, and five failed sign-ins lock a name out for 15 minutes. Accounts are kept in `server.db` in the data directory, separate from the library database.
+
 - **Rust migration, Phase 5 begins: the stlLibrary server (step 5a).** `rust/stl-server` serves a library read-only over HTTP: the browser table's ids and rows with filters, search and sorting, the filter pane's values and counts, model details and thumbnails (cacheable forever, because the store is content-addressed), with an OpenAPI description. Run it with `cargo run --release -p stl-server -- --data-dir <dir>`. There is no authentication yet, so it listens on `127.0.0.1` only.
 - **A library is open in one process at a time.** The desktop app now refuses to open a library that another app instance or the server has open, and says which process holds it. The lock is released when that process ends, even after a crash.
 

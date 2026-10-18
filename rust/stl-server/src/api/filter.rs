@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use stl_core::storage::library::{self, FilterValue, Key};
 use utoipa::ToSchema;
 
+use crate::auth::CurrentUser;
 use crate::{ApiError, AppState};
 
 /// A selected filter value: text, a lookup id, or a release date.
@@ -203,7 +204,7 @@ impl From<library::FilterTree> for FilterTree {
 /// Every value list and count the filter pane shows.
 #[utoipa::path(post, path = "/api/filter-tree", tag = "library", request_body = FilterTreeRequest,
     responses((status = 200, body = FilterTree), (status = 400, body = crate::error::ErrorBody)))]
-pub async fn tree(State(lib): State<AppState>, Json(req): Json<FilterTreeRequest>) -> Result<Json<FilterTree>, ApiError> {
+pub async fn tree(State(lib): State<AppState>, _me: CurrentUser, Json(req): Json<FilterTreeRequest>) -> Result<Json<FilterTree>, ApiError> {
     let spec = req.filter.as_ref().map(FilterSpecDto::to_spec).transpose()?;
     for s in &req.show {
         if !library::SHOW.contains(&s.as_str()) {

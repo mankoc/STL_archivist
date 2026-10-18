@@ -11,6 +11,7 @@ use utoipa::ToSchema;
 
 use super::filter::FilterSpecDto;
 use super::thumbs::thumbnail_url;
+use crate::auth::CurrentUser;
 use crate::{ApiError, AppState};
 
 /// Most rows one `/api/models/rows` request may ask for.
@@ -45,7 +46,7 @@ pub struct IdList {
 /// The ids of the models matching the query, in display order.
 #[utoipa::path(post, path = "/api/models/ids", tag = "library", request_body = ModelQuery,
     responses((status = 200, body = IdList), (status = 400, body = crate::error::ErrorBody)))]
-pub async fn ids(State(lib): State<AppState>, Json(q): Json<ModelQuery>) -> Result<Json<IdList>, ApiError> {
+pub async fn ids(State(lib): State<AppState>, _me: CurrentUser, Json(q): Json<ModelQuery>) -> Result<Json<IdList>, ApiError> {
     let spec = q.filter.to_spec()?;
     if let Some(s) = &q.sort
         && !library::SORT_COLUMNS.contains(&s.column.as_str())
@@ -131,7 +132,7 @@ pub struct Rows {
 /// Rows for `ids`, in that order; unknown ids are skipped.
 #[utoipa::path(post, path = "/api/models/rows", tag = "library", request_body = RowsRequest,
     responses((status = 200, body = Rows), (status = 400, body = crate::error::ErrorBody)))]
-pub async fn rows(State(lib): State<AppState>, Json(req): Json<RowsRequest>) -> Result<Json<Rows>, ApiError> {
+pub async fn rows(State(lib): State<AppState>, _me: CurrentUser, Json(req): Json<RowsRequest>) -> Result<Json<Rows>, ApiError> {
     if req.ids.len() > MAX_ROWS {
         return Err(ApiError::bad_request(format!("at most {MAX_ROWS} rows per request")));
     }
@@ -172,7 +173,7 @@ fn json_value(v: Value) -> serde_json::Value {
 #[utoipa::path(get, path = "/api/models/{id}", tag = "library",
     params(("id" = i64, Path, description = "Model id")),
     responses((status = 200, body = ModelDetail), (status = 404, body = crate::error::ErrorBody)))]
-pub async fn detail(State(lib): State<AppState>, Path(id): Path<i64>) -> Result<Json<ModelDetail>, ApiError> {
+pub async fn detail(State(lib): State<AppState>, _me: CurrentUser, Path(id): Path<i64>) -> Result<Json<ModelDetail>, ApiError> {
     let detail = lib
         .run(move |lib| {
             let (summary, images) = lib.db.with(|c| {

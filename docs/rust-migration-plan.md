@@ -865,6 +865,28 @@ Phase 5 runs in steps:
   (JPEG, immutable, redirect), scoped filter tree, a second server and the desktop app
   refused, and the lock free again after the server was killed.
 
+**5b: done 2026-10-18 (accounts).**
+
+- Accounts live in `<data_dir>/server.db` (`stl-server/src/accounts.rs`), not in the
+  library database, so the library schema stays as the desktop app expects (rule 6):
+  `users` (name unique case-insensitively, Argon2id hash, role, disabled), `sessions`
+  (SHA-256 of a 32-byte random token, sliding 30-day expiry) and `user_settings`
+  (JSON values, 64 KB each).
+- Roles are ordered `viewer` < `editor` < `admin`; every library route needs a session
+  (`auth::CurrentUser`, from `Authorization: Bearer` or the `stl_session` cookie:
+  HttpOnly, SameSite=Strict, `Secure` behind an HTTPS proxy). Write routes (5c) will
+  require `editor`, user administration requires `admin`. Thumbnails are now
+  `Cache-Control: private`.
+- First run: `POST /api/auth/setup` creates the first administrator, only while no user
+  exists and only from a loopback peer without proxy headers, so a reachable server cannot
+  be claimed remotely. The server is served with `ConnectInfo` for that check.
+- Routes: `GET /api/auth/status`, `POST /api/auth/setup|login|logout`,
+  `PUT /api/auth/password`, `GET|POST /api/users`, `PATCH|DELETE /api/users/{id}`,
+  `GET /api/me/settings`, `PUT|DELETE /api/me/settings/{key}`.
+- Rules: the last enabled administrator can be neither demoted, disabled nor deleted; a
+  password change or disabling ends the user's sessions; five failed sign-ins lock a name
+  out for 15 minutes; unknown names cost the same hash check as known ones.
+
 ### Phase 6: Web client (largest)
 
 React + TypeScript in `web/`, served by the server, built against the API while the PyQt app
