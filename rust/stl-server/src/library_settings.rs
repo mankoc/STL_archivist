@@ -71,9 +71,17 @@ impl LibrarySettings {
         }
     }
 
+    pub fn ai_embeddings_enabled(&self) -> bool {
+        self.get_bool("ai_embeddings_enabled", true)
+    }
+
+    pub fn ai_embeddings_during_crawl(&self) -> bool {
+        self.get_bool("ai_embeddings_during_crawl", false)
+    }
+
     /// AI embeddings enabled, and computed during crawls.
     pub fn embed_during_crawl(&self) -> bool {
-        self.get_bool("ai_embeddings_enabled", true) && self.get_bool("ai_embeddings_during_crawl", false)
+        self.ai_embeddings_enabled() && self.ai_embeddings_during_crawl()
     }
 
     pub fn warn_low_compression(&self) -> bool {

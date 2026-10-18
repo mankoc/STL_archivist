@@ -6,6 +6,7 @@ describe("pages from the hash", () => {
     expect(pageFromHash("#/jobs")).toBe("jobs");
     expect(pageFromHash("#jobs")).toBe("jobs");
     expect(pageFromHash("#/jobs/12")).toBe("jobs");
+    expect(pageFromHash("#/settings")).toBe("settings");
     expect(pageFromHash("#/nope")).toBe("library");
   });
 });

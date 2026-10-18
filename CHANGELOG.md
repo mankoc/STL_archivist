@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Web client step 6d: settings.** The Settings page sets your colour scheme, shows the library's crawler, warning and sidecar settings (administrators change them in the same `settings.json` the desktop app uses), and lets administrators manage users: add, change roles, disable, reset passwords, delete.
+
 - **Web client step 6c: the Jobs page.** Add folders by browsing the server's disks, crawl them with a path pattern, run maintenance (verify archives, image hashes, embeddings, prune images, compact the database) and follow each job's progress and log live. Fixes: the server's folder browser no longer counts `METADATA.7z` as an archive, and job logs no longer repeat a line.
 
 - **Web client step 6b: editing.** Editors can edit table cells in place (double-click), open the model editor with completion lists, drop images onto a model, remove images, and remove selected models from the library (Ctrl/Shift-click to select several). Viewers see no editing controls.
