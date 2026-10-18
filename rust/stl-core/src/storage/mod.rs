@@ -29,6 +29,7 @@ pub mod library;
 pub mod maintenance;
 pub mod model_edit;
 pub mod schema_sql;
+pub mod sidecar;
 pub mod stats;
 pub mod vectors;
 pub mod views;

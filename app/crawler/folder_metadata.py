@@ -103,6 +103,9 @@ def export_folder_metadata(
     from app.database.models import STLModel
 
     if session is None:
+        done = _export_native(Path(folder), include_thumbnails)
+        if done is not None:
+            return done
         from app.database.db import session_scope
         with session_scope() as own:
             return export_folder_metadata(folder, own, thumb_base_dir, include_thumbnails)
@@ -117,6 +120,7 @@ def export_folder_metadata(
     all_models = (
         session.query(STLModel)
         .filter(STLModel.archive_path.like(str(folder) + os.sep + "%"))
+        .order_by(STLModel.id)
         .all()
     )
     models = [m for m in all_models if Path(m.archive_path).parent == folder]
@@ -150,15 +154,56 @@ def export_folder_metadata(
         return False
 
 
+def _export_native(folder: Path, include_thumbnails: bool) -> "bool | None":
+    """``export_folder_metadata`` through the native core, or ``None`` to use Python."""
+    from app.database import native_db
+    from app.utils.thumbnailer import native_store
+    lib = native_db.library()
+    store = native_store()
+    if lib is None or not hasattr(lib, "sidecar_export") or (include_thumbnails and store is None):
+        return None
+    try:
+        return lib.sidecar_export(str(folder), include_thumbnails, store)
+    except ValueError:
+        return None
+    except OSError as exc:
+        logger.error("%s", exc)
+        return False
+
+
+def _import_native(folder: Path) -> "list[str] | None":
+    """``import_folder_metadata`` through the native core, or ``None`` to use Python."""
+    from app.database import native_db
+    from app.utils.thumbnailer import native_store
+    lib = native_db.library()
+    store = native_store()
+    if lib is None or store is None or not hasattr(lib, "sidecar_import"):
+        return None
+    try:
+        return lib.sidecar_import(str(folder), store)
+    except ValueError:
+        return None
+
+
 def import_folder_metadata(folder: Path, session: Session, thumb_base_dir: Path) -> list[str]:
     """
     Read METADATA.7z from *folder* and populate the DB with any records whose
     archive file exists on disk but is not yet in the DB.
 
-    Returns a list of archive_path strings that were newly inserted.
+    Returns a list of archive_path strings that were newly inserted.  *session*
+    may be ``None``: the import then runs natively, or in a session of its own.
     """
     from app.database.models import STLModel, Image, STLFile
+    from app.services.moves import archive_folder_for
     from app.utils.thumbnailer import write_raw_thumbnail
+
+    if session is None:
+        imported = _import_native(Path(folder))
+        if imported is not None:
+            return imported
+        from app.database.db import session_scope
+        with session_scope() as own:
+            return import_folder_metadata(folder, own, thumb_base_dir)
 
     folder = Path(folder)
     metadata_path = folder / METADATA_FILENAME
@@ -213,6 +258,7 @@ def import_folder_metadata(folder: Path, session: Session, thumb_base_dir: Path)
 
         model = STLModel(
             archive_path  = archive_str,
+            archive_folder = archive_folder_for(archive_str),
             archive_hash     = model_data.get("archive_hash", ""),
             title            = model_data.get("title"),
             creator          = model_data.get("creator") or model_data.get("author"),
@@ -276,6 +322,11 @@ def import_folder_metadata(folder: Path, session: Session, thumb_base_dir: Path)
 # Internal serialisation helpers
 # ---------------------------------------------------------------------------
 
+def _by_id(rows) -> list:
+    """ORM collection rows in id order (both the Python and the native export use it)."""
+    return sorted(rows, key=lambda r: r.id)
+
+
 def _serialize_models(models: list, thumb_base_dir: Path, include_thumbnails: bool = True) -> dict:
     """Build the ``metadata.json`` payload dict from a list of ``STLModel`` instances.
 
@@ -294,7 +345,7 @@ def _serialize_models(models: list, thumb_base_dir: Path, include_thumbnails: bo
     for m_idx, model in enumerate(models):
         images_list = []
         if include_thumbnails:
-            for i_idx, img in enumerate(model.images):
+            for i_idx, img in enumerate(_by_id(model.images)):
                 if img.thumbnail_path:
                     images_list.append({
                         "filename":  img.filename or "",
@@ -320,8 +371,8 @@ def _serialize_models(models: list, thumb_base_dir: Path, include_thumbnails: bo
             "subcollection": model.subcollection.name if model.subcollection else None,
             "category":      model.category.name     if model.category     else None,
             "release":       model.release.name      if model.release      else None,
-            "scales":        [s.name for s in model.scales],
-            "tags":          [t.name for t in model.tags],
+            "scales":        [s.name for s in _by_id(model.scales)],
+            "tags":          [t.name for t in _by_id(model.tags)],
             "images":        images_list,
             "stl_files":     [
                 {
@@ -329,7 +380,7 @@ def _serialize_models(models: list, thumb_base_dir: Path, include_thumbnails: bo
                     "file_size":    sf.file_size,
                     "archive_hash": sf.archive_hash,
                 }
-                for sf in model.stl_files
+                for sf in sorted(model.stl_files, key=lambda f: f.filename)
             ],
         })
 
@@ -372,7 +423,7 @@ def _write_metadata_7z(
             if include_thumbnails:
                 from app.utils.thumbnailer import get_thumbnail_bytes
                 for m_idx, model in enumerate(models):
-                    for i_idx, img in enumerate(model.images):
+                    for i_idx, img in enumerate(_by_id(model.images)):
                         if not img.thumbnail_path:
                             continue
                         thumb_bytes = get_thumbnail_bytes(img.id)
