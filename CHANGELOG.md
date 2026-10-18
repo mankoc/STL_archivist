@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fix: the thumbnail store no longer grows by 2 GB every time it is opened.** On Windows the store's `data.mdb` takes the size of its memory map, and the map was sized from that file plus 2 GB of headroom, so each start of the application (and each test run) enlarged it. The map is now sized from the space actually in use. The space is allocated sparsely, so disk usage did not grow with it. An enlarged file keeps its size until *Database Maintenance → Compact thumbnail store* rewrites it.
+
 - **Rust migration, step 4g-2: model metadata is inferred natively** (title, creator, source, release date and URL from the path, `.url` files and `info.json`). Results are identical to the Python code on a 60,000-archive library.
 
 - **Presupport patterns are checked when saved.** Configuration now refuses a custom pattern that uses syntax the crawler's native engine would read differently from Python (for example `\w`, named groups, inline flags, POSIX classes or non-ASCII characters) and explains why. Patterns that pass the check run in the native rules, which are faster. See *Help → Configuration → Warnings* for the accepted syntax.
