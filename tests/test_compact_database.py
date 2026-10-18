@@ -21,6 +21,7 @@ def _fill(n: int) -> None:
 
 
 def test_database_path_none_for_memory():
+    init_db(":memory:")
     assert database_path() is None
 
 

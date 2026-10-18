@@ -3,9 +3,8 @@ Shared pytest fixtures.
 
 Tests in this project follow two conventions:
 
-* **Fresh in-memory DB per test** — most modules touch the SQLAlchemy session,
-  so we re-initialise an in-memory SQLite database before every test.  This
-  is wired up as autouse so individual tests don't need to opt in.
+* **Fresh database file per test** (``library_db``, autouse) with its
+  thumbnail store beside it; build data with ``tests/factory.py``.
 * **Per-test LMDB thumbnail store** — modules that exercise thumbnail I/O
   ask for the ``thumb_store`` fixture which points at a tmpdir.  It is *not*
   autouse so tests that don't touch thumbnails skip the LMDB cost.
@@ -36,10 +35,18 @@ def native_follows_environment():
 
 
 @pytest.fixture(autouse=True)
-def in_memory_db():
-    """Reset the global SQLAlchemy engine to an empty in-memory SQLite."""
-    init_db(":memory:")
-    yield
+def library_db(tmp_path):
+    """A fresh library database file (and thumbnail store) per test.
+
+    A file, not an in-memory database, so the native core opens it too;
+    ``tests/factory.py`` builds test data in it with plain ``sqlite3``.
+    """
+    init_db(str(tmp_path / "stlLibrary.db"))
+    yield tmp_path / "stlLibrary.db"
+    from app.database import native_db
+    from app.utils.thumbnailer import close_thumbnail_store
+    native_db.reset()
+    close_thumbnail_store()
 
 
 @pytest.fixture
