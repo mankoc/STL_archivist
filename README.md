@@ -196,7 +196,9 @@ from the library. The **Jobs** page tracks crawled folders (add them by browsing
 server's disks, crawl them with a path pattern) and runs maintenance, with live progress and
 logs. **Mass edit** (on a selection) and the **Lookups** page (tags, categories,
 collections, subcollections, scales, creators) work as in the desktop app. **Statistics** and **Find by Image** (perceptual hash, or AI embedding when the server has
-ONNX Runtime and the CLIP model) work as their desktop dialogs. **Settings** holds your colour scheme, the library's crawler and sidecar settings
+ONNX Runtime and the CLIP model) work as their desktop dialogs. **Duplicates** finds archives
+sharing STL files, archives with matching images and models with similar metadata, and
+compares two archives side by side. **Settings** holds your colour scheme, the library's crawler and sidecar settings
 (administrators change them; they are the same `settings.json` the desktop app uses), and
 user administration.
 

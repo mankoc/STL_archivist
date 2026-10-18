@@ -182,6 +182,32 @@ fn make_thumbnail<'py>(
     Ok(PyBytes::new(py, &out))
 }
 
+/// `image_duplicates.model_pairs` (`stl_core::image_pairs`): item matches to
+/// model pairs. Returns `([(model_a, model_b, image_pairs, best)], skipped)`.
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn model_pairs(
+    py: Python<'_>,
+    n_items: usize,
+    img_item: Vec<usize>,
+    img_model: Vec<i64>,
+    a: Vec<usize>,
+    b: Vec<usize>,
+    scores: Vec<f64>,
+    perfect: f64,
+    higher_is_better: bool,
+    max_models: usize,
+) -> PyResult<(Vec<stl_core::image_pairs::ModelPair>, usize)> {
+    if img_item.len() != img_model.len() || a.len() != b.len() || a.len() != scores.len() {
+        return Err(PyValueError::new_err("array lengths differ"));
+    }
+    if img_item.iter().chain(&a).chain(&b).any(|&i| i >= n_items) {
+        return Err(PyValueError::new_err("item index out of range"));
+    }
+    let edges: Vec<(usize, usize, f64)> = a.into_iter().zip(b).zip(scores).map(|((u, v), s)| (u, v, s)).collect();
+    Ok(py.detach(|| stl_core::image_pairs::model_pairs(n_items, &img_item, &img_model, &edges, perfect, higher_is_better, max_models)))
+}
+
 /// The CLIP input tensor of an image (`stl_core::clip::preprocess`): 3 x 224 x
 /// 224 float32, channel-major, as little-endian bytes. Raises `ValueError`
 /// for an image the native decoder cannot read.
@@ -2079,6 +2105,7 @@ fn stl_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(read_archive_members, m)?)?;
     m.add_function(wrap_pyfunction!(make_thumbnail, m)?)?;
     m.add_function(wrap_pyfunction!(clip_preprocess, m)?)?;
+    m.add_function(wrap_pyfunction!(model_pairs, m)?)?;
     m.add_function(wrap_pyfunction!(dhash, m)?)?;
     m.add_function(wrap_pyfunction!(dhash_many, m)?)?;
     m.add_class::<PyThumbStore>()?;

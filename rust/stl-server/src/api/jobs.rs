@@ -29,12 +29,22 @@ pub async fn list(State(lib): State<AppState>, _me: CurrentUser) -> Json<Vec<Job
 pub async fn submit(
     State(lib): State<AppState>,
     me: CurrentUser,
-    Json(request): Json<JobRequest>,
+    Json(mut request): Json<JobRequest>,
 ) -> Result<(StatusCode, Json<JobInfo>), ApiError> {
     me.require(if matches!(request, JobRequest::CompactDatabase) { Role::Admin } else { Role::Editor })?;
-    if let JobRequest::Crawl { folder, .. } = &request {
-        let (lib2, me2, folder) = (std::sync::Arc::clone(&lib), me.clone(), std::path::PathBuf::from(folder));
-        lib2.run(move |lib| super::files::check_access(lib, &me2, &folder)).await?;
+    request.validate().map_err(ApiError::bad_request)?;
+    if let JobRequest::Crawl { folder, .. } = &mut request {
+        let (lib2, me2, path) = (std::sync::Arc::clone(&lib), me.clone(), std::path::PathBuf::from(&*folder));
+        let known = lib2
+            .run(move |lib| {
+                super::files::check_access(lib, &me2, &path)?;
+                super::files::known_spelling(lib, &path)
+            })
+            .await?;
+        // Crawl a known folder under its stored spelling (`C:/STL` = `C:\STL`).
+        if let Some(known) = known {
+            *folder = known;
+        }
     }
     let info = lib.submit_job(request, &me.user.name);
     tracing::info!(job = info.id, kind = info.kind, user = %me.user.name, "job queued");
@@ -46,6 +56,8 @@ pub struct JobDetail {
     pub job: JobInfo,
     /// The job's log, oldest line first (at most the last 2,000 lines).
     pub log: Vec<String>,
+    /// What a duplicate finder found, once it is done (`pairs` or `groups`).
+    pub result: Option<crate::dupes::FinderResult>,
 }
 
 /// One job with its log.
@@ -53,7 +65,7 @@ pub struct JobDetail {
     responses((status = 200, body = JobDetail), (status = 404, body = crate::error::ErrorBody)))]
 pub async fn detail(State(lib): State<AppState>, _me: CurrentUser, Path(id): Path<u64>) -> Result<Json<JobDetail>, ApiError> {
     let job = lib.jobs.get(id).ok_or_else(|| ApiError::not_found(format!("no job {id}")))?;
-    Ok(Json(JobDetail { job: job.info(), log: job.log() }))
+    Ok(Json(JobDetail { job: job.info(), log: job.log(), result: job.result() }))
 }
 
 /// Cancel a job: a queued one at once, a running one at its next checkpoint

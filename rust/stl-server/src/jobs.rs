@@ -63,6 +63,53 @@ pub enum JobRequest {
         #[serde(default)]
         all: bool,
     },
+    /// Find Duplicate Archives → STL files: archive pairs whose file lists
+    /// (name and size) overlap by at least `threshold` (0–1) of the larger list.
+    FindContentDuplicates {
+        #[serde(default = "default_content_threshold")]
+        threshold: f64,
+    },
+    /// Find Duplicate Archives → Images: archive pairs with matching images.
+    FindImageDuplicates {
+        /// `dhash` (perceptual hash) or `clip` (AI embedding).
+        method: String,
+        /// Most differing bits (`dhash`).
+        #[serde(default = "default_max_distance")]
+        max_distance: u32,
+        /// Least cosine similarity (`clip`).
+        #[serde(default = "default_similarity")]
+        threshold: f32,
+        /// Images found in more models than this (banners, logos) are left out.
+        #[serde(default = "default_max_models")]
+        max_models: usize,
+    },
+    /// Find Duplicates (metadata): models with equal or similar values.
+    FindMetadataDuplicates {
+        /// Column keys: title, creator, source, sculptor, collection,
+        /// subcollection, category, release, scale.
+        columns: Vec<String>,
+        /// `exact`, `levenshtein` or `soundex`.
+        method: String,
+        /// Most edits (`levenshtein`).
+        #[serde(default = "default_levenshtein")]
+        max_distance: u32,
+    },
+}
+
+fn default_content_threshold() -> f64 {
+    0.8
+}
+fn default_max_distance() -> u32 {
+    10
+}
+fn default_similarity() -> f32 {
+    0.9
+}
+fn default_max_models() -> usize {
+    10
+}
+fn default_levenshtein() -> u32 {
+    3
 }
 
 impl JobRequest {
@@ -74,6 +121,54 @@ impl JobRequest {
             JobRequest::PruneImages { .. } => "prune_images",
             JobRequest::CompactDatabase => "compact_database",
             JobRequest::ComputeEmbeddings { .. } => "compute_embeddings",
+            JobRequest::FindContentDuplicates { .. } => "find_content_duplicates",
+            JobRequest::FindImageDuplicates { .. } => "find_image_duplicates",
+            JobRequest::FindMetadataDuplicates { .. } => "find_metadata_duplicates",
+        }
+    }
+
+    /// Whether the job only reads the library (no change announcement after it).
+    pub fn read_only(&self) -> bool {
+        matches!(
+            self,
+            JobRequest::VerifyArchives
+                | JobRequest::FindContentDuplicates { .. }
+                | JobRequest::FindImageDuplicates { .. }
+                | JobRequest::FindMetadataDuplicates { .. }
+        )
+    }
+
+    /// Reject arguments the job would refuse anyway, before queueing it.
+    pub fn validate(&self) -> Result<(), String> {
+        match self {
+            JobRequest::FindContentDuplicates { threshold } if !(*threshold > 0.0 && *threshold <= 1.0) => {
+                Err("threshold must be above 0 and at most 1".into())
+            }
+            JobRequest::FindImageDuplicates { method, max_distance, threshold, max_models } => {
+                if method != "dhash" && method != "clip" {
+                    return Err(format!("unknown method {method:?} (dhash or clip)"));
+                }
+                if *max_distance > 64 || !(0.0..=1.0).contains(threshold) || *max_models == 0 {
+                    return Err("max_distance must be at most 64, threshold between 0 and 1, max_models at least 1".into());
+                }
+                Ok(())
+            }
+            JobRequest::FindMetadataDuplicates { columns, method, max_distance } => {
+                if columns.is_empty() {
+                    return Err("choose at least one column".into());
+                }
+                if let Some(c) = columns.iter().find(|c| !crate::dupes::COLUMNS.iter().any(|(k, ..)| k == c)) {
+                    return Err(format!("unknown column {c:?}"));
+                }
+                if !["exact", "levenshtein", "soundex"].contains(&method.as_str()) {
+                    return Err(format!("unknown method {method:?} (exact, levenshtein or soundex)"));
+                }
+                if *max_distance == 0 || *max_distance > 20 {
+                    return Err("max_distance must be between 1 and 20".into());
+                }
+                Ok(())
+            }
+            _ => Ok(()),
         }
     }
 }
@@ -125,9 +220,19 @@ pub struct Job {
     log: Mutex<VecDeque<String>>,
     stop: AtomicBool,
     ctl: Control,
+    result: Mutex<Option<crate::dupes::FinderResult>>,
 }
 
 impl Job {
+    /// What a finder job found (`None` for other jobs, or until it finishes).
+    pub fn result(&self) -> Option<crate::dupes::FinderResult> {
+        self.result.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    fn set_result(&self, v: crate::dupes::FinderResult) {
+        *self.result.lock().unwrap_or_else(|e| e.into_inner()) = Some(v);
+    }
+
     pub fn info(&self) -> JobInfo {
         self.info.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
@@ -257,6 +362,7 @@ impl Library {
             log: Mutex::new(VecDeque::new()),
             stop: AtomicBool::new(false),
             ctl: Control::new(),
+            result: Mutex::new(None),
         });
         jobs.list.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::clone(&job));
         jobs.trim();
@@ -338,7 +444,9 @@ async fn worker(lib: Weak<Library>, wake: Arc<Notify>) {
         }
         tracing::info!(job = job.info().id, kind = job.info().kind, state = ?job.info().state, "job finished");
         l.jobs.publish(&job);
-        l.changed(job.info().kind);
+        if !job.info().request.read_only() {
+            l.changed(job.info().kind);
+        }
     }
 }
 
@@ -351,7 +459,55 @@ fn run(lib: &Library, job: &Job) -> Result<String, String> {
         JobRequest::PruneImages { keep } => prune_images(lib, job, keep),
         JobRequest::CompactDatabase => compact(lib, job),
         JobRequest::ComputeEmbeddings { all } => compute_embeddings(lib, job, all),
+        JobRequest::FindContentDuplicates { threshold } => find_content(lib, job, threshold),
+        JobRequest::FindImageDuplicates { method, max_distance, threshold, max_models } => {
+            find_images(lib, job, &method, max_distance, threshold, max_models)
+        }
+        JobRequest::FindMetadataDuplicates { columns, method, max_distance } => {
+            find_metadata(lib, job, &columns, &method, max_distance)
+        }
     }
+}
+
+// ── duplicate finders ────────────────────────────────────────────────────────
+
+fn finder_done(job: &Job, result: crate::dupes::FinderResult, what: &str) -> String {
+    let n = result.len();
+    job.set_result(result);
+    format!("{n} {what} found")
+}
+
+fn find_content(lib: &Library, job: &Job, threshold: f64) -> Result<String, String> {
+    lib.job_log(job, format!("Comparing STL file lists (at least {:.0}% shared)…", threshold * 100.0));
+    match crate::dupes::content(lib, &job.ctl, threshold) {
+        Err(e) if job.stopped() => Ok(e),
+        r => Ok(finder_done(job, r?, "archive pair(s)")),
+    }
+}
+
+fn find_images(lib: &Library, job: &Job, method: &str, max_distance: u32, threshold: f32, max_models: usize) -> Result<String, String> {
+    let log = |line: String| lib.job_log(job, line);
+    let r = if method == "clip" {
+        crate::dupes::image_clip(lib, &job.ctl, &log, threshold, max_models)
+    } else {
+        crate::dupes::image_dhash(lib, &job.ctl, &log, max_distance, max_models)
+    };
+    match r {
+        Err(e) if job.stopped() => Ok(e),
+        r => {
+            let r = r?;
+            if matches!(&r, crate::dupes::FinderResult::Images(i) if i.truncated) {
+                lib.job_log(job, format!("Only the best {} pairs are kept: tighten the threshold.", crate::dupes::MAX_RESULTS));
+            }
+            Ok(finder_done(job, r, "archive pair(s)"))
+        }
+    }
+}
+
+fn find_metadata(lib: &Library, job: &Job, columns: &[String], method: &str, max_distance: u32) -> Result<String, String> {
+    lib.job_log(job, format!("Comparing {} column(s) ({method})…", columns.len()));
+    let r = crate::dupes::metadata(lib, &job.ctl, columns, method, max_distance)?;
+    Ok(finder_done(job, r, "group(s)"))
 }
 
 // ── crawl ────────────────────────────────────────────────────────────────────

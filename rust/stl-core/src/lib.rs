@@ -13,6 +13,7 @@ pub mod dhash;
 pub mod embedding;
 pub mod fingerprint;
 pub mod hamming;
+pub mod image_pairs;
 pub mod lock;
 pub mod metadata;
 pub mod path_pattern;

@@ -81,7 +81,9 @@ the native core owns the schema from Phase 4b).
 - **Server jobs:** `stl-server/src/jobs.rs`. A new kind is a `JobRequest` variant plus a
   `run` arm that reports through `job.ctl` (progress) and `lib.job_log` and checks
   `job.stopped()` between batches. Crawls run `stl_core::crawler::crawl` with `ServerHost`,
-  which answers `Response::None` until 5d-2 adds native PDF and CLIP. Events go through
+  which answers `Response::None` until 5d-2 adds native PDF and CLIP. Read-only jobs
+  (the duplicate finders in `dupes.rs`) return a typed result in `JobDetail.result` and
+  are listed in `JobRequest::read_only`; validate arguments in `JobRequest::validate`. Events go through
   `lib.jobs.events`; writes are announced by the `announce_changes` middleware.
 - **Server PDF / CLIP:** `stl-server/src/tools.rs` loads pdfium and ONNX Runtime at
   runtime (never link them); a missing library disables the feature. CLIP preprocessing is
@@ -115,7 +117,7 @@ the native core owns the schema from Phase 4b).
   `read_archive_members`, `make_thumbnail`, `dhash`, `dhash_many`, `ThumbStore`,
   `detect_presupport`, `detect_warnings`, `explain_warnings`, `detect_scale`, `parse_path`,
   `render_path_pattern`, `soundex`, `hamming_pairs`, `cosine_pairs`, `levenshtein_pairs`,
-  `clip_preprocess`. Long ones take `progress` / `should_stop` and raise
+  `clip_preprocess`, `model_pairs`. Long ones take `progress` / `should_stop` and raise
   `stl_native.Stopped`; the binding's `run_job` polls them from the calling thread, so
   Python callbacks never run on Rust threads. Arrays cross as NumPy buffers in and bytes out
   (`np.frombuffer`). The NumPy scans in `image_duplicates.py` still have Python versions;

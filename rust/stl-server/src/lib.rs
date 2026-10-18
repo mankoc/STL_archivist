@@ -10,6 +10,7 @@ pub mod accounts;
 pub mod api;
 pub mod auth;
 pub mod config;
+pub mod dupes;
 pub mod error;
 pub mod jobs;
 pub mod library_settings;
