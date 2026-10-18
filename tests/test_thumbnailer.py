@@ -334,3 +334,18 @@ def test_delete_thumbnail_without_init_is_noop(monkeypatch):
     import app.utils.thumbnailer as t
     monkeypatch.setattr(t, "_store", None)
     delete_thumbnail("1")  # must not raise
+
+
+def test_reopening_the_python_store_does_not_grow_the_map(tmp_path):
+    """The py-lmdb backend sizes its map from the pages in use, not from the
+    file, which LMDB extends to the map size on Windows."""
+    from app.utils.thumbnailer import _LmdbBackend
+    first = _LmdbBackend(tmp_path)
+    first.put_many([(1, b"x")])
+    size = first.map_size()
+    first.close()
+    for _ in range(3):
+        b = _LmdbBackend(tmp_path)
+        assert b.map_size() == size
+        b.close()
+    assert (tmp_path / "data.mdb").stat().st_size <= size

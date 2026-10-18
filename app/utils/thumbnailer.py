@@ -144,12 +144,16 @@ class _LmdbBackend:
     native = False
 
     def __init__(self, path: Path) -> None:
-        # Open with a map at least as large as the data already on disk (plus a
-        # grow-step of headroom), so a store that previously grew past _MAP_SIZE
-        # reopens without immediately hitting MDB_MAP_FULL on the first write.
-        data_file = path / "data.mdb"
-        existing = data_file.stat().st_size if data_file.exists() else 0
-        self.env = lmdb.open(str(path), map_size=max(_MAP_SIZE, existing + _GROW_STEP))
+        # Keep a grow-step of headroom beyond the pages in use, so a store that
+        # previously grew past _MAP_SIZE reopens without hitting MDB_MAP_FULL on
+        # the first write.  Sized from the pages in use, not the file: on Windows
+        # LMDB extends data.mdb to the map size, so sizing from the file grew the
+        # map (and the file) by a step on every open.  LMDB raises a smaller map
+        # to the pages in use by itself.
+        self.env = lmdb.open(str(path), map_size=_MAP_SIZE)
+        used = (self.env.info()["last_pgno"] + 1) * self.env.stat()["psize"]
+        if self.env.info()["map_size"] < used + _GROW_STEP:
+            self.env.set_mapsize(used + _GROW_STEP)
 
     def put_many(self, items) -> None:
         def _put(txn):
@@ -304,6 +308,11 @@ def _open_backend(path: Path):
         except (OSError, RuntimeError, ValueError) as exc:
             log.warning("Native thumbnail store failed to open %s (%s); using py-lmdb", path, exc)
     return _LmdbBackend(path)
+
+
+def native_store():
+    """The open ``stl_native.ThumbStore``, or ``None`` (closed, or the Python backend)."""
+    return _store.s if _store is not None and _store.native else None
 
 
 def store_backend() -> str:

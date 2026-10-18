@@ -93,15 +93,17 @@ fn page_align(n: usize) -> usize {
 impl ThumbStore {
     /// Open (creating if needed) the store in directory `dir`.
     ///
-    /// The map starts at least [`GROW_STEP`] larger than the data file, so a
-    /// store that already grew past [`MAP_SIZE`] does not fill on the first write.
+    /// The map then holds at least [`GROW_STEP`] beyond the pages in use, so a
+    /// store that already grew past [`MAP_SIZE`] does not fill on the first
+    /// write. It is sized from the pages in use, not from the file: on Windows
+    /// LMDB extends `data.mdb` to the map size, so sizing from the file grew the
+    /// map (and the file) by a step on every open.
     pub fn open(dir: &Path) -> Result<Self> {
         std::fs::create_dir_all(dir)?;
-        let existing = std::fs::metadata(dir.join("data.mdb")).map(|m| m.len() as usize).unwrap_or(0);
-        let map_size = page_align(MAP_SIZE.max(existing + GROW_STEP));
         // SAFETY: the file is only modified through LMDB; rule 3 keeps py-lmdb
-        // from opening the same environment in this process.
-        let env = unsafe { EnvOpenOptions::new().map_size(map_size).max_dbs(0).open(dir)? };
+        // from opening the same environment in this process. LMDB raises the
+        // map to the pages in use when it is smaller.
+        let env = unsafe { EnvOpenOptions::new().map_size(page_align(MAP_SIZE)).max_dbs(0).open(dir)? };
         // The unnamed main database always exists; opening it needs no write.
         let rtxn = env.read_txn()?;
         let db = env.open_database(&rtxn, None)?;
@@ -115,6 +117,13 @@ impl ThumbStore {
                 db
             }
         };
+        let rtxn = env.read_txn()?;
+        let used = (env.info().last_page_number + 1) * db.stat(&rtxn)?.page_size as usize;
+        rtxn.commit()?;
+        if env.info().map_size < used + GROW_STEP {
+            // SAFETY: no transaction is open in this process yet.
+            unsafe { env.resize(page_align(used + GROW_STEP))? };
+        }
         Ok(ThumbStore { env, db, dir: dir.to_path_buf(), resize: RwLock::new(()), digest: xxh3_digest })
     }
 
@@ -387,6 +396,22 @@ mod tests {
         assert_eq!(get(&s, 1).as_deref(), Some(&b"red"[..]));
         assert_eq!(get(&s, 2).as_deref(), Some(&b"green"[..]));
         assert_eq!(s.stats().unwrap().blobs, 2);
+    }
+
+    #[test]
+    fn reopening_does_not_grow_the_map() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = ThumbStore::open(dir.path()).unwrap();
+        first.put_many(&[(1, b"x".as_slice())]).unwrap();
+        let size = first.map_size();
+        first.close();
+        for _ in 0..3 {
+            let s = ThumbStore::open(dir.path()).unwrap();
+            assert_eq!(s.map_size(), size);
+            s.close();
+        }
+        let file = std::fs::metadata(dir.path().join("data.mdb")).unwrap().len() as usize;
+        assert!(file <= size, "{file} > {size}");
     }
 
     #[test]
