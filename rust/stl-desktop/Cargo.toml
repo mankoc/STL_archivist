@@ -1,0 +1,22 @@
+[package]
+name = "stl-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "stlLibrary desktop shell: a Tauri window on an stl-server (Phase 7)"
+
+[[bin]]
+name = "stl-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.7.3", features = [] }
+
+[dependencies]
+stl-proc = { version = "0.1.0", path = "../stl-proc" }
+tauri = { version = "2.12.4", features = ["tray-icon"] }
+tauri-plugin-dialog = "2.8.3"
+tauri-plugin-opener = "2.7.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = { version = "3.4.2", default-features = false }

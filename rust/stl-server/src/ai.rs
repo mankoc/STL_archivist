@@ -177,6 +177,7 @@ impl AiRuntime {
         log("Starting the AI model server (loading the model)…".into());
         tracing::info!(exe = %spec.exe.display(), port, "starting llama-server");
         let child = cmd.spawn().map_err(|e| format!("cannot start {}: {e}", spec.exe.display()))?;
+        stl_proc::end_with_parent(&child);
         let mut running = Running { child, base: format!("http://127.0.0.1:{port}") };
         let deadline = Instant::now() + STARTUP_TIMEOUT;
         let health = format!("{}/health", running.base);

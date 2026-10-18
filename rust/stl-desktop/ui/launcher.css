@@ -1,0 +1,89 @@
+:root {
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --text: #1c1f24;
+  --muted: #6b7280;
+  --border: #dcdfe4;
+  --accent: #1c7ed6;
+  --accent-text: #ffffff;
+  --danger: #c92a2a;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1b1e;
+    --panel: #25262b;
+    --text: #e9ecef;
+    --muted: #909296;
+    --border: #373a40;
+    --accent: #339af0;
+    --danger: #ff6b6b;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.45 system-ui, "Segoe UI", Roboto, sans-serif;
+}
+
+main { max-width: 720px; margin: 0 auto; padding: 32px 16px; }
+
+header { display: flex; gap: 14px; align-items: center; margin-bottom: 24px; }
+h1 { font-size: 22px; margin: 0; }
+h2 { font-size: 15px; margin: 0 0 6px; }
+.muted { color: var(--muted); margin: 0 0 10px; }
+.small { font-size: 12px; }
+
+section {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+.row input { flex: 1 1 200px; min-width: 0; }
+
+input {
+  font: inherit;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+}
+
+button {
+  font: inherit;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+  border-radius: 6px;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+button.secondary { background: transparent; color: var(--accent); }
+button.link { background: none; border: none; color: var(--danger); padding: 4px 6px; }
+button:disabled { opacity: 0.6; cursor: progress; }
+
+ul { list-style: none; margin: 0 0 12px; padding: 0; }
+li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+li:last-child { border-bottom: none; }
+li .name { font-weight: 600; }
+li .url { color: var(--muted); flex: 1; overflow-wrap: anywhere; }
+
+#status { min-height: 1.5em; white-space: pre-wrap; }
+#status.error { color: var(--danger); }

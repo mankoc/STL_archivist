@@ -1228,6 +1228,32 @@ Tauri app that hosts the web client: connect to a remote server or start a bundl
 `localhost`, remember servers, tray icon, native menus and shortcuts, open local folders when
 the path is visible. No business logic and no Tauri commands for data.
 
+**Done 2026-10-18.**
+
+- `rust/stl-desktop` (Tauri 2.12, `tauri-plugin-dialog`, `tauri-plugin-opener`): a bundled
+  launcher page (`ui/`, plain HTML/JS, strict CSP) lists remembered servers
+  (`<app config dir>/servers.json`) and opens a local library: the `stl-server` beside the
+  shell, on a free loopback port, with its output in `<app log dir>/stl-server.log` (its
+  last lines are shown when it fails to start, e.g. while the desktop app holds the
+  library lock). Connecting checks `/api/auth/status`, then navigates the window to the
+  server, which serves the web client.
+- Commands are scoped by an app manifest (`build.rs`): the launcher's capability allows
+  the launcher commands; each server origin gets a runtime capability with only
+  `open_folder` (an absolute path that exists: a folder is opened, a file revealed).
+  Verified: a server page's `list_servers` call is refused.
+- Menus (File: Switch server Ctrl+L, Quit; Edit; View: Reload Ctrl+R, full screen) and a
+  tray icon (Show, Switch server, Quit). Closing the window stops the local server.
+- `rust/stl-proc`: `end_with_parent(&Child)` puts a child in a kill-on-close Windows job
+  object, so the local server (and the server's `llama-server`) end even when the parent
+  is killed. Verified by force-killing the shell.
+- Web: `src/desktop.ts` (`inDesktopShell`, `openFolder`) and *Open folder* in the detail
+  pane when the server reports a client path.
+- Verified by driving the shell's WebView2 over the DevTools protocol
+  (`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=…`): launcher, local
+  library, sign-in, the table, the IPC scope, graceful and forced exits.
+- Not done: installers (Phase 8 ships the server and the shell); macOS / Linux builds are
+  untested.
+
 ### Phase 8: Retire Python (small)
 
 Once the web client has parity: remove `app/`, PyInstaller and the PyO3 bindings; ship the

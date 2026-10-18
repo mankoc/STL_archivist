@@ -225,6 +225,24 @@ selection) suggests tags and metadata per model for review, or tags them all in 
 (administrators change them; they are the same `settings.json` the desktop app uses), and
 user administration.
 
+### Desktop shell (preview)
+
+`rust/stl-desktop` is a small native app (Tauri 2, using the system's WebView2 on Windows)
+that shows the web client in its own window:
+
+```bash
+cd rust
+cargo build -p stl-server -p stl-desktop   # the shell starts the stl-server beside it
+cargo run -p stl-desktop
+```
+
+Its start page opens a library on this computer (it starts `stl-server` on a free local
+port for that window, and stops it when the window closes) or connects to a server,
+remembering the servers you add. *File → Switch server…* (Ctrl+L) returns to it; the tray
+icon offers the same. Inside the shell, the detail pane can also show an archive's folder
+in the file manager when the server's paths are visible from this computer. The shell
+holds no library logic: everything else is the web client talking to the server.
+
 ### Environment overrides
 
 These optional environment variables take precedence over the values set in Configuration. They are useful for portable or headless setups.

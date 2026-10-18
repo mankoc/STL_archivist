@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>stlLibrary</title>
+    <link rel="stylesheet" href="launcher.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <img src="icon.png" alt="" width="40" height="40" />
+        <div>
+          <h1>stlLibrary</h1>
+          <p class="muted">Open a library on this computer, or connect to a server.</p>
+        </div>
+      </header>
+
+      <section>
+        <h2>This computer</h2>
+        <p class="muted">Starts a library server for this window only. Close the desktop app first if it has the same library open.</p>
+        <div class="row">
+          <input id="data-dir" type="text" spellcheck="false" aria-label="Data directory" />
+          <button id="browse" type="button" class="secondary">Browse…</button>
+          <button id="open-local" type="button">Open</button>
+        </div>
+        <p id="local-note" class="muted small"></p>
+      </section>
+
+      <section>
+        <h2>Servers</h2>
+        <ul id="servers"></ul>
+        <form id="add" class="row">
+          <input id="name" type="text" placeholder="Name (optional)" aria-label="Server name" />
+          <input id="url" type="text" placeholder="http://nas:8770" aria-label="Server address" spellcheck="false" required />
+          <button type="submit">Add &amp; connect</button>
+        </form>
+      </section>
+
+      <p id="status" role="status"></p>
+    </main>
+    <script src="launcher.js"></script>
+  </body>
+</html>
