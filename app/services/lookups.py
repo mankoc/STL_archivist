@@ -28,7 +28,14 @@ def usage_counts(session: Session, kind: str) -> dict[int, int]:
     """Return ``{lookup_id: number_of_models}`` for every referenced row of *kind*.
 
     Rows that no model references are absent — use ``.get(id, 0)``.
+    Runs natively when it can (``app.database.native_db``).
     """
+    from app.database import native_db
+    if kind not in _REF_COLUMNS:
+        raise KeyError(kind)
+    lib = native_db.library() if native_db.session_clean(session) else None
+    if lib is not None:
+        return lib.usage_counts(kind)
     col = _REF_COLUMNS[kind]
     stmt = select(col, func.count()).where(col.isnot(None)).group_by(col)
     return {ref_id: n for ref_id, n in session.execute(stmt)}

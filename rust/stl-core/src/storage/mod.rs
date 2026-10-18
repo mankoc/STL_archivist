@@ -21,6 +21,7 @@
 //! drops the other's POSIX locks), so [`migrate`] opens, migrates and closes
 //! before SQLAlchemy connects.
 
+pub mod library;
 pub mod schema_sql;
 
 use std::collections::HashSet;

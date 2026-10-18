@@ -288,6 +288,17 @@ def table_ids(
     adds :func:`search_condition`.  Returns ``None`` when *should_stop* became
     true while the ids streamed in.
     """
+    from app.database import native_db
+    lib = native_db.library()
+    if lib is not None:
+        if sort is not None and sort[0] not in SORT_COLUMNS:
+            raise ValueError(f"not a sortable column: {sort[0]!r}")
+        ids = lib.table_ids(native_db.spec_dict(spec), search, tuple(sort) if sort else None)
+        return None if should_stop() else ids
+    return _table_ids_py(spec, search, sort, should_stop)
+
+
+def _table_ids_py(spec, search, sort, should_stop) -> "list[int] | None":
     from sqlalchemy import asc, desc, nullslast
 
     from app.database.db import get_models_view, get_session
@@ -327,10 +338,24 @@ def page_rows(ids: list[int], pair_for_id: "dict[int, int] | None" = None) -> li
     and *tags* are ``", "``-joined names in id order, *pair_index* is
     ``pair_for_id[id]`` or -1.
     """
+    from app.database import native_db
+    pair_for_id = pair_for_id or {}
+    lib = native_db.library()
+    if lib is not None:
+        from datetime import datetime
+        out = []
+        for (head, tail) in lib.page_rows(list(ids)):
+            created = datetime.fromisoformat(tail[2]) if tail[2] else None
+            out.append(head + (tail[0], tail[1], created) + tail[3:10]
+                       + (pair_for_id.get(head[0], -1), bool(tail[10]) if tail[10] is not None else None))
+        return out
+    return _page_rows_py(ids, pair_for_id)
+
+
+def _page_rows_py(ids: list[int], pair_for_id: dict) -> list[tuple]:
     from app.database.db import get_models_view, get_session
     from app.database.models import Scale
 
-    pair_for_id = pair_for_id or {}
     mv = get_models_view()
     session = get_session()
     try:

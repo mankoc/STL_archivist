@@ -32,6 +32,16 @@ def filter_tree_data(spec: "FilterSpec | None", show: dict, show_counts: bool) -
     ``sc_path_counts``, the value lists, ``sorted_dirs`` / ``scoped_dirs`` /
     ``new_dirs_frozen``) plus ``scoped``: whether section scopes applied.
     """
+    from app.database import native_db
+    lib = native_db.library()
+    if lib is not None:
+        spec_d = native_db.spec_dict(spec) if spec is not None and not spec.is_empty() else None
+        data = lib.filter_tree(spec_d, [k for k, v in show.items() if v], show_counts)
+        new_dirs = data.pop("new_dirs")
+        data["new_dirs_frozen"] = frozenset(new_dirs) if new_dirs is not None else None
+        if not show_counts:
+            data["path_counts"] = None
+        return data
     return _filter_tree_data_py(spec, show, show_counts)
 
 

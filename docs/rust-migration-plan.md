@@ -368,6 +368,27 @@ them.
   connects, so 4b is safe everywhere. From 4c, native database access while SQLAlchemy is
   open is limited to Windows until 4h removes SQLAlchemy.
 
+**4c: done 2026-10-18.** `storage::library` exposed as `stl_native.LibraryDb` (a pool of
+connections). It serves `library_query.table_ids` / `page_rows`,
+`filter_tree.filter_tree_data` (the browser's filter pane, first moved out of
+`_FilterTreeWorker` into a Qt-free service), `lookups.usage_counts` and
+`model_summary`. `app/database/native_db.library()` returns it only on Windows and for a
+file database (see the two-SQLite note above); otherwise the Python services run.
+
+- The predicates reproduce SQLAlchemy's SQL, quirks included. Exclusions are `NOT IN` /
+  `NOT LIKE`, so NULLs are excluded too. `lower()` is applied to the column (ASCII-only in
+  SQLite), while values are lowered the Unicode way. `LIKE` patterns are not escaped.
+  Folder and file-type values use `winpath::WinPath`, a port of `pathlib.WindowsPath`.
+- Before the comparison was possible, the order became deterministic in both
+  implementations: table ties are ordered by id, and tags/scales are joined in id order.
+- Gate: `tests/golden/test_library_golden.py` compares a random 400-model library with
+  hostile values across 300 table queries, all page rows and 122 filter trees. On the
+  reference library (copy), 108 table queries, all 60,593 rows, 27 filter trees and the
+  usage counts were identical. Native vs Python: page rows 4x faster (0.3 s vs 1.3 s for
+  every row), filter trees 2.9x (5.4 s vs 15.5 s for 27), table ids 1.2x.
+- The unfiltered filter tree is still cached as JSON by the Python worker
+  (`filter_cache.py`).
+
 ### Phase 5: Server (medium)
 
 `stl-server` on axum, the product's centre from here on:

@@ -85,6 +85,12 @@ the native core owns the schema from Phase 4b).
   not hold the database while SQLAlchemy has it open in the same process (lock loss can
   corrupt it); keep native database access Windows-only, or sequential, until SQLAlchemy is
   removed (step 4h).
+- **Native reads:** the browser/editor read services (`library_query.table_ids` / `page_rows`,
+  `filter_tree.filter_tree_data`, `lookups.usage_counts`, `model_summary`) go through
+  `app.database.native_db.library()` (`stl_native.LibraryDb`, Windows and file databases
+  only) and fall back to the `_..._py` implementations. A change to their semantics goes into
+  `rust/stl-core/src/storage/library.rs` as well; `tests/golden/test_library_golden.py`
+  compares the two on a random library.
 - Crawler rules (`rules.py`) use the native port only with the built-in presupport
   patterns; a custom pattern list always runs in Python, because fancy-regex and `re` read
   some syntax differently without raising. Keep `_native_patterns_ok` when touching them.
@@ -121,6 +127,8 @@ Handles all archive I/O and metadata extraction.
 
 - **`models.py`** — SQLAlchemy ORM classes: `STLModel` (central), `Tag`, `Image`, `Sculptor`,
   `Category`, `Subcategory`, `Release`, `Scale`. Tags use a many-to-many join table.
+- **`native_db.py`** — `library()`: the native read connection pool for the open
+  database, or `None` (not Windows, in-memory database, no native core).
 - **`db.py`** — engine/session factory (`init_db`, `session_scope`), WAL-mode pragmas;
   schema migration through the native core (`_migrate_natively`), with the Python steps
   (`_migrate_schema`, `_ensure_columns`, …) as the fallback.
