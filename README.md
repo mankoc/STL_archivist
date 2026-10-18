@@ -132,6 +132,10 @@ curl -X POST http://127.0.0.1:8770/api/auth/setup -H "content-type: application/
      -d '{"name": "admin", "password": "at least 8 characters"}'
 ```
 
+Viewers can browse; editors can also edit models (cells, the editor, the mass editor),
+add and remove images, and manage tags, categories, collections, scales and creators. Edits
+refresh the folder's `METADATA.7z` as the desktop app does.
+
 Accounts are kept in `<data dir>/server.db`, separate from the library database. Put the
 server behind an HTTPS reverse proxy before exposing it beyond `127.0.0.1`.
 

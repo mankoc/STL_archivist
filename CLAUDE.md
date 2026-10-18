@@ -67,6 +67,10 @@ the native core owns the schema from Phase 4b).
   library database). Every library route takes an `auth::CurrentUser` and calls
   `me.require(Role::…)` when it needs more than `viewer` (writes: `Editor`; users: `Admin`).
   Tests get a session with `TestLib::user(name, role)` (`tests/common`).
+- **Server edits:** after a write commits, call `lib.schedule_sidecars(archive_paths)`
+  (debounced `METADATA.7z` refresh, `sidecars.rs`); delete thumbnails with one
+  `thumbs.delete_many` after the commit. Library settings come from
+  `library_settings::LibrarySettings` (the desktop's `settings.json`, read per use).
 - **Library lock (rule 7):** `stl_core::lock::LibraryLock` (`library.lock` + `library.owner`
   in the data directory). The server and `main.py` both hold it for their lifetime; never
   open a library's database or store from a second process without it.

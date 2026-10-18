@@ -11,6 +11,8 @@ pub mod api;
 pub mod auth;
 pub mod config;
 pub mod error;
+pub mod library_settings;
+pub mod sidecars;
 
 use std::sync::Arc;
 
@@ -29,6 +31,7 @@ pub struct Library {
     /// `server.db`: users, sessions, per-user settings.
     pub accounts: Pool,
     pub logins: auth::LoginThrottle,
+    pub sidecars: sidecars::SidecarQueue,
     _lock: LibraryLock,
 }
 
@@ -54,6 +57,7 @@ impl Library {
             thumbs,
             accounts,
             logins: auth::LoginThrottle::default(),
+            sidecars: sidecars::SidecarQueue::default(),
             config,
             _lock: lock,
         })

@@ -887,6 +887,26 @@ Phase 5 runs in steps:
   password change or disabling ends the user's sessions; five failed sign-ins lock a name
   out for 15 minutes; unknown names cost the same hash check as known ones.
 
+**5c: done 2026-10-18 (editing).**
+
+- `api/edit.rs` (editor role): `PATCH /api/models/cells` (browser cell edits),
+  `GET|PUT /api/models/{id}/editor`, `GET /api/editor/choices|subcollections`,
+  `POST /api/models/mass-edit` (the server parses the path pattern per model, so the plan
+  carries the pattern instead of results; `manual` fields are applied in the desktop's
+  order), `POST /api/models/delete` (library records and thumbnails; files stay),
+  `POST /api/models/{id}/images` (multipart; thumbnails at the library's
+  `max_thumb_size`, the native decoder only, so AVIF and CMYK JPEG are refused until
+  Phase 8 drops Pillow) and `DELETE /api/images/{id}`.
+- `api/lookups.rs`: the lookup editors (`/api/lookups/{kind}` list, add, info, rename,
+  delete, merge), tag merge and unused-tag cleanup, creator names (`POST /api/authors`
+  with `rename` / `merge` / `delete`) and creator profiles.
+- Sidecars: `sidecars.rs` mirrors `sidecar_exporter.py` (1.5 s debounce, one folder at a
+  time on the blocking pool, `metadata_sidecar_enabled` / `metadata_thumbnails` from the
+  library's `settings.json`, pending folders exported at shutdown). Cell edits and editor
+  saves refresh them as in the desktop app; mass edits and image changes do too.
+- Gate: a cell edit through the release server wrote `METADATA.7z`, and the desktop app
+  restored the edited title and tags from it into a fresh library.
+
 ### Phase 6: Web client (largest)
 
 React + TypeScript in `web/`, served by the server, built against the API while the PyQt app

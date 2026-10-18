@@ -7,7 +7,7 @@ license.workspace = true
 
 [dependencies]
 argon2 = "0.5.3"
-axum = "0.8.9"
+axum = { version = "0.8.9", features = ["multipart"] }
 heed = "0.22.1"
 rand_core = { version = "0.6", features = ["getrandom"] }
 rusqlite = "0.40.2"
@@ -15,12 +15,13 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.140"
 sha2 = "0.10.9"
 stl-core = { version = "0.1.0", path = "../stl-core" }
-tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "net", "signal"] }
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "net", "signal", "time"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 utoipa = { version = "5", features = ["axum_extras"] }
 
 [dev-dependencies]
 http-body-util = "0.1.5"
+image = { version = "0.25.10", default-features = false, features = ["png"] }
 tempfile = "3.27.0"
 tower = { version = "0.5.3", features = ["util"] }
