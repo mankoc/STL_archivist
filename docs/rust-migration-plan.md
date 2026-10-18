@@ -1047,6 +1047,21 @@ Verified in headless Edge: an inline creator edit, a title change through the dr
 image upload through the drop zone's file input and its removal, and removing two
 Ctrl-selected models.
 
+**6c: done 2026-10-18 (Jobs page).**
+
+- Pages in the header (hash routes, `#/jobs`); `JobsPage` holds the crawled folders (add
+  through a server folder picker over `/api/files/browse`; crawl one with a path pattern and
+  force-rescan option, crawl all, stop tracking), the maintenance actions (verify, image
+  hashes, embeddings, prune, compact for admins), the job list with progress, and a live log.
+- Events: `job` events patch the cached job list (progress twice a second, no refetch);
+  `job_log` lines go through an in-page event bus to the open log; finished jobs refresh the
+  library views and the folder list.
+- Server fixes found on the way: the folder listing no longer counts a folder's
+  `METADATA.7z` as an archive, and a job log skips a line repeated by phase and log events.
+- Verified in headless Edge: adding a folder through the picker, crawling it with a pattern
+  (the folder shows its pattern afterwards), Verify archives, and the new models in the
+  library.
+
 ### Phase 7: Desktop shell (small)
 
 Tauri app that hosts the web client: connect to a remote server or start a bundled local one on

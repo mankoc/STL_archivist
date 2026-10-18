@@ -25,6 +25,7 @@ use crate::{ApiError, AppState, Library};
 /// Most entries one listing returns.
 const MAX_ENTRIES: usize = 5000;
 const ARCHIVES: &[&str] = &["zip", "7z", "rar"];
+const SIDECAR: &str = "METADATA.7z";
 
 /// Canonical form for comparisons: resolved, forward slashes, no trailing
 /// slash (case-folded on Windows, whose paths are case-insensitive).
@@ -129,6 +130,8 @@ pub async fn browse(State(lib): State<AppState>, me: CurrentUser, Query(q): Quer
                 } else if Path::new(&name)
                     .extension()
                     .is_some_and(|x| ARCHIVES.contains(&x.to_string_lossy().to_lowercase().as_str()))
+                    // The folder's sidecar is not a model archive (the crawler skips it too).
+                    && !name.eq_ignore_ascii_case(SIDECAR)
                 {
                     archives.push(Entry { name, path, kind: "archive", size: Some(meta.len()) });
                 }
