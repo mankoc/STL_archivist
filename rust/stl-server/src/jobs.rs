@@ -83,6 +83,14 @@ pub enum JobRequest {
         #[serde(default = "default_max_models")]
         max_models: usize,
     },
+    /// Write `METADATA.7z` in every folder holding catalogued archives (needs
+    /// sidecars enabled in the library settings).
+    GenerateSidecars,
+    /// Delete `METADATA.7z` from every folder holding catalogued archives.
+    RemoveSidecars,
+    /// Back up the database, thumbnails and settings to
+    /// `<data dir>/backups/stlLibrary_backup_<stamp>.7z` (administrators).
+    Backup,
     /// Records cataloguing the same archive more than once (same content hash,
     /// else same file name and size).
     FindDuplicateEntries,
@@ -133,6 +141,9 @@ impl JobRequest {
             JobRequest::PruneImages { .. } => "prune_images",
             JobRequest::CompactDatabase => "compact_database",
             JobRequest::ComputeEmbeddings { .. } => "compute_embeddings",
+            JobRequest::GenerateSidecars => "generate_sidecars",
+            JobRequest::RemoveSidecars => "remove_sidecars",
+            JobRequest::Backup => "backup",
             JobRequest::FindDuplicateEntries => "find_duplicate_entries",
             JobRequest::FindMoved { .. } => "find_moved",
             JobRequest::SearchFolder { .. } => "search_folder",
@@ -148,6 +159,9 @@ impl JobRequest {
         matches!(
             self,
             JobRequest::FindDuplicateEntries
+                | JobRequest::GenerateSidecars
+                | JobRequest::RemoveSidecars
+                | JobRequest::Backup
                 | JobRequest::FindMoved { .. }
                 | JobRequest::FindContentDuplicates { .. }
                 | JobRequest::FindImageDuplicates { .. }
@@ -493,6 +507,9 @@ fn run(lib: &Library, job: &Job) -> Result<String, String> {
         JobRequest::PruneImages { keep } => prune_images(lib, job, keep),
         JobRequest::CompactDatabase => compact(lib, job),
         JobRequest::ComputeEmbeddings { all } => compute_embeddings(lib, job, all),
+        JobRequest::GenerateSidecars => generate_sidecars(lib, job),
+        JobRequest::RemoveSidecars => remove_sidecars(lib, job),
+        JobRequest::Backup => backup(lib, job),
         JobRequest::FindDuplicateEntries => duplicate_entries(lib, job),
         JobRequest::FindMoved { ids } => find_moved(lib, job, &ids),
         JobRequest::SearchFolder { folder, ids } => search_folder(lib, job, &folder, &ids),
@@ -505,6 +522,89 @@ fn run(lib: &Library, job: &Job) -> Result<String, String> {
             find_metadata(lib, job, &columns, &method, max_distance)
         }
     }
+}
+
+// ── sidecars and backups ─────────────────────────────────────────────────────
+
+fn sidecar_folders(lib: &Library, job: &Job) -> Result<Vec<String>, String> {
+    // Spelled as the archive paths' parents, as the sidecars store and match them.
+    let paths = lib.db.with(duplicates::all_archive_paths).map_err(db_err)?;
+    let folders: Vec<String> = paths.iter().filter_map(|p| crate::sidecars::folder_of(p)).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+    if folders.is_empty() {
+        lib.job_log(job, "No folders with database records found.".into());
+    }
+    job.ctl.set_total(folders.len() as u64);
+    Ok(folders)
+}
+
+fn generate_sidecars(lib: &Library, job: &Job) -> Result<String, String> {
+    let settings = LibrarySettings::load(&lib.config.data_dir);
+    if !settings.sidecars_enabled() {
+        return Err("metadata sidecars are disabled in the library settings: enable them first".into());
+    }
+    let thumbs = settings.sidecar_thumbnails();
+    let folders = sidecar_folders(lib, job)?;
+    lib.job_log(job, format!("Processing {} folder(s); writing METADATA.7z (thumbnails: {})…", folders.len(), if thumbs { "yes" } else { "no" }));
+    let (mut written, mut failed) = (0usize, 0usize);
+    for (k, folder) in folders.iter().enumerate() {
+        if job.stopped() {
+            break;
+        }
+        let n = format!("[{}/{}]", k + 1, folders.len());
+        if !std::path::Path::new(folder).is_dir() {
+            lib.job_log(job, format!("{n} Skipped (folder not found): {folder}"));
+        } else {
+            match lib.db.with(|c| Ok::<_, rusqlite::Error>(storage::sidecar::export(c, Some(&lib.thumbs), folder, thumbs))).map_err(db_err)? {
+                Ok(true) => {
+                    written += 1;
+                    lib.job_log(job, format!("{n} Updated: {folder}"));
+                }
+                Ok(false) => lib.job_log(job, format!("{n} Skipped (no records): {folder}")),
+                Err(e) => {
+                    failed += 1;
+                    lib.job_log(job, format!("{n} ERROR in {folder}: {e:?}"));
+                }
+            }
+        }
+        job.ctl.advance(1);
+    }
+    Ok(format!("updated {written} of {} folder(s){}", folders.len(), if failed > 0 { format!(", {failed} failed") } else { String::new() }))
+}
+
+fn remove_sidecars(lib: &Library, job: &Job) -> Result<String, String> {
+    let folders = sidecar_folders(lib, job)?;
+    let mut removed = 0usize;
+    for (k, folder) in folders.iter().enumerate() {
+        if job.stopped() {
+            break;
+        }
+        let path = std::path::Path::new(folder).join(storage::sidecar::METADATA_FILENAME);
+        let n = format!("[{}/{}]", k + 1, folders.len());
+        if path.is_file() {
+            match std::fs::remove_file(&path) {
+                Ok(()) => {
+                    removed += 1;
+                    lib.job_log(job, format!("{n} Removed: {}", path.display()));
+                }
+                Err(e) => lib.job_log(job, format!("{n} ERROR removing {}: {e}", path.display())),
+            }
+        }
+        job.ctl.advance(1);
+    }
+    Ok(format!("removed {removed} sidecar(s) from {} folder(s)", folders.len()))
+}
+
+fn backup(lib: &Library, job: &Job) -> Result<String, String> {
+    let name = crate::api::backups::new_name();
+    let dest = crate::api::backups::dir(&lib.config.data_dir).join(&name);
+    lib.job_log(job, format!("Backing up the database, thumbnails and settings to {}…", dest.display()));
+    let settings = lib.config.data_dir.join(stl_core::backup::SETTINGS_FILE);
+    let size = lib
+        .db
+        .with(|c| Ok::<_, rusqlite::Error>(stl_core::backup::write(c, &lib.thumbs, Some(&settings), &dest, &job.ctl)))
+        .map_err(db_err)?
+        .map_err(|e| e.to_string())?;
+    Ok(format!("{name}: {:.1} MB", size as f64 / (1024.0 * 1024.0)))
 }
 
 // ── maintenance lists ────────────────────────────────────────────────────────
