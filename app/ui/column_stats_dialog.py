@@ -24,12 +24,6 @@ from app.ui._charts import BarChartWidget
 
 logger = logging.getLogger(__name__)
 
-_MONTH_NAMES = {
-    1: "January", 2: "February", 3: "March", 4: "April",
-    5: "May", 6: "June", 7: "July", 8: "August",
-    9: "September", 10: "October", 11: "November", 12: "December",
-}
-
 # (display label, internal key)
 COLUMN_CHOICES: list[tuple[str, str]] = [
     ("Category",       "category"),
@@ -47,105 +41,6 @@ COLUMN_CHOICES: list[tuple[str, str]] = [
 ]
 
 
-def _query_column(session, key: str, top_n: int | None) -> tuple[list[tuple[str, int]], int]:
-    """Return (data, total_models) for the chosen column.
-
-    *data* is a list of (label, count) pairs sorted by count descending,
-    capped at *top_n* entries.  *total_models* is the overall model count
-    used to compute percentages.
-    """
-    from sqlalchemy import func
-    from app.database.models import (
-        STLModel, Sculptor, Collection, Subcollection, Category,
-        Release, Scale, Tag, model_tags, model_scales,
-    )
-
-    total: int = session.query(func.count(STLModel.id)).scalar() or 0
-
-    def _cap(q):
-        return q.limit(top_n) if top_n is not None else q
-
-    def _direct(col, null_label="(none)", filter_null=False):
-        q = session.query(col, func.count(STLModel.id).label("n"))
-        if filter_null:
-            q = q.filter(col.isnot(None))
-        q = _cap(q.group_by(col).order_by(func.count(STLModel.id).desc()))
-        return [(str(v) if v is not None else null_label, cnt) for v, cnt in q.all()]
-
-    if key == "source":
-        data = _direct(STLModel.source, null_label="(unknown)")
-
-    elif key == "release_year":
-        data = _direct(STLModel.release_year, filter_null=True)
-
-    elif key == "release_month":
-        raw = _direct(STLModel.release_month, filter_null=True)
-        data = [
-            (_MONTH_NAMES.get(int(v), v) if v.isdigit() else v, cnt)
-            for v, cnt in raw
-        ]
-
-    elif key == "presupports":
-        data = _direct(STLModel.presupports, null_label="(not set)")
-
-    elif key == "creator":
-        data = _direct(STLModel.creator, null_label="(unknown)")
-
-    elif key == "sculptor":
-        q = (session.query(Sculptor.name, func.count(STLModel.id).label("n"))
-             .join(STLModel, STLModel.sculptor_id == Sculptor.id)
-             .group_by(Sculptor.id)
-             .order_by(func.count(STLModel.id).desc()))
-        data = list(_cap(q).all())
-
-    elif key == "collection":
-        q = (session.query(Collection.name, func.count(STLModel.id).label("n"))
-             .join(STLModel, STLModel.collection_id == Collection.id)
-             .group_by(Collection.id)
-             .order_by(func.count(STLModel.id).desc()))
-        data = list(_cap(q).all())
-
-    elif key == "subcollection":
-        q = (session.query(Subcollection.name, func.count(STLModel.id).label("n"))
-             .join(STLModel, STLModel.subcollection_id == Subcollection.id)
-             .group_by(Subcollection.id)
-             .order_by(func.count(STLModel.id).desc()))
-        data = list(_cap(q).all())
-
-    elif key == "category":
-        q = (session.query(Category.name, func.count(STLModel.id).label("n"))
-             .join(STLModel, STLModel.category_id == Category.id)
-             .group_by(Category.id)
-             .order_by(func.count(STLModel.id).desc()))
-        data = list(_cap(q).all())
-
-    elif key == "release":
-        q = (session.query(Release.name, func.count(STLModel.id).label("n"))
-             .join(STLModel, STLModel.release_id == Release.id)
-             .group_by(Release.id)
-             .order_by(func.count(STLModel.id).desc()))
-        data = list(_cap(q).all())
-
-    elif key == "scale":
-        q = (session.query(Scale.name, func.count(model_scales.c.model_id).label("n"))
-             .join(model_scales, model_scales.c.scale_id == Scale.id)
-             .group_by(Scale.id)
-             .order_by(func.count(model_scales.c.model_id).desc()))
-        data = list(_cap(q).all())
-
-    elif key == "tag":
-        q = (session.query(Tag.name, func.count(model_tags.c.model_id).label("n"))
-             .join(model_tags, model_tags.c.tag_id == Tag.id)
-             .group_by(Tag.id)
-             .order_by(func.count(model_tags.c.model_id).desc()))
-        data = list(_cap(q).all())
-
-    else:
-        data = []
-
-    return data, total
-
-
 class ColumnStatsWorker(QThread):
     data_ready = pyqtSignal(list, int)   # data, total
 
@@ -155,10 +50,9 @@ class ColumnStatsWorker(QThread):
         self._top_n = top_n
 
     def run(self) -> None:
-        from app.database.db import session_scope
+        from app.services.library_stats import column_distribution
         try:
-            with session_scope() as s:
-                data, total = _query_column(s, self._key, self._top_n)
+            data, total = column_distribution(self._key, self._top_n)
             self.data_ready.emit(data, total)
         except Exception as exc:
             logger.error("ColumnStatsWorker error: %s", exc, exc_info=True)

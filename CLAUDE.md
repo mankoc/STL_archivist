@@ -98,8 +98,9 @@ the native core owns the schema from Phase 4b).
   transaction is that write. Never run one while a SQLAlchemy session in the same thread
   holds the write lock (it would wait for itself until `busy_timeout`).
 - **Dialogs do not query the database.** Lookup editors go through `services/lookup_admin.py`
-  and the model editors through `services/model_edit.py` (step 4f moves the remaining
-  dialogs the same way). New database work in a dialog
+  the model editors through `services/model_edit.py`, the browser panel, lookup lists and
+  sort dialog through `services/browser_data.py`, and statistics through
+  `services/library_stats.py` (step 4f moves the remaining dialogs the same way). New database work in a dialog
   belongs in a service with a native implementation and a golden test, never inline ORM.
 - Crawler rules (`rules.py`) use the native port only with the built-in presupport
   patterns; a custom pattern list always runs in Python, because fancy-regex and `re` read
@@ -213,11 +214,17 @@ Qt-free business logic, testable without a `QApplication`:
   renames and creator profiles.
 - **`model_edit.py`** — the editor dialog, AI tagger and mass editor: completion lists,
   model snapshots, saves (the mass save takes a plain plan dict).
+- **`browser_data.py`** — browser info panel, thumbnail list, dropped images, image / model
+  deletes, Add Tag, `lookup_cache` lists, the sort dialog's sources and path update
+  (`set_archive_paths` also sets `archive_folder`).
+- **`library_stats.py`** — Statistics and Column Distribution queries; ties ranked by value
+  or id so both implementations agree.
 - **`model_summary.py`** — `model_summary(session, model_id)`: one-statement display row
   (names, tags, image count) for detail panels; cheap enough for the GUI thread.
 - **`maintenance.py`** — Database Maintenance operations (verify, duplicate entries, prune images,
   `compact_database` = `VACUUM` + `wal_checkpoint(TRUNCATE)`, run with `temp_store=FILE`).
-- **`file_deletion.py`** — archive deletion / trash.
+- **`file_deletion.py`** — archive deletion / trash (`delete_archives(ids, use_trash, trash)`
+  manages its own transaction).
 - **`moves.py`** — moved archives: `relocate`, `merge_into_missing`, `delete_model`,
   `index_by_hash`, `archive_folder_for`. Always set `archive_folder` through it (forward
   slashes; views compare the string). The crawler matches moves by hash in Phase 2, before

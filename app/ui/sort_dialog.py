@@ -28,8 +28,7 @@ from PyQt6.QtWidgets import (
     QToolButton, QVBoxLayout,
 )
 
-from app.database.db import session_scope, get_session
-from app.database.models import STLModel
+from app.services import browser_data
 from app.utils.path_pattern import render_path_pattern, PATTERN_HELP
 
 
@@ -91,9 +90,9 @@ def _unique_target(path: Path) -> Path:
         counter += 1
 
 
-def _compute_target(base_dir: Path, pattern: str, model: STLModel) -> Path:
-    """Compute the target path for *model* given *base_dir* and *pattern*."""
-    src = Path(model.archive_path)
+def _compute_target(base_dir: Path, pattern: str, model: dict) -> Path:
+    """Compute the target path for *model* (``browser_data.sort_sources`` fields)."""
+    src = Path(model["archive_path"])
     ext = src.suffix
 
     rendered = render_path_pattern(pattern.strip("/\\"), model)
@@ -429,36 +428,33 @@ class SortFilesDialog(QDialog):
                     item.setBackground(QBrush(color))
                 self._preview_table.setItem(row, col, item)
 
-        session = get_session()
-        try:
-            for mid in self._model_ids:
-                model: STLModel = session.get(STLModel, mid)
-                if model is None:
-                    _add_row("ERROR", f"model id={mid}", "not found in database", _RED)
-                    has_errors = True
-                    continue
+        sources = browser_data.sort_sources(self._model_ids)
+        for mid in self._model_ids:
+            model = sources.get(mid)
+            if model is None:
+                _add_row("ERROR", f"model id={mid}", "not found in database", _RED)
+                has_errors = True
+                continue
 
-                src = model.archive_path
-                if not src:
-                    _add_row("SKIP", model.title or str(mid), "no archive_path set", _YELLOW)
-                    has_errors = True
-                    continue
+            src = model["archive_path"]
+            if not src:
+                _add_row("SKIP", model["title"] or str(mid), "no archive_path set", _YELLOW)
+                has_errors = True
+                continue
 
-                src_path = Path(src)
-                if not src_path.exists():
-                    _add_row("MISS", src, "source file not found on disk", _RED)
-                    has_errors = True
-                    continue
+            src_path = Path(src)
+            if not src_path.exists():
+                _add_row("MISS", src, "source file not found on disk", _RED)
+                has_errors = True
+                continue
 
-                target = _compute_target(base_dir, pattern, model)
-                collision = target.exists() and target != src_path
-                if collision:
-                    _add_row("COLLISION", src, str(target), _YELLOW)
-                else:
-                    _add_row("OK", src, str(target))
-                self._preview_data.append((str(src_path), str(target), mid))
-        finally:
-            session.close()
+            target = _compute_target(base_dir, pattern, model)
+            collision = target.exists() and target != src_path
+            if collision:
+                _add_row("COLLISION", src, str(target), _YELLOW)
+            else:
+                _add_row("OK", src, str(target))
+            self._preview_data.append((str(src_path), str(target), mid))
 
         self._preview_table.resizeRowsToContents()
 
@@ -554,11 +550,7 @@ class SortFilesDialog(QDialog):
 
         # Phase 3: every move succeeded — write all DB updates in one
         # transaction so archive_path values are never partially updated.
-        with session_scope() as session:
-            for _src, dst, mid in plan:
-                model: STLModel = session.get(STLModel, mid)
-                if model is not None:
-                    model.archive_path = str(dst)
+        browser_data.set_archive_paths([(mid, str(dst)) for _src, dst, mid in plan])
 
         # Phase 3b: remove any source directories that are now empty.
         # Done after the DB commit so the DB is never inconsistent with the

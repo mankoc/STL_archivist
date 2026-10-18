@@ -470,6 +470,31 @@ rules, find & replace, and trimming, all in one transaction.
   commits and mass saves on two copies. Native refusals leave the database untouched;
   the final databases are compared.
 
+**4f-3: done 2026-10-18 (browser, statistics, sort).** Three new services, each backed
+natively:
+- `services/library_stats.py` (`storage::stats`): the Statistics and Column
+  Distribution dialogs.
+- `services/browser_data.py` (`storage::browser`):
+  - `lookup_cache` lists and the tag delegate's completions;
+  - the info panel's url / description / creator profile, and the thumbnail list;
+  - dropped images (records first, thumbnails next, then paths or deletes for failures);
+  - image delete, Add Tag, Delete from DB (one transaction);
+  - the sort dialog's sources and its final path update.
+- `file_deletion.delete_archives` no longer takes a session: it reads the rows, moves or
+  unlinks the files, then deletes the records whose file step worked in one transaction.
+
+Behaviour changes, in both implementations:
+- Rankings break count ties by value or lookup id. Before, the order of ties was unspecified.
+- **Bug fix:** the sort dialog now updates `archive_folder` with `archive_path`. Before,
+  moved archives kept their old folder in folder views until the next crawl.
+
+`render_path_pattern` accepts a dict of fields as well as a model.
+`tests/golden/test_browser_golden.py` runs 80 random reads and writes on two copies and
+compares every statistic. On the reference library (60,593 models) every read is
+identical. `sort_sources` for 2,000 models takes 4.6 ms natively against 66 ms in Python.
+Still in Python: the browser's re-crawl and rescan actions, which run the crawler's upsert
+and move with it in 4g.
+
 ### Phase 5: Server (medium)
 
 `stl-server` on axum, the product's centre from here on:

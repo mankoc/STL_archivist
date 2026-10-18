@@ -44,83 +44,13 @@ class StatsWorker(QThread):
     stats_ready = pyqtSignal(dict)
 
     def run(self) -> None:
-        from sqlalchemy import func
-        from app.database.db import session_scope
-        from app.database.models import (
-            STLModel, STLFile, Image, Sculptor, Collection, Category, Tag, Release, Scale,
-            model_tags,
-        )
+        from app.services.library_stats import library_statistics
         from app.ui.config_dialog import get_db_path, get_data_dir
 
         stats: dict = {}
 
         try:
-            with session_scope() as s:
-                # --- Counts ---
-                stats["total_models"]      = s.query(func.count(STLModel.id)).scalar() or 0
-                stats["total_images"]      = s.query(func.count(Image.id)).scalar() or 0
-                stats["total_sculptors"]   = s.query(func.count(Sculptor.id)).scalar() or 0
-                stats["total_collections"] = s.query(func.count(Collection.id)).scalar() or 0
-                stats["total_categories"]  = s.query(func.count(Category.id)).scalar() or 0
-                stats["total_releases"]    = s.query(func.count(Release.id)).scalar() or 0
-                stats["total_scales"]      = s.query(func.count(Scale.id)).scalar() or 0
-                stats["total_tags"]        = s.query(func.count(Tag.id)).scalar() or 0
-                stats["total_archive_size"] = s.query(func.sum(STLModel.archive_size)).scalar() or 0
-                stats["total_file_size"]    = s.query(func.sum(STLFile.file_size)).scalar() or 0
-
-                # --- Content quality ---
-                stats["presupported"] = s.query(func.count(STLModel.id)).filter(
-                    STLModel.presupports.isnot(None),
-                    STLModel.presupports.notin_(["", "No"]),
-                ).scalar() or 0
-
-                stats["with_warnings"] = s.query(func.count(STLModel.id)).filter(
-                    STLModel.warning.isnot(None),
-                ).scalar() or 0
-
-                stats["no_images"] = s.query(func.count(STLModel.id)).outerjoin(
-                    Image, STLModel.id == Image.model_id
-                ).filter(Image.id.is_(None)).scalar() or 0
-
-                stats["with_url"] = s.query(func.count(STLModel.id)).filter(
-                    STLModel.url.isnot(None),
-                    STLModel.url != "",
-                ).scalar() or 0
-
-                # --- By source ---
-                stats["by_source"] = s.query(
-                    STLModel.source, func.count(STLModel.id)
-                ).group_by(STLModel.source).order_by(func.count(STLModel.id).desc()).all()
-
-                # --- By year (top 10 by count) ---
-                stats["by_year"] = s.query(
-                    STLModel.release_year, func.count(STLModel.id)
-                ).filter(
-                    STLModel.release_year.isnot(None)
-                ).group_by(STLModel.release_year).order_by(
-                    func.count(STLModel.id).desc()
-                ).limit(10).all()
-
-                # --- Top sculptors ---
-                stats["top_sculptors"] = s.query(
-                    Sculptor.name, func.count(STLModel.id).label("n")
-                ).join(STLModel, STLModel.sculptor_id == Sculptor.id).group_by(
-                    Sculptor.id
-                ).order_by(func.count(STLModel.id).desc()).limit(15).all()
-
-                # --- Top tags ---
-                stats["top_tags"] = s.query(
-                    Tag.name, func.count(model_tags.c.model_id).label("n")
-                ).join(model_tags, model_tags.c.tag_id == Tag.id).group_by(
-                    Tag.id
-                ).order_by(func.count(model_tags.c.model_id).desc()).limit(15).all()
-
-                # --- Top collections ---
-                stats["top_collections"] = s.query(
-                    Collection.name, func.count(STLModel.id).label("n")
-                ).join(STLModel, STLModel.collection_id == Collection.id).group_by(
-                    Collection.id
-                ).order_by(func.count(STLModel.id).desc()).limit(10).all()
+            stats.update(library_statistics())
 
             # --- Storage ---
             db_path = Path(get_db_path())

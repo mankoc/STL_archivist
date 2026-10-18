@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Rust migration, step 4f-3: the browser panel, statistics and the sort dialog read and write natively** (on Windows). This covers the info panel, thumbnails, dropped images, Delete from DB, Add Tag, the edit-cell lookup lists, Statistics, Column Distribution and Sort Files. Results are identical to the Python code (golden-tested). Statistics rankings now order models with equal counts consistently.
+- **Fix:** sorting files into a directory now updates the archive's folder as well as its path, so folder views show moved archives in their new folder at once.
+
 - **Rust migration, step 4f-2: the model editors save natively** (on Windows): the Edit Model dialog, the AI tagger and the Mass Editor, including path-pattern parsing, `{token}` templates, Find & Replace and trimming. Results are identical to the Python code (golden-tested over random edits). A regular-expression Find & Replace still runs in Python, because the two regex engines differ in details.
 
 - **Rust migration, step 4f begins: the lookup editors run natively** (on Windows). Tag, Category, Collection, Subcollection, Scale, Author and creator profile editing all go through a shared service, with identical results (golden-tested over random edit sequences). Renaming an author to an existing name no longer holds the database locked while asking whether to merge.

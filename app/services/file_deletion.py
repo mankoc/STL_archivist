@@ -10,7 +10,7 @@ Two modes are supported:
 * **purge** — delete the archive file permanently with ``Path.unlink``.
 
 Both modes also remove the corresponding ``STLModel`` row (cascade-deletes
-images, tags, and stl_files via the ORM relationships).  Thumbnails stored
+images, tags, and stl_files).  Thumbnails stored
 in LMDB are purged via ``delete_thumbnail`` so the LMDB store does not grow
 unbounded.
 
@@ -26,9 +26,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy.orm import Session
-
+from app.database import native_db
+from app.database.db import session_scope
 from app.database.models import STLModel
+from app.services import browser_data
 from app.utils.thumbnailer import delete_thumbnails
 
 logger = logging.getLogger(__name__)
@@ -55,20 +56,18 @@ class DeletionReport:
 
 
 def delete_archives(
-    session: Session,
     model_ids: list[int],
     use_trash: bool,
     trash_path: Path | str | None,
 ) -> DeletionReport:
     """Delete archive files for the given model IDs and return a report.
 
-    The caller owns the ``Session`` lifecycle; this function adds work to
-    the session but does not commit.  Wrap the call in a ``with
-    session_scope() as session:`` block so a successful return commits the
-    accumulated deletes and an exception rolls them back.
+    Each archive file is moved to the trash or unlinked first; the records
+    whose file step succeeded are then deleted in one transaction (natively
+    when :func:`app.database.native_db.library` allows it), and their
+    thumbnails after that.
 
     Args:
-        session: Active SQLAlchemy session (write access required).
         model_ids: Primary keys of the ``STLModel`` rows to delete.
         use_trash: When ``True``, move files into *trash_path* instead of
             permanently deleting them.  Ignored when *trash_path* is
@@ -87,31 +86,38 @@ def delete_archives(
     if trash is not None:
         trash.mkdir(parents=True, exist_ok=True)
 
-    models = session.query(STLModel).filter(STLModel.id.in_(model_ids)).all()
-    thumb_refs: list[str] = []
-    for model in models:
-        archive_path = model.archive_path
+    done: list[int] = []
+    for model_id, archive_path, title, creator, archive_hash in _rows(model_ids):
         try:
             file_path = Path(archive_path)
             if file_path.exists():
                 if trash is not None:
-                    _move_to_trash(file_path, trash, model)
+                    _move_to_trash(file_path, trash, title, creator, archive_hash)
                 else:
                     file_path.unlink()
-
-            thumb_refs += [i.thumbnail_path for i in model.images if i.thumbnail_path]
-            session.delete(model)
+            done.append(model_id)
             report.deleted += 1
         except Exception as exc:
             logger.error("Failed to delete %s: %s", archive_path, exc, exc_info=True)
             report.failed.append((archive_path, str(exc)))
 
     # One LMDB transaction for all models: each one ends with a disk flush.
-    delete_thumbnails(thumb_refs)
+    delete_thumbnails(browser_data.delete_models(done))
     return report
 
 
-def _move_to_trash(file_path: Path, trash_dir: Path, model: STLModel) -> None:
+def _rows(model_ids: list[int]) -> list[tuple]:
+    """``(id, archive_path, title, creator, archive_hash)`` in id order."""
+    lib = native_db.library()
+    if lib is not None:
+        return lib.browser_deletion_rows([int(i) for i in model_ids])
+    with session_scope() as s:
+        return [tuple(r) for r in s.query(STLModel.id, STLModel.archive_path, STLModel.title,
+                                          STLModel.creator, STLModel.archive_hash)
+                .filter(STLModel.id.in_(model_ids)).order_by(STLModel.id)]
+
+
+def _move_to_trash(file_path: Path, trash_dir: Path, title, creator, archive_hash) -> None:
     """Move *file_path* into *trash_dir* and write a recovery JSON sidecar.
 
     Filename collisions in the trash directory are resolved by appending
@@ -127,9 +133,9 @@ def _move_to_trash(file_path: Path, trash_dir: Path, model: STLModel) -> None:
 
     info = {
         "original_path": str(file_path),
-        "title":         model.title,
-        "creator":       model.creator,
-        "archive_hash":  model.archive_hash,
+        "title":         title,
+        "creator":       creator,
+        "archive_hash":  archive_hash,
         "deleted_at":    datetime.now(timezone.utc).isoformat(),
     }
     sidecar = dest.with_suffix(dest.suffix + ".json")

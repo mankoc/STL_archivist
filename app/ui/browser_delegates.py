@@ -9,8 +9,6 @@ from PyQt6.QtCore import Qt, QStringListModel
 from PyQt6.QtWidgets import QStyledItemDelegate, QComboBox, QLineEdit, QCompleter
 
 from app.ui import lookup_cache as _lookup_cache
-from app.database.db import session_scope
-from app.database.models import Tag
 
 
 class _ComboDelegate(QStyledItemDelegate):
@@ -129,9 +127,8 @@ class TagDelegate(QStyledItemDelegate):
     """QLineEdit that autocompletes each comma-separated token from the tag pool."""
 
     def createEditor(self, parent, option, index) -> "_TagLineEdit":
-        with session_scope() as session:
-            all_tags = [t.name for t in session.query(Tag).order_by(Tag.name).all()]
-        edit = _TagLineEdit(all_tags, parent)
+        from app.services.browser_data import tag_names
+        edit = _TagLineEdit(tag_names(), parent)
         return edit
 
     def setEditorData(self, editor, index) -> None:

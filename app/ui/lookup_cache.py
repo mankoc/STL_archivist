@@ -51,31 +51,5 @@ def invalidate(kind: Optional[str] = None) -> None:
 
 
 def _load(kind: str) -> list[str]:
-    from app.database.db import get_session
-    from app.database.models import (
-        Category, Collection, Release, Scale, Sculptor, STLModel, Subcollection,
-    )
-
-    session = get_session()
-    try:
-        if kind == "source":
-            return sorted(filter(None, (
-                v for (v,) in session.query(STLModel.source).distinct().all()
-            )))
-        if kind == "sculptor":
-            return sorted(s.name for s in session.query(Sculptor).order_by(Sculptor.name).all())
-        if kind == "collection":
-            return sorted(c.name for c in session.query(Collection).order_by(Collection.name).all())
-        if kind == "subcollection":
-            return sorted(
-                s.name for s in session.query(Subcollection).order_by(Subcollection.name).all()
-            )
-        if kind == "category":
-            return sorted(c.name for c in session.query(Category).order_by(Category.name).all())
-        if kind == "release":
-            return sorted(r.name for r in session.query(Release).order_by(Release.name).all())
-        if kind == "scale":
-            return sorted(s.name for s in session.query(Scale).order_by(Scale.name).all())
-        return []
-    finally:
-        session.close()
+    from app.services.browser_data import lookup_names
+    return lookup_names(kind)

@@ -1016,7 +1016,6 @@ class FindContentDuplicatesDialog(QDialog):
     def _delete_archive_from_disk(
         self, model_id: int, table: QTableWidget, row: int
     ) -> None:
-        from app.database.db import session_scope
         from app.services.file_deletion import delete_archives
         from app.ui.config_dialog import get_trash_folder_path, get_use_trash_folder
 
@@ -1035,8 +1034,7 @@ class FindContentDuplicatesDialog(QDialog):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        with session_scope() as session:
-            report = delete_archives(session, [model_id], use_trash, trash_path)
+        report = delete_archives([model_id], use_trash, trash_path)
 
         if report.failed:
             QMessageBox.warning(
