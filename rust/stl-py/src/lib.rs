@@ -604,6 +604,103 @@ impl PyLibraryDb {
         self.with_tx(py, move |tx| stl_core::storage::maintenance::delete_images(tx, &ids), db_err)
     }
 
+    // ── lookup administration (services.lookup_admin) ─────────────────────────
+
+    /// `(id, name, models)`, or `(id, name, models, collection_id, collection_name)`
+    /// for subcollections.
+    fn admin_list<'py>(&self, py: Python<'py>, kind: String) -> PyResult<Vec<Bound<'py, PyAny>>> {
+        use stl_core::storage::admin;
+        let rows = self.with(py, |c| admin::list(c, &kind))?;
+        rows.into_iter()
+            .map(|(id, name, n, cid, cname)| {
+                Ok(match (cid, cname) {
+                    (Some(cid), Some(cname)) => (id, name, n, cid, cname).into_pyobject(py)?.into_any(),
+                    _ => (id, name, n).into_pyobject(py)?.into_any(),
+                })
+            })
+            .collect()
+    }
+
+    fn admin_tags_for_scan(&self, py: Python<'_>) -> PyResult<Vec<(i64, String, i64)>> {
+        self.with(py, stl_core::storage::admin::tags_for_scan)
+    }
+
+    #[pyo3(signature = (kind, name, collection_name=None))]
+    fn admin_add(&self, py: Python<'_>, kind: String, name: String, collection_name: Option<String>) -> PyResult<bool> {
+        self.with_tx(py, move |tx| stl_core::storage::admin::add(tx, &kind, &name, collection_name.as_deref()), db_err)
+    }
+
+    fn admin_name_of(&self, py: Python<'_>, kind: String, id: i64) -> PyResult<Option<(String, Option<i64>)>> {
+        self.with(py, |c| stl_core::storage::admin::name_of(c, &kind, id))
+    }
+
+    fn admin_rename(&self, py: Python<'_>, kind: String, id: i64, new_name: String) -> PyResult<bool> {
+        self.with_tx(py, move |tx| stl_core::storage::admin::rename(tx, &kind, id, &new_name), db_err)
+    }
+
+    fn admin_delete_info(&self, py: Python<'_>, kind: String, id: i64) -> PyResult<Option<(String, i64, i64)>> {
+        self.with(py, |c| stl_core::storage::admin::delete_info(c, &kind, id))
+    }
+
+    fn admin_delete(&self, py: Python<'_>, kind: String, id: i64) -> PyResult<()> {
+        self.with_tx(py, move |tx| stl_core::storage::admin::delete(tx, &kind, id), db_err)
+    }
+
+    fn admin_merge(&self, py: Python<'_>, kind: String, keep_id: i64, delete_id: i64) -> PyResult<()> {
+        self.with_tx(py, move |tx| stl_core::storage::admin::merge(tx, &kind, keep_id, delete_id), db_err)
+    }
+
+    fn admin_unused_tag_count(&self, py: Python<'_>) -> PyResult<i64> {
+        self.with(py, stl_core::storage::admin::unused_tag_count)
+    }
+
+    fn admin_delete_unused_tags(&self, py: Python<'_>) -> PyResult<usize> {
+        self.with_tx(py, stl_core::storage::admin::delete_unused_tags, db_err)
+    }
+
+    fn admin_merge_tags(&self, py: Python<'_>, tag_ids: Vec<i64>, target: String) -> PyResult<()> {
+        self.with_tx(py, move |tx| stl_core::storage::admin::merge_tags(tx, &tag_ids, &target), db_err)
+    }
+
+    fn admin_author_counts(&self, py: Python<'_>) -> PyResult<Vec<(String, i64)>> {
+        self.with(py, stl_core::storage::admin::author_counts)
+    }
+
+    fn admin_author_model_count(&self, py: Python<'_>, name: String) -> PyResult<i64> {
+        self.with(py, |c| stl_core::storage::admin::author_model_count(c, &name))
+    }
+
+    fn admin_rename_author(&self, py: Python<'_>, old_name: String, new_name: String) -> PyResult<()> {
+        self.with_tx(py, move |tx| stl_core::storage::admin::rename_author(tx, &old_name, &new_name), db_err)
+    }
+
+    fn admin_delete_author(&self, py: Python<'_>, name: String) -> PyResult<()> {
+        self.with_tx(py, move |tx| stl_core::storage::admin::delete_author(tx, &name), db_err)
+    }
+
+    fn admin_merge_authors(&self, py: Python<'_>, keep_name: String, delete_name: String) -> PyResult<()> {
+        self.with_tx(py, move |tx| stl_core::storage::admin::merge_authors(tx, &keep_name, &delete_name), db_err)
+    }
+
+    fn admin_creator_profile<'py>(&self, py: Python<'py>, name: String) -> PyResult<Option<Bound<'py, PyDict>>> {
+        use stl_core::storage::admin::{PROFILE_FIELDS, creator_profile};
+        let Some(vals) = self.with(py, |c| creator_profile(c, &name))? else { return Ok(None) };
+        let out = PyDict::new(py);
+        for (f, v) in PROFILE_FIELDS.iter().zip(vals) {
+            out.set_item(f, v)?;
+        }
+        Ok(Some(out))
+    }
+
+    fn admin_save_creator_profile(&self, py: Python<'_>, name: String, values: &Bound<'_, PyDict>) -> PyResult<()> {
+        use stl_core::storage::admin::{PROFILE_FIELDS, save_creator_profile};
+        let mut vals: [Option<String>; 5] = Default::default();
+        for (slot, f) in vals.iter_mut().zip(PROFILE_FIELDS) {
+            *slot = values.get_item(f)?.map(|v| v.extract()).transpose()?.flatten();
+        }
+        self.with_tx(py, move |tx| save_creator_profile(tx, &name, &vals), db_err)
+    }
+
     /// Close the pooled connections (they reopen on the next call).
     fn close(&self, py: Python<'_>) {
         py.detach(|| self.pool.lock().unwrap_or_else(|e| e.into_inner()).clear());

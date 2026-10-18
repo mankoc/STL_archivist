@@ -433,6 +433,21 @@ browser cell field, with the tag/scale/subcollection rules), `relocate`, `delete
   natively against 1.42 s in Python; vector reads and KNN take about the same time, since
   both already ran in C.
 
+**4f-1: done 2026-10-18 (lookup editors).** The tag, category, collection, subcollection,
+scale, author and creator-profile dialogs no longer touch the ORM. They call
+`services/lookup_admin.py`, which runs natively (`storage::admin`) or falls back to the
+dialogs' former ORM code, moved verbatim. The ORM's side effects are now explicit:
+- deleting a category, collection or subcollection nulls the models' reference and sets
+  `updated_at`, and a collection takes its subcollections with it;
+- deleting a tag or scale only unlinks it;
+- bulk creator renames set `updated_at`;
+- the tag-merge target is matched with SQL `lower()` against a Unicode-lowered name, now
+  `ORDER BY id`.
+
+The author rename no longer asks its "merge?" question inside an open transaction.
+`tests/golden/test_admin_golden.py` runs 150 random editor operations both ways and
+compares every result and both databases.
+
 ### Phase 5: Server (medium)
 
 `stl-server` on axum, the product's centre from here on:

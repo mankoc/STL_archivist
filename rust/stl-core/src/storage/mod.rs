@@ -21,6 +21,7 @@
 //! drops the other's POSIX locks), so [`migrate`] opens, migrates and closes
 //! before SQLAlchemy connects.
 
+pub mod admin;
 pub mod edit;
 pub mod library;
 pub mod maintenance;

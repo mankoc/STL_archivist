@@ -18,9 +18,7 @@ _ID_ROLE = Qt.ItemDataRole.UserRole
 _NAME_ROLE = Qt.ItemDataRole.UserRole + 1
 
 
-from app.database.db import session_scope, get_session
-from app.database.models import Tag
-from app.services.lookups import usage_count, usage_counts
+from app.services import lookup_admin
 from app.utils.string_utils import (
     levenshtein as _levenshtein,
     levenshtein_within as _within,
@@ -92,23 +90,18 @@ class TagEditorDialog(QDialog):
     def _load(self) -> None:
         self._table.setSortingEnabled(False)
         self._table.setRowCount(0)
-        session = get_session()
-        try:
-            counts = usage_counts(session, "tag")
-            for tag in session.query(Tag).order_by(Tag.name).all():
-                row = self._table.rowCount()
-                self._table.insertRow(row)
+        for tag_id, tag_name, tag_count in lookup_admin.list_lookups("tag"):
+            row = self._table.rowCount()
+            self._table.insertRow(row)
 
-                name_item = QTableWidgetItem(tag.name)
-                name_item.setData(Qt.ItemDataRole.UserRole, tag.id)
+            name_item = QTableWidgetItem(tag_name)
+            name_item.setData(Qt.ItemDataRole.UserRole, tag_id)
 
-                count_item = QTableWidgetItem(str(counts.get(tag.id, 0)))
-                count_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            count_item = QTableWidgetItem(str(tag_count))
+            count_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
-                self._table.setItem(row, 0, name_item)
-                self._table.setItem(row, 1, count_item)
-        finally:
-            session.close()
+            self._table.setItem(row, 0, name_item)
+            self._table.setItem(row, 1, count_item)
         self._table.setSortingEnabled(True)
         self._apply_filter()
 
@@ -149,11 +142,9 @@ class TagEditorDialog(QDialog):
         if not ok or not name.strip():
             return
         name = name.strip().lower()
-        with session_scope() as session:
-            if session.query(Tag).filter_by(name=name).first():
-                QMessageBox.warning(self, self.tr("Add Tag"), f"Tag '{name}' already exists.")
-                return
-            session.add(Tag(name=name))
+        if not lookup_admin.add("tag", name):
+            QMessageBox.warning(self, self.tr("Add Tag"), f"Tag '{name}' already exists.")
+            return
         self._load()
 
     def _rename_tag(self) -> None:
@@ -163,12 +154,7 @@ class TagEditorDialog(QDialog):
             QMessageBox.information(self, self.tr("Rename"), self.tr("Select exactly one tag to rename."))
             return
 
-        session = get_session()
-        try:
-            tag = session.get(Tag, tag_id)
-            old_name = tag.name
-        finally:
-            session.close()
+        old_name = lookup_admin.name_of("tag", tag_id)[0]
 
         new_name, ok = QInputDialog.getText(self, self.tr("Rename Tag"), self.tr("New name:"), text=old_name)
         if not ok or not new_name.strip():
@@ -177,11 +163,9 @@ class TagEditorDialog(QDialog):
         if new_name == old_name:
             return
 
-        with session_scope() as session:
-            if session.query(Tag).filter_by(name=new_name).first():
-                QMessageBox.warning(self, self.tr("Rename Tag"), f"Tag '{new_name}' already exists.")
-                return
-            session.get(Tag, tag_id).name = new_name
+        if not lookup_admin.rename("tag", tag_id, new_name):
+            QMessageBox.warning(self, self.tr("Rename Tag"), f"Tag '{new_name}' already exists.")
+            return
         self._load()
 
     def _delete_tag(self) -> None:
@@ -191,13 +175,7 @@ class TagEditorDialog(QDialog):
             QMessageBox.information(self, self.tr("Delete"), self.tr("Select exactly one tag to delete."))
             return
 
-        session = get_session()
-        try:
-            tag = session.get(Tag, tag_id)
-            name = tag.name
-            count = usage_count(session, "tag", tag_id)
-        finally:
-            session.close()
+        name, count, _subs = lookup_admin.delete_info("tag", tag_id)
 
         msg = f"Delete tag '{name}'?"
         if count:
@@ -210,21 +188,12 @@ class TagEditorDialog(QDialog):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        with session_scope() as session:
-            tag = session.get(Tag, tag_id)
-            session.delete(tag)
+        lookup_admin.delete("tag", tag_id)
         self._load()
 
     def _clear_unused_tags(self) -> None:
         """Delete all tags with 0 models after user confirmation."""
-        session = get_session()
-        try:
-            unused_tags = session.query(Tag).filter(
-                ~Tag.models.any()
-            ).all()
-            unused_count = len(unused_tags)
-        finally:
-            session.close()
+        unused_count = lookup_admin.unused_tag_count()
 
         if unused_count == 0:
             QMessageBox.information(
@@ -242,10 +211,7 @@ class TagEditorDialog(QDialog):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        with session_scope() as session:
-            session.query(Tag).filter(
-                ~Tag.models.any()
-            ).delete()
+        lookup_admin.delete_unused_tags()
         self._load()
 
     def _merge_similar(self) -> None:
@@ -366,22 +332,7 @@ class _ScanWorker(QThread):
         self._threshold = threshold
 
     def run(self) -> None:
-        from sqlalchemy import func
-        from app.database.models import model_tags
-
-        session = get_session()
-        try:
-            tags = [
-                (tid, name, count)
-                for tid, name, count in (
-                    session.query(Tag.id, Tag.name, func.count(model_tags.c.model_id))
-                    .outerjoin(model_tags, model_tags.c.tag_id == Tag.id)
-                    .group_by(Tag.id, Tag.name)
-                    .all()
-                )
-            ]
-        finally:
-            session.close()
+        tags = lookup_admin.tags_for_merge_scan()
 
         pairs: list[tuple] = []
         if self._method == "Levenshtein":
@@ -589,8 +540,6 @@ class _MergeSimilarDialog(QDialog):
         The target name comes from the editable *Replace with* combo, so it may
         be the value's own name, one of the similar tags, or a brand-new name.
         """
-        from sqlalchemy import func
-
         current = self._value_list.currentItem()
         if current is None:
             QMessageBox.information(
@@ -635,22 +584,7 @@ class _MergeSimilarDialog(QDialog):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        with session_scope() as session:
-            keep_tag = session.query(Tag).filter(func.lower(Tag.name) == target.lower()).first()
-            if keep_tag is None:
-                keep_tag = Tag(name=target)
-                session.add(keep_tag)
-                session.flush()
-            for did, _ in doomed:
-                if did == keep_tag.id:
-                    continue
-                delete_tag = session.get(Tag, did)
-                if delete_tag is None:
-                    continue
-                for model in list(delete_tag.models):
-                    if keep_tag not in model.tags:
-                        model.tags.append(keep_tag)
-                session.delete(delete_tag)
+        lookup_admin.merge_tags([did for did, _ in doomed], target)
 
         self._scan()
 

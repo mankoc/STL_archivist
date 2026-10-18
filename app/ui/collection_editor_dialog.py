@@ -9,9 +9,7 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox, QSpinBox, QComboBox,
 )
 
-from app.database.db import session_scope, get_session
-from app.database.models import Collection
-from app.services.lookups import usage_count, usage_counts
+from app.services import lookup_admin
 from app.utils.name_dedup import find_similar_pairs
 
 
@@ -68,23 +66,18 @@ class CollectionEditorDialog(QDialog):
     def _load(self) -> None:
         self._table.setSortingEnabled(False)
         self._table.setRowCount(0)
-        session = get_session()
-        try:
-            counts = usage_counts(session, "collection")
-            for col in session.query(Collection).order_by(Collection.name).all():
-                row = self._table.rowCount()
-                self._table.insertRow(row)
+        for col_id, col_name, col_count in lookup_admin.list_lookups("collection"):
+            row = self._table.rowCount()
+            self._table.insertRow(row)
 
-                name_item = QTableWidgetItem(col.name)
-                name_item.setData(Qt.ItemDataRole.UserRole, col.id)
+            name_item = QTableWidgetItem(col_name)
+            name_item.setData(Qt.ItemDataRole.UserRole, col_id)
 
-                count_item = QTableWidgetItem(str(counts.get(col.id, 0)))
-                count_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            count_item = QTableWidgetItem(str(col_count))
+            count_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
-                self._table.setItem(row, 0, name_item)
-                self._table.setItem(row, 1, count_item)
-        finally:
-            session.close()
+            self._table.setItem(row, 0, name_item)
+            self._table.setItem(row, 1, count_item)
         self._table.setSortingEnabled(True)
 
     # ------------------------------------------------------------------
@@ -100,11 +93,9 @@ class CollectionEditorDialog(QDialog):
         if not ok or not name.strip():
             return
         name = name.strip()
-        with session_scope() as session:
-            if session.query(Collection).filter_by(name=name).first():
-                QMessageBox.warning(self, self.tr("Add Collection"), f"Collection '{name}' already exists.")
-                return
-            session.add(Collection(name=name))
+        if not lookup_admin.add("collection", name):
+            QMessageBox.warning(self, self.tr("Add Collection"), f"Collection '{name}' already exists.")
+            return
         self._load()
 
     def _rename(self, *_) -> None:
@@ -113,11 +104,7 @@ class CollectionEditorDialog(QDialog):
             QMessageBox.information(self, self.tr("Rename"), self.tr("Select exactly one collection to rename."))
             return
 
-        session = get_session()
-        try:
-            old_name = session.get(Collection, col_id).name
-        finally:
-            session.close()
+        old_name = lookup_admin.name_of("collection", col_id)[0]
 
         new_name, ok = QInputDialog.getText(self, self.tr("Rename Collection"), self.tr("New name:"), text=old_name)
         if not ok or not new_name.strip():
@@ -126,11 +113,9 @@ class CollectionEditorDialog(QDialog):
         if new_name == old_name:
             return
 
-        with session_scope() as session:
-            if session.query(Collection).filter_by(name=new_name).first():
-                QMessageBox.warning(self, self.tr("Rename Collection"), f"Collection '{new_name}' already exists.")
-                return
-            session.get(Collection, col_id).name = new_name
+        if not lookup_admin.rename("collection", col_id, new_name):
+            QMessageBox.warning(self, self.tr("Rename Collection"), f"Collection '{new_name}' already exists.")
+            return
         self._load()
 
     def _delete(self) -> None:
@@ -139,14 +124,7 @@ class CollectionEditorDialog(QDialog):
             QMessageBox.information(self, self.tr("Delete"), self.tr("Select exactly one collection to delete."))
             return
 
-        session = get_session()
-        try:
-            col = session.get(Collection, col_id)
-            name = col.name
-            count = usage_count(session, "collection", col_id)
-            sub_count = len(col.subcollections)
-        finally:
-            session.close()
+        name, count, sub_count = lookup_admin.delete_info("collection", col_id)
 
         msg = f"Delete collection '{name}'?"
         if count:
@@ -161,8 +139,7 @@ class CollectionEditorDialog(QDialog):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        with session_scope() as session:
-            session.delete(session.get(Collection, col_id))
+        lookup_admin.delete("collection", col_id)
         self._load()
 
     def _merge_duplicates(self) -> None:
@@ -230,15 +207,7 @@ class _MergeCollectionsDialog(QDialog):
 
     def _scan(self):
         method = self._method_combo.currentText()
-        session = get_session()
-        try:
-            counts = usage_counts(session, "collection")
-            collections = [
-                (col.id, col.name, counts.get(col.id, 0))
-                for col in session.query(Collection).order_by(Collection.name).all()
-            ]
-        finally:
-            session.close()
+        collections = lookup_admin.list_lookups("collection")
 
         pairs = find_similar_pairs(collections, method, self._thresh_spin.value())
         col_header = "Distance" if method == "Levenshtein" else "Soundex"
@@ -283,12 +252,6 @@ class _MergeCollectionsDialog(QDialog):
 
         keep_id, delete_id = (id_a, id_b) if chosen == name_a else (id_b, id_a)
 
-        with session_scope() as session:
-            keep_col = session.get(Collection, keep_id)
-            delete_col = session.get(Collection, delete_id)
-            for model in list(delete_col.models):
-                model.collection = keep_col
-                model.subcollection = None
-            session.delete(delete_col)
+        lookup_admin.merge("collection", keep_id, delete_id)
 
         self._scan()

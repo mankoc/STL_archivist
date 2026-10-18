@@ -49,28 +49,22 @@ class CreatorEditorDialog(QDialog):
         root.addWidget(buttons)
 
     def _load(self) -> None:
-        from app.database.db import session_scope
-        from app.database.models import Creator
-        with session_scope() as session:
-            c = session.query(Creator).filter_by(name=self._creator_name).first()
-            if c:
-                self._full_name_edit.setText(c.full_name or "")
-                self._patreon_edit.setText(c.patreon_url or "")
-                self._artstation_edit.setText(c.artstation_url or "")
-                self._gumroad_edit.setText(c.gumroad_url or "")
-                self._mmf_edit.setText(c.myminifactory_url or "")
+        from app.services import lookup_admin
+        c = lookup_admin.creator_profile(self._creator_name)
+        if c:
+            self._full_name_edit.setText(c["full_name"] or "")
+            self._patreon_edit.setText(c["patreon_url"] or "")
+            self._artstation_edit.setText(c["artstation_url"] or "")
+            self._gumroad_edit.setText(c["gumroad_url"] or "")
+            self._mmf_edit.setText(c["myminifactory_url"] or "")
 
     def _save(self) -> None:
-        from app.database.db import session_scope
-        from app.database.models import Creator
-        with session_scope() as session:
-            c = session.query(Creator).filter_by(name=self._creator_name).first()
-            if c is None:
-                c = Creator(name=self._creator_name)
-                session.add(c)
-            c.full_name         = self._full_name_edit.text().strip() or None
-            c.patreon_url       = self._patreon_edit.text().strip() or None
-            c.artstation_url    = self._artstation_edit.text().strip() or None
-            c.gumroad_url       = self._gumroad_edit.text().strip() or None
-            c.myminifactory_url = self._mmf_edit.text().strip() or None
+        from app.services import lookup_admin
+        lookup_admin.save_creator_profile(self._creator_name, {
+            "full_name":         self._full_name_edit.text(),
+            "patreon_url":       self._patreon_edit.text(),
+            "artstation_url":    self._artstation_edit.text(),
+            "gumroad_url":       self._gumroad_edit.text(),
+            "myminifactory_url": self._mmf_edit.text(),
+        })
         self.accept()

@@ -97,6 +97,9 @@ the native core owns the schema from Phase 4b).
   `tests/golden/test_edit_golden.py` compares them. Use a native write only where the whole
   transaction is that write. Never run one while a SQLAlchemy session in the same thread
   holds the write lock (it would wait for itself until `busy_timeout`).
+- **Dialogs do not query the database.** Lookup editors go through `services/lookup_admin.py`
+  (step 4f moves the remaining dialogs the same way). New database work in a dialog
+  belongs in a service with a native implementation and a golden test, never inline ORM.
 - Crawler rules (`rules.py`) use the native port only with the built-in presupport
   patterns; a custom pattern list always runs in Python, because fancy-regex and `re` read
   some syntax differently without raising. Keep `_native_patterns_ok` when touching them.
@@ -205,6 +208,8 @@ Qt-free business logic, testable without a `QApplication`:
   multi-index Hamming search was tried and rejected: real dHashes cluster, and one segment
   bucket blew up to 30+ GB of candidates. `tests/test_image_duplicates.py` checks the
   aggregation against a slow reference.
+- **`lookup_admin.py`** — the lookup editors' list / add / rename / delete / merge, author
+  renames and creator profiles.
 - **`model_summary.py`** — `model_summary(session, model_id)`: one-statement display row
   (names, tags, image count) for detail panels; cheap enough for the GUI thread.
 - **`maintenance.py`** — Database Maintenance operations (verify, duplicate entries, prune images,

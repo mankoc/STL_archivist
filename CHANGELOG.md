@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Rust migration, step 4f begins: the lookup editors run natively** (on Windows). Tag, Category, Collection, Subcollection, Scale, Author and creator profile editing all go through a shared service, with identical results (golden-tested over random edit sequences). Renaming an author to an existing name no longer holds the database locked while asking whether to merge.
+
 - **Rust migration, step 4e: maintenance and image search run natively** (on Windows): *Verify Archives* (files are checked in parallel; about 1.8x faster when the drive's metadata is cached), *Find Duplicate Entries*, *Prune Images*, reading the stored AI embeddings, *Find by Image* by embedding, and the embedding duplicate search. Results are identical to the Python code on the reference library. *Verify Archives* and *Find Duplicate Entries* now always list records in the order they were added.
 
 - **Rust migration, step 4d: edits made in the browser table are saved natively** (on Windows), with the same rules as before: tags are lowercased and de-duplicated, a subcollection belongs to its collection, and the modification time only changes when a field really changes. Removing unused lookup values also runs natively. Moving and deleting records are ported too, and switch over with the crawler and dialogs later. Edits containing non-Latin digits (a date such as ٢٠٢٤) are saved by the Python code, as before.

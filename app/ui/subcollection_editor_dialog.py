@@ -9,11 +9,7 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox, QSpinBox, QComboBox,
 )
 
-from app.database.db import session_scope, get_session
-from sqlalchemy.orm import contains_eager
-
-from app.database.models import Collection, Subcollection
-from app.services.lookups import usage_count, usage_counts
+from app.services import lookup_admin
 from app.utils.name_dedup import find_similar_pairs_grouped
 
 
@@ -71,31 +67,22 @@ class SubcollectionEditorDialog(QDialog):
     def _load(self) -> None:
         self._table.setSortingEnabled(False)
         self._table.setRowCount(0)
-        session = get_session()
-        try:
-            counts = usage_counts(session, "subcollection")
-            for sc in (session.query(Subcollection)
-                       .join(Subcollection.collection)
-                       .options(contains_eager(Subcollection.collection))
-                       .order_by(Collection.name, Subcollection.name)
-                       .all()):
-                row = self._table.rowCount()
-                self._table.insertRow(row)
+        for sc_id, sc_name, sc_count, col_id, col_name in lookup_admin.list_lookups("subcollection"):
+            row = self._table.rowCount()
+            self._table.insertRow(row)
 
-                name_item = QTableWidgetItem(sc.name)
-                name_item.setData(Qt.ItemDataRole.UserRole, sc.id)
+            name_item = QTableWidgetItem(sc_name)
+            name_item.setData(Qt.ItemDataRole.UserRole, sc_id)
 
-                col_item = QTableWidgetItem(sc.collection.name)
-                col_item.setData(Qt.ItemDataRole.UserRole, sc.collection_id)
+            col_item = QTableWidgetItem(col_name)
+            col_item.setData(Qt.ItemDataRole.UserRole, col_id)
 
-                count_item = QTableWidgetItem(str(counts.get(sc.id, 0)))
-                count_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            count_item = QTableWidgetItem(str(sc_count))
+            count_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
-                self._table.setItem(row, 0, name_item)
-                self._table.setItem(row, 1, col_item)
-                self._table.setItem(row, 2, count_item)
-        finally:
-            session.close()
+            self._table.setItem(row, 0, name_item)
+            self._table.setItem(row, 1, col_item)
+            self._table.setItem(row, 2, count_item)
         self._table.setSortingEnabled(True)
 
     # ------------------------------------------------------------------
@@ -106,12 +93,7 @@ class SubcollectionEditorDialog(QDialog):
         return self._table.item(list(rows)[0], 0).data(Qt.ItemDataRole.UserRole)
 
     def _collection_names(self) -> list[str]:
-        session = get_session()
-        try:
-            return [col.name for col in
-                    session.query(Collection).order_by(Collection.name).all()]
-        finally:
-            session.close()
+        return lookup_admin.collection_names()
 
     # ------------------------------------------------------------------
     def _add(self) -> None:
@@ -142,17 +124,13 @@ class SubcollectionEditorDialog(QDialog):
             return
         name = name.strip()
 
-        with session_scope() as session:
-            col = session.query(Collection).filter_by(name=parent_name).first()
-            if col is None:
-                return
-            if session.query(Subcollection).filter_by(
-                    name=name, collection_id=col.id).first():
-                QMessageBox.warning(
-                    self, self.tr("Add Subcollection"),
-                    f"Subcollection '{name}' already exists under '{parent_name}'.")
-                return
-            session.add(Subcollection(name=name, collection_id=col.id))
+        if parent_name not in self._collection_names():
+            return
+        if not lookup_admin.add("subcollection", name, parent_name):
+            QMessageBox.warning(
+                self, self.tr("Add Subcollection"),
+                f"Subcollection '{name}' already exists under '{parent_name}'.")
+            return
         self._load()
 
     def _rename(self, *_) -> None:
@@ -163,13 +141,7 @@ class SubcollectionEditorDialog(QDialog):
                                     self.tr("Select exactly one subcollection to rename."))
             return
 
-        session = get_session()
-        try:
-            sc = session.get(Subcollection, sc_id)
-            old_name = sc.name
-            collection_id = sc.collection_id
-        finally:
-            session.close()
+        old_name, _collection_id = lookup_admin.name_of("subcollection", sc_id)
 
         new_name, ok = QInputDialog.getText(
             self, self.tr("Rename Subcollection"), self.tr("New name:"), text=old_name)
@@ -179,14 +151,11 @@ class SubcollectionEditorDialog(QDialog):
         if new_name == old_name:
             return
 
-        with session_scope() as session:
-            if session.query(Subcollection).filter_by(
-                    name=new_name, collection_id=collection_id).first():
-                QMessageBox.warning(
-                    self, self.tr("Rename Subcollection"),
-                    f"Subcollection '{new_name}' already exists under this collection.")
-                return
-            session.get(Subcollection, sc_id).name = new_name
+        if not lookup_admin.rename("subcollection", sc_id, new_name):
+            QMessageBox.warning(
+                self, self.tr("Rename Subcollection"),
+                f"Subcollection '{new_name}' already exists under this collection.")
+            return
         self._load()
 
     def _delete(self) -> None:
@@ -197,13 +166,7 @@ class SubcollectionEditorDialog(QDialog):
                                     self.tr("Select exactly one subcollection to delete."))
             return
 
-        session = get_session()
-        try:
-            sc = session.get(Subcollection, sc_id)
-            name = sc.name
-            count = usage_count(session, "subcollection", sc_id)
-        finally:
-            session.close()
+        name, count, _subs = lookup_admin.delete_info("subcollection", sc_id)
 
         msg = f"Delete subcollection '{name}'?"
         if count:
@@ -216,8 +179,7 @@ class SubcollectionEditorDialog(QDialog):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        with session_scope() as session:
-            session.delete(session.get(Subcollection, sc_id))
+        lookup_admin.delete("subcollection", sc_id)
         self._load()
 
     def _merge_duplicates(self) -> None:
@@ -288,22 +250,12 @@ class _MergeSubcollectionsDialog(QDialog):
 
     def _scan(self):
         method = self._method_combo.currentText()
-        session = get_session()
-        try:
-            # Group subcollections by parent collection
-            col_groups: dict[int, tuple[str, list]] = {}
-            counts = usage_counts(session, "subcollection")
-            for sc in (session.query(Subcollection)
-                       .join(Subcollection.collection)
-                       .options(contains_eager(Subcollection.collection))
-                       .order_by(Collection.name, Subcollection.name)
-                       .all()):
-                if sc.collection_id not in col_groups:
-                    col_groups[sc.collection_id] = (sc.collection.name, [])
-                col_groups[sc.collection_id][1].append(
-                    (sc.id, sc.name, counts.get(sc.id, 0)))
-        finally:
-            session.close()
+        # Group subcollections by parent collection
+        col_groups: dict[int, tuple[str, list]] = {}
+        for sc_id, sc_name, sc_count, col_id, col_name in lookup_admin.list_lookups("subcollection"):
+            if col_id not in col_groups:
+                col_groups[col_id] = (col_name, [])
+            col_groups[col_id][1].append((sc_id, sc_name, sc_count))
 
         pairs = find_similar_pairs_grouped(col_groups, method, self._thresh_spin.value())
         col_header = "Distance" if method == "Levenshtein" else "Soundex"
@@ -352,11 +304,6 @@ class _MergeSubcollectionsDialog(QDialog):
 
         keep_id, delete_id = (id_a, id_b) if chosen == name_a else (id_b, id_a)
 
-        with session_scope() as session:
-            keep_sc = session.get(Subcollection, keep_id)
-            delete_sc = session.get(Subcollection, delete_id)
-            for model in list(delete_sc.models):
-                model.subcollection = keep_sc
-            session.delete(delete_sc)
+        lookup_admin.merge("subcollection", keep_id, delete_id)
 
         self._scan()

@@ -9,9 +9,7 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox, QSpinBox, QComboBox,
 )
 
-from app.database.db import session_scope, get_session
-from app.database.models import Category
-from app.services.lookups import usage_count, usage_counts
+from app.services import lookup_admin
 from app.utils.name_dedup import find_similar_pairs
 
 
@@ -68,23 +66,18 @@ class CategoryEditorDialog(QDialog):
     def _load(self) -> None:
         self._table.setSortingEnabled(False)
         self._table.setRowCount(0)
-        session = get_session()
-        try:
-            counts = usage_counts(session, "category")
-            for cat in session.query(Category).order_by(Category.name).all():
-                row = self._table.rowCount()
-                self._table.insertRow(row)
+        for cat_id, cat_name, cat_count in lookup_admin.list_lookups("category"):
+            row = self._table.rowCount()
+            self._table.insertRow(row)
 
-                name_item = QTableWidgetItem(cat.name)
-                name_item.setData(Qt.ItemDataRole.UserRole, cat.id)
+            name_item = QTableWidgetItem(cat_name)
+            name_item.setData(Qt.ItemDataRole.UserRole, cat_id)
 
-                count_item = QTableWidgetItem(str(counts.get(cat.id, 0)))
-                count_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            count_item = QTableWidgetItem(str(cat_count))
+            count_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
-                self._table.setItem(row, 0, name_item)
-                self._table.setItem(row, 1, count_item)
-        finally:
-            session.close()
+            self._table.setItem(row, 0, name_item)
+            self._table.setItem(row, 1, count_item)
         self._table.setSortingEnabled(True)
 
     # ------------------------------------------------------------------
@@ -101,11 +94,9 @@ class CategoryEditorDialog(QDialog):
         if not ok or not name.strip():
             return
         name = name.strip()
-        with session_scope() as session:
-            if session.query(Category).filter_by(name=name).first():
-                QMessageBox.warning(self, self.tr("Add Category"), f"Category '{name}' already exists.")
-                return
-            session.add(Category(name=name))
+        if not lookup_admin.add("category", name):
+            QMessageBox.warning(self, self.tr("Add Category"), f"Category '{name}' already exists.")
+            return
         self._load()
 
     def _rename(self, *_) -> None:
@@ -115,11 +106,7 @@ class CategoryEditorDialog(QDialog):
             QMessageBox.information(self, self.tr("Rename"), self.tr("Select exactly one category to rename."))
             return
 
-        session = get_session()
-        try:
-            old_name = session.get(Category, cat_id).name
-        finally:
-            session.close()
+        old_name = lookup_admin.name_of("category", cat_id)[0]
 
         new_name, ok = QInputDialog.getText(self, self.tr("Rename Category"), self.tr("New name:"), text=old_name)
         if not ok or not new_name.strip():
@@ -128,11 +115,9 @@ class CategoryEditorDialog(QDialog):
         if new_name == old_name:
             return
 
-        with session_scope() as session:
-            if session.query(Category).filter_by(name=new_name).first():
-                QMessageBox.warning(self, self.tr("Rename Category"), f"Category '{new_name}' already exists.")
-                return
-            session.get(Category, cat_id).name = new_name
+        if not lookup_admin.rename("category", cat_id, new_name):
+            QMessageBox.warning(self, self.tr("Rename Category"), f"Category '{new_name}' already exists.")
+            return
         self._load()
 
     def _delete(self) -> None:
@@ -142,13 +127,7 @@ class CategoryEditorDialog(QDialog):
             QMessageBox.information(self, self.tr("Delete"), self.tr("Select exactly one category to delete."))
             return
 
-        session = get_session()
-        try:
-            cat = session.get(Category, cat_id)
-            name = cat.name
-            count = usage_count(session, "category", cat_id)
-        finally:
-            session.close()
+        name, count, _subs = lookup_admin.delete_info("category", cat_id)
 
         msg = f"Delete category '{name}'?"
         if count:
@@ -161,8 +140,7 @@ class CategoryEditorDialog(QDialog):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        with session_scope() as session:
-            session.delete(session.get(Category, cat_id))
+        lookup_admin.delete("category", cat_id)
         self._load()
 
     def _merge_duplicates(self) -> None:
@@ -235,15 +213,7 @@ class _MergeCategoriesDialog(QDialog):
 
     def _scan(self):
         method = self._method_combo.currentText()
-        session = get_session()
-        try:
-            counts = usage_counts(session, "category")
-            categories = [
-                (cat.id, cat.name, counts.get(cat.id, 0))
-                for cat in session.query(Category).order_by(Category.name).all()
-            ]
-        finally:
-            session.close()
+        categories = lookup_admin.list_lookups("category")
 
         pairs = find_similar_pairs(categories, method, self._thresh_spin.value())
         col_header = "Distance" if method == "Levenshtein" else "Soundex"
@@ -288,11 +258,6 @@ class _MergeCategoriesDialog(QDialog):
 
         keep_id, delete_id = (id_a, id_b) if chosen == name_a else (id_b, id_a)
 
-        with session_scope() as session:
-            keep_cat = session.get(Category, keep_id)
-            delete_cat = session.get(Category, delete_id)
-            for model in list(delete_cat.models):
-                model.category = keep_cat
-            session.delete(delete_cat)
+        lookup_admin.merge("category", keep_id, delete_id)
 
         self._scan()
