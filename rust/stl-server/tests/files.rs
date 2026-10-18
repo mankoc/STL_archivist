@@ -23,13 +23,14 @@ async fn editors_browse_inside_roots_admins_anywhere() {
     std::fs::write(root.join("STL").join("b.zip"), b"x").unwrap();
     std::fs::write(root.join("STL").join("A.7z"), b"xyz").unwrap();
     std::fs::write(root.join("STL").join("notes.txt"), b"x").unwrap();
+    std::fs::write(root.join("STL").join("METADATA.7z"), b"sidecar").unwrap();
 
     let uri = |p: &std::path::Path| format!("/api/files/browse?path={}", urlencode(&p.to_string_lossy()));
     let r = call(s, "GET", &uri(&root.join("STL")), Some(&ed), None).await;
     assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
     let v = r.json();
     let names: Vec<&str> = v["entries"].as_array().unwrap().iter().map(|e| e["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["Studio", "A.7z", "b.zip"], "folders first, then archives; other files hidden");
+    assert_eq!(names, ["Studio", "A.7z", "b.zip"], "folders first, then archives; other files and the sidecar hidden");
     assert_eq!(v["entries"][1]["size"], 3);
     assert!(v["parent"].is_string(), "the root itself is inside the roots");
 

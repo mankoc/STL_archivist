@@ -192,7 +192,9 @@ So far it signs in and browses the library: the filter pane (include / exclude v
 has-value groups, counts), search, the sortable table, and a detail pane with thumbnails and
 the archive download. Editors can edit cells in place (double-click), open the model editor,
 add images by dropping them on the detail pane, remove images, and remove selected models
-from the library.
+from the library. The **Jobs** page tracks crawled folders (add them by browsing the
+server's disks, crawl them with a path pattern) and runs maintenance, with live progress and
+logs.
 
 ### Environment overrides
 

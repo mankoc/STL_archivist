@@ -1,5 +1,5 @@
 // The signed-in application frame: header with the user menu, and the pages.
-import { AppShell, Avatar, Button, Group, Menu, Modal, PasswordInput, Stack, Text, Title, UnstyledButton } from "@mantine/core";
+import { AppShell, Avatar, Button, Group, Menu, Modal, PasswordInput, SegmentedControl, Stack, Text, Title, UnstyledButton } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import { IconKey, IconLogout } from "@tabler/icons-react";
@@ -10,11 +10,14 @@ import { api, type Schemas, unwrap } from "../api/client";
 import { useServerEvents } from "../api/events";
 import { UserContext } from "../auth/user";
 import { BrowserPage } from "../browser/BrowserPage";
+import { JobsPage } from "../jobs/JobsPage";
+import { type Page, usePage } from "./route";
 
 export function Shell({ user }: { user: Schemas["User"] }) {
   useServerEvents();
   const queryClient = useQueryClient();
   const [passwordOpen, password] = useDisclosure(false);
+  const [page, setPage] = usePage();
   const logout = async () => {
     await api.POST("/api/auth/logout");
     await queryClient.invalidateQueries({ queryKey: ["auth"] });
@@ -24,7 +27,19 @@ export function Shell({ user }: { user: Schemas["User"] }) {
       <AppShell header={{ height: 48 }} padding={0}>
         <AppShell.Header>
           <Group h="100%" px="md" justify="space-between">
-            <Title order={4}>stlLibrary</Title>
+            <Group gap="lg">
+              <Title order={4}>stlLibrary</Title>
+              <SegmentedControl
+                size="xs"
+                value={page}
+                onChange={(v) => setPage(v as Page)}
+                data={[
+                  { value: "library", label: "Library" },
+                  { value: "jobs", label: "Jobs" },
+                ]}
+                data-testid="pages"
+              />
+            </Group>
             <Menu position="bottom-end">
               <Menu.Target>
                 <UnstyledButton>
@@ -51,7 +66,7 @@ export function Shell({ user }: { user: Schemas["User"] }) {
           </Group>
         </AppShell.Header>
         <AppShell.Main style={{ height: "100vh", paddingTop: 48, display: "flex", flexDirection: "column" }}>
-          <BrowserPage />
+          {page === "jobs" ? <JobsPage /> : <BrowserPage />}
         </AppShell.Main>
         <PasswordModal opened={passwordOpen} onClose={password.close} />
       </AppShell>

@@ -276,6 +276,10 @@ impl Library {
     fn job_log(&self, job: &Job, line: String) {
         {
             let mut log = job.log.lock().unwrap_or_else(|e| e.into_inner());
+            // The crawl reports some steps as both a phase and a log line.
+            if log.back() == Some(&line) {
+                return;
+            }
             if log.len() >= KEEP_LOG {
                 log.pop_front();
             }
