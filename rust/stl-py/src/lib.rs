@@ -422,6 +422,69 @@ fn ranking_to_py<'py>(
         .collect()
 }
 
+
+// ── crawl input conversion ───────────────────────────────────────────────────
+
+fn opt_item<'py, T: FromPyObjectOwned<'py>>(d: &Bound<'py, PyDict>, key: &str) -> PyResult<Option<T>> {
+    match d.get_item(key)? {
+        Some(v) if !v.is_none() => Ok(Some(v.extract().map_err(Into::into)?)),
+        _ => Ok(None),
+    }
+}
+
+fn crawl_extracted(v: &Bound<'_, PyAny>) -> PyResult<Option<stl_core::storage::crawl::Extracted>> {
+    if v.is_none() {
+        return Ok(None);
+    }
+    let d = v.cast::<PyDict>()?;
+    Ok(Some(stl_core::storage::crawl::Extracted {
+        fields: opt_item(d, "fields")?.unwrap_or_default(),
+        release_date: opt_item(d, "release_date")?,
+        sequence: opt_item(d, "sequence")?,
+    }))
+}
+
+fn crawl_changed(v: &Bound<'_, PyAny>) -> PyResult<Option<stl_core::storage::crawl::Changed>> {
+    if v.is_none() {
+        return Ok(None);
+    }
+    let d = v.cast::<PyDict>()?;
+    Ok(Some(stl_core::storage::crawl::Changed {
+        title: opt_item(d, "title")?,
+        creator: opt_item(d, "creator")?,
+        source: opt_item(d, "source")?,
+        release_year: opt_item(d, "release_year")?,
+        release_month: opt_item(d, "release_month")?,
+        description: opt_item(d, "description")?,
+        release: opt_item(d, "release")?,
+        tags: opt_item(d, "tags")?.unwrap_or_default(),
+        presupports: opt_item(d, "presupports")?.unwrap_or_default(),
+        warnings: opt_item(d, "warnings")?,
+        scales: opt_item(d, "scales")?.unwrap_or_default(),
+        uncompressed_size: opt_item(d, "uncompressed_size")?,
+        thumbs: opt_item(d, "thumbs")?.unwrap_or_default(),
+        folder_images: opt_item(d, "folder_images")?.unwrap_or_default(),
+        stl_info: opt_item(d, "stl_info")?,
+    }))
+}
+
+fn crawl_config(d: &Bound<'_, PyDict>) -> PyResult<stl_core::storage::crawl::UpsertConfig> {
+    Ok(stl_core::storage::crawl::UpsertConfig {
+        store_stl: opt_item(d, "store_stl")?.unwrap_or(false),
+        warn_low_compression: opt_item(d, "warn_low_compression")?.unwrap_or(false),
+        low_compression_threshold: opt_item(d, "low_compression_threshold")?.unwrap_or(1.0),
+        force_creator: opt_item(d, "force_creator")?,
+        force_source: opt_item(d, "force_source")?,
+        force_sculptor: opt_item(d, "force_sculptor")?,
+        force_category: opt_item(d, "force_category")?,
+        force_collection: opt_item(d, "force_collection")?,
+        force_release: opt_item(d, "force_release")?,
+        force_scale: opt_item(d, "force_scale")?,
+        force_date: opt_item(d, "force_date")?,
+        embed_dim: opt_item(d, "embed_dim")?.unwrap_or(512),
+    })
+}
+
 #[pymethods]
 impl PyLibraryDb {
     #[new]
@@ -1229,6 +1292,136 @@ impl PyLibraryDb {
                 stl_core::storage::sidecar::import(tx, st, &folder)
             },
             sidecar_err,
+        )
+    }
+
+    // ── crawl phases (app.crawler.crawler) ────────────────────────────────────
+
+    #[allow(clippy::type_complexity)]
+    fn crawl_existing(
+        &self,
+        py: Python<'_>,
+        paths: Vec<String>,
+    ) -> PyResult<Vec<(String, String, Option<i64>, Option<i64>)>> {
+        self.with(py, |c| stl_core::storage::crawl::existing(c, &paths))
+    }
+
+    /// Phase 2 for a batch; returns a dict of the `Diff` fields.
+    fn crawl_diff<'py>(
+        &self,
+        py: Python<'py>,
+        batch: Vec<(String, String)>,
+        force: bool,
+        store_stl: bool,
+        candidates: std::collections::HashMap<String, i64>,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let d = self.with_tx(py, |tx| stl_core::storage::crawl::diff(tx, &batch, force, store_stl, &candidates), db_err)?;
+        let out = PyDict::new(py);
+        out.set_item("to_extract", d.to_extract)?;
+        out.set_item("stl_backfill", d.stl_backfill)?;
+        out.set_item("existing", d.existing)?;
+        out.set_item("unreadable", d.unreadable)?;
+        out.set_item("moved", d.moved)?;
+        out.set_item("consumed", d.consumed)?;
+        Ok(out)
+    }
+
+    /// Phase 4 for a batch in one transaction: per archive `(None, thumbnails,
+    /// folder images)` or `(error, 0, 0)`; shorter than `inputs` when it stopped
+    /// after `max_failures` consecutive failures.
+    #[pyo3(signature = (inputs, config, store=None, failures_before=0, max_failures=50))]
+    fn crawl_upsert_batch(
+        &self,
+        py: Python<'_>,
+        inputs: Vec<Bound<'_, PyDict>>,
+        config: &Bound<'_, PyDict>,
+        store: Option<Bound<'_, PyThumbStore>>,
+        failures_before: usize,
+        max_failures: usize,
+    ) -> PyResult<Vec<(Option<String>, usize, usize)>> {
+        use stl_core::storage::crawl;
+        let cfg = crawl_config(config)?;
+        let inputs = inputs
+            .iter()
+            .map(|d| {
+                Ok(crawl::UpsertInput {
+                    path: d.get_item("path")?.ok_or_else(|| PyValueError::new_err("path"))?.extract()?,
+                    hash: d.get_item("hash")?.ok_or_else(|| PyValueError::new_err("hash"))?.extract()?,
+                    existing: opt_item(d, "existing")?,
+                    extracted: match d.get_item("extracted")? {
+                        Some(v) => crawl_extracted(&v)?,
+                        None => None,
+                    },
+                    changed: match d.get_item("changed")? {
+                        Some(v) => crawl_changed(&v)?,
+                        None => None,
+                    },
+                })
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        let store = store.as_ref().map(|b| b.get());
+        let results = self.with_tx(
+            py,
+            |tx| {
+                let guard = store.map(|s| s.inner.read().unwrap_or_else(|e| e.into_inner()));
+                let st = guard.as_ref().and_then(|g| g.as_ref());
+                crawl::upsert_batch(tx, st, &cfg, &inputs, failures_before, max_failures)
+            },
+            db_err,
+        )?;
+        Ok(results
+            .into_iter()
+            .map(|r| match r {
+                Ok(u) => (None, u.thumbnails, u.folder_images),
+                Err(e) => (Some(e), 0, 0),
+            })
+            .collect())
+    }
+
+    fn crawl_collect_missing(&self, py: Python<'_>) -> PyResult<Vec<stl_core::storage::crawl::Missing>> {
+        self.with(py, stl_core::storage::crawl::collect_missing)
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn crawl_reconcile(
+        &self,
+        py: Python<'_>,
+        missing: Vec<stl_core::storage::crawl::Missing>,
+        new_paths: Vec<String>,
+    ) -> PyResult<(Vec<(i64, String, String)>, Vec<String>, Vec<String>)> {
+        self.with_tx(py, |tx| stl_core::storage::crawl::reconcile(tx, &missing, &new_paths), db_err)
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn crawl_mark_missing(
+        &self,
+        py: Python<'_>,
+        missing: Vec<stl_core::storage::crawl::Missing>,
+        source_dir: String,
+        defer: bool,
+    ) -> PyResult<(Vec<String>, Vec<String>, usize, Vec<String>)> {
+        self.with_tx(py, |tx| stl_core::storage::crawl::mark_missing(tx, &missing, &source_dir, defer), db_err)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn crawl_record_folder(
+        &self,
+        py: Python<'_>,
+        path: String,
+        pattern: Option<String>,
+        crawled_at: String,
+        archive_count: i64,
+        new_count: i64,
+        updated_count: i64,
+    ) -> PyResult<()> {
+        self.with_tx(
+            py,
+            |tx| {
+                stl_core::storage::crawl::record_folder(
+                    tx, &path, pattern.as_deref(), &crawled_at, archive_count, new_count, updated_count,
+                )
+            },
+            db_err,
         )
     }
 

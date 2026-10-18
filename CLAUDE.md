@@ -145,6 +145,10 @@ Handles all archive I/O and metadata extraction.
   change both implementations together.
 - **`crawler.py`** — `CrawlerWorker(QThread)` orchestrates the four-phase pipeline:
   1. Hash (parallel) → 2. DB query (batch) → 3. Extract (parallel) → 4. Upsert (serial)
+  With the native core, the database phases run in `storage::crawl` (`_native_diff`,
+  `_native_upsert`, …); Python passes in metadata, rule results, pattern matches,
+  thumbnails and vectors. Keep both paths equivalent; `tests/golden/test_crawl_golden.py`
+  compares them. The upsert flushes before applying the path pattern.
 
 ### `app/database/`
 

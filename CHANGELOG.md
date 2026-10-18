@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Rust migration, step 4g-4: the crawler's database work runs natively** (on Windows): change detection, move matching, saving new and changed archives, and the clean-up of missing records. Results are identical to the Python code (golden-tested over a multi-step crawl, and on real library folders).
+- **Fix:** a folder path pattern no longer overwrites a release, sculptor or collection that the same crawl has just taken from `info.json` or from the crawl's forced values. Before, that depended on internal timing.
+
 - **Rust migration, step 4g-3: METADATA.7z sidecars are written and read natively** (on Windows). Writing is about 9 times faster, because thumbnails are stored instead of being recompressed. Records restored from a sidecar now get their folder set, so folder views show them at once.
 
 - **Fix: the thumbnail store no longer grows by 2 GB every time it is opened.** On Windows the store's `data.mdb` takes the size of its memory map, and the map was sized from that file plus 2 GB of headroom, so each start of the application (and each test run) enlarged it. The map is now sized from the space actually in use. The space is allocated sparsely, so disk usage did not grow with it. An enlarged file keeps its size until *Database Maintenance → Compact Thumbnail Store* rewrites it.

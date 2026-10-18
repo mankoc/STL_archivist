@@ -647,6 +647,47 @@ Behaviour changes, in both implementations:
 Gate: 30 reference folders (301 models, 1,248 real thumbnails, read through a read-only copy
 of the live store) export identically.
 
+**4g-4: done 2026-10-18 (the crawl's database phases).** `storage::crawl` ports the crawl's
+database phases:
+- Phase 1's stored-hash lookup;
+- Phase 2's diff (unreadable warnings, hash backfill, size / mtime updates, early moves by
+  hash);
+- Phase 4's upsert, in one transaction per batch with a savepoint per archive and the
+  consecutive-failure stop;
+- collecting missing records (with a parallel existence check), move reconciliation,
+  marking records missing, and the crawled-folder record.
+
+`CrawlerWorker` uses them when `native_db.library()` is available and the thumbnail store
+is native (or closed).
+
+Python still computes what needs its semantics or libraries, and passes the results in:
+- metadata, rule results, path-pattern matches with their parsed dates and numbers;
+- precomputed thumbnails and dHashes, folder-image thumbnails, and CLIP vectors.
+
+The upsert replays the ORM's operation order. SQLAlchemy flushes a mapper's INSERTs before
+its DELETEs, and SQLite reuses the highest rowid, so new image rows are inserted before old
+or failed ones are deleted, and image ids match.
+
+**Behaviour change (both implementations):** the crawler flushes before applying the path
+pattern. Before, whether a pattern could overwrite a release, sculptor or collection just
+set from `info.json` or a force field depended on SQLAlchemy autoflush timing, which in turn
+depended on the per-batch lookup cache. Now "fill only empty fields" always holds.
+
+`tests/golden/test_crawl_golden.py` runs a three-step crawl scenario through both
+implementations over an identically rebuilt tree at one path, and compares databases,
+thumbnails and signals after every step. The scenario covers:
+- info.json tags and release, folder images, a failed thumbnail, a pattern;
+- forced values, a low-compression warning and an unreadable archive;
+- a changed archive, an early move, a deletion, a new archive, and a forced rescan.
+
+Gate: two real library folders (38 archives, 122 thumbnails) crawl to identical
+databases and stores.
+
+Still to do in 4g:
+- 4g-5: the orchestration itself (hashing, extraction, thumbnails, embeddings) in Rust;
+- 4g-6: the browser's rescan, thumbnail generation and re-crawl, and the Update Crawled
+  Folders reconciliation, on top of these phases.
+
 ### Phase 5: Server (medium)
 
 `stl-server` on axum, the product's centre from here on:

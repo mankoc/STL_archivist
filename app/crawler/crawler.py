@@ -47,6 +47,11 @@ from app.utils.image_hash import compute_dhash_from_jpeg, format_dhash
 from app.utils.path_pattern import parse_path, apply_extracted_to_model, parse_release_date
 
 
+def _missing_tuple(rec: dict) -> tuple:
+    """A missing record as the native reconciliation takes it."""
+    return (rec["id"], rec["path"], rec["hash"] or "", rec["filename"], rec["size"])
+
+
 def _store_embeddings(session, images: list[Image], vecs: list) -> None:
     """Write the CLIP vectors computed for *images* (parallel list) to image_vec."""
     if not vecs:
@@ -104,6 +109,8 @@ class CrawlerWorker(QThread):
         self._stats_updated = 0
         self._stats_unchanged = 0
         self._new_archive_paths: set[str] = set()
+        self._lib = self._native_library()
+        self._existing_hashes: dict[str, str] = {}
         logger.info("Crawl started — source: %s, pattern: %r, workers: %d",
                     self.source_dir, self._pattern, self._config.max_workers)
         self.phase.emit("Scanning for deleted files…")
@@ -145,6 +152,19 @@ class CrawlerWorker(QThread):
             logger.debug("--- Batch %d/%d (%d archives) ---", batch_idx, num_batches, len(batch))
 
             hashes = self._phase_hash(batch)
+
+            if self._lib is not None:
+                if batch_start == 0:
+                    self.phase.emit("Checking database for changes…")
+                to_extract, stl_backfill, existing_ids = self._native_diff(batch, hashes)
+                if to_extract and batch_start == 0:
+                    self.phase.emit("Extracting new/changed archives…")
+                extracted = self._phase_extract(to_extract, stl_backfill)
+                stopped = self._native_upsert(batch, batch_start, total, hashes, existing_ids,
+                                              *extracted, modified_folders)
+                if stopped or self._stop_requested:
+                    break
+                continue
 
             with session_scope() as session:
                 if batch_start == 0:
@@ -241,14 +261,20 @@ class CrawlerWorker(QThread):
         # Single batched DB lookup instead of one query per archive (was N+1).
         batch_strs = [str(p) for p in batch]
         existing: dict[str, tuple[str, int | None, int | None]] = {}
-        with session_scope() as session:
-            for ap, ah, asize, amtime in session.execute(
-                sa_select(
-                    STLModel.archive_path, STLModel.archive_hash,
-                    STLModel.archive_size, STLModel.archive_mtime_ns,
-                ).where(STLModel.archive_path.in_(batch_strs))
-            ).all():
+        lib = getattr(self, "_lib", None)
+        if lib is not None:
+            for ap, ah, asize, amtime in lib.crawl_existing(batch_strs):
                 existing[ap] = (ah, asize, amtime)
+        else:
+            with session_scope() as session:
+                for ap, ah, asize, amtime in session.execute(
+                    sa_select(
+                        STLModel.archive_path, STLModel.archive_hash,
+                        STLModel.archive_size, STLModel.archive_mtime_ns,
+                    ).where(STLModel.archive_path.in_(batch_strs))
+                ).all():
+                    existing[ap] = (ah, asize, amtime)
+        self._existing_hashes = {ap: row[0] for ap, row in existing.items()}
 
         for p in batch:
             fs_size, fs_mtime = stats.get(p, (None, None))
@@ -611,9 +637,240 @@ class CrawlerWorker(QThread):
     # Private helpers
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Native database phases (rust/stl-core/src/storage/crawl.rs)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _native_library():
+        """The native ``LibraryDb`` for the crawl's database phases, or ``None``.
+
+        Needs the native thumbnail store too (or none open), so thumbnails are
+        written by the same LMDB owner as everything else in this process.
+        """
+        from app.database import native_db
+        from app.utils.thumbnailer import store_backend
+        lib = native_db.library()
+        if lib is None or not hasattr(lib, "crawl_upsert_batch") or store_backend() == "lmdb":
+            return None
+        return lib
+
+    def _native_diff(self, batch: list[Path], hashes: dict[Path, str]):
+        """Phase 2 natively: returns ``(to_extract, stl_backfill, {path: model id})``."""
+        candidates = getattr(self, "_move_candidates", {}) or {}
+        d = self._lib.crawl_diff(
+            [(str(p), hashes[p]) for p in batch], bool(self._config.force_rescan),
+            bool(self._config.store_stl_file_list),
+            {h: rec["id"] for h, rec in candidates.items()})
+        for path in d["unreadable"]:
+            msg = f"WARNING: Cannot open archive (possibly corrupted): {Path(path).name}"
+            self.warning.emit(msg)
+            logger.warning("Corrupted or unreadable archive: %s", path)
+        for h in d["consumed"]:
+            rec = candidates.pop(h, None)
+            moved = next((m for m in d["moved"] if m[0] == h), None)
+            if rec is not None and moved is not None:
+                self._early_moved_ids.add(rec["id"])
+                self._moved_new_paths.add(moved[2])
+                self.log.emit(f"Moved: {rec['filename']} → {moved[2]}")
+                logger.info("File moved: %s → %s", rec["path"], moved[2])
+                self.file_moved.emit(rec["path"], moved[2])
+        by_str = {str(p): p for p in batch}
+        return ([by_str[x] for x in d["to_extract"]], [by_str[x] for x in d["stl_backfill"]],
+                dict(d["existing"]))
+
+    def _pattern_match(self, archive_path: Path) -> Optional[dict]:
+        """The path pattern's match for *archive_path* with Python's date and
+        number parses, as the native upsert takes it (``None``: no match)."""
+        if not self._pattern:
+            return None
+        try:
+            rel_path = "/" + str(archive_path.relative_to(self.source_dir)).replace("\\", "/")
+        except ValueError:
+            rel_path = str(archive_path)
+        extracted = parse_path(self._pattern, rel_path)
+        if not extracted:
+            return None
+        seq = None
+        if extracted.get("sequence"):
+            try:
+                seq = int(extracted["sequence"])
+            except ValueError:
+                seq = None
+        date = parse_release_date(extracted["release_date"]) if extracted.get("release_date") else None
+        return {"fields": list(extracted.items()), "release_date": date, "sequence": seq}
+
+    def _folder_images(self, archive_path: Path, max_thumb_size: int) -> list[tuple]:
+        """``_store_folder_images``' files with their thumbnails precomputed:
+        ``(file path, jpeg or None, dHash or None)``."""
+        from app.utils.thumbnailer import make_thumbnail
+        out = []
+        folder = archive_path.parent
+        while True:
+            try:
+                folder.relative_to(self.source_dir)
+            except ValueError:
+                break
+            try:
+                candidates = sorted(p for p in folder.iterdir()
+                                    if p.is_file() and p.suffix.lower() in IMAGE_SUFFIXES)
+            except OSError:
+                candidates = []
+            for p in candidates:
+                try:
+                    raw = p.read_bytes()
+                except OSError:
+                    continue
+                jpeg = make_thumbnail(raw, max_thumb_size)
+                h = compute_dhash_from_jpeg(jpeg) if jpeg else None
+                out.append((str(p), jpeg, format_dhash(h) if h is not None else None))
+            if folder == self.source_dir:
+                break
+            folder = folder.parent
+        return out
+
+    def _native_changed(self, archive_path: Path, current_hash: str, existing_id, contents,
+                        all_names, stl_info, uncompressed_size, precomp) -> dict:
+        """What Python computes for a new or changed archive (``Changed``)."""
+        cfg = self._config
+        meta = extract_metadata(archive_path, contents=contents, source_dir=self.source_dir)
+        self._log_metadata(meta)
+        if all_names is None:
+            all_names = list_contents(archive_path, cfg.unrar_path)
+        warnings = detect_warnings(
+            all_names,
+            check_presupported=cfg.warn_presupported_stl,
+            check_no_images=cfg.warn_no_images,
+            check_nested_archive=cfg.warn_nested_archive,
+            check_no_printable=cfg.warn_no_printable,
+            presupport_patterns=cfg.presupport_patterns,
+        )
+        year, month = parse_release_date(meta.release_date or "")
+        image_names = [
+            n for n in contents
+            if Path(n.replace("\\", "/")).suffix.lower() in IMAGE_SUFFIXES
+            or Path(n.replace("\\", "/")).suffix.lower() == ".pdf"
+        ]
+        self.log.emit(f"  {len(contents)} relevant file(s) extracted ({len(image_names)} image(s))")
+        candidates = image_names[:cfg.max_thumbnails]
+        pre = precomp or {}
+        thumbs = []
+        for name in candidates:
+            jpeg, dhash_int = pre.get(name, (None, None))
+            thumbs.append([name, jpeg or None, format_dhash(dhash_int) if jpeg and dhash_int is not None else None, None])
+        if cfg.embed_during_crawl:
+            resolved = [t for t in thumbs if t[1]]
+            try:
+                from app.utils import image_embedding as _emb
+                from app.utils.image_embedding import to_blob
+                vecs = _emb.embed_batch([t[1] for t in resolved])
+                for t, v in zip(resolved, vecs):
+                    t[3] = to_blob(v) if v is not None else None
+            except Exception:
+                logger.debug("  Embedding during crawl failed", exc_info=True)
+        existing_hash = self._existing_hashes.get(str(archive_path))
+        fresh = existing_id is None or existing_hash != current_hash
+        return {
+            "title": meta.title, "creator": meta.creator, "source": meta.distributor,
+            "release_year": year, "release_month": month, "description": meta.description,
+            "release": meta.release, "tags": list(meta.tags),
+            "presupports": detect_presupport(all_names), "warnings": warnings or None,
+            "scales": detect_scale([archive_path.name] + all_names),
+            "uncompressed_size": uncompressed_size,
+            "thumbs": [tuple(t) for t in thumbs],
+            "folder_images": self._folder_images(archive_path, cfg.max_thumb_size) if fresh else [],
+            "stl_info": list(stl_info.items()) if cfg.store_stl_file_list and stl_info is not None else None,
+        }
+
+    def _native_config(self) -> dict:
+        cfg = self._config
+        from app.utils.image_embedding import EMBED_DIM
+        return {
+            "store_stl": bool(cfg.store_stl_file_list),
+            "warn_low_compression": bool(cfg.warn_low_compression),
+            "low_compression_threshold": float(cfg.low_compression_threshold),
+            "force_creator": cfg.force_creator or None, "force_source": cfg.force_source or None,
+            "force_sculptor": cfg.force_sculptor or None, "force_category": cfg.force_category or None,
+            "force_collection": cfg.force_collection or None, "force_release": cfg.force_release or None,
+            "force_scale": cfg.force_scale or None,
+            "force_date": parse_release_date(cfg.force_date) if cfg.force_date else None,
+            "embed_dim": EMBED_DIM,
+        }
+
+    def _native_upsert(self, batch, batch_start, total, hashes, existing_ids, contents_map,
+                       all_names_map, stl_info_map, uncompressed_map, precomp_map,
+                       modified_folders) -> bool:
+        """Phase 4 natively; returns ``True`` when the crawl should stop."""
+        from app.utils.thumbnailer import native_store
+        inputs = []
+        for idx, archive_path in enumerate(batch, start=batch_start + 1):
+            existing_id = existing_ids.get(str(archive_path))
+            contents = contents_map.get(archive_path)
+            if contents is not None or self._config.log_unchanged:
+                self.log.emit(f"[{idx}/{total}] {archive_path.name}")
+            changed = None
+            if contents is not None:
+                changed = self._native_changed(
+                    archive_path, hashes[archive_path], existing_id, contents,
+                    all_names_map.get(archive_path), stl_info_map.get(archive_path),
+                    uncompressed_map.get(archive_path), precomp_map.get(archive_path))
+            inputs.append({"path": str(archive_path), "hash": hashes[archive_path],
+                           "existing": existing_id, "extracted": self._pattern_match(archive_path),
+                           "changed": changed})
+            if self._stop_requested:
+                break
+        results = self._lib.crawl_upsert_batch(
+            inputs, self._native_config(), native_store(),
+            self._consecutive_failures, self.MAX_CONSECUTIVE_FAILURES)
+        for k, (inp, (error, thumbs, folder_imgs)) in enumerate(zip(inputs, results)):
+            idx = batch_start + 1 + k
+            archive_path = batch[k]
+            if error is not None:
+                self.log.emit(f"  ERROR: {error}")
+                logger.error("Upsert failed for %s: %s", archive_path.name, error)
+                self._consecutive_failures += 1
+                if self._consecutive_failures >= self.MAX_CONSECUTIVE_FAILURES:
+                    abort_msg = (f"Crawl aborted: {self._consecutive_failures} consecutive upsert "
+                                 f"failures — last error: {error}")
+                    self.log.emit(abort_msg)
+                    logger.error(abort_msg)
+                    return True
+            else:
+                self._consecutive_failures = 0
+                if inp["changed"] is not None:
+                    if inp["existing"] is None:
+                        self._stats_new += 1
+                        self._new_archive_paths.add(str(archive_path))
+                        self.log.emit("  new")
+                        self.archive_result.emit(str(archive_path), "new")
+                    else:
+                        self._stats_updated += 1
+                        self.log.emit("  updated")
+                        self.archive_result.emit(str(archive_path), "updated")
+                    self.log.emit(f"  {thumbs} thumbnail(s) stored")
+                    if folder_imgs:
+                        self.log.emit(f"  {folder_imgs} folder image(s) stored")
+                    modified_folders.add(archive_path.parent)
+                else:
+                    self._stats_unchanged += 1
+                    if str(archive_path) in self._moved_new_paths:
+                        modified_folders.add(archive_path.parent)
+            self.progress.emit(idx, total)
+        self.counts_changed.emit(self._stats_new, self._stats_updated, self._stats_unchanged)
+        return self._stop_requested
+
     def _record_crawled_folder(self, archive_count: int) -> None:
         """Upsert a CrawledFolder row for source_dir with stats from this run."""
         path_str = str(self.source_dir)
+        if getattr(self, "_lib", None) is not None:
+            try:
+                self._lib.crawl_record_folder(
+                    path_str, self._pattern or None,
+                    datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f"),
+                    archive_count, self._stats_new, self._stats_updated)
+            except Exception as exc:
+                logger.error("Failed to record crawled folder %s: %s", path_str, exc)
+            return
         try:
             with session_scope() as session:
                 folder = session.query(CrawledFolder).filter_by(path=path_str).first()
@@ -642,6 +899,15 @@ class CrawlerWorker(QThread):
         happens later in :meth:`_reconcile_moved_files`.
         """
         logger.debug("Collecting missing archive records from database…")
+        if getattr(self, "_lib", None) is not None:
+            missing = [{"id": mid, "path": ap, "hash": ah, "filename": name, "size": size}
+                       for mid, ap, ah, name, size in self._lib.crawl_collect_missing()]
+            if missing:
+                msg = (f"Found {len(missing)} missing archive(s) — "
+                       "will check for moved files after crawl.")
+                self.log.emit(msg)
+                logger.info(msg)
+            return missing
         missing: list[dict] = []
         seen_ids: set[int] = set()
         with session_scope() as session:
@@ -721,6 +987,23 @@ class CrawlerWorker(QThread):
 
         matched_ids: set[int] = set()
         thumb_refs: list[str] = []
+
+        if getattr(self, "_lib", None) is not None:
+            matched, skipped, thumb_refs = self._lib.crawl_reconcile(
+                [_missing_tuple(r) for r in missing], sorted(new_paths))
+            for name in skipped:
+                self.log.emit(f"  Skipped ambiguous name+size match for {name} — multiple candidates")
+            names = {r["id"]: r["filename"] for r in missing}
+            for mid, old_path, new_path in matched:
+                matched_ids.add(mid)
+                self.log.emit(f"Moved: {names.get(mid, '')} → {new_path}")
+                logger.info("File moved: %s → %s", old_path, new_path)
+                self.file_moved.emit(old_path, new_path)
+            delete_thumbnails(thumb_refs)
+            if matched_ids:
+                self.log.emit(f"Matched {len(matched_ids)} moved file(s).")
+            self._mark_records_missing([r for r in missing if r["id"] not in matched_ids])
+            return
 
         with session_scope() as session:
             new_models: dict[str, STLModel] = {
@@ -837,6 +1120,19 @@ class CrawlerWorker(QThread):
         marked   = 0
         deferred = 0
         thumb_refs: list[str] = []
+        if getattr(self, "_lib", None) is not None:
+            gone, flagged, deferred, thumb_refs = self._lib.crawl_mark_missing(
+                [_missing_tuple(r) for r in missing], str(source), defer)
+            for path in gone:
+                self.log.emit(f"Deleted: {path}")
+                logger.info("Deleted: %s", path)
+                self.file_deleted.emit(path)
+            for path in flagged:
+                self.log.emit(f"Marked missing: {path}")
+                logger.info("Marked missing: %s", path)
+                self.file_deleted.emit(path)
+            deleted, marked = len(gone), len(flagged)
+            missing = []   # handled natively; the loop below has nothing to do
         with session_scope() as session:
             for rec in missing:
                 model = session.get(STLModel, rec["id"])
@@ -1019,6 +1315,7 @@ class CrawlerWorker(QThread):
                 rel_path = archive_str
             extracted = parse_path(self._pattern, rel_path)
             if extracted:
+                session.flush()   # foreign keys set above must read as set
                 apply_extracted_to_model(session, model, extracted, overwrite=False)
                 self.log.emit("  pattern: " + ", ".join(f"{k}={v!r}" for k, v in extracted.items()))
                 logger.debug("  Pattern matched: %s",
