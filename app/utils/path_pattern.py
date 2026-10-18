@@ -277,9 +277,23 @@ def render_path_pattern(pattern: str, model) -> str:
 
     Only the *filename* part (last segment) keeps the original archive
     extension so the resulting path remains a valid archive path.
+
+    *model* is an ``STLModel`` or a dict of its fields with lookups by name
+    (as ``services.browser_data.sort_sources`` returns them).
     """
     import os
     import re
+
+    if not isinstance(model, dict):
+        model = {
+            "source": model.source, "creator": model.creator, "title": model.title,
+            "release_year": model.release_year, "release_month": model.release_month,
+            "url": model.url, "sequence": model.sequence,
+            "sculptor": model.sculptor.name if model.sculptor else None,
+            "collection": model.collection.name if model.collection else None,
+            "subcollection": model.subcollection.name if model.subcollection else None,
+            "release": model.release.name if model.release else None,
+        }
 
     # Build a lookup dict from model attributes
     def _safe(v) -> str:
@@ -288,22 +302,23 @@ def render_path_pattern(pattern: str, model) -> str:
         s = str(v).strip()
         return s if s else "_unknown"
 
+    date = format_release_date(model["release_year"], model["release_month"])
     values: dict[str, str] = {
-        "source":        _safe(model.source),
-        "creator":       _safe(model.creator),
-        "author":        _safe(model.creator),   # backward-compat alias
-        "title":         _safe(model.title),
-        "name":          _safe(model.title),
-        "date":          _safe(format_release_date(model.release_year, model.release_month)),
-        "month":         _safe(format_release_date(model.release_year, model.release_month)),
-        "url":           _safe(model.url),
-        "sculptor":      _safe(model.sculptor.name    if model.sculptor    else None),
-        "collection":    _safe(model.collection.name  if model.collection  else None),
-        "category":      _safe(model.collection.name  if model.collection  else None),  # backward-compat
-        "subcollection": _safe(model.subcollection.name if model.subcollection else None),
-        "subcategory":   _safe(model.subcollection.name if model.subcollection else None),  # backward-compat
-        "sequence":      _safe(model.sequence),
-        "release":       _safe(model.release.name    if model.release     else None),
+        "source":        _safe(model["source"]),
+        "creator":       _safe(model["creator"]),
+        "author":        _safe(model["creator"]),   # backward-compat alias
+        "title":         _safe(model["title"]),
+        "name":          _safe(model["title"]),
+        "date":          _safe(date),
+        "month":         _safe(date),
+        "url":           _safe(model["url"]),
+        "sculptor":      _safe(model["sculptor"]),
+        "collection":    _safe(model["collection"]),
+        "category":      _safe(model["collection"]),     # backward-compat
+        "subcollection": _safe(model["subcollection"]),
+        "subcategory":   _safe(model["subcollection"]),  # backward-compat
+        "sequence":      _safe(model["sequence"]),
+        "release":       _safe(model["release"]),
     }
 
     # Replace each {token} or {token:n} with its value, sanitising directory-separator chars

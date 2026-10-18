@@ -21,7 +21,7 @@ def test_permanent_delete_removes_file_and_record(tmp_path):
         session.flush()
         model_id = model.id
 
-        report = delete_archives(session, [model_id], use_trash=False, trash_path=None)
+    report = delete_archives([model_id], use_trash=False, trash_path=None)
 
     assert report.deleted == 1
     assert report.failed == []
@@ -42,7 +42,7 @@ def test_trash_move_writes_recovery_sidecar(tmp_path):
         session.flush()
         model_id = model.id
 
-        report = delete_archives(session, [model_id], use_trash=True, trash_path=trash_dir)
+    report = delete_archives([model_id], use_trash=True, trash_path=trash_dir)
 
     assert report.deleted == 1
     assert not archive.exists()
@@ -77,7 +77,8 @@ def test_trash_move_resolves_filename_collision(tmp_path):
         session.add_all([m_a, m_b])
         session.flush()
         ids = [m_a.id, m_b.id]
-        delete_archives(session, ids, use_trash=True, trash_path=trash_dir)
+
+    delete_archives(ids, use_trash=True, trash_path=trash_dir)
 
     files = sorted(trash_dir.glob("dup*.zip"))
     assert len(files) == 2
@@ -96,7 +97,8 @@ def test_failed_deletion_is_reported_and_record_kept(tmp_path):
         session.add(model)
         session.flush()
         model_id = model.id
-        report = delete_archives(session, [model_id], use_trash=False, trash_path=None)
+
+    report = delete_archives([model_id], use_trash=False, trash_path=None)
 
     # No physical file to delete, but the DB row is removed.
     assert report.deleted == 1
@@ -106,7 +108,6 @@ def test_failed_deletion_is_reported_and_record_kept(tmp_path):
 
 
 def test_empty_list_is_a_noop(tmp_path):
-    with session_scope() as session:
-        report = delete_archives(session, [], use_trash=False, trash_path=None)
+    report = delete_archives([], use_trash=False, trash_path=None)
     assert report.deleted == 0
     assert report.failed == []

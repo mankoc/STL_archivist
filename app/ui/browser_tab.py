@@ -30,7 +30,6 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import QSettings
 
 
-from app.database.db import session_scope
 from app.ui import lookup_cache as _lookup_cache
 from app.ui.thumb_loader import ThumbnailLoaderWorker
 from app.ui.browser_table_model import _SqlTableModel
@@ -56,7 +55,7 @@ from app.ui.browser_common import (
     COL_CATEGORY, COL_COMPRESSION, COL_TO_PRINT, _HEADERS,
     _fmt_size,
 )
-from app.database.models import STLModel, Tag, Image
+from app.database.models import STLModel
 from app.utils.path_pattern import parse_release_date, format_release_date
 
 
@@ -1102,31 +1101,8 @@ class BrowserTab(QWidget):
         from html import escape
 
         if model_id not in self._panel_cache:
-            from app.database.models import Creator as CreatorModel
-            creator_name = row_data["creator"]
-            with session_scope() as session:
-                m = session.query(STLModel.url, STLModel.description).filter_by(id=model_id).first()
-                c = (
-                    session.query(
-                        CreatorModel.full_name,
-                        CreatorModel.patreon_url,
-                        CreatorModel.artstation_url,
-                        CreatorModel.gumroad_url,
-                        CreatorModel.myminifactory_url,
-                    ).filter_by(name=creator_name).first()
-                    if creator_name else None
-                )
-            self._panel_cache[model_id] = {
-                "url":         (m.url         or "") if m else "",
-                "description": (m.description or "") if m else "",
-                "creator": {
-                    "full_name":         (c.full_name         or "") if c else "",
-                    "patreon_url":       (c.patreon_url       or "") if c else "",
-                    "artstation_url":    (c.artstation_url    or "") if c else "",
-                    "gumroad_url":       (c.gumroad_url       or "") if c else "",
-                    "myminifactory_url": (c.myminifactory_url or "") if c else "",
-                } if c else None,
-            }
+            from app.services.browser_data import model_panel
+            self._panel_cache[model_id] = model_panel(model_id, row_data["creator"])
 
         cached = self._panel_cache[model_id]
         url         = cached["url"]
@@ -1743,8 +1719,7 @@ class BrowserTab(QWidget):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        with session_scope() as session:
-            report = delete_archives(session, model_ids, use_trash, trash_path)
+        report = delete_archives(model_ids, use_trash, trash_path)
 
         self.refresh()
         if report.failed:
@@ -1769,16 +1744,9 @@ class BrowserTab(QWidget):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        from app.services.moves import delete_model
+        from app.services.browser_data import delete_models
         from app.utils.thumbnailer import delete_thumbnails
-        thumb_refs: list[str] = []
-        with session_scope() as session:
-            for model_id in model_ids:
-                stl: STLModel = session.get(STLModel, model_id)
-                if stl is None:
-                    continue
-                thumb_refs += delete_model(session, stl)
-        delete_thumbnails(thumb_refs)   # after commit; one LMDB flush, not one per image
+        delete_thumbnails(delete_models(model_ids))   # after commit; one LMDB flush, not one per image
 
         self.refresh()
 
@@ -1828,21 +1796,11 @@ class BrowserTab(QWidget):
 
     def _on_image_drop_ready(self, model_id: int, encoded: list, errors: list) -> None:
         """Persist thumbnails encoded by ``_ImageDropRunnable`` (GUI thread)."""
+        from app.services.browser_data import add_images
         from app.utils.thumbnailer import write_raw_thumbnail
-        added = 0
-        if encoded:
-            with session_scope() as session:
-                for filename, jpeg in encoded:
-                    img_rec = Image(model_id=model_id, filename=filename)
-                    session.add(img_rec)
-                    session.flush()
-                    thumb_path = write_raw_thumbnail(img_rec.id, jpeg)
-                    if thumb_path is None:
-                        errors.append(filename)
-                        session.delete(img_rec)
-                        continue
-                    img_rec.thumbnail_path = thumb_path
-                    added += 1
+        failed = add_images(model_id, encoded, write_raw_thumbnail)
+        errors += failed
+        added = len(encoded) - len(failed)
         if added and self._current_model_id == model_id:
             self._show_thumbnails(model_id)
         if errors:
@@ -1869,15 +1827,9 @@ class BrowserTab(QWidget):
 
     def _show_thumbnails(self, model_id: int) -> None:
         """Load image records for *model_id* and display the first page."""
+        from app.services.browser_data import model_images
         self._clear_thumbnails()
-        with session_scope() as session:
-            rows = (
-                session.query(Image.id, Image.thumbnail_path)
-                .filter(Image.model_id == model_id)
-                .order_by(Image.id)
-                .all()
-            )
-        self._thumb_all_images = list(rows)
+        self._thumb_all_images = model_images(model_id)
         self._render_thumb_page()
 
     def _render_thumb_page(self) -> None:
@@ -2090,20 +2042,15 @@ class BrowserTab(QWidget):
 
     def _delete_image(self, image_id: int) -> None:
         """Delete an image from the database and refresh the thumbnail display."""
-        with session_scope() as session:
-            image = session.query(Image).filter_by(id=image_id).first()
-            if image is None:
-                QMessageBox.warning(self, self.tr("Error"), self.tr("Image not found in database."))
-                return
-
-            from app.utils.thumbnailer import delete_thumbnail
-            try:
-                delete_thumbnail(image_id)
-            except Exception as e:
-                logger.warning("Failed to delete thumbnail from LMDB: %s", e)
-
-            session.delete(image)
-            session.commit()
+        from app.services.browser_data import delete_image
+        from app.utils.thumbnailer import delete_thumbnail
+        if not delete_image(image_id):
+            QMessageBox.warning(self, self.tr("Error"), self.tr("Image not found in database."))
+            return
+        try:
+            delete_thumbnail(image_id)
+        except Exception as e:
+            logger.warning("Failed to delete thumbnail from LMDB: %s", e)
 
         QMessageBox.information(self, self.tr("Success"), self.tr("Image deleted successfully."))
         if self._current_model_id is not None:
@@ -2114,12 +2061,11 @@ class BrowserTab(QWidget):
         name, ok = QInputDialog.getText(self, self.tr("Add Tag"), self.tr("Tag name:"))
         if not ok or not name.strip():
             return
+        from app.services.browser_data import add_tag
         name = name.strip().lower()
-        with session_scope() as session:
-            if session.query(Tag).filter_by(name=name).first():
-                QMessageBox.information(self, self.tr("Add Tag"), f"Tag '{name}' already exists.")
-                return
-            session.add(Tag(name=name))
+        if not add_tag(name):
+            QMessageBox.information(self, self.tr("Add Tag"), f"Tag '{name}' already exists.")
+            return
         self._populate_filter_tree()
 
     def _open_tag_editor(self) -> None:
@@ -2294,14 +2240,9 @@ class BrowserTab(QWidget):
         from pathlib import Path
         from app.ui.metadata_sidecar_dialog import MetadataSidecarDialog
 
-        with session_scope() as session:
-            rows = (
-                session.query(STLModel.archive_path)
-                .filter(STLModel.id.in_(model_ids))
-                .all()
-            )
+        from app.services.model_edit import archive_paths
 
-        folders = {Path(r.archive_path).parent for r in rows if r.archive_path}
+        folders = {Path(p).parent for p in archive_paths(model_ids).values() if p}
         if not folders:
             QMessageBox.warning(self, self.tr("Create Sidecar"), self.tr("No valid file paths found for the selected models."))
             return

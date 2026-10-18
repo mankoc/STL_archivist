@@ -381,6 +381,15 @@ fn sql_value_to_py<'py>(py: Python<'py>, v: &rusqlite::types::Value) -> PyResult
     })
 }
 
+fn ranking_to_py<'py>(
+    py: Python<'py>,
+    rows: &[(rusqlite::types::Value, i64)],
+) -> PyResult<Vec<Bound<'py, PyAny>>> {
+    rows.iter()
+        .map(|(v, n)| Ok((sql_value_to_py(py, v)?, *n).into_pyobject(py)?.into_any()))
+        .collect()
+}
+
 #[pymethods]
 impl PyLibraryDb {
     #[new]
@@ -874,6 +883,103 @@ impl PyLibraryDb {
             *slot = values.get_item(f)?.map(|v| v.extract()).transpose()?.flatten();
         }
         self.with_tx(py, move |tx| save_creator_profile(tx, &name, &vals), db_err)
+    }
+
+    // ── statistics (services.library_stats) ───────────────────────────────────
+
+    fn stats_library<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let st = self.with(py, stl_core::storage::stats::library)?;
+        let out = PyDict::new(py);
+        for (k, v) in &st.scalars {
+            out.set_item(k, sql_value_to_py(py, v)?)?;
+        }
+        for (k, rows) in &st.rankings {
+            out.set_item(k, ranking_to_py(py, rows)?)?;
+        }
+        Ok(out)
+    }
+
+    #[pyo3(signature = (key, top_n=None))]
+    fn stats_column<'py>(
+        &self,
+        py: Python<'py>,
+        key: String,
+        top_n: Option<i64>,
+    ) -> PyResult<(Vec<Bound<'py, PyAny>>, i64)> {
+        let (rows, total) = self.with(py, |c| stl_core::storage::stats::column(c, &key, top_n))?;
+        Ok((ranking_to_py(py, &rows)?, total))
+    }
+
+    // ── browser panel and sort dialog (services.browser_data) ─────────────────
+
+    fn browser_lookup_names(&self, py: Python<'_>, kind: String) -> PyResult<Vec<String>> {
+        self.with(py, |c| stl_core::storage::browser::lookup_names(c, &kind))
+    }
+
+    fn browser_tag_names(&self, py: Python<'_>) -> PyResult<Vec<String>> {
+        self.with(py, stl_core::storage::browser::tag_names)
+    }
+
+    #[pyo3(signature = (model_id, creator=None))]
+    fn browser_model_panel(
+        &self,
+        py: Python<'_>,
+        model_id: i64,
+        creator: Option<String>,
+    ) -> PyResult<stl_core::storage::browser::Panel> {
+        self.with(py, |c| stl_core::storage::browser::model_panel(c, model_id, creator.as_deref()))
+    }
+
+    fn browser_model_images(&self, py: Python<'_>, model_id: i64) -> PyResult<Vec<(i64, Option<String>)>> {
+        self.with(py, |c| stl_core::storage::browser::model_images(c, model_id))
+    }
+
+    fn browser_add_images(&self, py: Python<'_>, model_id: i64, filenames: Vec<String>) -> PyResult<Vec<i64>> {
+        self.with_tx(py, |tx| stl_core::storage::browser::add_images(tx, model_id, &filenames), db_err)
+    }
+
+    fn browser_set_image_thumbnails(&self, py: Python<'_>, items: Vec<(i64, String)>) -> PyResult<()> {
+        self.with_tx(py, |tx| stl_core::storage::browser::set_image_thumbnails(tx, &items), db_err)
+    }
+
+    fn browser_add_tag(&self, py: Python<'_>, name: String) -> PyResult<bool> {
+        self.with_tx(py, |tx| stl_core::storage::browser::add_tag(tx, &name), db_err)
+    }
+
+    /// `moves.delete_model` for each id in one transaction: the thumbnail references.
+    fn browser_delete_models(&self, py: Python<'_>, ids: Vec<i64>) -> PyResult<Vec<String>> {
+        self.with_tx(py, |tx| stl_core::storage::browser::delete_models(tx, &ids), db_err)
+    }
+
+    /// `{id: fields}` for the sort dialog's path pattern.
+    fn browser_sort_sources<'py>(&self, py: Python<'py>, ids: Vec<i64>) -> PyResult<Bound<'py, PyDict>> {
+        let rows = self.with(py, |c| stl_core::storage::browser::sort_sources(c, &ids))?;
+        let out = PyDict::new(py);
+        for r in rows {
+            let d = PyDict::new(py);
+            d.set_item("archive_path", r.archive_path)?;
+            d.set_item("title", r.title)?;
+            d.set_item("source", r.source)?;
+            d.set_item("creator", r.creator)?;
+            d.set_item("release_year", sql_value_to_py(py, &r.release_year)?)?;
+            d.set_item("release_month", sql_value_to_py(py, &r.release_month)?)?;
+            d.set_item("url", r.url)?;
+            d.set_item("sequence", sql_value_to_py(py, &r.sequence)?)?;
+            d.set_item("sculptor", r.sculptor)?;
+            d.set_item("collection", r.collection)?;
+            d.set_item("subcollection", r.subcollection)?;
+            d.set_item("release", r.release)?;
+            out.set_item(r.id, d)?;
+        }
+        Ok(out)
+    }
+
+    fn browser_deletion_rows(&self, py: Python<'_>, ids: Vec<i64>) -> PyResult<Vec<stl_core::storage::browser::DeletionRow>> {
+        self.with(py, |c| stl_core::storage::browser::deletion_rows(c, &ids))
+    }
+
+    fn browser_set_archive_paths(&self, py: Python<'_>, items: Vec<(i64, String)>) -> PyResult<()> {
+        self.with_tx(py, |tx| stl_core::storage::browser::set_archive_paths(tx, &items), db_err)
     }
 
     /// Close the pooled connections (they reopen on the next call).
