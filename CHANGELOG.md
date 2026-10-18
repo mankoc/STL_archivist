@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Rust migration, step 4c: the browser's queries run natively.** On Windows, the main table's row ids and rows, the filter pane's values and counts, and the lookup editors' usage counts come from the native core. On the reference library they returned identical results to the Python queries. Loading rows is 4x faster and rebuilding a filtered filter pane is 2.9x faster (27 filter combinations: 5.4 s instead of 15.5 s). Other platforms keep the Python queries until the move away from SQLAlchemy is complete, because two SQLite libraries in one process can corrupt a database there.
+
 - **Browser table order is now reproducible.** Rows that tie on the sort column (same title, same creator) are ordered by when they were added, instead of by whatever order SQLite's query plan happened to give. A model's tags and scales are always listed in the order they were created. Internally, the browser's queries moved into Qt-free services (`library_query.table_ids` / `page_rows` and the new `services/filter_tree.py`), ready for the native core.
 
 - **Rust migration, step 4b: the native core migrates the database schema.** At startup, `stlLibrary.db` is brought up to date by Rust: old table and column renames, the dhash column fix, new tables, columns and indexes, the vector table and the view. The SQL is generated from the SQLAlchemy models (`tools/gen_schema.py`), so a database comes out byte-identical whichever side migrated it. That was checked on five generated legacy databases and on a copy of the reference library. The Python migration remains the fallback.

@@ -23,6 +23,8 @@ def init_db(db_path: str = "stlLibrary.db") -> None:
     """Initialise the engine and create all tables if they don't exist."""
     from pathlib import Path
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    from app.database import native_db
+    native_db.reset()   # pooled native connections belong to the previous database
 
     global _engine, _SessionFactory
     url = f"sqlite:///{db_path}"

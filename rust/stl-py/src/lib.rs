@@ -16,6 +16,7 @@ use pyo3::types::{PyBytes, PyDict};
 use stl_core::control::{Control, Stopped as CoreStopped};
 use stl_core::fingerprint::{self, Member};
 use stl_core::archive::{self, ArchiveError};
+use stl_core::storage::library;
 use stl_core::{embedding, hamming, path_pattern, rules, storage, strings, thumbnail, thumbstore};
 
 create_exception!(
@@ -217,6 +218,223 @@ fn migrate_database<'py>(
     out.set_item("vectors_reset", r.vectors_reset)?;
     out.set_item("scales_copied", r.scales_copied)?;
     Ok(out)
+}
+
+/// Read access to the library database for the browser and editors
+/// (`storage::library`): a small pool of connections, each opened with the
+/// same pragmas as the app's. Every method releases the GIL.
+///
+/// A `FilterSpec` crosses as a dict: `{"include": {facet: [values]}, "exclude":
+/// {...}, "has_value": [...], "no_value": [...], "ids": [...] | None}` with
+/// values `str`, `int` or `(year, month | None)`.
+#[pyclass(frozen, name = "LibraryDb")]
+struct PyLibraryDb {
+    path: std::path::PathBuf,
+    pool: std::sync::Mutex<Vec<rusqlite::Connection>>,
+}
+
+fn db_err(e: rusqlite::Error) -> PyErr {
+    PyRuntimeError::new_err(format!("library database: {e}"))
+}
+
+impl PyLibraryDb {
+    fn with<T: Send>(
+        &self,
+        py: Python<'_>,
+        f: impl FnOnce(&rusqlite::Connection) -> rusqlite::Result<T> + Send,
+    ) -> PyResult<T> {
+        py.detach(|| {
+            let conn = self.pool.lock().unwrap_or_else(|e| e.into_inner()).pop();
+            let conn = match conn {
+                Some(c) => c,
+                None => storage::open(&self.path).map_err(db_err)?,
+            };
+            let out = f(&conn).map_err(db_err);
+            let mut pool = self.pool.lock().unwrap_or_else(|e| e.into_inner());
+            if pool.len() < 8 {
+                pool.push(conn);
+            }
+            out
+        })
+    }
+}
+
+fn filter_value(v: &Bound<'_, PyAny>) -> PyResult<library::FilterValue> {
+    if let Ok((y, m)) = v.extract::<(i64, Option<i64>)>() {
+        return Ok(library::FilterValue::Date(y, m));
+    }
+    if !v.is_instance_of::<pyo3::types::PyBool>()
+        && let Ok(i) = v.extract::<i64>()
+    {
+        return Ok(library::FilterValue::Int(i));
+    }
+    Ok(library::FilterValue::Text(v.extract::<String>()?))
+}
+
+fn filter_spec(d: Option<&Bound<'_, PyDict>>) -> PyResult<Option<library::FilterSpec>> {
+    let Some(d) = d else { return Ok(None) };
+    let mut spec = library::FilterSpec::default();
+    for (key, target) in [("include", &mut spec.include), ("exclude", &mut spec.exclude)] {
+        if let Some(m) = d.get_item(key)? {
+            for (facet, values) in m.cast::<PyDict>()?.iter() {
+                let facet: String = facet.extract()?;
+                if !library::FACETS.contains(&facet.as_str()) {
+                    return Err(PyValueError::new_err(format!("unknown facet {facet}")));
+                }
+                let vals: Vec<library::FilterValue> =
+                    values.try_iter()?.map(|v| filter_value(&v?)).collect::<PyResult<_>>()?;
+                if !vals.is_empty() {
+                    target.insert(facet, vals);
+                }
+            }
+        }
+    }
+    for (key, target) in [("has_value", &mut spec.has_value), ("no_value", &mut spec.no_value)] {
+        if let Some(v) = d.get_item(key)? {
+            for g in v.try_iter()? {
+                target.insert(g?.extract()?);
+            }
+        }
+    }
+    if let Some(ids) = d.get_item("ids")?
+        && !ids.is_none()
+    {
+        spec.ids = Some(ids.extract()?);
+    }
+    Ok(Some(spec))
+}
+
+fn key_to_py<'py>(py: Python<'py>, k: &library::Key) -> PyResult<Bound<'py, PyAny>> {
+    use library::Key;
+    Ok(match k {
+        Key::Text(kind, s) => (kind.as_str(), s.as_str()).into_pyobject(py)?.into_any(),
+        Key::Int(kind, i) => (kind.as_str(), *i).into_pyobject(py)?.into_any(),
+        Key::Month(y, m) => ("date_month", (*y, *m)).into_pyobject(py)?.into_any(),
+        Key::Year(y) => ("date_year", *y).into_pyobject(py)?.into_any(),
+        Key::Group(g) => ("group", g.as_str()).into_pyobject(py)?.into_any(),
+    })
+}
+
+fn counts_to_py<'py>(
+    py: Python<'py>,
+    counts: &std::collections::HashMap<library::Key, i64>,
+) -> PyResult<Bound<'py, PyDict>> {
+    let out = PyDict::new(py);
+    for (k, v) in counts {
+        out.set_item(key_to_py(py, k)?, v)?;
+    }
+    Ok(out)
+}
+
+fn sql_value_to_py<'py>(py: Python<'py>, v: &rusqlite::types::Value) -> PyResult<Bound<'py, PyAny>> {
+    use rusqlite::types::Value;
+    Ok(match v {
+        Value::Null => py.None().into_bound(py),
+        Value::Integer(i) => i.into_pyobject(py)?.into_any(),
+        Value::Real(f) => f.into_pyobject(py)?.into_any(),
+        Value::Text(s) => s.into_pyobject(py)?.into_any(),
+        Value::Blob(b) => PyBytes::new(py, b).into_any(),
+    })
+}
+
+#[pymethods]
+impl PyLibraryDb {
+    #[new]
+    fn new(path: std::path::PathBuf) -> Self {
+        PyLibraryDb { path, pool: std::sync::Mutex::new(Vec::new()) }
+    }
+
+    /// `library_query.table_ids`; `sort` is `(column, descending)` or `None`.
+    #[pyo3(signature = (spec, search="", sort=None))]
+    fn table_ids(
+        &self,
+        py: Python<'_>,
+        spec: &Bound<'_, PyDict>,
+        search: &str,
+        sort: Option<(String, bool)>,
+    ) -> PyResult<Vec<i64>> {
+        let spec = filter_spec(Some(spec))?.unwrap_or_default();
+        let search = search.to_string();
+        self.with(py, |c| library::table_ids(c, &spec, &search, sort.as_ref().map(|(s, d)| (s.as_str(), *d))))
+    }
+
+    /// `library_query.page_rows` without the pair index: tuples of
+    /// `(id, title, creator, source, release_year, release_month, archive_path,
+    /// presupports, warning, archive_size, compression_rate, sequence,
+    /// created_at, sculptor_name, collection_name, subcollection_name,
+    /// category_name, release_name, scales, tags, to_print)`; `created_at` is text.
+    fn page_rows<'py>(&self, py: Python<'py>, ids: Vec<i64>) -> PyResult<Vec<Bound<'py, PyAny>>> {
+        let rows = self.with(py, |c| library::page_rows(c, &ids))?;
+        rows.into_iter()
+            .map(|r| {
+                let head = (
+                    r.id, r.title, r.creator, r.source, r.release_year, r.release_month, r.archive_path,
+                    r.presupports, r.warning, r.archive_size,
+                );
+                let tail = (
+                    r.compression_rate, r.sequence, r.created_at, r.sculptor_name, r.collection_name,
+                    r.subcollection_name, r.category_name, r.release_name, r.scales, r.tags, r.to_print,
+                );
+                Ok((head, tail).into_pyobject(py)?.into_any())
+            })
+            .collect()
+    }
+
+    /// `filter_tree.filter_tree_data` (lists as Python lists; `new_dirs` instead of
+    /// the frozenset; `scoped` flag).
+    fn filter_tree<'py>(
+        &self,
+        py: Python<'py>,
+        spec: Option<&Bound<'py, PyDict>>,
+        show: Vec<String>,
+        show_counts: bool,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        let spec = filter_spec(spec)?;
+        let show = library::Show(show.into_iter().collect());
+        let ft = self.with(py, |c| library::filter_tree(c, spec.as_ref(), &show, show_counts))?;
+        let out = PyDict::new(py);
+        out.set_item("counts", counts_to_py(py, &ft.counts)?)?;
+        out.set_item("path_counts", ft.path_counts)?;
+        out.set_item("scoped_counts", counts_to_py(py, &ft.scoped_counts)?)?;
+        out.set_item("sc_path_counts", ft.sc_path_counts)?;
+        out.set_item("creators", ft.creators)?;
+        out.set_item("tags", ft.tags)?;
+        out.set_item("sources", ft.sources)?;
+        out.set_item("dates", ft.dates)?;
+        out.set_item("sculptors", ft.sculptors)?;
+        out.set_item("collections", ft.collections)?;
+        out.set_item("sub_by_col", ft.sub_by_col)?;
+        out.set_item("categories", ft.categories)?;
+        out.set_item("releases", ft.releases)?;
+        out.set_item("scales", ft.scales)?;
+        out.set_item("presupports", ft.presupports)?;
+        out.set_item("filetypes", ft.filetypes)?;
+        out.set_item("sorted_dirs", ft.sorted_dirs)?;
+        out.set_item("scoped_dirs", ft.scoped_dirs)?;
+        out.set_item("new_dirs", ft.new_dirs)?;
+        out.set_item("scoped", ft.scoped)?;
+        Ok(out)
+    }
+
+    /// `lookups.usage_counts`.
+    fn usage_counts(&self, py: Python<'_>, kind: String) -> PyResult<std::collections::HashMap<i64, i64>> {
+        self.with(py, |c| library::usage_counts(c, &kind))
+    }
+
+    /// `model_summary.model_summary`: a dict, or `None` when the model is gone.
+    fn model_summary<'py>(&self, py: Python<'py>, model_id: i64) -> PyResult<Option<Bound<'py, PyDict>>> {
+        let Some(row) = self.with(py, |c| library::model_summary(c, model_id))? else { return Ok(None) };
+        let out = PyDict::new(py);
+        for (k, v) in &row {
+            out.set_item(k, sql_value_to_py(py, v)?)?;
+        }
+        Ok(Some(out))
+    }
+
+    /// Close the pooled connections (they reopen on the next call).
+    fn close(&self, py: Python<'_>) {
+        py.detach(|| self.pool.lock().unwrap_or_else(|e| e.into_inner()).clear());
+    }
 }
 
 fn rules_err(e: rules::RulesError) -> PyErr {
@@ -490,6 +708,7 @@ fn stl_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(dhash, m)?)?;
     m.add_function(wrap_pyfunction!(dhash_many, m)?)?;
     m.add_class::<PyThumbStore>()?;
+    m.add_class::<PyLibraryDb>()?;
     for f in [
         wrap_pyfunction!(detect_presupport, m)?,
         wrap_pyfunction!(detect_warnings, m)?,

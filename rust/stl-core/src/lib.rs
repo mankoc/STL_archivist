@@ -18,6 +18,7 @@ pub mod storage;
 pub mod strings;
 pub mod thumbstore;
 pub mod thumbnail;
+pub mod winpath;
 
 /// Version of the core library.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
