@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Web client step 6f: statistics and Find by Image.** The Statistics page shows library totals, rankings and the distribution of any column. Find by Image takes a dropped picture and finds models with similar thumbnails, by perceptual hash or (when the server has ONNX Runtime and the CLIP model) AI embedding.
+
 - **Web client step 6e: mass editor and lookup editors.** Select models and use *Mass edit*: path patterns with a preview of what they extract, manual fields, lookups, tags, find & replace and trimming. The *Lookups* page edits tags, categories, collections, subcollections and scales (add, rename, delete, merge, delete unused tags) and creators (rename, merge, clear, profiles).
 
 - **Web client step 6d: settings.** The Settings page sets your colour scheme, shows the library's crawler, warning and sidecar settings (administrators change them in the same `settings.json` the desktop app uses), and lets administrators manage users: add, change roles, disable, reset passwords, delete.

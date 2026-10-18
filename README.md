@@ -195,7 +195,8 @@ add images by dropping them on the detail pane, remove images, and remove select
 from the library. The **Jobs** page tracks crawled folders (add them by browsing the
 server's disks, crawl them with a path pattern) and runs maintenance, with live progress and
 logs. **Mass edit** (on a selection) and the **Lookups** page (tags, categories,
-collections, subcollections, scales, creators) work as in the desktop app. **Settings** holds your colour scheme, the library's crawler and sidecar settings
+collections, subcollections, scales, creators) work as in the desktop app. **Statistics** and **Find by Image** (perceptual hash, or AI embedding when the server has
+ONNX Runtime and the CLIP model) work as their desktop dialogs. **Settings** holds your colour scheme, the library's crawler and sidecar settings
 (administrators change them; they are the same `settings.json` the desktop app uses), and
 user administration.
 

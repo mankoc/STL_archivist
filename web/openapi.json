@@ -1639,6 +1639,84 @@
         }
       }
     },
+    "/api/search/image": {
+      "post": {
+        "tags": [
+          "search"
+        ],
+        "summary": "Search with an image (multipart, one file).",
+        "operationId": "post_search_image",
+        "parameters": [
+          {
+            "name": "method",
+            "in": "query",
+            "description": "`dhash` (default) or `clip`.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "max_distance",
+            "in": "query",
+            "description": "dHash: most differing bits (0 = identical; default 10).",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "threshold",
+            "in": "query",
+            "description": "CLIP: least cosine similarity (default 0.85).",
+            "required": false,
+            "schema": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The image",
+          "content": {
+            "multipart/form-data": {}
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/settings/library": {
       "get": {
         "tags": [
@@ -1702,6 +1780,82 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/stats/column": {
+      "get": {
+        "tags": [
+          "statistics"
+        ],
+        "summary": "How the models spread over one column's values, most frequent first.",
+        "operationId": "get_stats_column",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "query",
+            "description": "One of `category`, `collection`, `creator`, `presupports`, `release`,\n`release_month`, `release_year`, `scale`, `sculptor`, `source`,\n`subcollection`, `tag`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "top",
+            "in": "query",
+            "description": "Most frequent values to return (all when absent).",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ColumnStats"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/stats/library": {
+      "get": {
+        "tags": [
+          "statistics"
+        ],
+        "summary": "Counts, sums and rankings for the Statistics view.",
+        "operationId": "get_stats_library",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryStats"
                 }
               }
             }
@@ -2192,6 +2346,42 @@
             "items": {
               "$ref": "#/components/schemas/NamedId"
             }
+          }
+        }
+      },
+      "ColumnRow": {
+        "type": "object",
+        "required": [
+          "label",
+          "count"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      },
+      "ColumnStats": {
+        "type": "object",
+        "required": [
+          "rows",
+          "total"
+        ],
+        "properties": {
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ColumnRow"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Models in the library."
           }
         }
       },
@@ -3104,6 +3294,39 @@
           "cancelled"
         ]
       },
+      "LibraryStats": {
+        "type": "object",
+        "required": [
+          "scalars",
+          "rankings"
+        ],
+        "properties": {
+          "rankings": {
+            "type": "object",
+            "description": "`by_source`, `by_year`, `top_sculptors`, … each most frequent first.",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/RankEntry"
+              }
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "scalars": {
+            "type": "object",
+            "description": "`total_models`, `total_images`, `total_archive_size`, `presupported`, …",
+            "additionalProperties": {
+              "type": "number",
+              "format": "double"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "Listing": {
         "type": "object",
         "required": [
@@ -3286,6 +3509,38 @@
             "type": "integer",
             "description": "Models whose archive path matched `pattern`.",
             "minimum": 0
+          }
+        }
+      },
+      "Match": {
+        "type": "object",
+        "required": [
+          "model_id",
+          "title",
+          "archive",
+          "score"
+        ],
+        "properties": {
+          "archive": {
+            "type": "string"
+          },
+          "model_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "score": {
+            "type": "number",
+            "format": "double",
+            "description": "Bits differing (dHash) or cosine similarity (CLIP)."
+          },
+          "thumbnail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string"
           }
         }
       },
@@ -3543,6 +3798,23 @@
         },
         "additionalProperties": false
       },
+      "RankEntry": {
+        "type": "object",
+        "required": [
+          "value",
+          "count"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "value": {
+            "type": "object",
+            "description": "The value (a name, a year, …); null for \"none\"."
+          }
+        }
+      },
       "Rename": {
         "type": "object",
         "required": [
@@ -3727,6 +3999,36 @@
           }
         },
         "additionalProperties": false
+      },
+      "SearchResult": {
+        "type": "object",
+        "required": [
+          "method",
+          "matches",
+          "capped",
+          "outdated"
+        ],
+        "properties": {
+          "capped": {
+            "type": "boolean",
+            "description": "All of the closest images matched: more may exist (tighten the threshold)."
+          },
+          "matches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Match"
+            },
+            "description": "Best first."
+          },
+          "method": {
+            "type": "string"
+          },
+          "outdated": {
+            "type": "integer",
+            "description": "dHash: stored hashes in an older format, not compared (run Recompute image hashes).",
+            "minimum": 0
+          }
+        }
       },
       "ServerEvent": {
         "oneOf": [

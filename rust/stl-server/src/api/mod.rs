@@ -7,7 +7,9 @@ pub mod filter;
 pub mod jobs;
 pub mod lookups;
 pub mod models;
+pub mod search;
 pub mod settings;
+pub mod stats;
 pub mod system;
 pub mod thumbs;
 pub mod users;
@@ -83,6 +85,9 @@ use crate::AppState;
         files::download,
         settings::get,
         settings::put,
+        stats::library,
+        stats::column,
+        search::by_image,
     ),
     components(schemas(crate::error::ErrorBody)),
     modifiers(&OperationIds)
@@ -163,6 +168,9 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/files/browse", get(files::browse))
         .route("/api/models/{id}/archive", get(files::download))
         .route("/api/settings/library", get(settings::get).put(settings::put))
+        .route("/api/stats/library", get(stats::library))
+        .route("/api/stats/column", get(stats::column))
+        .route("/api/search/image", post(search::by_image))
         .route("/api/openapi.json", get(openapi))
         .layer(middleware::from_fn_with_state(state, announce_changes))
 }

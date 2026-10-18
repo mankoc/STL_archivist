@@ -1095,6 +1095,25 @@ Ctrl-selected models.
   from the folders, creator and tags applied); adding and deleting an unused tag; and
   adding, renaming and deleting a category.
 
+**6f: done 2026-10-18 (statistics, Find by Image).**
+
+- Server:
+  - `GET /api/stats/library`: scalars and rankings from `storage::stats`.
+  - `GET /api/stats/column?key=&top=`: Column Distribution with the desktop's labels
+    ("(unknown)", "(not set)", "(none)", month names).
+  - `POST /api/search/image`: multipart upload. With `method=dhash&max_distance=` it
+    computes the native dHash and compares it by Hamming distance with stored format-2
+    hashes, reporting how many outdated hashes were skipped. With
+    `method=clip&threshold=` it embeds the image through `tools::Embedder` and runs
+    `vectors::find_similar_models`. Both consider at most the 1,024 closest images and
+    keep the best one per model, as the desktop does.
+- Web:
+  - The Statistics page: totals, rankings, and Column Distribution with bars.
+  - The Find by Image page: drop an image, choose the method and threshold (results
+    update as the slider moves), open a match's details in a dialog.
+- Verified in headless Edge: the totals, the distribution by tag, and a dHash search
+  through the drop zone that opened a match.
+
 ### Phase 7: Desktop shell (small)
 
 Tauri app that hosts the web client: connect to a remote server or start a bundled local one on
