@@ -3,11 +3,12 @@
 import { ActionIcon, Anchor, Badge, Box, Button, Center, CopyButton, Group, Image, Loader, SimpleGrid, Stack, Table, Text, Title } from "@mantine/core";
 import { Dropzone, IMAGE_MIME_TYPE } from "@mantine/dropzone";
 import { notifications } from "@mantine/notifications";
-import { IconCopy, IconDownload, IconEdit, IconPhotoPlus, IconTrash } from "@tabler/icons-react";
+import { IconCopy, IconDownload, IconEdit, IconFolderOpen, IconPhotoPlus, IconTrash } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api, ApiError, type Schemas, unwrap } from "../api/client";
 import { hasRole, useUser } from "../auth/user";
+import { inDesktopShell, openFolder } from "../desktop";
 import { baseName, formatDate, formatSize } from "../format";
 import classes from "./DetailPane.module.css";
 
@@ -136,6 +137,16 @@ export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: num
           >
             Download
           </Button>
+          {d.client_path && inDesktopShell() && (
+            <Button
+              size="xs"
+              variant="subtle"
+              leftSection={<IconFolderOpen size={14} />}
+              onClick={() => openFolder(d.client_path!).catch((err) => notifications.show({ color: "red", message: String(err) }))}
+            >
+              Open folder
+            </Button>
+          )}
           {d.client_path && (
             <CopyButton value={d.client_path}>
               {({ copied, copy }) => (

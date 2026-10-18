@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "launcher",
+  "description": "The bundled launcher page: server list, local library, folder picker.",
+  "windows": ["main"],
+  "local": true,
+  "permissions": [
+    "core:default",
+    "allow-list-servers",
+    "allow-save-servers",
+    "allow-connect",
+    "allow-start-local",
+    "allow-pick-folder",
+    "allow-default-data-dir",
+    "allow-local-state"
+  ]
+}

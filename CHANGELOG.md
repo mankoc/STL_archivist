@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Desktop shell (Phase 7).** `stl-desktop` (Tauri 2) shows the web client in a native window: open a library on this computer (the shell runs `stl-server` for it on a free local port) or connect to a remembered server; tray icon, menus and shortcuts (Ctrl+L switch server, Ctrl+R reload); *Open folder* in the detail pane. A server's pages may only ask the shell to show a folder. Child processes (the shell's local server, the server's `llama-server`) now end with their parent even when it crashes (a Windows job object, crate `stl-proc`).
+
 - **Web client step 6j: AI tagger.** Select models in the browser and choose *AI tagger*: review a suggestion per model (tags and metadata from Qwen2.5-VL through llama.cpp, editable before *Save & next*) or process them all in one job. The server starts `llama-server` from the desktop app's AI install in its data directory (or the paths under `"ai"` in `server.json`, or uses a running server at `"ai": {"url": …}` / `STL_AI_URL`) and stops it after ten idle minutes. The tagger's text handling (tag cleanup, prompts, metadata parsing) moved to `app/utils/ai_tagging.py` so the native port is golden-tested against it.
 - Fixed: merging or removing records from Maintenance did not refresh other open clients.
 

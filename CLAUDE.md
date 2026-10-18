@@ -18,6 +18,9 @@ python -m pytest tests/ -v
 # Server (Phase 5; takes the library lock, so not while the app has the library open)
 cd rust && cargo run -p stl-server -- --data-dir <dir> --bind 127.0.0.1:8770
 
+# Desktop shell (Phase 7): starts the stl-server beside it for a local library
+cd rust && cargo build -p stl-server -p stl-desktop && cargo run -p stl-desktop
+
 # Web client (Phase 6; Node 24): dev server on :5173 proxying /api to :8770
 cd web && npm install && npm run dev
 npm run build        # web/dist, served by stl-server
@@ -46,7 +49,8 @@ stl_database/
 │   ├── icons/               # Toolbar / tree-view SVG icon set (light + dark variants)
 │   └── material-icons/      # Cached Material Design Icons (pre-downloaded for offline use)
 ├── rust/                    # Rust workspace: stl-core (library), stl-py (PyO3 → `stl_native`),
-│                            #   stl-server (axum HTTP API, Phase 5)
+│                            #   stl-server (axum HTTP API, Phase 5), stl-desktop (Tauri shell,
+│                            #   Phase 7), stl-proc (child processes that end with the parent)
 ├── web/                     # React + TypeScript web client (Phase 6), served by stl-server
 ├── tools/build_native.py    # maturin develop into the running interpreter's environment
 └── tests/                   # pytest; tests/factory.py builds data; tests/golden/ = Rust vs Python
@@ -94,6 +98,10 @@ the native core owns the schema from Phase 4b).
 - **Server AI tagger:** `stl-server/src/ai.rs` runs `llama-server` as a child process
   (never link llama.cpp) or uses `ai.url`; text handling is `stl_core::ai_tagging`, kept
   in step with `app/utils/ai_tagging.py` by a golden test.
+- **Desktop shell (`rust/stl-desktop`):** no library logic and no data commands. New
+  commands go into `build.rs`'s app manifest; the launcher capability lists what the
+  bundled page may call, and server origins get only `allow-open-folder` (runtime
+  capability in `grant`). Spawned helpers call `stl_proc::end_with_parent`.
 - **Server backups:** `stl_core::backup` (desktop layout); the `backup` job and
   `/api/backups` are admin-only, and restoring is the offline `stl-server restore`
   command (it takes the library lock). Never replace the database of an open library.
