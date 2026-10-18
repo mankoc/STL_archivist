@@ -448,6 +448,28 @@ The author rename no longer asks its "merge?" question inside an open transactio
 `tests/golden/test_admin_golden.py` runs 150 random editor operations both ways and
 compares every result and both databases.
 
+**4f-2: done 2026-10-18 (model editors).** The editor dialog, the AI tagger and the mass
+editor use `services/model_edit.py`, backed natively by `storage::model_edit`:
+- the completion lists and the model snapshot;
+- the editor save;
+- the AI commit, with its fill-only-empty rules;
+- the mass editor's choices, paths and save.
+
+The mass save ports `apply_extracted_to_model`, the `{token}` context (with Windows
+`pathlib` `folder` / `filename`), every manual field, lookup get-or-create, scale and tag
+rules, find & replace, and trimming, all in one transaction.
+- **Find & replace runs natively only where Rust and `re` agree:** a literal find
+  (case-insensitive only for an ASCII find text) and a replacement without backslashes.
+  Python expands `\1`, `\n` and `\g<0>`. Regex mode, and a tag list that would link one
+  tag twice (an IntegrityError in Python), raise before writing and run in Python. **4h
+  needs a decision for regex find & replace**, as for the crawler's custom patterns.
+- Lists the ORM loaded in unspecified order (a model's scales, tags, images, STL files)
+  are now explicitly in id (or file name) order in both implementations.
+  `apply_extracted_to_model`'s parentless subcollection lookup is `ORDER BY id`.
+- `tests/golden/test_model_edit_golden.py`: 120 random steps of reads, editor saves, AI
+  commits and mass saves on two copies. Native refusals leave the database untouched;
+  the final databases are compared.
+
 ### Phase 5: Server (medium)
 
 `stl-server` on axum, the product's centre from here on:

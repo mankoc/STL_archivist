@@ -16,24 +16,12 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QBrush, QColor, QCursor
 
-from app.database.db import session_scope, get_session
-from app.database.models import STLModel, Tag, Release, Collection, Subcollection, Category, Scale, Sculptor, model_tags
-from app.database.helpers import (
-    LookupCache,
-    get_or_create_category,
-    get_or_create_collection,
-    get_or_create_release,
-    get_or_create_scale,
-    get_or_create_sculptor,
-    get_or_create_subcollection,
-    get_or_create_tag,
-)
+from app.services import model_edit
 import re
 
 from app.utils.path_pattern import (
-    parse_path, apply_extracted_to_model,
+    parse_path,
     ATTR_LABEL as _ATTR_LABEL, PATTERN_HELP as _PATTERN_HELP,
-    parse_release_date, format_release_date,
 )
 
 #: Plain text columns on STLModel that the trim option cleans up.  Deliberately
@@ -124,12 +112,7 @@ class MassEditorDialog(QDialog):
     def _fetch_example_path(model_ids: list[int]) -> str:
         if not model_ids:
             return ""
-        session = get_session()
-        try:
-            model = session.get(STLModel, model_ids[0])
-            return (model.archive_path or "") if model else ""
-        finally:
-            session.close()
+        return model_edit.archive_paths(model_ids[:1]).get(model_ids[0], "")
 
     # ------------------------------------------------------------------
     def _build_ui(self):
@@ -241,72 +224,18 @@ class MassEditorDialog(QDialog):
         grid.setHorizontalSpacing(6)
         grid.setVerticalSpacing(4)
 
-        session = get_session()
-        try:
-            _uniq = lambda col: sorted(filter(None, (v for (v,) in session.query(col).distinct())))
-
-            # SQLite caps IN-clause variables at ~999; for large selections we
-            # skip the scope filter and return all values from the full DB.
-            _CHUNK = 999
-            _ids = self._model_ids
-            _large = len(_ids) > _CHUNK
-
-            sources        = _uniq(STLModel.source)
-            creators       = _uniq(STLModel.creator)
-            titles         = _uniq(STLModel.title)
-
-            if _large:
-                dates = sorted({
-                    format_release_date(y, mo)
-                    for (y, mo) in session.query(STLModel.release_year, STLModel.release_month)
-                                          .filter(STLModel.release_year.isnot(None)).distinct()
-                })
-                all_tags = sorted(t.name for t in session.query(Tag).order_by(Tag.name).all())
-                def _fk_ids(fk_col):
-                    return [
-                        cid for (cid,) in session.query(fk_col)
-                        .filter(fk_col.isnot(None)).distinct()
-                    ]
-            else:
-                dates = sorted({
-                    format_release_date(y, mo)
-                    for (y, mo) in session.query(STLModel.release_year, STLModel.release_month)
-                                          .filter(STLModel.id.in_(_ids))
-                                          .filter(STLModel.release_year.isnot(None)).distinct()
-                })
-                all_tags = sorted(
-                    t.name for t in session.query(Tag)
-                    .join(model_tags, Tag.id == model_tags.c.tag_id)
-                    .filter(model_tags.c.model_id.in_(_ids))
-                    .distinct().order_by(Tag.name).all()
-                )
-                def _fk_ids(fk_col):
-                    return [
-                        cid for (cid,) in session.query(fk_col)
-                        .filter(STLModel.id.in_(_ids))
-                        .filter(fk_col.isnot(None)).distinct()
-                    ]
-
-            _rel_ids = _fk_ids(STLModel.release_id)
-            releases       = sorted(filter(None, (
-                r.name for r in session.query(Release)
-                .filter(Release.id.in_(_rel_ids)).all()
-            ))) if _rel_ids else sorted(r.name for r in session.query(Release).order_by(Release.name).all())
-            _col_ids = _fk_ids(STLModel.collection_id)
-            collections    = sorted(filter(None, (
-                c.name for c in session.query(Collection)
-                .filter(Collection.id.in_(_col_ids)).all()
-            ))) if _col_ids else sorted(c.name for c in session.query(Collection).order_by(Collection.name).all())
-            _sub_ids = _fk_ids(STLModel.subcollection_id)
-            subcollections = sorted(filter(None, (
-                s.name for s in session.query(Subcollection)
-                .filter(Subcollection.id.in_(_sub_ids)).all()
-            ))) if _sub_ids else sorted(s.name for s in session.query(Subcollection).order_by(Subcollection.name).all())
-            categories     = sorted(c.name for c in session.query(Category).order_by(Category.name).all())
-            scales         = sorted(s.name for s in session.query(Scale).order_by(Scale.name).all())
-            sculptors      = sorted(s.name for s in session.query(Sculptor).order_by(Sculptor.name).all())
-        finally:
-            session.close()
+        choices = model_edit.mass_choices(self._model_ids)
+        sources        = choices["sources"]
+        creators       = choices["creators"]
+        titles         = choices["titles"]
+        dates          = choices["dates"]
+        all_tags       = choices["tags"]
+        releases       = choices["releases"]
+        collections    = choices["collections"]
+        subcollections = choices["subcollections"]
+        categories     = choices["categories"]
+        scales         = choices["scales"]
+        sculptors      = choices["sculptors"]
 
         self._type_edit    = self._make_ac_edit(sources,  "e.g. patreon  or  {source}")
         self._creator_edit = self._make_ac_edit(creators, "e.g. SomeCreator  or  {creator}")
@@ -505,40 +434,12 @@ class MassEditorDialog(QDialog):
     # ------------------------------------------------------------------
     # Token resolution
     # ------------------------------------------------------------------
-    @staticmethod
-    def _token_context(model: "STLModel", path_extracted: dict[str, str]) -> dict[str, str]:
-        from pathlib import Path as _P
-        ap = model.archive_path or ""
-        ctx: dict[str, str] = {
-            "creator":  model.creator  or "",
-            "source":   model.source   or "",
-            "title":    model.title    or "",
-            "date":     format_release_date(model.release_year, model.release_month),
-            "path":     ap,
-            "folder":   _P(ap).parent.name if ap else "",
-            "filename": _P(ap).stem       if ap else "",
-        }
-        ctx.update(path_extracted)
-        return ctx
-
-    @staticmethod
-    def _resolve_tokens(value: str, context: dict[str, str]) -> str:
-        def _sub(m: re.Match) -> str:
-            return context.get(m.group(1), m.group(0))
-        return re.sub(r"\{(\w+)\}", _sub, value)
+    _token_context = staticmethod(model_edit.token_context)
+    _resolve_tokens = staticmethod(model_edit.resolve_tokens)
 
     def _on_collection_changed(self, collection_name: str) -> None:
         """Repopulate subcollection combo when the collection selection changes."""
-        session = get_session()
-        try:
-            q = session.query(Subcollection).order_by(Subcollection.name)
-            if collection_name.strip():
-                col = session.query(Collection).filter_by(name=collection_name.strip()).first()
-                if col:
-                    q = q.filter(Subcollection.collection_id == col.id)
-            subcollections = [s.name for s in q.all()]
-        finally:
-            session.close()
+        subcollections = model_edit.subcollection_names(collection_name)
         current = self._subcollection_edit.currentText()
         self._subcollection_edit.blockSignals(True)
         self._subcollection_edit.clear()
@@ -643,18 +544,14 @@ class MassEditorDialog(QDialog):
 
         self._path_results.clear()
         matched = 0
-        session = get_session()
-        try:
-            for mid in self._model_ids:
-                model = session.get(STLModel, mid)
-                if model is None:
-                    continue
-                extracted = _parse_path(pattern, model.archive_path or "")
-                if extracted:
-                    self._path_results[mid] = extracted
-                    matched += 1
-        finally:
-            session.close()
+        paths = model_edit.archive_paths(self._model_ids)
+        for mid in self._model_ids:
+            if mid not in paths:
+                continue
+            extracted = _parse_path(pattern, paths[mid])
+            if extracted:
+                self._path_results[mid] = extracted
+                matched += 1
 
         total = len(self._model_ids)
         if matched:
@@ -675,15 +572,8 @@ class MassEditorDialog(QDialog):
         """
         self._parse_paths()   # so the table always reflects the pattern in the box
 
-        session = get_session()
-        try:
-            rows = []
-            for mid in self._model_ids:
-                model = session.get(STLModel, mid)
-                if model is not None:
-                    rows.append((model.archive_path or "", self._path_results.get(mid, {})))
-        finally:
-            session.close()
+        paths = model_edit.archive_paths(self._model_ids)
+        rows = [(paths[mid], self._path_results.get(mid, {})) for mid in self._model_ids if mid in paths]
 
         # One column per field any path yielded, in the order they first appear.
         attrs: list[str] = []
@@ -792,162 +682,37 @@ class MassEditorDialog(QDialog):
             elif edit.text().strip():
                 manual[field] = edit.text().strip()
 
-        scale_tmpl   = self._scale_edit.text().strip()
-        apply_scale  = "scale" in clearing or bool(scale_tmpl)
-
-        presup_choice     = self._presupports_combo.currentText()
-        apply_presupports = "presupports" in clearing or presup_choice != "— no change —"
-        presupports_value = None if "presupports" in clearing else (presup_choice if apply_presupports else None)
-
-        release_tmpl       = self._release_edit.text().strip()
-        collection_name    = self._collection_edit.currentText().strip()
-        subcollection_name = self._subcollection_edit.currentText().strip()
-        category_name      = self._category_edit.currentText().strip()
-
-        tags_tmpl  = self._tags_edit.text()
-        apply_tags = "tags" in clearing or bool(tags_tmpl.strip())
-
-        _cache: LookupCache = {}
-
-        # Prepare Find & Replace pattern if needed
+        presup_choice = self._presupports_combo.currentText()
         find_str = self._find_edit.text()
         target_fields = [f for f, cb in self._fnr_fields.items() if cb.isChecked()]
-        pattern = None
+        find = None
         if find_str and find_str.strip() and target_fields:
-            replace_str = self._replace_edit.text()
-            flags = 0 if self._fnr_case_check.isChecked() else re.IGNORECASE
-            raw = find_str if self._fnr_regex_check.isChecked() else re.escape(find_str)
-            try:
-                pattern = re.compile(raw, flags)
-            except re.error as exc:
-                from PyQt6.QtWidgets import QMessageBox
-                QMessageBox.warning(self, self.tr("Invalid Regex"), f"The pattern is not valid:\n{exc}")
-                return
-
-        # Single session for all operations (manual edits + Find & Replace)
-        _fnr_cache: LookupCache = {}
-        with session_scope() as session:
-            for mid in self._model_ids:
-                model: STLModel = session.get(STLModel, mid)
-                if model is None:
-                    continue
-
-                path_extracted = self._path_results.get(mid, {})
-                apply_extracted_to_model(
-                    session, model, path_extracted,
-                    overwrite=self._overwrite_cb.isChecked(),
-                )
-
-                ctx = self._token_context(model, path_extracted)
-                for attr, value in manual.items():
-                    if value is None:
-                        if attr == "release_date":
-                            model.release_year  = None
-                            model.release_month = None
-                        else:
-                            setattr(model, attr, None)
-                    else:
-                        resolved = self._resolve_tokens(value, ctx)
-                        if attr == "release_date":
-                            _year, _month = parse_release_date(resolved or "")
-                            model.release_year  = _year
-                            model.release_month = _month
-                        else:
-                            setattr(model, attr, resolved or None)
-
-                if "release" in clearing:
-                    model.release = None
-                elif release_tmpl:
-                    release_name = self._resolve_tokens(release_tmpl, ctx)
-                    if release_name:
-                        model.release = get_or_create_release(session, release_name, cache=_cache)
-
-                if "collection" in clearing:
-                    model.collection    = None
-                    model.subcollection = None
-                elif collection_name:
-                    col = get_or_create_collection(session, collection_name, cache=_cache)
-                    model.collection = col
-
-                    if "subcollection" in clearing:
-                        model.subcollection = None
-                    elif subcollection_name:
-                        model.subcollection = get_or_create_subcollection(
-                            session, subcollection_name, col.id, cache=_cache
-                        )
-
-                if "category" in clearing:
-                    model.category = None
-                elif category_name:
-                    model.category = get_or_create_category(session, category_name, cache=_cache)
-
-                sculptor_name = self._sculptor_edit.currentText().strip()
-                if "sculptor" in clearing:
-                    model.sculptor = None
-                elif sculptor_name:
-                    model.sculptor = get_or_create_sculptor(session, sculptor_name, cache=_cache)
-
-                if apply_scale:
-                    model.scales.clear()
-                    if "scale" not in clearing or scale_tmpl:
-                        _seen_scales: set[str] = set()
-                        for name in [s.strip() for s in scale_tmpl.split(",") if s.strip()]:
-                            if name.lower() in _seen_scales:
-                                continue
-                            model.scales.append(get_or_create_scale(session, name, cache=_cache))
-                            _seen_scales.add(name.lower())
-
-                if apply_presupports:
-                    model.presupports = presupports_value or None
-
-                if apply_tags:
-                    if "tags" in clearing and not tags_tmpl.strip():
-                        model.tags.clear()
-                    else:
-                        resolved_tags = self._resolve_tokens(tags_tmpl, ctx)
-                        tag_names = [t.strip() for t in resolved_tags.split(",") if t.strip()]
-                        model.tags.clear()
-                        for name in tag_names:
-                            model.tags.append(get_or_create_tag(session, name, cache=_cache))
-
-                # Apply Find & Replace in the same session
-                if pattern:
-                    simple_fields = [f for f in target_fields if f not in ("collection", "subcollection")]
-                    do_collection    = "collection"    in target_fields
-                    do_subcollection = "subcollection" in target_fields
-
-                    for field in simple_fields:
-                        old_val = getattr(model, field, None)
-                        if not old_val:
-                            continue
-                        new_val = pattern.sub(replace_str, old_val)
-                        if new_val != old_val:
-                            setattr(model, field, new_val or None)
-                    if do_collection and model.collection:
-                        new_name = pattern.sub(replace_str, model.collection.name)
-                        if new_name and new_name != model.collection.name:
-                            model.collection = get_or_create_collection(
-                                session, new_name, cache=_fnr_cache
-                            )
-                    if do_subcollection and model.subcollection:
-                        new_name = pattern.sub(replace_str, model.subcollection.name)
-                        if new_name and new_name != model.subcollection.name:
-                            parent_id = model.collection.id if model.collection else None
-                            if parent_id is not None:
-                                model.subcollection = get_or_create_subcollection(
-                                    session, new_name, parent_id, cache=_fnr_cache
-                                )
-
-                # Trim last, so values parsed from the path, typed above, or
-                # produced by Find & Replace are all cleaned up too.
-                if trim:
-                    for attr in _TRIMMABLE_ATTRS:
-                        value = getattr(model, attr, None)
-                        if not isinstance(value, str):
-                            continue
-                        stripped = value.strip()
-                        if stripped != value:
-                            setattr(model, attr, stripped or None)
+            find = {"find": find_str, "replace": self._replace_edit.text(),
+                    "case": self._fnr_case_check.isChecked(),
+                    "regex": self._fnr_regex_check.isChecked(), "fields": target_fields}
+        plan = {
+            "model_ids":     list(self._model_ids),
+            "path_results":  dict(self._path_results),
+            "overwrite":     self._overwrite_cb.isChecked(),
+            "manual":        manual,
+            "clearing":      sorted(clearing),
+            "scale":         self._scale_edit.text().strip(),
+            "presupports":   None if presup_choice == "— no change —" else presup_choice,
+            "release":       self._release_edit.text().strip(),
+            "collection":    self._collection_edit.currentText().strip(),
+            "subcollection": self._subcollection_edit.currentText().strip(),
+            "category":      self._category_edit.currentText().strip(),
+            "sculptor":      self._sculptor_edit.currentText().strip(),
+            "tags":          self._tags_edit.text(),
+            "find":          find,
+            "trim":          trim,
+        }
+        try:
+            model_edit.mass_save(plan)
+        except re.error as exc:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, self.tr("Invalid Regex"), f"The pattern is not valid:\n{exc}")
+            return
 
         from app.ui import lookup_cache as _lookup_cache
         _lookup_cache.invalidate()

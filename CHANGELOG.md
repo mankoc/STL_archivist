@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Rust migration, step 4f-2: the model editors save natively** (on Windows): the Edit Model dialog, the AI tagger and the Mass Editor, including path-pattern parsing, `{token}` templates, Find & Replace and trimming. Results are identical to the Python code (golden-tested over random edits). A regular-expression Find & Replace still runs in Python, because the two regex engines differ in details.
+
 - **Rust migration, step 4f begins: the lookup editors run natively** (on Windows). Tag, Category, Collection, Subcollection, Scale, Author and creator profile editing all go through a shared service, with identical results (golden-tested over random edit sequences). Renaming an author to an existing name no longer holds the database locked while asking whether to merge.
 
 - **Rust migration, step 4e: maintenance and image search run natively** (on Windows): *Verify Archives* (files are checked in parallel; about 1.8x faster when the drive's metadata is cached), *Find Duplicate Entries*, *Prune Images*, reading the stored AI embeddings, *Find by Image* by embedding, and the embedding duplicate search. Results are identical to the Python code on the reference library. *Verify Archives* and *Find Duplicate Entries* now always list records in the order they were added.

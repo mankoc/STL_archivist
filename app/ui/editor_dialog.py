@@ -12,12 +12,10 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QCursor, QPixmap
 
-from pathlib import Path
 
-from app.database.db import session_scope, get_session
-from app.database.models import STLModel, Tag, Release, Sculptor, Collection, Subcollection, Category, Scale
-from app.services import editing
-from app.utils.path_pattern import parse_path, ATTR_LABEL, PATTERN_HELP, parse_release_date, format_release_date
+
+from app.services import model_edit
+from app.utils.path_pattern import parse_path, ATTR_LABEL, PATTERN_HELP, format_release_date
 
 
 class TagEdit(QLineEdit):
@@ -89,7 +87,7 @@ class EditorDialog(QDialog):
     subcollection, category, release, scale, presupports, source, URL, date,
     sequence, tags, description) in a form layout with a thumbnail sidebar.
 
-    On accept the changes are written to the database using a session scope.
+    On accept the changes are saved through services.model_edit (one transaction).
     """
 
     def __init__(self, model_id: int, parent=None) -> None:
@@ -120,30 +118,18 @@ class EditorDialog(QDialog):
         self._path_edit.setReadOnly(True)
         self._path_edit.setStyleSheet("color: gray;")
 
-        session = get_session()
-        try:
-            _uniq = lambda col: sorted(
-                filter(None, (v for (v,) in session.query(col).distinct().all()))
-            )
-            titles        = _uniq(STLModel.title)
-            creators      = _uniq(STLModel.creator)
-            sources       = _uniq(STLModel.source)
-            dates         = sorted({
-                format_release_date(y, mo)
-                for (y, mo) in session.query(STLModel.release_year, STLModel.release_month)
-                                      .filter(STLModel.release_year.isnot(None))
-                                      .distinct()
-                                      .all()
-            })
-            all_tags      = [t.name for t in session.query(Tag).order_by(Tag.name).all()]
-            releases      = sorted(r.name for r in session.query(Release).order_by(Release.name).all())
-            sculptors     = sorted(s.name for s in session.query(Sculptor).order_by(Sculptor.name).all())
-            collections   = sorted(c.name for c in session.query(Collection).order_by(Collection.name).all())
-            subcollections = sorted(s.name for s in session.query(Subcollection).order_by(Subcollection.name).all())
-            categories    = sorted(c.name for c in session.query(Category).order_by(Category.name).all())
-            scales        = sorted(s.name for s in session.query(Scale).order_by(Scale.name).all())
-        finally:
-            session.close()
+        choices = model_edit.editor_choices()
+        titles         = choices["titles"]
+        creators       = choices["creators"]
+        sources        = choices["sources"]
+        dates          = choices["dates"]
+        all_tags       = choices["tags"]
+        releases       = choices["releases"]
+        sculptors      = choices["sculptors"]
+        collections    = choices["collections"]
+        subcollections = choices["subcollections"]
+        categories     = choices["categories"]
+        scales         = choices["scales"]
 
         self._title_edit  = self._autocomplete_edit(titles)
         self._creator_edit = self._autocomplete_edit(creators)
@@ -321,16 +307,7 @@ class EditorDialog(QDialog):
 
     def _on_collection_changed(self, collection_name: str):
         """Repopulate subcollection combo when the collection changes."""
-        session = get_session()
-        try:
-            q = session.query(Subcollection).order_by(Subcollection.name)
-            if collection_name.strip():
-                col = session.query(Collection).filter_by(name=collection_name.strip()).first()
-                if col:
-                    q = q.filter(Subcollection.collection_id == col.id)
-            subcollections = [s.name for s in q.all()]
-        finally:
-            session.close()
+        subcollections = model_edit.subcollection_names(collection_name)
         current = self._subcollection_edit.currentText()
         self._subcollection_edit.blockSignals(True)
         self._subcollection_edit.clear()
@@ -341,35 +318,31 @@ class EditorDialog(QDialog):
 
     # ------------------------------------------------------------------
     def _load_model(self):
-        session = get_session()
-        try:
-            model: STLModel = session.get(STLModel, self.model_id)
-            if model is None:
-                return
-            self._archive_path = model.archive_path
-            self._path_edit.setText(model.archive_path or "")
-            self._title_edit.setText(model.title or "")
-            self._creator_edit.setText(model.creator or "")
-            self._source_edit.setCurrentText(model.source or "")
-            self._date_edit.setText(format_release_date(model.release_year, model.release_month))
-            self._release_edit.setCurrentText(model.release.name if model.release else "")
-            self._sculptor_edit.setCurrentText(model.sculptor.name if model.sculptor else "")
-            collection_name = model.collection.name if model.collection else ""
-            self._collection_edit.setCurrentText(collection_name)
-            self._on_collection_changed(collection_name)
-            self._subcollection_edit.setCurrentText(model.subcollection.name if model.subcollection else "")
-            self._category_edit.setCurrentText(model.category.name if model.category else "")
-            self._sequence_spin.setValue(model.sequence if model.sequence is not None else 0)
-            self._scale_edit.setText(", ".join(s.name for s in model.scales))
-            self._presupports_edit.setCurrentText(model.presupports or "")
-            self._url_edit.setText(model.url or "")
-            self._desc_edit.setPlainText(model.description or "")
-            self._tags_edit.setText(", ".join(t.name for t in model.tags))
-            self._populate_thumbnails(model)
-        finally:
-            session.close()
+        model = model_edit.model_for_editor(self.model_id)
+        if model is None:
+            return
+        self._archive_path = model["archive_path"]
+        self._path_edit.setText(model["archive_path"] or "")
+        self._title_edit.setText(model["title"] or "")
+        self._creator_edit.setText(model["creator"] or "")
+        self._source_edit.setCurrentText(model["source"] or "")
+        self._date_edit.setText(format_release_date(model["release_year"], model["release_month"]))
+        self._release_edit.setCurrentText(model["release"] or "")
+        self._sculptor_edit.setCurrentText(model["sculptor"] or "")
+        collection_name = model["collection"] or ""
+        self._collection_edit.setCurrentText(collection_name)
+        self._on_collection_changed(collection_name)
+        self._subcollection_edit.setCurrentText(model["subcollection"] or "")
+        self._category_edit.setCurrentText(model["category"] or "")
+        self._sequence_spin.setValue(model["sequence"] if model["sequence"] is not None else 0)
+        self._scale_edit.setText(", ".join(model["scales"]))
+        self._presupports_edit.setCurrentText(model["presupports"] or "")
+        self._url_edit.setText(model["url"] or "")
+        self._desc_edit.setPlainText(model["description"] or "")
+        self._tags_edit.setText(", ".join(model["tags"]))
+        self._populate_thumbnails(model["images"])
 
-    def _populate_thumbnails(self, model: STLModel):
+    def _populate_thumbnails(self, images: "list[tuple[int, bool]]"):
         while self._thumb_vlayout.count():
             item = self._thumb_vlayout.takeAt(0)
             if item.widget():
@@ -379,14 +352,14 @@ class EditorDialog(QDialog):
         # than one round-trip per image. JPEG→QPixmap decoding stays on the GUI
         # thread (QPixmap requires it) and is cheap for a single model's images.
         from app.utils.thumbnailer import get_thumbnail_bytes_many
-        ids = [img.id for img in model.images if img.thumbnail_path]
+        ids = [image_id for image_id, has_thumb in images if has_thumb]
         blobs = get_thumbnail_bytes_many(ids) if ids else {}
 
         sidebar_width = 200
-        for img in model.images:
+        for image_id, has_thumb in images:
             lbl = QLabel()
             px = QPixmap()
-            data = blobs.get(img.id) if img.thumbnail_path else None
+            data = blobs.get(image_id) if has_thumb else None
             if data:
                 px.loadFromData(data)
             px = px.scaled(sidebar_width, sidebar_width,
@@ -493,37 +466,23 @@ class EditorDialog(QDialog):
 
     # ------------------------------------------------------------------
     def _save(self):
-        with session_scope() as session:
-            model: STLModel = session.get(STLModel, self.model_id)
-            if model is None:
-                self.accept()
-                return
-
-            model.title        = self._title_edit.text().strip() or None
-            model.creator      = self._creator_edit.text().strip() or None
-            model.source       = self._source_edit.currentText().strip() or None
-            _year, _month = parse_release_date(self._date_edit.text().strip())
-            model.release_year  = _year
-            model.release_month = _month
-            editing.assign_scales(session, model, self._scale_edit.get_tags())
-            model.presupports  = self._presupports_edit.currentText().strip() or None
-            model.url          = self._url_edit.text().strip() or None
-            model.description  = self._desc_edit.toPlainText().strip() or None
-            seq = self._sequence_spin.value()
-            model.sequence     = seq if seq > 0 else None
-
-            editing.set_release(session, model, self._release_edit.currentText())
-            editing.set_sculptor(session, model, self._sculptor_edit.currentText())
-            editing.set_collection(session, model, self._collection_edit.currentText())
-            # A subcollection is only kept under a collection.
-            if model.collection is not None:
-                editing.set_subcollection(session, model, self._subcollection_edit.currentText())
-            else:
-                model.subcollection = None
-            editing.set_category(session, model, self._category_edit.currentText())
-            editing.assign_tags(session, model, self._tags_edit.get_tags())
-
-            folder = str(Path(model.archive_path).parent) if model.archive_path else None
+        folder = model_edit.save_model_editor(self.model_id, {
+            "title":         self._title_edit.text(),
+            "creator":       self._creator_edit.text(),
+            "source":        self._source_edit.currentText(),
+            "date":          self._date_edit.text(),
+            "scales":        self._scale_edit.get_tags(),
+            "presupports":   self._presupports_edit.currentText(),
+            "url":           self._url_edit.text(),
+            "description":   self._desc_edit.toPlainText(),
+            "sequence":      self._sequence_spin.value(),
+            "release":       self._release_edit.currentText(),
+            "sculptor":      self._sculptor_edit.currentText(),
+            "collection":    self._collection_edit.currentText(),
+            "subcollection": self._subcollection_edit.currentText(),
+            "category":      self._category_edit.currentText(),
+            "tags":          self._tags_edit.get_tags(),
+        })
 
         from app.ui import lookup_cache as _lookup_cache
         from app.ui import sidecar_exporter
