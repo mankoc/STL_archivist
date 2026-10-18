@@ -1242,6 +1242,31 @@ fn render_path_pattern(pattern: String, values: std::collections::HashMap<String
     path_pattern::render(&pattern, &values)
 }
 
+/// `app.crawler.metadata.extract_metadata`: a dict of the `ModelMetadata`
+/// fields. Raises `ValueError` for input the port leaves to Python.
+#[pyfunction]
+#[pyo3(signature = (archive_path, contents, source_dir=None))]
+fn extract_metadata<'py>(
+    py: Python<'py>,
+    archive_path: String,
+    contents: Vec<(String, Vec<u8>)>,
+    source_dir: Option<String>,
+) -> PyResult<Bound<'py, PyDict>> {
+    let m = py
+        .detach(|| stl_core::metadata::extract(&archive_path, &contents, source_dir.as_deref()))
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let d = PyDict::new(py);
+    d.set_item("title", m.title)?;
+    d.set_item("creator", m.creator)?;
+    d.set_item("distributor", m.distributor)?;
+    d.set_item("release_date", m.release_date)?;
+    d.set_item("url", m.url)?;
+    d.set_item("description", m.description)?;
+    d.set_item("tags", m.tags)?;
+    d.set_item("release", m.release)?;
+    Ok(d)
+}
+
 /// Why a custom presupport pattern is not portable (`rules.portable_pattern_error`),
 /// or `None` when the native rules read it as Python does.
 #[pyfunction]
@@ -1449,6 +1474,7 @@ fn stl_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
         wrap_pyfunction!(render_path_pattern, m)?,
         wrap_pyfunction!(soundex, m)?,
         wrap_pyfunction!(portable_pattern_error, m)?,
+        wrap_pyfunction!(extract_metadata, m)?,
         wrap_pyfunction!(migrate_database, m)?,
     ] {
         m.add_function(f)?;

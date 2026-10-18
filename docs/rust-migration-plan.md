@@ -590,6 +590,30 @@ validators accept the same ones, and every accepted pattern flags the same membe
 rule sets. The test names probe case folding (`ſ`, the Kelvin sign, `İ`, `ß`) and `$` before
 a final newline.
 
+**4g-2: done 2026-10-18 (metadata inference).** `stl-core/src/metadata.rs` ports
+`extract_metadata` (path inference, `.url` contents, `info.json`) and
+`archive.find_url_file` (`.url` members, then the folder, then `*-links` / `*_links`
+folders). `metadata.extract_metadata` calls it and passes only the `.url` and `info.json`
+members across. Python semantics are reproduced explicitly:
+- `\b` is a boundary of `[\p{L}\p{N}_]`, `\d` is `\p{Nd}`, and `\s` is `str.isspace()`;
+- `str.strip`, `str.splitlines`, and `bytes.decode` with `errors="ignore"` / `"replace"`;
+- Windows `pathlib` `parts`, and case-insensitive `relative_to`;
+- `sorted(glob)` on lowercased names.
+
+`pyjson.rs` writes JSON exactly as Python's `json.dumps(indent=2)` does, including
+`repr(float)`. 4g-3's sidecars use it.
+
+The port leaves these cases to Python:
+- `info.json` that `serde_json` rejects (Python also reads `NaN`), that is not an object
+  (Python raises), or that has non-text values where Python would store them as they are;
+- a `.url` search that would have to open a RAR archive (RAR moves to Rust with the
+  crawler).
+
+`tests/golden/test_metadata_golden.py` covers 3,000 random paths (Unicode digits and marks,
+CJK years, UNC and relative roots), and `.url` placement and `info.json` variants on real zip
+files. Gate on the reference library: path inference for all 60,593 archives and full
+extraction of 2,000 sampled zip / 7z archives, with no differences and no fallbacks.
+
 ### Phase 5: Server (medium)
 
 `stl-server` on axum, the product's centre from here on:
