@@ -9,9 +9,7 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox,
 )
 
-from app.database.db import session_scope, get_session
-from app.database.models import Scale
-from app.services.lookups import usage_count, usage_counts
+from app.services import lookup_admin
 
 
 class ScaleEditorDialog(QDialog):
@@ -60,20 +58,15 @@ class ScaleEditorDialog(QDialog):
     def _load(self) -> None:
         self._table.setSortingEnabled(False)
         self._table.setRowCount(0)
-        session = get_session()
-        try:
-            counts = usage_counts(session, "scale")
-            for sc in session.query(Scale).order_by(Scale.name).all():
-                row = self._table.rowCount()
-                self._table.insertRow(row)
-                name_item = QTableWidgetItem(sc.name)
-                name_item.setData(Qt.ItemDataRole.UserRole, sc.id)
-                count_item = QTableWidgetItem(str(counts.get(sc.id, 0)))
-                count_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self._table.setItem(row, 0, name_item)
-                self._table.setItem(row, 1, count_item)
-        finally:
-            session.close()
+        for sc_id, sc_name, sc_count in lookup_admin.list_lookups("scale"):
+            row = self._table.rowCount()
+            self._table.insertRow(row)
+            name_item = QTableWidgetItem(sc_name)
+            name_item.setData(Qt.ItemDataRole.UserRole, sc_id)
+            count_item = QTableWidgetItem(str(sc_count))
+            count_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._table.setItem(row, 0, name_item)
+            self._table.setItem(row, 1, count_item)
         self._table.setSortingEnabled(True)
 
     def _selected_id(self) -> int | None:
@@ -88,11 +81,9 @@ class ScaleEditorDialog(QDialog):
         if not ok or not name.strip():
             return
         name = name.strip()
-        with session_scope() as session:
-            if session.query(Scale).filter_by(name=name).first():
-                QMessageBox.warning(self, self.tr("Add Scale"), f"Scale '{name}' already exists.")
-                return
-            session.add(Scale(name=name))
+        if not lookup_admin.add("scale", name):
+            QMessageBox.warning(self, self.tr("Add Scale"), f"Scale '{name}' already exists.")
+            return
         self._load()
 
     def _rename(self, *_) -> None:
@@ -101,20 +92,14 @@ class ScaleEditorDialog(QDialog):
         if sc_id is None:
             QMessageBox.information(self, self.tr("Rename"), self.tr("Select exactly one scale to rename."))
             return
-        session = get_session()
-        try:
-            old_name = session.get(Scale, sc_id).name
-        finally:
-            session.close()
+        old_name = lookup_admin.name_of("scale", sc_id)[0]
         new_name, ok = QInputDialog.getText(self, self.tr("Rename Scale"), self.tr("New name:"), text=old_name)
         if not ok or not new_name.strip() or new_name.strip() == old_name:
             return
         new_name = new_name.strip()
-        with session_scope() as session:
-            if session.query(Scale).filter_by(name=new_name).first():
-                QMessageBox.warning(self, self.tr("Rename Scale"), f"Scale '{new_name}' already exists.")
-                return
-            session.get(Scale, sc_id).name = new_name
+        if not lookup_admin.rename("scale", sc_id, new_name):
+            QMessageBox.warning(self, self.tr("Rename Scale"), f"Scale '{new_name}' already exists.")
+            return
         self._load()
 
     def _delete(self) -> None:
@@ -123,12 +108,7 @@ class ScaleEditorDialog(QDialog):
         if sc_id is None:
             QMessageBox.information(self, self.tr("Delete"), self.tr("Select exactly one scale to delete."))
             return
-        session = get_session()
-        try:
-            sc = session.get(Scale, sc_id)
-            name, count = sc.name, usage_count(session, "scale", sc_id)
-        finally:
-            session.close()
+        name, count, _subs = lookup_admin.delete_info("scale", sc_id)
         msg = f"Delete scale '{name}'?"
         if count:
             msg += f"\n\nIt is currently used by {count} model(s)."
@@ -139,6 +119,5 @@ class ScaleEditorDialog(QDialog):
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-        with session_scope() as session:
-            session.delete(session.get(Scale, sc_id))
+        lookup_admin.delete("scale", sc_id)
         self._load()

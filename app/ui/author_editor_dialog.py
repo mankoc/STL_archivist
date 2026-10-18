@@ -13,8 +13,7 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox, QSpinBox, QComboBox,
 )
 
-from app.database.db import session_scope, get_session
-from app.database.models import STLModel, Creator
+from app.services import lookup_admin
 from app.utils.string_utils import levenshtein_pairs as _levenshtein_pairs, soundex as _soundex
 
 
@@ -71,26 +70,9 @@ class AuthorEditorDialog(QDialog):
     def _load(self) -> None:
         self._table.setSortingEnabled(False)
         self._table.setRowCount(0)
-        session = get_session()
-        try:
-            rows = (
-                session.query(STLModel.creator, STLModel.creator)
-                .filter(STLModel.creator.isnot(None))
-                .group_by(STLModel.creator)
-                .order_by(STLModel.creator)
-                .all()
-            )
-            from sqlalchemy import func
-            counts = dict(
-                session.query(STLModel.creator, func.count(STLModel.id))
-                .filter(STLModel.creator.isnot(None))
-                .group_by(STLModel.creator)
-                .all()
-            )
-        finally:
-            session.close()
-
-        for (name, _) in rows:
+        author_rows = lookup_admin.author_counts()
+        counts = dict(author_rows)
+        for (name, _) in author_rows:
             row = self._table.rowCount()
             self._table.insertRow(row)
             name_item = QTableWidgetItem(name)
@@ -127,34 +109,17 @@ class AuthorEditorDialog(QDialog):
         if new_name == old_name:
             return
 
-        with session_scope() as session:
-            existing = (
-                session.query(STLModel)
-                .filter_by(creator=new_name)
-                .first()
+        if lookup_admin.author_model_count(new_name):
+            reply = QMessageBox.question(
+                self, self.tr("Name Conflict"),
+                f"'{new_name}' already exists. Merge both authors under that name?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
             )
-            if existing:
-                reply = QMessageBox.question(
-                    self, self.tr("Name Conflict"),
-                    f"'{new_name}' already exists. Merge both authors under that name?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-                    QMessageBox.StandardButton.Cancel,
-                )
-                if reply != QMessageBox.StandardButton.Yes:
-                    return
-            (
-                session.query(STLModel)
-                .filter_by(creator=old_name)
-                .update({"creator": new_name})
-            )
-            # Rename or merge the Creator profile record
-            old_profile = session.query(Creator).filter_by(name=old_name).first()
-            if old_profile:
-                new_profile = session.query(Creator).filter_by(name=new_name).first()
-                if new_profile is None:
-                    old_profile.name = new_name
-                else:
-                    session.delete(old_profile)
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        # Moves the models and renames (or merges) the creator profile.
+        lookup_admin.rename_author(old_name, new_name)
 
         self._load()
 
@@ -165,15 +130,7 @@ class AuthorEditorDialog(QDialog):
             QMessageBox.information(self, self.tr("Delete"), self.tr("Select exactly one author to delete."))
             return
 
-        session = get_session()
-        try:
-            count = (
-                session.query(STLModel)
-                .filter_by(creator=name)
-                .count()
-            )
-        finally:
-            session.close()
+        count = lookup_admin.author_model_count(name)
 
         reply = QMessageBox.question(
             self, self.tr("Delete Author"),
@@ -184,11 +141,7 @@ class AuthorEditorDialog(QDialog):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        with session_scope() as session:
-            session.query(STLModel).filter_by(creator=name).update({"creator": None})
-            profile = session.query(Creator).filter_by(name=name).first()
-            if profile:
-                session.delete(profile)
+        lookup_admin.delete_author(name)
 
         self._load()
 
@@ -221,11 +174,7 @@ class AuthorEditorDialog(QDialog):
 
         keep_name, delete_name = (name_a, name_b) if chosen == name_a else (name_b, name_a)
 
-        with session_scope() as session:
-            session.query(STLModel).filter_by(creator=delete_name).update({"creator": keep_name})
-            old_profile = session.query(Creator).filter_by(name=delete_name).first()
-            if old_profile:
-                session.delete(old_profile)
+        lookup_admin.merge_authors(keep_name, delete_name)
 
         self._load()
 
@@ -288,21 +237,7 @@ class _MergeSimilarAuthorsDialog(QDialog):
         self._thresh_spin.setVisible(is_lev)
 
     def _scan(self) -> None:
-        from sqlalchemy import func
-        session = get_session()
-        try:
-            authors = [
-                (name, count)
-                for name, count in (
-                    session.query(STLModel.creator, func.count(STLModel.id))
-                    .filter(STLModel.creator.isnot(None))
-                    .group_by(STLModel.creator)
-                    .order_by(STLModel.creator)
-                    .all()
-                )
-            ]
-        finally:
-            session.close()
+        authors = lookup_admin.author_counts()
 
         method = self._method_combo.currentText()
         pairs: list[tuple] = []
@@ -361,10 +296,6 @@ class _MergeSimilarAuthorsDialog(QDialog):
 
         keep_name, delete_name = (name_a, name_b) if chosen == name_a else (name_b, name_a)
 
-        with session_scope() as session:
-            session.query(STLModel).filter_by(creator=delete_name).update({"creator": keep_name})
-            old_profile = session.query(Creator).filter_by(name=delete_name).first()
-            if old_profile:
-                session.delete(old_profile)
+        lookup_admin.merge_authors(keep_name, delete_name)
 
         self._scan()
