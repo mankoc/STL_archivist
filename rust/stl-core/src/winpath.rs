@@ -67,6 +67,11 @@ impl WinPath {
         out
     }
 
+    /// `name`: the final part (`""` for an anchor or `.`).
+    pub fn name(&self) -> &str {
+        self.parts.last().map(String::as_str).unwrap_or("")
+    }
+
     /// `suffix` (Python 3.14) of the final part.
     pub fn suffix(&self) -> &str {
         let name = self.parts.last().map(String::as_str).unwrap_or("");

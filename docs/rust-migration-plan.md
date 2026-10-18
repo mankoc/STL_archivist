@@ -412,6 +412,27 @@ browser cell field, with the tag/scale/subcollection rules), `relocate`, `delete
   deletes and pruning, to two copies of a library, one through the Python services and one
   natively, and compares every table.
 
+**4e: done 2026-10-18.**
+
+- `storage::vectors` ports `count`, `read_all`, `store` and `prune_orphans`. `read_all`
+  decodes the chunk shadow tables with the same version guard, and falls back to a row scan.
+  It also ports `find_similar_models` (KNN in a `MATERIALIZED` CTE, best image per model,
+  stable order) and `load_model_vectors`.
+- `storage::maintenance` ports `verify_archives` (stats files in parallel, in chunks, so
+  Stop returns the checked prefix) and `find_duplicate_entries`. For `prune_images` it
+  supplies the models over the limit, the excess ids per batch and the image deletes; the
+  thumbnail deletes stay in the Python loop, before the database delete, as before.
+- Python uses them through `native_db.library()`. The Python queries now order by id, so
+  their results are deterministic. Vector writes (`vectors.store`) run inside the embedding
+  worker's ORM transaction and keep the Python path until that worker moves.
+- Found while comparing: SQLAlchemy's bulk `update()` applies `onupdate`, so clearing the
+  missing flag of reappeared files also sets `updated_at`. The native code does the same.
+- Gate: `tests/golden/test_maintenance_golden.py`. On the reference library (copy), every
+  result was identical: verify (60,593 rows), duplicates (557 rows), `read_all` (355,643
+  vectors), `load_model_vectors` and nine KNN searches. Warm-cache verify takes 0.78 s
+  natively against 1.42 s in Python; vector reads and KNN take about the same time, since
+  both already ran in C.
+
 ### Phase 5: Server (medium)
 
 `stl-server` on axum, the product's centre from here on:

@@ -23,7 +23,9 @@
 
 pub mod edit;
 pub mod library;
+pub mod maintenance;
 pub mod schema_sql;
+pub mod vectors;
 
 use std::collections::HashSet;
 use std::path::Path;

@@ -202,14 +202,19 @@ def verify_archives(
     Records previously flagged missing whose file has reappeared get the flag
     cleared (in a single UPDATE at the end).
     """
+    from app.database import native_db
     from app.database.db import session_scope
     from app.database.models import STLModel
+
+    lib = native_db.library()
+    if lib is not None:
+        return _verify_native(lib, progress, log, should_stop)
 
     with session_scope() as session:
         records = session.query(
             STLModel.id, STLModel.title, STLModel.archive_path,
             STLModel.archive_hash, STLModel.archive_size, STLModel.is_missing,
-        ).all()
+        ).order_by(STLModel.id).all()
 
     total = len(records)
     if total == 0:
@@ -261,6 +266,30 @@ def verify_archives(
     return results
 
 
+def _verify_native(lib, progress: Progress, log: Log, should_stop: ShouldStop) -> list[dict]:
+    """:func:`verify_archives` through the native core (files checked in parallel)."""
+    total, rows, stopped, _cleared = lib.verify_archives(progress=progress, should_stop=should_stop)
+    if total == 0:
+        log("No records found in the database.")
+        return []
+    log(f"Verifying {total} archive(s)…")
+    results = [_result_row(mid, title, path, ahash, size, status)
+               for mid, title, path, ahash, size, status in rows]
+    if stopped:
+        log("Stopped by user.")
+    count = defaultdict(int)
+    for r in results:
+        count[r["status"]] += 1
+    n_missing, n_flagged, n_modified = count[STATUS_MISSING], count[STATUS_FLAGGED], count[STATUS_MODIFIED]
+    ok_count = total - n_missing - n_flagged - n_modified
+    log(
+        f"Done — {ok_count} OK, {n_modified} modified, "
+        f"{n_missing} missing, {n_flagged} flagged missing "
+        f"out of {total} archive(s)."
+    )
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Duplicate DB entries
 # ---------------------------------------------------------------------------
@@ -280,11 +309,25 @@ def find_duplicate_entries(progress: Progress = _noop, log: Log = _noop) -> list
     from app.database.models import STLModel
 
     log("Scanning for duplicate entries…")
+    from app.database import native_db
+    lib = native_db.library()
+    if lib is not None:
+        results = []
+        for mid, title, path, ahash, size, match in lib.duplicate_entries():
+            rec = _result_row(mid, title, path, ahash, size, STATUS_DUPLICATE, match)
+            results.append(rec)
+        progress(1, 1)
+        n = len(results)
+        if n:
+            log(f"Found {n} record(s) in {n // 2 + n % 2} duplicate group(s).")
+        else:
+            log("No duplicate entries found.")
+        return results
     with session_scope() as session:
         rows = session.query(
             STLModel.id, STLModel.title, STLModel.archive_path,
             STLModel.archive_hash, STLModel.archive_size,
-        ).all()
+        ).order_by(STLModel.id).all()
 
     total = len(rows)
     progress(0, total)
@@ -346,14 +389,21 @@ def prune_images(
     from app.database.models import Image as DBImage
     from app.utils.thumbnailer import delete_thumbnails
 
+    from app.database import native_db
+
     keep = max(0, int(keep))
-    with session_scope() as session:
-        model_ids = [mid for (mid,) in (
-            session.query(DBImage.model_id)
-            .group_by(DBImage.model_id)
-            .having(func.count(DBImage.id) > keep)
-            .all()
-        )]
+    lib = native_db.library()
+    if lib is not None:
+        model_ids = lib.images_over(keep)
+    else:
+        with session_scope() as session:
+            model_ids = [mid for (mid,) in (
+                session.query(DBImage.model_id)
+                .group_by(DBImage.model_id)
+                .having(func.count(DBImage.id) > keep)
+                .order_by(DBImage.model_id)
+                .all()
+            )]
 
     total = len(model_ids)
     if total == 0:
@@ -368,6 +418,16 @@ def prune_images(
             log("Stopped by user.")
             break
         chunk = model_ids[start:start + batch_size]
+        if lib is not None:
+            pruned, excess = lib.excess_images(chunk, keep)
+            models_pruned += pruned
+            delete_thumbnails(excess)
+            if excess:
+                lib.delete_images(excess)
+            images_removed += len(excess)
+            done += len(chunk)
+            progress(done, total)
+            continue
         with session_scope() as session:
             per_model: dict[int, list[int]] = defaultdict(list)
             for img_id, mid in (

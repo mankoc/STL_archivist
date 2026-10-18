@@ -37,6 +37,10 @@ def find_similar_models(
     cosine similarity (1.0 = identical).  *capped* is True when all *limit*
     nearest images cleared the threshold, so more matches may exist.
     """
+    from app.database import native_db
+    lib = native_db.library() if native_db.session_clean(session) else None
+    if lib is not None:
+        return lib.find_similar_models(to_blob(query_vec), float(threshold), int(limit))
     k = min(limit, vectors.MAX_KNN)
     maxd = 1.0 - threshold
     rows = session.execute(text(_KNN_SQL), {"q": to_blob(query_vec), "k": k}).all()
@@ -63,6 +67,14 @@ def load_model_vectors(session):
     deleted or missing models' images are left out.
     """
     import numpy as np
+
+    from app.database import native_db
+    from app.utils.image_embedding import EMBED_DIM
+    lib = native_db.library() if native_db.session_clean(session) else None
+    if lib is not None:
+        mids, mat = lib.load_model_vectors(EMBED_DIM)
+        return (np.frombuffer(mids, dtype=np.int64).copy(),
+                np.frombuffer(mat, dtype=np.float32).reshape(-1, EMBED_DIM))
 
     ids, mat = vectors.read_all(session)
     # Plain driver rows: building ORM rows for 360k images took 1.7x as long.

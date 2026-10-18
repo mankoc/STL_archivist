@@ -227,6 +227,9 @@ fn migrate_database<'py>(
 /// A `FilterSpec` crosses as a dict: `{"include": {facet: [values]}, "exclude":
 /// {...}, "has_value": [...], "no_value": [...], "ids": [...] | None}` with
 /// values `str`, `int` or `(year, month | None)`.
+/// A maintenance result row: `(id, title, path, hash, size, status or match path)`.
+type MaintRow<T> = (i64, String, String, String, Option<i64>, T);
+
 #[pyclass(frozen, name = "LibraryDb")]
 struct PyLibraryDb {
     path: std::path::PathBuf,
@@ -514,6 +517,91 @@ impl PyLibraryDb {
     fn prune_unused_lookups(&self, py: Python<'_>) -> PyResult<std::collections::HashMap<&'static str, usize>> {
         use stl_core::storage::edit;
         Ok(self.with_tx(py, edit::prune_unused_lookups, db_err)?.into_iter().collect())
+    }
+
+    /// `vectors.read_all`: `(image ids as int64 bytes, float32 matrix as bytearray)`.
+    fn vectors_read_all<'py>(&self, py: Python<'py>, dim: usize) -> PyResult<(Bound<'py, PyBytes>, Bound<'py, PyAny>)> {
+        let (ids, mat) = self.with(py, |c| stl_core::storage::vectors::read_all(c, dim))?;
+        Ok((bytes(py, &ids), pyo3::types::PyByteArray::new(py, bytemuck::cast_slice(&mat)).into_any()))
+    }
+
+    /// `image_similarity.load_model_vectors`: like `vectors_read_all`, with model ids.
+    fn load_model_vectors<'py>(&self, py: Python<'py>, dim: usize) -> PyResult<(Bound<'py, PyBytes>, Bound<'py, PyAny>)> {
+        let (ids, mat) = self.with(py, |c| stl_core::storage::vectors::load_model_vectors(c, dim))?;
+        Ok((bytes(py, &ids), pyo3::types::PyByteArray::new(py, bytemuck::cast_slice(&mat)).into_any()))
+    }
+
+    /// `image_similarity.find_similar_models`: `([(similarity, model_id, title,
+    /// archive_name, thumbnail_path)], capped)`.
+    fn find_similar_models(
+        &self,
+        py: Python<'_>,
+        query: Vec<u8>,
+        threshold: f64,
+        limit: usize,
+    ) -> PyResult<(Vec<stl_core::storage::vectors::Similar>, bool)> {
+        self.with(py, |c| stl_core::storage::vectors::find_similar_models(c, &query, threshold, limit))
+    }
+
+    /// `maintenance.verify_archives` core: `(total, [(id, title, path, hash,
+    /// size, status)], stopped)`; clears the missing flag of files that came back.
+    #[pyo3(signature = (progress=None, should_stop=None))]
+    fn verify_archives<'py>(
+        &self,
+        py: Python<'py>,
+        progress: Option<Bound<'py, PyAny>>,
+        should_stop: Option<Bound<'py, PyAny>>,
+    ) -> PyResult<(usize, Vec<MaintRow<&'static str>>, bool, usize)> {
+        use stl_core::storage::maintenance;
+        let conn = self.pool.lock().unwrap_or_else(|e| e.into_inner()).pop();
+        let conn = match conn {
+            Some(c) => c,
+            None => storage::open(&self.path).map_err(db_err)?,
+        };
+        let outcome = run_job(py, progress.as_ref(), should_stop.as_ref(), move |ctl| {
+            let v = maintenance::verify(&conn, ctl);
+            Ok((v, conn))
+        });
+        let (verified, conn) = match outcome {
+            Ok(x) => x,
+            // Stopped before the first file: nothing checked, as the Python loop.
+            Err(e) if e.is_instance_of::<Stopped>(py) => {
+                let total = self.with(py, maintenance::model_count)?;
+                return Ok((total, Vec::new(), true, 0));
+            }
+            Err(e) => return Err(e),
+        };
+        self.pool.lock().unwrap_or_else(|e| e.into_inner()).push(conn);
+        let v = verified.map_err(db_err)?;
+        let cleared = if v.reappeared.is_empty() {
+            0
+        } else {
+            let ids = v.reappeared.clone();
+            self.with_tx(py, move |tx| maintenance::clear_missing(tx, &ids), db_err)?
+        };
+        let rows = v.results.into_iter().map(|r| (r.id, r.title, r.path, r.hash, r.size, r.status)).collect();
+        Ok((v.total, rows, v.stopped, cleared))
+    }
+
+    /// `maintenance.find_duplicate_entries` core: `[(id, title, path, hash, size, match_path)]`.
+    fn duplicate_entries(&self, py: Python<'_>) -> PyResult<Vec<MaintRow<String>>> {
+        let rows = self.with(py, stl_core::storage::maintenance::duplicate_entries)?;
+        Ok(rows.into_iter().map(|r| (r.id, r.title, r.path, r.hash, r.size, r.match_path)).collect())
+    }
+
+    /// `prune_images`: model ids with more than `keep` images.
+    fn images_over(&self, py: Python<'_>, keep: i64) -> PyResult<Vec<i64>> {
+        self.with(py, |c| stl_core::storage::maintenance::models_over(c, keep))
+    }
+
+    /// `prune_images`, one batch: `(models pruned, excess image ids)`.
+    fn excess_images(&self, py: Python<'_>, model_ids: Vec<i64>, keep: usize) -> PyResult<(usize, Vec<i64>)> {
+        self.with(py, |c| stl_core::storage::maintenance::excess_images(c, &model_ids, keep))
+    }
+
+    /// Delete images by id (and, through the TEMP trigger, their vectors).
+    fn delete_images(&self, py: Python<'_>, ids: Vec<i64>) -> PyResult<usize> {
+        self.with_tx(py, move |tx| stl_core::storage::maintenance::delete_images(tx, &ids), db_err)
     }
 
     /// Close the pooled connections (they reopen on the next call).
