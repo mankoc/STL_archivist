@@ -431,16 +431,209 @@ def _detect_scale_py(names: list[str]) -> list[str]:
     return found
 
 
+# ── Portable presupport patterns ─────────────────────────────────────────────
+# A custom pattern runs in the native rules only when it uses syntax that
+# Python's re and fancy-regex read the same way (case-insensitively); the
+# Configuration dialog accepts no other.  rust/stl-core/src/rules.rs
+# (portable_pattern) implements the same grammar, and
+# tests/golden/test_portable_patterns_golden.py compares the two.
+#
+#   literals      printable ASCII except  . ^ $ * + ? ( ) [ ] { } | \
+#   escapes       \d \D \A \Z, and \ before one of  . ^ $ * + ? ( ) [ ] { } | \ - /
+#   classes       [...] / [^...] of ASCII characters, ranges and the escapes
+#                 above (no nested "[", no "&&", "--", "~~", no leading "]";
+#                 a literal "-" only first, last or escaped)
+#   groups        (...) (?:...) (?=...) (?!...) (?<=...) (?<!...)
+#   quantifiers   * + ? {n} {n,} {n,m}, each optionally lazy (?), after a
+#                 literal, ".", an escape, a class or a capturing / plain group
+#   anchors       ^ $  ($ means "end, or before a final newline", as in re)
+
+_PORTABLE_META = set(".^$*+?()[]{}|\\")
+_PORTABLE_ESCAPABLE = set(".^$*+?()[]{}|\\-/")
+_LOOKAROUNDS = ("?:", "?=", "?!", "?<=", "?<!")
+
+
+def portable_pattern_error(pattern: str) -> "str | None":
+    """Why *pattern* is not portable between ``re`` and the native rules, or ``None``."""
+    err = _portable_scan(pattern)
+    if err is not None:
+        return err
+    try:
+        re.compile(pattern, re.IGNORECASE)
+    except re.error as exc:
+        return f"not a valid regular expression ({exc})"
+    return None
+
+
+def _portable_scan(p: str) -> "str | None":
+    i, n = 0, len(p)
+    depth = 0
+    # What the previous token was: None (start, "(" or "|"), "atom" (can be
+    # quantified), "anchor"/"look" (cannot), "quant" (may take a lazy "?").
+    prev = None
+    lookaround_stack: list[bool] = []
+    while i < n:
+        c = p[i]
+        if not (" " <= c <= "~"):
+            return f"use only printable ASCII characters (found {c!r} at {i})"
+        if c == "\\":
+            if i + 1 >= n:
+                return "a pattern cannot end with a backslash"
+            e = p[i + 1]
+            if e in "dD":
+                prev = "atom"
+            elif e in "AZ":
+                prev = "anchor"
+            elif e in _PORTABLE_ESCAPABLE:
+                prev = "atom"
+            else:
+                return f"the escape \\{e} is not supported (at {i})"
+            i += 2
+            continue
+        if c == "[":
+            j = _portable_class(p, i)
+            if isinstance(j, str):
+                return j
+            i = j
+            prev = "atom"
+            continue
+        if c == "(":
+            rest = p[i + 1:]
+            if rest.startswith("?"):
+                kind = next((k for k in sorted(_LOOKAROUNDS, key=len, reverse=True) if rest.startswith(k)), None)
+                if kind is None:
+                    return f"only (?:...), (?=...), (?!...), (?<=...) and (?<!...) groups are supported (at {i})"
+                lookaround_stack.append(kind != "?:")
+                i += 1 + len(kind)
+            else:
+                lookaround_stack.append(False)
+                i += 1
+            depth += 1
+            prev = None
+            continue
+        if c == ")":
+            if depth == 0:
+                return f"unbalanced parenthesis (at {i})"
+            depth -= 1
+            prev = "look" if lookaround_stack.pop() else "atom"
+            i += 1
+            continue
+        if c == "|":
+            prev = None
+            i += 1
+            continue
+        if c in "*+?{":
+            if c == "?" and prev == "quant":
+                prev = "lazy"
+                i += 1
+                continue
+            if prev != "atom":
+                return f"nothing to repeat at {i}"
+            if c == "{":
+                j = _portable_braces(p, i)
+                if isinstance(j, str):
+                    return j
+                i = j
+            else:
+                i += 1
+            prev = "quant"
+            continue
+        if c in "^$":
+            prev = "anchor"
+            i += 1
+            continue
+        if c == "}" or c == "]":
+            return f"escape a literal {c!r} as \\{c} (at {i})"
+        prev = "atom"   # literal or "."
+        i += 1
+    if depth:
+        return "unbalanced parenthesis"
+    return None
+
+
+def _portable_braces(p: str, i: int) -> "int | str":
+    """End index of a ``{n}``, ``{n,}`` or ``{n,m}`` quantifier starting at *i*."""
+    m = re.compile(r"\{([0-9]+)(,([0-9]*))?\}").match(p, i)
+    if m is None:
+        return f"use {{n}}, {{n,}} or {{n,m}}, or escape a literal '{{' as \\{{ (at {i})"
+    lo, hi = int(m.group(1)), m.group(3)
+    if hi and int(hi) < lo:
+        return f"bad repeat range (at {i})"
+    if lo > 1000 or (hi and int(hi) > 1000):
+        return f"repeat counts above 1000 are not supported (at {i})"
+    return m.end()
+
+
+def _portable_class(p: str, i: int) -> "int | str":
+    """End index (after ``]``) of the character class starting at *i*."""
+    j = i + 1
+    if j < len(p) and p[j] == "^":
+        j += 1
+    if j < len(p) and p[j] == "]":
+        return f"escape a ']' at the start of a class as \\] (at {j})"
+    items = 0
+    prev_single: "str | None" = None   # last single character, for ranges
+    while j < len(p):
+        c = p[j]
+        if not (" " <= c <= "~"):
+            return f"use only printable ASCII characters (found {c!r} at {j})"
+        if c == "]":
+            if items == 0:
+                return f"empty character class (at {i})"
+            return j + 1
+        if c == "[":
+            return f"escape a '[' inside a class as \\[ (at {j})"
+        if p.startswith(("&&", "--", "~~"), j):
+            return f"'{p[j:j + 2]}' inside a class is not supported (at {j})"
+        if c == "\\":
+            if j + 1 >= len(p):
+                break
+            e = p[j + 1]
+            if e in "dD":
+                prev_single = None
+            elif e in _PORTABLE_ESCAPABLE:
+                prev_single = e
+            else:
+                return f"the escape \\{e} is not supported in a class (at {j})"
+            j += 2
+            items += 1
+            continue
+        if c == "-" and prev_single is not None and j + 1 < len(p) and p[j + 1] != "]":
+            hi = p[j + 1]
+            if hi == "\\":
+                if j + 2 >= len(p) or p[j + 2] not in _PORTABLE_ESCAPABLE:
+                    return f"a range must end in a single character (at {j})"
+                hi, step = p[j + 2], 3
+            elif hi == "[":
+                return f"escape a '[' inside a class as \\[ (at {j + 1})"
+            else:
+                step = 2
+            if not (" " <= hi <= "~"):
+                return f"use only printable ASCII characters (found {hi!r} at {j + 1})"
+            if hi < prev_single:
+                return f"bad character range {prev_single}-{hi} (at {j})"
+            j += step
+            prev_single = None
+            items += 1
+            continue
+        if c == "-" and items and not (j + 1 < len(p) and p[j + 1] == "]"):
+            return f"escape a '-' in the middle of a class as \\- (at {j})"
+        prev_single = c
+        items += 1
+        j += 1
+    return f"unterminated character class (at {i})"
+
+
 # ── Native versions ──────────────────────────────────────────────────────────
 # rust/stl-core/src/rules.rs ports the functions above; tests/golden compares
 # them. The native call raises for input it does not handle exactly (a name
 # with lone surrogates, for one), and the Python implementation then runs.
 #
-# Custom presupport patterns always use Python: fancy-regex and Python's re
-# disagree on some syntax without either raising ("[[:alpha:]]" is a POSIX
-# class in one and a character set in the other; "(?<name>x)" and "\x{41}"
-# are valid only natively), so a user's pattern list could flag different
-# archives. The built-in defaults are golden-tested.
+# Custom presupport patterns run natively only when every one is portable
+# (see portable_pattern_error): fancy-regex and Python's re disagree on some
+# syntax without either raising ("[[:alpha:]]" is a POSIX class in one and a
+# character set in the other; "(?<name>x)" and "\x{41}" are valid only
+# natively).  Other lists use Python.  The built-in defaults are golden-tested.
 
 _NATIVE_ERRORS = (ValueError, TypeError, UnicodeError, AttributeError)
 
@@ -462,9 +655,11 @@ def detect_presupport(names: list[str]) -> str:
 
 
 def _native_patterns_ok(check_presupported: bool, patterns) -> bool:
-    """True when the native rules give Python's result for these patterns."""
+    """True when the native rules give Python's result for these patterns:
+    the defaults, or custom patterns that are all portable."""
     return (not check_presupported or patterns is None
-            or list(patterns) == DEFAULT_PRESUPPORT_PATTERNS)
+            or list(patterns) == DEFAULT_PRESUPPORT_PATTERNS
+            or all(portable_pattern_error(p) is None for p in patterns))
 
 
 def explain_warnings(

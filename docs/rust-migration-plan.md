@@ -328,8 +328,8 @@ the Python implementation it replaces, as in earlier phases.
   and empty segments, Python 3.14 `suffix`/`stem`).
 - **Custom presupport patterns stay on Python.** fancy-regex and `re` disagree on some
   syntax without raising (`[[:alpha:]]`, `(?<name>…)`, `\x{41}`, `(?(1)a|b)`), so only the
-  built-in defaults go native. **4g must settle this** before the crawler leaves Python:
-  validate patterns when they are saved, accepting only syntax both engines read the same.
+  built-in defaults go native. Settled in 4g-1: patterns are validated when saved, and
+  only syntax both engines read the same is accepted (portable patterns run natively).
 - `parse_path` returns fields in Python's dict order (dialogs show them in that order) and
   caches compiled patterns. Release dates: ASCII digits only; Python's `int()` also takes
   other Unicode digits.
@@ -558,6 +558,37 @@ ORM use left in `app/ui` is crawler work only, so it moves to 4g with the crawle
 - `browser_jobs.RescanWorker` and `ThumbnailGeneratorWorker`;
 - the browser's re-crawl preview and apply;
 - the Update Crawled Folders cross-folder reconciliation and deferred deletions.
+
+**4g sub-steps.** Each one is committed on its own:
+- 4g-1: custom-pattern policy;
+- 4g-2: metadata inference;
+- 4g-3: sidecar export / import;
+- 4g-4: the crawl's database phases (diff, early moves, upsert, missing / moved
+  reconciliation);
+- 4g-5: the `stl_native.crawl` orchestrator, with embeddings via `ort`;
+- 4g-6: rescan, thumbnail generation, re-crawl and Update Crawled Folders on top of it.
+
+**4g-1: done 2026-10-18 (custom presupport patterns).** The policy: a custom pattern
+runs natively only if it is *portable*, meaning it uses only syntax that `re` and
+fancy-regex read the same way, case-insensitively. That syntax is:
+- printable ASCII literals;
+- `.`, `\d`, `\D`, `\A`, `\Z`, and escaped special characters;
+- classes without nesting, set operations or a leading `]`;
+- `(...)`, `(?:...)` and lookarounds;
+- `* + ? {n} {n,} {n,m}`, optionally lazy;
+- `^` and `$`.
+
+`rules.portable_pattern_error` (Python) and `rules::portable_pattern` (Rust) implement the
+same grammar. Rust translates `$` to `(?=\n?\z)` and `\Z` to `\z`, so `$` keeps `re`'s
+"end or before a final newline" meaning.
+
+Configuration refuses a non-portable pattern on save and says why; it checks with both
+validators when the native core is loaded. A non-portable list saved earlier keeps running
+in Python until 4h, when it will be reported and dropped.
+`tests/golden/test_portable_patterns_golden.py` checks 4,000 random patterns: both
+validators accept the same ones, and every accepted pattern flags the same members in both
+rule sets. The test names probe case folding (`ſ`, the Kelvin sign, `İ`, `ß`) and `$` before
+a final newline.
 
 ### Phase 5: Server (medium)
 

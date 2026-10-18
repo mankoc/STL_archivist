@@ -878,6 +878,20 @@ catalogued.</div>
 <p>The <em>Support file patterns</em> list (editable in the Warnings section) defines
 name substrings that trigger the &ldquo;support files detected&rdquo; warning.
 Add, edit, or remove patterns as needed for your naming conventions.</p>
+<p>The patterns are case-insensitive regular expressions. Only a common subset is accepted,
+because the crawler&rsquo;s fast native engine must read each pattern exactly as Python does:</p>
+<ul>
+  <li>ASCII letters, digits and punctuation;</li>
+  <li><code>.</code> and <code>\d</code>;</li>
+  <li>escaped special characters such as <code>\.</code>;</li>
+  <li>classes such as <code>[_ -]</code> or <code>[^a-z]</code>;</li>
+  <li>groups <code>(...)</code> and <code>(?:...)</code>, and lookarounds such as
+      <code>(?&lt;!un)</code>;</li>
+  <li>quantifiers <code>* + ? {n,m}</code>;</li>
+  <li><code>^</code> and <code>$</code>.</li>
+</ul>
+<p>Not accepted: <code>\w</code>, <code>\s</code>, <code>\b</code>, named groups, inline flags,
+POSIX classes and non-ASCII characters. Configuration explains which pattern it refuses and why.</p>
 
 <h2>File writing</h2>
 <table>

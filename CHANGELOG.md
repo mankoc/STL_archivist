@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Presupport patterns are checked when saved.** Configuration now refuses a custom pattern that uses syntax the crawler's native engine would read differently from Python (for example `\w`, named groups, inline flags, POSIX classes or non-ASCII characters) and explains why. Patterns that pass the check run in the native rules, which are faster. See *Help → Configuration → Warnings* for the accepted syntax.
+
 - **Rust migration, step 4f-4d: the crawler tab's folder list and the browser's cell edits run through native-backed services** (on Windows). Every dialog except the crawler-driven ones (rescan, thumbnail generation, re-crawl, Update Crawled Folders) now works without the Python database layer.
 
 - **Rust migration, step 4f-4c: Database Maintenance reads and writes natively** (on Windows). This covers embeddings, the warning re-check, Find Moved, merging moved records, removing records and the free-space figure for Compact.

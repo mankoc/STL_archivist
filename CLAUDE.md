@@ -111,9 +111,10 @@ the native core owns the schema from Phase 4b).
   Update Crawled Folders reconciliation), and it moves with the crawler in step 4g. New
   database work in a dialog belongs in a service with a native implementation and a golden
   test, never inline ORM.
-- Crawler rules (`rules.py`) use the native port only with the built-in presupport
-  patterns; a custom pattern list always runs in Python, because fancy-regex and `re` read
-  some syntax differently without raising. Keep `_native_patterns_ok` when touching them.
+- Crawler rules (`rules.py`) use the native port with the built-in presupport patterns and
+  with custom lists whose patterns are all portable (`rules.portable_pattern_error`,
+  mirrored by `rules::portable_pattern`; change both together). Other lists run in Python,
+  because fancy-regex and `re` read some syntax differently without raising. Keep `_native_patterns_ok` when touching them.
 - Tests that toggle `STL_NATIVE` need no cleanup of their own: the autouse
   `native_follows_environment` fixture in `tests/conftest.py` reloads the native core after
   every test, once monkeypatch has restored the environment.
