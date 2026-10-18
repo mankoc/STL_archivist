@@ -223,3 +223,14 @@ def test_unknown_cell_field_raises():
     mid = _fresh_model_id()
     with pytest.raises(KeyError):
         _edit(mid, "archive_path", "/evil")
+
+
+def test_apply_cell_edits_returns_folders():
+    """``editing.apply_cell_edits``: one transaction, the touched folders sorted."""
+    with session_scope() as s:
+        s.add_all([STLModel(title="a", archive_path="F:/x/a.7z", archive_hash="1"),
+                   STLModel(title="b", archive_path="F:/y/b.7z", archive_hash="2")])
+    folders = editing.apply_cell_edits([(2, "title", "B"), (1, "creator", "Me"), (99, "title", "z")])
+    assert [f.replace("\\", "/") for f in folders] == ["F:/x", "F:/y"]
+    with session_scope() as s:
+        assert (s.get(STLModel, 2).title, s.get(STLModel, 1).creator) == ("B", "Me")

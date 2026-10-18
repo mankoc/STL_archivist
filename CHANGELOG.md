@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Rust migration, step 4f-4d: the crawler tab's folder list and the browser's cell edits run through native-backed services** (on Windows). Every dialog except the crawler-driven ones (rescan, thumbnail generation, re-crawl, Update Crawled Folders) now works without the Python database layer.
+
 - **Rust migration, step 4f-4c: Database Maintenance reads and writes natively** (on Windows). This covers embeddings, the warning re-check, Find Moved, merging moved records, removing records and the free-space figure for Compact.
 - **Fix:** *Remove from database* in Database Maintenance now also deletes the removed records' thumbnails, and relocating a missing archive updates its folder as well as its path.
 

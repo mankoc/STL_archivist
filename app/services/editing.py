@@ -177,3 +177,36 @@ def apply_cell_edit(session: Session, model: STLModel, field: str, text: str | N
         model.presupports = value
     elif field == "to_print":
         model.to_print = value == "1"
+
+
+def apply_cell_edits(edits: Iterable[tuple[int, str, str | None]]) -> list[str]:
+    """Apply browser-table cell edits ``(model id, field, text)`` in one
+    transaction; returns the sorted archive folders touched (for sidecars).
+
+    Runs natively when :func:`app.database.native_db.library` allows it and the
+    native port reproduces the input (``ValueError`` otherwise: nothing was
+    written, and Python runs it).
+    """
+    from pathlib import Path
+
+    from app.database import native_db
+    from app.database.db import session_scope
+
+    edits = list(edits)
+    lib = native_db.library()
+    if lib is not None:
+        try:
+            paths = lib.apply_cell_edits([(int(mid), field, text) for mid, field, text in edits])
+            return sorted({str(Path(p).parent) for p in paths})
+        except ValueError:
+            pass
+    folders: set[str] = set()
+    with session_scope() as session:
+        for model_id, field, text in edits:
+            stl = session.get(STLModel, model_id)
+            if stl is None:
+                continue
+            apply_cell_edit(session, stl, field, text)
+            if stl.archive_path:
+                folders.add(str(Path(stl.archive_path).parent))
+    return sorted(folders)

@@ -41,6 +41,15 @@ pub fn crawled_folders(conn: &Connection) -> Result<Vec<(String, Option<String>)
     st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()
 }
 
+/// Track a folder for crawling unless it is tracked already; returns whether it was added.
+pub fn add_crawled_folder(tx: &rusqlite::Transaction, path: &str) -> Result<bool> {
+    let n = tx.execute(
+        "INSERT INTO crawled_folders (path) SELECT ?1 WHERE NOT EXISTS (SELECT 1 FROM crawled_folders WHERE path = ?1)",
+        [path],
+    )?;
+    Ok(n > 0)
+}
+
 pub fn remove_crawled_folder(tx: &rusqlite::Transaction, path: &str) -> Result<usize> {
     tx.execute("DELETE FROM crawled_folders WHERE path = ?1", [path])
 }

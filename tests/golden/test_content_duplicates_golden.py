@@ -77,6 +77,9 @@ def test_stop_and_remove(lib, monkeypatch):
         CD.find_stl_duplicates(0.1, should_stop=lambda: True)
     CD.remove_crawled_folder("F:/a")
     assert CD.crawled_folders() == [("F:/b", "{name}")]
+    assert CD.add_crawled_folder("F:/c") and not CD.add_crawled_folder("F:/b")
+    assert CD.crawled_folders() == [("F:/b", "{name}"), ("F:/c", None)]
     monkeypatch.setattr(native_db, "library", lambda: None)
     with pytest.raises(CD.Stopped):
         CD.find_stl_duplicates(0.1, should_stop=lambda: True)
+    assert CD.add_crawled_folder("F:/d") and not CD.add_crawled_folder("F:/d")

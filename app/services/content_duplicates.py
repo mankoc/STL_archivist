@@ -152,6 +152,18 @@ def crawled_folders() -> list[tuple[str, str | None]]:
         return [tuple(r) for r in s.query(CrawledFolder.path, CrawledFolder.pattern).order_by(CrawledFolder.path)]
 
 
+def add_crawled_folder(path: str) -> bool:
+    """Track a folder for crawling unless it is tracked; returns whether it was added."""
+    lib = native_db.library()
+    if lib is not None:
+        return lib.dup_add_crawled_folder(path)
+    with session_scope() as s:
+        if s.query(CrawledFolder.id).filter_by(path=path).first():
+            return False
+        s.add(CrawledFolder(path=path, pattern=None))
+        return True
+
+
 def remove_crawled_folder(path: str) -> None:
     """Stop tracking a crawled folder (its models stay)."""
     lib = native_db.library()

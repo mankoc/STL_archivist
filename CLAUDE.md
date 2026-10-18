@@ -97,13 +97,20 @@ the native core owns the schema from Phase 4b).
   `tests/golden/test_edit_golden.py` compares them. Use a native write only where the whole
   transaction is that write. Never run one while a SQLAlchemy session in the same thread
   holds the write lock (it would wait for itself until `busy_timeout`).
-- **Dialogs do not query the database.** Lookup editors go through `services/lookup_admin.py`
-  the model editors through `services/model_edit.py`, the browser panel, lookup lists and
-  sort dialog through `services/browser_data.py`, and statistics through
-  `services/library_stats.py`, the viewers through `services/model_views.py`, and content
-  duplicates and folder lists through `services/content_duplicates.py` (step 4f moves the
-  remaining dialogs the same way). New database work in a dialog
-  belongs in a service with a native implementation and a golden test, never inline ORM.
+- **Dialogs do not query the database.** Each one uses a service:
+  - lookup editors: `services/lookup_admin.py`;
+  - model editors: `services/model_edit.py`;
+  - browser panel, lookup lists and sort dialog: `services/browser_data.py`;
+  - statistics: `services/library_stats.py`;
+  - viewers: `services/model_views.py`;
+  - content duplicates and folder lists: `services/content_duplicates.py`;
+  - Database Maintenance: `services/maintenance.py`;
+  - cell edits: `editing.apply_cell_edits`.
+
+  The only ORM left in `app/ui` is crawler-driven (rescan, thumbnail generation, re-crawl,
+  Update Crawled Folders reconciliation), and it moves with the crawler in step 4g. New
+  database work in a dialog belongs in a service with a native implementation and a golden
+  test, never inline ORM.
 - Crawler rules (`rules.py`) use the native port only with the built-in presupport
   patterns; a custom pattern list always runs in Python, because fancy-regex and `re` read
   some syntax differently without raising. Keep `_native_patterns_ok` when touching them.
