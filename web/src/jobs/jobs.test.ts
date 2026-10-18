@@ -19,6 +19,8 @@ describe("jobs", () => {
     expect(label(job({ kind: "prune_images", request: { kind: "prune_images", keep: 3 } }))).toBe("Prune images (keep 3)");
     expect(label(job({ kind: "recompute_dhashes", request: { kind: "recompute_dhashes", all: true } }))).toBe("Recompute image hashes (all)");
     expect(label(job({ kind: "verify_archives", request: { kind: "verify_archives" } }))).toBe("Verify archives");
+    expect(label(job({ kind: "recheck_warnings", request: { kind: "recheck_warnings", warning: "no_images" } }))).toBe("Re-check warnings (images)");
+    expect(label(job({ kind: "search_folder", request: { kind: "search_folder", folder: "D:/old", ids: [1] } }))).toBe("Search in folder D:/old");
   });
 
   it("formats durations", () => {

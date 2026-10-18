@@ -83,6 +83,18 @@ pub enum JobRequest {
         #[serde(default = "default_max_models")]
         max_models: usize,
     },
+    /// Records cataloguing the same archive more than once (same content hash,
+    /// else same file name and size).
+    FindDuplicateEntries,
+    /// For each record, another record with the same content whose archive is on
+    /// disk (Find Moved in DB); merge them with `/api/maintenance/merge-moved`.
+    FindMoved { ids: Vec<i64> },
+    /// Look under `folder` for the records' archives (by content hash) and point
+    /// the records at the archives found.
+    SearchFolder { folder: String, ids: Vec<i64> },
+    /// Re-read every archive's file list and fix one warning line:
+    /// `no_images` or `presupported`.
+    RecheckWarnings { warning: String },
     /// Find Duplicates (metadata): models with equal or similar values.
     FindMetadataDuplicates {
         /// Column keys: title, creator, source, sculptor, collection,
@@ -121,6 +133,10 @@ impl JobRequest {
             JobRequest::PruneImages { .. } => "prune_images",
             JobRequest::CompactDatabase => "compact_database",
             JobRequest::ComputeEmbeddings { .. } => "compute_embeddings",
+            JobRequest::FindDuplicateEntries => "find_duplicate_entries",
+            JobRequest::FindMoved { .. } => "find_moved",
+            JobRequest::SearchFolder { .. } => "search_folder",
+            JobRequest::RecheckWarnings { .. } => "recheck_warnings",
             JobRequest::FindContentDuplicates { .. } => "find_content_duplicates",
             JobRequest::FindImageDuplicates { .. } => "find_image_duplicates",
             JobRequest::FindMetadataDuplicates { .. } => "find_metadata_duplicates",
@@ -131,7 +147,8 @@ impl JobRequest {
     pub fn read_only(&self) -> bool {
         matches!(
             self,
-            JobRequest::VerifyArchives
+            JobRequest::FindDuplicateEntries
+                | JobRequest::FindMoved { .. }
                 | JobRequest::FindContentDuplicates { .. }
                 | JobRequest::FindImageDuplicates { .. }
                 | JobRequest::FindMetadataDuplicates { .. }
@@ -143,6 +160,12 @@ impl JobRequest {
         match self {
             JobRequest::FindContentDuplicates { threshold } if !(*threshold > 0.0 && *threshold <= 1.0) => {
                 Err("threshold must be above 0 and at most 1".into())
+            }
+            JobRequest::RecheckWarnings { warning } if crate::maint::Recheck::parse(warning).is_none() => {
+                Err(format!("unknown warning {warning:?} (no_images or presupported)"))
+            }
+            JobRequest::FindMoved { ids } | JobRequest::SearchFolder { ids, .. } if ids.is_empty() => {
+                Err("no records given".into())
             }
             JobRequest::FindImageDuplicates { method, max_distance, threshold, max_models } => {
                 if method != "dhash" && method != "clip" {
@@ -220,17 +243,23 @@ pub struct Job {
     log: Mutex<VecDeque<String>>,
     stop: AtomicBool,
     ctl: Control,
-    result: Mutex<Option<crate::dupes::FinderResult>>,
+    result: Mutex<Option<crate::dupes::JobResult>>,
+    /// Archive paths whose folders' sidecars need a refresh once the job ends.
+    sidecars: Mutex<Vec<String>>,
 }
 
 impl Job {
     /// What a finder job found (`None` for other jobs, or until it finishes).
-    pub fn result(&self) -> Option<crate::dupes::FinderResult> {
+    pub fn result(&self) -> Option<crate::dupes::JobResult> {
         self.result.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    fn set_result(&self, v: crate::dupes::FinderResult) {
+    fn set_result(&self, v: crate::dupes::JobResult) {
         *self.result.lock().unwrap_or_else(|e| e.into_inner()) = Some(v);
+    }
+
+    fn touch_sidecars(&self, paths: impl IntoIterator<Item = String>) {
+        self.sidecars.lock().unwrap_or_else(|e| e.into_inner()).extend(paths);
     }
 
     pub fn info(&self) -> JobInfo {
@@ -363,6 +392,7 @@ impl Library {
             stop: AtomicBool::new(false),
             ctl: Control::new(),
             result: Mutex::new(None),
+            sidecars: Mutex::new(Vec::new()),
         });
         jobs.list.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::clone(&job));
         jobs.trim();
@@ -444,6 +474,10 @@ async fn worker(lib: Weak<Library>, wake: Arc<Notify>) {
         }
         tracing::info!(job = job.info().id, kind = job.info().kind, state = ?job.info().state, "job finished");
         l.jobs.publish(&job);
+        let touched = std::mem::take(&mut *job.sidecars.lock().unwrap_or_else(|e| e.into_inner()));
+        if !touched.is_empty() {
+            l.schedule_sidecars(touched);
+        }
         if !job.info().request.read_only() {
             l.changed(job.info().kind);
         }
@@ -459,6 +493,10 @@ fn run(lib: &Library, job: &Job) -> Result<String, String> {
         JobRequest::PruneImages { keep } => prune_images(lib, job, keep),
         JobRequest::CompactDatabase => compact(lib, job),
         JobRequest::ComputeEmbeddings { all } => compute_embeddings(lib, job, all),
+        JobRequest::FindDuplicateEntries => duplicate_entries(lib, job),
+        JobRequest::FindMoved { ids } => find_moved(lib, job, &ids),
+        JobRequest::SearchFolder { folder, ids } => search_folder(lib, job, &folder, &ids),
+        JobRequest::RecheckWarnings { warning } => recheck_warnings(lib, job, &warning),
         JobRequest::FindContentDuplicates { threshold } => find_content(lib, job, threshold),
         JobRequest::FindImageDuplicates { method, max_distance, threshold, max_models } => {
             find_images(lib, job, &method, max_distance, threshold, max_models)
@@ -469,19 +507,55 @@ fn run(lib: &Library, job: &Job) -> Result<String, String> {
     }
 }
 
+// ── maintenance lists ────────────────────────────────────────────────────────
+
+fn records(rows: Vec<crate::maint::RecordRow>) -> crate::dupes::JobResult {
+    crate::dupes::JobResult::Records { rows }
+}
+
+fn duplicate_entries(lib: &Library, job: &Job) -> Result<String, String> {
+    lib.job_log(job, "Scanning for duplicate entries…".into());
+    let rows: Vec<_> = lib.db.with(maintenance::duplicate_entries).map_err(db_err)?.into_iter().map(Into::into).collect();
+    Ok(finder_done(job, records(rows), "duplicate record(s) found"))
+}
+
+fn find_moved(lib: &Library, job: &Job, ids: &[i64]) -> Result<String, String> {
+    lib.job_log(job, format!("Searching {} missing record(s) in the database…", ids.len()));
+    let rows = crate::maint::find_moved(lib, &job.ctl, ids)?;
+    Ok(finder_done(job, records(rows), "record(s) found re-crawled elsewhere"))
+}
+
+fn search_folder(lib: &Library, job: &Job, folder: &str, ids: &[i64]) -> Result<String, String> {
+    if !std::path::Path::new(folder).is_dir() {
+        return Err(format!("{folder} is not a folder the server can read"));
+    }
+    let log = |line: String| lib.job_log(job, line);
+    let (rows, touched) = crate::maint::search_folder(lib, &job.ctl, &log, folder, ids)?;
+    job.touch_sidecars(touched);
+    Ok(finder_done(job, records(rows), "archive(s) found and relocated"))
+}
+
+fn recheck_warnings(lib: &Library, job: &Job, warning: &str) -> Result<String, String> {
+    let which = crate::maint::Recheck::parse(warning).ok_or("unknown warning")?;
+    let log = |line: String| lib.job_log(job, line);
+    let r = crate::maint::recheck_warnings(lib, &job.ctl, &log, which)?;
+    job.touch_sidecars(r.touched);
+    Ok(format!("{} cleared, {} added, {} skipped (missing or unreadable)", r.cleared, r.added, r.skipped))
+}
+
 // ── duplicate finders ────────────────────────────────────────────────────────
 
-fn finder_done(job: &Job, result: crate::dupes::FinderResult, what: &str) -> String {
+fn finder_done(job: &Job, result: crate::dupes::JobResult, what: &str) -> String {
     let n = result.len();
     job.set_result(result);
-    format!("{n} {what} found")
+    format!("{n} {what}")
 }
 
 fn find_content(lib: &Library, job: &Job, threshold: f64) -> Result<String, String> {
     lib.job_log(job, format!("Comparing STL file lists (at least {:.0}% shared)…", threshold * 100.0));
     match crate::dupes::content(lib, &job.ctl, threshold) {
         Err(e) if job.stopped() => Ok(e),
-        r => Ok(finder_done(job, r?, "archive pair(s)")),
+        r => Ok(finder_done(job, r?, "archive pair(s) found")),
     }
 }
 
@@ -496,10 +570,10 @@ fn find_images(lib: &Library, job: &Job, method: &str, max_distance: u32, thresh
         Err(e) if job.stopped() => Ok(e),
         r => {
             let r = r?;
-            if matches!(&r, crate::dupes::FinderResult::Images(i) if i.truncated) {
+            if matches!(&r, crate::dupes::JobResult::Images(i) if i.truncated) {
                 lib.job_log(job, format!("Only the best {} pairs are kept: tighten the threshold.", crate::dupes::MAX_RESULTS));
             }
-            Ok(finder_done(job, r, "archive pair(s)"))
+            Ok(finder_done(job, r, "archive pair(s) found"))
         }
     }
 }
@@ -507,7 +581,7 @@ fn find_images(lib: &Library, job: &Job, method: &str, max_distance: u32, thresh
 fn find_metadata(lib: &Library, job: &Job, columns: &[String], method: &str, max_distance: u32) -> Result<String, String> {
     lib.job_log(job, format!("Comparing {} column(s) ({method})…", columns.len()));
     let r = crate::dupes::metadata(lib, &job.ctl, columns, method, max_distance)?;
-    Ok(finder_done(job, r, "group(s)"))
+    Ok(finder_done(job, r, "group(s) found"))
 }
 
 // ── crawl ────────────────────────────────────────────────────────────────────
@@ -641,7 +715,10 @@ fn verify(lib: &Library, job: &Job) -> Result<String, String> {
         }
     }
     let parts: Vec<String> = counts.iter().map(|(s, n)| format!("{n} {s}")).collect();
-    Ok(format!("{} checked: {}; {cleared} back on disk", v.results.len(), parts.join(", ")))
+    let checked = v.results.len();
+    let problems = v.results.into_iter().filter(|r| r.status != maintenance::STATUS_OK).map(Into::into).collect();
+    job.set_result(records(problems));
+    Ok(format!("{checked} checked: {}; {cleared} back on disk", parts.join(", ")))
 }
 
 fn recompute_dhashes(lib: &Library, job: &Job, all: bool) -> Result<String, String> {

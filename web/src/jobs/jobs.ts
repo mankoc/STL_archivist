@@ -34,13 +34,18 @@ const KIND_LABEL: Record<string, string> = {
   find_content_duplicates: "Find duplicate STL files",
   find_image_duplicates: "Find duplicate images",
   find_metadata_duplicates: "Find duplicate metadata",
+  find_duplicate_entries: "Find duplicate entries",
+  find_moved: "Find moved in DB",
+  search_folder: "Search in folder",
+  recheck_warnings: "Re-check warnings",
 };
 
 /** "Crawl D:/STL/Patreon", "Verify archives", … */
 export function describe(job: Job): string {
   const label = KIND_LABEL[job.kind] ?? job.kind;
-  const r = job.request as { folder?: string; all?: boolean; keep?: number };
+  const r = job.request as { folder?: string; all?: boolean; keep?: number; warning?: string };
   if (r.folder) return `${label} ${r.folder}`;
+  if (r.warning) return `${label} (${r.warning === "no_images" ? "images" : "presupport"})`;
   if (r.keep !== undefined) return `${label} (keep ${r.keep})`;
   if (r.all) return `${label} (all)`;
   return label;

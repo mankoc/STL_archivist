@@ -1073,6 +1073,88 @@
         }
       }
     },
+    "/api/maintenance/merge-moved": {
+      "post": {
+        "tags": [
+          "maintenance"
+        ],
+        "summary": "Merge each missing record into the record found at its new location: the\nmetadata of the missing one moves there (Merge Moved).",
+        "operationId": "post_maintenance_merge_moved",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MergeMoved"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Merged"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/maintenance/remove": {
+      "post": {
+        "tags": [
+          "maintenance"
+        ],
+        "summary": "Remove records from the library and prune lookups left unused (Remove\nSelected / All Missing). The archive files are not touched.",
+        "operationId": "post_maintenance_remove",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveRecords"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Removed"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/me/settings": {
       "get": {
         "tags": [
@@ -3065,74 +3147,6 @@
         },
         "additionalProperties": false
       },
-      "FinderResult": {
-        "oneOf": [
-          {
-            "type": "object",
-            "required": [
-              "pairs",
-              "type"
-            ],
-            "properties": {
-              "pairs": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/ContentRow"
-                }
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "content"
-                ]
-              }
-            }
-          },
-          {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ImageResult"
-              },
-              {
-                "type": "object",
-                "required": [
-                  "type"
-                ],
-                "properties": {
-                  "type": {
-                    "type": "string",
-                    "enum": [
-                      "images"
-                    ]
-                  }
-                }
-              }
-            ]
-          },
-          {
-            "type": "object",
-            "required": [
-              "groups",
-              "type"
-            ],
-            "properties": {
-              "groups": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/MetadataGroup"
-                }
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "metadata"
-                ]
-              }
-            }
-          }
-        ],
-        "description": "What a finder job found (`JobDetail.result`)."
-      },
       "FolderPath": {
         "type": "object",
         "required": [
@@ -3336,7 +3350,7 @@
                 "type": "null"
               },
               {
-                "$ref": "#/components/schemas/FinderResult",
+                "$ref": "#/components/schemas/JobResult",
                 "description": "What a duplicate finder found, once it is done (`pairs` or `groups`)."
               }
             ]
@@ -3599,6 +3613,90 @@
           },
           {
             "type": "object",
+            "description": "Records cataloguing the same archive more than once (same content hash,\nelse same file name and size).",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "find_duplicate_entries"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "For each record, another record with the same content whose archive is on\ndisk (Find Moved in DB); merge them with `/api/maintenance/merge-moved`.",
+            "required": [
+              "ids",
+              "kind"
+            ],
+            "properties": {
+              "ids": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int64"
+                }
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "find_moved"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Look under `folder` for the records' archives (by content hash) and point\nthe records at the archives found.",
+            "required": [
+              "folder",
+              "ids",
+              "kind"
+            ],
+            "properties": {
+              "folder": {
+                "type": "string"
+              },
+              "ids": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int64"
+                }
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "search_folder"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Re-read every archive's file list and fix one warning line:\n`no_images` or `presupported`.",
+            "required": [
+              "warning",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "recheck_warnings"
+                ]
+              },
+              "warning": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
             "description": "Find Duplicates (metadata): models with equal or similar values.",
             "required": [
               "columns",
@@ -3633,6 +3731,96 @@
           }
         ],
         "description": "What to run. Crawl settings not given here come from the library's\n`settings.json`, as in the desktop app."
+      },
+      "JobResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "pairs",
+              "type"
+            ],
+            "properties": {
+              "pairs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ContentRow"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "content"
+                ]
+              }
+            }
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImageResult"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "images"
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "type": "object",
+            "required": [
+              "groups",
+              "type"
+            ],
+            "properties": {
+              "groups": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/MetadataGroup"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "metadata"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Records of a maintenance list (Verify, duplicate entries, moved, found).",
+            "required": [
+              "rows",
+              "type"
+            ],
+            "properties": {
+              "rows": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RecordRow"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "records"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "What a finder or maintenance job found (`JobDetail.result`)."
       },
       "JobState": {
         "type": "string",
@@ -3914,6 +4102,39 @@
         },
         "additionalProperties": false
       },
+      "MergeMoved": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MovedRecord"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "Merged": {
+        "type": "object",
+        "required": [
+          "merged",
+          "errors"
+        ],
+        "properties": {
+          "errors": {
+            "type": "integer",
+            "description": "Items whose records no longer exist.",
+            "minimum": 0
+          },
+          "merged": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
       "MetadataGroup": {
         "type": "object",
         "description": "Models with equal or similar values in one column.",
@@ -4023,6 +4244,25 @@
               }
             ],
             "default": null
+          }
+        },
+        "additionalProperties": false
+      },
+      "MovedRecord": {
+        "type": "object",
+        "required": [
+          "id",
+          "path"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The missing record, whose metadata is kept."
+          },
+          "path": {
+            "type": "string",
+            "description": "The archive path of the record crawled at the new location."
           }
         },
         "additionalProperties": false
@@ -4207,6 +4447,88 @@
           "value": {
             "type": "object",
             "description": "The value (a name, a year, …); null for \"none\"."
+          }
+        }
+      },
+      "RecordRow": {
+        "type": "object",
+        "description": "One record of a maintenance list (`_result_row`).",
+        "required": [
+          "id",
+          "title",
+          "path",
+          "hash",
+          "status",
+          "match_path"
+        ],
+        "properties": {
+          "hash": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "match_path": {
+            "type": "string",
+            "description": "Another record's path (duplicates, moved) or where the archive was found."
+          },
+          "path": {
+            "type": "string"
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "status": {
+            "type": "string",
+            "description": "`Missing`, `Flagged Missing`, `Modified`, `Duplicate`, `Moved (in DB)` or `Found`."
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "RemoveRecords": {
+        "type": "object",
+        "required": [
+          "ids"
+        ],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "Removed": {
+        "type": "object",
+        "required": [
+          "removed",
+          "pruned"
+        ],
+        "properties": {
+          "pruned": {
+            "type": "object",
+            "description": "Lookup rows no model uses any more, deleted with them: `{table: rows}`.",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "removed": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       },

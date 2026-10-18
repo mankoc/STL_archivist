@@ -2342,6 +2342,7 @@ dependencies = [
  "ort",
  "pdfium-render",
  "rand_core 0.6.4",
+ "rayon",
  "rusqlite",
  "serde",
  "serde_json",

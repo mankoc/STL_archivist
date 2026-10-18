@@ -14,6 +14,7 @@ pub mod dupes;
 pub mod error;
 pub mod jobs;
 pub mod library_settings;
+pub mod maint;
 pub mod sidecars;
 pub mod tools;
 

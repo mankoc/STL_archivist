@@ -33,6 +33,11 @@ pub async fn submit(
 ) -> Result<(StatusCode, Json<JobInfo>), ApiError> {
     me.require(if matches!(request, JobRequest::CompactDatabase) { Role::Admin } else { Role::Editor })?;
     request.validate().map_err(ApiError::bad_request)?;
+    // A searched folder is read and records may point into it: the same access as a crawl.
+    if let JobRequest::SearchFolder { folder, .. } = &request {
+        let (lib2, me2, path) = (std::sync::Arc::clone(&lib), me.clone(), std::path::PathBuf::from(folder));
+        lib2.run(move |lib| super::files::check_access(lib, &me2, &path)).await?;
+    }
     if let JobRequest::Crawl { folder, .. } = &mut request {
         let (lib2, me2, path) = (std::sync::Arc::clone(&lib), me.clone(), std::path::PathBuf::from(&*folder));
         let known = lib2
@@ -57,7 +62,7 @@ pub struct JobDetail {
     /// The job's log, oldest line first (at most the last 2,000 lines).
     pub log: Vec<String>,
     /// What a duplicate finder found, once it is done (`pairs` or `groups`).
-    pub result: Option<crate::dupes::FinderResult>,
+    pub result: Option<crate::dupes::JobResult>,
 }
 
 /// One job with its log.

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Web client step 6h: Database Maintenance.** A *Maintenance* page replaces the maintenance buttons of the Jobs page. *Verify archives* and *Find duplicate entries* list the records with problems; on that list, *Find moved in DB*, *Search in folder…* (finds missing archives under a folder by content and points their records there), *Merge moved*, *Remove selected* and *Remove all missing* work as in the desktop dialog. *Check images warning* and *Check presupport warning* fix one warning line without a rescan. Searching a folder needs the same access as crawling it (editors: inside the library's folders). Sidecar refreshes skip folders that no longer exist.
+
 - **Web client step 6g: duplicate finders.** The *Duplicates* page finds archives sharing STL files, archives with matching images (perceptual hash or AI embedding, skipping banners shared by many models) and models with equal or similar metadata (exact, Levenshtein, Soundex). Each search runs as a server job; its result stays with the job, and *Compare* shows two archives side by side. A crawl of a folder the library already knows under another spelling (`C:/STL` for `C:\STL`, or a folder inside it) now uses the stored spelling instead of adding every archive again.
 
 - **Web client step 6f: statistics and Find by Image.** The Statistics page shows library totals, rankings and the distribution of any column. Find by Image takes a dropped picture and finds models with similar thumbnails, by perceptual hash or (when the server has ONNX Runtime and the CLIP model) AI embedding.
