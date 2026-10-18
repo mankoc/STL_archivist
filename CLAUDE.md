@@ -173,7 +173,10 @@ Qt-free business logic, testable without a `QApplication`:
 
 - **`library_query.py`** — the browser's `FilterSpec` and the single predicate builder used by
   both the table (`table_where`) and the faceted filter-pane counts (`facet_scopes`), plus the
-  search condition. Add a new filter here once; never re-implement predicates in a widget.
+  search condition; `table_ids` / `page_rows` are what the table model loads (ties ordered by
+  id). Add a new filter here once; never re-implement predicates in a widget.
+- **`filter_tree.py`** — `filter_tree_data(spec, show, show_counts)`: every value list and
+  count the filter pane shows; `_FilterTreeWorker` wraps it and caches the unfiltered result.
 - **`editing.py`** — field-level model edits (`apply_cell_edit`, `assign_tags`, `set_collection`,
   …) built on the `database/helpers.py` get-or-create functions. Use these instead of inline
   `query(...).filter_by(name=…).first()` + `add` + `flush`.

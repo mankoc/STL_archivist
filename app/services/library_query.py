@@ -265,6 +265,113 @@ def facet_scopes(spec: FilterSpec, *, path_ids=None) -> dict[str, Select | None]
     return scopes
 
 
+#: Columns the browser table can sort by (``models_view`` names).  Scale and tags
+#: are many-to-many and not sortable.
+SORT_COLUMNS: frozenset[str] = frozenset({
+    "title", "creator", "source", "sculptor_name", "collection_name",
+    "subcollection_name", "sequence", "release_name", "archive_path", "presupports",
+    "created_at", "archive_size", "compression_rate", "category_name",
+})
+
+
+def table_ids(
+    spec: FilterSpec,
+    search: str = "",
+    sort: "tuple[str, bool] | None" = ("title", False),
+    should_stop=lambda: False,
+) -> "list[int] | None":
+    """Ids of the models the browser table shows, in display order.
+
+    *sort* is ``(column, descending)`` with *column* in :data:`SORT_COLUMNS`
+    (NULLs last, ties by id so the order is reproducible), or ``None`` for no
+    ordering (the caller orders, as the duplicate-pairs view does).  *search*
+    adds :func:`search_condition`.  Returns ``None`` when *should_stop* became
+    true while the ids streamed in.
+    """
+    from sqlalchemy import asc, desc, nullslast
+
+    from app.database.db import get_models_view, get_session
+
+    mv = get_models_view()
+    stmt = select(mv.c.id).select_from(mv)
+    where = table_where(spec, mv)
+    if where is not None:
+        stmt = stmt.where(where)
+    if search:
+        stmt = stmt.where(search_condition(mv, search))
+    if sort is not None:
+        column, descending = sort
+        if column not in SORT_COLUMNS:
+            raise ValueError(f"not a sortable column: {column!r}")
+        fn = desc if descending else asc
+        stmt = stmt.order_by(nullslast(fn(mv.c[column])), mv.c.id)
+    session = get_session()
+    try:
+        ids: list[int] = []
+        for row in session.execute(stmt.execution_options(yield_per=2000)):
+            if should_stop():
+                return None
+            ids.append(row[0])
+        return ids
+    finally:
+        session.close()
+
+
+def page_rows(ids: list[int], pair_for_id: "dict[int, int] | None" = None) -> list[tuple]:
+    """Display rows for *ids* (in that order; ids no longer present are skipped).
+
+    Each row: ``(id, title, creator, source, release_year, release_month,
+    archive_path, presupports, warning, archive_size, compression_rate,
+    sequence, created_at, sculptor_name, collection_name, subcollection_name,
+    category_name, release_name, scales, tags, pair_index, to_print)``; *scales*
+    and *tags* are ``", "``-joined names in id order, *pair_index* is
+    ``pair_for_id[id]`` or -1.
+    """
+    from app.database.db import get_models_view, get_session
+    from app.database.models import Scale
+
+    pair_for_id = pair_for_id or {}
+    mv = get_models_view()
+    session = get_session()
+    try:
+        stmt = select(
+            mv.c.id, mv.c.title, mv.c.creator, mv.c.source,
+            mv.c.release_year, mv.c.release_month,
+            mv.c.archive_path, mv.c.presupports, mv.c.warning,
+            mv.c.archive_size, mv.c.compression_rate,
+            mv.c.sequence, mv.c.created_at,
+            mv.c.sculptor_name, mv.c.collection_name,
+            mv.c.subcollection_name, mv.c.category_name,
+            mv.c.release_name, mv.c.to_print,
+        ).select_from(mv).where(mv.c.id.in_(ids))
+        rows_by_id = {row.id: row for row in session.execute(stmt).all()}
+
+        def joined(join_table, fk, lookup):
+            # Names in lookup-id order, as the join table's primary key orders them.
+            out: dict[int, list[str]] = {}
+            q = (select(join_table.c.model_id, lookup.name)
+                 .join(lookup, fk == lookup.id)
+                 .where(join_table.c.model_id.in_(ids))
+                 .order_by(join_table.c.model_id, lookup.id))
+            for mid, name in session.execute(q):
+                out.setdefault(mid, []).append(name)
+            return {mid: ", ".join(names) for mid, names in out.items()}
+
+        tags_for = joined(model_tags, model_tags.c.tag_id, Tag)
+        scales_for = joined(model_scales, model_scales.c.scale_id, Scale)
+        return [
+            (r.id, r.title, r.creator, r.source, r.release_year, r.release_month,
+             r.archive_path, r.presupports, r.warning, r.archive_size,
+             r.compression_rate, r.sequence, r.created_at, r.sculptor_name,
+             r.collection_name, r.subcollection_name, r.category_name,
+             r.release_name, scales_for.get(r.id, ""), tags_for.get(r.id, ""),
+             pair_for_id.get(r.id, -1), r.to_print)
+            for r in (rows_by_id.get(mid) for mid in ids) if r is not None
+        ]
+    finally:
+        session.close()
+
+
 def search_condition(mv, text: str) -> ColumnElement:
     """Free-text search across title, creator, sculptor, collection, path and tags."""
     pat = f"%{text}%"
