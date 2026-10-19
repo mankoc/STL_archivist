@@ -73,10 +73,11 @@ export function JobsPage() {
                   leftSection={<IconPlayerPlay size={14} />}
                   disabled={!folders.data?.length}
                   onClick={async () => {
-                    for (const f of folders.data ?? []) await submit({ kind: "crawl", folder: f.path });
+                    const job = await submit({ kind: "update_folders" });
+                    if (job) setSelected(job.id);
                   }}
                 >
-                  Crawl all
+                  Update all
                 </Button>
               </Group>
             )}

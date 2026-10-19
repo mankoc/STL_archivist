@@ -31,12 +31,19 @@ pub async fn submit(
     me: CurrentUser,
     Json(mut request): Json<JobRequest>,
 ) -> Result<(StatusCode, Json<JobInfo>), ApiError> {
-    me.require(if matches!(request, JobRequest::CompactDatabase | JobRequest::Backup) { Role::Admin } else { Role::Editor })?;
+    let admin = matches!(request, JobRequest::CompactDatabase | JobRequest::Backup | JobRequest::ClearLibrary { .. });
+    me.require(if admin { Role::Admin } else { Role::Editor })?;
     request.validate().map_err(ApiError::bad_request)?;
     // A searched folder is read and records may point into it: the same access as a crawl.
     if let JobRequest::SearchFolder { folder, .. } | JobRequest::SortFiles { target_dir: folder, .. } = &request {
         let (lib2, me2, path) = (std::sync::Arc::clone(&lib), me.clone(), std::path::PathBuf::from(folder));
         lib2.run(move |lib| super::files::check_access(lib, &me2, &path)).await?;
+    }
+    if let JobRequest::UpdateFolders { folders } = &request {
+        for folder in folders.clone() {
+            let (lib2, me2) = (std::sync::Arc::clone(&lib), me.clone());
+            lib2.run(move |lib| super::files::check_access(lib, &me2, &std::path::PathBuf::from(folder))).await?;
+        }
     }
     if let JobRequest::Crawl { folder, .. } = &mut request {
         let (lib2, me2, path) = (std::sync::Arc::clone(&lib), me.clone(), std::path::PathBuf::from(&*folder));

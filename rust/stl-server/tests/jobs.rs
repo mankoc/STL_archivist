@@ -221,3 +221,53 @@ async fn websocket_streams_events() {
         }
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn update_folders_keeps_records_moved_between_folders() {
+    let lib = empty_library();
+    let ed = lib.user("ed", Role::Editor);
+    let (a, b) = (lib.dir.path().join("a"), lib.dir.path().join("b"));
+    write_zip(&a.join("Dragon.zip"), &[("dragon.stl", b"solid d\nendsolid\n")]);
+    write_zip(&a.join("Gone.zip"), &[("gone.stl", b"solid g\nendsolid\n")]);
+    write_zip(&b.join("Knight.zip"), &[("knight.stl", b"solid k\nendsolid\n")]);
+    for f in [&a, &b] {
+        let id = submit(&lib, &ed, json!({"kind": "crawl", "folder": f.to_string_lossy()})).await;
+        wait(&lib, &ed, id).await;
+    }
+    lib.state.db.with(|c| c.execute("UPDATE models SET title = 'Edited' WHERE archive_path LIKE '%Dragon.zip'", [])).unwrap();
+    std::fs::rename(a.join("Dragon.zip"), b.join("Dragon.zip")).unwrap();
+    std::fs::remove_file(a.join("Gone.zip")).unwrap();
+
+    let id = submit(&lib, &ed, json!({"kind": "update_folders"})).await;
+    let v = wait(&lib, &ed, id).await;
+    assert_eq!(v["job"]["state"], "done", "{v}");
+    assert!(v["job"]["message"].as_str().unwrap().starts_with("2 folder(s)"), "{v}");
+    assert_eq!(count(&lib, "SELECT count(*) FROM models"), 2, "Gone is deleted, Dragon kept once");
+    let (title, path): (String, String) = lib
+        .state
+        .db
+        .with(|c| c.query_row("SELECT title, archive_path FROM models WHERE archive_path LIKE '%Dragon.zip'", [], |r| Ok((r.get(0)?, r.get(1)?))))
+        .unwrap();
+    assert_eq!(title, "Edited");
+    assert_eq!(path, b.join("Dragon.zip").to_string_lossy());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn clear_library_needs_an_admin_and_confirmation() {
+    let lib = empty_library();
+    let ed = lib.user("ed", Role::Editor);
+    let admin = lib.user("admin", Role::Admin);
+    let root = archives(&lib);
+    let id = submit(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy()})).await;
+    wait(&lib, &ed, id).await;
+    let r = call(&lib.state, "POST", "/api/jobs", Some(&ed), Some(json!({"kind": "clear_library", "confirm": "DELETE"}))).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    let r = call(&lib.state, "POST", "/api/jobs", Some(&admin), Some(json!({"kind": "clear_library", "confirm": "yes"}))).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    let id = submit(&lib, &admin, json!({"kind": "clear_library", "confirm": "DELETE"})).await;
+    assert_eq!(wait(&lib, &admin, id).await["job"]["message"], "library cleared: 2 model(s) deleted");
+    assert_eq!(count(&lib, "SELECT count(*) FROM models"), 0);
+    assert_eq!(count(&lib, "SELECT count(*) FROM crawled_folders"), 0);
+    let stats = lib.state.thumbs.stats().unwrap();
+    assert_eq!((stats.thumbnails, stats.blobs), (0, 0), "thumbnails dropped");
+}

@@ -4119,6 +4119,46 @@
           },
           {
             "type": "object",
+            "description": "Re-crawl crawled folders (all of them, or `folders`) with their stored\npatterns, matching archives moved from one folder to another before\ndeleting the records of archives that are gone (Update Folders).",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "folders": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "update_folders"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Delete every record, lookup and thumbnail of the library (Delete\nDatabase; administrators). `confirm` must be `\"DELETE\"`.",
+            "required": [
+              "confirm",
+              "kind"
+            ],
+            "properties": {
+              "confirm": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "clear_library"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
             "description": "Check that every archive is still on disk, unchanged in size.",
             "required": [
               "kind"

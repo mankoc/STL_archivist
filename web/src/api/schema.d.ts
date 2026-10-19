@@ -1473,6 +1473,14 @@ export interface components {
             /** @description Default: the `recurse_subdirs` setting. */
             recurse?: boolean | null;
         } | {
+            folders?: string[];
+            /** @enum {string} */
+            kind: "update_folders";
+        } | {
+            confirm: string;
+            /** @enum {string} */
+            kind: "clear_library";
+        } | {
             /** @enum {string} */
             kind: "verify_archives";
         } | {

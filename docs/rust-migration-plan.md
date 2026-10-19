@@ -1251,6 +1251,19 @@ preview statuses, and the move (free names, all or none with rollback, emptied s
 folders removed). `POST /api/sort/preview` and the `sort_files` job (needs
 `file_sorting_enabled`; the target folder goes through `check_access`). Web: `SortModal`.
 
+**6n: done 2026-10-19 (update folders, delete all records, about).**
+
+- `update_folders { folders? }`: `_UpdateAllWorker` — crawls with
+  `defer_missing_deletion` when there are several folders, collects the crawls' new
+  archives (`Event::Result`), then `storage::jobs::cross_folder` and
+  `delete_missing_under`, thumbnails after each commit. The web's *Update all* uses it.
+- `clear_library { confirm: "DELETE" }` (admin): `maintenance::clear_all`, then every
+  thumbnail and orphaned blob.
+- About dialog from `/api/system/info`.
+- Not ported, deliberately: AI Setup (downloading llama.cpp and the model) stays in the
+  desktop app or a Docker image (`server.json` → `ai`); Delete Logs (the server logs to
+  its own output); the desktop's visual settings (fonts, hotkeys, icon sets).
+
 ### Phase 7: Desktop shell (small)
 
 Tauri app that hosts the web client: connect to a remote server or start a bundled local one on

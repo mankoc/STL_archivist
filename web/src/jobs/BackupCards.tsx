@@ -1,5 +1,5 @@
 // Maintenance page cards for METADATA.7z sidecars and library backups.
-import { ActionIcon, Anchor, Button, Card, Code, Group, Modal, Stack, Table, Text, Title, Tooltip } from "@mantine/core";
+import { ActionIcon, Anchor, Button, Card, Code, Group, Modal, Stack, Table, Text, TextInput, Title, Tooltip } from "@mantine/core";
 import { IconDownload, IconTrash } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -96,6 +96,37 @@ export function BackupCard({ jobs, start }: { jobs: Job[] | undefined; start: (r
       ) : (
         <Text size="sm" c="dimmed">No backups on the server yet.</Text>
       )}
+    </Card>
+  );
+}
+
+/** Delete every record (administrators), confirmed by typing DELETE. */
+export function DangerCard({ start }: { start: (r: JobRequest) => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState("");
+  return (
+    <Card withBorder>
+      <Title order={5} mb="xs">
+        Delete all records
+      </Title>
+      <Text size="xs" c="dimmed" mb="xs">
+        Empties the library: every model, lookup, crawled folder and thumbnail. Archive files are not touched. Back up first.
+      </Text>
+      <Button size="xs" color="red" variant="light" onClick={() => setOpen(true)}>
+        Delete all records…
+      </Button>
+      <Modal opened={open} onClose={() => setOpen(false)} title="Delete all records">
+        <Stack>
+          <Text size="sm">Type DELETE to empty the library.</Text>
+          <TextInput value={typed} onChange={(e) => setTyped(e.currentTarget.value)} data-testid="confirm-text" />
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button color="red" disabled={typed !== "DELETE"} onClick={() => { setOpen(false); setTyped(""); void start({ kind: "clear_library", confirm: "DELETE" }); }}>
+              Delete everything
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Card>
   );
 }
