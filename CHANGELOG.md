@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Readable crawl log.** Each catalogued archive now gets one line naming it, e.g. `[12/340] new: Archvillain/2020/Workshop Golem.7z (4 thumbnails, 1 folder image)`, instead of bare "new" / "4 thumbnail(s) stored" lines whose archive could not be told; errors name the archive too.
+
 - **Resizable details pane.** Drag the Library page's details pane by its left edge (double-click resets it); the width is remembered per browser.
 
 - **Full-size images.** Clicking an image in the details pane opens a full-screen viewer with the original image at full resolution, read from the archive (`GET /api/images/{id}/original`); arrow keys step through the model's images. The thumbnail is shown while the original loads, and instead of it when the original cannot be read.
