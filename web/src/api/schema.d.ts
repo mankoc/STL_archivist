@@ -1982,6 +1982,15 @@ export interface components {
             ai_embeddings_enabled: boolean;
             /**
              * Format: double
+             * @description The AI tagger's sampling temperature (0 to 2; lower is more literal).
+             */
+            ai_temperature: number;
+            /** @description *Delete files* may remove archives from disk. */
+            allow_file_delete: boolean;
+            /** @description *Sort files* may move archives. */
+            file_sorting_enabled: boolean;
+            /**
+             * Format: double
              * @description Compression rate above which an archive counts as poorly compressed.
              */
             low_compression_threshold: number;
@@ -2002,6 +2011,9 @@ export interface components {
             presupport_patterns: string[];
             recurse_subdirs: boolean;
             store_stl_file_list: boolean;
+            trash_folder_path: string;
+            /** @description Deleted archives go to `trash_folder_path` (when set) instead of being deleted. */
+            use_trash_folder: boolean;
             warn_low_compression: boolean;
             warn_nested_archive: boolean;
             warn_no_images: boolean;

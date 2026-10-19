@@ -39,6 +39,15 @@ pub struct Settings {
     pub presupport_patterns: Vec<String>,
     pub ai_embeddings_enabled: bool,
     pub ai_embeddings_during_crawl: bool,
+    /// *Delete files* may remove archives from disk.
+    pub allow_file_delete: bool,
+    /// Deleted archives go to `trash_folder_path` (when set) instead of being deleted.
+    pub use_trash_folder: bool,
+    pub trash_folder_path: String,
+    /// *Sort files* may move archives.
+    pub file_sorting_enabled: bool,
+    /// The AI tagger's sampling temperature (0 to 2; lower is more literal).
+    pub ai_temperature: f64,
 }
 
 impl Settings {
@@ -61,6 +70,11 @@ impl Settings {
             presupport_patterns: s.presupport_patterns(),
             ai_embeddings_enabled: s.ai_embeddings_enabled(),
             ai_embeddings_during_crawl: s.ai_embeddings_during_crawl(),
+            allow_file_delete: s.allow_file_delete(),
+            use_trash_folder: s.use_trash_folder(),
+            trash_folder_path: s.trash_folder_path(),
+            file_sorting_enabled: s.file_sorting_enabled(),
+            ai_temperature: s.ai_temperature(),
         }
     }
 
@@ -76,6 +90,9 @@ impl Settings {
         }
         if !(0.0..=1.0).contains(&self.low_compression_threshold) {
             return Err(ApiError::bad_request("low_compression_threshold is between 0 and 1"));
+        }
+        if !(0.0..=2.0).contains(&self.ai_temperature) {
+            return Err(ApiError::bad_request("ai_temperature is between 0 and 2"));
         }
         for p in &self.presupport_patterns {
             stl_core::rules::portable_pattern(p).map_err(|e| ApiError::bad_request(format!("pattern {p:?}: {e}")))?;

@@ -19,8 +19,11 @@ async fn settings_round_trip() {
     assert_eq!(v["max_thumbnails"], 5, "defaults filled in");
     assert_eq!(v["presupport_patterns"].as_array().unwrap().len(), 4);
 
+    assert_eq!((v["allow_file_delete"].clone(), v["file_sorting_enabled"].clone(), v["ai_temperature"].clone()), (false.into(), false.into(), 0.2.into()));
     v["max_thumbnails"] = 8.into();
     v["warn_low_compression"] = true.into();
+    v["allow_file_delete"] = true.into();
+    v["trash_folder_path"] = "D:/Trash".into();
     assert_eq!(call(s, "PUT", "/api/settings/library", Some(&ed), Some(v.clone())).await.status, StatusCode::FORBIDDEN);
     let r = call(s, "PUT", "/api/settings/library", Some(&admin), Some(v.clone())).await;
     assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
@@ -28,6 +31,10 @@ async fn settings_round_trip() {
     let file: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(lib.dir.path().join("settings.json")).unwrap()).unwrap();
     assert_eq!(file["color_scheme"], "Windows 11 Dark", "the desktop's own keys are kept");
     assert_eq!(file["warn_low_compression"], true);
+    assert_eq!((file["allow_file_delete"].clone(), file["trash_folder_path"].clone()), (true.into(), "D:/Trash".into()));
+    let mut bad = v.clone();
+    bad["ai_temperature"] = 3.0.into();
+    assert_eq!(call(s, "PUT", "/api/settings/library", Some(&admin), Some(bad)).await.status, StatusCode::BAD_REQUEST);
 
     // Invalid values are refused, nothing is written.
     let mut bad = v.clone();

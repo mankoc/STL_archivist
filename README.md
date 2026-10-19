@@ -9,6 +9,8 @@ It is a server (`stl-server`, Rust) with a web client (React) that runs in any b
 a small desktop app (`stl-desktop`, Tauri) that shows the same client in its own window and
 can open a library on your computer without setting up a server.
 
+**Guides:** [using stlLibrary](docs/user-guide.md) · [deploying a server](docs/deployment.md)
+
 Version: 2026.24
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
@@ -245,6 +247,8 @@ stl_database/
 └── docs/                    # Migration plan and design notes
 ```
 
+For users: [docs/user-guide.md](docs/user-guide.md). For installing a server (Linux,
+Docker, Windows, HTTPS, configuration, backups): [docs/deployment.md](docs/deployment.md).
 Developer notes are in [CLAUDE.md](CLAUDE.md) and
 [docs/rust-migration-plan.md](docs/rust-migration-plan.md).
 

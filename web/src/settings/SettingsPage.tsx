@@ -169,6 +169,40 @@ function LibrarySettingsForm({ editable }: { editable: boolean }) {
           {check("metadata_thumbnails", "Include thumbnails in sidecars")}
         </Stack>
       </Card>
+      <Card withBorder>
+        <Title order={5} mb="sm">
+          Archive files
+        </Title>
+        <Stack gap="xs">
+          {check("file_sorting_enabled", "Allow Sort files (moves archives)")}
+          {check("allow_file_delete", "Allow Delete files")}
+          {check("use_trash_folder", "Move deleted archives to the trash folder instead of deleting them")}
+          <TextInput
+            label="Trash folder"
+            description="A folder on the server; without one, deleted archives are gone for good"
+            value={form.trash_folder_path}
+            disabled={!editable}
+            onChange={(e) => set("trash_folder_path", e.currentTarget.value)}
+          />
+        </Stack>
+      </Card>
+      <Card withBorder>
+        <Title order={5} mb="sm">
+          AI tagger
+        </Title>
+        <NumberInput
+          label="Temperature"
+          description="Lower keeps suggestions literal and grounded in the images; higher is more creative"
+          min={0}
+          max={2}
+          step={0.05}
+          decimalScale={2}
+          w={220}
+          value={form.ai_temperature}
+          disabled={!editable}
+          onChange={(v) => set("ai_temperature", Number(v) || 0)}
+        />
+      </Card>
       {editable && (
         <Group>
           <Button onClick={save} data-testid="save-settings">
