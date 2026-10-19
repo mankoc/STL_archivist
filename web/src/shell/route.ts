@@ -2,7 +2,7 @@
 // can be bookmarked; no router library needed for a handful of pages.
 import { useEffect, useState } from "react";
 
-export const PAGES = ["library", "find", "duplicates", "lookups", "jobs", "maintenance", "stats", "settings"] as const;
+export const PAGES = ["library", "folders", "find", "duplicates", "lookups", "jobs", "maintenance", "stats", "settings"] as const;
 export type Page = (typeof PAGES)[number];
 
 export function pageFromHash(hash: string): Page {

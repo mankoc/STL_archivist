@@ -14,6 +14,7 @@ pub mod archive;
 pub mod backups;
 pub mod maintenance;
 pub mod stats;
+pub mod views;
 pub mod system;
 pub mod thumbs;
 pub mod users;
@@ -90,6 +91,9 @@ use crate::AppState;
         settings::get,
         settings::put,
         archive::files,
+        views::grid,
+        views::folders,
+        views::folder,
         archive::warnings,
         ai::status,
         ai::commit,
@@ -182,6 +186,9 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/models/{id}/archive", get(files::download))
         .route("/api/settings/library", get(settings::get).put(settings::put))
         .route("/api/models/{id}/files", get(archive::files))
+        .route("/api/views/grid", post(views::grid))
+        .route("/api/views/folder", post(views::folder))
+        .route("/api/folders", get(views::folders))
         .route("/api/models/{id}/warnings", get(archive::warnings))
         .route("/api/ai/status", get(ai::status))
         .route("/api/ai/commit/{id}", post(ai::commit))

@@ -9,7 +9,7 @@ export type ServerEvent = Schemas["ServerEvent"];
 type Job = Schemas["JobInfo"];
 
 /** The query keys a library change makes stale. */
-export const LIBRARY_KEYS = ["ids", "rows", "tree", "model", "editor", "lookups", "crawled-folders"] as const;
+export const LIBRARY_KEYS = ["ids", "rows", "tree", "model", "editor", "lookups", "crawled-folders", "grid", "folders", "folder-cells"] as const;
 
 /** Every event, for components that follow one (a job's log lines). */
 const bus = new EventTarget();
