@@ -34,7 +34,7 @@ pub async fn submit(
     me.require(if matches!(request, JobRequest::CompactDatabase | JobRequest::Backup) { Role::Admin } else { Role::Editor })?;
     request.validate().map_err(ApiError::bad_request)?;
     // A searched folder is read and records may point into it: the same access as a crawl.
-    if let JobRequest::SearchFolder { folder, .. } = &request {
+    if let JobRequest::SearchFolder { folder, .. } | JobRequest::SortFiles { target_dir: folder, .. } = &request {
         let (lib2, me2, path) = (std::sync::Arc::clone(&lib), me.clone(), std::path::PathBuf::from(folder));
         lib2.run(move |lib| super::files::check_access(lib, &me2, &path)).await?;
     }

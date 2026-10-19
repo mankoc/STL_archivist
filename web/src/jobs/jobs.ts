@@ -44,6 +44,7 @@ const KIND_LABEL: Record<string, string> = {
   rescan: "Rescan",
   generate_thumbnails: "Generate thumbnails",
   delete_files: "Delete files",
+  sort_files: "Sort files",
   ai_suggest: "AI suggestion",
   ai_tag: "AI tagging",
 };

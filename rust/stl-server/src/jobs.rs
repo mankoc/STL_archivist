@@ -101,6 +101,9 @@ pub enum JobRequest {
         #[serde(default)]
         max_thumbnails: Option<usize>,
     },
+    /// Move the models' archives into a folder tree under `target_dir` built
+    /// from `pattern` (Sort Files). Needs *file sorting* in the settings.
+    SortFiles { ids: Vec<i64>, target_dir: String, pattern: String },
     /// Move the models' archive files to the trash folder (or delete them,
     /// without one) and remove the records. Needs *allow file delete*.
     DeleteFiles { ids: Vec<i64> },
@@ -182,6 +185,7 @@ impl JobRequest {
             JobRequest::Rescan { .. } => "rescan",
             JobRequest::GenerateThumbnails { .. } => "generate_thumbnails",
             JobRequest::DeleteFiles { .. } => "delete_files",
+            JobRequest::SortFiles { .. } => "sort_files",
             JobRequest::AiSuggest { .. } => "ai_suggest",
             JobRequest::AiTag { .. } => "ai_tag",
             JobRequest::GenerateSidecars => "generate_sidecars",
@@ -228,6 +232,7 @@ impl JobRequest {
             | JobRequest::Rescan { ids }
             | JobRequest::GenerateThumbnails { ids, .. }
             | JobRequest::DeleteFiles { ids }
+            | JobRequest::SortFiles { ids, .. }
                 if ids.is_empty() =>
             {
                 Err("no records given".into())
@@ -561,6 +566,7 @@ fn run(lib: &Library, job: &Job) -> Result<String, String> {
         JobRequest::Rescan { ids } => rescan(lib, job, &ids),
         JobRequest::GenerateThumbnails { ids, max_thumbnails } => generate_thumbnails(lib, job, &ids, max_thumbnails),
         JobRequest::DeleteFiles { ids } => delete_files(lib, job, &ids),
+        JobRequest::SortFiles { ids, target_dir, pattern } => sort_files(lib, job, &ids, &target_dir, &pattern),
         JobRequest::AiSuggest { id, max_tags, ignore_meta } => ai_suggest(lib, job, id, max_tags, ignore_meta),
         JobRequest::AiTag { ids, overwrite, ignore_meta, max_tags } => ai_tag(lib, job, &ids, overwrite, ignore_meta, max_tags),
         JobRequest::GenerateSidecars => generate_sidecars(lib, job),
@@ -604,6 +610,28 @@ fn delete_files(lib: &Library, job: &Job, ids: &[i64]) -> Result<String, String>
     job.ctl.advance(ids.len() as u64);
     job.touch_sidecars(paths);
     Ok(format!("{deleted} archive(s) deleted{}", if failed > 0 { format!(", {failed} failed") } else { String::new() }))
+}
+
+/// Sort Files: plan, move every archive or none, then point the records at
+/// the new paths in one transaction.
+fn sort_files(lib: &Library, job: &Job, ids: &[i64], target_dir: &str, pattern: &str) -> Result<String, String> {
+    if !LibrarySettings::load(&lib.config.data_dir).file_sorting_enabled() {
+        return Err("sorting files is disabled in the library settings (file sorting)".into());
+    }
+    let sources = lib.db.with(|c| storage::browser::sort_sources(c, ids)).map_err(db_err)?;
+    let rows = stl_core::sort_files::preview(&sources, ids, std::path::Path::new(target_dir), pattern);
+    for r in rows.iter().filter(|r| !r.moves()) {
+        lib.job_log(job, format!("{}: {} ({})", r.status, r.from, r.to));
+    }
+    job.ctl.set_total(rows.len() as u64);
+    let moved = stl_core::sort_files::execute(&rows)?;
+    lib.db.with_tx(|tx| storage::browser::set_archive_paths(tx, &moved)).map_err(db_err)?;
+    job.ctl.advance(rows.len() as u64);
+    for r in rows.iter().filter(|r| r.moves()) {
+        lib.job_log(job, format!("Moved: {} → {}", r.from, r.to));
+    }
+    job.touch_sidecars(rows.iter().filter(|r| r.moves()).map(|r| r.from.clone()).chain(moved.iter().map(|(_, p)| p.clone())));
+    Ok(format!("moved {} archive(s)", moved.len()))
 }
 
 // ── AI tagger ────────────────────────────────────────────────────────────────

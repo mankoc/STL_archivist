@@ -121,3 +121,32 @@ async fn delete_files_to_the_trash() {
     assert!(note["original_path"].as_str().unwrap().ends_with("Dragon.zip"));
     assert_eq!(scalar::<i64>(&lib, "SELECT count(*) FROM models"), 0);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sort_files_by_pattern() {
+    let lib = empty_library();
+    let ed = lib.user("ed", Role::Editor);
+    let root = lib.dir.path().join("archives");
+    write_zip(&root.join("In").join("Dragon.zip"), &[("dragon.stl", b"solid d\nendsolid\n")]);
+    run(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy(), "pattern": "{sculptor}/{title}"})).await;
+    let dragon: i64 = scalar(&lib, "SELECT id FROM models");
+    let target = root.join("Sorted");
+    std::fs::create_dir_all(&target).unwrap();
+    let body = json!({"ids": [dragon], "target_dir": target.to_string_lossy(), "pattern": "{sculptor}/{title}"});
+
+    let rows = call(&lib.state, "POST", "/api/sort/preview", Some(&ed), Some(body.clone())).await.json();
+    assert_eq!(rows[0]["status"], "OK", "{rows}");
+    assert_eq!(rows[0]["to"], json!(target.join("In").join("Dragon.zip").to_string_lossy()));
+
+    // Off by default.
+    let mut job = body.clone();
+    job["kind"] = json!("sort_files");
+    assert_eq!(finish(&lib, &ed, job.clone()).await["job"]["state"], "failed");
+    std::fs::write(lib.dir.path().join("settings.json"), r#"{"file_sorting_enabled": true}"#).unwrap();
+    let v = run(&lib, &ed, job).await;
+    assert_eq!(v["job"]["message"], "moved 1 archive(s)");
+    let path: String = scalar(&lib, "SELECT archive_path FROM models");
+    assert_eq!(path, target.join("In").join("Dragon.zip").to_string_lossy());
+    assert!(std::path::Path::new(&path).is_file());
+    assert!(!root.join("In").join("Dragon.zip").exists());
+}

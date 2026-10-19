@@ -88,6 +88,11 @@ impl LibrarySettings {
         self.get_bool("warn_low_compression", false)
     }
 
+    /// Sort Files may move archives (`get_file_sorting_enabled`).
+    pub fn file_sorting_enabled(&self) -> bool {
+        self.get_bool("file_sorting_enabled", false)
+    }
+
     /// Delete Files may remove archives from disk (`get_allow_file_delete`).
     pub fn allow_file_delete(&self) -> bool {
         self.get_bool("allow_file_delete", false)
