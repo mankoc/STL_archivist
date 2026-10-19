@@ -1,0 +1,19 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "version": "0.1.0",
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "stlLibrary",
+    "shortDescription": "Catalogue and browse collections of 3D-printable model archives",
+    "resources": {
+      "../target/release/stl-server.exe": "stl-server.exe",
+      "../../web/dist/": "web/"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  }
+}

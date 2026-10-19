@@ -1301,6 +1301,25 @@ the path is visible. No business logic and no Tauri commands for data.
 Once the web client has parity: remove `app/`, PyInstaller and the PyO3 bindings; ship the
 server (installer and Docker image) and the desktop shell.
 
+**Done 2026-10-19.** After the parity steps 6k–6n, the owner chose to retire the PyQt app
+(kept on its own branch):
+
+- Removed: `app/`, `main.py`, `tests/` (pytest, including the golden tests), `rust/stl-py`
+  (the `stl_native` bindings), `tools/build_native.py`, PyInstaller (`stl_database.spec`,
+  `build_dist.py`), the Python launchers (`launch.bat`, `launch.py`, `launch.sh`,
+  `LAUNCHER.md`), the icon and theme scripts, the Qt-only resources (icon sets, themes,
+  translations) and the Python CI workflows. `tools/create_ai_model.py` stays: it
+  regenerates the tiny CLIP stand-in the server tests use.
+- Ships: `build.ps1` / `build.sh`; a Windows NSIS installer from `cargo tauri build --config
+  tauri.bundle.json` (the shell, `stl-server.exe` and `web/` installed side by side, current
+  user, 7.8 MB); the Docker image; CI (`rust.yml`: web tests and build, cargo tests and
+  clippy; `release.yml`: the installer on `v*` tags).
+- Lost with Python (documented in the README): the reader fallbacks for archives the native
+  readers refuse, Pillow-only images (AVIF, CMYK JPEG), non-portable presupport patterns, the
+  in-app download of the AI model and CLIP encoder, the translated interface.
+- `stl-core` keeps functions only the bindings used (golden-test helpers, the desktop's
+  `LibraryDb` methods); they are harmless and some back server features.
+
 ## Effort and risk overview
 
 | Phase | Relative effort | Risk | Main risk |

@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-  <rect x="1.5" y="3.5" width="13" height="11" rx="1.5" fill="none" stroke="#6b6b6b" stroke-width="1.5"/>
-  <line x1="1.5" y1="7.5" x2="14.5" y2="7.5" stroke="#6b6b6b" stroke-width="1.5"/>
-  <line x1="5" y1="1.5" x2="5" y2="5.5" stroke="#6b6b6b" stroke-width="1.5" stroke-linecap="round"/>
-  <line x1="11" y1="1.5" x2="11" y2="5.5" stroke="#6b6b6b" stroke-width="1.5" stroke-linecap="round"/>
-</svg>
