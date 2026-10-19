@@ -4,7 +4,7 @@ import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import { IconArchive, IconColumns, IconEdit, IconFilterOff, IconSearch, IconSparkles, IconTrash } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { type CSSProperties, type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
 
 import { api, unwrap } from "../api/client";
 import { hasRole, useUser } from "../auth/user";
@@ -13,6 +13,7 @@ import { DetailPane } from "./DetailPane";
 import { EditorDrawer } from "./EditorDrawer";
 import { FilterPane } from "./FilterPane";
 import { GridView } from "./GridView";
+import { clampWidth, DEFAULT_WIDTH, loadWidth, saveWidth } from "./paneWidth";
 import { SortModal } from "./SortModal";
 import { AiTaggerDrawer } from "./AiTaggerDrawer";
 import { MassEditDrawer } from "./MassEditDrawer";
@@ -35,6 +36,32 @@ export function BrowserPage() {
   const [massEdit, setMassEdit] = useState(false);
   const [aiTagger, setAiTagger] = useState(false);
   const [view, setView] = useState<"table" | "grid">("table");
+  // The detail pane's width, dragged by its left edge.
+  const layoutRef = useRef<HTMLDivElement>(null);
+  const [detailWidth, setDetailWidth] = useState(loadWidth);
+  const [dragging, setDragging] = useState(false);
+  const startDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const layout = layoutRef.current;
+    if (!layout) return;
+    const target = e.currentTarget;
+    target.setPointerCapture(e.pointerId);
+    setDragging(true);
+    let width = detailWidth;
+    const move = (ev: PointerEvent) => {
+      const box = layout.getBoundingClientRect();
+      width = clampWidth(box.right - ev.clientX, box.width);
+      setDetailWidth(width);
+    };
+    const up = () => {
+      target.removeEventListener("pointermove", move);
+      target.removeEventListener("pointerup", up);
+      setDragging(false);
+      saveWidth(width);
+    };
+    target.addEventListener("pointermove", move);
+    target.addEventListener("pointerup", up);
+  };
   // Hidden table columns: a per-user setting, so it follows the account.
   const prefs = useQuery({ queryKey: ["me-settings"], queryFn: async () => unwrap(await api.GET("/api/me/settings")) as Record<string, unknown> });
   const hidden = hiddenFrom(prefs.data?.[HIDDEN_COLUMNS_KEY]);
@@ -81,7 +108,7 @@ export function BrowserPage() {
   });
 
   return (
-    <div className={classes.layout}>
+    <div className={classes.layout} ref={layoutRef} style={{ "--detail-width": `${detailWidth}px` } as CSSProperties}>
       <Box className={classes.filters}>
         <Group justify="space-between" px="xs" py={6} className={classes.toolbar}>
           <Text size="sm" fw={600}>
@@ -182,6 +209,14 @@ export function BrowserPage() {
         </Box>
       </Box>
       <Box className={classes.detail}>
+        <div
+          className={classes.splitter}
+          data-dragging={dragging || undefined}
+          onPointerDown={startDrag}
+          onDoubleClick={() => { setDetailWidth(DEFAULT_WIDTH); saveWidth(DEFAULT_WIDTH); }}
+          title="Drag to resize; double-click to reset"
+          data-testid="detail-splitter"
+        />
         <DetailPane id={selection.current} onEdit={setEditing} />
       </Box>
       <EditorDrawer id={editing} onClose={() => setEditing(null)} />
