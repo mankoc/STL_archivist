@@ -120,7 +120,7 @@ pub async fn image_original(State(lib): State<AppState>, _me: CurrentUser, Path(
                 std::fs::read(file).ok()
             } else {
                 archive.and_then(|a| {
-                    stl_core::archive::read_members_with(std::path::Path::new(&a), &[name.clone()], &lib.config.unrar_tool())
+                    stl_core::archive::read_members_with(std::path::Path::new(&a), std::slice::from_ref(&name), &lib.config.unrar_tool())
                         .ok()
                         .and_then(|mut v| v.pop())
                         .map(|(_, b)| b)
