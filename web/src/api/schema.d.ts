@@ -1918,6 +1918,9 @@ export interface components {
         Role: "viewer" | "editor" | "admin";
         /** @description One table row. */
         Row: {
+            /** @description The archive's folder (forward slashes). */
+            archive_folder?: string | null;
+            archive_hash?: string | null;
             archive_path?: string | null;
             /** Format: int64 */
             archive_size?: number | null;
@@ -1927,8 +1930,16 @@ export interface components {
             compression_rate?: number | null;
             created_at?: string | null;
             creator?: string | null;
+            description?: string | null;
             /** Format: int64 */
             id: number;
+            /**
+             * Format: int64
+             * @description Images catalogued for the model.
+             */
+            images: number;
+            /** @description The archive was not on disk when last checked. */
+            is_missing: boolean;
             presupports?: string | null;
             release?: string | null;
             /** Format: int64 */
@@ -1946,6 +1957,8 @@ export interface components {
             tags: string;
             title?: string | null;
             to_print: boolean;
+            updated_at?: string | null;
+            url?: string | null;
             warning?: string | null;
         };
         Rows: {

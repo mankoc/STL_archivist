@@ -144,6 +144,8 @@ async fn rows_keep_the_requested_order() {
     assert_eq!(rows[0]["sculptor"], "Bob");
     assert_eq!(rows[1]["tags"], "dragon");
     assert_eq!(rows[1]["to_print"], false);
+    assert_eq!((rows[0]["images"].clone(), rows[0]["is_missing"].clone()), (json!(1), json!(false)));
+    assert!(rows[0]["archive_hash"].is_string() && rows[0].get("url").is_some() && rows[0].get("updated_at").is_some());
 }
 
 #[tokio::test]

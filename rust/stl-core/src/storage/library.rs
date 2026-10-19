@@ -398,16 +398,26 @@ pub struct PageRow {
     pub scales: String,
     pub tags: String,
     pub to_print: Option<bool>,
+    pub url: Option<String>,
+    pub description: Option<String>,
+    pub updated_at: Option<String>,
+    pub archive_folder: Option<String>,
+    pub archive_hash: Option<String>,
+    pub is_missing: Option<bool>,
+    /// Images catalogued for the model.
+    pub image_count: i64,
 }
 
 /// `page_rows`: rows for `ids` in that order (missing ids skipped).
 pub fn page_rows(conn: &Connection, ids: &[i64]) -> Result<Vec<PageRow>> {
     let json = Value::Text(serde_json_ids(ids));
     let mut st = conn.prepare(
-        "SELECT id, title, creator, source, release_year, release_month, archive_path, presupports, \
-         warning, archive_size, compression_rate, sequence, created_at, sculptor_name, collection_name, \
-         subcollection_name, category_name, release_name, to_print \
-         FROM models_view WHERE id IN (SELECT value FROM json_each(?1))",
+        "SELECT v.id, v.title, v.creator, v.source, v.release_year, v.release_month, v.archive_path, v.presupports, \
+         v.warning, v.archive_size, v.compression_rate, v.sequence, v.created_at, v.sculptor_name, v.collection_name, \
+         v.subcollection_name, v.category_name, v.release_name, v.to_print, \
+         m.url, m.description, m.updated_at, m.archive_folder, m.archive_hash, m.is_missing, \
+         (SELECT count(*) FROM images i WHERE i.model_id = v.id) \
+         FROM models_view v JOIN models m ON m.id = v.id WHERE v.id IN (SELECT value FROM json_each(?1))",
     )?;
     let mut by_id: HashMap<i64, PageRow> = st
         .query_map([&json], |r| {
@@ -433,6 +443,13 @@ pub fn page_rows(conn: &Connection, ids: &[i64]) -> Result<Vec<PageRow>> {
                 scales: String::new(),
                 tags: String::new(),
                 to_print: r.get(18)?,
+                url: r.get(19)?,
+                description: r.get(20)?,
+                updated_at: r.get(21)?,
+                archive_folder: r.get(22)?,
+                archive_hash: r.get(23)?,
+                is_missing: r.get(24)?,
+                image_count: r.get(25)?,
             })
         })?
         .map(|r| r.map(|row| (row.id, row)))

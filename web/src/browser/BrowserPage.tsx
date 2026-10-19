@@ -18,7 +18,7 @@ import { SortModal } from "./SortModal";
 import { AiTaggerDrawer } from "./AiTaggerDrawer";
 import { MassEditDrawer } from "./MassEditDrawer";
 import { EMPTY, type FilterSpec, isEmpty } from "./filters";
-import { ALWAYS_SHOWN, HIDDEN_COLUMNS_KEY, hiddenFrom, toggle } from "./columns";
+import { ALWAYS_SHOWN, choiceFrom, HIDDEN_COLUMNS_KEY, isShown, SHOWN_COLUMNS_KEY, toggle } from "./columns";
 import { COLUMNS, ModelTable, type Sort, useModelIds } from "./ModelTable";
 import { NONE, click, prune, type Selection } from "./selection";
 import classes from "./BrowserPage.module.css";
@@ -64,12 +64,19 @@ export function BrowserPage() {
   };
   // Hidden table columns: a per-user setting, so it follows the account.
   const prefs = useQuery({ queryKey: ["me-settings"], queryFn: async () => unwrap(await api.GET("/api/me/settings")) as Record<string, unknown> });
-  const hidden = hiddenFrom(prefs.data?.[HIDDEN_COLUMNS_KEY]);
-  const toggleColumn = async (id: string) => {
-    const next = toggle(hidden, id);
-    queryClient.setQueryData<Record<string, unknown>>(["me-settings"], (old) => ({ ...old, [HIDDEN_COLUMNS_KEY]: next }));
-    await api.PUT("/api/me/settings/{key}", { params: { path: { key: HIDDEN_COLUMNS_KEY } }, body: next as never });
+  const choice = choiceFrom(prefs.data);
+  const toggleColumn = async (c: (typeof COLUMNS)[number]) => {
+    const next = toggle(choice, c);
+    const [key, value] = c.optional ? [SHOWN_COLUMNS_KEY, next.shown] : [HIDDEN_COLUMNS_KEY, next.hidden];
+    queryClient.setQueryData<Record<string, unknown>>(["me-settings"], (old) => ({ ...old, [key]: value }));
+    await api.PUT("/api/me/settings/{key}", { params: { path: { key } }, body: value as never });
   };
+  const columnItem = (c: (typeof COLUMNS)[number]) => (
+    <Menu.Item key={c.id} disabled={c.id === ALWAYS_SHOWN} onClick={() => toggleColumn(c)}
+      leftSection={<Checkbox size="xs" readOnly checked={isShown(c, choice)} tabIndex={-1} />}>
+      {c.header}
+    </Menu.Item>
+  );
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [sorting, setSorting] = useState(false);
   const selectedIds = () => order.filter((i) => selection.ids.has(i));
@@ -151,13 +158,10 @@ export function BrowserPage() {
                   Columns
                 </Button>
               </Menu.Target>
-              <Menu.Dropdown>
-                {COLUMNS.map((c) => (
-                  <Menu.Item key={c.id} disabled={c.id === ALWAYS_SHOWN} onClick={() => toggleColumn(c.id)}
-                    leftSection={<Checkbox size="xs" readOnly checked={!hidden.includes(c.id)} tabIndex={-1} />}>
-                    {c.header}
-                  </Menu.Item>
-                ))}
+              <Menu.Dropdown mah="70vh" style={{ overflowY: "auto" }}>
+                {COLUMNS.filter((c) => !c.optional).map(columnItem)}
+                <Menu.Label>More columns</Menu.Label>
+                {COLUMNS.filter((c) => c.optional).map(columnItem)}
               </Menu.Dropdown>
             </Menu>
           )}
@@ -203,7 +207,7 @@ export function BrowserPage() {
               selection={selection}
               onRowClick={(id, mods) => setSelection((s) => click(s, order, id, mods))}
               editable={editor}
-              hidden={hidden}
+              choice={choice}
             />
           )}
         </Box>

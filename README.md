@@ -11,7 +11,7 @@ can open a library on your computer without setting up a server.
 
 **Guides:** [using stlLibrary](docs/user-guide.md) · [deploying a server](docs/deployment.md)
 
-Version: 2026.26.0
+Version: 2026.27.0
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). Libraries are compatible: this version opens the same data directory

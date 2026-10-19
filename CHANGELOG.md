@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026.27.0 — 2026-10-19
+
+- **More table columns.** *Columns* has a *More columns* group with fields that were not shown before: Warning, Sequence (editable in place), Images (count), Compression, To print, Missing, Added, Updated, URL, Description, Folder and Archive hash. They start hidden; turning one on is saved with your account (`table_shown_columns`), and the standard columns keep their own setting. Sequence, Compression and Added can be sorted.
+
 ## 2026.26.0 — 2026-10-19
 
 - **Installer builds on GitHub.** Pushing a version tag (`v2026.26.0`) builds the Windows installer and publishes it on a GitHub release (the workflow checks that the tag matches the version); it can also be started by hand from the Actions tab, keeping the installer as a run artifact. Ordinary pushes do not build it. The Tauri CLI is cached between runs.

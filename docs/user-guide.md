@@ -110,7 +110,10 @@ selected model's details on the right.
 ### Table and grid
 
 - Click a column header to sort (ascending, descending, off); drag a header's edge to resize.
-- **Columns** chooses which columns are shown (saved with your account).
+- **Columns** chooses which columns are shown (saved with your account). The standard
+  columns are on until you hide them; *More columns* lists further fields, off until you turn
+  them on: Warning, Sequence, Images, Compression, To print, Missing, Added, Updated, URL,
+  Description, Folder and Archive hash.
 - **Table / Images** switches between the table and a grid of thumbnails of the same models.
 - Click a row to select it; **Ctrl**-click adds or removes rows; **Shift**-click selects a range.
   The count of selected models shows above the table.
