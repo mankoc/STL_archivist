@@ -85,6 +85,54 @@ pub async fn image_thumbnail(State(lib): State<AppState>, _me: CurrentUser, Path
     }
 }
 
+/// The media type of an original image, by its name; `None` for what is not
+/// an image (PDF previews have no original to show).
+fn image_type(name: &str) -> Option<&'static str> {
+    let ext = name.rsplit_once('.')?.1.to_ascii_lowercase();
+    Some(match ext.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "avif" => "image/avif",
+        "tif" | "tiff" => "image/tiff",
+        _ => return None,
+    })
+}
+
+/// An image at full size: the original the thumbnail was made from, read from
+/// the archive (or from the file beside it). 404 when it cannot be had (an
+/// image added by hand, a moved archive): show the thumbnail instead.
+#[utoipa::path(get, path = "/api/images/{id}/original", tag = "thumbnails",
+    params(("id" = i64, Path, description = "Image id")),
+    responses((status = 200, description = "The image file", content_type = "image/jpeg"),
+              (status = 404, body = crate::error::ErrorBody)))]
+pub async fn image_original(State(lib): State<AppState>, _me: CurrentUser, Path(id): Path<i64>) -> Result<Response, ApiError> {
+    let found = lib
+        .run(move |lib| {
+            let Some((archive, Some(name))) = lib.db.with(|c| stl_core::storage::views::image_source(c, id))? else {
+                return Ok(None);
+            };
+            let Some(ct) = image_type(&name) else { return Ok(None) };
+            let file = std::path::Path::new(&name);
+            let data = if file.is_absolute() {
+                std::fs::read(file).ok()
+            } else {
+                archive.and_then(|a| {
+                    stl_core::archive::read_members_with(std::path::Path::new(&a), &[name.clone()], &lib.config.unrar_tool())
+                        .ok()
+                        .and_then(|mut v| v.pop())
+                        .map(|(_, b)| b)
+                })
+            };
+            Ok::<_, ApiError>(data.map(|d| (ct, d)))
+        })
+        .await?;
+    let (ct, data) = found.ok_or_else(|| ApiError::not_found("the original image is not available"))?;
+    Ok(([(header::CONTENT_TYPE, ct), (header::CACHE_CONTROL, "private, max-age=3600")], data).into_response())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,5 +146,8 @@ mod tests {
         assert_eq!(content_type(&[0xff, 0xd8, 0xff]), "image/jpeg");
         assert_eq!(thumbnail_url(5, None), "/api/images/5/thumbnail");
         assert_eq!(thumbnail_url(5, Some(&[0xab])), "/api/thumb/ab");
+        assert_eq!(image_type("renders/A.JPG"), Some("image/jpeg"));
+        assert_eq!(image_type("preview.pdf"), None);
+        assert_eq!(image_type("noext"), None);
     }
 }

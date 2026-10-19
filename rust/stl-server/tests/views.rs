@@ -76,3 +76,25 @@ async fn grid_and_folders() {
     let all = call(&lib.state, "POST", "/api/views/folder", Some(&ed), Some(json!({"folder": a, "include_subfolders": true}))).await.json();
     assert_eq!(titles(&all), ["Dragon", "Knight"]);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn original_images() {
+    let lib = empty_library();
+    let ed = lib.user("ed", Role::Editor);
+    let root = lib.dir.path().join("archives");
+    let render = png();
+    write_zip(&root.join("A").join("Dragon.zip"), &[("d.stl", b"solid\nendsolid\n"), ("renders/big.png", &render)]);
+    crawl(&lib, &ed, &root).await;
+    let image: i64 = lib.state.db.with(|c| c.query_row("SELECT id FROM images", [], |r| r.get(0))).unwrap();
+
+    let r = call(&lib.state, "GET", &format!("/api/images/{image}/original"), Some(&ed), None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.headers["content-type"], "image/png");
+    assert_eq!(r.body, render, "the member's original bytes");
+
+    // An image whose source is gone (here: no file name, as for an image added by hand).
+    lib.state.db.with(|c| c.execute("UPDATE images SET filename = NULL", [])).unwrap();
+    let r = call(&lib.state, "GET", &format!("/api/images/{image}/original"), Some(&ed), None).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    assert_eq!(call(&lib.state, "GET", "/api/images/999/original", Some(&ed), None).await.status, StatusCode::NOT_FOUND);
+}

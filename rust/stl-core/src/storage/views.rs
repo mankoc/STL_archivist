@@ -20,6 +20,17 @@ pub fn stl_files(conn: &Connection, model_id: i64) -> Result<Vec<StlFileRow>> {
     st.query_map([model_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect()
 }
 
+/// `(archive path, image file name)` of one image: where its original is
+/// (an archive member, or a file beside the archive given by its full path).
+pub fn image_source(conn: &Connection, image_id: i64) -> Result<Option<(Option<String>, Option<String>)>> {
+    conn.query_row(
+        "SELECT m.archive_path, i.filename FROM images i JOIN models m ON m.id = i.model_id WHERE i.id = ?1",
+        [image_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )
+    .optional()
+}
+
 /// `(archive_path, warning)` of one model (Warning Details).
 pub fn path_warning(conn: &Connection, model_id: i64) -> Result<Option<(Option<String>, Option<String>)>> {
     conn.query_row("SELECT archive_path, warning FROM models WHERE id = ?1", [model_id], |r| Ok((r.get(0)?, r.get(1)?)))

@@ -1,6 +1,7 @@
 // The selected model: its fields, thumbnails, and the archive (download, or
 // the folder path when this client can open it there).
-import { ActionIcon, Anchor, Badge, Box, Button, Center, CopyButton, Group, Image, Loader, SimpleGrid, Stack, Table, Text, Title } from "@mantine/core";
+import { ActionIcon, Badge, Box, Button, Center, CopyButton, Group, Image, Loader, SimpleGrid, Stack, Table, Text, Title, UnstyledButton } from "@mantine/core";
+import { useEffect, useState } from "react";
 import { Dropzone, IMAGE_MIME_TYPE } from "@mantine/dropzone";
 import { notifications } from "@mantine/notifications";
 import { IconCopy, IconDownload, IconEdit, IconFolderOpen, IconPhotoPlus, IconTrash } from "@tabler/icons-react";
@@ -10,6 +11,7 @@ import { api, ApiError, type Schemas, unwrap } from "../api/client";
 import { hasRole, useUser } from "../auth/user";
 import { inDesktopShell, openFolder } from "../desktop";
 import { ArchiveInfo } from "./ArchiveInfo";
+import { ImageViewer, type ViewerImage } from "./ImageViewer";
 import { baseName, formatDate, formatSize } from "../format";
 import classes from "./DetailPane.module.css";
 
@@ -36,6 +38,9 @@ async function uploadImages(id: number, files: File[]): Promise<Schemas["AddedIm
 export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: number) => void }) {
   const user = useUser();
   const editor = hasRole(user, "editor");
+  // The image open in the full-size viewer (an index into the shown images).
+  const [viewing, setViewing] = useState<number | null>(null);
+  useEffect(() => setViewing(null), [id]);
   const queryClient = useQueryClient();
   const refresh = async () => {
     for (const key of ["model", "rows", "editor"]) await queryClient.invalidateQueries({ queryKey: [key] });
@@ -71,6 +76,7 @@ export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: num
     );
   }
   const d = detail.data;
+  const viewable: ViewerImage[] = d.images.flatMap((i) => (i.thumbnail ? [{ id: i.id, thumbnail: i.thumbnail }] : []));
   const f = d.fields as Record<string, string | number | null>;
   const path = (f.archive_path as string | null) ?? "";
   const tags = String(f.tags ?? "")
@@ -164,9 +170,14 @@ export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: num
         {d.images.map((img) =>
           img.thumbnail ? (
             <Box key={img.id} className={classes.thumb}>
-              <Anchor href={img.thumbnail} target="_blank">
+              <UnstyledButton
+                onClick={() => setViewing(viewable.findIndex((v) => v.id === img.id))}
+                display="block"
+                style={{ cursor: "zoom-in" }}
+                data-testid="detail-image"
+              >
                 <Image src={img.thumbnail} radius="sm" alt="" loading="lazy" />
-              </Anchor>
+              </UnstyledButton>
               {editor && (
                 <ActionIcon
                   className={classes.remove}
@@ -190,6 +201,7 @@ export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: num
           ) : null,
         )}
       </SimpleGrid>
+      <ImageViewer images={viewable} index={viewing} onIndex={setViewing} onClose={() => setViewing(null)} />
       {d.images.length === 0 && (
         <Text size="sm" c="dimmed">
           No images.
