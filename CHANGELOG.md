@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Table columns can be hidden.** *Columns* above the browser table shows or hides each column (the title always stays); the choice is saved with your account.
+
 - **Web client step 6n: update folders, delete all records, about.** *Update all* on the Jobs page re-crawls every crawled folder in one job and, like the desktop's Update Folders, keeps the record (and its edits) of an archive moved from one folder to another before deleting the records of archives that are gone; it replaces queuing one crawl per folder, which lost such records. Administrators can empty the library (Maintenance → *Delete all records*, confirmed by typing DELETE), which also drops the thumbnails. *About* in the user menu shows the server version.
 
 - **Web client step 6m: sort files.** *Archives* → *Sort files…* previews where a path pattern (`{collection}/{creator}/{title}`) would move the selected archives under a server folder, then moves them all or none (a failed move puts the others back) and updates the records. Needs *file sorting* in the library settings.

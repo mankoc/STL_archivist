@@ -1,8 +1,8 @@
 // The browser: filter pane, table and detail pane (the desktop's main window).
-import { Box, Button, Center, Group, Loader, Menu, Modal, SegmentedControl, Text, TextInput } from "@mantine/core";
+import { Box, Button, Center, Checkbox, Group, Loader, Menu, Modal, SegmentedControl, Text, TextInput } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconArchive, IconEdit, IconFilterOff, IconSearch, IconSparkles, IconTrash } from "@tabler/icons-react";
+import { IconArchive, IconColumns, IconEdit, IconFilterOff, IconSearch, IconSparkles, IconTrash } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
@@ -17,7 +17,8 @@ import { SortModal } from "./SortModal";
 import { AiTaggerDrawer } from "./AiTaggerDrawer";
 import { MassEditDrawer } from "./MassEditDrawer";
 import { EMPTY, type FilterSpec, isEmpty } from "./filters";
-import { ModelTable, type Sort, useModelIds } from "./ModelTable";
+import { ALWAYS_SHOWN, HIDDEN_COLUMNS_KEY, hiddenFrom, toggle } from "./columns";
+import { COLUMNS, ModelTable, type Sort, useModelIds } from "./ModelTable";
 import { NONE, click, prune, type Selection } from "./selection";
 import classes from "./BrowserPage.module.css";
 
@@ -34,6 +35,14 @@ export function BrowserPage() {
   const [massEdit, setMassEdit] = useState(false);
   const [aiTagger, setAiTagger] = useState(false);
   const [view, setView] = useState<"table" | "grid">("table");
+  // Hidden table columns: a per-user setting, so it follows the account.
+  const prefs = useQuery({ queryKey: ["me-settings"], queryFn: async () => unwrap(await api.GET("/api/me/settings")) as Record<string, unknown> });
+  const hidden = hiddenFrom(prefs.data?.[HIDDEN_COLUMNS_KEY]);
+  const toggleColumn = async (id: string) => {
+    const next = toggle(hidden, id);
+    queryClient.setQueryData<Record<string, unknown>>(["me-settings"], (old) => ({ ...old, [HIDDEN_COLUMNS_KEY]: next }));
+    await api.PUT("/api/me/settings/{key}", { params: { path: { key: HIDDEN_COLUMNS_KEY } }, body: next as never });
+  };
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [sorting, setSorting] = useState(false);
   const selectedIds = () => order.filter((i) => selection.ids.has(i));
@@ -108,6 +117,23 @@ export function BrowserPage() {
             {ids.data ? `${ids.data.length.toLocaleString()} model${ids.data.length === 1 ? "" : "s"}` : ""}
             {selection.ids.size > 1 ? ` · ${selection.ids.size} selected` : ""}
           </Text>
+          {view === "table" && (
+            <Menu closeOnItemClick={false} position="bottom-start">
+              <Menu.Target>
+                <Button size="compact-xs" variant="subtle" leftSection={<IconColumns size={14} />} data-testid="columns-menu">
+                  Columns
+                </Button>
+              </Menu.Target>
+              <Menu.Dropdown>
+                {COLUMNS.map((c) => (
+                  <Menu.Item key={c.id} disabled={c.id === ALWAYS_SHOWN} onClick={() => toggleColumn(c.id)}
+                    leftSection={<Checkbox size="xs" readOnly checked={!hidden.includes(c.id)} tabIndex={-1} />}>
+                    {c.header}
+                  </Menu.Item>
+                ))}
+              </Menu.Dropdown>
+            </Menu>
+          )}
           <SegmentedControl size="xs" value={view} onChange={(v) => setView(v as "table" | "grid")}
             data={[{ value: "table", label: "Table" }, { value: "grid", label: "Images" }]} data-testid="view-toggle" />
           {editor && selection.ids.size > 0 && (
@@ -150,6 +176,7 @@ export function BrowserPage() {
               selection={selection}
               onRowClick={(id, mods) => setSelection((s) => click(s, order, id, mods))}
               editable={editor}
+              hidden={hidden}
             />
           )}
         </Box>
