@@ -9,6 +9,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Schemas, unwrap } from "../api/client";
 import { hasRole, useUser } from "../auth/user";
 import { inDesktopShell, openFolder } from "../desktop";
+import { ArchiveInfo } from "./ArchiveInfo";
 import { baseName, formatDate, formatSize } from "../format";
 import classes from "./DetailPane.module.css";
 
@@ -113,6 +114,7 @@ export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: num
           </Table.Tr>
         </Table.Tbody>
       </Table>
+      <ArchiveInfo id={id} warning={(f.warning as string | null) ?? null} />
       {tags.length > 0 && (
         <Group gap={4}>
           {tags.map((t) => (

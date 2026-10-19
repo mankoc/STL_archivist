@@ -8,6 +8,7 @@
 
 pub mod accounts;
 pub mod ai;
+pub mod archive_tools;
 pub mod api;
 pub mod auth;
 pub mod config;

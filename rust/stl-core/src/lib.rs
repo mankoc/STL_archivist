@@ -22,6 +22,7 @@ pub mod path_pattern;
 pub mod pyunicode;
 pub mod pyjson;
 pub mod pairs;
+pub mod rescan;
 pub mod rules;
 pub mod storage;
 pub mod strings;

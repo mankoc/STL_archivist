@@ -91,6 +91,19 @@ pub enum JobRequest {
     /// Back up the database, thumbnails and settings to
     /// `<data dir>/backups/stlLibrary_backup_<stamp>.7z` (administrators).
     Backup,
+    /// Re-read the models' archives: metadata, presupports, warnings, scales,
+    /// hash (Rescan).
+    Rescan { ids: Vec<i64> },
+    /// Replace the models' images with ones from their archives, at most
+    /// `max_thumbnails` each (default: the library setting).
+    GenerateThumbnails {
+        ids: Vec<i64>,
+        #[serde(default)]
+        max_thumbnails: Option<usize>,
+    },
+    /// Move the models' archive files to the trash folder (or delete them,
+    /// without one) and remove the records. Needs *allow file delete*.
+    DeleteFiles { ids: Vec<i64> },
     /// Ask the AI tagger for one model's tags and metadata; nothing is saved
     /// (save the reviewed result with `/api/ai/commit/{id}`).
     AiSuggest {
@@ -166,6 +179,9 @@ impl JobRequest {
             JobRequest::PruneImages { .. } => "prune_images",
             JobRequest::CompactDatabase => "compact_database",
             JobRequest::ComputeEmbeddings { .. } => "compute_embeddings",
+            JobRequest::Rescan { .. } => "rescan",
+            JobRequest::GenerateThumbnails { .. } => "generate_thumbnails",
+            JobRequest::DeleteFiles { .. } => "delete_files",
             JobRequest::AiSuggest { .. } => "ai_suggest",
             JobRequest::AiTag { .. } => "ai_tag",
             JobRequest::GenerateSidecars => "generate_sidecars",
@@ -206,7 +222,14 @@ impl JobRequest {
             JobRequest::RecheckWarnings { warning } if crate::maint::Recheck::parse(warning).is_none() => {
                 Err(format!("unknown warning {warning:?} (no_images or presupported)"))
             }
-            JobRequest::FindMoved { ids } | JobRequest::SearchFolder { ids, .. } | JobRequest::AiTag { ids, .. } if ids.is_empty() => {
+            JobRequest::FindMoved { ids }
+            | JobRequest::SearchFolder { ids, .. }
+            | JobRequest::AiTag { ids, .. }
+            | JobRequest::Rescan { ids }
+            | JobRequest::GenerateThumbnails { ids, .. }
+            | JobRequest::DeleteFiles { ids }
+                if ids.is_empty() =>
+            {
                 Err("no records given".into())
             }
             JobRequest::FindImageDuplicates { method, max_distance, threshold, max_models } => {
@@ -535,6 +558,9 @@ fn run(lib: &Library, job: &Job) -> Result<String, String> {
         JobRequest::PruneImages { keep } => prune_images(lib, job, keep),
         JobRequest::CompactDatabase => compact(lib, job),
         JobRequest::ComputeEmbeddings { all } => compute_embeddings(lib, job, all),
+        JobRequest::Rescan { ids } => rescan(lib, job, &ids),
+        JobRequest::GenerateThumbnails { ids, max_thumbnails } => generate_thumbnails(lib, job, &ids, max_thumbnails),
+        JobRequest::DeleteFiles { ids } => delete_files(lib, job, &ids),
         JobRequest::AiSuggest { id, max_tags, ignore_meta } => ai_suggest(lib, job, id, max_tags, ignore_meta),
         JobRequest::AiTag { ids, overwrite, ignore_meta, max_tags } => ai_tag(lib, job, &ids, overwrite, ignore_meta, max_tags),
         JobRequest::GenerateSidecars => generate_sidecars(lib, job),
@@ -552,6 +578,32 @@ fn run(lib: &Library, job: &Job) -> Result<String, String> {
             find_metadata(lib, job, &columns, &method, max_distance)
         }
     }
+}
+
+// ── archive tools ────────────────────────────────────────────────────────────
+
+fn rescan(lib: &Library, job: &Job, ids: &[i64]) -> Result<String, String> {
+    let log = |line: String| lib.job_log(job, line);
+    let out = crate::archive_tools::rescan_models(lib, &job.ctl, &log, ids)?;
+    job.touch_sidecars(out.touched);
+    Ok(format!("{} of {} model(s) updated", out.done, ids.len()))
+}
+
+fn generate_thumbnails(lib: &Library, job: &Job, ids: &[i64], max: Option<usize>) -> Result<String, String> {
+    let log = |line: String| lib.job_log(job, line);
+    let max = max.unwrap_or_else(|| LibrarySettings::load(&lib.config.data_dir).max_thumbnails());
+    let out = crate::archive_tools::generate_thumbnails(lib, &job.ctl, &log, ids, max)?;
+    job.touch_sidecars(out.touched);
+    Ok(format!("thumbnails generated for {} of {} model(s)", out.done, ids.len()))
+}
+
+fn delete_files(lib: &Library, job: &Job, ids: &[i64]) -> Result<String, String> {
+    let log = |line: String| lib.job_log(job, line);
+    job.ctl.set_total(ids.len() as u64);
+    let (deleted, failed, paths) = crate::archive_tools::delete_files(lib, &log, ids)?;
+    job.ctl.advance(ids.len() as u64);
+    job.touch_sidecars(paths);
+    Ok(format!("{deleted} archive(s) deleted{}", if failed > 0 { format!(", {failed} failed") } else { String::new() }))
 }
 
 // ── AI tagger ────────────────────────────────────────────────────────────────

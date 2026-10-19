@@ -1,13 +1,14 @@
 // The browser: filter pane, table and detail pane (the desktop's main window).
-import { Box, Button, Center, Group, Loader, Modal, Text, TextInput } from "@mantine/core";
+import { Box, Button, Center, Group, Loader, Menu, Modal, Text, TextInput } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconEdit, IconFilterOff, IconSearch, IconSparkles, IconTrash } from "@tabler/icons-react";
+import { IconArchive, IconEdit, IconFilterOff, IconSearch, IconSparkles, IconTrash } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { api, unwrap } from "../api/client";
 import { hasRole, useUser } from "../auth/user";
+import type { JobRequest } from "../jobs/jobs";
 import { DetailPane } from "./DetailPane";
 import { EditorDrawer } from "./EditorDrawer";
 import { FilterPane } from "./FilterPane";
@@ -30,6 +31,16 @@ export function BrowserPage() {
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [massEdit, setMassEdit] = useState(false);
   const [aiTagger, setAiTagger] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const selectedIds = () => order.filter((i) => selection.ids.has(i));
+  const queueJob = async (body: JobRequest, what: string) => {
+    try {
+      unwrap(await api.POST("/api/jobs", { body }));
+      notifications.show({ message: `${what} queued: follow it on the Jobs page` });
+    } catch (err) {
+      notifications.show({ color: "red", message: (err as Error).message });
+    }
+  };
   const user = useUser();
   const editor = hasRole(user, "editor");
   const queryClient = useQueryClient();
@@ -101,6 +112,21 @@ export function BrowserPage() {
               <Button size="compact-xs" variant="subtle" leftSection={<IconSparkles size={14} />} onClick={() => setAiTagger(true)} data-testid="ai-tagger">
                 AI tagger
               </Button>
+              <Menu position="bottom-end">
+                <Menu.Target>
+                  <Button size="compact-xs" variant="subtle" leftSection={<IconArchive size={14} />} data-testid="archive-menu">
+                    Archives
+                  </Button>
+                </Menu.Target>
+                <Menu.Dropdown>
+                  <Menu.Item onClick={() => queueJob({ kind: "rescan", ids: selectedIds() }, "Rescan")}>Rescan</Menu.Item>
+                  <Menu.Item onClick={() => queueJob({ kind: "generate_thumbnails", ids: selectedIds() }, "Thumbnail generation")}>
+                    Generate thumbnails
+                  </Menu.Item>
+                  <Menu.Divider />
+                  <Menu.Item color="red" onClick={() => setConfirmDelete(true)}>Delete files…</Menu.Item>
+                </Menu.Dropdown>
+              </Menu>
               <Button size="compact-xs" variant="subtle" color="red" leftSection={<IconTrash size={14} />} onClick={() => setConfirmRemove(true)}>
                 Remove from library
               </Button>
@@ -123,6 +149,18 @@ export function BrowserPage() {
       <EditorDrawer id={editing} onClose={() => setEditing(null)} />
       <MassEditDrawer ids={order.filter((i) => selection.ids.has(i))} opened={massEdit} onClose={() => setMassEdit(false)} />
       <AiTaggerDrawer ids={order.filter((i) => selection.ids.has(i))} opened={aiTagger} onClose={() => setAiTagger(false)} />
+      <Modal opened={confirmDelete} onClose={() => setConfirmDelete(false)} title="Delete archive files">
+        <Text size="sm">
+          Delete the archive files of {selection.ids.size} model(s) and remove them from the library? With a trash folder set in
+          the library settings the files are moved there; otherwise they are deleted. Needs “allow file delete” in the settings.
+        </Text>
+        <Group justify="flex-end" mt="md">
+          <Button variant="default" onClick={() => setConfirmDelete(false)}>Cancel</Button>
+          <Button color="red" onClick={() => { setConfirmDelete(false); void queueJob({ kind: "delete_files", ids: selectedIds() }, "Deleting files"); }}>
+            Delete files
+          </Button>
+        </Group>
+      </Modal>
       <Modal opened={confirmRemove} onClose={() => setConfirmRemove(false)} title="Remove from library">
         <Text size="sm">
           Remove {selection.ids.size} model(s) from the library? Their records, images and thumbnails are deleted;

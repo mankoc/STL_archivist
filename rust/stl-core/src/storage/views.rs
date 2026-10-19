@@ -20,6 +20,12 @@ pub fn stl_files(conn: &Connection, model_id: i64) -> Result<Vec<StlFileRow>> {
     st.query_map([model_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect()
 }
 
+/// `(archive_path, warning)` of one model (Warning Details).
+pub fn path_warning(conn: &Connection, model_id: i64) -> Result<Option<(Option<String>, Option<String>)>> {
+    conn.query_row("SELECT archive_path, warning FROM models WHERE id = ?1", [model_id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .optional()
+}
+
 pub fn title_path(conn: &Connection, model_id: i64) -> Result<Option<(Option<String>, Option<String>)>> {
     conn.query_row("SELECT title, archive_path FROM models WHERE id = ?1", [model_id], |r| Ok((r.get(0)?, r.get(1)?)))
         .optional()

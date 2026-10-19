@@ -221,7 +221,9 @@ compares two archives side by side. **Maintenance** verifies archives, finds dup
 entries and moved records (by content, in the database or under a folder), merges and
 removes records, re-checks warnings, generates or removes the metadata sidecars, runs the
 image and storage jobs and (administrators) makes backups. The **AI tagger** (on a
-selection) suggests tags and metadata per model for review, or tags them all in one job. **Settings** holds your colour scheme, the library's crawler and sidecar settings
+selection) suggests tags and metadata per model for review, or tags them all in one job.
+*Archives* on a selection rescans archives, regenerates thumbnails or deletes the files (to
+the trash folder); the detail pane lists a model's files and explains its warnings. **Settings** holds your colour scheme, the library's crawler and sidecar settings
 (administrators change them; they are the same `settings.json` the desktop app uses), and
 user administration.
 

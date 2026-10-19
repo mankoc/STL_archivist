@@ -205,7 +205,7 @@ pub fn list_archives(root: &str, recurse: bool) -> Vec<String> {
 
 // ── phase 1 ──────────────────────────────────────────────────────────────────
 
-fn fallback_fingerprint(path: &str) -> String {
+pub(crate) fn fallback_fingerprint(path: &str) -> String {
     match db::stat(path) {
         Some((size, mtime)) => format!("fallback:{size}:{mtime}"),
         None => "fallback:0:0".into(),
@@ -245,7 +245,7 @@ fn size_limit(name: &str) -> u64 {
 const STL_EXTS: [&str; 6] = [".stl", ".obj", ".lys", ".lyt", ".chitubox", ".ctp"];
 
 /// `extract_archive_contents` natively, or `None` where the native readers refuse.
-fn extract_native(path: &str, unrar: &str) -> Option<Extracted> {
+pub(crate) fn extract_native(path: &str, unrar: &str) -> Option<Extracted> {
     let p = Path::new(path);
     let members = archive::list_members(p).ok()?;
     let names: Vec<String> = members.iter().map(|m| m.name.clone()).collect();
