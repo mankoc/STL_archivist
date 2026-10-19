@@ -3,3 +3,5 @@
 rust/stl-core/src/storage/schema_sql.rs text eol=lf
 Dockerfile text eol=lf
 .dockerignore text eol=lf
+# Shell scripts run on Linux / macOS.
+*.sh text eol=lf
