@@ -125,7 +125,14 @@ server origins get only `allow-open-folder` (runtime capability in `grant`). Ins
 settings are in `tauri.bundle.json`, merged only by `cargo tauri build --config …`, so plain
 builds need neither the web client nor the server built.
 
-## Documentation
+## Documentation and versions
 
 Always update the README, the changelog and the migration plan with the changes that are
 made. Commit messages carry no co-author lines.
+
+**Every commit raises the version**, by at least the minor part (`2026.25.0` → `2026.26.0`;
+the major part for sweeping changes), chosen by the scope of the change; never a patch-only
+bump. The version is the same in four places: `rust/Cargo.toml` (`[workspace.package]
+version`, which the server reports), `rust/stl-desktop/tauri.bundle.json` (the installer),
+`web/package.json`, and the `Version:` line of `README.md`. Each version gets a
+`## <version> — <date>` section in `CHANGELOG.md` with that commit's changes.

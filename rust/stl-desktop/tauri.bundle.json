@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "version": "0.1.0",
+  "version": "2026.25.0",
   "bundle": {
     "active": true,
     "targets": ["nsis"],
