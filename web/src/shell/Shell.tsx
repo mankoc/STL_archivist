@@ -2,7 +2,7 @@
 import { AppShell, Avatar, Button, Group, Menu, Modal, PasswordInput, SegmentedControl, Stack, Text, Title, UnstyledButton, useMantineColorScheme } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconKey, IconLogout } from "@tabler/icons-react";
+import { IconInfoCircle, IconKey, IconLogout } from "@tabler/icons-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { type FormEvent, useEffect, useState } from "react";
@@ -25,6 +25,7 @@ export function Shell({ user }: { user: Schemas["User"] }) {
   useServerEvents();
   const queryClient = useQueryClient();
   const [passwordOpen, password] = useDisclosure(false);
+  const [aboutOpen, about] = useDisclosure(false);
   const [page, setPage] = usePage();
   // The colour scheme this user chose (Settings → Account).
   const { setColorScheme } = useMantineColorScheme();
@@ -77,6 +78,9 @@ export function Shell({ user }: { user: Schemas["User"] }) {
                 </UnstyledButton>
               </Menu.Target>
               <Menu.Dropdown>
+                <Menu.Item leftSection={<IconInfoCircle size={14} />} onClick={about.open}>
+                  About
+                </Menu.Item>
                 <Menu.Item leftSection={<IconKey size={14} />} onClick={password.open}>
                   Change password
                 </Menu.Item>
@@ -109,6 +113,7 @@ export function Shell({ user }: { user: Schemas["User"] }) {
           )}
         </AppShell.Main>
         <PasswordModal opened={passwordOpen} onClose={password.close} />
+        <AboutModal opened={aboutOpen} onClose={about.close} />
       </AppShell>
     </UserContext.Provider>
   );
@@ -141,6 +146,23 @@ function PasswordModal({ opened, onClose }: { opened: boolean; onClose: () => vo
           </Text>
         )}
         <Button type="submit">Change</Button>
+      </Stack>
+    </Modal>
+  );
+}
+
+function AboutModal({ opened, onClose }: { opened: boolean; onClose: () => void }) {
+  const info = useQuery({ queryKey: ["system-info"], queryFn: async () => unwrap(await api.GET("/api/system/info")), enabled: opened });
+  return (
+    <Modal opened={opened} onClose={onClose} title="About stlLibrary">
+      <Stack gap="xs">
+        <Text size="sm">
+          stlLibrary catalogues collections of 3D-printable model archives (.zip, .7z, .rar): metadata, thumbnails,
+          tags, duplicates and AI tagging, in a server that this web client and the desktop app share.
+        </Text>
+        <Text size="sm">Server version: {info.data?.version ?? "…"}</Text>
+        <Text size="sm">Models in this library: {info.data?.models.toLocaleString() ?? "…"}</Text>
+        <Text size="xs" c="dimmed">Licensed CC BY-NC-SA 4.0.</Text>
       </Stack>
     </Modal>
   );

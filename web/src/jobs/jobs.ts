@@ -42,6 +42,8 @@ const KIND_LABEL: Record<string, string> = {
   remove_sidecars: "Remove sidecars",
   backup: "Backup",
   rescan: "Rescan",
+  update_folders: "Update folders",
+  clear_library: "Delete all records",
   generate_thumbnails: "Generate thumbnails",
   delete_files: "Delete files",
   sort_files: "Sort files",
