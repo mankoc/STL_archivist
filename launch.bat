@@ -44,7 +44,7 @@ if not exist "main.py" (
 
 REM Check if required packages are installed
 echo Checking dependencies...
-%PYTHON_EXE% -c "import PyQt6, sqlalchemy, lmdb" >nul 2>&1
+%PYTHON_EXE% -c "import PyQt6, stl_native" >nul 2>&1
 if errorlevel 1 (
     echo.
     echo ERROR: Required Python packages are not installed
@@ -64,6 +64,9 @@ if errorlevel 1 (
         echo   -----
         echo   python -m pip install -r requirements.txt
     )
+    echo.
+    echo The native core ^(stl_native^) is built with:
+    echo   .venv\Scripts\python tools\build_native.py
     echo.
     echo After installing dependencies, run this launcher again.
     echo.
