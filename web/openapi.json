@@ -2155,6 +2155,50 @@
         }
       }
     },
+    "/api/sort/preview": {
+      "post": {
+        "tags": [
+          "editing"
+        ],
+        "summary": "Where the archives would go (nothing is moved).",
+        "operationId": "post_sort_preview",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SortRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SortRow"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/stats/column": {
       "get": {
         "tags": [
@@ -4314,6 +4358,37 @@
           },
           {
             "type": "object",
+            "description": "Move the models' archives into a folder tree under `target_dir` built\nfrom `pattern` (Sort Files). Needs *file sorting* in the settings.",
+            "required": [
+              "ids",
+              "target_dir",
+              "pattern",
+              "kind"
+            ],
+            "properties": {
+              "ids": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int64"
+                }
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "sort_files"
+                ]
+              },
+              "pattern": {
+                "type": "string"
+              },
+              "target_dir": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
             "description": "Move the models' archive files to the trash folder (or delete them,\nwithout one) and remove the records. Needs *allow file delete*.",
             "required": [
               "ids",
@@ -5780,6 +5855,57 @@
           }
         },
         "additionalProperties": false
+      },
+      "SortRequest": {
+        "type": "object",
+        "required": [
+          "ids",
+          "target_dir",
+          "pattern"
+        ],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "pattern": {
+            "type": "string",
+            "description": "`{collection}/{creator}/{title}`: folders, then the file name."
+          },
+          "target_dir": {
+            "type": "string",
+            "description": "The folder the tree is built in (a server folder)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SortRow": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "from",
+          "to"
+        ],
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "type": "string",
+            "description": "`OK`, `COLLISION` (a free name is used), `MISS`, `SKIP` or `ERROR`."
+          },
+          "to": {
+            "type": "string"
+          }
+        }
       },
       "StlFile": {
         "type": "object",

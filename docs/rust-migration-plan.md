@@ -1245,6 +1245,12 @@ count); `GET /api/folders`. Web: `CellGrid` (virtualised rows, `grid.ts` layout 
 the browser's Table / Images toggle (`GridView` loads 120-id pages for the visible rows),
 and the Folders page.
 
+**6m: done 2026-10-19 (sort files).** `stl_core::sort_files` ports `sort_dialog.py`:
+the token values of `render_path_pattern`, `_sanitise_segment`, `_compute_target`, the
+preview statuses, and the move (free names, all or none with rollback, emptied source
+folders removed). `POST /api/sort/preview` and the `sort_files` job (needs
+`file_sorting_enabled`; the target folder goes through `check_access`). Web: `SortModal`.
+
 ### Phase 7: Desktop shell (small)
 
 Tauri app that hosts the web client: connect to a remote server or start a bundled local one on

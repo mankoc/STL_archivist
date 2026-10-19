@@ -810,6 +810,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sort/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Where the archives would go (nothing is moved). */
+        post: operations["post_sort_preview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/stats/column": {
         parameters: {
             query?: never;
@@ -1516,6 +1533,12 @@ export interface components {
         } | {
             ids: number[];
             /** @enum {string} */
+            kind: "sort_files";
+            pattern: string;
+            target_dir: string;
+        } | {
+            ids: number[];
+            /** @enum {string} */
             kind: "delete_files";
         } | {
             /** Format: int64 */
@@ -1985,6 +2008,21 @@ export interface components {
              */
             column: string;
             descending?: boolean;
+        };
+        SortRequest: {
+            ids: number[];
+            /** @description `{collection}/{creator}/{title}`: folders, then the file name. */
+            pattern: string;
+            /** @description The folder the tree is built in (a server folder). */
+            target_dir: string;
+        };
+        SortRow: {
+            from: string;
+            /** Format: int64 */
+            id: number;
+            /** @description `OK`, `COLLISION` (a free name is used), `MISS`, `SKIP` or `ERROR`. */
+            status: string;
+            to: string;
         };
         StlFile: {
             filename: string;
@@ -3631,6 +3669,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    post_sort_preview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SortRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SortRow"][];
                 };
             };
             403: {

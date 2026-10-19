@@ -13,6 +13,7 @@ import { DetailPane } from "./DetailPane";
 import { EditorDrawer } from "./EditorDrawer";
 import { FilterPane } from "./FilterPane";
 import { GridView } from "./GridView";
+import { SortModal } from "./SortModal";
 import { AiTaggerDrawer } from "./AiTaggerDrawer";
 import { MassEditDrawer } from "./MassEditDrawer";
 import { EMPTY, type FilterSpec, isEmpty } from "./filters";
@@ -34,6 +35,7 @@ export function BrowserPage() {
   const [aiTagger, setAiTagger] = useState(false);
   const [view, setView] = useState<"table" | "grid">("table");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [sorting, setSorting] = useState(false);
   const selectedIds = () => order.filter((i) => selection.ids.has(i));
   const queueJob = async (body: JobRequest, what: string) => {
     try {
@@ -127,6 +129,7 @@ export function BrowserPage() {
                   <Menu.Item onClick={() => queueJob({ kind: "generate_thumbnails", ids: selectedIds() }, "Thumbnail generation")}>
                     Generate thumbnails
                   </Menu.Item>
+                  <Menu.Item onClick={() => setSorting(true)}>Sort files…</Menu.Item>
                   <Menu.Divider />
                   <Menu.Item color="red" onClick={() => setConfirmDelete(true)}>Delete files…</Menu.Item>
                 </Menu.Dropdown>
@@ -157,6 +160,7 @@ export function BrowserPage() {
       <EditorDrawer id={editing} onClose={() => setEditing(null)} />
       <MassEditDrawer ids={order.filter((i) => selection.ids.has(i))} opened={massEdit} onClose={() => setMassEdit(false)} />
       <AiTaggerDrawer ids={order.filter((i) => selection.ids.has(i))} opened={aiTagger} onClose={() => setAiTagger(false)} />
+      {sorting && <SortModal ids={selectedIds()} opened onClose={() => setSorting(false)} />}
       <Modal opened={confirmDelete} onClose={() => setConfirmDelete(false)} title="Delete archive files">
         <Text size="sm">
           Delete the archive files of {selection.ids.size} model(s) and remove them from the library? With a trash folder set in

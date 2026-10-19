@@ -24,6 +24,7 @@ pub mod pyjson;
 pub mod pairs;
 pub mod rescan;
 pub mod rules;
+pub mod sort_files;
 pub mod storage;
 pub mod strings;
 pub mod thumbstore;

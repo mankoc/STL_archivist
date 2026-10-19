@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Web client step 6m: sort files.** *Archives* → *Sort files…* previews where a path pattern (`{collection}/{creator}/{title}`) would move the selected archives under a server folder, then moves them all or none (a failed move puts the others back) and updates the records. Needs *file sorting* in the library settings.
+
 - **Web client step 6l: image grid and archive browser.** The browser switches between the table and an *Images* grid of the same models (loaded as they scroll into view). The *Folders* page lists the folders holding archives and shows a folder's archives (optionally with its subfolders) as thumbnails.
 
 - **Web client step 6k: archive tools.** The detail pane shows a model's warnings with *Warning details* (which files trigger each) and its stored printable *Files*. On a selection, *Archives* → *Rescan*, *Generate thumbnails* and *Delete files…* (to the trash folder from the library settings, only when *allow file delete* is on) run as server jobs.
