@@ -5811,7 +5811,12 @@
           "low_compression_threshold",
           "presupport_patterns",
           "ai_embeddings_enabled",
-          "ai_embeddings_during_crawl"
+          "ai_embeddings_during_crawl",
+          "allow_file_delete",
+          "use_trash_folder",
+          "trash_folder_path",
+          "file_sorting_enabled",
+          "ai_temperature"
         ],
         "properties": {
           "ai_embeddings_during_crawl": {
@@ -5819,6 +5824,19 @@
           },
           "ai_embeddings_enabled": {
             "type": "boolean"
+          },
+          "ai_temperature": {
+            "type": "number",
+            "format": "double",
+            "description": "The AI tagger's sampling temperature (0 to 2; lower is more literal)."
+          },
+          "allow_file_delete": {
+            "type": "boolean",
+            "description": "*Delete files* may remove archives from disk."
+          },
+          "file_sorting_enabled": {
+            "type": "boolean",
+            "description": "*Sort files* may move archives."
           },
           "low_compression_threshold": {
             "type": "number",
@@ -5861,6 +5879,13 @@
           },
           "store_stl_file_list": {
             "type": "boolean"
+          },
+          "trash_folder_path": {
+            "type": "string"
+          },
+          "use_trash_folder": {
+            "type": "boolean",
+            "description": "Deleted archives go to `trash_folder_path` (when set) instead of being deleted."
           },
           "warn_low_compression": {
             "type": "boolean"

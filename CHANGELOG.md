@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Documentation:** a user guide (`docs/user-guide.md`) and a deployment guide (`docs/deployment.md`: the desktop app, Linux with systemd, Docker, Windows, HTTPS proxies, configuration, optional features, roles, moving a library, backups, troubleshooting).
+- **Library settings:** the Settings page now also sets *Allow Sort files*, *Allow Delete files*, the trash folder and the AI tagger's temperature (before, only the old desktop app could switch file sorting and deletion on).
+
 - **The PyQt6 desktop application is retired** (it remains on its own branch). stlLibrary is now the server, the web client and the desktop app (`stl-desktop`), which opens a library on this computer or connects to a server. The data directory format is unchanged, so existing libraries open as they are. Build with `build.ps1` / `build.sh`; a Windows installer bundles the desktop app, the server and the web client. Removed with Python: the reader fallbacks for archives the built-in readers refuse, thumbnails of AVIF and CMYK JPEG images, presupport patterns only Python's regex engine read, the in-app AI model download and the translations (see the README's *Known limitations*).
 
 - **Table columns can be hidden.** *Columns* above the browser table shows or hides each column (the title always stays); the choice is saved with your account.
