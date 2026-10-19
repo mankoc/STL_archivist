@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 2026.25.0 — 2026-10-19
+
+The first release of the Rust server, web client and desktop app (everything below), and
+the start of the versioning rule: every commit raises the version by at least the minor part
+and gets its own section here.
 
 - **Readable crawl log.** Each catalogued archive now gets one line naming it, e.g. `[12/340] new: Archvillain/2020/Workshop Golem.7z (4 thumbnails, 1 folder image)`, instead of bare "new" / "4 thumbnail(s) stored" lines whose archive could not be told; errors name the archive too.
 
