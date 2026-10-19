@@ -360,6 +360,28 @@ fn rel_path(path: &str, source: &str) -> String {
     }
 }
 
+/// An archive's path inside the crawled folder (`Studio/2020/Dragon.zip`), for the log.
+fn rel_name(path: &str, source: &str) -> String {
+    match metadata::win_relative_parts(path, source) {
+        Some(parts) if !parts.is_empty() => parts.join("/"),
+        _ => WinPath::new(path).name().to_string(),
+    }
+}
+
+fn plural(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
+
+/// One log line per catalogued archive: position, what happened, which archive,
+/// and what was stored.
+fn result_line(idx: usize, total: usize, status: &str, name: &str, thumbnails: usize, folder_images: usize) -> String {
+    let mut stored = plural(thumbnails, "thumbnail", "thumbnails");
+    if folder_images > 0 {
+        stored.push_str(&format!(", {}", plural(folder_images, "folder image", "folder images")));
+    }
+    format!("[{idx}/{total}] {status}: {name} ({stored})")
+}
+
 fn pattern_match(cfg: &CrawlConfig, path: &str, host: &dyn Host) -> Option<db::Extracted> {
     if cfg.pattern.is_empty() {
         return None;
@@ -556,12 +578,8 @@ impl Run<'_> {
         let existing: HashMap<String, i64> = diff.existing.into_iter().collect();
         let total = self.summary.total;
         let mut inputs = Vec::new();
-        for (k, (p, h)) in pairs.iter().enumerate() {
-            let idx = start + k + 1;
+        for (p, h) in pairs.iter() {
             let prep = prepared.get(p);
-            if prep.is_some() || cfg.log_unchanged {
-                self.log(format!("[{idx}/{total}] {}", WinPath::new(p).name()));
-            }
             let existing_id = existing.get(p).copied();
             let changed = prep.map(|prep| self.changed(p, h, existing_id, prep));
             inputs.push(db::UpsertInput {
@@ -585,7 +603,7 @@ impl Run<'_> {
             let idx = start + k + 1;
             match result {
                 Err(e) => {
-                    self.log(format!("  ERROR: {e}"));
+                    self.log(format!("[{idx}/{total}] ERROR {}: {e}", rel_name(&input.path, &cfg.source_dir)));
                     self.failures += 1;
                     if self.failures >= MAX_CONSECUTIVE_FAILURES {
                         self.log(format!("Crawl aborted: {} consecutive upsert failures — last error: {e}", self.failures));
@@ -595,23 +613,23 @@ impl Run<'_> {
                 Ok(u) => {
                     self.failures = 0;
                     if input.changed.is_some() {
-                        if input.existing.is_none() {
+                        let status = if input.existing.is_none() {
                             self.summary.new += 1;
                             self.summary.new_paths.push(input.path.clone());
-                            self.log("  new");
                             self.host.emit(Event::Result(input.path.clone(), "new".into()));
+                            "new"
                         } else {
                             self.summary.updated += 1;
-                            self.log("  updated");
                             self.host.emit(Event::Result(input.path.clone(), "updated".into()));
-                        }
-                        self.log(format!("  {} thumbnail(s) stored", u.thumbnails));
-                        if u.folder_images > 0 {
-                            self.log(format!("  {} folder image(s) stored", u.folder_images));
-                        }
+                            "updated"
+                        };
+                        self.log(result_line(idx, total, status, &rel_name(&input.path, &cfg.source_dir), u.thumbnails, u.folder_images));
                         modified.insert(WinPath::new(&input.path).parent().as_posix());
                     } else {
                         self.summary.unchanged += 1;
+                        if cfg.log_unchanged {
+                            self.log(format!("[{idx}/{total}] unchanged: {}", rel_name(&input.path, &cfg.source_dir)));
+                        }
                         if self.moved_new_paths.contains(&input.path) {
                             modified.insert(WinPath::new(&input.path).parent().as_posix());
                         }
@@ -898,6 +916,14 @@ fn reconcile(run: &mut Run<'_>, missing: Vec<db::Missing>) -> Result<(), CrawlEr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn log_lines_name_the_archive() {
+        assert_eq!(rel_name(r"D:\STL\Studio\2020\Dragon.zip", r"D:\STL"), "Studio/2020/Dragon.zip");
+        assert_eq!(rel_name(r"E:\other\Dragon.zip", r"D:\STL"), "Dragon.zip");
+        assert_eq!(result_line(3, 40, "new", "Studio/Dragon.zip", 4, 1), "[3/40] new: Studio/Dragon.zip (4 thumbnails, 1 folder image)");
+        assert_eq!(result_line(4, 40, "updated", "Knight.zip", 1, 0), "[4/40] updated: Knight.zip (1 thumbnail)");
+    }
 
     #[test]
     fn listing_and_ordering() {
