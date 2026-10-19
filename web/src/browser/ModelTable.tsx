@@ -18,7 +18,7 @@ import { type KeyboardEvent, type ReactNode, useMemo, useRef, useState } from "r
 import { api, type Schemas, unwrap } from "../api/client";
 import { baseName, formatDate, formatSize } from "../format";
 import type { FilterSpec } from "./filters";
-import { visible } from "./columns";
+import { type ColumnChoice, visible } from "./columns";
 import { blockIds, blocksFor } from "./rowBlocks";
 import type { Selection } from "./selection";
 import classes from "./ModelTable.module.css";
@@ -44,7 +44,12 @@ interface Column {
   /** The cell-edit field (`PATCH /api/models/cells`) and the text to start from. */
   field?: string;
   text?: (row: Row) => string;
+  /** Off until the user turns it on (Columns → More columns). */
+  optional?: boolean;
 }
+
+/** `2026-10-18 14:02:08.62` → `2026-10-18 14:02`. */
+const stamp = (s: string | null | undefined) => (s ? s.slice(0, 16) : null);
 
 const text = (key: keyof Row) => (r: Row) => String(r[key] ?? "");
 
@@ -63,6 +68,19 @@ export const COLUMNS: Column[] = [
   { id: "presupports", header: "Presupports", size: 110, sortKey: "presupports", render: (r) => r.presupports, field: "presupports", text: text("presupports") },
   { id: "size", header: "File Size", size: 90, sortKey: "archive_size", render: (r) => formatSize(r.archive_size) },
   { id: "path", header: "Path", size: 360, sortKey: "archive_path", render: (r) => r.archive_path },
+  // Optional columns.
+  { id: "warning", header: "Warning", size: 220, optional: true, render: (r) => r.warning?.split("\n").join("; ") },
+  { id: "sequence", header: "Sequence", size: 90, sortKey: "sequence", optional: true, render: (r) => r.sequence, field: "sequence", text: (r) => String(r.sequence ?? "") },
+  { id: "images", header: "Images", size: 80, optional: true, render: (r) => r.images },
+  { id: "compression", header: "Compression", size: 110, sortKey: "compression_rate", optional: true, render: (r) => (r.compression_rate == null ? null : `${Math.round(r.compression_rate * 100)} %`) },
+  { id: "to_print", header: "To print", size: 80, optional: true, render: (r) => (r.to_print ? "✓" : null) },
+  { id: "missing", header: "Missing", size: 80, optional: true, render: (r) => (r.is_missing ? "missing" : null) },
+  { id: "added", header: "Added", size: 140, sortKey: "created_at", optional: true, render: (r) => stamp(r.created_at) },
+  { id: "updated", header: "Updated", size: 140, optional: true, render: (r) => stamp(r.updated_at) },
+  { id: "url", header: "URL", size: 240, optional: true, render: (r) => r.url },
+  { id: "description", header: "Description", size: 300, optional: true, render: (r) => r.description },
+  { id: "folder", header: "Folder", size: 300, optional: true, render: (r) => r.archive_folder },
+  { id: "hash", header: "Archive hash", size: 200, optional: true, render: (r) => r.archive_hash },
 ];
 
 const ROW_HEIGHT = 30;
@@ -84,8 +102,8 @@ interface Props {
   onRowClick: (id: number, mods: { ctrl: boolean; shift: boolean }) => void;
   /** Cells can be edited (double-click). */
   editable: boolean;
-  /** Column ids not to show. */
-  hidden?: string[];
+  /** Which columns to show. */
+  choice?: ColumnChoice;
 }
 
 /** Save one cell (`PATCH /api/models/cells`). */
@@ -119,7 +137,7 @@ function CellEditor(props: { initial: string; onDone: (value: string | null) => 
   );
 }
 
-export function ModelTable({ query, onSort, selection, onRowClick, editable, hidden }: Props) {
+export function ModelTable({ query, onSort, selection, onRowClick, editable, choice }: Props) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<{ id: number; column: number } | null>(null);
   const ids = useModelIds(query);
@@ -127,7 +145,7 @@ export function ModelTable({ query, onSort, selection, onRowClick, editable, hid
   const scrollRef = useRef<HTMLDivElement>(null);
   const [sizing, setSizing] = useState<ColumnSizingState>({});
 
-  const shown = useMemo(() => visible(COLUMNS, hidden ?? []), [hidden]);
+  const shown = useMemo(() => visible(COLUMNS, choice ?? { hidden: [], shown: [] }), [choice]);
   const columns = useMemo<ColumnDef<number>[]>(
     () => shown.map((c) => ({ id: c.id, header: c.header, size: c.size, minSize: 50, enableResizing: true })),
     [shown],

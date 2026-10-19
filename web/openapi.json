@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.26.0"
+    "version": "2026.27.0"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -5523,9 +5523,24 @@
           "id",
           "scales",
           "tags",
-          "to_print"
+          "to_print",
+          "is_missing",
+          "images"
         ],
         "properties": {
+          "archive_folder": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The archive's folder (forward slashes)."
+          },
+          "archive_hash": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "archive_path": {
             "type": [
               "string",
@@ -5570,9 +5585,24 @@
               "null"
             ]
           },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "id": {
             "type": "integer",
             "format": "int64"
+          },
+          "images": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Images catalogued for the model."
+          },
+          "is_missing": {
+            "type": "boolean",
+            "description": "The archive was not on disk when last checked."
           },
           "presupports": {
             "type": [
@@ -5641,6 +5671,18 @@
           },
           "to_print": {
             "type": "boolean"
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "warning": {
             "type": [

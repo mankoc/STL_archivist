@@ -97,6 +97,16 @@ pub struct Row {
     /// Comma-separated, by name.
     pub tags: String,
     pub to_print: bool,
+    pub url: Option<String>,
+    pub description: Option<String>,
+    pub updated_at: Option<String>,
+    /// The archive's folder (forward slashes).
+    pub archive_folder: Option<String>,
+    pub archive_hash: Option<String>,
+    /// The archive was not on disk when last checked.
+    pub is_missing: bool,
+    /// Images catalogued for the model.
+    pub images: i64,
 }
 
 impl From<library::PageRow> for Row {
@@ -123,6 +133,13 @@ impl From<library::PageRow> for Row {
             scales: r.scales,
             tags: r.tags,
             to_print: r.to_print.unwrap_or(false),
+            url: r.url,
+            description: r.description,
+            updated_at: r.updated_at,
+            archive_folder: r.archive_folder,
+            archive_hash: r.archive_hash,
+            is_missing: r.is_missing.unwrap_or(false),
+            images: r.image_count,
         }
     }
 }
