@@ -358,6 +358,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/images/{id}/original": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An image at full size: the original the thumbnail was made from, read from
+         *     the archive (or from the file beside it). 404 when it cannot be had (an
+         *     image added by hand, a moved archive): show the thumbnail instead.
+         */
+        get: operations["get_images_by_id_original"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/images/{id}/thumbnail": {
         parameters: {
             query?: never;
@@ -2706,6 +2727,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_images_by_id_original: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Image id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The image file */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": unknown;
+                };
             };
             404: {
                 headers: {

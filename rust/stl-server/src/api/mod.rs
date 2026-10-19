@@ -55,6 +55,7 @@ use crate::AppState;
         models::detail,
         filter::tree,
         thumbs::image_thumbnail,
+        thumbs::image_original,
         thumbs::thumb,
         edit::cells,
         edit::get_editor,
@@ -178,6 +179,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/authors/profile", get(lookups::profile).put(lookups::save_profile))
         .route("/api/filter-tree", post(filter::tree))
         .route("/api/images/{id}/thumbnail", get(thumbs::image_thumbnail))
+        .route("/api/images/{id}/original", get(thumbs::image_original))
         .route("/api/thumb/{digest}", get(thumbs::thumb))
         .route("/api/jobs", get(jobs::list).post(jobs::submit))
         .route("/api/jobs/{id}", get(jobs::detail).delete(jobs::cancel))

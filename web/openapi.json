@@ -797,6 +797,45 @@
         }
       }
     },
+    "/api/images/{id}/original": {
+      "get": {
+        "tags": [
+          "thumbnails"
+        ],
+        "summary": "An image at full size: the original the thumbnail was made from, read from\nthe archive (or from the file beside it). 404 when it cannot be had (an\nimage added by hand, a moved archive): show the thumbnail instead.",
+        "operationId": "get_images_by_id_original",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Image id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The image file",
+            "content": {
+              "image/jpeg": {}
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/images/{id}/thumbnail": {
       "get": {
         "tags": [

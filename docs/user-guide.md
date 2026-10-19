@@ -125,7 +125,10 @@ The selected model's fields, tags, warnings, archive path and images:
   lists).
 - Warnings (for example *Archive without images*) show as orange badges; **Warning
   details** lists the files that trigger each one.
-- Click an image to open it in a new tab.
+- Click an image to view it full screen at full resolution: the original is read from the
+  archive (the thumbnail shows meanwhile, and stays when the original cannot be read, for
+  example for an image added by hand). **←** / **→** or the side arrows step through the
+  model's images; the link at the top right opens the original in a new tab.
 
 ### Folders page
 
@@ -294,5 +297,6 @@ Example: archives stored as `ArtistName/2024-01 Some Release/model_name.zip` use
 |---|---|
 | Table | Click selects; Ctrl-click adds/removes; Shift-click selects a range; double-click a cell edits it |
 | Cell editor | Enter saves; Esc cancels |
+| Image viewer | ← / → previous and next image; Esc closes |
 | Filter pane | Click a value: include → exclude → off; click a header's circle: has value → no value → off |
 | Desktop app | Ctrl+L back to the start page (switch server); Ctrl+R reload; Ctrl+Q quit |

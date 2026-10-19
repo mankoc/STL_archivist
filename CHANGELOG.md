@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Full-size images.** Clicking an image in the details pane opens a full-screen viewer with the original image at full resolution, read from the archive (`GET /api/images/{id}/original`); arrow keys step through the model's images. The thumbnail is shown while the original loads, and instead of it when the original cannot be read.
+
 - **Documentation:** a user guide (`docs/user-guide.md`) and a deployment guide (`docs/deployment.md`: the desktop app, Linux with systemd, Docker, Windows, HTTPS proxies, configuration, optional features, roles, moving a library, backups, troubleshooting).
 - **Library settings:** the Settings page now also sets *Allow Sort files*, *Allow Delete files*, the trash folder and the AI tagger's temperature (before, only the old desktop app could switch file sorting and deletion on).
 
