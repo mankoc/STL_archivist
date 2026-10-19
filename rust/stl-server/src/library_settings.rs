@@ -88,6 +88,20 @@ impl LibrarySettings {
         self.get_bool("warn_low_compression", false)
     }
 
+    /// Delete Files may remove archives from disk (`get_allow_file_delete`).
+    pub fn allow_file_delete(&self) -> bool {
+        self.get_bool("allow_file_delete", false)
+    }
+
+    /// Deleted archives go to the trash folder (`get_use_trash_folder`).
+    pub fn use_trash_folder(&self) -> bool {
+        self.get_bool("use_trash_folder", true)
+    }
+
+    pub fn trash_folder_path(&self) -> String {
+        self.0.get("trash_folder_path").and_then(Value::as_str).unwrap_or("").to_string()
+    }
+
     /// The AI tagger's sampling temperature (`get_ai_temperature`).
     pub fn ai_temperature(&self) -> f64 {
         self.0.get("ai_temperature").and_then(Value::as_f64).unwrap_or(0.2)

@@ -10,6 +10,7 @@ pub mod models;
 pub mod search;
 pub mod settings;
 pub mod ai;
+pub mod archive;
 pub mod backups;
 pub mod maintenance;
 pub mod stats;
@@ -88,6 +89,8 @@ use crate::AppState;
         files::download,
         settings::get,
         settings::put,
+        archive::files,
+        archive::warnings,
         ai::status,
         ai::commit,
         backups::list,
@@ -178,6 +181,8 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/files/browse", get(files::browse))
         .route("/api/models/{id}/archive", get(files::download))
         .route("/api/settings/library", get(settings::get).put(settings::put))
+        .route("/api/models/{id}/files", get(archive::files))
+        .route("/api/models/{id}/warnings", get(archive::warnings))
         .route("/api/ai/status", get(ai::status))
         .route("/api/ai/commit/{id}", post(ai::commit))
         .route("/api/backups", get(backups::list))

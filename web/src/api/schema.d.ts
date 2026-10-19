@@ -695,6 +695,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/models/{id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The printable files the crawl stored for a model (empty unless the library
+         *     stores STL file lists), by name.
+         */
+        get: operations["get_models_by_id_files"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/models/{id}/images": {
         parameters: {
             query?: never;
@@ -709,6 +729,26 @@ export interface paths {
          *     thumbnail (resized to the library's thumbnail size); the original is not kept.
          */
         post: operations["post_models_by_id_images"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/models/{id}/warnings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Which archive members trigger each of the model's stored warnings (the
+         *     archive's catalog is read now).
+         */
+        get: operations["get_models_by_id_warnings"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1393,6 +1433,19 @@ export interface components {
             /** @enum {string} */
             kind: "backup";
         } | {
+            ids: number[];
+            /** @enum {string} */
+            kind: "rescan";
+        } | {
+            ids: number[];
+            /** @enum {string} */
+            kind: "generate_thumbnails";
+            max_thumbnails?: number | null;
+        } | {
+            ids: number[];
+            /** @enum {string} */
+            kind: "delete_files";
+        } | {
             /** Format: int64 */
             id: number;
             /** @description Leave the catalogued metadata out of the prompt. */
@@ -1861,6 +1914,13 @@ export interface components {
             column: string;
             descending?: boolean;
         };
+        StlFile: {
+            filename: string;
+            /** @description The file's content hash, when the crawl stored one. */
+            hash?: string | null;
+            /** Format: int64 */
+            size?: number | null;
+        };
         TagMerge: {
             ids: number[];
             /** @description The resulting tag's name (an existing tag, matched case-insensitively, or a new one). */
@@ -1878,6 +1938,24 @@ export interface components {
             /** @description A new password; ends the user's sessions. */
             password?: string | null;
             role?: null | components["schemas"]["Role"];
+        };
+        WarningDetails: {
+            /** @description Why the archive's files could not be listed. */
+            error?: string | null;
+            sections: components["schemas"]["WarningSection"][];
+        };
+        WarningMember: {
+            name: string;
+            /** Format: int64 */
+            size?: number | null;
+        };
+        WarningSection: {
+            /**
+             * @description The members that trigger it now (empty for warnings raised by an
+             *     absence, or ones that no longer reproduce).
+             */
+            members: components["schemas"]["WarningMember"][];
+            warning: string;
         };
     };
     responses: never;
@@ -3292,6 +3370,27 @@ export interface operations {
             };
         };
     };
+    get_models_by_id_files: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StlFile"][];
+                };
+            };
+        };
+    };
     post_models_by_id_images: {
         parameters: {
             query?: never;
@@ -3315,6 +3414,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AddedImages"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_models_by_id_warnings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WarningDetails"];
                 };
             };
             404: {

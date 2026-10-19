@@ -1222,6 +1222,22 @@ Ctrl-selected models.
 - Tests: `tests/ai.rs` against a stand-in OpenAI-compatible server; verified in headless
   Edge with the real model (CUDA llama-server, first suggestion in 32 s with loading).
 
+**6k: done 2026-10-19 (archive tools).** Parity work found by an audit of the desktop's
+menus before Phase 8.
+
+- Core: `stl_core::rescan`: `rescan` (the desktop `RescanWorker`: hash only when size or
+  time changed, native extraction, metadata with the archive's folder as source, rules,
+  scales from the name and members, the narrower rescan STL suffixes, `round4`) and
+  `thumbnails` (images by name until the limit succeeds, failures kept, printable check
+  always on as in `ThumbnailGeneratorWorker`). Archives the native readers refuse are
+  reported, not changed.
+- Server (`archive_tools.rs`): jobs `rescan`, `generate_thumbnails { max_thumbnails? }`,
+  `delete_files` (needs `allow_file_delete`; trash folder with a JSON recovery note per
+  `_move_to_trash`, else deletion; records removed after the file step, thumbnails after
+  the commit); `GET /api/models/{id}/files`, `GET /api/models/{id}/warnings`
+  (`explain_warnings` with every check, the stored lines in order).
+- Web: `ArchiveInfo` in the detail pane; the *Archives* menu on a selection.
+
 ### Phase 7: Desktop shell (small)
 
 Tauri app that hosts the web client: connect to a remote server or start a bundled local one on

@@ -424,7 +424,7 @@ fn apply_pattern(tx: &Transaction, row: &mut ModelRow, ex: &Extracted) -> Result
 }
 
 /// Python's `round(x, 4)`: correctly rounded, ties to even on the exact value.
-fn round4(x: f64) -> f64 {
+pub(crate) fn round4(x: f64) -> f64 {
     format!("{x:.4}").parse().unwrap_or(x)
 }
 

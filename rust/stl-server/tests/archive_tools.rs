@@ -1,0 +1,123 @@
+//! Archive tools on selected models: Show Files, Warning Details, Rescan,
+//! Generate Thumbnails and Delete Files.
+
+mod common;
+
+use std::io::Write;
+use std::path::Path;
+use std::time::Duration;
+
+use axum::http::StatusCode;
+use common::{TestLib, call, empty_library};
+use serde_json::{Value, json};
+use stl_server::accounts::Role;
+
+fn png(rgb: [u8; 3]) -> Vec<u8> {
+    let img = image::RgbImage::from_pixel(40, 30, image::Rgb(rgb));
+    let mut out = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut out, image::ImageFormat::Png).unwrap();
+    out.into_inner()
+}
+
+fn write_zip(path: &Path, members: &[(&str, &[u8])]) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let mut z = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+    let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    for (name, data) in members {
+        z.start_file(*name, opts).unwrap();
+        z.write_all(data).unwrap();
+    }
+    z.finish().unwrap();
+}
+
+async fn finish(lib: &TestLib, token: &str, body: Value) -> Value {
+    let r = call(&lib.state, "POST", "/api/jobs", Some(token), Some(body)).await;
+    assert_eq!(r.status, StatusCode::ACCEPTED, "{:?}", r.json());
+    let id = r.json()["id"].as_u64().unwrap();
+    for _ in 0..300 {
+        let v = call(&lib.state, "GET", &format!("/api/jobs/{id}"), Some(token), None).await.json();
+        if !matches!(v["job"]["state"].as_str(), Some("queued" | "running")) {
+            return v;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("job {id} did not finish");
+}
+
+async fn run(lib: &TestLib, token: &str, body: Value) -> Value {
+    let v = finish(lib, token, body).await;
+    assert_eq!(v["job"]["state"], "done", "{v}");
+    v
+}
+
+fn scalar<T: rusqlite::types::FromSql>(lib: &TestLib, sql: &str) -> T {
+    lib.state.db.with(|c| c.query_row(sql, [], |r| r.get(0))).unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn files_warnings_rescan_and_thumbnails() {
+    let lib = empty_library();
+    let ed = lib.user("ed", Role::Editor);
+    std::fs::write(lib.dir.path().join("settings.json"), r#"{"store_stl_file_list": true, "max_thumbnails": 5}"#).unwrap();
+    let root = lib.dir.path().join("archives");
+    let (red, green) = (png([200, 0, 0]), png([0, 200, 0]));
+    write_zip(&root.join("Studio").join("Dragon.zip"), &[("dragon_presupported.stl", b"solid d\nendsolid\n"), ("a.png", &red), ("b.png", &green)]);
+    write_zip(&root.join("Studio").join("Knight.zip"), &[("knight.stl", b"solid k\nendsolid\n")]);
+    run(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy(), "pattern": "{sculptor}/{title}"})).await;
+    let dragon: i64 = scalar(&lib, "SELECT id FROM models WHERE title = 'Dragon'");
+    let knight: i64 = scalar(&lib, "SELECT id FROM models WHERE title = 'Knight'");
+
+    let files = call(&lib.state, "GET", &format!("/api/models/{dragon}/files"), Some(&ed), None).await.json();
+    assert_eq!(files[0]["filename"], "dragon_presupported.stl", "{files}");
+
+    // Warning Details: the presupported member, and an absence without members.
+    let w = call(&lib.state, "GET", &format!("/api/models/{dragon}/warnings"), Some(&ed), None).await.json();
+    assert_eq!(w["error"], Value::Null, "{w}");
+    assert_eq!(w["sections"][0]["warning"], "Models with presupported stl");
+    assert_eq!(w["sections"][0]["members"][0]["name"], "dragon_presupported.stl");
+    let w = call(&lib.state, "GET", &format!("/api/models/{knight}/warnings"), Some(&ed), None).await.json();
+    assert_eq!(w["sections"][0]["warning"], "Archive without images", "{w}");
+    assert_eq!(w["sections"][0]["members"], json!([]));
+    assert_eq!(call(&lib.state, "GET", "/api/models/9999/warnings", Some(&ed), None).await.status, StatusCode::NOT_FOUND);
+
+    // Rescan picks up a changed archive: an image now, so the warning goes.
+    write_zip(&root.join("Studio").join("Knight.zip"), &[("knight.stl", b"solid k2\nendsolid\n"), ("k.png", &red)]);
+    let v = run(&lib, &ed, json!({"kind": "rescan", "ids": [knight]})).await;
+    assert_eq!(v["job"]["message"], "1 of 1 model(s) updated");
+    let warning: Option<String> = scalar(&lib, &format!("SELECT warning FROM models WHERE id = {knight}"));
+    assert_eq!(warning, None);
+
+    // Generate Thumbnails, at most one per model this time.
+    let v = run(&lib, &ed, json!({"kind": "generate_thumbnails", "ids": [dragon, knight], "max_thumbnails": 1})).await;
+    assert_eq!(v["job"]["message"], "thumbnails generated for 2 of 2 model(s)");
+    assert_eq!(scalar::<i64>(&lib, &format!("SELECT count(*) FROM images WHERE model_id = {dragon}")), 1);
+    assert_eq!(scalar::<i64>(&lib, &format!("SELECT count(*) FROM images WHERE model_id = {knight}")), 1);
+    let image: i64 = scalar(&lib, &format!("SELECT id FROM images WHERE model_id = {dragon}"));
+    assert_eq!(lib.state.thumbs.get_many(&[image as u64]).unwrap().len(), 1, "the thumbnail is stored");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn delete_files_to_the_trash() {
+    let lib = empty_library();
+    let ed = lib.user("ed", Role::Editor);
+    let root = lib.dir.path().join("archives");
+    write_zip(&root.join("Studio").join("Dragon.zip"), &[("dragon.stl", b"solid d\nendsolid\n")]);
+    run(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy()})).await;
+    let dragon: i64 = scalar(&lib, "SELECT id FROM models");
+
+    // Off by default.
+    let v = finish(&lib, &ed, json!({"kind": "delete_files", "ids": [dragon]})).await;
+    assert_eq!(v["job"]["state"], "failed", "{v}");
+    assert!(root.join("Studio").join("Dragon.zip").is_file());
+
+    let trash = lib.dir.path().join("trash");
+    let settings = json!({"allow_file_delete": true, "use_trash_folder": true, "trash_folder_path": trash.to_string_lossy()});
+    std::fs::write(lib.dir.path().join("settings.json"), settings.to_string()).unwrap();
+    let v = run(&lib, &ed, json!({"kind": "delete_files", "ids": [dragon]})).await;
+    assert_eq!(v["job"]["message"], "1 archive(s) deleted");
+    assert!(!root.join("Studio").join("Dragon.zip").exists());
+    assert!(trash.join("Dragon.zip").is_file());
+    let note: Value = serde_json::from_str(&std::fs::read_to_string(trash.join("Dragon.zip.json")).unwrap()).unwrap();
+    assert!(note["original_path"].as_str().unwrap().ends_with("Dragon.zip"));
+    assert_eq!(scalar::<i64>(&lib, "SELECT count(*) FROM models"), 0);
+}

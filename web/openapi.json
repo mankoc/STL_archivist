@@ -1857,6 +1857,41 @@
         }
       }
     },
+    "/api/models/{id}/files": {
+      "get": {
+        "tags": [
+          "library"
+        ],
+        "summary": "The printable files the crawl stored for a model (empty unless the library\nstores STL file lists), by name.",
+        "operationId": "get_models_by_id_files",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/StlFile"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/models/{id}/images": {
       "post": {
         "tags": [
@@ -1889,6 +1924,48 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AddedImages"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/{id}/warnings": {
+      "get": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Which archive members trigger each of the model's stored warnings (the\narchive's catalog is read now).",
+        "operationId": "get_models_by_id_warnings",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WarningDetails"
                 }
               }
             }
@@ -4005,6 +4082,82 @@
           },
           {
             "type": "object",
+            "description": "Re-read the models' archives: metadata, presupports, warnings, scales,\nhash (Rescan).",
+            "required": [
+              "ids",
+              "kind"
+            ],
+            "properties": {
+              "ids": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int64"
+                }
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "rescan"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Replace the models' images with ones from their archives, at most\n`max_thumbnails` each (default: the library setting).",
+            "required": [
+              "ids",
+              "kind"
+            ],
+            "properties": {
+              "ids": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int64"
+                }
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "generate_thumbnails"
+                ]
+              },
+              "max_thumbnails": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Move the models' archive files to the trash folder (or delete them,\nwithout one) and remove the records. Needs *allow file delete*.",
+            "required": [
+              "ids",
+              "kind"
+            ],
+            "properties": {
+              "ids": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int64"
+                }
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "delete_files"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
             "description": "Ask the AI tagger for one model's tags and metadata; nothing is saved\n(save the reviewed result with `/api/ai/commit/{id}`).",
             "required": [
               "id",
@@ -5449,6 +5602,31 @@
         },
         "additionalProperties": false
       },
+      "StlFile": {
+        "type": "object",
+        "required": [
+          "filename"
+        ],
+        "properties": {
+          "filename": {
+            "type": "string"
+          },
+          "hash": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The file's content hash, when the crawl stored one."
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        }
+      },
       "TagMerge": {
         "type": "object",
         "required": [
@@ -5522,6 +5700,65 @@
           }
         },
         "additionalProperties": false
+      },
+      "WarningDetails": {
+        "type": "object",
+        "required": [
+          "sections"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the archive's files could not be listed."
+          },
+          "sections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WarningSection"
+            }
+          }
+        }
+      },
+      "WarningMember": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "WarningSection": {
+        "type": "object",
+        "required": [
+          "warning",
+          "members"
+        ],
+        "properties": {
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WarningMember"
+            },
+            "description": "The members that trigger it now (empty for warnings raised by an\nabsence, or ones that no longer reproduce)."
+          },
+          "warning": {
+            "type": "string"
+          }
+        }
       }
     }
   }
