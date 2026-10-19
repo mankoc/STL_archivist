@@ -224,7 +224,7 @@ image and storage jobs and (administrators) makes backups. The **AI tagger** (on
 selection) suggests tags and metadata per model for review, or tags them all in one job.
 *Archives* on a selection rescans archives, regenerates thumbnails or deletes the files (to
 the trash folder); the detail pane lists a model's files and explains its warnings. The
-browser shows its models as a table or as an image grid, and **Folders** browses the
+browser shows its models as a table (choose its columns with *Columns*) or as an image grid, and **Folders** browses the
 archives folder by folder. *Sort files…* moves selected archives into a folder tree built
 from a path pattern, after a preview. *Update all* (Jobs) re-crawls every folder and keeps records of archives moved between
 folders. **Settings** holds your colour scheme, the library's crawler and sidecar settings

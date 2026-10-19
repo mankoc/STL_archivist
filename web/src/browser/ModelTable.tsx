@@ -18,6 +18,7 @@ import { type KeyboardEvent, type ReactNode, useMemo, useRef, useState } from "r
 import { api, type Schemas, unwrap } from "../api/client";
 import { baseName, formatDate, formatSize } from "../format";
 import type { FilterSpec } from "./filters";
+import { visible } from "./columns";
 import { blockIds, blocksFor } from "./rowBlocks";
 import type { Selection } from "./selection";
 import classes from "./ModelTable.module.css";
@@ -47,7 +48,7 @@ interface Column {
 
 const text = (key: keyof Row) => (r: Row) => String(r[key] ?? "");
 
-const COLUMNS: Column[] = [
+export const COLUMNS: Column[] = [
   { id: "title", header: "Title", size: 280, sortKey: "title", render: (r) => r.title ?? baseName(r.archive_path), field: "title", text: text("title") },
   { id: "creator", header: "Creator", size: 140, sortKey: "creator", render: (r) => r.creator, field: "creator", text: text("creator") },
   { id: "source", header: "Type", size: 110, sortKey: "source", render: (r) => r.source, field: "source", text: text("source") },
@@ -83,6 +84,8 @@ interface Props {
   onRowClick: (id: number, mods: { ctrl: boolean; shift: boolean }) => void;
   /** Cells can be edited (double-click). */
   editable: boolean;
+  /** Column ids not to show. */
+  hidden?: string[];
 }
 
 /** Save one cell (`PATCH /api/models/cells`). */
@@ -116,7 +119,7 @@ function CellEditor(props: { initial: string; onDone: (value: string | null) => 
   );
 }
 
-export function ModelTable({ query, onSort, selection, onRowClick, editable }: Props) {
+export function ModelTable({ query, onSort, selection, onRowClick, editable, hidden }: Props) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<{ id: number; column: number } | null>(null);
   const ids = useModelIds(query);
@@ -124,9 +127,10 @@ export function ModelTable({ query, onSort, selection, onRowClick, editable }: P
   const scrollRef = useRef<HTMLDivElement>(null);
   const [sizing, setSizing] = useState<ColumnSizingState>({});
 
+  const shown = useMemo(() => visible(COLUMNS, hidden ?? []), [hidden]);
   const columns = useMemo<ColumnDef<number>[]>(
-    () => COLUMNS.map((c) => ({ id: c.id, header: c.header, size: c.size, minSize: 50, enableResizing: true })),
-    [],
+    () => shown.map((c) => ({ id: c.id, header: c.header, size: c.size, minSize: 50, enableResizing: true })),
+    [shown],
   );
   const table = useReactTable({
     data: all,
@@ -187,7 +191,7 @@ export function ModelTable({ query, onSort, selection, onRowClick, editable }: P
     <div ref={scrollRef} className={classes.scroll} data-testid="model-table">
       <div className={classes.header} style={{ width }}>
         {table.getHeaderGroups()[0].headers.map((h, i) => {
-          const c = COLUMNS[i];
+          const c = shown[i];
           const sort = sortOf(c);
           return (
             <div key={h.id} className={classes.headerCell} style={{ width: h.getSize() }}>
@@ -224,7 +228,7 @@ export function ModelTable({ query, onSort, selection, onRowClick, editable }: P
               onClick={(e) => onRowClick(id, { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey })}
             >
               {table.getHeaderGroups()[0].headers.map((h, i) => {
-                const c = COLUMNS[i];
+                const c = shown[i];
                 const isEditing = editing?.id === id && editing.column === i && row;
                 return (
                   <div
