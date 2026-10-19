@@ -117,7 +117,9 @@ selected model's details on the right.
 
 ### Details pane
 
-The selected model's fields, tags, warnings, archive path and images:
+The selected model's fields, tags, warnings, archive path and images. Drag the pane's left
+edge to make it wider or narrower (double-click the edge to reset); the width is remembered
+in this browser.
 
 - **Download** the archive; **Copy path** (when the server's path makes sense on your
   computer); **Open folder** in the desktop app shows the archive in the file manager.
