@@ -11,7 +11,7 @@ can open a library on your computer without setting up a server.
 
 **Guides:** [using stlLibrary](docs/user-guide.md) · [deploying a server](docs/deployment.md)
 
-Version: 2026.25.0
+Version: 2026.26.0
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). Libraries are compatible: this version opens the same data directory
@@ -62,6 +62,11 @@ Version: 2026.25.0
 The [Releases](../../releases) page has `stlLibrary_<version>_x64-setup.exe`: the desktop
 app with the server and the web client. It installs for the current user and needs no
 administrator rights (Windows 10 and 11 ship the WebView2 runtime it uses).
+
+Releases are built by GitHub Actions: push a tag named after the version
+(`git tag v2026.26.0 && git push origin v2026.26.0`) and the *Windows installer* workflow
+publishes `stlLibrary_<version>_x64-setup.exe` on a release. It can also be run by hand from
+the Actions tab.
 
 ### From source
 

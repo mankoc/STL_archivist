@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026.26.0 — 2026-10-19
+
+- **Installer builds on GitHub.** Pushing a version tag (`v2026.26.0`) builds the Windows installer and publishes it on a GitHub release (the workflow checks that the tag matches the version); it can also be started by hand from the Actions tab, keeping the installer as a run artifact. Ordinary pushes do not build it. The Tauri CLI is cached between runs.
+
 ## 2026.25.0 — 2026-10-19
 
 The first release of the Rust server, web client and desktop app (everything below), and
