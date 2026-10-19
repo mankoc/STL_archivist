@@ -1,7 +1,7 @@
 [workspace]
 # stlLibrary Rust core. See docs/rust-migration-plan.md.
 resolver = "2"
-members = ["stl-core", "stl-py", "stl-server", "stl-desktop", "stl-proc"]
+members = ["stl-core", "stl-server", "stl-desktop", "stl-proc"]
 
 [workspace.package]
 version = "0.1.0"

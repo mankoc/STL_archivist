@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **The PyQt6 desktop application is retired** (it remains on its own branch). stlLibrary is now the server, the web client and the desktop app (`stl-desktop`), which opens a library on this computer or connects to a server. The data directory format is unchanged, so existing libraries open as they are. Build with `build.ps1` / `build.sh`; a Windows installer bundles the desktop app, the server and the web client. Removed with Python: the reader fallbacks for archives the built-in readers refuse, thumbnails of AVIF and CMYK JPEG images, presupport patterns only Python's regex engine read, the in-app AI model download and the translations (see the README's *Known limitations*).
+
 - **Table columns can be hidden.** *Columns* above the browser table shows or hides each column (the title always stays); the choice is saved with your account.
 
 - **Web client step 6n: update folders, delete all records, about.** *Update all* on the Jobs page re-crawls every crawled folder in one job and, like the desktop's Update Folders, keeps the record (and its edits) of an archive moved from one folder to another before deleting the records of archives that are gone; it replaces queuing one crawl per folder, which lost such records. Administrators can empty the library (Maintenance → *Delete all records*, confirmed by typing DELETE), which also drops the thumbnails. *About* in the user menu shows the server version.
