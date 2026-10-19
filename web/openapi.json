@@ -737,6 +737,30 @@
         }
       }
     },
+    "/api/folders": {
+      "get": {
+        "tags": [
+          "library"
+        ],
+        "summary": "The folders holding catalogued archives (forward slashes), sorted.",
+        "operationId": "get_folders",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/images/{id}": {
       "delete": {
         "tags": [
@@ -2509,6 +2533,84 @@
           }
         }
       }
+    },
+    "/api/views/folder": {
+      "post": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Thumbnail cells for the archives in a folder (and its subfolders), by path.",
+        "operationId": "post_views_folder",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Cell"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/views/grid": {
+      "post": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Thumbnail cells for models, in the order asked.",
+        "operationId": "post_views_grid",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GridRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Cell"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2776,6 +2878,50 @@
             "type": "integer",
             "format": "int64",
             "minimum": 0
+          }
+        }
+      },
+      "Cell": {
+        "type": "object",
+        "description": "One model as a thumbnail cell.",
+        "required": [
+          "id",
+          "images"
+        ],
+        "properties": {
+          "archive_path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "creator": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "images": {
+            "type": "integer",
+            "description": "How many images the model has.",
+            "minimum": 0
+          },
+          "thumbnail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The first thumbnail."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -3579,6 +3725,39 @@
         "properties": {
           "path": {
             "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "FolderRequest": {
+        "type": "object",
+        "required": [
+          "folder"
+        ],
+        "properties": {
+          "folder": {
+            "type": "string",
+            "description": "A folder from `/api/folders`."
+          },
+          "include_subfolders": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "GridRequest": {
+        "type": "object",
+        "required": [
+          "ids"
+        ],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "The models, in the order wanted (at most 500)."
           }
         },
         "additionalProperties": false

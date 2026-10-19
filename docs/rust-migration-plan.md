@@ -1238,6 +1238,13 @@ menus before Phase 8.
   (`explain_warnings` with every check, the stored lines in order).
 - Web: `ArchiveInfo` in the detail pane; the *Archives* menu on a selection.
 
+**6l: done 2026-10-19 (image grid, archive browser).** `POST /api/views/grid {ids}` (at
+most 500, in the order asked) and `POST /api/views/folder {folder, include_subfolders}`
+return thumbnail cells (`views::grid_models` / `folder_models`, first thumbnail and image
+count); `GET /api/folders`. Web: `CellGrid` (virtualised rows, `grid.ts` layout tested),
+the browser's Table / Images toggle (`GridView` loads 120-id pages for the visible rows),
+and the Folders page.
+
 ### Phase 7: Desktop shell (small)
 
 Tauri app that hosts the web client: connect to a remote server or start a bundled local one on

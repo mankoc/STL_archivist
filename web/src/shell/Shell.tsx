@@ -16,6 +16,7 @@ import { MaintenancePage } from "../jobs/MaintenancePage";
 import { LookupsPage } from "../lookups/LookupsPage";
 import { DuplicatesPage } from "../tools/DuplicatesPage";
 import { FindByImagePage } from "../tools/FindByImagePage";
+import { FoldersPage } from "../tools/FoldersPage";
 import { StatsPage } from "../tools/StatsPage";
 import { SettingsPage } from "../settings/SettingsPage";
 import { type Page, usePage } from "./route";
@@ -49,6 +50,7 @@ export function Shell({ user }: { user: Schemas["User"] }) {
                 onChange={(v) => setPage(v as Page)}
                 data={[
                   { value: "library", label: "Library" },
+                  { value: "folders", label: "Folders" },
                   { value: "find", label: "Find by Image" },
                   { value: "duplicates", label: "Duplicates" },
                   { value: "lookups", label: "Lookups" },
@@ -96,6 +98,8 @@ export function Shell({ user }: { user: Schemas["User"] }) {
             <LookupsPage />
           ) : page === "stats" ? (
             <StatsPage />
+          ) : page === "folders" ? (
+            <FoldersPage />
           ) : page === "duplicates" ? (
             <DuplicatesPage />
           ) : page === "find" ? (

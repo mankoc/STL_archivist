@@ -1,5 +1,5 @@
 // The browser: filter pane, table and detail pane (the desktop's main window).
-import { Box, Button, Center, Group, Loader, Menu, Modal, Text, TextInput } from "@mantine/core";
+import { Box, Button, Center, Group, Loader, Menu, Modal, SegmentedControl, Text, TextInput } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import { IconArchive, IconEdit, IconFilterOff, IconSearch, IconSparkles, IconTrash } from "@tabler/icons-react";
@@ -12,6 +12,7 @@ import type { JobRequest } from "../jobs/jobs";
 import { DetailPane } from "./DetailPane";
 import { EditorDrawer } from "./EditorDrawer";
 import { FilterPane } from "./FilterPane";
+import { GridView } from "./GridView";
 import { AiTaggerDrawer } from "./AiTaggerDrawer";
 import { MassEditDrawer } from "./MassEditDrawer";
 import { EMPTY, type FilterSpec, isEmpty } from "./filters";
@@ -31,6 +32,7 @@ export function BrowserPage() {
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [massEdit, setMassEdit] = useState(false);
   const [aiTagger, setAiTagger] = useState(false);
+  const [view, setView] = useState<"table" | "grid">("table");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const selectedIds = () => order.filter((i) => selection.ids.has(i));
   const queueJob = async (body: JobRequest, what: string) => {
@@ -104,6 +106,8 @@ export function BrowserPage() {
             {ids.data ? `${ids.data.length.toLocaleString()} model${ids.data.length === 1 ? "" : "s"}` : ""}
             {selection.ids.size > 1 ? ` · ${selection.ids.size} selected` : ""}
           </Text>
+          <SegmentedControl size="xs" value={view} onChange={(v) => setView(v as "table" | "grid")}
+            data={[{ value: "table", label: "Table" }, { value: "grid", label: "Images" }]} data-testid="view-toggle" />
           {editor && selection.ids.size > 0 && (
             <Group gap="xs" ml="auto">
               <Button size="compact-xs" variant="subtle" leftSection={<IconEdit size={14} />} onClick={() => setMassEdit(true)}>
@@ -134,13 +138,17 @@ export function BrowserPage() {
           )}
         </Group>
         <Box className={classes.tableBody}>
-          <ModelTable
-            query={query}
-            onSort={setSort}
-            selection={selection}
-            onRowClick={(id, mods) => setSelection((s) => click(s, order, id, mods))}
-            editable={editor}
-          />
+          {view === "grid" ? (
+            <GridView ids={order} selected={selection.current} onOpen={(id) => setSelection((s) => click(s, order, id, { ctrl: false, shift: false }))} />
+          ) : (
+            <ModelTable
+              query={query}
+              onSort={setSort}
+              selection={selection}
+              onRowClick={(id, mods) => setSelection((s) => click(s, order, id, mods))}
+              editable={editor}
+            />
+          )}
         </Box>
       </Box>
       <Box className={classes.detail}>
