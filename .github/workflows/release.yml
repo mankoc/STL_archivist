@@ -1,8 +1,8 @@
 name: Windows installer
 
 # Builds stlLibrary_<version>_x64-setup.exe (the desktop app with the server and
-# the web client) when a version tag is pushed (git tag v2026.26.0 && git push
-# origin v2026.26.0), and publishes it on a GitHub release. It can also be started
+# the web client) when a version tag is pushed (git tag v2026.43.0 && git push
+# origin v2026.43.0), and publishes it on a GitHub release. It can also be started
 # by hand (Actions → Windows installer → Run workflow): then the installer is only
 # kept as a run artifact. Ordinary pushes do not run it.
 on:
