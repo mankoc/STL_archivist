@@ -247,8 +247,12 @@ The **Maintenance** page (editors; some cards for administrators):
   images** keeps at most N images per model; **Compact database** (administrators) reclaims
   space after large deletions.
 - **Metadata sidecars** — **Generate sidecars** writes `METADATA.7z` in every archive folder;
-  **Remove all sidecars** deletes them. Sidecars let a new library restore its records when
-  it crawls the folders.
+  **Clean sidecars** tidies the `METADATA.7z` files under the crawled folders: one that lists
+  other archives than the folder's records is rewritten, one in a folder without records
+  whose archives are all gone is deleted (one whose archives still exist is kept: crawling
+  the folder imports them), and leftover `METADATA.7z.tmp` files are deleted. **Remove all
+  sidecars** deletes them. Sidecars let a new library restore its records when it crawls the
+  folders.
 - **AI and add-on components** (administrators) — downloads the optional parts into the
   library's folder: the AI tagger's runtime (llama.cpp, with a *CPU* / *NVIDIA GPU (CUDA)*
   choice on Windows; CUDA is preselected when an NVIDIA GPU is found) and model (about 3.3 GB;

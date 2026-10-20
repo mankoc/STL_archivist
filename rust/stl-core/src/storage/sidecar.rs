@@ -453,6 +453,22 @@ fn read_sidecar(path: &Path) -> SResult<(Json, HashMap<String, Vec<u8>>)> {
     Ok((value, thumbs))
 }
 
+/// The archive names a sidecar lists (its models' `archive_name`), for cleaning
+/// up sidecars whose archives are gone.
+pub fn listed_archives(path: &Path) -> SResult<Vec<String>> {
+    let (data, _) = read_sidecar(path)?;
+    let models = match &data {
+        Json::Object(d) => list(d.get("models"), "models")?,
+        _ => return unsupported("metadata.json is not an object"),
+    };
+    Ok(models
+        .iter()
+        .filter_map(|m| m.get("archive_name").and_then(Json::as_str))
+        .filter(|n| !n.is_empty() && !n.contains(['/', '\\', ':']) && *n != "." && *n != "..")
+        .map(str::to_string)
+        .collect())
+}
+
 /// `import_folder_metadata`: insert the sidecar's records whose archive exists
 /// and is not in the database yet; returns their archive paths. Thumbnails are
 /// written to `store` in one transaction.

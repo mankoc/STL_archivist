@@ -11,7 +11,7 @@ can open a library on your computer without setting up a server.
 
 **Guides:** [using stlLibrary](docs/user-guide.md) · [deploying a server](docs/deployment.md)
 
-Version: 2026.43.0
+Version: 2026.43.1
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). Libraries are compatible: this version opens the same data directory
@@ -49,7 +49,7 @@ Version: 2026.43.0
   compact the database, rescan archives, regenerate thumbnails, delete files to a trash
   folder, sort files into a folder tree by pattern
 - **Metadata sidecars** — a `METADATA.7z` per archive folder lets a new library restore its
-  records without re-crawling
+  records without re-crawling; *Clean sidecars* rewrites stale ones and deletes orphans
 - **Backups** — database, thumbnails and settings in one `.7z`; restore with
   `stl-server restore`
 - **Users** — viewer, editor and administrator roles; per-user preferences

@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.43.0"
+    "version": "2026.43.1"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -4490,6 +4490,21 @@
                 "type": "string",
                 "enum": [
                   "remove_sidecars"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Tidy the `METADATA.7z` files under the crawled folders: rewrite those\nlisting archives that are gone, delete those whose archives are all gone,\nand delete leftover `METADATA.7z.tmp` files.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "clean_sidecars"
                 ]
               }
             }

@@ -64,6 +64,29 @@ async fn sidecar_jobs() {
     assert_eq!(v["job"]["message"], "updated 2 of 2 folder(s)");
     assert!(sidecars.iter().all(|p| p.is_file()));
 
+    // Cleaning: an out-of-date sidecar is rewritten, an orphan whose archives are
+    // gone is removed, one whose archives exist but are not catalogued is kept,
+    // and leftover temporary files go.
+    let studio = std::fs::read(&sidecars[0]).unwrap();
+    std::fs::write(&sidecars[1], &studio).unwrap(); // Other's now lists Dragon.zip
+    std::fs::write(root.join("Other").join("METADATA.7z.tmp"), b"partial").unwrap();
+    std::fs::create_dir_all(root.join("Gone")).unwrap();
+    std::fs::write(root.join("Gone").join("METADATA.7z"), &studio).unwrap();
+    std::fs::create_dir_all(root.join("Extra")).unwrap();
+    std::fs::write(root.join("Extra").join("METADATA.7z"), &studio).unwrap();
+    std::fs::copy(root.join("Studio").join("Dragon.zip"), root.join("Extra").join("Dragon.zip")).unwrap();
+    let v = run(&lib, &ed, json!({"kind": "clean_sidecars"})).await;
+    assert_eq!(v["job"]["message"], "4 sidecar folder(s): 1 rewritten, 1 removed, 1 kept", "{v}");
+    let listed = |p: &std::path::Path| stl_core::storage::sidecar::listed_archives(p).unwrap();
+    assert_eq!(listed(&sidecars[1]), ["Knight.zip"]);
+    assert!(!root.join("Other").join("METADATA.7z.tmp").exists());
+    assert!(!root.join("Gone").join("METADATA.7z").exists());
+    assert!(root.join("Extra").join("METADATA.7z").is_file());
+    assert_eq!(listed(&sidecars[0]), ["Dragon.zip"]);
+    // A second run finds nothing to do.
+    let v = run(&lib, &ed, json!({"kind": "clean_sidecars"})).await;
+    assert_eq!(v["job"]["message"], "3 sidecar folder(s): 0 rewritten, 0 removed, 1 kept", "{v}");
+
     // Disabled in the settings: the job refuses.
     std::fs::write(lib.dir.path().join("settings.json"), r#"{"metadata_sidecar_enabled": false}"#).unwrap();
     let r = call(&lib.state, "POST", "/api/jobs", Some(&ed), Some(json!({"kind": "generate_sidecars"}))).await;
