@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.43.0 — 2026-10-20
+
+- **New version scheme:** `<year>.<ISO week>.<N>`, where `N` counts the commits of the week
+  from 0 (`2026.43.0`, `2026.43.1`, …, then `2026.44.0`). It replaces the running minor
+  number (2026.25.0–2026.28.0) and stays above it, so upgrades install over older versions.
+
 ## 2026.28.0 — 2026-10-20
 
 - **Download AI and add-on components.** *Maintenance → AI and add-on components*

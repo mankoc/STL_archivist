@@ -130,9 +130,11 @@ builds need neither the web client nor the server built.
 Always update the README, the changelog and the migration plan with the changes that are
 made. Commit messages carry no co-author lines.
 
-**Every commit raises the version**, by at least the minor part (`2026.25.0` → `2026.26.0`;
-the major part for sweeping changes), chosen by the scope of the change; never a patch-only
-bump. The version is the same in four places: `rust/Cargo.toml` (`[workspace.package]
+**Every commit raises the version**, which is `<year>.<ISO week>.<N>`: the year and ISO week
+of the commit date, and `N` counting the commits of that week from 0 (`2026.43.0`,
+`2026.43.1`, … then `2026.44.0` in the next week; a new year restarts at its own week). Take
+the ISO year and week of the commit date (`date +%G.%V`), and the last part one above the
+previous version's when the year and week are unchanged, else 0. The version is the same in four places: `rust/Cargo.toml` (`[workspace.package]
 version`, which the server reports), `rust/stl-desktop/tauri.bundle.json` (the installer),
 `web/package.json`, and the `Version:` line of `README.md`. Each version gets a
 `## <version> — <date>` section in `CHANGELOG.md` with that commit's changes.
