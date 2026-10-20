@@ -12,7 +12,7 @@ import { api, unwrap } from "../api/client";
 import { hasRole, useUser } from "../auth/user";
 import { DetailPane } from "../browser/DetailPane";
 import { formatSize } from "../format";
-import { addJob, type Job, type JobRequest, isActive, percent } from "../jobs/jobs";
+import { addJob, type Job, type JobRequest, isActive, percent, progressText } from "../jobs/jobs";
 import { type Finder, latestJob, matches, METADATA_COLUMNS, pageCount, pageOf, percentLabel, scoreLabel } from "./duplicates";
 
 type Compare = number[];
@@ -111,6 +111,7 @@ function FinderFrame({
               {job.state === "queued" ? "Waiting for other jobs…" : (job.phase ?? "Searching…")}
             </Text>
             <Progress value={pct ?? 100} animated striped={pct == null} />
+            {progressText(job, Date.now() / 1000) && <Text size="xs" c="dimmed">{progressText(job, Date.now() / 1000)}</Text>}
           </Stack>
         )}
         {job?.state === "failed" && <Alert color="red" mt="sm">{job.message}</Alert>}

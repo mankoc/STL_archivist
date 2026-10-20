@@ -9,7 +9,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { api, unwrap } from "../api/client";
-import { addJob, isActive, type Job, type JobRequest, percent } from "../jobs/jobs";
+import { addJob, isActive, type Job, type JobRequest, percent, progressText } from "../jobs/jobs";
 import { addTag, EMPTY_FIELDS, type Fields, fieldsOf, removeTag, SOURCES, suggestJob } from "./aiTagger";
 
 const MAX_TAGS_KEY = "stl.ai.maxTags";
@@ -80,6 +80,7 @@ function JobProgress({ job }: { job: Job }) {
         <Text size="xs" c="dimmed">{job.state === "queued" ? "Waiting for other jobs…" : (job.phase ?? "Asking the model… (the first request loads it, which takes a while)")}</Text>
       </Group>
       <Progress value={pct ?? 100} animated striped={pct == null} />
+      {progressText(job, Date.now() / 1000) && <Text size="xs" c="dimmed">{progressText(job, Date.now() / 1000)}</Text>}
     </Stack>
   );
 }

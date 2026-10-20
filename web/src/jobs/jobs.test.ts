@@ -1,4 +1,4 @@
-import { addJob, describe as label, duration, elapsed, percent, sortJobs, type Job } from "./jobs";
+import { addJob, describe as label, duration, elapsed, percent, progressText, remaining, sortJobs, type Job } from "./jobs";
 
 const job = (over: Partial<Job>): Job =>
   ({
@@ -21,6 +21,16 @@ describe("jobs", () => {
     expect(label(job({ kind: "verify_archives", request: { kind: "verify_archives" } }))).toBe("Verify archives");
     expect(label(job({ kind: "recheck_warnings", request: { kind: "recheck_warnings", warning: "no_images" } }))).toBe("Re-check warnings (images)");
     expect(label(job({ kind: "search_folder", request: { kind: "search_folder", folder: "D:/old", ids: [1] } }))).toBe("Search in folder D:/old");
+  });
+
+  it("shows the count and the time left", () => {
+    const running = (o: Partial<Job>) => job({ state: "running", started_at: 100, ...o });
+    expect(progressText(running({ done: 0, total: 0 }), 200)).toBeNull();
+    expect(progressText(running({ done: 0, total: 8000 }), 101)).toBe(`0 / ${(8000).toLocaleString()} (0%)`);
+    expect(remaining(running({ done: 1000, total: 8000 }), 102)).toBeNull(); // too early to tell
+    expect(remaining(running({ done: 1000, total: 8000 }), 200)).toBe(700);
+    expect(progressText(running({ done: 1000, total: 8000 }), 200)).toBe(`${(1000).toLocaleString()} / ${(8000).toLocaleString()} (13%) · about 11 min 40 s left`);
+    expect(progressText(job({ state: "done", done: 5, total: 5, started_at: 100 }), 200)).toBeNull();
   });
 
   it("formats durations", () => {

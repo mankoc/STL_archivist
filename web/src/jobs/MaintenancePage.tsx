@@ -12,7 +12,7 @@ import { hasRole, useUser } from "../auth/user";
 import { BackupCard, DangerCard, SidecarCard } from "./BackupCards";
 import { ComponentsCard } from "./ComponentsCard";
 import { FolderPicker } from "./FolderPicker";
-import { addJob, describe, isActive, type Job, type JobRequest, percent } from "./jobs";
+import { addJob, describe, isActive, type Job, type JobRequest, percent, progressText } from "./jobs";
 import { JobLog } from "./JobsPage";
 import classes from "./JobsPage.module.css";
 import { isMissing, isMoved, latestRecordsJob, type RecordRow, STATUS_COLOR, targets } from "./maintenance";
@@ -187,6 +187,7 @@ function RecordList({ job, editor, start }: { job: Job | undefined; editor: bool
         <Stack gap={4}>
           <Text size="xs" c="dimmed">{job.phase ?? "Working…"}</Text>
           <Progress value={pct ?? 100} animated striped={pct == null} />
+          {progressText(job, Date.now() / 1000) && <Text size="xs" c="dimmed">{progressText(job, Date.now() / 1000)}</Text>}
         </Stack>
       )}
       {finished && result?.type === "records" && (

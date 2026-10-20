@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.43.2 — 2026-10-20
+
+- **Progress with counts and time left.** Running jobs show `1,234 / 8,000 (15%) · about
+  12 min left` under their progress bars (Jobs, Maintenance, Duplicates, AI tagger); the
+  estimate appears after five seconds and follows the rate so far.
+- *Compute embeddings* and *Recompute image hashes* now log how many images they process and
+  their progress about every 5 %, instead of leaving the log empty.
+
 ## 2026.43.1 — 2026-10-20
 
 - **Clean sidecars.** *Maintenance → Metadata sidecars → Clean sidecars* (editors) looks

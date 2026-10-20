@@ -269,7 +269,9 @@ The **Maintenance** page (editors; some cards for administrators):
 - **Delete all records** (administrators) — empties the library after you type `DELETE`.
   Archive files are not touched. Back up first.
 
-The log of the job you started last shows at the bottom of the page.
+Under a running job's progress bar you see how many items are done out of the total and,
+after a few seconds, an estimate of the time left. The log of the job you started last shows
+at the bottom of the page.
 
 ## Settings and accounts
 
