@@ -1266,11 +1266,21 @@ fn verify(lib: &Library, job: &Job) -> Result<String, String> {
     Ok(format!("{checked} checked: {}; {cleared} back on disk", parts.join(", ")))
 }
 
+/// Logs a batch job's progress about every 5 % (and at the end), so the log of a
+/// long job shows it moving.
+fn log_progress(lib: &Library, job: &Job, done: usize, total: usize, last: &mut usize, line: impl FnOnce() -> String) {
+    if done >= *last + (total / 20).max(1) || (done == total && done != *last) {
+        *last = done;
+        lib.job_log(job, format!("[{done}/{total}] {}", line()));
+    }
+}
+
 fn recompute_dhashes(lib: &Library, job: &Job, all: bool) -> Result<String, String> {
     const DHASH_STR_LEN: i64 = 34; // "2:" + 32 hex digits
     let ids = lib.db.with(|c| maintenance::dhash_targets(c, all, DHASH_STR_LEN)).map_err(db_err)?;
     job.ctl.set_total(ids.len() as u64);
-    let (mut computed, mut skipped) = (0usize, 0usize);
+    lib.job_log(job, format!("Hashing {} image(s)…", ids.len()));
+    let (mut computed, mut skipped, mut logged) = (0usize, 0usize, 0usize);
     for chunk in ids.chunks(DHASH_BATCH) {
         if job.stopped() {
             break;
@@ -1295,6 +1305,7 @@ fn recompute_dhashes(lib: &Library, job: &Job, all: bool) -> Result<String, Stri
         computed += rows.len();
         skipped += chunk.len() - rows.len();
         job.ctl.advance(chunk.len() as u64);
+        log_progress(lib, job, computed + skipped, ids.len(), &mut logged, || format!("{computed} computed, {skipped} skipped"));
     }
     Ok(format!("{computed} computed, {skipped} skipped (no thumbnail or not decodable)"))
 }
@@ -1331,8 +1342,9 @@ fn compute_embeddings(lib: &Library, job: &Job, all: bool) -> Result<String, Str
     }
     let rows = lib.db.with(|c| maintenance::embedding_targets(c, all)).map_err(db_err)?;
     job.ctl.set_total(rows.len() as u64);
+    lib.job_log(job, format!("Computing embeddings of {} image(s)…", rows.len()));
     let dim = storage::schema_sql::EMBED_DIM as usize;
-    let (mut computed, mut skipped) = (0usize, 0usize);
+    let (mut computed, mut skipped, mut logged) = (0usize, 0usize, 0usize);
     for chunk in rows.chunks(crate::tools::BATCH * 4) {
         if job.stopped() {
             break;
@@ -1353,6 +1365,7 @@ fn compute_embeddings(lib: &Library, job: &Job, all: bool) -> Result<String, Str
         computed += stored;
         skipped += chunk.len() - stored;
         job.ctl.advance(chunk.len() as u64);
+        log_progress(lib, job, computed + skipped, rows.len(), &mut logged, || format!("{computed} computed, {skipped} skipped"));
     }
     Ok(format!("{computed} computed, {skipped} skipped (no thumbnail, not decodable or a wrong model output)"))
 }

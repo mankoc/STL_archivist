@@ -13,7 +13,7 @@ import { api, unwrap } from "../api/client";
 import { type ServerEvent, useServerEvent } from "../api/events";
 import { hasRole, useUser } from "../auth/user";
 import { FolderPicker } from "./FolderPicker";
-import { describe, elapsed, isActive, type Job, type JobRequest, percent, sortJobs, STATE_COLOR } from "./jobs";
+import { describe, elapsed, isActive, type Job, type JobRequest, percent, progressText, sortJobs, STATE_COLOR } from "./jobs";
 import classes from "./JobsPage.module.css";
 
 async function submit(request: JobRequest) {
@@ -171,7 +171,7 @@ export function JobsPage() {
                   </Group>
                   {job.state === "running" && <Progress value={p ?? 100} striped={p === null} animated={p === null} size="sm" mt={4} />}
                   <Text size="xs" c="dimmed" truncate>
-                    {[job.phase && job.state === "running" ? job.phase : job.message, elapsed(job, now), job.user].filter(Boolean).join(" · ")}
+                    {[job.phase && job.state === "running" ? job.phase : job.message, progressText(job, now), elapsed(job, now), job.user].filter(Boolean).join(" · ")}
                   </Text>
                 </UnstyledButton>
               );

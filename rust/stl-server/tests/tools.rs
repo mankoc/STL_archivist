@@ -137,6 +137,8 @@ async fn crawl_embeds_and_the_job_computes_missing_vectors() {
     let v = run_job(&lib, &ed, json!({"kind": "compute_embeddings"})).await;
     assert_eq!(v["job"]["message"], "2 computed, 0 skipped (no thumbnail, not decodable or a wrong model output)");
     assert_eq!(vectors(&lib).len(), 3);
+    let log: Vec<&str> = v["log"].as_array().unwrap().iter().map(|l| l.as_str().unwrap()).collect();
+    assert_eq!(log, ["Computing embeddings of 2 image(s)…", "[2/2] 2 computed, 0 skipped"], "{v}");
     let v = run_job(&lib, &ed, json!({"kind": "compute_embeddings", "all": true})).await;
     assert!(v["job"]["message"].as_str().unwrap().starts_with("3 computed"));
 }

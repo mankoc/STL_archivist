@@ -79,6 +79,22 @@ export function elapsed(job: Job, now: number): string | null {
   return duration((job.finished_at ?? now) - job.started_at);
 }
 
+/** Seconds left at the rate so far, once there is enough to go by (5 s and one item). */
+export function remaining(job: Job, now: number): number | null {
+  if (job.state !== "running" || job.started_at == null || job.total <= 0 || job.done <= 0) return null;
+  const spent = now - job.started_at;
+  if (spent < 5) return null;
+  return (spent / job.done) * Math.max(0, job.total - job.done);
+}
+
+/** "1,234 / 8,000 (15%) · about 12 min left" for a running job with a total. */
+export function progressText(job: Job, now: number): string | null {
+  if (job.state !== "running" || job.total <= 0) return null;
+  const count = `${job.done.toLocaleString()} / ${job.total.toLocaleString()} (${percent(job)}%)`;
+  const left = remaining(job, now);
+  return left == null ? count : `${count} · about ${duration(left)} left`;
+}
+
 /** Newest first, with active jobs on top. */
 export function sortJobs(jobs: Job[]): Job[] {
   return [...jobs].sort((a, b) => Number(isActive(b)) - Number(isActive(a)) || b.id - a.id);
