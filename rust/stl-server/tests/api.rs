@@ -227,7 +227,7 @@ async fn openapi_lists_every_route() {
 #[test]
 fn a_second_server_is_refused() {
     let dir = tempfile::tempdir().unwrap();
-    let config = Config { data_dir: dir.path().to_path_buf(), bind: "127.0.0.1:0".parse().unwrap(), unrar: None, onnxruntime: None, pdfium: None, roots: vec![], path_map: vec![], web_dir: None, ai: Default::default() };
+    let config = Config { data_dir: dir.path().to_path_buf(), bind: "127.0.0.1:0".parse().unwrap(), unrar: None, onnxruntime: None, pdfium: None, roots: vec![], path_map: vec![], web_dir: None, ai: Default::default(), components_mirror: None };
     let first = Library::open(config.clone()).unwrap();
     let err = Library::open(config.clone()).err().expect("second open must fail");
     assert!(err.contains("stl-server"), "{err}");

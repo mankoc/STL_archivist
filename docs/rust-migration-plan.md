@@ -1317,6 +1317,12 @@ server (installer and Docker image) and the desktop shell.
 - Lost with Python (documented in the README): the reader fallbacks for archives the native
   readers refuse, Pillow-only images (AVIF, CMYK JPEG), non-portable presupport patterns, the
   in-app download of the AI model and CLIP encoder, the translated interface.
+- 2026.28.0 brought the download back as *Maintenance → AI and add-on components*
+  (`stl-server/src/components.rs`): pinned URLs and SHA-256 sums for llama.cpp b9789 (the
+  old app's build; CPU or CUDA on Windows, CPU on Linux), the Qwen2.5-VL GGUF files, the CLIP
+  encoder (Xenova's export of the same model, bit-identical to the old app's file), ONNX
+  Runtime 1.22.0 and pdfium 7881, installed into the old layout (`ai/bin`, `ai/models`,
+  `models/`, the data directory) as admin jobs with resumable downloads.
 - `stl-core` keeps functions only the bindings used (golden-test helpers, the desktop's
   `LibraryDb` methods); they are harmless and some back server features.
 

@@ -12,6 +12,7 @@ pub mod settings;
 pub mod ai;
 pub mod archive;
 pub mod backups;
+pub mod components;
 pub mod maintenance;
 pub mod sort;
 pub mod stats;
@@ -101,6 +102,7 @@ use crate::AppState;
         ai::status,
         ai::commit,
         backups::list,
+        components::status,
         backups::download,
         backups::delete,
         maintenance::merge_moved,
@@ -198,6 +200,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/ai/status", get(ai::status))
         .route("/api/ai/commit/{id}", post(ai::commit))
         .route("/api/backups", get(backups::list))
+        .route("/api/components", get(components::status))
         .route("/api/backups/{name}", get(backups::download).delete(backups::delete))
         .route("/api/maintenance/merge-moved", post(maintenance::merge_moved))
         .route("/api/maintenance/remove", post(maintenance::remove))

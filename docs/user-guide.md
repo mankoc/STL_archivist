@@ -249,6 +249,16 @@ The **Maintenance** page (editors; some cards for administrators):
 - **Metadata sidecars** — **Generate sidecars** writes `METADATA.7z` in every archive folder;
   **Remove all sidecars** deletes them. Sidecars let a new library restore its records when
   it crawls the folders.
+- **AI and add-on components** (administrators) — downloads the optional parts into the
+  library's folder: the AI tagger's runtime (llama.cpp, with a *CPU* / *NVIDIA GPU (CUDA)*
+  choice on Windows; CUDA is preselected when an NVIDIA GPU is found) and model (about 3.3 GB;
+  tick the box accepting its licence, which limits commercial use), the CLIP encoder and
+  ONNX Runtime (AI image embeddings) and pdfium (PDF previews). Tick components, then
+  **Download**; the card shows each one's size, licence and state (*installed*, *not
+  installed*, or *configured elsewhere* when the server's configuration points at another
+  copy). An interrupted download resumes where it stopped. **Remove selected** deletes
+  downloaded ones. After installing the CLIP encoder and ONNX Runtime, run *Compute missing
+  embeddings*.
 - **Backups** (administrators) — **Back up now** saves the database, thumbnails and library
   settings in one file; download or delete backups from the list. Restoring is done on the
   server (see [deployment.md](deployment.md#backups-restore-and-upgrades)).

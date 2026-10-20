@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.27.0"
+    "version": "2026.28.0"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -483,6 +483,37 @@
             "description": ""
           },
           "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/components": {
+      "get": {
+        "tags": [
+          "components"
+        ],
+        "summary": "The downloadable components and whether each is installed.",
+        "operationId": "get_components",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComponentsInfo"
+                }
+              }
+            }
+          },
+          "403": {
             "description": "",
             "content": {
               "application/json": {
@@ -3120,6 +3151,102 @@
           }
         }
       },
+      "ComponentStatus": {
+        "type": "object",
+        "description": "One component as the Maintenance page shows it.",
+        "required": [
+          "id",
+          "label",
+          "enables",
+          "license",
+          "license_url",
+          "state",
+          "detail",
+          "sizes"
+        ],
+        "properties": {
+          "detail": {
+            "type": "string",
+            "description": "Where it is, or why it is in that state."
+          },
+          "enables": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "license": {
+            "type": "string"
+          },
+          "license_url": {
+            "type": "string"
+          },
+          "sizes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VariantSize"
+            },
+            "description": "Download sizes per variant (`default` for components without variants)."
+          },
+          "state": {
+            "type": "string",
+            "description": "`installed`, `missing`, `external` (configured elsewhere, not managed\nhere) or `unavailable` (no download for this platform)."
+          },
+          "variant": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The AI runtime's installed variant (`cpu` / `cuda`)."
+          }
+        }
+      },
+      "ComponentsInfo": {
+        "type": "object",
+        "required": [
+          "components",
+          "variants",
+          "nvidia_gpu"
+        ],
+        "properties": {
+          "components": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ComponentStatus"
+            }
+          },
+          "free_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Free space where the data directory is.",
+            "minimum": 0
+          },
+          "nvidia_gpu": {
+            "type": "boolean",
+            "description": "An NVIDIA driver is installed (the CUDA runtime is the better choice)."
+          },
+          "platform": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`windows-x64`, `linux-x64`, or null when nothing can be downloaded here."
+          },
+          "variants": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The AI runtime's variants here; the first is the default."
+          }
+        }
+      },
       "ContentRow": {
         "type": "object",
         "description": "Two archives sharing STL files (name and size).",
@@ -4378,6 +4505,56 @@
                 "type": "string",
                 "enum": [
                   "backup"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Download optional components into the data directory (administrators):\n`ai_runtime`, `ai_model`, `clip_model`, `onnxruntime`, `pdfium`.\n`variant` is the AI runtime's (`cpu`, or `cuda` on Windows).",
+            "required": [
+              "components",
+              "kind"
+            ],
+            "properties": {
+              "components": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "install_components"
+                ]
+              },
+              "variant": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Delete downloaded components (administrators).",
+            "required": [
+              "components",
+              "kind"
+            ],
+            "properties": {
+              "components": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "remove_components"
                 ]
               }
             }
@@ -6151,6 +6328,23 @@
           }
         },
         "additionalProperties": false
+      },
+      "VariantSize": {
+        "type": "object",
+        "required": [
+          "variant",
+          "bytes"
+        ],
+        "properties": {
+          "bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "variant": {
+            "type": "string"
+          }
+        }
       },
       "WarningDetails": {
         "type": "object",

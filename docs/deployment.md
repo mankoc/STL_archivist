@@ -225,6 +225,7 @@ the command line (later wins).
 | `unrar` | `STL_UNRAR_PATH` | | `unrar` on `PATH` | UnRAR tool |
 | `pdfium` | `STL_PDFIUM_PATH` | | beside the server, then the data directory | pdfium library |
 | `onnxruntime` | `ORT_DYLIB_PATH` | | beside the server, then the data directory | ONNX Runtime library |
+| `components_mirror` | | | official sources | base URL serving the component downloads by file name |
 | `web_dir` | `STL_WEB_DIR` | | `web/` beside the server | The built web client |
 | `ai` | `STL_AI_URL` (for `ai.url`) | | `<data dir>/ai` | AI tagger model server, see below |
 | | `STL_LOG` | | `info` | Log detail (`error`, `warn`, `info`, `debug`) |
@@ -250,7 +251,17 @@ The API is described at `/api/openapi.json` on a running server.
 
 ## Optional features
 
-Each is enabled by making its files available; without them the rest works.
+Each is enabled by making its files available; without them the rest works. On Windows x64
+and Linux x64 the easiest way is *Maintenance → AI and add-on components* (administrators),
+which downloads pinned versions from their official sources into the data directory and
+checks each file's SHA-256: llama.cpp build b9789 (`ai/bin/`; CPU, or CUDA 12.4 with its
+runtime on Windows — Linux gets the CPU build), the Qwen2.5-VL model (`ai/models/`), the CLIP
+encoder (`models/clip_image_encoder.onnx`, exported from `openai/clip-vit-base-patch32` by
+Xenova/clip-vit-base-patch32), ONNX Runtime 1.22.0 and pdfium 7881 (the data directory). The
+server needs outbound HTTPS to github.com and huggingface.co for this; set
+`"components_mirror": "https://mirror.example/stl/"` in `server.json` to fetch the same file
+names from your own mirror instead. Components the configuration points elsewhere are left
+alone. Installing manually works as described below.
 
 **PDF previews** (thumbnails of PDFs inside archives): pdfium from
 [pdfium-binaries](https://github.com/bblanchon/pdfium-binaries) (build 7881): `pdfium.dll`,

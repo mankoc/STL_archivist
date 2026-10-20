@@ -87,7 +87,7 @@ fn exe_name() -> &'static str {
 }
 
 /// `llama_server_exe`: directly in `dir`, else anywhere below it.
-fn find_exe(dir: &Path) -> Option<PathBuf> {
+pub(crate) fn find_exe(dir: &Path) -> Option<PathBuf> {
     let direct = dir.join(exe_name());
     if direct.is_file() {
         return Some(direct);
@@ -224,6 +224,11 @@ impl AiRuntime {
                 }
             }
         });
+    }
+
+    /// Stop a started model server (before its files are replaced).
+    pub fn stop(&self) {
+        self.restart();
     }
 
     /// Stop a started model server (a restart after corrupted output).

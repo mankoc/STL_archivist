@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026.28.0 — 2026-10-20
+
+- **Download AI and add-on components.** *Maintenance → AI and add-on components*
+  (administrators) downloads the optional parts into the library's folder: the AI tagger's
+  llama.cpp runtime (build b9789, as the earlier desktop app; CPU or CUDA on Windows, CUDA
+  preselected when an NVIDIA GPU is found; CPU on Linux) and Qwen2.5-VL model (after
+  accepting its licence), the CLIP image encoder and ONNX Runtime 1.22.0 (AI image
+  embeddings), and pdfium (PDF previews). Files come from pinned official URLs, are checked
+  by SHA-256, resume when interrupted, and can be removed again; components configured
+  elsewhere are left alone. New `GET /api/components`, jobs `install_components` /
+  `remove_components`, and the `server.json` key `components_mirror`. A feature whose
+  library failed to load is retried five minutes later (or right after an install) instead
+  of staying off until a restart.
+
 ## 2026.27.0 — 2026-10-19
 
 - **More table columns.** *Columns* has a *More columns* group with fields that were not shown before: Warning, Sequence (editable in place), Images (count), Compression, To print, Missing, Added, Updated, URL, Description, Folder and Archive hash. They start hidden; turning one on is saved with your account (`table_shown_columns`), and the standard columns keep their own setting. Sequence, Compression and Added can be sorted.

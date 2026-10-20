@@ -11,7 +11,7 @@ can open a library on your computer without setting up a server.
 
 **Guides:** [using stlLibrary](docs/user-guide.md) · [deploying a server](docs/deployment.md)
 
-Version: 2026.27.0
+Version: 2026.28.0
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). Libraries are compatible: this version opens the same data directory
@@ -177,6 +177,10 @@ and sorting, AI temperature, …) live in `<data dir>/settings.json` and are edi
 
 ### AI features
 
+Administrators can download everything below from *Maintenance → AI and add-on components*
+(Windows x64 and Linux x64; checked by SHA-256, CUDA on Windows when an NVIDIA GPU is
+present). To install by hand:
+
 - **AI tagger** — needs llama.cpp's `llama-server` and the Qwen2.5-VL GGUF model
   (`Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf` and `mmproj-Qwen2.5-VL-3B-Instruct-f16.gguf`, from
   [ggml-org/Qwen2.5-VL-3B-Instruct-GGUF](https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF)).
@@ -209,8 +213,7 @@ Compared with the earlier desktop application, which could fall back to Python l
 - images only Pillow decoded (AVIF, CMYK JPEG) get no thumbnail;
 - custom presupport patterns must use syntax the Rust regex engine reads the same way
   (a crawl logs a warning and skips the presupport check when one does not);
-- the AI model and the CLIP encoder are installed by hand (see above), not downloaded from
-  the application; the interface is in English only.
+- the interface is in English only.
 
 ## Path Patterns
 

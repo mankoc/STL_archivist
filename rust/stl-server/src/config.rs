@@ -35,6 +35,9 @@ pub struct Config {
     pub web_dir: Option<String>,
     /// The AI tagger's model server (see `ai`).
     pub ai: crate::ai::AiConfig,
+    /// A base URL that serves the downloadable components' files by name,
+    /// instead of their own sources (an offline mirror; see `components`).
+    pub components_mirror: Option<String>,
 }
 
 /// A server path prefix and how clients reach it (`"D:/STL"` → `"\\nas\stl"`).
@@ -60,6 +63,7 @@ struct FileSettings {
     web_dir: Option<String>,
     #[serde(default)]
     ai: crate::ai::AiConfig,
+    components_mirror: Option<String>,
 }
 
 impl Config {
@@ -129,6 +133,7 @@ impl Config {
             path_map: file.path_map,
             web_dir: env("STL_WEB_DIR").or(file.web_dir),
             ai,
+            components_mirror: file.components_mirror,
         })
     }
 }

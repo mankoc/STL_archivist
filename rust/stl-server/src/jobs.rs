@@ -101,6 +101,16 @@ pub enum JobRequest {
     /// Back up the database, thumbnails and settings to
     /// `<data dir>/backups/stlLibrary_backup_<stamp>.7z` (administrators).
     Backup,
+    /// Download optional components into the data directory (administrators):
+    /// `ai_runtime`, `ai_model`, `clip_model`, `onnxruntime`, `pdfium`.
+    /// `variant` is the AI runtime's (`cpu`, or `cuda` on Windows).
+    InstallComponents {
+        components: Vec<String>,
+        #[serde(default)]
+        variant: Option<String>,
+    },
+    /// Delete downloaded components (administrators).
+    RemoveComponents { components: Vec<String> },
     /// Re-read the models' archives: metadata, presupports, warnings, scales,
     /// hash (Rescan).
     Rescan { ids: Vec<i64> },
@@ -194,6 +204,8 @@ impl JobRequest {
             JobRequest::PruneImages { .. } => "prune_images",
             JobRequest::CompactDatabase => "compact_database",
             JobRequest::ComputeEmbeddings { .. } => "compute_embeddings",
+            JobRequest::InstallComponents { .. } => "install_components",
+            JobRequest::RemoveComponents { .. } => "remove_components",
             JobRequest::Rescan { .. } => "rescan",
             JobRequest::GenerateThumbnails { .. } => "generate_thumbnails",
             JobRequest::DeleteFiles { .. } => "delete_files",
@@ -236,6 +248,10 @@ impl JobRequest {
                 Err("threshold must be above 0 and at most 1".into())
             }
             JobRequest::ClearLibrary { confirm } if confirm != "DELETE" => Err("confirm with \"DELETE\"".into()),
+            JobRequest::InstallComponents { components, variant } if bad_components(components, variant.as_deref()) => {
+                Err(components_hint())
+            }
+            JobRequest::RemoveComponents { components } if bad_components(components, None) => Err(components_hint()),
             JobRequest::RecheckWarnings { warning } if crate::maint::Recheck::parse(warning).is_none() => {
                 Err(format!("unknown warning {warning:?} (no_images or presupported)"))
             }
@@ -578,6 +594,12 @@ fn run(lib: &Library, job: &Job) -> Result<String, String> {
         JobRequest::PruneImages { keep } => prune_images(lib, job, keep),
         JobRequest::CompactDatabase => compact(lib, job),
         JobRequest::ComputeEmbeddings { all } => compute_embeddings(lib, job, all),
+        JobRequest::InstallComponents { components, variant } => install_components(lib, job, &components, variant),
+        JobRequest::RemoveComponents { components } => {
+            let log = |line: String| lib.job_log(job, line);
+            let n = crate::components::remove(lib, &log, &components)?;
+            Ok(format!("{n} component(s) removed"))
+        }
         JobRequest::Rescan { ids } => rescan(lib, job, &ids),
         JobRequest::GenerateThumbnails { ids, max_thumbnails } => generate_thumbnails(lib, job, &ids, max_thumbnails),
         JobRequest::DeleteFiles { ids } => delete_files(lib, job, &ids),
@@ -599,6 +621,28 @@ fn run(lib: &Library, job: &Job) -> Result<String, String> {
             find_metadata(lib, job, &columns, &method, max_distance)
         }
     }
+}
+
+// ── components ───────────────────────────────────────────────────────────────
+
+fn bad_components(ids: &[String], variant: Option<&str>) -> bool {
+    ids.is_empty()
+        || ids.iter().any(|c| !crate::components::IDS.contains(&c.as_str()))
+        || variant.is_some_and(|v| !crate::components::variants().contains(&v))
+}
+
+fn components_hint() -> String {
+    let variants = crate::components::variants();
+    let v = if variants.is_empty() { String::new() } else { format!(" and a variant among {variants:?}") };
+    format!("choose components among {:?}{v}", crate::components::IDS)
+}
+
+fn install_components(lib: &Library, job: &Job, ids: &[String], variant: Option<String>) -> Result<String, String> {
+    let log = |line: String| lib.job_log(job, line);
+    let default = if crate::components::nvidia_gpu() && crate::components::variants().contains(&"cuda") { "cuda" } else { "cpu" };
+    let variant = variant.unwrap_or_else(|| default.to_string());
+    let n = crate::components::install(lib, &job.ctl, &log, ids, &variant)?;
+    Ok(format!("{n} component(s) installed"))
 }
 
 // ── archive tools ────────────────────────────────────────────────────────────

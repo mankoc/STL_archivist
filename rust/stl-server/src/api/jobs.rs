@@ -31,7 +31,14 @@ pub async fn submit(
     me: CurrentUser,
     Json(mut request): Json<JobRequest>,
 ) -> Result<(StatusCode, Json<JobInfo>), ApiError> {
-    let admin = matches!(request, JobRequest::CompactDatabase | JobRequest::Backup | JobRequest::ClearLibrary { .. });
+    let admin = matches!(
+        request,
+        JobRequest::CompactDatabase
+            | JobRequest::Backup
+            | JobRequest::ClearLibrary { .. }
+            | JobRequest::InstallComponents { .. }
+            | JobRequest::RemoveComponents { .. }
+    );
     me.require(if admin { Role::Admin } else { Role::Editor })?;
     request.validate().map_err(ApiError::bad_request)?;
     // A searched folder is read and records may point into it: the same access as a crawl.
