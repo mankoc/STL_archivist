@@ -40,6 +40,7 @@ const KIND_LABEL: Record<string, string> = {
   recheck_warnings: "Re-check warnings",
   generate_sidecars: "Generate sidecars",
   remove_sidecars: "Remove sidecars",
+  clean_sidecars: "Clean sidecars",
   backup: "Backup",
   rescan: "Rescan",
   install_components: "Download components",

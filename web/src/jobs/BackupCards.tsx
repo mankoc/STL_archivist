@@ -22,6 +22,10 @@ export function SidecarCard({ editor, start }: { editor: boolean; start: (r: Job
         <Button size="xs" variant="default" disabled={!editor} onClick={() => start({ kind: "generate_sidecars" })}>
           Generate sidecars
         </Button>
+        <Button size="xs" variant="default" disabled={!editor} onClick={() => start({ kind: "clean_sidecars" })}
+          title="Rewrite out-of-date sidecars, delete those whose archives are all gone and leftover temporary files">
+          Clean sidecars
+        </Button>
         <Button size="xs" variant="default" color="red" disabled={!editor} onClick={() => setConfirm(true)}>
           Remove all sidecars
         </Button>

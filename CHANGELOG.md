@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026.43.1 — 2026-10-20
+
+- **Clean sidecars.** *Maintenance → Metadata sidecars → Clean sidecars* (editors) looks
+  for `METADATA.7z` files under the crawled folders: a sidecar listing other archives than
+  the folder's records is rewritten from the database (when sidecars are enabled), one in a
+  folder without records whose archives are all gone is deleted, one whose archives still
+  exist is kept (crawling the folder imports them), and leftover `METADATA.7z.tmp` files are
+  deleted. New job kind `clean_sidecars`.
+
 ## 2026.43.0 — 2026-10-20
 
 - **New version scheme:** `<year>.<ISO week>.<N>`, where `N` counts the commits of the week

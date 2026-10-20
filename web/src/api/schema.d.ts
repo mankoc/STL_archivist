@@ -1599,6 +1599,9 @@ export interface components {
             kind: "remove_sidecars";
         } | {
             /** @enum {string} */
+            kind: "clean_sidecars";
+        } | {
+            /** @enum {string} */
             kind: "backup";
         } | {
             components: string[];
