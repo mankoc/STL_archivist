@@ -197,6 +197,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/components": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The downloadable components and whether each is installed. */
+        get: operations["get_components"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/crawled-folders": {
         parameters: {
             query?: never;
@@ -1164,6 +1181,39 @@ export interface components {
              */
             total: number;
         };
+        /** @description One component as the Maintenance page shows it. */
+        ComponentStatus: {
+            /** @description Where it is, or why it is in that state. */
+            detail: string;
+            enables: string;
+            id: string;
+            label: string;
+            license: string;
+            license_url: string;
+            /** @description Download sizes per variant (`default` for components without variants). */
+            sizes: components["schemas"]["VariantSize"][];
+            /**
+             * @description `installed`, `missing`, `external` (configured elsewhere, not managed
+             *     here) or `unavailable` (no download for this platform).
+             */
+            state: string;
+            /** @description The AI runtime's installed variant (`cpu` / `cuda`). */
+            variant?: string | null;
+        };
+        ComponentsInfo: {
+            components: components["schemas"]["ComponentStatus"][];
+            /**
+             * Format: int64
+             * @description Free space where the data directory is.
+             */
+            free_bytes?: number | null;
+            /** @description An NVIDIA driver is installed (the CUDA runtime is the better choice). */
+            nvidia_gpu: boolean;
+            /** @description `windows-x64`, `linux-x64`, or null when nothing can be downloaded here. */
+            platform?: string | null;
+            /** @description The AI runtime's variants here; the first is the default. */
+            variants: string[];
+        };
         /** @description Two archives sharing STL files (name and size). */
         ContentRow: {
             /** Format: int64 */
@@ -1550,6 +1600,15 @@ export interface components {
         } | {
             /** @enum {string} */
             kind: "backup";
+        } | {
+            components: string[];
+            /** @enum {string} */
+            kind: "install_components";
+            variant?: string | null;
+        } | {
+            components: string[];
+            /** @enum {string} */
+            kind: "remove_components";
         } | {
             ids: number[];
             /** @enum {string} */
@@ -2103,6 +2162,11 @@ export interface components {
             password?: string | null;
             role?: null | components["schemas"]["Role"];
         };
+        VariantSize: {
+            /** Format: int64 */
+            bytes: number;
+            variant: string;
+        };
         WarningDetails: {
             /** @description Why the archive's files could not be listed. */
             error?: string | null;
@@ -2499,6 +2563,33 @@ export interface operations {
                 content?: never;
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_components: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComponentsInfo"];
+                };
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

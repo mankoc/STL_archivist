@@ -11,6 +11,7 @@ pub mod ai;
 pub mod archive_tools;
 pub mod api;
 pub mod auth;
+pub mod components;
 pub mod config;
 pub mod dupes;
 pub mod error;

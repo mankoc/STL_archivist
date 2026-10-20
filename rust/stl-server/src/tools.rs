@@ -12,6 +12,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use ort::session::Session;
 use ort::value::Tensor;
@@ -179,41 +180,57 @@ impl PdfRenderer {
     }
 }
 
-/// The tools, loaded on first use (once; a failure is logged once).
+/// How long a failed load is remembered before it is tried again.
+const RETRY_AFTER: Duration = Duration::from_secs(300);
+
+/// The tools, loaded on first use and kept once loaded. A failure is logged
+/// once and tried again after [`RETRY_AFTER`], or at once after [`Tools::retry`]
+/// (when components were just installed).
 #[derive(Default)]
 pub struct Tools {
-    embedder: OnceLock<Option<Embedder>>,
-    pdf: OnceLock<Option<PdfRenderer>>,
+    embedder: OnceLock<Embedder>,
+    embedder_failed: Mutex<Option<Instant>>,
+    pdf: OnceLock<PdfRenderer>,
+    pdf_failed: Mutex<Option<Instant>>,
+}
+
+fn cached<'a, T>(cell: &'a OnceLock<T>, failed: &Mutex<Option<Instant>>, what: &str, load: impl FnOnce() -> Result<T, String>) -> Option<&'a T> {
+    if let Some(v) = cell.get() {
+        return Some(v);
+    }
+    let mut failed = failed.lock().unwrap_or_else(|e| e.into_inner());
+    if failed.is_some_and(|t| t.elapsed() < RETRY_AFTER) {
+        return None;
+    }
+    match load() {
+        Ok(v) => {
+            tracing::info!("{what} available");
+            *failed = None;
+            let _ = cell.set(v);
+            cell.get()
+        }
+        Err(e) => {
+            if failed.is_none() {
+                tracing::info!("{what} unavailable: {e}");
+            }
+            *failed = Some(Instant::now());
+            None
+        }
+    }
 }
 
 impl Tools {
     pub fn embedder(&self, config: &Config) -> Option<&Embedder> {
-        self.embedder
-            .get_or_init(|| match Embedder::load(config) {
-                Ok(e) => {
-                    tracing::info!(model = %e.model.display(), "CLIP embeddings available");
-                    Some(e)
-                }
-                Err(e) => {
-                    tracing::info!("CLIP embeddings unavailable: {e}");
-                    None
-                }
-            })
-            .as_ref()
+        cached(&self.embedder, &self.embedder_failed, "CLIP embeddings", || Embedder::load(config))
     }
 
     pub fn pdf(&self, config: &Config) -> Option<&PdfRenderer> {
-        self.pdf
-            .get_or_init(|| match PdfRenderer::load(config) {
-                Ok(p) => {
-                    tracing::info!("PDF previews available");
-                    Some(p)
-                }
-                Err(e) => {
-                    tracing::info!("PDF previews unavailable: {e}");
-                    None
-                }
-            })
-            .as_ref()
+        cached(&self.pdf, &self.pdf_failed, "PDF previews", || PdfRenderer::load(config))
+    }
+
+    /// Forget earlier failures: try loading again on next use.
+    pub fn retry(&self) {
+        *self.embedder_failed.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        *self.pdf_failed.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 }
