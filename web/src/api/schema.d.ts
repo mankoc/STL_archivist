@@ -1041,6 +1041,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The compute mode and the connected workers. */
+        get: operations["get_workers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workers/connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A compute worker's connection (editors): a WebSocket of JSON frames, the
+         *     worker's `hello` first (see `crate::workers::ToServer` / `ToWorker`).
+         */
+        get: operations["get_workers_connect"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workers/token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A session token for a compute worker (editors): the web client asks for
+         *     one and hands it to the desktop app, which starts the worker with it.
+         */
+        post: operations["post_workers_token"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2199,6 +2256,49 @@ export interface components {
              */
             members: components["schemas"]["WarningMember"][];
             warning: string;
+        };
+        /** @description A connected worker as users see it. */
+        WorkerInfo: {
+            /**
+             * Format: int32
+             * @description Requests it is working on.
+             */
+            busy: number;
+            /** @description The AI tagger's model, when it has one. */
+            chat_model?: string | null;
+            /** @description Where its CLIP encoder runs, when this server uses it. */
+            clip_provider?: string | null;
+            /**
+             * Format: int64
+             * @description Unix seconds.
+             */
+            connected_at: number;
+            /**
+             * Format: int64
+             * @description Requests it has answered.
+             */
+            done: number;
+            /** Format: int64 */
+            id: number;
+            /** @description The worker's machine. */
+            name: string;
+            /** @description Why part of it is not used (a different CLIP model). */
+            note?: string | null;
+            /** @description The user whose session it uses. */
+            user: string;
+            version: string;
+        };
+        WorkerToken: {
+            /**
+             * @description A new session of the signed-in user, for `stl-server worker`
+             *     (`STL_WORKER_TOKEN`). Signing out elsewhere does not end it.
+             */
+            token: string;
+        };
+        WorkersStatus: {
+            /** @description `local` or `workers` (see `server.json` → `compute`). */
+            compute: string;
+            workers: components["schemas"]["WorkerInfo"][];
         };
     };
     responses: never;
@@ -4248,6 +4348,78 @@ export interface operations {
                 };
             };
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_workers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkersStatus"];
+                };
+            };
+        };
+    };
+    get_workers_connect: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description WebSocket of worker messages */
+            101: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    post_workers_token: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerToken"];
+                };
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

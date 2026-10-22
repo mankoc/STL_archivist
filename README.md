@@ -11,7 +11,7 @@ can open a library on your computer without setting up a server.
 
 **Guides:** [using stlLibrary](docs/user-guide.md) · [deploying a server](docs/deployment.md)
 
-Version: 2026.43.4
+Version: 2026.43.5
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). Libraries are compatible: this version opens the same data directory
@@ -196,6 +196,10 @@ and cuDNN 9 must be installed). To install by hand:
   Image* and *Duplicates*. The encoder runs on a GPU when the ONNX Runtime build supports
   one for the GPUs found (DirectML; CUDA, MIGraphX, ROCm or OpenVINO on Linux), else on the
   CPU; the components card shows which.
+- **Compute workers** — a server on a machine without a GPU can let a computer with one do
+  the embeddings and tagging: in the desktop app, *Maintenance → Compute workers → Use this
+  computer for AI*. With `"compute": "workers"` (or `STL_COMPUTE=workers`) the server never
+  runs the models itself and its jobs wait for a worker. See the deployment guide.
 
 ### Backups and restore
 

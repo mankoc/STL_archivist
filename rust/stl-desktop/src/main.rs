@@ -3,8 +3,15 @@
 //! The bundled launcher page (`ui/`) lists remembered servers and can start a
 //! local library: the `stl-server` beside this program, on a free loopback
 //! port. Connecting navigates the window to the server, which serves the web
-//! client itself. The shell holds no library logic; the only command a
-//! server's pages may call is `open_folder` (granted per server at connect).
+//! client itself. The shell holds no library logic; a server's pages may call
+//! only `open_folder` and the compute worker's commands (granted per server at
+//! connect).
+//!
+//! The compute worker: on a server's Maintenance page, "Use this computer for
+//! AI" hands the shell a worker token, and the shell runs `stl-server worker`
+//! for that server (embeddings and AI tags on this machine's GPU), with the
+//! components of the local library's data directory. It is remembered and
+//! started again when the app connects to that server.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::collections::HashSet;
@@ -39,6 +46,30 @@ struct Saved {
     /// The data directory last opened as a local library.
     #[serde(default)]
     local_data_dir: Option<String>,
+    /// The server this computer works for, with its worker token.
+    #[serde(default)]
+    worker: Option<SavedWorker>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SavedWorker {
+    server: String,
+    token: String,
+}
+
+/// A running `stl-server worker`.
+struct WorkerProc {
+    child: Child,
+    server: String,
+    data_dir: String,
+    log_path: PathBuf,
+}
+
+impl Drop for WorkerProc {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 struct LocalServer {
@@ -57,6 +88,7 @@ impl Drop for LocalServer {
 #[derive(Default)]
 struct Shell {
     local: Mutex<Option<LocalServer>>,
+    worker: Mutex<Option<WorkerProc>>,
     launcher: Mutex<Option<Url>>,
     granted: Mutex<HashSet<String>>,
 }
@@ -112,7 +144,10 @@ fn save_servers(app: AppHandle, servers: Vec<Server>) -> Result<(), String> {
     store_saved(&app, &saved)
 }
 
-/// Let `origin`'s pages call `open_folder` (and nothing else).
+/// What a server's pages may call.
+const SERVER_PERMISSIONS: &[&str] = &["allow-open-folder", "allow-start-worker", "allow-stop-worker", "allow-worker-state"];
+
+/// Let `origin`'s pages call [`SERVER_PERMISSIONS`] (and nothing else).
 fn grant(app: &AppHandle, shell: &Shell, origin: &Url) -> Result<(), String> {
     let key = origin.as_str().trim_end_matches('/').to_string();
     let mut granted = shell.granted.lock().unwrap_or_else(|e| e.into_inner());
@@ -120,7 +155,7 @@ fn grant(app: &AppHandle, shell: &Shell, origin: &Url) -> Result<(), String> {
         return Ok(());
     }
     let id = format!("server-{}", granted.len() + 1);
-    let cap = CapabilityBuilder::new(id).remote(format!("{key}/*")).window(MAIN).permission("allow-open-folder");
+    let cap = SERVER_PERMISSIONS.iter().fold(CapabilityBuilder::new(id).remote(format!("{key}/*")).window(MAIN), |c, p| c.permission(*p));
     app.add_capability(cap).map_err(|e| e.to_string())?;
     granted.insert(key);
     Ok(())
@@ -141,7 +176,17 @@ async fn connect(app: AppHandle, url: String) -> Result<(), String> {
     let probe = base.clone();
     tauri::async_runtime::spawn_blocking(move || reachable(&probe, Duration::from_secs(5))).await.map_err(|e| e.to_string())??;
     grant(&app, &app.state::<Shell>(), &base)?;
-    navigate(&app, base)
+    navigate(&app, base.clone())?;
+    // This computer works for this server: start its worker again.
+    if let Some(w) = load_saved(&app).worker.filter(|w| w.server == base.as_str()) {
+        let app2 = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            if let Err(e) = run_worker(&app2, &w.server, &w.token) {
+                eprintln!("compute worker: {e}");
+            }
+        });
+    }
+    Ok(())
 }
 
 /// The `stl-server` program: beside this one (an install, or `target/<profile>`).
@@ -201,6 +246,119 @@ fn spawn_local(app: &AppHandle, data_dir: &str) -> Result<LocalServer, String> {
         }
         std::thread::sleep(Duration::from_millis(300));
     }
+}
+
+// ── compute worker ───────────────────────────────────────────────────────────
+
+/// The data directory whose components the worker uses: the local library's.
+fn worker_data_dir(app: &AppHandle) -> String {
+    load_saved(app).local_data_dir.unwrap_or_else(default_data_dir)
+}
+
+/// Start `stl-server worker` for `server`, replacing a running one.
+fn run_worker(app: &AppHandle, server: &str, token: &str) -> Result<(), String> {
+    let exe = server_exe()?;
+    let data_dir = worker_data_dir(app);
+    let log_dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&log_dir).map_err(|e| e.to_string())?;
+    let log_path = log_dir.join("stl-worker.log");
+    let shell = app.state::<Shell>();
+    let mut slot = shell.worker.lock().unwrap_or_else(|e| e.into_inner());
+    *slot = None; // the old one lets go of its log first
+    let log = std::fs::File::create(&log_path).map_err(|e| e.to_string())?;
+    let mut cmd = Command::new(&exe);
+    cmd.args(["worker", "--server", server, "--data-dir", &data_dir])
+        .env("STL_WORKER_TOKEN", token)
+        .env("NO_COLOR", "1")
+        .stdin(Stdio::null())
+        .stdout(log.try_clone().map_err(|e| e.to_string())?)
+        .stderr(log);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let child = cmd.spawn().map_err(|e| format!("cannot start {}: {e}", exe.display()))?;
+    stl_proc::end_with_parent(&child);
+    *slot = Some(WorkerProc { child, server: server.to_string(), data_dir, log_path });
+    Ok(())
+}
+
+/// The origin of the page that called (a server's web client).
+fn caller_origin(webview: &tauri::Webview) -> Result<String, String> {
+    let url = webview.url().map_err(|e| e.to_string())?;
+    Ok(normalize_url(url.as_str())?.to_string())
+}
+
+#[derive(Serialize)]
+struct WorkerState {
+    /// A worker runs for the calling server.
+    running: bool,
+    /// The server a worker runs for, when it is another one.
+    other_server: Option<String>,
+    /// Where its components come from.
+    data_dir: String,
+    /// Why it stopped (its exit status and last log lines), when it did.
+    stopped: Option<String>,
+}
+
+/// The worker as the calling server's page sees it.
+#[tauri::command]
+fn worker_state(app: AppHandle, webview: tauri::Webview) -> Result<WorkerState, String> {
+    let origin = caller_origin(&webview)?;
+    let shell = app.state::<Shell>();
+    let mut slot = shell.worker.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(w) = slot.as_mut() else {
+        return Ok(WorkerState { running: false, other_server: None, data_dir: worker_data_dir(&app), stopped: None });
+    };
+    if w.server != origin {
+        return Ok(WorkerState { running: false, other_server: Some(w.server.clone()), data_dir: w.data_dir.clone(), stopped: None });
+    }
+    let stopped = match w.child.try_wait() {
+        Ok(None) => None,
+        Ok(Some(status)) => Some(format!("{status}: {}", log_tail(&w.log_path))),
+        Err(e) => Some(e.to_string()),
+    };
+    Ok(WorkerState { running: stopped.is_none(), other_server: None, data_dir: w.data_dir.clone(), stopped })
+}
+
+/// Work for the calling server with `token` (from `POST /api/workers/token`),
+/// now and whenever the app connects to it again.
+#[tauri::command]
+async fn start_worker(app: AppHandle, webview: tauri::Webview, token: String) -> Result<WorkerState, String> {
+    let origin = caller_origin(&webview)?;
+    if token.is_empty() || !token.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("not a worker token".into());
+    }
+    let app2 = app.clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        run_worker(&app2, &origin, &token)?;
+        let mut saved = load_saved(&app2);
+        saved.worker = Some(SavedWorker { server: origin, token });
+        store_saved(&app2, &saved)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    worker_state(app, webview)
+}
+
+/// Stop working for the calling server (and forget it).
+#[tauri::command]
+fn stop_worker(app: AppHandle, webview: tauri::Webview) -> Result<WorkerState, String> {
+    let origin = caller_origin(&webview)?;
+    {
+        let shell = app.state::<Shell>();
+        let mut slot = shell.worker.lock().unwrap_or_else(|e| e.into_inner());
+        if slot.as_ref().is_some_and(|w| w.server == origin) {
+            *slot = None;
+        }
+    }
+    let mut saved = load_saved(&app);
+    if saved.worker.as_ref().is_some_and(|w| w.server == origin) {
+        saved.worker = None;
+        store_saved(&app, &saved)?;
+    }
+    worker_state(app, webview)
 }
 
 /// Start (or reuse) a local server on `data_dir` and open it.
@@ -374,7 +532,10 @@ fn main() {
             pick_folder,
             default_data_dir,
             local_state,
-            open_folder
+            open_folder,
+            start_worker,
+            stop_worker,
+            worker_state
         ])
         .on_menu_event(|app, e| on_menu(app, e.id().as_ref()))
         .setup(setup)
@@ -382,8 +543,9 @@ fn main() {
         .expect("the stlLibrary shell could not start");
     app.run(|app, event| {
         if let RunEvent::Exit = event {
-            // Stop the local server (and with it the library lock).
+            // Stop the local server (and with it the library lock) and the worker.
             *app.state::<Shell>().local.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            *app.state::<Shell>().worker.lock().unwrap_or_else(|e| e.into_inner()) = None;
         }
     });
 }

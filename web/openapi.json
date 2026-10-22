@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.43.4"
+    "version": "2026.43.5"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -2714,6 +2714,82 @@
             }
           },
           "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workers": {
+      "get": {
+        "tags": [
+          "workers"
+        ],
+        "summary": "The compute mode and the connected workers.",
+        "operationId": "get_workers",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkersStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workers/connect": {
+      "get": {
+        "tags": [
+          "workers"
+        ],
+        "summary": "A compute worker's connection (editors): a WebSocket of JSON frames, the\nworker's `hello` first (see `crate::workers::ToServer` / `ToWorker`).",
+        "operationId": "get_workers_connect",
+        "responses": {
+          "101": {
+            "description": "WebSocket of worker messages"
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workers/token": {
+      "post": {
+        "tags": [
+          "workers"
+        ],
+        "summary": "A session token for a compute worker (editors): the web client asks for\none and hands it to the desktop app, which starts the worker with it.",
+        "operationId": "post_workers_token",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerToken"
+                }
+              }
+            }
+          },
+          "403": {
             "description": "",
             "content": {
               "application/json": {
@@ -6437,6 +6513,106 @@
           },
           "warning": {
             "type": "string"
+          }
+        }
+      },
+      "WorkerInfo": {
+        "type": "object",
+        "description": "A connected worker as users see it.",
+        "required": [
+          "id",
+          "name",
+          "user",
+          "version",
+          "connected_at",
+          "busy",
+          "done"
+        ],
+        "properties": {
+          "busy": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Requests it is working on.",
+            "minimum": 0
+          },
+          "chat_model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The AI tagger's model, when it has one."
+          },
+          "clip_provider": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where its CLIP encoder runs, when this server uses it."
+          },
+          "connected_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix seconds."
+          },
+          "done": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Requests it has answered.",
+            "minimum": 0
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string",
+            "description": "The worker's machine."
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why part of it is not used (a different CLIP model)."
+          },
+          "user": {
+            "type": "string",
+            "description": "The user whose session it uses."
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "WorkerToken": {
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "A new session of the signed-in user, for `stl-server worker`\n(`STL_WORKER_TOKEN`). Signing out elsewhere does not end it."
+          }
+        }
+      },
+      "WorkersStatus": {
+        "type": "object",
+        "required": [
+          "compute",
+          "workers"
+        ],
+        "properties": {
+          "compute": {
+            "type": "string",
+            "description": "`local` or `workers` (see `server.json` → `compute`)."
+          },
+          "workers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkerInfo"
+            }
           }
         }
       }

@@ -1059,9 +1059,13 @@ impl Host for ServerHost<'_> {
                 Some(r) => Response::Thumbnail(r.thumbnail(&data, self.max_thumb_size)),
                 None => Response::None,
             },
-            Request::Embed(images) => match self.lib.tools.embedder(config) {
-                Some(e) => Response::Vectors(e.embed(&images)),
-                None => Response::None,
+            Request::Embed(images) => match self.lib.embed(&images) {
+                Ok(Some(v)) => Response::Vectors(v),
+                Ok(None) => Response::None,
+                Err(e) => {
+                    self.lib.job_log(self.job, format!("Warning: {e}"));
+                    Response::None
+                }
             },
             _ => Response::None,
         }
@@ -1226,7 +1230,7 @@ fn crawl_folder(
         sidecar_thumbnails: settings.sidecar_thumbnails(),
         warn: settings.checks(),
         presupport_patterns: patterns,
-        embed: settings.embed_during_crawl() && lib.tools.embedder(&lib.config).is_some(),
+        embed: settings.embed_during_crawl() && lib.can_embed(),
         log_unchanged: false,
         defer_missing_deletion,
         upsert: crawl_db::UpsertConfig {
@@ -1335,9 +1339,10 @@ fn prune_images(lib: &Library, job: &Job, keep: usize) -> Result<String, String>
 
 fn compute_embeddings(lib: &Library, job: &Job, all: bool) -> Result<String, String> {
     use stl_core::storage::vectors;
-    let embedder = lib.tools.embedder(&lib.config).ok_or_else(|| {
-        "CLIP embeddings are unavailable: the server needs ONNX Runtime and the CLIP model (see the server log)".to_string()
-    })?;
+    let log = |line: String| lib.job_log(job, line);
+    if !lib.wait_for_embedder(&job.ctl, &log)? {
+        return Ok("stopped".into());
+    }
     let orphans = lib.db.with_tx(vectors::prune_orphans).map_err(db_err)?;
     if orphans > 0 {
         lib.job_log(job, format!("Removed {orphans} embedding(s) of deleted images."));
@@ -1361,8 +1366,15 @@ fn compute_embeddings(lib: &Library, job: &Job, all: bool) -> Result<String, Str
         }
         let have: Vec<i64> = chunk.iter().map(|(i, _)| *i).filter(|i| thumbs.contains_key(i)).collect();
         let images: Vec<Vec<u8>> = have.iter().map(|i| thumbs.remove(i).unwrap_or_default()).collect();
-        let items: Vec<(i64, Vec<u8>)> =
-            have.iter().zip(embedder.embed(&images)).filter_map(|(&i, v)| v.map(|v| (i, v))).collect();
+        // A compute worker may leave mid-job: wait for another (or fail as at the start).
+        let vectors = loop {
+            match lib.embed(&images)? {
+                Some(v) => break v,
+                None if lib.wait_for_embedder(&job.ctl, &log)? => {}
+                None => return Ok(format!("stopped: {computed} computed, {skipped} skipped")),
+            }
+        };
+        let items: Vec<(i64, Vec<u8>)> = have.iter().zip(vectors).filter_map(|(&i, v)| v.map(|v| (i, v))).collect();
         let stored = lib.db.with_tx(|tx| vectors::store(tx, dim, &items)).map_err(db_err)?;
         computed += stored;
         skipped += chunk.len() - stored;

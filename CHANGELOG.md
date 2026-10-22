@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026.43.5 — 2026-10-22
+
+- **Compute workers.** A server without a GPU can hand CLIP embeddings and the AI tagger
+  to a computer with one: in the desktop app, *Maintenance → Compute workers → Use this
+  computer for AI* runs `stl-server worker` on that computer, which connects to the server
+  (outbound WebSocket `/api/workers/connect`) and computes with the local library folder's
+  components (DirectML / CUDA). Jobs, review and the database stay on the server. The switch
+  is remembered per server. A worker's CLIP encoder is used only when it is the library's
+  model (by SHA-256). New `server.json` option `compute` (`STL_COMPUTE`): `local` (default:
+  a connected worker, else the server's own components) or `workers` (the server never runs
+  the models: jobs wait for a worker, crawls skip embeddings). New routes `GET /api/workers`,
+  `POST /api/workers/token` (editors), `GET /api/workers/connect`; new command
+  `stl-server worker`; the desktop shell's server pages may call `start_worker`,
+  `stop_worker` and `worker_state`. On an RTX 3070 a worker embedded 6 images 12 s after
+  starting (mostly loading and hashing the encoder) and tagged a model in 35 s (including
+  loading the model).
+
 ## 2026.43.4 — 2026-10-22
 
 - **CLIP embeddings on the GPU.** The CLIP encoder now runs on a GPU when the ONNX Runtime

@@ -16,8 +16,8 @@ use stl_core::control::Control;
 use stl_core::storage::model_edit::{AiFields, AiInputs};
 use utoipa::ToSchema;
 
-use crate::Library;
 use crate::library_settings::LibrarySettings;
+use crate::{Config, Library};
 
 /// The desktop's model files (`app/utils/ai_runtime.py`).
 pub const MODEL_FILE: &str = "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf";
@@ -44,6 +44,15 @@ pub struct AiConfig {
     pub mmproj: Option<String>,
     /// Layers to offload to the GPU (`-ngl`); default: all for a CUDA install.
     pub gpu_layers: Option<u32>,
+}
+
+/// One question for the model.
+#[derive(Debug, Clone, Copy)]
+pub struct Prompt<'a> {
+    pub images: &'a [Vec<u8>],
+    pub text: &'a str,
+    pub max_tokens: u32,
+    pub temperature: f64,
 }
 
 /// What the AI tagger can use.
@@ -106,9 +115,9 @@ pub(crate) fn find_exe(dir: &Path) -> Option<PathBuf> {
     None
 }
 
-fn launch_spec(lib: &Library) -> Result<Launch, String> {
-    let cfg = &lib.config.ai;
-    let ai_dir = lib.config.data_dir.join("ai");
+fn launch_spec(config: &Config) -> Result<Launch, String> {
+    let cfg = &config.ai;
+    let ai_dir = config.data_dir.join("ai");
     let exe = match &cfg.llama_server {
         Some(p) => PathBuf::from(p),
         None => find_exe(&ai_dir.join("bin")).ok_or_else(|| {
@@ -136,21 +145,21 @@ fn free_port() -> Result<u16, String> {
 }
 
 impl AiRuntime {
-    pub fn status(&self, lib: &Library) -> AiStatus {
+    pub fn status(&self, config: &Config) -> AiStatus {
         let running = self.running.lock().unwrap_or_else(|e| e.into_inner()).is_some();
-        if let Some(url) = &lib.config.ai.url {
+        if let Some(url) = &config.ai.url {
             return AiStatus { available: true, running: false, model: MODEL_LABEL.into(), detail: format!("using {url}") };
         }
-        match launch_spec(lib) {
+        match launch_spec(config) {
             Ok(l) => AiStatus { available: true, running, model: MODEL_LABEL.into(), detail: format!("{}", l.exe.display()) },
             Err(e) => AiStatus { available: false, running, model: MODEL_LABEL.into(), detail: e },
         }
     }
 
     /// The base URL of a ready model server, starting one when needed.
-    fn ensure(self: &Arc<Self>, lib: &Library, ctl: &Control, log: &dyn Fn(String)) -> Result<String, String> {
+    fn ensure(self: &Arc<Self>, config: &Config, ctl: &Control, log: &dyn Fn(String)) -> Result<String, String> {
         *self.last_used.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
-        if let Some(url) = &lib.config.ai.url {
+        if let Some(url) = &config.ai.url {
             return Ok(url.trim_end_matches('/').to_string());
         }
         let mut guard = self.running.lock().unwrap_or_else(|e| e.into_inner());
@@ -160,7 +169,7 @@ impl AiRuntime {
             }
             *guard = None; // it exited
         }
-        let spec = launch_spec(lib)?;
+        let spec = launch_spec(config)?;
         let port = free_port()?;
         let mut cmd = Command::new(&spec.exe);
         cmd.arg("-m").arg(&spec.model).arg("--mmproj").arg(&spec.mmproj);
@@ -234,6 +243,20 @@ impl AiRuntime {
     /// Stop a started model server (a restart after corrupted output).
     fn restart(&self) {
         *self.running.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    /// One answer from the model (started when needed): output that looks
+    /// corrupted restarts a started model server and is asked for once more.
+    pub fn ask(self: &Arc<Self>, config: &Config, ctl: &Control, log: &dyn Fn(String), p: Prompt) -> Result<String, String> {
+        let base = self.ensure(config, ctl, log)?;
+        let reply = self.chat(&base, p.images, p.text, p.max_tokens, p.temperature)?;
+        if stl_core::ai_tagging::is_corrupted_output(&reply) && config.ai.url.is_none() {
+            log("The model is in a bad state: reloading it…".into());
+            self.restart();
+            let base = self.ensure(config, ctl, log)?;
+            return self.chat(&base, p.images, p.text, p.max_tokens, p.temperature);
+        }
+        Ok(reply)
     }
 
     /// `chat`: images and a prompt in, the reply text out.
@@ -372,17 +395,13 @@ pub fn suggest(lib: &Library, ctl: &Control, log: &dyn Fn(String), model_id: i64
     let temperature = LibrarySettings::load(&lib.config.data_dir).ai_temperature();
     let title = inputs.title.clone().filter(|t| !t.is_empty()).unwrap_or_else(|| stl_core::rules::MemberPath::new(&inputs.archive_path).stem().to_string());
 
-    let rt = &lib.ai;
-    let ask = |prompt: &str, max_tokens: u32| -> Result<String, String> {
-        let base = rt.ensure(lib, ctl, log)?;
-        let reply = rt.chat(&base, &images, prompt, max_tokens, temperature)?;
-        if T::is_corrupted_output(&reply) && lib.config.ai.url.is_none() {
-            log("The model is in a bad state: reloading it…".into());
-            rt.restart();
-            let base = rt.ensure(lib, ctl, log)?;
-            return rt.chat(&base, &images, prompt, max_tokens, temperature);
+    // A compute worker when there is one (see `workers`), else this server's model.
+    let ask = |text: &str, max_tokens: u32| -> Result<String, String> {
+        let p = Prompt { images: &images, text, max_tokens, temperature };
+        match lib.workers.chat(lib.config.compute, ctl, log, p) {
+            Some(reply) => reply,
+            None => lib.ai.ask(&lib.config, ctl, log, p),
         }
-        Ok(reply)
     };
     log(format!("{title}: generating tags…"));
     let raw_tags = ask(&T::build_tags_prompt(&stems, &inputs.archive_path, &known), 120)?;

@@ -38,6 +38,20 @@ pub struct Config {
     /// A base URL that serves the downloadable components' files by name,
     /// instead of their own sources (an offline mirror; see `components`).
     pub components_mirror: Option<String>,
+    /// Where CLIP embeddings and the AI tagger run (see `workers`).
+    pub compute: Compute,
+}
+
+/// `server.json` → `"compute"` (or `STL_COMPUTE`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Compute {
+    /// A connected compute worker when there is one, else this server's own
+    /// ONNX Runtime and `llama-server`.
+    #[default]
+    Local,
+    /// Only compute workers: jobs wait for one, crawls skip embeddings.
+    Workers,
 }
 
 /// A server path prefix and how clients reach it (`"D:/STL"` → `"\\nas\stl"`).
@@ -64,6 +78,8 @@ struct FileSettings {
     #[serde(default)]
     ai: crate::ai::AiConfig,
     components_mirror: Option<String>,
+    #[serde(default)]
+    compute: Compute,
 }
 
 impl Config {
@@ -123,6 +139,12 @@ impl Config {
         if let Some(url) = env("STL_AI_URL").filter(|u| !u.is_empty()) {
             ai.url = Some(url);
         }
+        let compute = match env("STL_COMPUTE").as_deref() {
+            None | Some("") => file.compute,
+            Some("local") => Compute::Local,
+            Some("workers") => Compute::Workers,
+            Some(other) => return Err(format!("STL_COMPUTE={other:?}: use local or workers")),
+        };
         Ok(Config {
             data_dir,
             bind,
@@ -134,6 +156,7 @@ impl Config {
             web_dir: env("STL_WEB_DIR").or(file.web_dir),
             ai,
             components_mirror: file.components_mirror,
+            compute,
         })
     }
 }

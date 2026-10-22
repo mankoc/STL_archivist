@@ -1,6 +1,7 @@
 // The stlLibrary desktop shell (rust/stl-desktop): when the web client runs in
-// its window, the shell lets this page show folders in the file manager. That
-// is the only shell command a server's page may call.
+// its window, the shell lets this page show folders in the file manager and run
+// a compute worker for this server. Those are the only shell commands a
+// server's page may call.
 
 type Invoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
@@ -20,3 +21,26 @@ export async function openFolder(path: string): Promise<void> {
   if (!invoke) throw new Error("only the desktop app can open folders");
   await invoke("open_folder", { path });
 }
+
+/** The desktop app's compute worker, as this server's page sees it. */
+export interface WorkerState {
+  /** A worker runs for this server. */
+  running: boolean;
+  /** The server a worker runs for, when it is another one. */
+  other_server: string | null;
+  /** Where its CLIP encoder and AI model come from. */
+  data_dir: string;
+  /** Why it stopped (exit status and last log lines), when it did. */
+  stopped: string | null;
+}
+
+async function workerCall(cmd: string, args?: Record<string, unknown>): Promise<WorkerState> {
+  const invoke = shellInvoke();
+  if (!invoke) throw new Error("only the desktop app can run a compute worker");
+  return (await invoke(cmd, args)) as WorkerState;
+}
+
+export const workerState = () => workerCall("worker_state");
+/** Run a worker for this server with `token` (from `POST /api/workers/token`). */
+export const startWorker = (token: string) => workerCall("start_worker", { token });
+export const stopWorker = () => workerCall("stop_worker");

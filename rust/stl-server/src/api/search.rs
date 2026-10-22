@@ -113,15 +113,13 @@ pub async fn by_image(
         "clip" => {
             let threshold = q.threshold.unwrap_or(0.85);
             lib.run(move |lib| {
-                let embedder = lib
-                    .tools
-                    .embedder(&lib.config)
-                    .ok_or_else(|| ApiError::bad_request("AI embeddings are unavailable on this server"))?;
-                let vector = embedder
-                    .embed(&[image])
-                    .pop()
-                    .flatten()
-                    .ok_or_else(|| ApiError::bad_request("not a readable image"))?;
+                let vectors = lib.embed(&[image]).map_err(ApiError::internal)?.ok_or_else(|| {
+                    ApiError::bad_request(match lib.config.compute {
+                        crate::config::Compute::Workers => "AI embeddings run on a compute worker, and none is connected",
+                        crate::config::Compute::Local => "AI embeddings are unavailable on this server",
+                    })
+                })?;
+                let vector = vectors.into_iter().next().flatten().ok_or_else(|| ApiError::bad_request("not a readable image"))?;
                 let (found, capped) = lib.db.with(|c| vectors::find_similar_models(c, &vector, threshold, MAX_RESULT_IMAGES))?;
                 Ok(SearchResult { method: "clip".into(), matches: with_thumbnails(lib, found)?, capped, outdated: 0 })
             })
