@@ -20,6 +20,7 @@ pub mod views;
 pub mod system;
 pub mod thumbs;
 pub mod users;
+pub mod workers;
 
 use axum::Json;
 use axum::Router;
@@ -110,6 +111,9 @@ use crate::AppState;
         stats::library,
         stats::column,
         search::by_image,
+        workers::list,
+        workers::token,
+        workers::connect,
     ),
     components(schemas(crate::error::ErrorBody)),
     modifiers(&OperationIds)
@@ -207,6 +211,9 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/stats/library", get(stats::library))
         .route("/api/stats/column", get(stats::column))
         .route("/api/search/image", post(search::by_image))
+        .route("/api/workers", get(workers::list))
+        .route("/api/workers/token", post(workers::token))
+        .route("/api/workers/connect", get(workers::connect))
         .route("/api/openapi.json", get(openapi))
         .layer(middleware::from_fn_with_state(state, announce_changes))
 }

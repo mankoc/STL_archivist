@@ -14,7 +14,7 @@ use crate::{ApiError, AppState};
 /// Whether the AI tagger can run, and with what.
 #[utoipa::path(get, path = "/api/ai/status", tag = "ai", responses((status = 200, body = AiStatus)))]
 pub async fn status(State(lib): State<AppState>, _me: CurrentUser) -> Result<Json<AiStatus>, ApiError> {
-    Ok(Json(lib.run(|lib| Ok::<_, ApiError>(lib.ai.status(lib))).await?))
+    Ok(Json(lib.run(|lib| Ok::<_, ApiError>(crate::workers::ai_status(lib))).await?))
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

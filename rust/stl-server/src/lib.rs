@@ -20,6 +20,8 @@ pub mod library_settings;
 pub mod maint;
 pub mod sidecars;
 pub mod tools;
+pub mod worker;
+pub mod workers;
 
 use std::sync::Arc;
 
@@ -42,6 +44,8 @@ pub struct Library {
     pub jobs: jobs::Jobs,
     pub tools: tools::Tools,
     pub ai: Arc<ai::AiRuntime>,
+    /// Connected compute workers (see `workers`).
+    pub workers: workers::Workers,
     _lock: LibraryLock,
 }
 
@@ -71,6 +75,7 @@ impl Library {
             jobs: jobs::Jobs::default(),
             tools: tools::Tools::default(),
             ai: Arc::default(),
+            workers: workers::Workers::default(),
             config,
             _lock: lock,
         })

@@ -100,6 +100,11 @@ stl_database/
 - **AI tagger:** `ai.rs` runs `llama-server` as a child (never link llama.cpp) or uses
   `ai.url`; text handling is `stl_core::ai_tagging` (a port of the old Python
   `ai_tagging.py`, kept faithful: Python `str.split`/`splitlines` semantics).
+- **Compute workers:** `workers.rs` (the hub: `/api/workers/connect`, a WebSocket of
+  `ToServer`/`ToWorker` JSON) and `worker.rs` (`stl-server worker`, the client; opens no
+  library). Embeddings go through `Library::embed` / `can_embed` / `wait_for_embedder`, the
+  tagger's model through `workers.chat` then `ai.ask`; never call `tools.embedder` directly
+  for library work. `compute: workers` (`Config::compute`) means jobs wait, crawls skip.
 - **Backups:** `stl_core::backup` (the old desktop layout); restoring is the offline
   `stl-server restore` command (it takes the library lock). Never replace the database of an
   open library.
@@ -121,7 +126,9 @@ conveniences (wrap it in try/catch). Pages are hash routes (`shell/route.ts`).
 
 No library logic and no data commands. New commands go into `build.rs`'s app manifest; the
 launcher capability (`capabilities/launcher.json`) lists what the bundled page may call, and
-server origins get only `allow-open-folder` (runtime capability in `grant`). Installer
+server origins get only `SERVER_PERMISSIONS` (`open_folder` and the compute worker's
+`start_worker` / `stop_worker` / `worker_state`; runtime capability in `grant`). The worker
+commands act for the calling page's origin only. Installer
 settings are in `tauri.bundle.json`, merged only by `cargo tauri build --config …`, so plain
 builds need neither the web client nor the server built.
 

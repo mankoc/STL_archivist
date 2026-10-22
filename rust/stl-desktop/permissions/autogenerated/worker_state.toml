@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-worker-state"
+description = "Enables the worker_state command without any pre-configured scope."
+commands.allow = ["worker_state"]
+
+[[permission]]
+identifier = "deny-worker-state"
+description = "Denies the worker_state command without any pre-configured scope."
+commands.deny = ["worker_state"]

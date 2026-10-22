@@ -7,6 +7,9 @@
 //! `stl-server restore BACKUP.7z [--data-dir DIR]`: restore a backup (the server's or the
 //! desktop app's) into the data directory, with the library closed: the server and the
 //! desktop app must not be running. The replaced files go to `pre-restore-<stamp>`.
+//! `stl-server worker --server URL [--data-dir DIR] [--name NAME]`: compute CLIP
+//! embeddings and AI tags for a remote server (see `stl_server::worker`); it ends
+//! with exit code 2 when it cannot work (a refused token, nothing installed).
 
 use std::sync::Arc;
 
@@ -22,6 +25,13 @@ async fn main() {
     let result = match args.first().map(String::as_str) {
         Some("create-admin") => create_admin(&args[1..]),
         Some("restore") => restore(&args[1..]),
+        Some("worker") => {
+            if let Err(e) = stl_server::worker::run(&args[1..]).await {
+                tracing::error!("{e}");
+                std::process::exit(2);
+            }
+            Ok(())
+        }
         Some("openapi") => {
             print!("{}", stl_server::api::openapi_json());
             Ok(())

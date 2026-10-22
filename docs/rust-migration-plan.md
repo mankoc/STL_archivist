@@ -1331,6 +1331,13 @@ server (installer and Docker image) and the desktop shell.
   variants (Windows: CPU or DirectML from NuGet with DirectML 1.15.4, preloaded so the older
   System32 copy is not used; Linux: CPU or the CUDA build), like the AI runtime; install jobs
   take `variants` (component → variant) instead of `variant`.
+- 2026.43.5 added compute workers (`stl-server/src/workers.rs`, `worker.rs`): a desktop app
+  on a GPU machine runs `stl-server worker`, which connects out to the server and answers
+  its `embed` and `chat` requests; the server keeps jobs and data. Embeddings everywhere go
+  through `Library::embed`, the tagger through `Workers::chat` before `AiRuntime::ask`
+  (`ai.rs` now takes a `Config`, so the worker needs no library). `compute: workers` makes
+  the server wait for a worker instead of computing. The desktop shell gained the worker
+  commands for server pages (only for the calling origin).
 - 2026.43.4 also fixed crawling on Linux: the crawler, rescans and sidecars built paths with
   `\` (the Windows spelling the old app stored), so a Linux server never entered subfolders.
   `winpath::{SEP, native, join}` now spell paths with the platform's separator; Windows keeps

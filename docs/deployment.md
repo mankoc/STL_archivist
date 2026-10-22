@@ -232,6 +232,7 @@ the command line (later wins).
 | `components_mirror` | | | official sources | base URL serving the component downloads by file name |
 | `web_dir` | `STL_WEB_DIR` | | `web/` beside the server | The built web client |
 | `ai` | `STL_AI_URL` (for `ai.url`) | | `<data dir>/ai` | AI tagger model server, see below |
+| `compute` | `STL_COMPUTE` | | `local` | `workers`: CLIP and the AI tagger run only on compute workers, see below |
 | | `STL_LOG` | | `info` | Log detail (`error`, `warn`, `info`, `debug`) |
 
 ¹ Windows `%LOCALAPPDATA%\stlLibrary`, Linux `$XDG_DATA_HOME/stlLibrary` (usually
@@ -249,6 +250,8 @@ Other command-line commands:
 stl-server create-admin NAME [--data-dir DIR]     first administrator (no users yet)
 stl-server restore FILE.7z [--data-dir DIR]        restore a backup (server stopped)
 stl-server openapi                                 print the API description
+stl-server worker --server URL [--data-dir DIR]    compute worker for a remote server (token in
+                                                   STL_WORKER_TOKEN; the desktop app starts it)
 ```
 
 The API is described at `/api/openapi.json` on a running server.
@@ -327,6 +330,38 @@ The server starts `llama-server` on the first request (loading takes from second
 to a minute or two on a CPU), and stops it after ten idle minutes or when it stops. To use a
 model server that is already running (any OpenAI-compatible endpoint with vision), set
 `{"ai": {"url": "http://127.0.0.1:8080"}}` instead.
+
+### Compute workers: AI on another machine
+
+A server on a small machine (a NAS, a mini PC without a GPU) can hand CLIP embeddings and the
+AI tagger to a computer that has one. On that computer, open the server in the desktop app,
+go to *Maintenance → Compute workers* and turn on **Use this computer for AI** (editors).
+The desktop app then runs `stl-server worker`, which connects to the server (out from the
+computer, over the same address and a WebSocket like the event stream, so it works behind
+NAT and through the reverse proxy), and does the work with the components of the computer's
+local library folder: install them there from that library's *Maintenance → AI and add-on
+components* (DirectML on Windows for CLIP; the CUDA AI runtime for an NVIDIA card). The
+switch is remembered: the worker starts again whenever the app connects to that server, and
+stops when the app closes. The card lists the connected workers, what each does, and how
+many requests it answered.
+
+Jobs, progress, the review of suggestions and the database stay on the server; only images
+and prompts travel to the worker, and vectors and replies come back. A worker's CLIP encoder
+is used only when it is the same model as the library's (the downloaded encoder, or the
+server's own file, by SHA-256): vectors of another model would not match.
+
+With a worker connected, the server always uses it. Without one, it depends on `compute`:
+
+- `local` (default): the server's own ONNX Runtime and `llama-server`, when it has them.
+- `workers` (`"compute": "workers"` in `server.json`, or `STL_COMPUTE=workers` for Docker):
+  the server never runs the models itself. *Compute embeddings* and the AI tagger wait for a
+  worker (and finish when one connects), crawls skip embeddings (compute them later), and
+  *Find by Image* by AI similarity asks for a worker.
+
+The worker's session is a new session of the user who turned it on, stored by the desktop
+app (`servers.json` in its configuration folder); disabling that user, or turning the switch
+off, ends it. Behind a reverse proxy, WebSocket upgrades must be passed on (they already are
+for the event stream).
 
 ## Users and roles
 

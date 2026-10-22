@@ -66,6 +66,8 @@ const QWEN: &str = "https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/
 const ORT: &str = "https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/";
 const ORT_DML: &str = "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime.directml/1.22.0/";
 const DIRECTML: &str = "https://api.nuget.org/v3-flatcontainer/microsoft.ai.directml/1.15.4/";
+/// SHA-256 of the CLIP encoder the server downloads (compute workers' must match).
+pub const CLIP_SHA256: &str = "fd6e1402a588279d1723c7534d4bcba5bc0b14b47dfab0e46f8c47b8270d7d40";
 const PDFIUM: &str = "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F7881/";
 
 macro_rules! asset {
@@ -133,7 +135,7 @@ pub fn assets(id: &str, variant: &str) -> Vec<Asset> {
         "clip_model" if windows || linux => vec![Asset {
             file: "vision_model.onnx",
             url: "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/d15189d7028b43f1d3e65039190477f6af591c2a/onnx/vision_model.onnx".into(),
-            sha256: "fd6e1402a588279d1723c7534d4bcba5bc0b14b47dfab0e46f8c47b8270d7d40",
+            sha256: CLIP_SHA256,
             size: 351_685_709,
             unpack: Unpack::File,
             to: "models/clip_image_encoder.onnx",
