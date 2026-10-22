@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026.43.4 — 2026-10-22
+
+- **CLIP embeddings on the GPU.** The CLIP encoder now runs on a GPU when the ONNX Runtime
+  build supports one, and falls back to the CPU: DirectML on Windows (any DirectX 12 GPU),
+  and on Linux the provider for the GPUs found in sysfs (CUDA for NVIDIA, MIGraphX or ROCm
+  for AMD, OpenVINO for Intel). On an RTX 3070, embedding is about 8× faster, with the same
+  vectors. The log and the components card show where it runs.
+- **ONNX Runtime variants.** *Maintenance → AI and add-on components* offers ONNX Runtime as
+  CPU or DirectML on Windows (the DirectML build and DirectML 1.15.4 from NuGet) and CPU or
+  CUDA on Linux (the `onnxruntime-linux-x64-gpu` build; CUDA 12 and cuDNN 9 come from the
+  system). Each component with variants has its own choice; the defaults follow the GPUs
+  found (shown on the card). Switching variants replaces the installed files.
+- API: `ComponentStatus` gains `variants` and `default_variant`; `ComponentsInfo` replaces
+  `variants` and `nvidia_gpu` with `gpus` and `clip_provider`; `install_components` takes
+  `variants` (component → variant) instead of `variant`.
+- **Fixed: crawls on Linux found nothing in subfolders.** The crawler joined paths with `\`,
+  as on Windows, so on a Linux server (or in Docker) `/library/Creator` + `Model` became the
+  file name `Creator\Model`; every subfolder was skipped and a crawl reported `Found 0
+  archives`. Paths now use the platform's separator (`\` on Windows as before, `/`
+  elsewhere) when listing archives, reading folder images and `.url` files, and writing or
+  matching `METADATA.7z` sidecars. Archives found directly in a crawled folder before the fix
+  were stored with a `\` in their path; the next crawl finds them again and treats them as
+  moved (same hash), keeping their data.
+
 ## 2026.43.3 — 2026-10-22
 
 - **Docker build fixed.** The image built with Rust 1.92, but `sevenz-rust2` 0.24 needs 1.93,

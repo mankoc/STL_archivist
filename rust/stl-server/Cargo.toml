@@ -16,7 +16,7 @@ argon2 = "0.5.3"
 axum = { version = "0.8.9", features = ["multipart", "ws"] }
 heed = "0.22.1"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
-ort = { version = "=2.0.0-rc.14", default-features = false, features = ["std", "load-dynamic", "api-17"] }
+ort = { version = "=2.0.0-rc.14", default-features = false, features = ["std", "load-dynamic", "api-17", "directml", "cuda", "migraphx", "rocm", "openvino"] }
 pdfium-render = { version = "0.9.4", default-features = false, features = ["pdfium_7881", "image_025", "thread_safe"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
 rusqlite = "0.40.2"

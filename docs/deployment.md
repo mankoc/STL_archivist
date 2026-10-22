@@ -154,6 +154,9 @@ docker exec -it stl stl-server create-admin admin
 Mount the archives read-only (`:ro`) if you do not want sidecars, sorting or deletion. Paths
 inside the container are what the library records: crawl `/library/...`. UnRAR is not
 included (it is not free software); add it in a derived image and set `STL_UNRAR_PATH`.
+The image's ONNX Runtime is the CPU build; for CLIP on an NVIDIA GPU, derive an image with
+CUDA 12, cuDNN 9 and the `onnxruntime-linux-x64-gpu` build (`ORT_DYLIB_PATH` pointing at it),
+and run it with `--gpus all` (NVIDIA Container Toolkit).
 
 ## Option D: a Windows server
 
@@ -258,8 +261,13 @@ which downloads pinned versions from their official sources into the data direct
 checks each file's SHA-256: llama.cpp build b9789 (`ai/bin/`; CPU, or CUDA 12.4 with its
 runtime on Windows — Linux gets the CPU build), the Qwen2.5-VL model (`ai/models/`), the CLIP
 encoder (`models/clip_image_encoder.onnx`, exported from `openai/clip-vit-base-patch32` by
-Xenova/clip-vit-base-patch32), ONNX Runtime 1.22.0 and pdfium 7881 (the data directory). The
-server needs outbound HTTPS to github.com and huggingface.co for this; set
+Xenova/clip-vit-base-patch32), ONNX Runtime 1.22.0 (the data directory; CPU, DirectML on
+Windows with DirectML 1.15.4 beside it, or CUDA on Linux) and pdfium 7881 (the data
+directory). The page shows the GPUs found (Linux: the PCI display devices in sysfs; Windows:
+an NVIDIA driver) and offers CUDA for an NVIDIA card and DirectML on Windows by default;
+choosing another variant of an installed component replaces it (restart the server if ONNX
+Runtime was already loaded). The server needs outbound HTTPS to github.com, huggingface.co
+and api.nuget.org (DirectML) for this; set
 `"components_mirror": "https://mirror.example/stl/"` in `server.json` to fetch the same file
 names from your own mirror instead. Components the configuration points elsewhere are left
 alone. Installing manually works as described below.
@@ -283,6 +291,21 @@ curl -L -o <data dir>/models/clip_image_encoder.onnx \
 
 Then run *Maintenance → Compute missing embeddings* once; new crawls embed their thumbnails
 when *compute embeddings during crawl* is on in the library settings.
+
+The encoder runs on a GPU when the loaded ONNX Runtime supports one for the GPUs found, and
+falls back to the CPU otherwise (the log says `CLIP encoder runs on …`, and the components
+card shows it once the encoder is loaded):
+
+| Platform | GPU | ONNX Runtime build | Also needs |
+|---|---|---|---|
+| Windows | any DirectX 12 GPU | DirectML (`Microsoft.ML.OnnxRuntime.DirectML`) | `DirectML.dll` 1.15+ beside `onnxruntime.dll` |
+| Linux | NVIDIA | `onnxruntime-linux-x64-gpu` (its `libonnxruntime_providers_*.so` beside it) | CUDA 12 and cuDNN 9 on the library path |
+| Linux | AMD | a MIGraphX or ROCm build (AMD's packages) | ROCm |
+| Linux | Intel | an OpenVINO build (Intel's packages) | OpenVINO, the GPU driver |
+
+Only the first two are downloaded by the server; point `"onnxruntime"` at a vendor build for
+the others. On a GPU, embeddings are several times faster (an RTX 3070 with DirectML: about
+2 ms per image, against 18 ms on the CPU) and give the same vectors.
 
 **AI tagger:** llama.cpp's `llama-server`
 ([releases](https://github.com/ggml-org/llama.cpp/releases): a CPU build, or CUDA for an

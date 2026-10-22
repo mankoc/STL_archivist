@@ -47,7 +47,11 @@ async fn status_install_and_remove() {
     }
     assert_eq!(state_of(&v, "pdfium"), "missing");
     assert!(v["components"][1]["sizes"][0]["bytes"].as_u64().unwrap() > 3_000_000_000, "the model is over 3 GB");
-    assert_eq!(v["variants"][0], "cpu");
+    assert_eq!(v["components"][0]["variants"][0], "cpu");
+    let onnx = &v["components"][3];
+    assert_eq!(onnx["variants"].as_array().unwrap().len(), 2, "{onnx}");
+    assert!(onnx["sizes"][1]["bytes"].as_u64().unwrap() > 200_000_000, "the GPU build is the larger one");
+    assert!(v["gpus"].is_array() && v["clip_provider"].is_null());
 
     // An installed component is not downloaded again, and can be removed.
     let pdfium = lib.dir.path().join(format!("{}pdfium{}", std::env::consts::DLL_PREFIX, std::env::consts::DLL_SUFFIX));
@@ -65,7 +69,8 @@ async fn status_install_and_remove() {
     for bad in [
         json!({"kind": "install_components", "components": ["everything"]}),
         json!({"kind": "install_components", "components": []}),
-        json!({"kind": "install_components", "components": ["ai_runtime"], "variant": "metal"}),
+        json!({"kind": "install_components", "components": ["ai_runtime"], "variants": {"ai_runtime": "metal"}}),
+        json!({"kind": "install_components", "components": ["pdfium"], "variants": {"pdfium": "cuda"}}),
         json!({"kind": "remove_components", "components": ["../x"]}),
     ] {
         let r = call(&lib.state, "POST", "/api/jobs", Some(&admin), Some(bad.clone())).await;

@@ -95,9 +95,35 @@ impl WinPath {
     }
 }
 
+/// The separator of the paths the library stores and opens: `\` on Windows
+/// (as the PyQt app stored them), `/` elsewhere.
+pub const SEP: char = if cfg!(windows) { '\\' } else { '/' };
+
+/// A `/`-form path (as [`WinPath::as_posix`] gives) spelled with [`SEP`].
+pub fn native(posix: &str) -> String {
+    if cfg!(windows) { posix.replace('/', "\\") } else { posix.to_string() }
+}
+
+/// `str(Path(dir) / name)` for a plain file name, with [`SEP`].
+pub fn join(dir: &str, name: &str) -> String {
+    if dir.ends_with('\\') || dir.ends_with('/') { format!("{dir}{name}") } else { format!("{dir}{SEP}{name}") }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_spelling() {
+        if cfg!(windows) {
+            assert_eq!(join("F:\\STL", "a.zip"), "F:\\STL\\a.zip");
+            assert_eq!(native("F:/STL/a"), "F:\\STL\\a");
+        } else {
+            assert_eq!(join("/library/08 - Gambody", "Model"), "/library/08 - Gambody/Model");
+            assert_eq!(native("/library/a"), "/library/a");
+        }
+        assert_eq!(join("F:/", "a.zip"), "F:/a.zip");
+    }
 
     #[test]
     fn matches_windows_pathlib() {

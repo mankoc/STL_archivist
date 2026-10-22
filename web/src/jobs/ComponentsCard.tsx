@@ -7,8 +7,10 @@ import { useEffect, useMemo, useState } from "react";
 
 import { api, unwrap } from "../api/client";
 import { formatSize } from "../format";
-import { defaultVariant, installable, NEEDS_ACCEPTANCE, sizeOf, totalBytes } from "./components";
+import { defaultVariants, installable, NEEDS_ACCEPTANCE, sizeOf, totalBytes, variantLabel } from "./components";
 import type { Job, JobRequest } from "./jobs";
+
+const GPU: Record<string, string> = { nvidia: "NVIDIA", amd: "AMD", intel: "Intel" };
 
 const STATE: Record<string, [string, string]> = {
   installed: ["green", "installed"],
@@ -27,17 +29,17 @@ export function ComponentsCard({ jobs, start }: { jobs: Job[] | undefined; start
     queryFn: async () => unwrap(await api.GET("/api/components")),
   });
   const info = status.data;
-  const [variant, setVariant] = useState<string | null>(null);
+  const [variants, setVariants] = useState<Record<string, string> | null>(null);
   const [chosen, setChosen] = useState<string[]>([]);
   const [accepted, setAccepted] = useState(false);
   useEffect(() => {
-    if (info && variant == null) setVariant(defaultVariant(info));
-  }, [info, variant]);
-  const v = variant ?? "cpu";
+    if (info && variants == null) setVariants(defaultVariants(info));
+  }, [info, variants]);
+  const vs = useMemo(() => variants ?? {}, [variants]);
   const components = useMemo(() => info?.components ?? [], [info]);
-  const toInstall = chosen.filter((id) => components.some((c) => c.id === id && installable(c, v)));
+  const toInstall = chosen.filter((id) => components.some((c) => c.id === id && installable(c, vs[id])));
   const toRemove = chosen.filter((id) => components.some((c) => c.id === id && c.state === "installed"));
-  const total = totalBytes(components, chosen, v);
+  const total = totalBytes(components, chosen, vs);
   const needsLicence = toInstall.some((id) => NEEDS_ACCEPTANCE.includes(id));
   const toggle = (id: string) => setChosen((c) => (c.includes(id) ? c.filter((x) => x !== id) : [...c, id]));
 
@@ -59,18 +61,15 @@ export function ComponentsCard({ jobs, start }: { jobs: Job[] | undefined; start
       <Text size="xs" c="dimmed" mb="xs">
         Downloaded into the library's folder, from their official sources, and checked before use.
       </Text>
-      {info.variants.length > 1 && (
-        <Group gap="xs" mb="xs">
-          <Text size="sm">AI tagger runtime:</Text>
-          <SegmentedControl size="xs" value={v} onChange={setVariant}
-            data={info.variants.map((x) => ({ value: x, label: x === "cuda" ? "NVIDIA GPU (CUDA)" : "CPU" }))} />
-          {info.nvidia_gpu && <Text size="xs" c="dimmed">NVIDIA GPU found</Text>}
-        </Group>
-      )}
+      <Text size="xs" c="dimmed" mb="xs" data-testid="gpus">
+        {info.gpus.length ? `GPU found: ${info.gpus.map((g) => GPU[g] ?? g).join(", ")}` : "No GPU detected"}
+        {info.clip_provider ? ` · CLIP encoder runs on ${info.clip_provider}` : ""}
+      </Text>
       <Table fz="sm" verticalSpacing={4}>
         <Table.Tbody>
           {components.map((c) => {
             const [color, label] = STATE[c.state] ?? ["gray", c.state];
+            const v = vs[c.id];
             const selectable = installable(c, v) || c.state === "installed";
             return (
               <Table.Tr key={c.id} data-testid="component-row">
@@ -83,11 +82,16 @@ export function ComponentsCard({ jobs, start }: { jobs: Job[] | undefined; start
                     {c.enables} · <Anchor href={c.license_url} target="_blank" size="xs">{c.license}</Anchor>
                     {c.state !== "missing" && c.detail ? ` · ${c.detail}` : ""}
                   </Text>
+                  {c.variants.length > 1 && c.state !== "external" && (
+                    <SegmentedControl size="xs" mt={4} value={v} data-testid={`variant-${c.id}`}
+                      onChange={(x) => setVariants({ ...vs, [c.id]: x })}
+                      data={c.variants.map((x) => ({ value: x, label: variantLabel(x) }))} />
+                  )}
                 </Table.Td>
                 <Table.Td w={90} ta="right">{formatSize(sizeOf(c, v))}</Table.Td>
                 <Table.Td w={150}>
                   <Badge size="sm" variant="light" color={color}>
-                    {label}{c.variant ? ` (${c.variant})` : ""}
+                    {label}{c.variant ? ` (${variantLabel(c.variant)})` : ""}
                   </Badge>
                 </Table.Td>
               </Table.Tr>
@@ -103,7 +107,12 @@ export function ComponentsCard({ jobs, start }: { jobs: Job[] | undefined; start
       )}
       <Group mt="xs" gap="xs">
         <Button size="xs" disabled={!toInstall.length || (needsLicence && !accepted)} data-testid="install-components"
-          onClick={() => { void start({ kind: "install_components", components: toInstall, variant: v }); setChosen([]); setAccepted(false); }}>
+          onClick={() => {
+            const picked = Object.fromEntries(toInstall.filter((id) => vs[id]).map((id) => [id, vs[id]]));
+            void start({ kind: "install_components", components: toInstall, variants: picked });
+            setChosen([]);
+            setAccepted(false);
+          }}>
           Download {toInstall.length ? `(${formatSize(total)})` : ""}
         </Button>
         <Button size="xs" variant="light" color="red" disabled={!toRemove.length}

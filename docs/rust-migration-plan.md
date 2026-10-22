@@ -1325,6 +1325,17 @@ server (installer and Docker image) and the desktop shell.
   encoder (Xenova's export of the same model, bit-identical to the old app's file), ONNX
   Runtime 1.22.0 and pdfium 7881, installed into the old layout (`ai/bin`, `ai/models`,
   `models/`, the data directory) as admin jobs with resumable downloads.
+- 2026.43.4 runs the CLIP encoder on a GPU: `ort` registers DirectML, CUDA, MIGraphX, ROCm
+  or OpenVINO (by the GPU vendors found in sysfs; DirectML on Windows) and falls back to the
+  CPU; vectors match the CPU's (cosine 0.9999995). ONNX Runtime became a component with
+  variants (Windows: CPU or DirectML from NuGet with DirectML 1.15.4, preloaded so the older
+  System32 copy is not used; Linux: CPU or the CUDA build), like the AI runtime; install jobs
+  take `variants` (component → variant) instead of `variant`.
+- 2026.43.4 also fixed crawling on Linux: the crawler, rescans and sidecars built paths with
+  `\` (the Windows spelling the old app stored), so a Linux server never entered subfolders.
+  `winpath::{SEP, native, join}` now spell paths with the platform's separator; Windows keeps
+  `\`, so stored paths stay as before. CI runs on Windows only, which is how this went
+  unnoticed.
 - `stl-core` keeps functions only the bindings used (golden-test helpers, the desktop's
   `LibraryDb` methods); they are harmless and some back server features.
 

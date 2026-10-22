@@ -5,26 +5,34 @@ import type { Schemas } from "../api/client";
 export type ComponentsInfo = Schemas["ComponentsInfo"];
 export type ComponentStatus = Schemas["ComponentStatus"];
 
-/** The AI runtime's variant to offer first: CUDA when an NVIDIA GPU is present. */
-export function defaultVariant(info: ComponentsInfo): string {
-  if (info.nvidia_gpu && info.variants.includes("cuda")) return "cuda";
-  return info.variants[0] ?? "cpu";
+/** The variant to offer per component with variants (the server's default for the GPUs found). */
+export function defaultVariants(info: ComponentsInfo): Record<string, string> {
+  return Object.fromEntries(
+    info.components.filter((c) => c.variants.length > 0).map((c) => [c.id, c.default_variant ?? c.variants[0]]),
+  );
 }
 
-/** Download size of a component (the AI runtime's in `variant`). */
-export function sizeOf(c: ComponentStatus, variant: string): number {
+/** How a variant is shown. */
+export function variantLabel(v: string): string {
+  return { cpu: "CPU", cuda: "NVIDIA GPU (CUDA)", directml: "GPU (DirectML)" }[v] ?? v;
+}
+
+/** Download size of a component in `variant` (ignored without variants). */
+export function sizeOf(c: ComponentStatus, variant: string | undefined): number {
   const s = c.sizes.find((x) => x.variant === variant) ?? c.sizes.find((x) => x.variant === "default") ?? c.sizes[0];
   return s?.bytes ?? 0;
 }
 
-/** Whether a component can be installed: missing, or the AI runtime in another variant. */
-export function installable(c: ComponentStatus, variant: string): boolean {
-  return c.state === "missing" || (c.id === "ai_runtime" && c.state === "installed" && c.variant !== variant);
+/** Whether a component can be installed: missing, or installed in another variant. */
+export function installable(c: ComponentStatus, variant: string | undefined): boolean {
+  return c.state === "missing" || (c.state === "installed" && c.variants.length > 0 && c.variant !== variant);
 }
 
-/** Total download of the chosen components. */
-export function totalBytes(components: ComponentStatus[], chosen: string[], variant: string): number {
-  return components.filter((c) => chosen.includes(c.id) && installable(c, variant)).reduce((sum, c) => sum + sizeOf(c, variant), 0);
+/** Total download of the chosen components, each in its variant. */
+export function totalBytes(components: ComponentStatus[], chosen: string[], variants: Record<string, string>): number {
+  return components
+    .filter((c) => chosen.includes(c.id) && installable(c, variants[c.id]))
+    .reduce((sum, c) => sum + sizeOf(c, variants[c.id]), 0);
 }
 
 /** Components whose licence must be accepted before downloading. */

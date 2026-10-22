@@ -1183,6 +1183,8 @@ export interface components {
         };
         /** @description One component as the Maintenance page shows it. */
         ComponentStatus: {
+            /** @description The variant to offer, from the GPUs found. */
+            default_variant?: string | null;
             /** @description Where it is, or why it is in that state. */
             detail: string;
             enables: string;
@@ -1197,22 +1199,30 @@ export interface components {
              *     here) or `unavailable` (no download for this platform).
              */
             state: string;
-            /** @description The AI runtime's installed variant (`cpu` / `cuda`). */
+            /** @description The installed variant. */
             variant?: string | null;
+            /** @description Its variants here (`cpu`, `cuda`, `directml`); empty when it has none. */
+            variants: string[];
         };
         ComponentsInfo: {
+            /**
+             * @description The execution provider of the loaded CLIP encoder (`CPU`, `CUDA`,
+             *     `DirectML`, …); null until it is first used.
+             */
+            clip_provider?: string | null;
             components: components["schemas"]["ComponentStatus"][];
             /**
              * Format: int64
              * @description Free space where the data directory is.
              */
             free_bytes?: number | null;
-            /** @description An NVIDIA driver is installed (the CUDA runtime is the better choice). */
-            nvidia_gpu: boolean;
+            /**
+             * @description GPU vendors found: `nvidia`, `amd`, `intel` (on Windows only `nvidia`
+             *     is detected).
+             */
+            gpus: string[];
             /** @description `windows-x64`, `linux-x64`, or null when nothing can be downloaded here. */
             platform?: string | null;
-            /** @description The AI runtime's variants here; the first is the default. */
-            variants: string[];
         };
         /** @description Two archives sharing STL files (name and size). */
         ContentRow: {
@@ -1607,7 +1617,9 @@ export interface components {
             components: string[];
             /** @enum {string} */
             kind: "install_components";
-            variant?: string | null;
+            variants?: {
+                [key: string]: string;
+            };
         } | {
             components: string[];
             /** @enum {string} */
