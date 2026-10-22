@@ -173,9 +173,7 @@ fn sort_paths(v: &mut [String]) {
 /// followed) or the folder's own archive files, sorted, without `METADATA.7z`.
 pub fn list_archives(root: &str, recurse: bool) -> Vec<String> {
     let mut out = Vec::new();
-    let join = |dir: &str, name: &str| {
-        if dir.ends_with('\\') || dir.ends_with('/') { format!("{dir}{name}") } else { format!("{dir}\\{name}") }
-    };
+    let join = crate::winpath::join;
     let mut stack = vec![root.to_string()];
     while let Some(dir) = stack.pop() {
         let Ok(rd) = std::fs::read_dir(&dir) else { continue };
@@ -428,14 +426,14 @@ fn folder_images(path: &str, cfg: &CrawlConfig, host: &dyn Host) -> Vec<(String,
         if metadata::win_relative_parts(&posix, &cfg.source_dir).is_none() {
             break;
         }
-        let dir = posix.replace('/', "\\");
+        let dir = crate::winpath::native(&posix);
         let mut files: Vec<String> = std::fs::read_dir(&dir)
             .map(|rd| {
                 rd.flatten()
                     .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
                     .map(|e| e.file_name().to_string_lossy().into_owned())
                     .filter(|n| rules::IMAGE_SUFFIXES.contains(&suffix_lower(n).as_str()))
-                    .map(|n| if dir.ends_with('\\') { format!("{dir}{n}") } else { format!("{dir}\\{n}") })
+                    .map(|n| crate::winpath::join(&dir, &n))
                     .collect()
             })
             .unwrap_or_default();
@@ -742,7 +740,7 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
             if host.should_stop() {
                 break;
             }
-            let folder = WinPath::new(p).parent().as_posix().replace('/', "\\");
+            let folder = crate::winpath::native(&WinPath::new(p).parent().as_posix());
             if !seen.insert(folder.clone()) || !Path::new(&folder).join(sidecar::METADATA_FILENAME).exists() {
                 continue;
             }
@@ -784,7 +782,7 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
 
     if !modified.is_empty() && cfg.sidecars && store.is_some() {
         run.log(format!("Updating METADATA.7z in {} folder(s)…", modified.len()));
-        let mut folders: Vec<String> = modified.into_iter().map(|f| f.replace('/', "\\")).collect();
+        let mut folders: Vec<String> = modified.into_iter().map(|f| crate::winpath::native(&f)).collect();
         sort_paths(&mut folders);
         for folder in folders {
             if host.should_stop() {
@@ -928,7 +926,7 @@ mod tests {
     #[test]
     fn listing_and_ordering() {
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().to_string_lossy().replace('/', "\\");
+        let root = crate::winpath::native(&dir.path().to_string_lossy());
         std::fs::create_dir_all(dir.path().join("B")).unwrap();
         for f in ["a.ZIP", "B/c.7z", "b.rar", "METADATA.7z", "x.txt", "B/METADATA.7z"] {
             std::fs::write(dir.path().join(f), b"x").unwrap();

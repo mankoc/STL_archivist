@@ -9,6 +9,7 @@
 //! failed install never leaves a half-installed component behind.
 
 use std::fs::{self, File};
+use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
 use std::path::{Component as PathPart, Path, PathBuf};
 use std::time::Duration;
@@ -29,10 +30,11 @@ pub enum Unpack {
     Zip,
     /// A `.tar.gz` extracted into the folder `to`, without its top `strip` folders.
     Tar { strip: usize },
-    /// One member of a zip, saved as `to`.
-    ZipPick(&'static str),
-    /// One member of a `.tar.gz`, saved as `to`.
-    TarPick(&'static str),
+    /// Members of a zip, each saved as its destination (relative to the data
+    /// directory; the first is `to`).
+    ZipPick(&'static [(&'static str, &'static str)]),
+    /// Members of a `.tar.gz`, as [`Unpack::ZipPick`].
+    TarPick(&'static [(&'static str, &'static str)]),
 }
 
 /// One file to download.
@@ -48,9 +50,22 @@ pub struct Asset {
     pub to: &'static str,
 }
 
+impl Asset {
+    /// The files it puts in the data directory (none for a folder).
+    fn outputs(&self) -> Vec<&'static str> {
+        match self.unpack {
+            Unpack::File => vec![self.to],
+            Unpack::ZipPick(m) | Unpack::TarPick(m) => m.iter().map(|(_, to)| *to).collect(),
+            Unpack::Zip | Unpack::Tar { .. } => Vec::new(),
+        }
+    }
+}
+
 const LLAMA: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b9789/";
 const QWEN: &str = "https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/resolve/5037fcf163dd95d1e41d1974465f0898ed108ca2/";
 const ORT: &str = "https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/";
+const ORT_DML: &str = "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime.directml/1.22.0/";
+const DIRECTML: &str = "https://api.nuget.org/v3-flatcontainer/microsoft.ai.directml/1.15.4/";
 const PDFIUM: &str = "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F7881/";
 
 macro_rules! asset {
@@ -71,16 +86,32 @@ pub fn platform() -> Option<&'static str> {
     }
 }
 
-/// The AI runtime's variants on this platform (the first is the default).
-pub fn variants() -> &'static [&'static str] {
-    match platform() {
-        Some("windows-x64") => &["cpu", "cuda"],
-        Some(_) => &["cpu"],
-        None => &[],
+/// A component's variants on this platform (empty: it has none).
+pub fn variants(id: &str) -> &'static [&'static str] {
+    match (id, platform()) {
+        ("ai_runtime", Some("windows-x64")) => &["cpu", "cuda"],
+        ("ai_runtime", Some(_)) => &["cpu"],
+        ("onnxruntime", Some("windows-x64")) => &["cpu", "directml"],
+        ("onnxruntime", Some(_)) => &["cpu", "cuda"],
+        _ => &[],
     }
 }
 
-/// The assets of a component on this platform (`variant` for the AI runtime).
+/// The variant to offer for a component given the GPUs found: CUDA for an
+/// NVIDIA card, DirectML on Windows (any DirectX 12 GPU), else the CPU.
+pub fn default_variant(id: &str, gpus: &[&str]) -> Option<&'static str> {
+    let vs = variants(id);
+    let pick = if gpus.contains(&"nvidia") && vs.contains(&"cuda") {
+        "cuda"
+    } else if vs.contains(&"directml") {
+        "directml"
+    } else {
+        "cpu"
+    };
+    vs.iter().copied().find(|v| *v == pick).or(vs.first().copied())
+}
+
+/// The assets of a component on this platform (in `variant`, for those with variants).
 pub fn assets(id: &str, variant: &str) -> Vec<Asset> {
     let windows = platform() == Some("windows-x64");
     let linux = platform() == Some("linux-x64");
@@ -107,21 +138,43 @@ pub fn assets(id: &str, variant: &str) -> Vec<Asset> {
             unpack: Unpack::File,
             to: "models/clip_image_encoder.onnx",
         }],
+        // DirectML: ONNX Runtime's DirectML build and the DirectML it was built
+        // against (newer than the one in System32; `tools` loads it first).
+        "onnxruntime" if windows && variant == "directml" => vec![
+            asset!(
+                ORT_DML, "microsoft.ml.onnxruntime.directml.1.22.0.nupkg", "29f9872d786236b79aa83f94482f3a17c14297e4833768d6d0ed4883ee732e60", 17_898_472,
+                Unpack::ZipPick(&[("runtimes/win-x64/native/onnxruntime.dll", "onnxruntime.dll")]), "onnxruntime.dll"
+            ),
+            asset!(
+                DIRECTML, "microsoft.ai.directml.1.15.4.nupkg", "4e7cb7ddce8cf837a7a75dc029209b520ca0101470fcdf275c1f49736a3615b9", 202_292_617,
+                Unpack::ZipPick(&[("bin/x64-win/DirectML.dll", "DirectML.dll")]), "DirectML.dll"
+            ),
+        ],
         "onnxruntime" if windows => vec![asset!(
             ORT, "onnxruntime-win-x64-1.22.0.zip", "174c616efc0271194488642a72f1a514e01487da4dfe84c49296d66e40ebe0da", 72_368_545,
-            Unpack::ZipPick("onnxruntime-win-x64-1.22.0/lib/onnxruntime.dll"), "onnxruntime.dll"
+            Unpack::ZipPick(&[("onnxruntime-win-x64-1.22.0/lib/onnxruntime.dll", "onnxruntime.dll")]), "onnxruntime.dll"
+        )],
+        // CUDA 12 and cuDNN 9 come from the system (or the container image).
+        "onnxruntime" if linux && variant == "cuda" => vec![asset!(
+            ORT, "onnxruntime-linux-x64-gpu-1.22.0.tgz", "2a19dbfa403672ec27378c3d40a68f793ac7a6327712cd0e8240a86be2b10c55", 227_317_516,
+            Unpack::TarPick(&[
+                ("onnxruntime-linux-x64-gpu-1.22.0/lib/libonnxruntime.so.1.22.0", "libonnxruntime.so"),
+                ("onnxruntime-linux-x64-gpu-1.22.0/lib/libonnxruntime_providers_shared.so", "libonnxruntime_providers_shared.so"),
+                ("onnxruntime-linux-x64-gpu-1.22.0/lib/libonnxruntime_providers_cuda.so", "libonnxruntime_providers_cuda.so"),
+            ]),
+            "libonnxruntime.so"
         )],
         "onnxruntime" if linux => vec![asset!(
             ORT, "onnxruntime-linux-x64-1.22.0.tgz", "8344d55f93d5bc5021ce342db50f62079daf39aaafb5d311a451846228be49b3", 7_798_730,
-            Unpack::TarPick("onnxruntime-linux-x64-1.22.0/lib/libonnxruntime.so.1.22.0"), "libonnxruntime.so"
+            Unpack::TarPick(&[("onnxruntime-linux-x64-1.22.0/lib/libonnxruntime.so.1.22.0", "libonnxruntime.so")]), "libonnxruntime.so"
         )],
         "pdfium" if windows => vec![asset!(
             PDFIUM, "pdfium-win-x64.tgz", "73cc0de638ac2095e7445bf56a38200a5b7c7ca0e9f4ba144598f2457377ac08", 3_733_154,
-            Unpack::TarPick("bin/pdfium.dll"), "pdfium.dll"
+            Unpack::TarPick(&[("bin/pdfium.dll", "pdfium.dll")]), "pdfium.dll"
         )],
         "pdfium" if linux => vec![asset!(
             PDFIUM, "pdfium-linux-x64.tgz", "1470e21b8b4a3b4ad7f85684e2da11d94f3b69a86d81dee11b9b6709d927ac1d", 3_644_759,
-            Unpack::TarPick("lib/libpdfium.so"), "libpdfium.so"
+            Unpack::TarPick(&[("lib/libpdfium.so", "libpdfium.so")]), "libpdfium.so"
         )],
         _ => Vec::new(),
     }
@@ -184,7 +237,11 @@ pub struct ComponentStatus {
     pub detail: String,
     /// Download sizes per variant (`default` for components without variants).
     pub sizes: Vec<VariantSize>,
-    /// The AI runtime's installed variant (`cpu` / `cuda`).
+    /// Its variants here (`cpu`, `cuda`, `directml`); empty when it has none.
+    pub variants: Vec<String>,
+    /// The variant to offer, from the GPUs found.
+    pub default_variant: Option<String>,
+    /// The installed variant.
     pub variant: Option<String>,
 }
 
@@ -199,10 +256,12 @@ pub struct ComponentsInfo {
     pub components: Vec<ComponentStatus>,
     /// `windows-x64`, `linux-x64`, or null when nothing can be downloaded here.
     pub platform: Option<String>,
-    /// The AI runtime's variants here; the first is the default.
-    pub variants: Vec<String>,
-    /// An NVIDIA driver is installed (the CUDA runtime is the better choice).
-    pub nvidia_gpu: bool,
+    /// GPU vendors found: `nvidia`, `amd`, `intel` (on Windows only `nvidia`
+    /// is detected).
+    pub gpus: Vec<String>,
+    /// The execution provider of the loaded CLIP encoder (`CPU`, `CUDA`,
+    /// `DirectML`, …); null until it is first used.
+    pub clip_provider: Option<String>,
     /// Free space where the data directory is.
     pub free_bytes: Option<u64>,
 }
@@ -211,13 +270,42 @@ fn lib_name(base: &str) -> String {
     format!("{}{base}{}", std::env::consts::DLL_PREFIX, std::env::consts::DLL_SUFFIX)
 }
 
-/// An NVIDIA driver is present (its CUDA driver library is installed with it).
-pub fn nvidia_gpu() -> bool {
+/// The GPU vendors in this machine. Linux: the PCI display devices in sysfs
+/// (also visible in containers). Windows: an NVIDIA driver (`nvcuda.dll`).
+pub fn gpus() -> Vec<&'static str> {
+    let mut found = Vec::new();
     if cfg!(windows) {
         let root = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
-        root.join("System32").join("nvcuda.dll").is_file()
+        if root.join("System32").join("nvcuda.dll").is_file() {
+            found.push("nvidia");
+        }
     } else {
-        Path::new("/proc/driver/nvidia/version").exists()
+        for dev in fs::read_dir("/sys/bus/pci/devices").into_iter().flatten().flatten() {
+            let read = |f: &str| fs::read_to_string(dev.path().join(f)).unwrap_or_default();
+            if let Some(v) = gpu_vendor(&read("class"), &read("vendor"))
+                && !found.contains(&v)
+            {
+                found.push(v);
+            }
+        }
+        if !found.contains(&"nvidia") && Path::new("/proc/driver/nvidia/version").exists() {
+            found.push("nvidia");
+        }
+    }
+    found
+}
+
+/// The vendor of a PCI device from its sysfs `class` and `vendor`, when it is
+/// a display controller (class `0x03xxxx`).
+fn gpu_vendor(class: &str, vendor: &str) -> Option<&'static str> {
+    if !class.trim().starts_with("0x03") {
+        return None;
+    }
+    match vendor.trim() {
+        "0x10de" => Some("nvidia"),
+        "0x1002" => Some("amd"),
+        "0x8086" => Some("intel"),
+        _ => None,
     }
 }
 
@@ -283,9 +371,28 @@ fn beside_server(name: &str) -> Option<String> {
     p.is_file().then(|| format!("{} (beside the server)", p.display()))
 }
 
-/// The AI runtime's installed variant (`variant.txt`), `cpu` when not recorded.
-fn installed_variant(data: &Path) -> String {
-    fs::read_to_string(data.join("ai").join("bin").join("variant.txt")).map(|v| v.trim().to_string()).unwrap_or_else(|_| "cpu".into())
+/// A component's installed variant: the AI runtime's `variant.txt`; for ONNX
+/// Runtime, the variant whose extra files (DirectML, the CUDA provider) are
+/// present; `cpu` otherwise.
+fn installed_variant(data: &Path, id: &str) -> String {
+    if id == "ai_runtime" {
+        return fs::read_to_string(data.join("ai").join("bin").join("variant.txt")).map(|v| v.trim().to_string()).unwrap_or_else(|_| "cpu".into());
+    }
+    let main = lib_name("onnxruntime");
+    let has_extra = |v: &&str| assets(id, v).iter().flat_map(|a| a.outputs()).any(|f| f != main && data.join(f).is_file());
+    variants(id).iter().filter(|v| **v != "cpu").find(|v| has_extra(v)).unwrap_or(&"cpu").to_string()
+}
+
+/// Delete the files every variant of a component puts in the data directory.
+fn remove_outputs(data: &Path, id: &str) -> io::Result<()> {
+    let names: Vec<&str> = if variants(id).is_empty() { vec![""] } else { variants(id).to_vec() };
+    for f in names.iter().flat_map(|v| assets(id, v)).flat_map(|a| a.outputs()) {
+        match fs::remove_file(data.join(f)) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 fn installed(lib: &Library, id: &str) -> Option<String> {
@@ -311,25 +418,26 @@ fn installed(lib: &Library, id: &str) -> Option<String> {
 /// What the Maintenance page lists.
 pub fn status(lib: &Library) -> ComponentsInfo {
     let data = &lib.config.data_dir;
+    let gpus = gpus();
     let components = IDS
         .iter()
         .map(|&id| {
             let i = info(id);
-            let sizes: Vec<VariantSize> = if id == "ai_runtime" {
-                variants().iter().map(|v| VariantSize { variant: v.to_string(), bytes: assets(id, v).iter().map(|a| a.size).sum() }).collect()
-            } else {
+            let sizes: Vec<VariantSize> = if variants(id).is_empty() {
                 vec![VariantSize { variant: "default".into(), bytes: assets(id, "").iter().map(|a| a.size).sum() }]
+            } else {
+                variants(id).iter().map(|v| VariantSize { variant: v.to_string(), bytes: assets(id, v).iter().map(|a| a.size).sum() }).collect()
             };
             let (state, detail) = if let Some(where_) = external(lib, id) {
                 ("external", where_)
             } else if let Some(where_) = installed(lib, id) {
                 ("installed", where_)
-            } else if assets(id, variants().first().copied().unwrap_or("cpu")).is_empty() {
+            } else if assets(id, variants(id).first().copied().unwrap_or("")).is_empty() {
                 ("unavailable", format!("no download for {} {}", std::env::consts::OS, std::env::consts::ARCH))
             } else {
                 ("missing", String::new())
             };
-            let variant = (id == "ai_runtime" && state == "installed").then(|| installed_variant(data));
+            let variant = (!variants(id).is_empty() && state == "installed").then(|| installed_variant(data, id));
             ComponentStatus {
                 id: id.into(),
                 label: i.label.into(),
@@ -339,6 +447,8 @@ pub fn status(lib: &Library) -> ComponentsInfo {
                 state: state.into(),
                 detail,
                 sizes,
+                variants: variants(id).iter().map(|v| v.to_string()).collect(),
+                default_variant: default_variant(id, &gpus).map(str::to_string),
                 variant,
             }
         })
@@ -346,8 +456,8 @@ pub fn status(lib: &Library) -> ComponentsInfo {
     ComponentsInfo {
         components,
         platform: platform().map(str::to_string),
-        variants: variants().iter().map(|v| v.to_string()).collect(),
-        nvidia_gpu: nvidia_gpu(),
+        gpus: gpus.iter().map(|g| g.to_string()).collect(),
+        clip_provider: lib.tools.clip_provider().map(str::to_string),
         free_bytes: free_bytes(data),
     }
 }
@@ -455,21 +565,35 @@ fn safe_relative(name: &str, strip: usize) -> Option<PathBuf> {
     (ok && !kept.as_os_str().is_empty()).then_some(kept)
 }
 
-fn unpack_zip(archive: &Path, into: &Path, pick: Option<(&str, &Path)>) -> Result<(), String> {
+/// Where a picked member is unpacked: `into/<its index in picks>`.
+fn picked(into: &Path, picks: &[(&str, &str)], name: &str) -> Option<PathBuf> {
+    picks.iter().position(|(m, _)| *m == name).map(|i| into.join(i.to_string()))
+}
+
+/// Fails unless every picked member was unpacked.
+fn check_picks(archive: &Path, into: &Path, picks: &[(&str, &str)]) -> Result<(), String> {
+    match picks.iter().enumerate().find(|(i, _)| !into.join(i.to_string()).is_file()) {
+        Some((_, (member, _))) => Err(format!("{} does not contain {member}", archive.display())),
+        None => Ok(()),
+    }
+}
+
+/// Unpack a zip into `into`, or with `picks` only those members (see [`picked`]).
+fn unpack_zip(archive: &Path, into: &Path, picks: Option<&[(&str, &str)]>) -> Result<(), String> {
     let mut zip = zip::ZipArchive::new(File::open(archive).map_err(|e| e.to_string())?).map_err(|e| format!("{}: {e}", archive.display()))?;
-    let mut found = false;
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
         let name = entry.name().map(|n| n.to_string()).map_err(|e| e.to_string())?;
-        let target = match pick {
-            Some((member, to)) if name == member => to.to_path_buf(),
-            Some(_) => continue,
+        let target = match picks {
+            Some(p) => match picked(into, p, &name) {
+                Some(t) => t,
+                None => continue,
+            },
             None => match safe_relative(&name, 0) {
                 Some(rel) => into.join(rel),
                 None => return Err(format!("{}: unsafe member {name:?}", archive.display())),
             },
         };
-        found = true;
         if entry.is_dir() {
             fs::create_dir_all(&target).map_err(|e| e.to_string())?;
             continue;
@@ -480,30 +604,28 @@ fn unpack_zip(archive: &Path, into: &Path, pick: Option<(&str, &Path)>) -> Resul
         let mut out = File::create(&target).map_err(|e| format!("{}: {e}", target.display()))?;
         io::copy(&mut entry, &mut out).map_err(|e| e.to_string())?;
     }
-    if pick.is_some() && !found {
-        return Err(format!("{} does not contain {}", archive.display(), pick.map(|p| p.0).unwrap_or_default()));
-    }
-    Ok(())
+    picks.map_or(Ok(()), |p| check_picks(archive, into, p))
 }
 
-fn unpack_tar(archive: &Path, into: &Path, strip: usize, pick: Option<(&str, &Path)>) -> Result<(), String> {
+/// Unpack a `.tar.gz` as [`unpack_zip`], without the top `strip` folders.
+fn unpack_tar(archive: &Path, into: &Path, strip: usize, picks: Option<&[(&str, &str)]>) -> Result<(), String> {
     let gz = flate2::read::GzDecoder::new(File::open(archive).map_err(|e| e.to_string())?);
     let mut tar = tar::Archive::new(gz);
     tar.set_preserve_permissions(true);
-    let mut found = false;
     for entry in tar.entries().map_err(|e| e.to_string())? {
         let mut entry = entry.map_err(|e| e.to_string())?;
         let name = entry.path().map_err(|e| e.to_string())?.to_string_lossy().replace('\\', "/");
-        let target = match pick {
-            Some((member, to)) if name.trim_start_matches("./") == member => to.to_path_buf(),
-            Some(_) => continue,
+        let target = match picks {
+            Some(p) => match picked(into, p, name.trim_start_matches("./")) {
+                Some(t) => t,
+                None => continue,
+            },
             None => match safe_relative(&name, strip) {
                 Some(rel) => into.join(rel),
                 None if name.split('/').filter(|p| !p.is_empty() && *p != ".").count() <= strip => continue, // the stripped folders
                 None => return Err(format!("{}: unsafe member {name:?}", archive.display())),
             },
         };
-        found = true;
         if let Some(dir) = target.parent() {
             fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         }
@@ -511,10 +633,7 @@ fn unpack_tar(archive: &Path, into: &Path, strip: usize, pick: Option<(&str, &Pa
         // `unpack` refuses links pointing outside the destination.
         entry.unpack(&target).map_err(|e| format!("{}: {e}", target.display()))?;
     }
-    if pick.is_some() && !found {
-        return Err(format!("{} does not contain {}", archive.display(), pick.map(|p| p.0).unwrap_or_default()));
-    }
-    Ok(())
+    picks.map_or(Ok(()), |p| check_picks(archive, into, p))
 }
 
 /// Move everything in `from` into `to`, replacing files of the same name.
@@ -560,20 +679,23 @@ pub fn install_asset(data: &Path, asset: &Asset, mirror: Option<&str>, ctl: &Con
             unpack_tar(&archive, &staging, strip, None)?;
             merge_into(&staging, &target)
         }
-        Unpack::ZipPick(member) | Unpack::TarPick(member) => {
-            let tmp = staging.join("file");
+        Unpack::ZipPick(picks) | Unpack::TarPick(picks) => {
             if matches!(asset.unpack, Unpack::ZipPick(_)) {
-                unpack_zip(&archive, &staging, Some((member, &tmp)))?;
+                unpack_zip(&archive, &staging, Some(picks))?;
             } else {
-                unpack_tar(&archive, &staging, 0, Some((member, &tmp)))?;
+                unpack_tar(&archive, &staging, 0, Some(picks))?;
             }
-            if let Some(dir) = target.parent() {
-                fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+            for (i, (_, to)) in picks.iter().enumerate() {
+                let target = data.join(to);
+                if let Some(dir) = target.parent() {
+                    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+                }
+                if target.exists() {
+                    fs::remove_file(&target).map_err(|e| format!("{}: {e} (is it in use? restart the server first)", target.display()))?;
+                }
+                fs::rename(staging.join(i.to_string()), &target).map_err(|e| format!("{}: {e}", target.display()))?;
             }
-            if target.exists() {
-                fs::remove_file(&target).map_err(|e| format!("{}: {e} (is it in use? restart the server first)", target.display()))?;
-            }
-            fs::rename(&tmp, &target).map_err(|e| format!("{}: {e}", target.display()))
+            Ok(())
         }
         Unpack::File => unreachable!("handled above"),
     })();
@@ -584,33 +706,36 @@ pub fn install_asset(data: &Path, asset: &Asset, mirror: Option<&str>, ctl: &Con
     result
 }
 
-/// Install components (`ai_runtime` in `variant`). Already installed ones are
-/// skipped, except the AI runtime when another variant is asked for.
-pub fn install(lib: &Library, ctl: &Control, log: &dyn Fn(String), ids: &[String], variant: &str) -> Result<usize, String> {
+/// Install components, each in its variant from `chosen` (id → variant) or
+/// its default. Already installed ones are skipped, unless another variant is
+/// asked for.
+pub fn install(lib: &Library, ctl: &Control, log: &dyn Fn(String), ids: &[String], chosen: &BTreeMap<String, String>) -> Result<usize, String> {
     let data = &lib.config.data_dir;
-    let mut plan: Vec<(String, Vec<Asset>)> = Vec::new();
+    let gpus = gpus();
+    let mut plan: Vec<(String, String, Vec<Asset>)> = Vec::new();
     for id in ids {
         if let Some(where_) = external(lib, id) {
             log(format!("{}: configured elsewhere ({where_}); skipped", info(id).label));
             continue;
         }
+        let variant = chosen.get(id).map(String::as_str).or(default_variant(id, &gpus)).unwrap_or("").to_string();
         let present = installed(lib, id).is_some();
-        if present && !(id == "ai_runtime" && installed_variant(data) != variant) {
+        if present && (variants(id).is_empty() || installed_variant(data, id) == variant) {
             log(format!("{}: already installed", info(id).label));
             continue;
         }
-        let assets = assets(id, variant);
+        let assets = assets(id, &variant);
         if assets.is_empty() {
             return Err(format!("{} has no download for this platform", info(id).label));
         }
-        plan.push((id.clone(), assets));
+        plan.push((id.clone(), variant, assets));
     }
-    let total: u64 = plan.iter().flat_map(|(_, a)| a.iter().map(|a| a.size)).sum();
+    let total: u64 = plan.iter().flat_map(|(_, _, a)| a.iter().map(|a| a.size)).sum();
     if total == 0 {
         return Ok(0);
     }
     // Archives are unpacked beside their download: count them twice.
-    let needed: u64 = plan.iter().flat_map(|(_, a)| a.iter().map(|a| if a.unpack == Unpack::File { a.size } else { a.size * 3 })).sum();
+    let needed: u64 = plan.iter().flat_map(|(_, _, a)| a.iter().map(|a| if a.unpack == Unpack::File { a.size } else { a.size * 3 })).sum();
     if let Some(free) = free_bytes(data)
         && free < needed
     {
@@ -618,13 +743,20 @@ pub fn install(lib: &Library, ctl: &Control, log: &dyn Fn(String), ids: &[String
     }
     ctl.set_total(total);
     let mirror = lib.config.components_mirror.clone();
-    for (id, assets) in &plan {
-        log(format!("{}: downloading {} MB…", info(id).label, assets.iter().map(|a| a.size).sum::<u64>() / 1_000_000));
+    for (id, variant, assets) in &plan {
+        let label = match variant.as_str() {
+            "" => info(id).label.to_string(),
+            v => format!("{} ({v})", info(id).label),
+        };
+        log(format!("{label}: downloading {} MB…", assets.iter().map(|a| a.size).sum::<u64>() / 1_000_000));
         if id == "ai_runtime" {
             lib.ai.stop(); // a running llama-server keeps its files locked
             if installed(lib, id).is_some() {
                 let _ = fs::remove_dir_all(data.join("ai").join("bin"));
             }
+        } else if installed(lib, id).is_some() {
+            // Another variant: none of its files may stay (they decide the variant).
+            remove_outputs(data, id).map_err(|e| format!("{label}: {e} (it is in use; restart the server and try again)"))?;
         }
         for a in assets {
             install_asset(data, a, mirror.as_deref(), ctl)?;
@@ -632,7 +764,10 @@ pub fn install(lib: &Library, ctl: &Control, log: &dyn Fn(String), ids: &[String
         if id == "ai_runtime" {
             fs::write(data.join("ai").join("bin").join("variant.txt"), variant).map_err(|e| e.to_string())?;
         }
-        log(format!("{}: installed", info(id).label));
+        log(format!("{label}: installed"));
+        if id == "onnxruntime" && lib.tools.ort_loaded() {
+            log("ONNX Runtime is already loaded: restart the server to use the new one".into());
+        }
     }
     lib.tools.retry(); // load ONNX Runtime / pdfium on next use
     Ok(plan.len())
@@ -651,9 +786,7 @@ pub fn remove(lib: &Library, log: &dyn Fn(String), ids: &[String]) -> Result<usi
                 lib.ai.stop();
                 fs::remove_dir_all(data.join("ai").join("bin"))
             }
-            _ => assets(id, "").iter().try_for_each(|a| fs::remove_file(data.join(a.to))).or_else(|e| {
-                if e.kind() == io::ErrorKind::NotFound { Ok(()) } else { Err(e) }
-            }),
+            _ => remove_outputs(data, id),
         };
         match result {
             Ok(()) => {
@@ -749,11 +882,59 @@ mod tests {
             return;
         }
         for id in IDS {
-            let v = variants()[0];
-            let a = assets(id, v);
-            assert!(!a.is_empty(), "{id}");
-            assert!(a.iter().all(|a| a.sha256.len() == 64 && a.size > 0 && a.url.ends_with(a.file)), "{id}");
+            let vs = if variants(id).is_empty() { vec![""] } else { variants(id).to_vec() };
+            for v in vs {
+                let a = assets(id, v);
+                assert!(!a.is_empty(), "{id} {v}");
+                assert!(a.iter().all(|a| a.sha256.len() == 64 && a.size > 0 && a.url.ends_with(a.file)), "{id} {v}");
+                assert!(a.iter().all(|a| a.outputs().first().is_none_or(|o| *o == a.to)), "{id} {v}: `to` is the first output");
+            }
         }
+    }
+
+    #[test]
+    fn gpus_and_default_variants() {
+        assert_eq!(gpu_vendor("0x030000
+", "0x10de
+"), Some("nvidia"));
+        assert_eq!(gpu_vendor("0x030200", "0x1002"), Some("amd"));
+        assert_eq!(gpu_vendor("0x038000", "0x8086"), Some("intel"));
+        assert_eq!(gpu_vendor("0x060400", "0x8086"), None, "a PCI bridge is no GPU");
+        assert_eq!(gpu_vendor("0x030000", "0x1234"), None);
+        match platform() {
+            Some("windows-x64") => {
+                assert_eq!(default_variant("onnxruntime", &[]), Some("directml"));
+                assert_eq!(default_variant("ai_runtime", &["nvidia"]), Some("cuda"));
+                assert_eq!(default_variant("ai_runtime", &["amd"]), Some("cpu"));
+            }
+            Some(_) => {
+                assert_eq!(default_variant("onnxruntime", &["intel", "nvidia"]), Some("cuda"));
+                assert_eq!(default_variant("onnxruntime", &["amd"]), Some("cpu"));
+                assert_eq!(default_variant("ai_runtime", &["nvidia"]), Some("cpu"));
+            }
+            None => assert_eq!(default_variant("onnxruntime", &["nvidia"]), None),
+        }
+        assert_eq!(default_variant("pdfium", &["nvidia"]), None);
+    }
+
+    #[test]
+    fn onnx_variant_follows_its_files() {
+        if platform().is_none() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path();
+        fs::write(data.join(lib_name("onnxruntime")), b"x").unwrap();
+        assert_eq!(installed_variant(data, "onnxruntime"), "cpu");
+        let gpu = variants("onnxruntime")[1];
+        for a in assets("onnxruntime", gpu) {
+            for f in a.outputs() {
+                fs::write(data.join(f), b"x").unwrap();
+            }
+        }
+        assert_eq!(installed_variant(data, "onnxruntime"), gpu);
+        remove_outputs(data, "onnxruntime").unwrap();
+        assert_eq!(fs::read_dir(data).unwrap().count(), 0, "every variant's files are removed");
     }
 
     #[test]
@@ -783,8 +964,13 @@ mod tests {
         // A zip into a folder; a tar member picked and renamed.
         install_asset(data, &asset("llama.zip", &zip, Unpack::Zip, "ai/bin"), Some(&base), &ctl).unwrap();
         assert_eq!(fs::read(data.join("ai/bin/llama-server.exe")).unwrap(), exe);
-        install_asset(data, &asset("pkg.tgz", &tgz, Unpack::TarPick("pkg/lib/libthing.so.1"), "libthing.so"), Some(&base), &ctl).unwrap();
+        let picks: &'static [(&str, &str)] = &[("pkg/lib/libthing.so.1", "libthing.so"), ("pkg/README", "docs/README")];
+        install_asset(data, &asset("pkg.tgz", &tgz, Unpack::TarPick(picks), "libthing.so"), Some(&base), &ctl).unwrap();
         assert_eq!(fs::read(data.join("libthing.so")).unwrap(), b"so");
+        assert_eq!(fs::read(data.join("docs/README")).unwrap(), b"r");
+        let missing: &'static [(&str, &str)] = &[("pkg/README", "r2"), ("pkg/nothing", "n")];
+        let err = install_asset(data, &asset("pkg.tgz", &tgz, Unpack::TarPick(missing), "r2"), Some(&base), &ctl).unwrap_err();
+        assert!(err.contains("does not contain pkg/nothing") && !data.join("r2").exists(), "{err}");
         install_asset(data, &asset("pkg.tgz", &tgz, Unpack::Tar { strip: 1 }, "out"), Some(&base), &ctl).unwrap();
         assert_eq!(fs::read(data.join("out/lib/libthing.so.1")).unwrap(), b"so");
         assert!(!data.join("downloads/pkg.tgz").exists(), "archives are deleted after unpacking");

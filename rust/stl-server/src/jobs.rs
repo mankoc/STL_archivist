@@ -3,7 +3,7 @@
 //! lines go to the job's record and to every WebSocket client
 //! ([`ServerEvent`]); a job stops at its next checkpoint when cancelled.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;
@@ -107,11 +107,13 @@ pub enum JobRequest {
     Backup,
     /// Download optional components into the data directory (administrators):
     /// `ai_runtime`, `ai_model`, `clip_model`, `onnxruntime`, `pdfium`.
-    /// `variant` is the AI runtime's (`cpu`, or `cuda` on Windows).
+    /// `variants` picks a variant per component (`ai_runtime`: `cpu`, or `cuda`
+    /// on Windows; `onnxruntime`: `cpu`, `directml` on Windows, `cuda` on
+    /// Linux); the others get the default for the GPUs found.
     InstallComponents {
         components: Vec<String>,
         #[serde(default)]
-        variant: Option<String>,
+        variants: BTreeMap<String, String>,
     },
     /// Delete downloaded components (administrators).
     RemoveComponents { components: Vec<String> },
@@ -254,10 +256,10 @@ impl JobRequest {
                 Err("threshold must be above 0 and at most 1".into())
             }
             JobRequest::ClearLibrary { confirm } if confirm != "DELETE" => Err("confirm with \"DELETE\"".into()),
-            JobRequest::InstallComponents { components, variant } if bad_components(components, variant.as_deref()) => {
+            JobRequest::InstallComponents { components, variants } if bad_components(components, variants) => {
                 Err(components_hint())
             }
-            JobRequest::RemoveComponents { components } if bad_components(components, None) => Err(components_hint()),
+            JobRequest::RemoveComponents { components } if bad_components(components, &BTreeMap::new()) => Err(components_hint()),
             JobRequest::RecheckWarnings { warning } if crate::maint::Recheck::parse(warning).is_none() => {
                 Err(format!("unknown warning {warning:?} (no_images or presupported)"))
             }
@@ -600,7 +602,7 @@ fn run(lib: &Library, job: &Job) -> Result<String, String> {
         JobRequest::PruneImages { keep } => prune_images(lib, job, keep),
         JobRequest::CompactDatabase => compact(lib, job),
         JobRequest::ComputeEmbeddings { all } => compute_embeddings(lib, job, all),
-        JobRequest::InstallComponents { components, variant } => install_components(lib, job, &components, variant),
+        JobRequest::InstallComponents { components, variants } => install_components(lib, job, &components, &variants),
         JobRequest::RemoveComponents { components } => {
             let log = |line: String| lib.job_log(job, line);
             let n = crate::components::remove(lib, &log, &components)?;
@@ -632,23 +634,23 @@ fn run(lib: &Library, job: &Job) -> Result<String, String> {
 
 // ── components ───────────────────────────────────────────────────────────────
 
-fn bad_components(ids: &[String], variant: Option<&str>) -> bool {
+fn bad_components(ids: &[String], variants: &BTreeMap<String, String>) -> bool {
+    use crate::components::{IDS, variants as offered};
     ids.is_empty()
-        || ids.iter().any(|c| !crate::components::IDS.contains(&c.as_str()))
-        || variant.is_some_and(|v| !crate::components::variants().contains(&v))
+        || ids.iter().any(|c| !IDS.contains(&c.as_str()))
+        || variants.iter().any(|(id, v)| !offered(id).contains(&v.as_str()))
 }
 
 fn components_hint() -> String {
-    let variants = crate::components::variants();
-    let v = if variants.is_empty() { String::new() } else { format!(" and a variant among {variants:?}") };
-    format!("choose components among {:?}{v}", crate::components::IDS)
+    use crate::components::{IDS, variants};
+    let v: Vec<String> = IDS.iter().filter(|id| !variants(id).is_empty()).map(|id| format!("{id}: {:?}", variants(id))).collect();
+    let v = if v.is_empty() { String::new() } else { format!(", with variants among {}", v.join(", ")) };
+    format!("choose components among {IDS:?}{v}")
 }
 
-fn install_components(lib: &Library, job: &Job, ids: &[String], variant: Option<String>) -> Result<String, String> {
+fn install_components(lib: &Library, job: &Job, ids: &[String], variants: &BTreeMap<String, String>) -> Result<String, String> {
     let log = |line: String| lib.job_log(job, line);
-    let default = if crate::components::nvidia_gpu() && crate::components::variants().contains(&"cuda") { "cuda" } else { "cpu" };
-    let variant = variant.unwrap_or_else(|| default.to_string());
-    let n = crate::components::install(lib, &job.ctl, &log, ids, &variant)?;
+    let n = crate::components::install(lib, &job.ctl, &log, ids, variants)?;
     Ok(format!("{n} component(s) installed"))
 }
 

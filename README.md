@@ -11,7 +11,7 @@ can open a library on your computer without setting up a server.
 
 **Guides:** [using stlLibrary](docs/user-guide.md) · [deploying a server](docs/deployment.md)
 
-Version: 2026.43.3
+Version: 2026.43.4
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). Libraries are compatible: this version opens the same data directory
@@ -178,8 +178,10 @@ and sorting, AI temperature, …) live in `<data dir>/settings.json` and are edi
 ### AI features
 
 Administrators can download everything below from *Maintenance → AI and add-on components*
-(Windows x64 and Linux x64; checked by SHA-256, CUDA on Windows when an NVIDIA GPU is
-present). To install by hand:
+(Windows x64 and Linux x64; checked by SHA-256). Where a GPU helps, the page offers it and
+picks the default from the GPUs it finds: the AI tagger's runtime with CUDA (Windows, NVIDIA),
+and ONNX Runtime with DirectML (Windows, any DirectX 12 GPU) or CUDA (Linux, NVIDIA; CUDA 12
+and cuDNN 9 must be installed). To install by hand:
 
 - **AI tagger** — needs llama.cpp's `llama-server` and the Qwen2.5-VL GGUF model
   (`Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf` and `mmproj-Qwen2.5-VL-3B-Instruct-f16.gguf`, from
@@ -191,7 +193,9 @@ present). To install by hand:
   `<data dir>/models/clip_image_encoder.onnx` (or `STLLIBRARY_CLIP_MODEL`): `onnx/vision_model.onnx`
   from [Xenova/clip-vit-base-patch32](https://huggingface.co/Xenova/clip-vit-base-patch32).
   Then run *Maintenance → Compute missing embeddings*; the AI method appears in *Find by
-  Image* and *Duplicates*.
+  Image* and *Duplicates*. The encoder runs on a GPU when the ONNX Runtime build supports
+  one for the GPUs found (DirectML; CUDA, MIGraphX, ROCm or OpenVINO on Linux), else on the
+  CPU; the components card shows which.
 
 ### Backups and restore
 

@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.43.3"
+    "version": "2026.43.4"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -3162,9 +3162,17 @@
           "license_url",
           "state",
           "detail",
-          "sizes"
+          "sizes",
+          "variants"
         ],
         "properties": {
+          "default_variant": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The variant to offer, from the GPUs found."
+          },
           "detail": {
             "type": "string",
             "description": "Where it is, or why it is in that state."
@@ -3200,7 +3208,14 @@
               "string",
               "null"
             ],
-            "description": "The AI runtime's installed variant (`cpu` / `cuda`)."
+            "description": "The installed variant."
+          },
+          "variants": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Its variants here (`cpu`, `cuda`, `directml`); empty when it has none."
           }
         }
       },
@@ -3208,10 +3223,16 @@
         "type": "object",
         "required": [
           "components",
-          "variants",
-          "nvidia_gpu"
+          "gpus"
         ],
         "properties": {
+          "clip_provider": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The execution provider of the loaded CLIP encoder (`CPU`, `CUDA`,\n`DirectML`, …); null until it is first used."
+          },
           "components": {
             "type": "array",
             "items": {
@@ -3227,9 +3248,12 @@
             "description": "Free space where the data directory is.",
             "minimum": 0
           },
-          "nvidia_gpu": {
-            "type": "boolean",
-            "description": "An NVIDIA driver is installed (the CUDA runtime is the better choice)."
+          "gpus": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "GPU vendors found: `nvidia`, `amd`, `intel` (on Windows only `nvidia`\nis detected)."
           },
           "platform": {
             "type": [
@@ -3237,13 +3261,6 @@
               "null"
             ],
             "description": "`windows-x64`, `linux-x64`, or null when nothing can be downloaded here."
-          },
-          "variants": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "The AI runtime's variants here; the first is the default."
           }
         }
       },
@@ -4526,7 +4543,7 @@
           },
           {
             "type": "object",
-            "description": "Download optional components into the data directory (administrators):\n`ai_runtime`, `ai_model`, `clip_model`, `onnxruntime`, `pdfium`.\n`variant` is the AI runtime's (`cpu`, or `cuda` on Windows).",
+            "description": "Download optional components into the data directory (administrators):\n`ai_runtime`, `ai_model`, `clip_model`, `onnxruntime`, `pdfium`.\n`variants` picks a variant per component (`ai_runtime`: `cpu`, or `cuda`\non Windows; `onnxruntime`: `cpu`, `directml` on Windows, `cuda` on\nLinux); the others get the default for the GPUs found.",
             "required": [
               "components",
               "kind"
@@ -4544,11 +4561,14 @@
                   "install_components"
                 ]
               },
-              "variant": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+              "variants": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "propertyNames": {
+                  "type": "string"
+                }
               }
             }
           },

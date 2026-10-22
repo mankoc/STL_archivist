@@ -7,6 +7,9 @@
 //!   `onnxruntime.dll` / `libonnxruntime.so` / `.dylib` next to the server or in
 //!   the data directory. The CLIP model is found as `image_embedding.model_path`
 //!   does: `STLLIBRARY_CLIP_MODEL`, then `<data_dir>/models/clip_image_encoder.onnx`.
+//!   The encoder runs on a GPU when the loaded ONNX Runtime build supports one
+//!   for the GPUs found ([`gpu_providers`]: DirectML on Windows; CUDA, MIGraphX,
+//!   ROCm or OpenVINO on Linux), else on the CPU.
 //! - pdfium: `pdfium` in `server.json`, `STL_PDFIUM_PATH`, or the platform's
 //!   pdfium library next to the server or in the data directory.
 
@@ -14,6 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use ort::ep::{self, ExecutionProviderDispatch};
 use ort::session::Session;
 use ort::value::Tensor;
 use pdfium_render::prelude::{PdfRenderConfig, Pdfium};
@@ -41,6 +45,8 @@ pub struct Embedder {
     input: String,
     output: String,
     pub model: PathBuf,
+    /// Where it runs: `CPU`, `DirectML`, `CUDA`, `MIGraphX`, `ROCm`, `OpenVINO`.
+    pub provider: &'static str,
 }
 
 /// ONNX Runtime allows one environment per process; it is kept once loaded
@@ -60,12 +66,53 @@ fn ort_env(config: &Config) -> Result<&'static ort::environment::Environment, St
         .or_else(|| std::env::var_os("ORT_DYLIB_PATH").map(PathBuf::from))
         .or_else(|| beside(config, &lib_name("onnxruntime")))
         .ok_or("ONNX Runtime not found (set \"onnxruntime\" in server.json or ORT_DYLIB_PATH)")?;
+    // ONNX Runtime loads DirectML.dll by name, which would find the older one
+    // in System32: load the one installed beside it first.
+    let directml = dylib.with_file_name("DirectML.dll");
+    if cfg!(windows) && directml.is_file() {
+        ort::util::preload_dylib(&directml).map_err(|e| format!("cannot load {}: {e}", directml.display()))?;
+    }
     let env = ort::init_from(&dylib)
         .map_err(|e| format!("cannot load ONNX Runtime {}: {e}", dylib.display()))?
         .with_name("stlLibrary")
         .build()
         .map_err(|e| format!("ONNX Runtime: {e}"))?;
     Ok(ORT_ENV.get_or_init(|| env))
+}
+
+/// The GPU execution providers to try, best first, for the GPUs found. Each is
+/// skipped when the ONNX Runtime build lacks it or it fails to start (no
+/// driver, CUDA or ROCm libraries missing).
+fn gpu_providers(gpus: &[&str]) -> Vec<(&'static str, ExecutionProviderDispatch)> {
+    let mut eps = Vec::new();
+    if cfg!(windows) {
+        eps.push(("DirectML", ep::DirectML::default().build()));
+        return eps;
+    }
+    for gpu in gpus {
+        match *gpu {
+            "nvidia" => eps.push(("CUDA", ep::CUDA::default().build())),
+            "amd" => {
+                eps.push(("MIGraphX", ep::MIGraphX::default().build()));
+                eps.push(("ROCm", ep::ROCm::default().build()));
+            }
+            "intel" => eps.push(("OpenVINO", ep::OpenVINO::default().with_device_type("GPU").build())),
+            _ => {}
+        }
+    }
+    eps
+}
+
+fn session(env: &ort::environment::Environment, model: &Path, provider: Option<&ExecutionProviderDispatch>) -> Result<Session, String> {
+    let mut b = Session::builder(env).map_err(|e| e.to_string())?;
+    if let Some(p) = provider {
+        if p.name() == "DmlExecutionProvider" {
+            // DirectML supports neither memory patterns nor parallel execution.
+            b = b.with_memory_pattern(false).map_err(|e| e.to_string())?;
+        }
+        p.register(&mut b).map_err(|e| e.to_string())?;
+    }
+    b.commit_from_file(model).map_err(|e| e.to_string())
 }
 
 pub fn model_path(config: &Config) -> Option<PathBuf> {
@@ -82,16 +129,28 @@ impl Embedder {
             format!("CLIP model not found (place {MODEL_FILENAME} in <data dir>/models or set STLLIBRARY_CLIP_MODEL)")
         })?;
         let env = ort_env(config)?;
-        let session = Session::builder(env)
-            .and_then(|mut b| b.commit_from_file(&model))
-            .map_err(|e| format!("cannot load the CLIP model {}: {e}", model.display()))?;
+        let mut found = None;
+        for (name, p) in gpu_providers(&crate::components::gpus()) {
+            match session(env, &model, Some(&p)) {
+                Ok(s) => {
+                    found = Some((s, name));
+                    break;
+                }
+                Err(e) => tracing::info!("CLIP on {name} unavailable: {e}"),
+            }
+        }
+        let (session, provider) = match found {
+            Some(f) => f,
+            None => (session(env, &model, None).map_err(|e| format!("cannot load the CLIP model {}: {e}", model.display()))?, "CPU"),
+        };
+        tracing::info!("CLIP encoder runs on {provider}");
         let input = session.inputs().first().map(|o| o.name().to_string()).ok_or("the model has no input")?;
         let names: Vec<String> = session.outputs().iter().map(|o| o.name().to_string()).collect();
         // As image_embedding._get_session: prefer pooler_output (Xenova exports).
         let output = if names.iter().any(|n| n == "pooler_output") { "pooler_output".to_string() } else {
             names.first().cloned().ok_or("the model has no output")?
         };
-        Ok(Embedder { session: Mutex::new(session), input, output, model })
+        Ok(Embedder { session: Mutex::new(session), input, output, model, provider })
     }
 
     /// L2-normalised float32 vectors (as little-endian bytes) for images;
@@ -222,6 +281,16 @@ fn cached<'a, T>(cell: &'a OnceLock<T>, failed: &Mutex<Option<Instant>>, what: &
 impl Tools {
     pub fn embedder(&self, config: &Config) -> Option<&Embedder> {
         cached(&self.embedder, &self.embedder_failed, "CLIP embeddings", || Embedder::load(config))
+    }
+
+    /// Where the loaded CLIP encoder runs (`None`: not loaded yet).
+    pub fn clip_provider(&self) -> Option<&'static str> {
+        self.embedder.get().map(|e| e.provider)
+    }
+
+    /// ONNX Runtime is loaded in this process (a new one needs a restart).
+    pub fn ort_loaded(&self) -> bool {
+        ORT_ENV.get().is_some()
     }
 
     pub fn pdf(&self, config: &Config) -> Option<&PdfRenderer> {

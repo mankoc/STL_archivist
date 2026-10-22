@@ -73,10 +73,7 @@ fn normcase(p: &str) -> String {
     WinPath::new(p).as_posix().to_lowercase()
 }
 
-/// `str(Path(folder) / name)` on Windows, for a plain file name.
-fn join(folder: &str, name: &str) -> String {
-    if folder.ends_with('\\') || folder.ends_with('/') { format!("{folder}{name}") } else { format!("{folder}\\{name}") }
-}
+use crate::winpath::join;
 
 struct Snapshot {
     data: J,
@@ -104,7 +101,7 @@ fn snapshot(conn: &Connection, folder: &str, include_thumbnails: bool) -> SResul
     )?;
     let want = normcase(folder);
     let rows: Vec<Vec<Value>> = st
-        .query_map([format!("{folder}\\%")], |r| (0..19).map(|k| r.get::<_, Value>(k)).collect())?
+        .query_map([format!("{folder}{}%", crate::winpath::SEP)], |r| (0..19).map(|k| r.get::<_, Value>(k)).collect())?
         .collect::<rusqlite::Result<_>>()?;
     let mut entries = Vec::new();
     let mut thumbs = Vec::new();
@@ -629,7 +626,7 @@ mod tests {
         let folder = dir.path().join("models");
         std::fs::create_dir(&folder).unwrap();
         std::fs::write(folder.join("a.zip"), b"x").unwrap();
-        let folder_s = folder.to_string_lossy().replace('/', "\\");
+        let folder_s = crate::winpath::native(&folder.to_string_lossy());
         let store = ThumbStore::open(&dir.path().join("thumbs")).unwrap();
 
         let src = dir.path().join("src.db");
