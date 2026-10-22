@@ -11,8 +11,9 @@ The migration is **incremental**. A Rust core library grows underneath the exist
 which keeps shipping at every step. The Rust server is then built on that core, the React web
 client is built against the server, and a thin desktop shell comes last.
 
-This plan supersedes `docs/server-migration-plan.md`: its "Qt-free core" becomes the Rust core,
-and its FastAPI server becomes a Rust (axum) server.
+This plan superseded `docs/server-migration-plan.md` (removed in 2026.43.3; it is in the git
+history): its "Qt-free core" becomes the Rust core, and its FastAPI server becomes a Rust
+(axum) server.
 
 ---
 
@@ -58,7 +59,8 @@ single-language stack.
 | `tests` | 5,320 | Kept running against the Python app throughout; ported to `cargo test` per module |
 
 Toolchain on the development machine: Rust 1.99 and Visual Studio 2022 Build Tools are
-installed. **Node.js is not** and is needed from Phase 6 (web client).
+installed. **Node.js is not** and is needed from Phase 6 (web client). The oldest Rust that
+builds the locked dependencies is 1.93 (`sevenz-rust2` 0.24); the Dockerfile pins it.
 
 ---
 
