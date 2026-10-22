@@ -10,7 +10,8 @@
 # RAR archives need UnRAR, which is not free software and not included: add it in
 # a derived image and set STL_UNRAR_PATH.
 
-ARG RUST_VERSION=1.92
+# At least the highest rust-version of the locked dependencies (sevenz-rust2 0.24: 1.93).
+ARG RUST_VERSION=1.93
 FROM rust:${RUST_VERSION}-trixie AS build
 WORKDIR /src
 COPY rust/ rust/
