@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026.43.3 — 2026-10-22
+
+- **Docker build fixed.** The image built with Rust 1.92, but `sevenz-rust2` 0.24 needs 1.93,
+  so `docker build` failed; the Dockerfile now uses Rust 1.93 (`RUST_VERSION`), the oldest
+  release that builds the locked dependencies. The deployment guide states the minimum.
+- **Obsolete documents removed:** `changes.md` (a PyQt-era feature note),
+  `docs/code-review-2026-06.md` and `docs/refactoring-plan.md` (reviews and plans for the
+  Python code) and `docs/server-migration-plan.md` (superseded by the Rust migration plan);
+  they remain in the git history. The manual CLIP encoder setup in the README and the
+  deployment guide now downloads the ready-made file instead of exporting it with Python.
+
 ## 2026.43.2 — 2026-10-20
 
 - **Progress with counts and time left.** Running jobs show `1,234 / 8,000 (15%) · about

@@ -1,5 +1,5 @@
 # stlLibrary server (rust/stl-server) and web client (web/), with pdfium (PDF
-# previews) and ONNX Runtime (AI embeddings). See README.md → "Server (preview)".
+# previews) and ONNX Runtime (AI embeddings). See docs/deployment.md → "Option C: Docker".
 #
 #   docker build -t stllibrary-server .
 #   docker run -d --name stl -p 8770:8770 -v /srv/stl-data:/data -v /srv/STL:/library:ro stllibrary-server

@@ -61,7 +61,8 @@ the desktop app to it under **Servers**.
 
 ### Build
 
-On Debian or Ubuntu:
+Building needs Rust 1.93 or newer (rustup installs the current release) and Node.js 24. On
+Debian or Ubuntu:
 
 ```bash
 sudo apt update
@@ -271,12 +272,13 @@ alone. Installing manually works as described below.
 **AI image embeddings** (*Find by Image* and *Duplicates* by AI similarity): ONNX Runtime
 1.17 or newer (`onnxruntime.dll` / `libonnxruntime.so`, set `"onnxruntime"` if it is not
 beside the server) and the CLIP image encoder at `<data dir>/models/clip_image_encoder.onnx`
-(or `STLLIBRARY_CLIP_MODEL`). Create the encoder with:
+(or `STLLIBRARY_CLIP_MODEL`). The encoder is the ONNX export of
+`openai/clip-vit-base-patch32`'s vision model, the same file the earlier desktop app used:
 
 ```bash
-pip install "optimum[exporters]"
-optimum-cli export onnx --model openai/clip-vit-base-patch32 --task zero-shot-image-classification clip_onnx/
-cp clip_onnx/vision_model.onnx <data dir>/models/clip_image_encoder.onnx
+mkdir -p <data dir>/models
+curl -L -o <data dir>/models/clip_image_encoder.onnx \
+  https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/d15189d7028b43f1d3e65039190477f6af591c2a/onnx/vision_model.onnx
 ```
 
 Then run *Maintenance → Compute missing embeddings* once; new crawls embed their thumbnails

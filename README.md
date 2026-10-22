@@ -11,7 +11,7 @@ can open a library on your computer without setting up a server.
 
 **Guides:** [using stlLibrary](docs/user-guide.md) · [deploying a server](docs/deployment.md)
 
-Version: 2026.43.2
+Version: 2026.43.3
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). Libraries are compatible: this version opens the same data directory
@@ -188,10 +188,10 @@ present). To install by hand:
   app's AI setup created) or point `"ai"` at them. The server starts `llama-server` on first
   use and stops it after ten idle minutes.
 - **AI image embeddings (CLIP)** — needs ONNX Runtime and the CLIP image encoder at
-  `<data dir>/models/clip_image_encoder.onnx` (or `STLLIBRARY_CLIP_MODEL`). Export it with
-  `optimum-cli export onnx --model openai/clip-vit-base-patch32 --task zero-shot-image-classification clip_onnx/`
-  and copy `clip_onnx/vision_model.onnx`. Then run *Maintenance → Compute missing
-  embeddings*; the AI method appears in *Find by Image* and *Duplicates*.
+  `<data dir>/models/clip_image_encoder.onnx` (or `STLLIBRARY_CLIP_MODEL`): `onnx/vision_model.onnx`
+  from [Xenova/clip-vit-base-patch32](https://huggingface.co/Xenova/clip-vit-base-patch32).
+  Then run *Maintenance → Compute missing embeddings*; the AI method appears in *Find by
+  Image* and *Duplicates*.
 
 ### Backups and restore
 
