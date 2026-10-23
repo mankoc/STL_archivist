@@ -215,9 +215,18 @@ pub struct AiInputs {
     pub files: Vec<String>,
 }
 
-/// `ai_model_inputs`.
+/// `ai_model_inputs`. The archive's path is given as `library name/relative
+/// path`: what the folders say about the model, without where the library
+/// happens to be mounted.
 pub fn ai_model_inputs(tx: &Connection, model_id: i64) -> Result<Option<AiInputs>> {
-    let Some((row, archive_path)) = load_row(tx, model_id)? else { return Ok(None) };
+    let Some((row, _)) = load_row(tx, model_id)? else { return Ok(None) };
+    let archive_path: Option<String> = tx
+        .query_row(
+            "SELECT l.name || '/' || m.rel_path FROM models m JOIN libraries l ON l.id = m.library_id WHERE m.id = ?1",
+            [model_id],
+            |r| r.get(0),
+        )
+        .optional()?;
     let mut meta = Vec::new();
     let mut add = |label: &str, value: Option<String>| {
         if let Some(v) = value.filter(|v| !v.is_empty()) {
@@ -372,7 +381,7 @@ pub fn mass_choices(conn: &Connection, ids: &[i64]) -> Result<Vec<(&'static str,
 pub fn archive_paths(conn: &Connection, ids: &[i64]) -> Result<HashMap<i64, String>> {
     let json = format!("[{}]", ids.iter().map(i64::to_string).collect::<Vec<_>>().join(","));
     let mut st =
-        conn.prepare("SELECT id, archive_path FROM models WHERE id IN (SELECT value FROM json_each(?1))")?;
+        conn.prepare(&format!("SELECT id, {} FROM models WHERE id IN (SELECT value FROM json_each(?1))", super::schema_sql::archive_path_sql("models")))?;
     st.query_map([json], |r| Ok((r.get(0)?, r.get::<_, Option<String>>(1)?.unwrap_or_default())))?.collect()
 }
 

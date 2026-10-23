@@ -26,6 +26,26 @@ pub enum JobResult {
     Records { rows: Vec<crate::maint::RecordRow> },
     /// The AI tagger's suggestion for one model (`ai_suggest`).
     AiSuggestion(Box<crate::ai::AiSuggestion>),
+    /// What moving a library to a new root found (`relocate_library`).
+    Relocation(Relocation),
+}
+
+/// The check (and move) of a library to a new root.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct Relocation {
+    pub library: i64,
+    pub root: String,
+    pub total: usize,
+    pub found: usize,
+    /// Found only with another letter case.
+    pub case_only: usize,
+    pub missing: usize,
+    /// Some relative paths not found.
+    pub missing_examples: Vec<String>,
+    /// Libraries inside it, moved along.
+    pub inner: usize,
+    /// The root was changed (else only checked).
+    pub applied: bool,
 }
 
 impl JobResult {
@@ -37,6 +57,7 @@ impl JobResult {
             JobResult::Metadata { groups } => groups.len(),
             JobResult::Records { rows } => rows.len(),
             JobResult::AiSuggestion(_) => 1,
+            JobResult::Relocation(r) => r.total,
         }
     }
 

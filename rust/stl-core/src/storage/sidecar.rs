@@ -15,7 +15,8 @@ use rusqlite::types::Value;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde_json::Value as Json;
 
-use super::edit::{archive_folder_for, lookup, py_strip, subcollection, tag, utc_now_text};
+use super::edit::{lookup, py_strip, subcollection, tag, utc_now_text};
+use super::libraries::{self, Roots};
 use crate::pyjson::{J, dumps_indent2, utc_now_isoformat};
 use crate::thumbstore::ThumbStore;
 use crate::winpath::WinPath;
@@ -88,8 +89,10 @@ fn names(conn: &Connection, sql: &str, id: i64) -> SResult<Vec<J>> {
 }
 
 fn snapshot(conn: &Connection, folder: &str, include_thumbnails: bool) -> SResult<Option<Snapshot>> {
-    let mut st = conn.prepare(
-        "SELECT m.id, m.archive_path, m.archive_hash, m.title, m.creator, m.source, m.release_year, m.release_month, \
+    // The folder's archives: in the deepest library holding it, at its relative folder.
+    let Some((library, rel_folder)) = Roots::load(conn)?.locate_folder(folder) else { return Ok(None) };
+    let mut st = conn.prepare(&format!(
+        "SELECT m.id, {}, m.archive_hash, m.title, m.creator, m.source, m.release_year, m.release_month, \
          m.url, m.description, m.sequence, m.presupports, m.warning, m.compression_rate, \
          scu.name, col.name, sub.name, cat.name, rel.name FROM models m \
          LEFT JOIN sculptors scu ON m.sculptor_id = scu.id \
@@ -97,11 +100,12 @@ fn snapshot(conn: &Connection, folder: &str, include_thumbnails: bool) -> SResul
          LEFT JOIN subcollections sub ON m.subcollection_id = sub.id \
          LEFT JOIN categories cat ON m.category_id = cat.id \
          LEFT JOIN releases rel ON m.release_id = rel.id \
-         WHERE m.archive_path LIKE ?1 ORDER BY m.id",
-    )?;
+         WHERE m.library_id = ?1 AND m.rel_folder = ?2 ORDER BY m.id",
+        super::schema_sql::archive_path_sql("m")
+    ))?;
     let want = normcase(folder);
     let rows: Vec<Vec<Value>> = st
-        .query_map([format!("{folder}{}%", crate::winpath::SEP)], |r| (0..19).map(|k| r.get::<_, Value>(k)).collect())?
+        .query_map(params![library, rel_folder], |r| (0..19).map(|k| r.get::<_, Value>(k)).collect())?
         .collect::<rusqlite::Result<_>>()?;
     let mut entries = Vec::new();
     let mut thumbs = Vec::new();
@@ -196,9 +200,11 @@ fn snapshot(conn: &Connection, folder: &str, include_thumbnails: bool) -> SResul
     if entries.is_empty() {
         return Ok(None);
     }
-    let pattern: Option<Value> = conn
-        .query_row("SELECT pattern FROM crawled_folders WHERE path = ?1 ORDER BY id LIMIT 1", [folder], |r| r.get(0))
-        .optional()?;
+    // The pattern of the library the folder is the root of (none for other folders).
+    let pattern: Option<Value> = match Roots::load(conn)?.locate_root(folder) {
+        Some(id) => conn.query_row("SELECT pattern FROM libraries WHERE id = ?1", [id], |r| r.get(0)).optional()?,
+        None => None,
+    };
     let data = J::Obj(vec![
         ("version".into(), J::Int(SCHEMA_VERSION)),
         ("generated_at".into(), J::Str(utc_now_isoformat())),
@@ -509,28 +515,21 @@ pub fn import(tx: &Transaction, store: &ThumbStore, folder: &str) -> SResult<Vec
         plans.push(plan_model(m, path, &thumbs)?);
     }
     // An archive listed twice is inserted once: the second finds the first, as in Python.
-    if let Some(pattern) = &pattern {
-        let crawled: Option<(i64, Option<String>)> = tx
-            .query_row("SELECT id, pattern FROM crawled_folders WHERE path = ?1 ORDER BY id LIMIT 1", [folder], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })
-            .optional()?;
-        match crawled {
-            None => {
-                tx.execute("INSERT INTO crawled_folders (path, pattern) VALUES (?1, ?2)", params![folder, pattern])?;
-            }
-            Some((id, ref current)) if current.as_ref().is_none_or(|c| c.is_empty()) => {
-                tx.execute("UPDATE crawled_folders SET pattern = ?1 WHERE id = ?2", params![pattern, id])?;
-            }
-            Some(_) => {}
-        }
+    // A sidecar at a library's root gives that library its pattern when it has none.
+    if let Some(pattern) = &pattern
+        && let Some(id) = Roots::load(tx)?.locate_root(folder)
+    {
+        tx.execute("UPDATE libraries SET pattern = ?1 WHERE id = ?2 AND coalesce(pattern, '') = ''", params![pattern, id])?;
     }
 
     let mut imported = Vec::new();
     let mut thumb_writes: Vec<(i64, Vec<u8>)> = Vec::new();
     for p in plans {
+        let (library, rel) = libraries::locate_or_create(tx, &p.archive_path, Some(folder))?;
         if tx
-            .query_row("SELECT id FROM models WHERE archive_path = ?1 LIMIT 1", [&p.archive_path], |r| r.get::<_, i64>(0))
+            .query_row("SELECT id FROM models WHERE library_id = ?1 AND rel_path = ?2 LIMIT 1", params![library, rel.as_str()], |r| {
+                r.get::<_, i64>(0)
+            })
             .optional()?
             .is_some()
         {
@@ -568,13 +567,13 @@ pub fn import(tx: &Transaction, store: &ThumbStore, folder: &str) -> SResult<Vec
         let now = utc_now_text();
         let [title, creator, source, url, description, presupports, warning] = &p.columns;
         tx.execute(
-            "INSERT INTO models (title, creator, source, release_year, release_month, url, description, archive_path, \
-             archive_folder, archive_hash, sequence, presupports, warning, compression_rate, is_missing, to_print, \
+            "INSERT INTO models (title, creator, source, release_year, release_month, url, description, library_id, rel_path, \
+             rel_folder, archive_hash, sequence, presupports, warning, compression_rate, is_missing, to_print, \
              created_at, updated_at, sculptor_id, collection_id, subcollection_id, category_id, release_id) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 0, 0, ?15, ?15, ?16, ?17, ?18, ?19, ?20)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, 0, 0, ?16, ?16, ?17, ?18, ?19, ?20, ?21)",
             params![
-                title, creator, source, p.release_year, p.release_month, url, description, p.archive_path,
-                archive_folder_for(&p.archive_path), p.archive_hash, p.sequence, presupports, warning, rate, now,
+                title, creator, source, p.release_year, p.release_month, url, description, library, rel.as_str(),
+                rel.folder(), p.archive_hash, p.sequence, presupports, warning, rate, now,
                 sculptor, collection, sub, category, release
             ],
         )?;
@@ -632,10 +631,13 @@ mod tests {
         let src = dir.path().join("src.db");
         migrate(&src, &Vectors::default()).unwrap();
         let conn = open(&src).unwrap();
+        // A library around the folder: the sidecar holds the folder's own archives.
+        conn.execute("INSERT INTO libraries (uuid, name, root) VALUES ('u1', 'lib', ?1)", [crate::winpath::native(&dir.path().to_string_lossy())])
+            .unwrap();
         conn.execute(
-            "INSERT INTO models (title, archive_path, archive_hash, compression_rate, is_missing, to_print) \
-             VALUES ('A', ?1, 'h', 0.5, 0, 0)",
-            [format!(r"{folder_s}\a.zip")],
+            "INSERT INTO models (title, library_id, rel_path, rel_folder, archive_hash, compression_rate, is_missing, to_print) \
+             VALUES ('A', 1, 'models/a.zip', 'models', 'h', 0.5, 0, 0)",
+            [],
         )
         .unwrap();
         conn.execute("INSERT INTO images (model_id, filename, thumbnail_path) VALUES (1, 'i.jpg', '1')", []).unwrap();
@@ -648,7 +650,10 @@ mod tests {
         let tx = conn.transaction().unwrap();
         let imported = import(&tx, &store, &folder_s).unwrap();
         tx.commit().unwrap();
-        assert_eq!(imported, [format!(r"{folder_s}\a.zip")]);
+        assert_eq!(imported, [crate::winpath::join(&folder_s, "a.zip")]);
+        let (root, rel): (String, String) =
+            conn.query_row("SELECT l.root, m.rel_path FROM models m JOIN libraries l ON l.id = m.library_id", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((root, rel.as_str()), (folder_s.clone(), "a.zip"), "outside every library: the folder became one");
         let (title, rate): (String, f64) =
             conn.query_row("SELECT title, compression_rate FROM models", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
         assert_eq!((title.as_str(), rate), ("A", 0.5));

@@ -92,3 +92,12 @@ pub fn request(method: &str, uri: &str, token: Option<&str>, body: Option<Value>
 pub async fn call(state: &AppState, method: &str, uri: &str, token: Option<&str>, body: Option<Value>) -> Reply {
     send_from(state, LOCAL, request(method, uri, token, body)).await
 }
+
+/// A fixture's archive in a library at `root` (made when needed): `(library
+/// id, path relative to it, its folder)`, for inserting models by hand.
+#[allow(dead_code)]
+pub fn located(tx: &rusqlite::Transaction, root: &str, abs: &str) -> (i64, String, String) {
+    let id = stl_core::storage::libraries::create(tx, root, None, None, None).unwrap();
+    let rel = stl_core::relpath::RelPath::from_abs(root, abs).unwrap_or_else(|| panic!("{abs} is not under {root}"));
+    (id, rel.as_str().to_string(), rel.folder().to_string())
+}

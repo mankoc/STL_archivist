@@ -24,7 +24,7 @@ use crate::winpath::WinPath;
 
 /// Filter-pane sections, in display order (`FACETS`).
 pub const FACETS: &[&str] = &[
-    "creator", "source", "tag", "path", "date", "sculptor", "collection", "subcollection", "category",
+    "library", "creator", "source", "tag", "path", "date", "sculptor", "collection", "subcollection", "category",
     "release", "scale", "presupports", "warning", "filetype",
 ];
 
@@ -36,12 +36,13 @@ pub const GROUPS: &[&str] = &[
 
 /// Sections `filter_tree` can be asked to show (`Show`).
 pub const SHOW: &[&str] = &[
-    "author", "tags", "source", "date", "sculptor", "collection", "subcollection", "category", "release",
+    "library", "author", "tags", "source", "date", "sculptor", "collection", "subcollection", "category", "release",
     "scale", "presupports", "path",
 ];
 
 /// Facets compared against a lookup FK column.
 const ID_FACETS: &[(&str, &str)] = &[
+    ("library", "library_id"),
     ("sculptor", "sculptor_id"),
     ("collection", "collection_id"),
     ("subcollection", "subcollection_id"),
@@ -53,7 +54,7 @@ const ID_FACETS: &[(&str, &str)] = &[
 pub const SORT_COLUMNS: &[&str] = &[
     "title", "creator", "source", "sculptor_name", "collection_name", "subcollection_name", "sequence",
     "release_name", "archive_path", "presupports", "created_at", "archive_size", "compression_rate",
-    "category_name",
+    "category_name", "library_name",
 ];
 
 /// One selected value: text, a lookup id, or a `(year, month)` date.
@@ -294,12 +295,12 @@ fn conditions(spec: &FilterSpec, t: &str, skip: Option<&str>, path_table: Option
     if want("filetype") {
         if let Some(vs) = inc.get("filetype") {
             let p: Vec<Value> = FilterSpec::texts(vs).map(|e| Value::Text(format!("%{e}"))).collect();
-            let parts = vec![format!("lower({t}.archive_path) LIKE ?"); p.len()];
+            let parts = vec![format!("lower({t}.rel_path) LIKE ?"); p.len()];
             out.push(Sql::with(format!("({})", parts.join(" OR ")), p));
         }
         if let Some(vs) = exc.get("filetype") {
             let p: Vec<Value> = FilterSpec::texts(vs).map(|e| Value::Text(format!("%{e}"))).collect();
-            let parts = vec![format!("lower({t}.archive_path) NOT LIKE ?"); p.len()];
+            let parts = vec![format!("lower({t}.rel_path) NOT LIKE ?"); p.len()];
             out.push(Sql::with(format!("({})", parts.join(" AND ")), p));
         }
     }
@@ -313,6 +314,22 @@ fn conditions(spec: &FilterSpec, t: &str, skip: Option<&str>, path_table: Option
     out
 }
 
+/// SQL for a model's absolute archive path in table `t` (`models_view` has it
+/// as a column).
+fn archive_path_of(t: &str) -> String {
+    if t == "models_view" { "models_view.archive_path".into() } else { super::schema_sql::archive_path_sql(t) }
+}
+
+/// The folders (in `/` form, the folder tree's spelling) of the models of
+/// `scope` (a subquery of model ids, or all), with each folder's model count.
+const FOLDER_COUNTS: &str = "SELECT posix_join(l.root, g.rel_folder), g.c FROM \
+     (SELECT library_id, rel_folder, count(*) AS c FROM models WHERE {scope} GROUP BY library_id, rel_folder) g \
+     JOIN libraries l ON l.id = g.library_id";
+
+fn folder_counts_sql(scope: Option<&str>) -> String {
+    FOLDER_COUNTS.replace("{scope}", scope.unwrap_or("1"))
+}
+
 fn serde_json_ids(ids: &[i64]) -> String {
     let parts: Vec<String> = ids.iter().map(i64::to_string).collect();
     format!("[{}]", parts.join(","))
@@ -324,7 +341,7 @@ fn path_matches(t: &str, paths: &[String]) -> Option<Sql> {
     }
     let params: Vec<Value> =
         paths.iter().map(|p| Value::Text(format!("{}/%", p.trim_end_matches('/')))).collect();
-    let parts = vec![format!("replace({t}.archive_path, '\\', '/') LIKE ?"); params.len()];
+    let parts = vec![format!("replace({}, '\\', '/') LIKE ?", archive_path_of(t)); params.len()];
     Some(Sql::with(format!("({})", parts.join(" OR ")), params))
 }
 
@@ -334,7 +351,7 @@ fn group_has_value(key: &str, t: &str) -> String {
         "tag" => format!("{t}.id IN (SELECT DISTINCT model_tags.model_id FROM model_tags)"),
         "scale" => format!("{t}.id IN (SELECT DISTINCT model_scales.model_id FROM model_scales)"),
         "date" => format!("{t}.release_year IS NOT NULL"),
-        "path" => non_empty("archive_path"),
+        "path" => non_empty("rel_path"),
         k => match ID_FACETS.iter().find(|(f, _)| *f == k) {
             Some((_, col)) => format!("{t}.{col} IS NOT NULL"),
             None => non_empty(k), // creator, source, presupports, warning
@@ -406,6 +423,10 @@ pub struct PageRow {
     pub is_missing: Option<bool>,
     /// Images catalogued for the model.
     pub image_count: i64,
+    pub library_id: i64,
+    pub library_name: String,
+    /// The archive's path relative to its library (`/` form).
+    pub rel_path: String,
 }
 
 /// `page_rows`: rows for `ids` in that order (missing ids skipped).
@@ -415,8 +436,9 @@ pub fn page_rows(conn: &Connection, ids: &[i64]) -> Result<Vec<PageRow>> {
         "SELECT v.id, v.title, v.creator, v.source, v.release_year, v.release_month, v.archive_path, v.presupports, \
          v.warning, v.archive_size, v.compression_rate, v.sequence, v.created_at, v.sculptor_name, v.collection_name, \
          v.subcollection_name, v.category_name, v.release_name, v.to_print, \
-         m.url, m.description, m.updated_at, m.archive_folder, m.archive_hash, m.is_missing, \
-         (SELECT count(*) FROM images i WHERE i.model_id = v.id) \
+         m.url, m.description, m.updated_at, \
+         posix_join((SELECT root FROM libraries WHERE libraries.id = v.library_id), v.rel_folder), m.archive_hash, m.is_missing, \
+         (SELECT count(*) FROM images i WHERE i.model_id = v.id), v.library_id, v.library_name, v.rel_path \
          FROM models_view v JOIN models m ON m.id = v.id WHERE v.id IN (SELECT value FROM json_each(?1))",
     )?;
     let mut by_id: HashMap<i64, PageRow> = st
@@ -450,6 +472,9 @@ pub fn page_rows(conn: &Connection, ids: &[i64]) -> Result<Vec<PageRow>> {
                 archive_hash: r.get(23)?,
                 is_missing: r.get(24)?,
                 image_count: r.get(25)?,
+                library_id: r.get(26)?,
+                library_name: r.get(27)?,
+                rel_path: r.get(28)?,
             })
         })?
         .map(|r| r.map(|row| (row.id, row)))
@@ -548,6 +573,7 @@ pub struct FilterTree {
     pub tags: Vec<String>,
     pub sources: Vec<String>,
     pub dates: Vec<(i64, Option<i64>)>,
+    pub libraries: Vec<(String, i64)>,
     pub sculptors: Vec<(String, i64)>,
     pub collections: Vec<(String, i64)>,
     pub sub_by_col: Vec<Collection>,
@@ -651,6 +677,7 @@ pub fn filter_tree(conn: &Connection, spec: Option<&FilterSpec>, show: &Show, sh
     if show_counts {
         let mut grp: HashMap<String, i64> = HashMap::new();
         for (col, kind) in [
+            ("library_id", "library_id"),
             ("creator", "creator"),
             ("source", "source"),
             ("sculptor_id", "sculptor_id"),
@@ -760,7 +787,8 @@ pub fn filter_tree(conn: &Connection, spec: Option<&FilterSpec>, show: &Show, sh
         ft.dates = st.query_map(params_from_iter(params), |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_>>()?;
     }
     for (flag, table, col, target) in [
-        ("sculptor", "sculptors", "sculptor_id", 0usize),
+        ("library", "libraries", "library_id", 4usize),
+        ("sculptor", "sculptors", "sculptor_id", 0),
         ("collection", "collections", "collection_id", 1),
         ("category", "categories", "category_id", 2),
         ("release", "releases", "release_id", 3),
@@ -771,6 +799,7 @@ pub fn filter_tree(conn: &Connection, spec: Option<&FilterSpec>, show: &Show, sh
                 0 => ft.sculptors = list,
                 1 => ft.collections = list,
                 2 => ft.categories = list,
+                4 => ft.libraries = list,
                 _ => ft.releases = list,
             }
         }
@@ -846,43 +875,14 @@ pub fn filter_tree(conn: &Connection, spec: Option<&FilterSpec>, show: &Show, sh
     if show.get("path") {
         match scope("path") {
             Some(sc) => {
-                let mut dirs: BTreeSet<String> = column_texts(
-                    conn,
-                    &format!(
-                        "SELECT DISTINCT models.archive_folder FROM models WHERE models.id IN ({}) \
-                         AND models.archive_folder IS NOT NULL",
-                        sc.text
-                    ),
-                    &sc.params,
-                )?
-                .into_iter()
-                .collect();
-                for ap in column_texts(
-                    conn,
-                    &format!(
-                        "SELECT DISTINCT models.archive_path FROM models WHERE models.id IN ({}) \
-                         AND models.archive_folder IS NULL AND models.archive_path IS NOT NULL",
-                        sc.text
-                    ),
-                    &sc.params,
-                )? {
-                    dirs.insert(WinPath::new(&ap).parent().as_posix());
-                }
+                let scope = format!("models.id IN ({})", sc.text);
+                let dirs: BTreeSet<String> =
+                    rows_i64_text(conn, &folder_counts_sql(Some(&scope)), &sc.params)?.into_iter().filter_map(|(v, _)| text_of(v)).collect();
                 ft.scoped_dirs = Some(dirs.into_iter().collect());
             }
             None => {
-                let mut dirs: BTreeSet<String> = column_texts(
-                    conn,
-                    "SELECT DISTINCT models.archive_folder FROM models WHERE models.archive_folder IS NOT NULL",
-                    &[],
-                )?
-                .into_iter()
-                .collect();
-                for ap in column_opt_texts(conn, "SELECT DISTINCT models.archive_path FROM models WHERE models.archive_folder IS NULL")? {
-                    if let Some(ap) = ap.filter(|a| !a.is_empty()) {
-                        dirs.insert(WinPath::new(&ap).parent().as_posix());
-                    }
-                }
+                let dirs: BTreeSet<String> =
+                    rows_i64_text(conn, &folder_counts_sql(None), &[])?.into_iter().filter_map(|(v, _)| text_of(v)).collect();
                 let sorted: Vec<String> = dirs.into_iter().collect();
                 ft.new_dirs = Some(sorted.clone());
                 ft.sorted_dirs = sorted;
@@ -921,6 +921,7 @@ fn in_scope(col: &str, sc: &Sql) -> Sql {
 fn scoped_counts(conn: &Connection, scopes: &Scopes, ft: &mut FilterTree) -> Result<()> {
     let scope = |section: &str| scopes.get(section);
     for (section, col, kind) in [
+        ("library", "library_id", "library_id"),
         ("creator", "creator", "creator"),
         ("source", "source", "source"),
         ("sculptor", "sculptor_id", "sculptor_id"),
@@ -1056,7 +1057,7 @@ fn date_counts(conn: &Connection, sc: Option<&Sql>, counts: &mut HashMap<Key, i6
 
 /// `Path(ap).suffix.lower()` of every non-empty archive path (in scope).
 fn filetype_suffixes(conn: &Connection, sc: Option<&Sql>, _all: bool) -> Result<Vec<String>> {
-    let mut sql = String::from("SELECT models.archive_path FROM models WHERE models.archive_path IS NOT NULL");
+    let mut sql = String::from("SELECT models.rel_path FROM models WHERE 1");
     let mut params = Vec::new();
     if let Some(sc) = sc {
         sql.push_str(&format!(" AND models.id IN ({})", sc.text));
@@ -1069,33 +1070,26 @@ fn filetype_suffixes(conn: &Connection, sc: Option<&Sql>, _all: bool) -> Result<
         .collect())
 }
 
-/// Models per folder: `archive_folder`, or the archive path's parent when it is NULL.
+/// Models per folder (absolute, in `/` form).
 fn direct_folders(conn: &Connection, sc: Option<&Sql>) -> Result<HashMap<String, i64>> {
-    let (scope_sql, params) = match sc {
-        Some(sc) => (format!("models.id IN ({}) AND ", sc.text), sc.params.clone()),
-        None => (String::new(), Vec::new()),
+    let (scope, params) = match sc {
+        Some(sc) => (Some(format!("models.id IN ({})", sc.text)), sc.params.clone()),
+        None => (None, Vec::new()),
     };
     let mut direct: HashMap<String, i64> = HashMap::new();
-    for (v, c) in rows_i64_text(
-        conn,
-        &format!(
-            "SELECT models.archive_folder, count(models.id) FROM models WHERE {scope_sql}models.archive_folder IS NOT NULL \
-             GROUP BY models.archive_folder"
-        ),
-        &params,
-    )? {
-        if let Value::Text(f) = v {
+    for (v, c) in rows_i64_text(conn, &folder_counts_sql(scope.as_deref()), &params)? {
+        if let Some(f) = text_of(v) {
             *direct.entry(f).or_default() += c;
         }
     }
-    for ap in column_texts(
-        conn,
-        &format!("SELECT models.archive_path FROM models WHERE {scope_sql}models.archive_folder IS NULL AND models.archive_path IS NOT NULL"),
-        &params,
-    )? {
-        *direct.entry(WinPath::new(&ap).parent().as_posix()).or_default() += 1;
-    }
     Ok(direct)
+}
+
+fn text_of(v: Value) -> Option<String> {
+    match v {
+        Value::Text(t) => Some(t),
+        _ => None,
+    }
 }
 
 fn distinct_texts(conn: &Connection, col: &str, sc: Option<&Sql>) -> Result<Vec<String>> {
@@ -1140,10 +1134,6 @@ fn scalar(conn: &Connection, sql: &str, params: &[Value]) -> Result<i64> {
 fn column_texts(conn: &Connection, sql: &str, params: &[Value]) -> Result<Vec<String>> {
     let mut st = conn.prepare(sql)?;
     st.query_map(params_from_iter(params.iter()), |r| r.get(0))?.collect()
-}
-
-fn column_opt_texts(conn: &Connection, sql: &str) -> Result<Vec<Option<String>>> {
-    column_opt_texts_p(conn, sql, &[])
 }
 
 fn column_opt_texts_p(conn: &Connection, sql: &str, params: &[Value]) -> Result<Vec<Option<String>>> {

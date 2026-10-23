@@ -158,7 +158,8 @@ pub struct Row {
 pub(crate) fn load_row(tx: &rusqlite::Connection, model_id: i64) -> Result<Option<(Row, Option<String>)>> {
     tx.query_row(
         "SELECT title, creator, source, release_year, release_month, sequence, presupports, to_print, \
-         sculptor_id, collection_id, subcollection_id, category_id, release_id, archive_path, url, description \
+         sculptor_id, collection_id, subcollection_id, category_id, release_id, \
+         path_join((SELECT root FROM libraries WHERE libraries.id = models.library_id), rel_path), url, description \
          FROM models WHERE id = ?1",
         [model_id],
         |r| {
@@ -388,27 +389,8 @@ pub fn apply_cell_edits(
 
 // ── moves.py ─────────────────────────────────────────────────────────────────
 
-/// `archive_folder_for`: `PurePosixPath(path.replace("\\", "/")).parent.as_posix()`.
-pub fn archive_folder_for(archive_path: &str) -> String {
-    let norm = archive_path.replace('\\', "/");
-    let absolute = norm.starts_with('/');
-    // PurePosixPath keeps exactly two leading slashes, collapses three or more.
-    let anchor = if norm.starts_with("//") && !norm.starts_with("///") {
-        "//"
-    } else if absolute {
-        "/"
-    } else {
-        ""
-    };
-    let mut parts: Vec<&str> = norm.split('/').filter(|p| !p.is_empty() && *p != ".").collect();
-    parts.pop();
-    if parts.is_empty() {
-        return if anchor.is_empty() { ".".into() } else { anchor.into() };
-    }
-    format!("{anchor}{}", parts.join("/"))
-}
-
-/// `moves.relocate`: point the model at its archive's new location.
+/// `moves.relocate`: point the model at its archive's new location (an
+/// absolute path; outside every library, its folder becomes one).
 pub fn relocate(
     tx: &Transaction,
     model_id: i64,
@@ -418,18 +400,33 @@ pub fn relocate(
     mtime_ns: Option<i64>,
     compression: Option<f64>,
 ) -> Result<()> {
-    let folder = archive_folder_for(new_path);
+    let (library, rel) = super::libraries::locate_or_create(tx, new_path, None)?;
+    relocate_to(tx, model_id, library, &rel, archive_hash, size, mtime_ns, compression)
+}
+
+/// [`relocate`] to a library and relative path.
+#[allow(clippy::too_many_arguments)]
+pub fn relocate_to(
+    tx: &Transaction,
+    model_id: i64,
+    library: i64,
+    rel: &crate::relpath::RelPath,
+    archive_hash: &str,
+    size: Option<i64>,
+    mtime_ns: Option<i64>,
+    compression: Option<f64>,
+) -> Result<()> {
     let now = utc_now_text();
     match compression {
         Some(c) => tx.execute(
-            "UPDATE models SET archive_path = ?1, archive_hash = ?2, archive_size = ?3, archive_mtime_ns = ?4, \
-             archive_folder = ?5, is_missing = 0, compression_rate = ?6, updated_at = ?7 WHERE id = ?8",
-            params![new_path, archive_hash, size, mtime_ns, folder, c, now, model_id],
+            "UPDATE models SET library_id = ?1, rel_path = ?2, rel_folder = ?3, archive_hash = ?4, archive_size = ?5, \
+             archive_mtime_ns = ?6, is_missing = 0, compression_rate = ?7, updated_at = ?8 WHERE id = ?9",
+            params![library, rel.as_str(), rel.folder(), archive_hash, size, mtime_ns, c, now, model_id],
         )?,
         None => tx.execute(
-            "UPDATE models SET archive_path = ?1, archive_hash = ?2, archive_size = ?3, archive_mtime_ns = ?4, \
-             archive_folder = ?5, is_missing = 0, updated_at = ?6 WHERE id = ?7",
-            params![new_path, archive_hash, size, mtime_ns, folder, now, model_id],
+            "UPDATE models SET library_id = ?1, rel_path = ?2, rel_folder = ?3, archive_hash = ?4, archive_size = ?5, \
+             archive_mtime_ns = ?6, is_missing = 0, updated_at = ?7 WHERE id = ?8",
+            params![library, rel.as_str(), rel.folder(), archive_hash, size, mtime_ns, now, model_id],
         )?,
     };
     Ok(())
@@ -455,17 +452,18 @@ pub fn delete_model(tx: &Transaction, model_id: i64) -> Result<Vec<String>> {
 /// location of `new_id`, the shallow record created for the moved archive,
 /// which is deleted. Returns `new_id`'s thumbnail references.
 pub fn merge_into_missing(tx: &Transaction, old_id: i64, new_id: i64) -> Result<Vec<String>> {
-    type Loc = (String, String, Option<i64>, Option<i64>, Option<f64>);
+    type Loc = (i64, String, String, Option<i64>, Option<i64>, Option<f64>);
     let loc: Option<Loc> = tx
         .query_row(
-            "SELECT archive_path, archive_hash, archive_size, archive_mtime_ns, compression_rate FROM models WHERE id = ?1",
+            "SELECT library_id, rel_path, archive_hash, archive_size, archive_mtime_ns, compression_rate FROM models WHERE id = ?1",
             [new_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
         )
         .optional()?;
-    let Some((path, hash, size, mtime, compression)) = loc else { return Ok(Vec::new()) };
+    let Some((library, rel, hash, size, mtime, compression)) = loc else { return Ok(Vec::new()) };
+    let rel = crate::relpath::RelPath::parse(&rel).map_err(rusqlite::Error::InvalidParameterName)?;
     let refs = delete_model(tx, new_id)?;
-    relocate(tx, old_id, &path, &hash, size, mtime, compression)?;
+    relocate_to(tx, old_id, library, &rel, &hash, size, mtime, compression)?;
     Ok(refs)
 }
 
@@ -516,11 +514,6 @@ mod tests {
 
     #[test]
     fn folder_and_int_rules() {
-        assert_eq!(archive_folder_for("F:\\STL\\x.7z"), "F:/STL");
-        assert_eq!(archive_folder_for("F:/x.7z"), "F:");
-        assert_eq!(archive_folder_for("x.7z"), ".");
-        assert_eq!(archive_folder_for("//nas/share/x.7z"), "//nas/share");
-        assert_eq!(archive_folder_for("/x.7z"), "/");
         assert_eq!(py_int("1_000").unwrap(), Some(1000));
         assert_eq!(py_int("+3").unwrap(), Some(3));
         assert_eq!(py_int("1__0").unwrap(), None);

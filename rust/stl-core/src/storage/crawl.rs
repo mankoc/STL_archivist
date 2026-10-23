@@ -19,7 +19,8 @@ use rusqlite::types::Value;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 use super::edit::{lookup, py_strip, relocate, subcollection, tag, utc_now_text};
-use super::vectors;
+use super::libraries::{self, Roots};
+use super::{schema_sql, vectors};
 use crate::thumbstore::ThumbStore;
 use crate::winpath::WinPath;
 
@@ -32,9 +33,17 @@ fn json_ids(ids: &[i64]) -> String {
     format!("[{}]", ids.iter().map(i64::to_string).collect::<Vec<_>>().join(","))
 }
 
-fn json_strs(v: &[String]) -> String {
-    serde_json::to_string(v).unwrap_or_else(|_| "[]".into())
+/// `[[library id, relative path, path], …]` for the given absolute paths that
+/// lie in a library, for `json_each` (see [`LOCATED`]).
+pub(crate) fn located_json(conn: &Connection, paths: &[String]) -> Result<String> {
+    let roots = Roots::load(conn)?;
+    let v: Vec<serde_json::Value> =
+        paths.iter().filter_map(|p| roots.locate(p).map(|(id, r)| serde_json::json!([id, r.as_str(), p]))).collect();
+    Ok(serde_json::Value::Array(v).to_string())
 }
+
+/// The models at [`located_json`]'s paths (`?1`); `j.value->>2` is the path asked for.
+pub(crate) const LOCATED: &str = "json_each(?1) j JOIN models ON models.library_id = j.value->>0 AND models.rel_path = j.value->>1";
 
 /// `(size, mtime_ns)` of a file, as `int(st.st_size)`, `int(st.st_mtime_ns)`.
 pub fn stat(path: &str) -> Option<(i64, i64)> {
@@ -49,13 +58,10 @@ pub fn stat(path: &str) -> Option<(i64, i64)> {
 
 // ── Phase 1 ──────────────────────────────────────────────────────────────────
 
-/// `{archive_path: (archive_hash, archive_size, archive_mtime_ns)}` of the given paths.
+/// `{archive path: (archive_hash, archive_size, archive_mtime_ns)}` of the given paths.
 pub fn existing(conn: &Connection, paths: &[String]) -> Result<Vec<(String, String, Option<i64>, Option<i64>)>> {
-    let mut st = conn.prepare(
-        "SELECT archive_path, archive_hash, archive_size, archive_mtime_ns FROM models \
-         WHERE archive_path IN (SELECT value FROM json_each(?1))",
-    )?;
-    st.query_map([json_strs(paths)], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect()
+    let mut st = conn.prepare(&format!("SELECT j.value->>2, archive_hash, archive_size, archive_mtime_ns FROM {LOCATED}"))?;
+    st.query_map([located_json(conn, paths)?], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect()
 }
 
 // ── Phase 2 ──────────────────────────────────────────────────────────────────
@@ -102,14 +108,13 @@ pub fn diff(
     candidates: &HashMap<String, i64>,
 ) -> Result<Diff> {
     let paths: Vec<String> = batch.iter().map(|(p, _)| p.clone()).collect();
-    let mut st = tx.prepare(
-        "SELECT archive_path, id, archive_hash, warning, stl_list_hash, \
-         EXISTS (SELECT 1 FROM stl_files f WHERE f.model_id = models.id) \
-         FROM models WHERE archive_path IN (SELECT value FROM json_each(?1))",
-    )?;
+    let mut st = tx.prepare(&format!(
+        "SELECT j.value->>2, models.id, archive_hash, warning, stl_list_hash, \
+         EXISTS (SELECT 1 FROM stl_files f WHERE f.model_id = models.id) FROM {LOCATED}"
+    ))?;
     type Ex = (i64, String, Option<String>, Option<String>, bool);
     let mut existing: HashMap<String, Ex> = st
-        .query_map([json_strs(&paths)], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))))?
+        .query_map([located_json(tx, &paths)?], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))))?
         .collect::<Result<_>>()?;
     drop(st);
     let mut new_hash_counts: HashMap<&str, usize> = HashMap::new();
@@ -247,7 +252,6 @@ pub struct Upserted {
 #[derive(Debug, Clone, Default, PartialEq)]
 struct ModelRow {
     archive_hash: String,
-    archive_folder: Option<String>,
     archive_size: Option<i64>,
     archive_mtime_ns: Option<i64>,
     compression_rate: Option<f64>,
@@ -269,7 +273,7 @@ struct ModelRow {
     release_id: Option<i64>,
 }
 
-const ROW_COLUMNS: &str = "archive_hash, archive_folder, archive_size, archive_mtime_ns, compression_rate, presupports, \
+const ROW_COLUMNS: &str = "archive_hash, archive_size, archive_mtime_ns, compression_rate, presupports, \
      warning, title, creator, source, url, release_year, release_month, sequence, description, stl_list_hash, \
      sculptor_id, collection_id, subcollection_id, category_id, release_id";
 
@@ -277,26 +281,25 @@ fn load(tx: &Transaction, id: i64) -> Result<ModelRow> {
     tx.query_row(&format!("SELECT {ROW_COLUMNS} FROM models WHERE id = ?1"), [id], |r| {
         Ok(ModelRow {
             archive_hash: r.get(0)?,
-            archive_folder: r.get(1)?,
-            archive_size: r.get(2)?,
-            archive_mtime_ns: r.get(3)?,
-            compression_rate: r.get(4)?,
-            presupports: r.get(5)?,
-            warning: r.get(6)?,
-            title: r.get(7)?,
-            creator: r.get(8)?,
-            source: r.get(9)?,
-            url: r.get(10)?,
-            release_year: r.get(11)?,
-            release_month: r.get(12)?,
-            sequence: r.get(13)?,
-            description: r.get(14)?,
-            stl_list_hash: r.get(15)?,
-            sculptor_id: r.get(16)?,
-            collection_id: r.get(17)?,
-            subcollection_id: r.get(18)?,
-            category_id: r.get(19)?,
-            release_id: r.get(20)?,
+            archive_size: r.get(1)?,
+            archive_mtime_ns: r.get(2)?,
+            compression_rate: r.get(3)?,
+            presupports: r.get(4)?,
+            warning: r.get(5)?,
+            title: r.get(6)?,
+            creator: r.get(7)?,
+            source: r.get(8)?,
+            url: r.get(9)?,
+            release_year: r.get(10)?,
+            release_month: r.get(11)?,
+            sequence: r.get(12)?,
+            description: r.get(13)?,
+            stl_list_hash: r.get(14)?,
+            sculptor_id: r.get(15)?,
+            collection_id: r.get(16)?,
+            subcollection_id: r.get(17)?,
+            category_id: r.get(18)?,
+            release_id: r.get(19)?,
         })
     })
 }
@@ -306,7 +309,6 @@ fn row_values(r: &ModelRow) -> Vec<Value> {
     let i = |v: &Option<i64>| v.map(Value::Integer).unwrap_or(Value::Null);
     vec![
         Value::Text(r.archive_hash.clone()),
-        t(&r.archive_folder),
         i(&r.archive_size),
         i(&r.archive_mtime_ns),
         r.compression_rate.map(Value::Real).unwrap_or(Value::Null),
@@ -353,15 +355,18 @@ fn store_model(tx: &Transaction, id: i64, old: &ModelRow, new: &ModelRow) -> Res
 
 fn insert(tx: &Transaction, path: &str, r: &ModelRow) -> Result<i64> {
     let now = utc_now_text();
+    let (library, rel) = libraries::locate_or_create(tx, path, None)?;
     let mut vals = row_values(r);
-    vals.push(Value::Text(path.to_string()));
+    vals.push(Value::Integer(library));
+    vals.push(Value::Text(rel.as_str().to_string()));
+    vals.push(Value::Text(rel.folder().to_string()));
     vals.push(Value::Text(now.clone()));
     vals.push(Value::Text(now));
     let n = vals.len();
     let marks: Vec<String> = (1..=n).map(|k| format!("?{k}")).collect();
     tx.execute(
         &format!(
-            "INSERT INTO models ({ROW_COLUMNS}, archive_path, created_at, updated_at, is_missing, to_print) \
+            "INSERT INTO models ({ROW_COLUMNS}, library_id, rel_path, rel_folder, created_at, updated_at, is_missing, to_print) \
              VALUES ({}, 0, 0)",
             marks.join(", ")
         ),
@@ -473,7 +478,6 @@ pub fn upsert(
     let hash_changed = old.as_ref().is_some_and(|o| o.archive_hash != input.hash);
     let mut row = old.clone().unwrap_or_default();
     row.archive_hash = input.hash.clone();
-    row.archive_folder = Some(WinPath::new(&input.path).parent().as_posix());
     if let Some((size, mtime)) = stat(&input.path) {
         row.archive_size = Some(size);
         row.archive_mtime_ns = Some(mtime);
@@ -644,7 +648,8 @@ pub type Missing = (i64, String, String, String, Option<i64>);
 /// `_collect_missing`: records whose archive is gone, plus those already flagged.
 pub fn collect_missing(conn: &Connection) -> Result<Vec<Missing>> {
     use rayon::prelude::*;
-    let mut st = conn.prepare("SELECT id, archive_path, archive_hash, archive_size, is_missing FROM models")?;
+    let mut st =
+        conn.prepare(&format!("SELECT id, {}, archive_hash, archive_size, is_missing FROM models", schema_sql::archive_path_sql("models")))?;
     let rows: Vec<(i64, Option<String>, Option<String>, Option<i64>, bool)> =
         st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get::<_, Option<bool>>(4)?.unwrap_or(false))))?
             .collect::<Result<_>>()?;
@@ -672,12 +677,9 @@ pub fn reconcile(
     missing: &[Missing],
     new_paths: &[String],
 ) -> Result<(Vec<(i64, String, String)>, Vec<String>, Vec<String>)> {
-    let mut st = tx.prepare(
-        "SELECT archive_path, id, archive_hash, archive_size FROM models \
-         WHERE archive_path IN (SELECT value FROM json_each(?1)) ORDER BY id",
-    )?;
+    let mut st = tx.prepare(&format!("SELECT j.value->>2, models.id, archive_hash, archive_size FROM {LOCATED} ORDER BY models.id"))?;
     let news: Vec<(String, i64, Option<String>, Option<i64>)> =
-        st.query_map([json_strs(new_paths)], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect::<Result<_>>()?;
+        st.query_map([located_json(tx, new_paths)?], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect::<Result<_>>()?;
     drop(st);
     let new_ids: HashMap<String, i64> = news.iter().map(|(p, id, ..)| (p.clone(), *id)).collect();
     let mut hash_to_path: HashMap<String, String> = HashMap::new();
@@ -754,10 +756,14 @@ pub fn mark_missing(
     tx: &Transaction,
     missing: &[Missing],
     source_dir: &str,
+    inner_roots: &[String],
     defer: bool,
 ) -> Result<(Vec<String>, Vec<String>, usize, Vec<String>)> {
     let source = WinPath::new(source_dir).as_posix().to_lowercase();
     let in_scope = |p: &str| {
+        if inner_roots.iter().any(|r| libraries::contains(r, p)) {
+            return false; // an inner library's record: its own crawl's business
+        }
         let mut cur = WinPath::new(p);
         loop {
             if cur.as_posix().to_lowercase() == source {
@@ -795,7 +801,8 @@ pub fn mark_missing(
     Ok((deleted, marked, deferred, refs))
 }
 
-/// `_record_crawled_folder`.
+/// `_record_crawled_folder`: the crawled library's counts (the library is made
+/// when the folder is none yet).
 pub fn record_folder(
     tx: &Transaction,
     path: &str,
@@ -805,17 +812,9 @@ pub fn record_folder(
     new_count: i64,
     updated_count: i64,
 ) -> Result<()> {
-    let id: Option<i64> =
-        tx.query_row("SELECT id FROM crawled_folders WHERE path = ?1 ORDER BY id LIMIT 1", [path], |r| r.get(0)).optional()?;
-    let id = match id {
-        Some(id) => id,
-        None => {
-            tx.execute("INSERT INTO crawled_folders (path) VALUES (?1)", [path])?;
-            tx.last_insert_rowid()
-        }
-    };
+    let id = libraries::create(tx, path, None, None, None)?;
     tx.execute(
-        "UPDATE crawled_folders SET pattern = ?2, last_crawled_at = ?3, archive_count = ?4, new_count = ?5, \
+        "UPDATE libraries SET pattern = ?2, last_crawled_at = ?3, archive_count = ?4, new_count = ?5, \
          updated_count = ?6 WHERE id = ?1",
         params![id, pattern, crawled_at, archive_count, new_count, updated_count],
     )?;

@@ -42,19 +42,24 @@ CREATE TABLE collections (
         ],
     },
     TableDdl {
-        name: "crawled_folders",
+        name: "libraries",
         create: r#"
-CREATE TABLE crawled_folders (
+CREATE TABLE libraries (
 	id INTEGER NOT NULL, 
-	path TEXT NOT NULL, 
+	uuid VARCHAR(36) NOT NULL, 
+	name VARCHAR(256) NOT NULL, 
+	root TEXT NOT NULL, 
 	pattern TEXT, 
+	monitored INTEGER NOT NULL DEFAULT 0, 
 	last_crawled_at DATETIME, 
 	archive_count INTEGER, 
 	new_count INTEGER, 
 	updated_count INTEGER, 
-	monitored INTEGER NOT NULL DEFAULT 0, 
+	origin VARCHAR(32), 
+	created_at DATETIME, 
 	PRIMARY KEY (id), 
-	UNIQUE (path)
+	UNIQUE (uuid), 
+	UNIQUE (name)
 )
 
 "#,
@@ -176,8 +181,9 @@ CREATE TABLE models (
 	release_month INTEGER, 
 	url TEXT, 
 	description TEXT, 
-	archive_path TEXT NOT NULL, 
-	archive_folder VARCHAR(512), 
+	library_id INTEGER NOT NULL, 
+	rel_path TEXT NOT NULL, 
+	rel_folder TEXT NOT NULL DEFAULT '', 
 	archive_hash VARCHAR(64) NOT NULL, 
 	archive_size INTEGER, 
 	archive_mtime_ns INTEGER, 
@@ -196,7 +202,8 @@ CREATE TABLE models (
 	category_id INTEGER, 
 	release_id INTEGER, 
 	PRIMARY KEY (id), 
-	UNIQUE (archive_path), 
+	UNIQUE (library_id, rel_path), 
+	FOREIGN KEY(library_id) REFERENCES libraries (id), 
 	FOREIGN KEY(sculptor_id) REFERENCES sculptors (id) ON DELETE SET NULL, 
 	FOREIGN KEY(collection_id) REFERENCES collections (id) ON DELETE SET NULL, 
 	FOREIGN KEY(subcollection_id) REFERENCES subcollections (id) ON DELETE SET NULL, 
@@ -206,7 +213,7 @@ CREATE TABLE models (
 
 "#,
         indexes: &[
-            r#"CREATE INDEX ix_models_archive_folder ON models (archive_folder)"#,
+            r#"CREATE INDEX ix_models_library_folder ON models (library_id, rel_folder)"#,
             r#"CREATE INDEX ix_models_archive_hash ON models (archive_hash)"#,
             r#"CREATE INDEX ix_models_category_id ON models (category_id)"#,
             r#"CREATE INDEX ix_models_collection_id ON models (collection_id)"#,
@@ -293,14 +300,6 @@ pub const ADD_COLUMNS: &[(&str, &str, &str)] = &[
     ("categories", "name", r#"ALTER TABLE "categories" ADD COLUMN "name" VARCHAR(128) NOT NULL"#),
     ("collections", "id", r#"ALTER TABLE "collections" ADD COLUMN "id" INTEGER NOT NULL"#),
     ("collections", "name", r#"ALTER TABLE "collections" ADD COLUMN "name" VARCHAR(128) NOT NULL"#),
-    ("crawled_folders", "id", r#"ALTER TABLE "crawled_folders" ADD COLUMN "id" INTEGER NOT NULL"#),
-    ("crawled_folders", "path", r#"ALTER TABLE "crawled_folders" ADD COLUMN "path" TEXT NOT NULL"#),
-    ("crawled_folders", "pattern", r#"ALTER TABLE "crawled_folders" ADD COLUMN "pattern" TEXT"#),
-    ("crawled_folders", "last_crawled_at", r#"ALTER TABLE "crawled_folders" ADD COLUMN "last_crawled_at" DATETIME"#),
-    ("crawled_folders", "archive_count", r#"ALTER TABLE "crawled_folders" ADD COLUMN "archive_count" INTEGER"#),
-    ("crawled_folders", "new_count", r#"ALTER TABLE "crawled_folders" ADD COLUMN "new_count" INTEGER"#),
-    ("crawled_folders", "updated_count", r#"ALTER TABLE "crawled_folders" ADD COLUMN "updated_count" INTEGER"#),
-    ("crawled_folders", "monitored", r#"ALTER TABLE "crawled_folders" ADD COLUMN "monitored" INTEGER NOT NULL DEFAULT 0"#),
     ("creators", "name", r#"ALTER TABLE "creators" ADD COLUMN "name" VARCHAR(256) NOT NULL"#),
     ("creators", "full_name", r#"ALTER TABLE "creators" ADD COLUMN "full_name" VARCHAR(512)"#),
     ("creators", "patreon_url", r#"ALTER TABLE "creators" ADD COLUMN "patreon_url" TEXT"#),
@@ -329,8 +328,6 @@ pub const ADD_COLUMNS: &[(&str, &str, &str)] = &[
     ("models", "release_month", r#"ALTER TABLE "models" ADD COLUMN "release_month" INTEGER"#),
     ("models", "url", r#"ALTER TABLE "models" ADD COLUMN "url" TEXT"#),
     ("models", "description", r#"ALTER TABLE "models" ADD COLUMN "description" TEXT"#),
-    ("models", "archive_path", r#"ALTER TABLE "models" ADD COLUMN "archive_path" TEXT NOT NULL"#),
-    ("models", "archive_folder", r#"ALTER TABLE "models" ADD COLUMN "archive_folder" VARCHAR(512)"#),
     ("models", "archive_hash", r#"ALTER TABLE "models" ADD COLUMN "archive_hash" VARCHAR(64) NOT NULL"#),
     ("models", "archive_size", r#"ALTER TABLE "models" ADD COLUMN "archive_size" INTEGER"#),
     ("models", "archive_mtime_ns", r#"ALTER TABLE "models" ADD COLUMN "archive_mtime_ns" INTEGER"#),
@@ -367,7 +364,7 @@ pub const ADD_COLUMNS: &[(&str, &str, &str)] = &[
 /// `db.ENSURE_INDEXES`: indexes added to existing databases as well.
 pub const ENSURE_INDEXES: &[&str] = &[
     r#"CREATE INDEX IF NOT EXISTS ix_models_archive_hash ON models (archive_hash)"#,
-    r#"CREATE INDEX IF NOT EXISTS ix_models_archive_folder ON models (archive_folder)"#,
+    r#"CREATE INDEX IF NOT EXISTS ix_models_library_folder ON models (library_id, rel_folder)"#,
     r#"CREATE INDEX IF NOT EXISTS ix_models_release_date ON models (release_year, release_month)"#,
     r#"CREATE INDEX IF NOT EXISTS ix_images_model_id ON images (model_id)"#,
     r#"CREATE INDEX IF NOT EXISTS ix_models_creator_source ON models (creator, source)"#,
@@ -384,7 +381,8 @@ pub const MODELS_VIEW: &str = r#"CREATE VIEW models_view AS
 SELECT
     m.id, m.title, m.creator, m.source,
     m.release_year, m.release_month,
-    m.archive_path, m.presupports, m.warning,
+    path_join(lib.root, m.rel_path) AS archive_path, m.presupports, m.warning,
+    m.library_id, m.rel_path, m.rel_folder, lib.name AS library_name,
     m.archive_size, m.compression_rate,
     m.sequence, m.created_at,
     m.sculptor_id, m.collection_id, m.subcollection_id,
@@ -400,7 +398,20 @@ LEFT JOIN sculptors      scu ON m.sculptor_id      = scu.id
 LEFT JOIN collections    col ON m.collection_id    = col.id
 LEFT JOIN subcollections sub ON m.subcollection_id = sub.id
 LEFT JOIN categories     cat ON m.category_id      = cat.id
-LEFT JOIN releases       rel ON m.release_id       = rel.id"#;
+LEFT JOIN releases       rel ON m.release_id       = rel.id
+JOIN libraries           lib ON m.library_id       = lib.id"#;
+
+/// SQL for a model's absolute archive path (`m` is the models table's alias):
+/// its library's root joined with its relative path, in this system's spelling.
+pub fn archive_path_sql(m: &str) -> String {
+    format!("path_join((SELECT root FROM libraries WHERE libraries.id = {m}.library_id), {m}.rel_path)")
+}
+
+/// SQL for the absolute folder of a model's archive in `/` form (the folder
+/// tree's spelling).
+pub fn archive_folder_sql(m: &str) -> String {
+    format!("posix_join((SELECT root FROM libraries WHERE libraries.id = {m}.library_id), {m}.rel_folder)")
+}
 
 /// `vectors`: the embedding model the stored vectors must come from.
 pub const EMBED_MODEL_ID: &str = r#"clip-vit-b32-onnx"#;

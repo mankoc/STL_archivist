@@ -135,6 +135,18 @@ pub enum JobRequest {
     /// Move the models' archives into a folder tree under `target_dir` built
     /// from `pattern` (Sort Files). Needs *file sorting* in the settings.
     SortFiles { ids: Vec<i64>, target_dir: String, pattern: String },
+    /// Move a library to a new root: check every archive there and, with
+    /// `apply`, set the root (and those of the libraries inside it). With
+    /// `fix_case`, paths found only with another letter case take the
+    /// spelling on disk. Nothing is re-read.
+    RelocateLibrary {
+        id: i64,
+        root: String,
+        #[serde(default)]
+        apply: bool,
+        #[serde(default)]
+        fix_case: bool,
+    },
     /// Move the models' archive files to the trash folder (or delete them,
     /// without one) and remove the records. Needs *allow file delete*.
     DeleteFiles { ids: Vec<i64> },
@@ -221,6 +233,7 @@ impl JobRequest {
             JobRequest::GenerateThumbnails { .. } => "generate_thumbnails",
             JobRequest::DeleteFiles { .. } => "delete_files",
             JobRequest::SortFiles { .. } => "sort_files",
+            JobRequest::RelocateLibrary { .. } => "relocate_library",
             JobRequest::AiSuggest { .. } => "ai_suggest",
             JobRequest::AiTag { .. } => "ai_tag",
             JobRequest::GenerateSidecars => "generate_sidecars",
@@ -241,7 +254,8 @@ impl JobRequest {
     pub fn read_only(&self) -> bool {
         matches!(
             self,
-            JobRequest::FindDuplicateEntries
+            JobRequest::RelocateLibrary { apply: false, .. }
+                | JobRequest::FindDuplicateEntries
                 | JobRequest::AiSuggest { .. }
                 | JobRequest::GenerateSidecars
                 | JobRequest::RemoveSidecars
@@ -617,6 +631,7 @@ fn run(lib: &Library, job: &Job) -> Result<String, String> {
         JobRequest::GenerateThumbnails { ids, max_thumbnails } => generate_thumbnails(lib, job, &ids, max_thumbnails),
         JobRequest::DeleteFiles { ids } => delete_files(lib, job, &ids),
         JobRequest::SortFiles { ids, target_dir, pattern } => sort_files(lib, job, &ids, &target_dir, &pattern),
+        JobRequest::RelocateLibrary { id, root, apply, fix_case } => relocate_library(lib, job, id, &root, apply, fix_case),
         JobRequest::AiSuggest { id, max_tags, ignore_meta } => ai_suggest(lib, job, id, max_tags, ignore_meta),
         JobRequest::AiTag { ids, overwrite, ignore_meta, max_tags } => ai_tag(lib, job, &ids, overwrite, ignore_meta, max_tags),
         JobRequest::GenerateSidecars => generate_sidecars(lib, job),
@@ -687,6 +702,41 @@ fn delete_files(lib: &Library, job: &Job, ids: &[i64]) -> Result<String, String>
 
 /// Sort Files: plan, move every archive or none, then point the records at
 /// the new paths in one transaction.
+fn relocate_library(lib: &Library, job: &Job, id: i64, root: &str, apply: bool, fix_case: bool) -> Result<String, String> {
+    use storage::libraries;
+    let name = lib.db.with(|c| libraries::get(c, id)).map_err(db_err)?.ok_or_else(|| format!("no library {id}"))?.name;
+    lib.job_log(job, format!("Checking the archives of {name} under {root}…"));
+    let check = lib.db.with(|c| Ok(libraries::check_relocate(c, id, root, Some(&job.ctl)))).map_err(db_err)??;
+    for m in &check.missing_examples {
+        lib.job_log(job, format!("Not found: {m}"));
+    }
+    let applied = apply && !job.stopped();
+    if applied {
+        lib.db.with_tx(|tx| libraries::relocate(tx, id, root, &check, fix_case)).map_err(db_err)?;
+        lib.job_log(job, format!("{name} now lives in {root}."));
+    }
+    let summary = format!(
+        "{} of {} found, {} with another letter case, {} missing{}",
+        check.found,
+        check.total,
+        check.case_only.len(),
+        check.missing,
+        if applied { "; moved" } else { " (checked only)" }
+    );
+    job.set_result(crate::dupes::JobResult::Relocation(crate::dupes::Relocation {
+        library: id,
+        root: root.to_string(),
+        total: check.total,
+        found: check.found,
+        case_only: check.case_only.len(),
+        missing: check.missing,
+        missing_examples: check.missing_examples.clone(),
+        inner: check.inner.len(),
+        applied,
+    }));
+    Ok(summary)
+}
+
 fn sort_files(lib: &Library, job: &Job, ids: &[i64], target_dir: &str, pattern: &str) -> Result<String, String> {
     if !LibrarySettings::load(&lib.config.data_dir).file_sorting_enabled() {
         return Err("sorting files is disabled in the library settings (file sorting)".into());
@@ -698,7 +748,7 @@ fn sort_files(lib: &Library, job: &Job, ids: &[i64], target_dir: &str, pattern: 
     }
     job.ctl.set_total(rows.len() as u64);
     let moved = stl_core::sort_files::execute(&rows)?;
-    lib.db.with_tx(|tx| storage::browser::set_archive_paths(tx, &moved)).map_err(db_err)?;
+    lib.db.with_tx(|tx| storage::browser::set_archive_paths(tx, &moved, Some(target_dir))).map_err(db_err)?;
     job.ctl.advance(rows.len() as u64);
     for r in rows.iter().filter(|r| r.moves()) {
         lib.job_log(job, format!("Moved: {} → {}", r.from, r.to));

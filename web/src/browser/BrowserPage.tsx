@@ -23,7 +23,7 @@ import { COLUMNS, ModelTable, type Sort, useModelIds } from "./ModelTable";
 import { NONE, click, prune, type Selection } from "./selection";
 import classes from "./BrowserPage.module.css";
 
-const SHOW = ["author", "tags", "source", "date", "sculptor", "collection", "subcollection", "category", "release", "scale", "presupports", "path"];
+const SHOW = ["library", "author", "tags", "source", "date", "sculptor", "collection", "subcollection", "category", "release", "scale", "presupports", "path"];
 
 export function BrowserPage() {
   const [filter, setFilter] = useState<FilterSpec>(EMPTY);

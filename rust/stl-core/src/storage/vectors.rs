@@ -119,8 +119,9 @@ pub fn find_similar_models(conn: &Connection, query: &[u8], threshold: f64, limi
     let mut st = conn.prepare(&format!(
         "WITH hits AS MATERIALIZED (\n    SELECT image_id, distance FROM {VECTOR_TABLE}\n    \
          WHERE embedding MATCH ?1 AND k = ?2\n)\n\
-         SELECT hits.distance, i.model_id, i.thumbnail_path, m.title, m.archive_path\nFROM hits\n\
-         LEFT JOIN images i ON i.id = hits.image_id\nLEFT JOIN models m ON m.id = i.model_id\n"
+         SELECT hits.distance, i.model_id, i.thumbnail_path, m.title, {}\nFROM hits\n\
+         LEFT JOIN images i ON i.id = hits.image_id\nLEFT JOIN models m ON m.id = i.model_id\n",
+        super::schema_sql::archive_path_sql("m")
     ))?;
     type Hit = (f64, Option<i64>, Option<String>, Option<String>, Option<String>);
     let rows: Vec<Hit> = st

@@ -171,7 +171,9 @@ fn sort_paths(v: &mut [String]) {
 
 /// `iter_archives` (`rglob("*")`: files and folders, no symlinked folders
 /// followed) or the folder's own archive files, sorted, without `METADATA.7z`.
-pub fn list_archives(root: &str, recurse: bool) -> Vec<String> {
+/// Folders in `skip` (the roots of libraries inside this one) are not entered.
+pub fn list_archives(root: &str, recurse: bool, skip: &[String]) -> Vec<String> {
+    let skip: Vec<String> = skip.iter().map(|s| crate::relpath::path_key(s)).collect();
     let mut out = Vec::new();
     let join = crate::winpath::join;
     let mut stack = vec![root.to_string()];
@@ -186,7 +188,7 @@ pub fn list_archives(root: &str, recurse: bool) -> Vec<String> {
                 if is_archive_suffix(&name) && name != sidecar::METADATA_FILENAME {
                     out.push(path.clone());
                 }
-                if is_dir {
+                if is_dir && !skip.contains(&crate::relpath::path_key(&path)) {
                     stack.push(path);
                 }
             } else if ft.is_some_and(|t| t.is_file()) && is_archive_suffix(&name) && name != sidecar::METADATA_FILENAME {
@@ -486,6 +488,8 @@ struct Run<'a> {
     early_moved: HashSet<i64>,
     moved_new_paths: HashSet<String>,
     existing_hashes: HashMap<String, String>,
+    /// Roots of the libraries inside the crawled one (not entered).
+    inner_roots: Vec<String>,
 }
 
 fn tx(conn: &mut rusqlite::Connection) -> rusqlite::Result<rusqlite::Transaction<'_>> {
@@ -701,7 +705,17 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
         early_moved: HashSet::new(),
         moved_new_paths: HashSet::new(),
         existing_hashes: HashMap::new(),
+        inner_roots: Vec::new(),
     };
+    // The crawled folder is a library (made now when it is none yet); the
+    // libraries inside it are crawled on their own.
+    let library = {
+        let t = tx(&mut run.conn)?;
+        let id = storage::libraries::create(&t, &cfg.source_dir, None, None, None)?;
+        t.commit()?;
+        id
+    };
+    run.inner_roots = storage::libraries::Roots::load(&run.conn)?.inner(library).into_iter().map(|(_, r)| r).collect();
     host.emit(Event::Phase("Scanning for deleted files…".into()));
     let missing = db::collect_missing(&run.conn)?;
     if !missing.is_empty() {
@@ -725,7 +739,7 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
     }
 
     host.emit(Event::Phase("Retrieving file list…".into()));
-    let archives = list_archives(&cfg.source_dir, cfg.recurse);
+    let archives = list_archives(&cfg.source_dir, cfg.recurse, &run.inner_roots);
     let total = archives.len();
     run.summary.total = total;
     let msg = format!("Found {total} archives in {}", cfg.source_dir);
@@ -886,7 +900,7 @@ fn reconcile(run: &mut Run<'_>, missing: Vec<db::Missing>) -> Result<(), CrawlEr
     }
     let (deleted, marked, _deferred, refs) = {
         let t = tx(&mut run.conn)?;
-        let r = db::mark_missing(&t, &unmatched, &run.cfg.source_dir, run.cfg.defer_missing_deletion)?;
+        let r = db::mark_missing(&t, &unmatched, &run.cfg.source_dir, &run.inner_roots, run.cfg.defer_missing_deletion)?;
         t.commit()?;
         r
     };
@@ -933,8 +947,10 @@ mod tests {
         }
         let names = |v: Vec<String>| v.iter().map(|p| p[root.len() + 1..].to_string()).collect::<Vec<_>>();
         // Python sorts Windows paths by lowercased components: "b" < "b.rar".
-        assert_eq!(names(list_archives(&root, true)), ["a.ZIP", r"B\c.7z", "b.rar"]);
-        assert_eq!(names(list_archives(&root, false)), ["a.ZIP", "b.rar"]);
+        let sep = crate::winpath::SEP;
+        assert_eq!(names(list_archives(&root, true, &[])), ["a.ZIP", &format!("B{sep}c.7z"), "b.rar"]);
+        assert_eq!(names(list_archives(&root, false, &[])), ["a.ZIP", "b.rar"]);
+        assert_eq!(names(list_archives(&root, true, &[crate::winpath::join(&root, "B")])), ["a.ZIP", "b.rar"], "an inner library");
         let stl = stl_dict(
             [("a.stl", Some(1)), ("x.png", Some(2)), ("a.stl", Some(3)), ("b.OBJ", None)]
                 .into_iter()

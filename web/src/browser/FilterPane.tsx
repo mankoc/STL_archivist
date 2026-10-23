@@ -171,6 +171,11 @@ export function FilterPane({ tree, spec, onChange }: Props) {
 
   return (
     <div className={classes.pane}>
+      {tree.libraries.length > 1 && (
+        <Section title="Library" group="library" {...common} searchable={tree.libraries.length > SEARCH_FROM}>
+          {(s) => named("library", tree.libraries, s)}
+        </Section>
+      )}
       <Section title="Creators" group="creator" {...common} searchable={tree.creators.length > SEARCH_FROM}>
         {(s) => texts("creator", tree.creators, s)}
       </Section>

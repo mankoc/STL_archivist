@@ -1343,6 +1343,14 @@ server (installer and Docker image) and the desktop shell.
   library is open) and `stl-server components status|install|remove` drives it from the
   command line (JSON lines); the shell runs it for the worker's folder, which the page can
   change.
+- 2026.43.7 replaced absolute archive paths with **libraries** (`docs/libraries-plan.md`):
+  `libraries` (root, name, `uuid`, pattern, monitored) replaces `crawled_folders`, and
+  `models.archive_path` / `archive_folder` become `library_id`, `rel_path`, `rel_folder` —
+  portable relative paths (`stl_core::relpath`). The migration (`storage::libraries::migrate`,
+  foreign keys off while `models` is rebuilt) is one-way: compatibility rule 6 ends for the
+  database, and the server writes a `_pre_libraries` backup before converting. Absolute paths
+  are computed (`path_join` / `posix_join` SQL functions, `models_view.archive_path`).
+  Relocation is the `relocate_library` job and `stl-server libraries relocate`.
 - 2026.43.6 also added the built-in help (`web/src/help/`): topics as data (`topics.ts`) with
   a small inline syntax (bold, code, topic links), searched and rendered by `HelpPage`; a
   test keeps ids unique and links working.

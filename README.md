@@ -12,17 +12,23 @@ can open a library on your computer without setting up a server.
 **Guides:** [using stlLibrary](docs/user-guide.md) · [deploying a server](docs/deployment.md) ·
 and in the interface, the **?** button: searchable in-depth help on every feature
 
-Version: 2026.43.6
+Version: 2026.43.7
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
-> own branch). Libraries are compatible: this version opens the same data directory
+> own branch). This version opens its data directory and, since 2026.43.7, converts it once
+> to libraries with relative paths (backing it up first); the earlier application cannot
+> open the converted library. Before that conversion it opened the same data directory
 > (`stlLibrary.db`, `thumbnails.lmdb/`, `settings.json`).
 
 ## Features
 
 - **Archive scanning** — crawls folders of archives in parallel using CRC-based
   fingerprints (no decompression needed to notice what changed); moved archives keep their
-  record, metadata and thumbnails, even when moved between crawled folders
+  record, metadata and thumbnails, even when moved between libraries
+- **Libraries** — each catalogued folder is a named library; records store paths relative
+  to it, in a form that is the same on Windows, Linux and macOS, so a library moves to
+  another disk, mount point or machine (and from Windows to Linux) by pointing it at its new
+  folder — no re-crawl, nothing lost; libraries can sit inside one another
 - **Metadata extraction** — from embedded `info.json`, `.url` files and the folder structure
   through [path patterns](#path-patterns)
 - **Thumbnails** — up to N images per archive (JPEG; animated GIFs stay animated), stored
@@ -136,14 +142,14 @@ server) on the same data directory is refused.
 
 ### First steps
 
-1. **Jobs → Add folder**: browse to your archive folder, set a path pattern if your folders
+1. **Jobs → Add library**: browse to your archive folder, set a path pattern if your folders
    follow one, and **Crawl**. Jobs run in the server, one at a time; the page can be closed.
 2. **Library**: filter, search, edit; *Columns* chooses the table's columns, *Images* shows a
    grid. Select models for *Mass edit*, the *AI tagger* or *Archives* (rescan, thumbnails,
    sort files, delete files).
-3. **Jobs → Update all** re-crawls every folder later, keeping the records of archives moved
-   between folders and removing those of archives that are gone.
-4. Or let the server keep up: the eye button on a crawled folder **monitors** it. The server
+3. **Jobs → Update all** re-crawls every library later, keeping the records of archives moved
+   between libraries and removing those of archives that are gone.
+4. Or let the server keep up: the eye button on a library **monitors** it. The server
    compares it with the library every 30 minutes (*Settings → Library*) by file size and
    date, and crawls it when archives were added, changed or removed. Removed archives are
    marked missing; *Maintenance → Remove missing archives* deletes their records.
@@ -170,7 +176,7 @@ line:
 |---|---|---|
 | `--data-dir` | `STL_DATA_DIR` | Library data directory |
 | `bind` / `--bind` | `STL_BIND` | Address and port (default `127.0.0.1:8770`) |
-| `roots` | | Folders editors may browse and crawl (administrators: anywhere; crawled folders count too) |
+| `roots` | | Folders editors may browse and crawl (administrators: anywhere; libraries count too) |
 | `path_map` | | How clients see the server's paths (for *Open folder* and *Copy path*) |
 | `unrar` | `STL_UNRAR_PATH` | UnRAR for compressed `.rar` members (default: `unrar` on `PATH`) |
 | `pdfium` | `STL_PDFIUM_PATH` | pdfium for PDF previews ([builds](https://github.com/bblanchon/pdfium-binaries), 7881) |
