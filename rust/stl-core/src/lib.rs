@@ -22,6 +22,7 @@ pub mod monitor;
 pub mod path_pattern;
 pub mod pyunicode;
 pub mod pyjson;
+pub mod relpath;
 pub mod pairs;
 pub mod rescan;
 pub mod rules;

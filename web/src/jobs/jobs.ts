@@ -45,7 +45,8 @@ const KIND_LABEL: Record<string, string> = {
   rescan: "Rescan",
   install_components: "Download components",
   remove_components: "Remove components",
-  update_folders: "Update folders",
+  update_folders: "Update libraries",
+  relocate_library: "Move library",
   clear_library: "Delete all records",
   generate_thumbnails: "Generate thumbnails",
   delete_files: "Delete files",
@@ -57,8 +58,9 @@ const KIND_LABEL: Record<string, string> = {
 /** "Crawl D:/STL/Patreon", "Verify archives", … */
 export function describe(job: Job): string {
   const label = KIND_LABEL[job.kind] ?? job.kind;
-  const r = job.request as { folder?: string; all?: boolean; keep?: number; warning?: string };
+  const r = job.request as { folder?: string; root?: string; all?: boolean; keep?: number; warning?: string };
   if (r.folder) return `${label} ${r.folder}`;
+  if (r.root) return `${label} to ${r.root}`;
   if (r.warning) return `${label} (${r.warning === "no_images" ? "images" : "presupport"})`;
   if (r.keep !== undefined) return `${label} (keep ${r.keep})`;
   if (r.all) return `${label} (all)`;

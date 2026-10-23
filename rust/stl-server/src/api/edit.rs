@@ -509,7 +509,10 @@ pub async fn delete_image(State(lib): State<AppState>, me: CurrentUser, Path(id)
             let path: Option<Option<String>> = lib.db.with(|c| {
                 use rusqlite::OptionalExtension;
                 c.query_row(
-                    "SELECT m.archive_path FROM images i JOIN models m ON m.id = i.model_id WHERE i.id = ?1",
+                    &format!(
+                        "SELECT {} FROM images i JOIN models m ON m.id = i.model_id WHERE i.id = ?1",
+                        stl_core::storage::schema_sql::archive_path_sql("m")
+                    ),
                     [id],
                     |r| r.get(0),
                 )

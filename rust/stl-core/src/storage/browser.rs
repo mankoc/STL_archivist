@@ -4,7 +4,7 @@ use rusqlite::types::Value;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 use super::Result;
-use super::edit::{archive_folder_for, delete_model, utc_now_text};
+use super::edit::{delete_model, utc_now_text};
 
 fn names(conn: &Connection, sql: &str) -> Result<Vec<String>> {
     let mut st = conn.prepare(sql)?;
@@ -134,15 +134,16 @@ pub struct SortSource {
 
 pub fn sort_sources(conn: &Connection, ids: &[i64]) -> Result<Vec<SortSource>> {
     let json = format!("[{}]", ids.iter().map(i64::to_string).collect::<Vec<_>>().join(","));
-    let mut st = conn.prepare(
-        "SELECT m.id, m.archive_path, m.title, m.source, m.creator, m.release_year, m.release_month, m.url, \
+    let mut st = conn.prepare(&format!(
+        "SELECT m.id, {}, m.title, m.source, m.creator, m.release_year, m.release_month, m.url, \
          m.sequence, scu.name, col.name, sub.name, rel.name FROM models m \
          LEFT JOIN sculptors scu ON m.sculptor_id = scu.id \
          LEFT JOIN collections col ON m.collection_id = col.id \
          LEFT JOIN subcollections sub ON m.subcollection_id = sub.id \
          LEFT JOIN releases rel ON m.release_id = rel.id \
          WHERE m.id IN (SELECT value FROM json_each(?1)) ORDER BY m.id",
-    )?;
+        super::schema_sql::archive_path_sql("m")
+    ))?;
     st.query_map([json], |r| {
         Ok(SortSource {
             id: r.get(0)?,
@@ -163,16 +164,18 @@ pub fn sort_sources(conn: &Connection, ids: &[i64]) -> Result<Vec<SortSource>> {
     .collect()
 }
 
-/// Point models at their moved archives (`archive_path` and `archive_folder`);
+/// Point models at their moved archives (absolute paths); a path outside every
+/// library goes into a library at `fallback_root` (or at its folder).
 /// `updated_at` changes only for rows that really change.
-pub fn set_archive_paths(tx: &Transaction, items: &[(i64, String)]) -> Result<()> {
+pub fn set_archive_paths(tx: &Transaction, items: &[(i64, String)], fallback_root: Option<&str>) -> Result<()> {
     let now = utc_now_text();
-    let mut st = tx.prepare(
-        "UPDATE models SET archive_path = ?2, archive_folder = ?3, updated_at = ?4 \
-         WHERE id = ?1 AND (archive_path IS NOT ?2 OR archive_folder IS NOT ?3)",
-    )?;
     for (id, path) in items {
-        st.execute(params![id, path, archive_folder_for(path), now])?;
+        let (library, rel) = super::libraries::locate_or_create(tx, path, fallback_root)?;
+        tx.execute(
+            "UPDATE models SET library_id = ?2, rel_path = ?3, rel_folder = ?4, updated_at = ?5 \
+             WHERE id = ?1 AND (library_id IS NOT ?2 OR rel_path IS NOT ?3)",
+            params![id, library, rel.as_str(), rel.folder(), now],
+        )?;
     }
     Ok(())
 }
@@ -183,10 +186,11 @@ pub type DeletionRow = (i64, Option<String>, Option<String>, Option<String>, Opt
 
 pub fn deletion_rows(conn: &Connection, ids: &[i64]) -> Result<Vec<DeletionRow>> {
     let json = format!("[{}]", ids.iter().map(i64::to_string).collect::<Vec<_>>().join(","));
-    let mut st = conn.prepare(
-        "SELECT id, archive_path, title, creator, archive_hash FROM models \
+    let mut st = conn.prepare(&format!(
+        "SELECT id, {}, title, creator, archive_hash FROM models \
          WHERE id IN (SELECT value FROM json_each(?1)) ORDER BY id",
-    )?;
+        super::schema_sql::archive_path_sql("models")
+    ))?;
     st.query_map([json], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?.collect()
 }
 
@@ -203,9 +207,10 @@ mod tests {
         let mut conn = open(&path).unwrap();
         conn.execute_batch(
             "INSERT INTO sculptors (name) VALUES ('Bob'), ('Alice');
-             INSERT INTO models (title, source, archive_path, archive_hash, sculptor_id, is_missing, to_print)
-             VALUES ('A', 'patreon', 'F:/a.7z', 'h1', 1, 0, 0), ('B', NULL, 'F:/b.7z', 'h2', 1, 0, 0),
-                    ('C', 'patreon', 'F:/c.7z', 'h3', 2, 0, 0);",
+             INSERT INTO libraries (uuid, name, root) VALUES ('u1', 'F', 'F:');
+             INSERT INTO models (title, source, library_id, rel_path, archive_hash, sculptor_id, is_missing, to_print)
+             VALUES ('A', 'patreon', 1, 'a.7z', 'h1', 1, 0, 0), ('B', NULL, 1, 'b.7z', 'h2', 1, 0, 0),
+                    ('C', 'patreon', 1, 'c.7z', 'h3', 2, 0, 0);",
         )
         .unwrap();
         assert_eq!(lookup_names(&conn, "sculptor").unwrap(), ["Alice", "Bob"]);
@@ -215,12 +220,13 @@ mod tests {
         assert!(!add_tag(&tx, "elf").unwrap());
         let ids = add_images(&tx, 1, &["a.png".into(), "b.png".into()]).unwrap();
         set_image_thumbnails(&tx, &[(ids[0], ids[0].to_string())]).unwrap();
-        set_archive_paths(&tx, &[(2, r"G:\s\b.7z".into())]).unwrap();
+        set_archive_paths(&tx, &[(2, "G:/s/b.7z".into())], None).unwrap();
         assert_eq!(delete_models(&tx, &[3, 99]).unwrap(), Vec::<String>::new());
         tx.commit().unwrap();
         assert_eq!(model_images(&conn, 1).unwrap(), [(ids[0], Some(ids[0].to_string())), (ids[1], None)]);
-        let folder: String = conn.query_row("SELECT archive_folder FROM models WHERE id = 2", [], |r| r.get(0)).unwrap();
-        assert_eq!(folder, "G:/s");
+        let sql = format!("SELECT {} FROM models WHERE id = 2", crate::storage::schema_sql::archive_folder_sql("models"));
+        let folder: String = conn.query_row(&sql, [], |r| r.get(0)).unwrap();
+        assert_eq!(folder, "G:/s", "moved into a library made at its folder");
         let (rows, total) = crate::storage::stats::column(&conn, "sculptor", None).unwrap();
         assert_eq!(total, 2);
         assert_eq!(rows, [(Value::Text("Bob".into()), 2)]);

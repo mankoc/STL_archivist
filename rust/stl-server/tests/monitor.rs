@@ -66,13 +66,15 @@ async fn monitored_folders_are_crawled_when_they_change() {
     write_zip(&root.join("Studio").join("Knight.zip"), "knight.stl");
     assert!(check(&lib, &ed).await.is_empty());
 
-    // The switch: editors, crawled folders only.
-    let body = json!({"path": folder, "monitored": true});
-    assert_eq!(call(&lib.state, "POST", "/api/crawled-folders/monitor", Some(&viewer), Some(body.clone())).await.status, StatusCode::FORBIDDEN);
-    let other = json!({"path": "/not/crawled", "monitored": true});
-    assert_eq!(call(&lib.state, "POST", "/api/crawled-folders/monitor", Some(&ed), Some(other)).await.status, StatusCode::NOT_FOUND);
-    assert_eq!(call(&lib.state, "POST", "/api/crawled-folders/monitor", Some(&ed), Some(body)).await.status, StatusCode::NO_CONTENT);
-    let folders = call(&lib.state, "GET", "/api/crawled-folders", Some(&viewer), None).await.json();
+    // The switch: editors, on a library.
+    let libs = call(&lib.state, "GET", "/api/libraries", Some(&viewer), None).await.json();
+    let id = libs[0]["id"].as_i64().unwrap();
+    let body = json!({"monitored": true});
+    let uri = format!("/api/libraries/{id}");
+    assert_eq!(call(&lib.state, "PATCH", &uri, Some(&viewer), Some(body.clone())).await.status, StatusCode::FORBIDDEN);
+    assert_eq!(call(&lib.state, "PATCH", "/api/libraries/999", Some(&ed), Some(body.clone())).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(call(&lib.state, "PATCH", &uri, Some(&ed), Some(body)).await.status, StatusCode::OK);
+    let folders = call(&lib.state, "GET", "/api/libraries", Some(&viewer), None).await.json();
     assert_eq!(folders[0]["monitored"], true, "{folders}");
 
     // A new archive: one crawl, by the monitor.

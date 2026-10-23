@@ -23,8 +23,9 @@ async fn statistics() {
         .db
         .with(|c| {
             c.execute_batch(
-                "INSERT INTO models (title, archive_path, archive_hash, is_missing, to_print, source, release_month, archive_size)
-                 VALUES ('a', '/a.7z', 'h1', 0, 0, 'patreon', 3, 100), ('b', '/b.7z', 'h2', 0, 0, NULL, NULL, 50);",
+                "INSERT INTO libraries (uuid, name, root) VALUES ('u1', 'root', '/');
+                 INSERT INTO models (title, library_id, rel_path, archive_hash, is_missing, to_print, source, release_month, archive_size)
+                 VALUES ('a', 1, 'a.7z', 'h1', 0, 0, 'patreon', 3, 100), ('b', 1, 'b.7z', 'h2', 0, 0, NULL, NULL, 50);",
             )
         })
         .unwrap();
@@ -64,8 +65,9 @@ async fn find_by_image_dhash() {
         .db
         .with(|c| {
             c.execute_batch(&format!(
-                "INSERT INTO models (id, title, archive_path, archive_hash, is_missing, to_print) VALUES
-                   (1, 'Match', 'F:/lib/match.zip', 'a', 0, 0), (2, 'Other', 'F:/lib/other.zip', 'b', 0, 0);
+                "INSERT INTO libraries (uuid, name, root) VALUES ('u1', 'lib', 'F:/lib');
+                 INSERT INTO models (id, title, library_id, rel_path, archive_hash, is_missing, to_print) VALUES
+                   (1, 'Match', 1, 'match.zip', 'a', 0, 0), (2, 'Other', 1, 'other.zip', 'b', 0, 0);
                  INSERT INTO images (id, model_id, filename, thumbnail_path, dhash) VALUES
                    (10, 1, 'x', '10', '{hs}'), (11, 2, 'y', '11', '{ho}'), (12, 2, 'z', '12', 'ffffffffffffffff');"
             ))

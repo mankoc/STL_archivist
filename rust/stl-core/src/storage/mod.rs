@@ -7,12 +7,17 @@
 //! 2. `images.dhash` rebuilt with TEXT affinity on databases that declared it INTEGER;
 //! 3. missing tables created from [`schema_sql`] (the source of truth since Phase 4h);
 //! 4. the sqlite-vec table `image_vec` (and moving legacy `images.embedding` blobs);
-//! 5. missing columns added, extra indexes created, `ANALYZE`;
-//! 6. the legacy single `models.scale_id` copied into `model_scales`;
-//! 7. `models_view` recreated.
+//! 5. missing columns added;
+//! 6. absolute archive paths turned into libraries and relative paths
+//!    ([`libraries::migrate`], one-way: `crawled_folders` become libraries and
+//!    `models` is rebuilt with `library_id` / `rel_path`);
+//! 7. extra indexes created, `ANALYZE`;
+//! 8. the legacy single `models.scale_id` copied into `model_scales`;
+//! 9. `models_view` recreated.
 //!
-//! The DDL text is the one SQLAlchemy used to emit, so libraries created by
-//! older versions and by this code hold the same `sqlite_master` SQL.
+//! Every connection gets the SQL functions `path_join(root, rel)` and
+//! `posix_join(root, rel)` (see [`crate::relpath`]): queries build absolute
+//! paths from a library's root with them.
 
 pub mod admin;
 pub mod browser;
@@ -20,6 +25,7 @@ pub mod crawl;
 pub mod duplicates;
 pub mod edit;
 pub mod jobs;
+pub mod libraries;
 pub mod library;
 pub mod maintenance;
 pub mod model_edit;
@@ -70,8 +76,27 @@ pub fn open(path: &Path) -> Result<Connection> {
          PRAGMA busy_timeout=5000;
          PRAGMA wal_autocheckpoint=1000;",
     )?;
+    add_path_functions(&conn)?;
     add_vector_delete_trigger(&conn)?;
     Ok(conn)
+}
+
+/// `path_join(root, rel)`: an absolute path in this system's spelling;
+/// `posix_join(root, rel)`: the same in `/` form. NULL in, NULL out.
+pub fn add_path_functions(conn: &Connection) -> Result<()> {
+    use rusqlite::functions::FunctionFlags;
+    let flags = FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC;
+    conn.create_scalar_function("path_join", 2, flags, |ctx| {
+        let root: Option<String> = ctx.get(0)?;
+        let rel: Option<String> = ctx.get(1)?;
+        Ok(root.zip(rel).map(|(root, rel)| crate::relpath::join(&root, &rel)))
+    })?;
+    conn.create_scalar_function("posix_join", 2, flags, |ctx| {
+        let root: Option<String> = ctx.get(0)?;
+        let rel: Option<String> = ctx.get(1)?;
+        Ok(root.zip(rel).map(|(root, rel)| crate::relpath::posix_join(&root, &rel)))
+    })?;
+    Ok(())
 }
 
 /// The TEMP trigger `vectors.on_connect` adds: an image delete removes its
@@ -102,6 +127,8 @@ pub struct MigrateReport {
     /// The embedding model changed, so the stored vectors were dropped.
     pub vectors_reset: bool,
     pub scales_copied: Option<usize>,
+    /// Absolute paths turned into libraries and relative paths (one-way).
+    pub paths: Option<libraries::PathsMigration>,
 }
 
 fn tables(conn: &Connection) -> Result<HashSet<String>> {
@@ -166,6 +193,22 @@ pub fn migrate(path: &Path, vectors: &Vectors) -> Result<MigrateReport> {
     let tx = conn.transaction()?;
     add_missing_columns(&tx, &mut report)?;
     tx.commit()?;
+
+    if libraries::needs_migration(&conn)? {
+        // Rebuilding `models` drops the old table: without this its rows'
+        // images, tags and files would be deleted with it.
+        conn.execute_batch("PRAGMA foreign_keys=OFF")?;
+        let models = schema_sql::TABLES.iter().find(|t| t.name == "models").expect("the models table");
+        let indexes: Vec<String> = models.indexes.iter().map(|i| strip_cr(i)).collect();
+        let tx = conn.transaction()?;
+        report.paths = libraries::migrate(&tx, &strip_cr(models.create), &indexes.iter().map(String::as_str).collect::<Vec<_>>())?;
+        let broken: bool = tx.prepare("PRAGMA foreign_key_check")?.exists([])?;
+        if broken {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
+        tx.commit()?;
+        conn.execute_batch("PRAGMA foreign_keys=ON")?;
+    }
 
     let tx = conn.transaction()?;
     for ddl in schema_sql::ENSURE_INDEXES {

@@ -51,7 +51,7 @@ The bar at the top switches pages:
 | **Find by Image** | Finding models that look like a picture |
 | **Duplicates** | Archives that share files or images; models with similar names |
 | **Lookups** | Tags, categories, collections, subcollections, scales, creators |
-| **Jobs** | Crawled folders, crawling, and every background job with its log |
+| **Jobs** | Libraries (crawl, monitor, rename, move), and every background job with its log |
 | **Maintenance** | Checking and repairing the library, sidecars, backups |
 | **Statistics** | Totals, rankings, and the distribution of any column |
 | **Settings** | Your account, the library's settings, users |
@@ -67,7 +67,7 @@ it reads the archive's file list, preview images, `info.json` and `.url` files, 
 scales and presupports, and takes metadata from the folder names when you give a
 [path pattern](#path-patterns).
 
-1. Open **Jobs** and click **Add folder** in *Crawled folders*.
+1. Open **Jobs** and click **Add library** in *Libraries*.
 2. Browse to the folder that holds your archives and click **Use this folder**.
 3. In *Crawl folder*, optionally enter a path pattern such as `{sculptor}/{release}/{title}`.
    Tick **Force rescan** only to re-read archives that have not changed.
@@ -89,7 +89,18 @@ archives are recognised by their content and keep their record, edits and images
 Editors can only choose folders the administrator made available; administrators can choose
 any folder on the server.
 
-**Monitored folders.** The eye button on a crawled folder monitors it: every *Check monitored
+**Libraries.** Each catalogued folder is a *library*: a name, its folder (the root) and a
+path pattern. Records store their archive's path relative to the library, the same on every
+operating system. When the folder moves (another disk, a new mount point, a new server, from
+Windows to Linux), click **Move** on the library, choose the new folder, **Check** (every
+archive is looked up there) and **Move**: records, edits, tags and thumbnails stay and nothing
+is re-read. A library whose folder is gone shows *root not found*. **Rename** changes the
+name; **Remove** gives its records to the library around it, or deletes them when there is
+none (the files stay). A library may sit inside another: an archive belongs to the deepest
+library above it, and the outer library's crawls skip the inner folder. The browser has a
+**Library** filter section and column.
+
+**Monitored folders.** The eye button on a library monitors it: every *Check monitored
 folders every* minutes (*Settings → Library*, default 30) the server compares the folder with
 the library by file size and date, without opening archives, and crawls it only when archives
 were added, changed or removed (the job shows as started by `monitor`). Archives that vanished
@@ -272,7 +283,7 @@ The **Maintenance** page (editors; some cards for administrators):
   images** keeps at most N images per model; **Compact database** (administrators) reclaims
   space after large deletions.
 - **Metadata sidecars** — **Generate sidecars** writes `METADATA.7z` in every archive folder;
-  **Clean sidecars** tidies the `METADATA.7z` files under the crawled folders: one that lists
+  **Clean sidecars** tidies the `METADATA.7z` files under the libraries: one that lists
   other archives than the folder's records is rewritten, one in a folder without records
   whose archives are all gone is deleted (one whose archives still exist is kept: crawling
   the folder imports them), and leftover `METADATA.7z.tmp` files are deleted. **Remove all

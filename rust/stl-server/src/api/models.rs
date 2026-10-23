@@ -107,6 +107,10 @@ pub struct Row {
     pub is_missing: bool,
     /// Images catalogued for the model.
     pub images: i64,
+    pub library_id: i64,
+    pub library: String,
+    /// The archive's path relative to its library (`/` form).
+    pub rel_path: String,
 }
 
 impl From<library::PageRow> for Row {
@@ -140,6 +144,9 @@ impl From<library::PageRow> for Row {
             archive_hash: r.archive_hash,
             is_missing: r.is_missing.unwrap_or(false),
             images: r.image_count,
+            library_id: r.library_id,
+            library: r.library_name,
+            rel_path: r.rel_path,
         }
     }
 }

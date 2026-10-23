@@ -32,9 +32,10 @@ pub struct ResultRow {
 type Record = (i64, Option<String>, Option<String>, Option<String>, Option<i64>, bool);
 
 fn records(conn: &Connection) -> Result<Vec<Record>> {
-    let mut st = conn.prepare(
-        "SELECT id, title, archive_path, archive_hash, archive_size, is_missing FROM models ORDER BY id",
-    )?;
+    let mut st = conn.prepare(&format!(
+        "SELECT id, title, {}, archive_hash, archive_size, is_missing FROM models ORDER BY id",
+        super::schema_sql::archive_path_sql("models")
+    ))?;
     st.query_map([], |r| {
         Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get::<_, Option<bool>>(5)?.unwrap_or(false)))
     })?
@@ -120,7 +121,7 @@ pub fn model_count(conn: &Connection) -> Result<usize> {
 /// `find_duplicate_entries`: records cataloguing the same file more than once,
 /// by identical real hash, else by identical `(file name, size)`.
 pub fn duplicate_entries(conn: &Connection) -> Result<Vec<ResultRow>> {
-    let mut st = conn.prepare("SELECT id, title, archive_path, archive_hash, archive_size FROM models ORDER BY id")?;
+    let mut st = conn.prepare(&format!("SELECT id, title, {}, archive_hash, archive_size FROM models ORDER BY id", super::schema_sql::archive_path_sql("models")))?;
     type Row = (i64, Option<String>, Option<String>, Option<String>, Option<i64>);
     let rows: Vec<Row> =
         st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?.collect::<Result<_>>()?;
@@ -246,7 +247,7 @@ pub fn embedding_targets(conn: &Connection, all: bool) -> Result<Vec<(i64, Optio
 pub type WarningRow = (i64, Option<String>, Option<String>);
 
 pub fn warning_records(conn: &Connection) -> Result<Vec<WarningRow>> {
-    let mut st = conn.prepare("SELECT id, archive_path, warning FROM models ORDER BY id")?;
+    let mut st = conn.prepare(&format!("SELECT id, {}, warning FROM models ORDER BY id", super::schema_sql::archive_path_sql("models")))?;
     st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect()
 }
 
@@ -264,7 +265,7 @@ pub type LocationRow = (i64, Option<String>, Option<String>, Option<i64>);
 
 /// `(id, archive_path, archive_hash, archive_size)` of every model, by id.
 pub fn location_rows(conn: &Connection) -> Result<Vec<LocationRow>> {
-    let mut st = conn.prepare("SELECT id, archive_path, archive_hash, archive_size FROM models ORDER BY id")?;
+    let mut st = conn.prepare(&format!("SELECT id, {}, archive_hash, archive_size FROM models ORDER BY id", super::schema_sql::archive_path_sql("models")))?;
     st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect()
 }
 
@@ -275,7 +276,11 @@ pub fn merge_moved(tx: &Transaction, items: &[(i64, String)]) -> Result<(usize, 
     for (old_id, path) in items {
         let old = tx.query_row("SELECT 1 FROM models WHERE id = ?1", [old_id], |_| Ok(())).optional()?;
         let new: Option<i64> = tx
-            .query_row("SELECT id FROM models WHERE archive_path = ?1 ORDER BY id LIMIT 1", [path], |r| r.get(0))
+            .query_row(
+                &format!("SELECT models.id FROM {} ORDER BY models.id LIMIT 1", super::crawl::LOCATED),
+                [super::crawl::located_json(tx, std::slice::from_ref(path))?],
+                |r| r.get(0),
+            )
             .optional()?;
         match (old, new) {
             (Some(()), Some(new_id)) => {
@@ -322,7 +327,7 @@ pub fn compact(conn: &Connection) -> Result<bool> {
 pub fn clear_all(tx: &Transaction) -> Result<()> {
     for table in [
         "model_tags", "model_scales", "stl_files", "images", "models", "subcollections", "collections", "sculptors",
-        "categories", "releases", "scales", "tags", "creators", "crawled_folders", "filter_cache",
+        "categories", "releases", "scales", "tags", "creators", "libraries", "filter_cache",
     ] {
         tx.execute(&format!("DELETE FROM {table}"), [])?;
     }
@@ -350,10 +355,9 @@ pub fn filter_cache_clear(tx: &Transaction) -> Result<()> {
 
 /// Whether any of `paths` is a model's archive path (`folder_has_db_records`).
 pub fn any_archive_path(conn: &Connection, paths: &[String]) -> Result<bool> {
-    let json = serde_json::to_string(paths).unwrap_or_else(|_| "[]".into());
     conn.query_row(
-        "SELECT EXISTS (SELECT 1 FROM models WHERE archive_path IN (SELECT value FROM json_each(?1)))",
-        [json],
+        &format!("SELECT EXISTS (SELECT 1 FROM {})", super::crawl::LOCATED),
+        [super::crawl::located_json(conn, paths)?],
         |r| r.get(0),
     )
 }
@@ -391,23 +395,6 @@ pub fn set_dhashes(tx: &Transaction, rows: &[(i64, String)]) -> Result<()> {
     Ok(())
 }
 
-/// `backfill_archive_folder`: normalise backslashed folders and fill missing
-/// ones from the archive path (`PurePosixPath(...).parent`). Returns the number filled.
-pub fn backfill_archive_folder(tx: &Transaction) -> Result<usize> {
-    tx.execute(
-        "UPDATE models SET archive_folder = replace(archive_folder, char(92), '/') WHERE instr(archive_folder, char(92)) > 0",
-        [],
-    )?;
-    let mut st = tx.prepare("SELECT id, archive_path FROM models WHERE archive_folder IS NULL")?;
-    let rows: Vec<(i64, String)> = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_>>()?;
-    drop(st);
-    let mut up = tx.prepare("UPDATE models SET archive_folder = ?2 WHERE id = ?1")?;
-    for (id, path) in &rows {
-        up.execute(params![id, super::edit::archive_folder_for(path)])?;
-    }
-    Ok(rows.len())
-}
-
 #[cfg(test)]
 mod dialog_tests {
     use super::*;
@@ -421,8 +408,9 @@ mod dialog_tests {
         let mut conn = open(&path).unwrap();
         conn.execute_batch(
             "INSERT INTO sculptors (name) VALUES ('unused');
-             INSERT INTO models (title, archive_path, archive_hash, warning, is_missing, to_print)
-             VALUES ('A', 'F:/a.7z', 'h', 'w', 1, 0), ('B', 'G:/a.7z', 'h', NULL, 0, 0), ('C', 'c', 'x', NULL, 0, 0);",
+             INSERT INTO libraries (uuid, name, root) VALUES ('u1', 'F', 'F:'), ('u2', 'G', 'G:');
+             INSERT INTO models (title, library_id, rel_path, archive_hash, warning, is_missing, to_print)
+             VALUES ('A', 1, 'a.7z', 'h', 'w', 1, 0), ('B', 2, 'a.7z', 'h', NULL, 0, 0), ('C', 1, 'c', 'x', NULL, 0, 0);",
         )
         .unwrap();
         let tx = conn.transaction().unwrap();
@@ -434,7 +422,7 @@ mod dialog_tests {
         assert_eq!(pruned, [("sculptors", 1)]);
         let rows = location_rows(&conn).unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].1.as_deref(), Some("G:/a.7z"));
+        assert_eq!(rows[0].1, Some(crate::relpath::join("G:", "a.7z")), "merged into B's location");
         assert!(free_bytes(&conn).unwrap() >= 0);
     }
 }

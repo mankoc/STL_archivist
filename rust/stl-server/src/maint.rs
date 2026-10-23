@@ -133,7 +133,7 @@ pub fn search_folder(
     }
     // A fallback fingerprint carries the file size: skip candidates of another size.
     let fallback_size = |h: &str| h.strip_prefix("fallback:").and_then(|r| r.split(':').next()?.parse::<i64>().ok());
-    let candidates = stl_core::crawler::list_archives(folder, true);
+    let candidates = stl_core::crawler::list_archives(folder, true, &[]);
     if candidates.is_empty() {
         log("No archive files found in the selected folder.".into());
         return Ok((Vec::new(), Vec::new()));
@@ -173,7 +173,7 @@ pub fn search_folder(
             }
         }
         if !moves.is_empty() {
-            lib.db.with_tx(|tx| browser::set_archive_paths(tx, &moves)).map_err(db)?;
+            lib.db.with_tx(|tx| browser::set_archive_paths(tx, &moves, Some(folder))).map_err(db)?;
         }
     }
     log(format!("Search complete: {} of {} missing archive(s) located.", found.len(), found.len() + targets.len()));

@@ -1,6 +1,7 @@
 //! Read-only model views for the viewer dialogs: a port of
 //! `app/services/model_views.py`.
 
+use super::schema_sql::archive_path_sql;
 use std::collections::HashMap;
 
 use rusqlite::types::Value;
@@ -24,7 +25,7 @@ pub fn stl_files(conn: &Connection, model_id: i64) -> Result<Vec<StlFileRow>> {
 /// (an archive member, or a file beside the archive given by its full path).
 pub fn image_source(conn: &Connection, image_id: i64) -> Result<Option<(Option<String>, Option<String>)>> {
     conn.query_row(
-        "SELECT m.archive_path, i.filename FROM images i JOIN models m ON m.id = i.model_id WHERE i.id = ?1",
+        &format!("SELECT {}, i.filename FROM images i JOIN models m ON m.id = i.model_id WHERE i.id = ?1", archive_path_sql("m")),
         [image_id],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )
@@ -33,18 +34,24 @@ pub fn image_source(conn: &Connection, image_id: i64) -> Result<Option<(Option<S
 
 /// `(archive_path, warning)` of one model (Warning Details).
 pub fn path_warning(conn: &Connection, model_id: i64) -> Result<Option<(Option<String>, Option<String>)>> {
-    conn.query_row("SELECT archive_path, warning FROM models WHERE id = ?1", [model_id], |r| Ok((r.get(0)?, r.get(1)?)))
-        .optional()
+    conn.query_row(&format!("SELECT {}, warning FROM models WHERE id = ?1", archive_path_sql("models")), [model_id], |r| {
+        Ok((r.get(0)?, r.get(1)?))
+    })
+    .optional()
 }
 
 pub fn title_path(conn: &Connection, model_id: i64) -> Result<Option<(Option<String>, Option<String>)>> {
-    conn.query_row("SELECT title, archive_path FROM models WHERE id = ?1", [model_id], |r| Ok((r.get(0)?, r.get(1)?)))
-        .optional()
+    conn.query_row(&format!("SELECT title, {} FROM models WHERE id = ?1", archive_path_sql("models")), [model_id], |r| {
+        Ok((r.get(0)?, r.get(1)?))
+    })
+    .optional()
 }
 
+/// Every folder holding catalogued archives (absolute, `/` form), sorted.
 pub fn archive_folders(conn: &Connection) -> Result<Vec<String>> {
     let mut st = conn.prepare(
-        "SELECT DISTINCT archive_folder FROM models WHERE archive_folder IS NOT NULL ORDER BY archive_folder",
+        "SELECT DISTINCT posix_join(l.root, g.rel_folder) AS f FROM (SELECT DISTINCT library_id, rel_folder FROM models) g \
+         JOIN libraries l ON l.id = g.library_id ORDER BY f",
     )?;
     let v: Vec<String> = st.query_map([], |r| r.get(0))?.collect::<Result<_>>()?;
     Ok(v.into_iter().filter(|f| !f.is_empty()).collect())
@@ -79,8 +86,12 @@ pub struct FolderModel {
 /// Archive browser cells for `folder` (and, with `include_subfolders`, every
 /// folder under it, matched with `LIKE` as the Python code does), by path.
 pub fn folder_models(conn: &Connection, folder: &str, include_subfolders: bool) -> Result<Vec<FolderModel>> {
-    let cols = "SELECT id, title, creator, archive_path FROM models";
-    let order = " ORDER BY archive_path, id";
+    let cols = format!(
+        "SELECT id, title, creator, {} AS path, {} AS folder FROM models",
+        archive_path_sql("models"),
+        super::schema_sql::archive_folder_sql("models")
+    );
+    let order = " ORDER BY path, id";
     let map = |r: &rusqlite::Row| {
         Ok(FolderModel { id: r.get(0)?, title: r.get(1)?, creator: r.get(2)?, archive_path: r.get(3)?, thumbs: Vec::new() })
     };
@@ -90,10 +101,10 @@ pub fn folder_models(conn: &Connection, folder: &str, include_subfolders: bool) 
             prefix.push('/');
         }
         prefix.push('%');
-        let mut st = conn.prepare(&format!("{cols} WHERE archive_folder = ?1 OR archive_folder LIKE ?2{order}"))?;
+        let mut st = conn.prepare(&format!("SELECT * FROM ({cols}) WHERE folder = ?1 OR folder LIKE ?2{order}"))?;
         st.query_map([folder, prefix.as_str()], map)?.collect::<Result<_>>()?
     } else {
-        let mut st = conn.prepare(&format!("{cols} WHERE archive_folder = ?1{order}"))?;
+        let mut st = conn.prepare(&format!("SELECT * FROM ({cols}) WHERE folder = ?1{order}"))?;
         st.query_map([folder], map)?.collect::<Result<_>>()?
     };
     let mut t = thumbs(conn, &rows.iter().map(|r| r.id).collect::<Vec<_>>())?;
@@ -156,9 +167,11 @@ fn scales_of(conn: &Connection, ids: &[i64]) -> Result<HashMap<i64, Vec<String>>
 }
 
 pub fn grid_models(conn: &Connection, ids: &[i64]) -> Result<Vec<GridModel>> {
+    let cols: Vec<String> =
+        GRID_FIELDS.iter().map(|f| if *f == "archive_path" { archive_path_sql("models") } else { f.to_string() }).collect();
     let mut st = conn.prepare(&format!(
         "SELECT id, {} FROM models WHERE id IN (SELECT value FROM json_each(?1)) ORDER BY id",
-        GRID_FIELDS.join(", ")
+        cols.join(", ")
     ))?;
     let mut rows: Vec<GridModel> = st
         .query_map([id_json(ids)], |r| {
@@ -221,10 +234,11 @@ pub fn duplicate_rows(conn: &Connection) -> Result<Vec<DuplicateRow>> {
 pub type HashRow = (i64, String, Option<String>, Option<String>, Option<String>);
 
 pub fn image_hash_rows(conn: &Connection) -> Result<Vec<HashRow>> {
-    let mut st = conn.prepare(
-        "SELECT i.model_id, i.dhash, i.thumbnail_path, m.title, m.archive_path \
+    let mut st = conn.prepare(&format!(
+        "SELECT i.model_id, i.dhash, i.thumbnail_path, m.title, {} \
          FROM images i JOIN models m ON i.model_id = m.id WHERE i.dhash IS NOT NULL ORDER BY i.id",
-    )?;
+        archive_path_sql("m")
+    ))?;
     st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?.collect()
 }
 
@@ -241,9 +255,10 @@ mod tests {
         let conn = open(&path).unwrap();
         conn.execute_batch(
             "INSERT INTO scales (name) VALUES ('75mm'), ('28mm');
-             INSERT INTO models (title, archive_path, archive_folder, archive_hash, is_missing, to_print)
-             VALUES ('A', 'F:/a/x.7z', 'F:/a', 'h1', 0, 0), (NULL, 'F:/a/b/y.7z', 'F:/a/b', 'h2', 0, 0),
-                    ('C', 'F:/ab/z.7z', 'F:/ab', 'h3', 0, 0);
+             INSERT INTO libraries (uuid, name, root) VALUES ('u1', 'F', 'F:/');
+             INSERT INTO models (title, library_id, rel_path, rel_folder, archive_hash, is_missing, to_print)
+             VALUES ('A', 1, 'a/x.7z', 'a', 'h1', 0, 0), (NULL, 1, 'a/b/y.7z', 'a/b', 'h2', 0, 0),
+                    ('C', 1, 'ab/z.7z', 'ab', 'h3', 0, 0);
              INSERT INTO model_scales (model_id, scale_id) VALUES (1, 2), (1, 1);
              INSERT INTO images (model_id, thumbnail_path, dhash) VALUES (1, '5', '2:ab'), (1, NULL, NULL);
              INSERT INTO stl_files (model_id, filename) VALUES (1, 'b.stl'), (1, 'a.stl');",
@@ -259,6 +274,6 @@ mod tests {
         assert_eq!(stl_files(&conn, 1).unwrap()[0].0, "a.stl");
         assert_eq!(duplicate_rows(&conn).unwrap()[0].scales, ["75mm", "28mm"]);
         assert_eq!(image_hash_rows(&conn).unwrap().len(), 1);
-        assert_eq!(title_path(&conn, 2).unwrap(), Some((None, Some("F:/a/b/y.7z".into()))));
+        assert_eq!(title_path(&conn, 2).unwrap(), Some((None, Some(crate::relpath::join("F:/", "a/b/y.7z")))));
     }
 }

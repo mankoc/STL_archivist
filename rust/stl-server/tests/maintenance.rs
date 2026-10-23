@@ -101,7 +101,7 @@ async fn verify_search_folder_and_merge_moved() {
     assert_eq!(v["job"]["message"], "1 archive(s) found and relocated");
     let found = rows(&v);
     assert_eq!((found[0]["status"].as_str(), found[0]["match_path"].as_str()), (Some("Found"), Some(path_s(&away.join("Knight.zip")).as_str())));
-    let path: String = scalar(&lib, &format!("SELECT archive_path FROM models WHERE id = {knight}"));
+    let path: String = scalar(&lib, &format!("SELECT archive_path FROM models_view WHERE id = {knight}"));
     assert_eq!(path, path_s(&away.join("Knight.zip")));
 
     // A copy is crawled elsewhere (a second record), then the original goes away.
@@ -122,7 +122,7 @@ async fn verify_search_folder_and_merge_moved() {
     assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
     assert_eq!(r.json(), json!({"merged": 1, "errors": 0}));
     assert_eq!(scalar::<i64>(&lib, "SELECT count(*) FROM models"), 2);
-    let title: String = scalar(&lib, &format!("SELECT title FROM models WHERE archive_path = '{}'", path_s(&elsewhere.join("Knight.zip")).replace('\'', "''")));
+    let title: String = scalar(&lib, &format!("SELECT title FROM models_view WHERE archive_path = '{}'", path_s(&elsewhere.join("Knight.zip")).replace('\'', "''")));
     assert_eq!(title, "Sir Knight");
 }
 

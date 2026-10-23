@@ -145,7 +145,7 @@ async fn sort_files_by_pattern() {
     std::fs::write(lib.dir.path().join("settings.json"), r#"{"file_sorting_enabled": true}"#).unwrap();
     let v = run(&lib, &ed, job).await;
     assert_eq!(v["job"]["message"], "moved 1 archive(s)");
-    let path: String = scalar(&lib, "SELECT archive_path FROM models");
+    let path: String = scalar(&lib, "SELECT archive_path FROM models_view");
     assert_eq!(path, target.join("In").join("Dragon.zip").to_string_lossy());
     assert!(std::path::Path::new(&path).is_file());
     assert!(!root.join("In").join("Dragon.zip").exists());

@@ -25,3 +25,5 @@ AGENTS.md
 .coverage
 TODOs.md
 .autoclaude
+# Claude agent-farm settings backups (machine-specific)
+.claude_agent_farm_backups/

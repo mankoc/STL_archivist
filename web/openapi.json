@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.43.6"
+    "version": "2026.43.7"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -526,113 +526,6 @@
         }
       }
     },
-    "/api/crawled-folders": {
-      "get": {
-        "tags": [
-          "jobs"
-        ],
-        "summary": "The folders tracked for crawling (Update Crawled Folders).",
-        "operationId": "get_crawled_folders",
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/CrawledFolder"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "jobs"
-        ],
-        "summary": "Track a folder for crawling (201), or 200 when it is already tracked.",
-        "operationId": "post_crawled_folders",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FolderPath"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": ""
-          },
-          "201": {
-            "description": ""
-          }
-        }
-      }
-    },
-    "/api/crawled-folders/monitor": {
-      "post": {
-        "tags": [
-          "jobs"
-        ],
-        "summary": "Monitor a crawled folder, or stop (editors): a monitored folder is checked\nevery `monitor_interval_minutes` and crawled when its archives changed.",
-        "operationId": "post_crawled_folders_monitor",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MonitorFolder"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": ""
-          },
-          "404": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/crawled-folders/remove": {
-      "post": {
-        "tags": [
-          "jobs"
-        ],
-        "summary": "Stop tracking a folder (its models stay).",
-        "operationId": "post_crawled_folders_remove",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FolderPath"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": ""
-          }
-        }
-      }
-    },
     "/api/editor/choices": {
       "get": {
         "tags": [
@@ -1083,6 +976,173 @@
             }
           },
           "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/libraries": {
+      "get": {
+        "tags": [
+          "libraries"
+        ],
+        "summary": "Every library, by name.",
+        "operationId": "get_libraries",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LibraryInfo"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "libraries"
+        ],
+        "summary": "Add a library at a folder (editors, inside their roots): 201, or 200 with\nthe library already there. Records of libraries around it below the folder\nmove into it.",
+        "operationId": "post_libraries",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewLibrary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryInfo"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryInfo"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/libraries/{id}": {
+      "patch": {
+        "tags": [
+          "libraries"
+        ],
+        "summary": "Rename a library, set its pattern, or monitor it (editors). A name another\nlibrary has gets a number.",
+        "operationId": "patch_libraries_by_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LibraryChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/libraries/{id}/remove": {
+      "post": {
+        "tags": [
+          "libraries"
+        ],
+        "summary": "Remove a library (editors): its records go to the library around it, or\nare deleted with their images when there is none. Files are not touched.",
+        "operationId": "post_libraries_by_id_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryRemoved"
+                }
+              }
+            }
+          },
+          "404": {
             "description": "",
             "content": {
               "application/json": {
@@ -3481,29 +3541,6 @@
           }
         }
       },
-      "CrawledFolder": {
-        "type": "object",
-        "required": [
-          "path",
-          "monitored"
-        ],
-        "properties": {
-          "monitored": {
-            "type": "boolean",
-            "description": "Checked for changes and crawled automatically (see `crate::monitor`)."
-          },
-          "path": {
-            "type": "string"
-          },
-          "pattern": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The path pattern used when crawling it."
-          }
-        }
-      },
       "Credentials": {
         "type": "object",
         "required": [
@@ -3868,6 +3905,7 @@
           "tags",
           "sources",
           "dates",
+          "libraries",
           "sculptors",
           "collections",
           "subcollections",
@@ -3917,6 +3955,12 @@
             "type": "array",
             "items": {
               "type": "string"
+            }
+          },
+          "libraries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NamedId"
             }
           },
           "new_folders": {
@@ -4085,18 +4129,6 @@
             "description": "`find` is a regular expression (Rust fancy-regex); `replace` then takes\n`\\1`, `\\g<name>`, `\\n` as in Python."
           },
           "replace": {
-            "type": "string"
-          }
-        },
-        "additionalProperties": false
-      },
-      "FolderPath": {
-        "type": "object",
-        "required": [
-          "path"
-        ],
-        "properties": {
-          "path": {
             "type": "string"
           }
         },
@@ -4830,6 +4862,36 @@
           },
           {
             "type": "object",
+            "description": "Move a library to a new root: check every archive there and, with\n`apply`, set the root (and those of the libraries inside it). With\n`fix_case`, paths found only with another letter case take the\nspelling on disk. Nothing is re-read.",
+            "required": [
+              "id",
+              "root",
+              "kind"
+            ],
+            "properties": {
+              "apply": {
+                "type": "boolean"
+              },
+              "fix_case": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "relocate_library"
+                ]
+              },
+              "root": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
             "description": "Move the models' archive files to the trash folder (or delete them,\nwithout one) and remove the records. Needs *allow file delete*.",
             "required": [
               "ids",
@@ -5143,6 +5205,29 @@
               }
             ],
             "description": "The AI tagger's suggestion for one model (`ai_suggest`)."
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Relocation",
+                "description": "What moving a library to a new root found (`relocate_library`)."
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "relocation"
+                    ]
+                  }
+                }
+              }
+            ],
+            "description": "What moving a library to a new root found (`relocate_library`)."
           }
         ],
         "description": "What a finder or maintenance job found (`JobDetail.result`)."
@@ -5156,6 +5241,126 @@
           "failed",
           "cancelled"
         ]
+      },
+      "LibraryChange": {
+        "type": "object",
+        "properties": {
+          "monitored": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pattern": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A path pattern; `\"\"` clears it."
+          }
+        },
+        "additionalProperties": false
+      },
+      "LibraryInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "uuid",
+          "name",
+          "root",
+          "monitored",
+          "models",
+          "reachable"
+        ],
+        "properties": {
+          "archive_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Archives found by its last crawl."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "last_crawled_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "models": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Records in it."
+          },
+          "monitored": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "origin": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`migration` when the move to libraries made it for archives outside\nevery crawled folder."
+          },
+          "pattern": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Path pattern its crawls use."
+          },
+          "reachable": {
+            "type": "boolean",
+            "description": "Its root is a folder on the server (else it must be relocated)."
+          },
+          "root": {
+            "type": "string",
+            "description": "Where the library is on the server."
+          },
+          "uuid": {
+            "type": "string",
+            "description": "The same on every instance (export, sync)."
+          }
+        }
+      },
+      "LibraryRemoved": {
+        "type": "object",
+        "required": [
+          "moved",
+          "deleted"
+        ],
+        "properties": {
+          "deleted": {
+            "type": "integer",
+            "description": "Records deleted (no library around it). The archive files stay.",
+            "minimum": 0
+          },
+          "moved": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "moved_to": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The library around it that took its records."
+          }
+        }
       },
       "LibraryStats": {
         "type": "object",
@@ -5573,22 +5778,6 @@
         },
         "additionalProperties": false
       },
-      "MonitorFolder": {
-        "type": "object",
-        "required": [
-          "path",
-          "monitored"
-        ],
-        "properties": {
-          "monitored": {
-            "type": "boolean"
-          },
-          "path": {
-            "type": "string"
-          }
-        },
-        "additionalProperties": false
-      },
       "MovedRecord": {
         "type": "object",
         "required": [
@@ -5623,6 +5812,31 @@
             "type": "string"
           }
         }
+      },
+      "NewLibrary": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "path": {
+            "type": "string",
+            "description": "The library's root folder on the server."
+          },
+          "pattern": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
       },
       "NewLookup": {
         "type": "object",
@@ -5833,6 +6047,63 @@
           }
         }
       },
+      "Relocation": {
+        "type": "object",
+        "description": "The check (and move) of a library to a new root.",
+        "required": [
+          "library",
+          "root",
+          "total",
+          "found",
+          "case_only",
+          "missing",
+          "missing_examples",
+          "inner",
+          "applied"
+        ],
+        "properties": {
+          "applied": {
+            "type": "boolean",
+            "description": "The root was changed (else only checked)."
+          },
+          "case_only": {
+            "type": "integer",
+            "description": "Found only with another letter case.",
+            "minimum": 0
+          },
+          "found": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "inner": {
+            "type": "integer",
+            "description": "Libraries inside it, moved along.",
+            "minimum": 0
+          },
+          "library": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "missing": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "missing_examples": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Some relative paths not found."
+          },
+          "root": {
+            "type": "string"
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
       "RemoveRecords": {
         "type": "object",
         "required": [
@@ -5903,7 +6174,10 @@
           "tags",
           "to_print",
           "is_missing",
-          "images"
+          "images",
+          "library_id",
+          "library",
+          "rel_path"
         ],
         "properties": {
           "archive_folder": {
@@ -5982,11 +6256,22 @@
             "type": "boolean",
             "description": "The archive was not on disk when last checked."
           },
+          "library": {
+            "type": "string"
+          },
+          "library_id": {
+            "type": "integer",
+            "format": "int64"
+          },
           "presupports": {
             "type": [
               "string",
               "null"
             ]
+          },
+          "rel_path": {
+            "type": "string",
+            "description": "The archive's path relative to its library (`/` form)."
           },
           "release": {
             "type": [

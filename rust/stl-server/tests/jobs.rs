@@ -102,7 +102,7 @@ async fn crawl_job_catalogues_a_folder() {
     assert!(changed);
 
     // The folder is tracked with its pattern; a second crawl finds nothing new.
-    let folders = call(&lib.state, "GET", "/api/crawled-folders", Some(&ed), None).await.json();
+    let folders = call(&lib.state, "GET", "/api/libraries", Some(&ed), None).await.json();
     assert_eq!(folders[0]["pattern"], "{sculptor}/{title}");
     let id = submit(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy()})).await;
     assert_eq!(wait(&lib, &ed, id).await["job"]["message"], "0 new, 0 updated, 2 unchanged");
@@ -234,7 +234,7 @@ async fn update_folders_keeps_records_moved_between_folders() {
         let id = submit(&lib, &ed, json!({"kind": "crawl", "folder": f.to_string_lossy()})).await;
         wait(&lib, &ed, id).await;
     }
-    lib.state.db.with(|c| c.execute("UPDATE models SET title = 'Edited' WHERE archive_path LIKE '%Dragon.zip'", [])).unwrap();
+    lib.state.db.with(|c| c.execute("UPDATE models SET title = 'Edited' WHERE rel_path LIKE '%Dragon.zip'", [])).unwrap();
     std::fs::rename(a.join("Dragon.zip"), b.join("Dragon.zip")).unwrap();
     std::fs::remove_file(a.join("Gone.zip")).unwrap();
 
@@ -246,7 +246,7 @@ async fn update_folders_keeps_records_moved_between_folders() {
     let (title, path): (String, String) = lib
         .state
         .db
-        .with(|c| c.query_row("SELECT title, archive_path FROM models WHERE archive_path LIKE '%Dragon.zip'", [], |r| Ok((r.get(0)?, r.get(1)?))))
+        .with(|c| c.query_row("SELECT title, archive_path FROM models_view WHERE archive_path LIKE '%Dragon.zip'", [], |r| Ok((r.get(0)?, r.get(1)?))))
         .unwrap();
     assert_eq!(title, "Edited");
     assert_eq!(path, b.join("Dragon.zip").to_string_lossy());
@@ -267,7 +267,7 @@ async fn clear_library_needs_an_admin_and_confirmation() {
     let id = submit(&lib, &admin, json!({"kind": "clear_library", "confirm": "DELETE"})).await;
     assert_eq!(wait(&lib, &admin, id).await["job"]["message"], "library cleared: 2 model(s) deleted");
     assert_eq!(count(&lib, "SELECT count(*) FROM models"), 0);
-    assert_eq!(count(&lib, "SELECT count(*) FROM crawled_folders"), 0);
+    assert_eq!(count(&lib, "SELECT count(*) FROM libraries"), 0);
     let stats = lib.state.thumbs.stats().unwrap();
     assert_eq!((stats.thumbnails, stats.blobs), (0, 0), "thumbnails dropped");
 }

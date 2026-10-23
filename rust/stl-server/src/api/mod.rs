@@ -5,6 +5,7 @@ pub mod edit;
 pub mod files;
 pub mod filter;
 pub mod jobs;
+pub mod libraries;
 pub mod lookups;
 pub mod models;
 pub mod search;
@@ -87,9 +88,10 @@ use crate::AppState;
         jobs::detail,
         jobs::cancel,
         jobs::events,
-        jobs::crawled_folders,
-        jobs::add_folder,
-        jobs::remove_folder,
+        libraries::list,
+        libraries::add,
+        libraries::change,
+        libraries::remove,
         files::browse,
         files::download,
         settings::get,
@@ -112,7 +114,6 @@ use crate::AppState;
         stats::column,
         search::by_image,
         workers::list,
-        jobs::monitor_folder,
         maintenance::remove_missing,
         workers::token,
         workers::connect,
@@ -192,9 +193,9 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/jobs", get(jobs::list).post(jobs::submit))
         .route("/api/jobs/{id}", get(jobs::detail).delete(jobs::cancel))
         .route("/api/events", get(jobs::events))
-        .route("/api/crawled-folders", get(jobs::crawled_folders).post(jobs::add_folder))
-        .route("/api/crawled-folders/remove", post(jobs::remove_folder))
-        .route("/api/crawled-folders/monitor", post(jobs::monitor_folder))
+        .route("/api/libraries", get(libraries::list).post(libraries::add))
+        .route("/api/libraries/{id}", patch(libraries::change))
+        .route("/api/libraries/{id}/remove", post(libraries::remove))
         .route("/api/files/browse", get(files::browse))
         .route("/api/models/{id}/archive", get(files::download))
         .route("/api/settings/library", get(settings::get).put(settings::put))

@@ -20,7 +20,7 @@ type Result<T> = rusqlite::Result<T>;
 /// `(archive_path, archive_size, archive_mtime_ns, archive_hash)` of a model.
 pub fn rescan_state(conn: &Connection, model_id: i64) -> Result<Option<(Option<String>, Option<i64>, Option<i64>, String)>> {
     conn.query_row(
-        "SELECT archive_path, archive_size, archive_mtime_ns, archive_hash FROM models WHERE id = ?1",
+        &format!("SELECT {}, archive_size, archive_mtime_ns, archive_hash FROM models WHERE id = ?1", super::schema_sql::archive_path_sql("models")),
         [model_id],
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
     )
@@ -191,7 +191,7 @@ pub fn apply_rescan(tx: &Transaction, model_id: i64, r: &Rescan) -> std::result:
 /// matches exactly one new archive (and no other missing record) are merged
 /// into it. Returns `(old path, new path)` per move and the thumbnail refs.
 pub fn cross_folder(tx: &Transaction, new_paths: &[String]) -> Result<(Vec<(String, String)>, Vec<String>)> {
-    let mut st = tx.prepare("SELECT id, archive_path, archive_hash FROM models WHERE is_missing = 1 ORDER BY id")?;
+    let mut st = tx.prepare(&format!("SELECT id, {}, archive_hash FROM models WHERE is_missing = 1 ORDER BY id", super::schema_sql::archive_path_sql("models")))?;
     let missing: Vec<(i64, Option<String>, Option<String>)> =
         st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<Result<_>>()?;
     drop(st);
@@ -213,12 +213,9 @@ pub fn cross_folder(tx: &Transaction, new_paths: &[String]) -> Result<(Vec<(Stri
     if hash_to_missing.iter().all(|(h, _)| missing_collision.contains(h)) {
         return Ok((Vec::new(), Vec::new()));
     }
-    let json = serde_json::to_string(new_paths).unwrap_or_else(|_| "[]".into());
-    let mut st = tx.prepare(
-        "SELECT archive_path, id, archive_hash FROM models WHERE archive_path IN (SELECT value FROM json_each(?1)) ORDER BY id",
-    )?;
+    let mut st = tx.prepare(&format!("SELECT j.value->>2, models.id, archive_hash FROM {} ORDER BY models.id", super::crawl::LOCATED))?;
     let news: Vec<(String, i64, Option<String>)> =
-        st.query_map([json], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<Result<_>>()?;
+        st.query_map([super::crawl::located_json(tx, new_paths)?], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<Result<_>>()?;
     drop(st);
     let new_ids: HashMap<String, i64> = news.iter().map(|(p, id, _)| (p.clone(), *id)).collect();
     let mut hash_to_new: HashMap<String, String> = HashMap::new();
@@ -271,7 +268,7 @@ fn under(p: &str, root: &str) -> bool {
 /// Update Crawled Folders' clean-up: delete the missing records under any of
 /// `roots`. Returns their paths and the thumbnail refs.
 pub fn delete_missing_under(tx: &Transaction, roots: &[String]) -> Result<(Vec<String>, Vec<String>)> {
-    let mut st = tx.prepare("SELECT id, archive_path FROM models WHERE is_missing = 1 ORDER BY id")?;
+    let mut st = tx.prepare(&format!("SELECT id, {} FROM models WHERE is_missing = 1 ORDER BY id", super::schema_sql::archive_path_sql("models")))?;
     let rows: Vec<(i64, Option<String>)> = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_>>()?;
     drop(st);
     let (mut deleted, mut refs) = (Vec::new(), Vec::new());

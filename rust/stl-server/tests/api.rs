@@ -33,10 +33,11 @@ fn fixture() -> Fixture {
                 ("Blue Dragon", "Alice", "F:/lib/Alice/blue.zip", 1),
                 ("Knight", "Bob", "F:/lib/Bob/knight.7z", 2),
             ] {
+                let (library, rel, folder) = common::located(tx, "F:/lib", path);
                 tx.execute(
-                    "INSERT INTO models (title, creator, archive_path, archive_folder, archive_hash, sculptor_id, \
-                     is_missing, to_print, release_year, release_month) VALUES (?1, ?2, ?3, ?4, ?1, ?5, 0, 0, 2024, 3)",
-                    rusqlite::params![title, creator, path, path.rsplit_once('/').unwrap().0, sculptor],
+                    "INSERT INTO models (title, creator, library_id, rel_path, rel_folder, archive_hash, sculptor_id, \
+                     is_missing, to_print, release_year, release_month) VALUES (?1, ?2, ?3, ?4, ?5, ?1, ?6, 0, 0, 2024, 3)",
+                    rusqlite::params![title, creator, library, rel, folder, sculptor],
                 )?;
                 ids.push(tx.last_insert_rowid());
             }
@@ -216,7 +217,7 @@ async fn openapi_lists_every_route() {
         "/api/models/{id}/images", "/api/images/{id}", "/api/editor/choices", "/api/editor/subcollections",
         "/api/lookups/{kind}", "/api/lookups/{kind}/merge", "/api/lookups/{kind}/{id}", "/api/tags/merge",
         "/api/tags/unused", "/api/authors", "/api/authors/profile",
-        "/api/jobs", "/api/jobs/{id}", "/api/events", "/api/crawled-folders", "/api/crawled-folders/remove",
+        "/api/jobs", "/api/jobs/{id}", "/api/events", "/api/libraries", "/api/libraries/{id}", "/api/libraries/{id}/remove",
         "/api/files/browse", "/api/models/{id}/archive", "/api/settings/library", "/api/models/parse-paths",
         "/api/stats/library", "/api/stats/column", "/api/search/image",
     ] {

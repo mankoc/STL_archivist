@@ -52,11 +52,19 @@ stl_database/
 ## Rules
 
 - **Compatibility:** the data directory (`stlLibrary.db`, `thumbnails.lmdb/`, `settings.json`,
-  `METADATA.7z` sidecars, backups) stays readable by the PyQt app's last version: bit-identical
-  `archive_hash`, perceptual hashes as `"2:" + 32 hex`, the schema in
-  `rust/stl-core/src/storage/schema_sql.rs` (`TABLES` plus `ADD_COLUMNS`, migrated by
-  `storage::migrate`; data steps in `storage/mod.rs`). Read the migration plan's compatibility
-  rules before changing formats.
+  `METADATA.7z` sidecars, backups) keeps its formats: bit-identical `archive_hash`, perceptual
+  hashes as `"2:" + 32 hex`, the schema in `rust/stl-core/src/storage/schema_sql.rs` (`TABLES`
+  plus `ADD_COLUMNS`, migrated by `storage::migrate`; data steps in `storage/mod.rs`). Since
+  2026.43.7 the database is no longer readable by the PyQt app: `storage::libraries::migrate`
+  converted absolute paths to libraries once (the server backs up first). Libraries, sidecars,
+  thumbnails and settings must still open older data directories. See
+  `docs/libraries-plan.md` and the migration plan's compatibility rules before changing formats.
+- **Paths:** a model's archive is `library_id` + `rel_path` (a `relpath::RelPath`: `/`
+  separators, NFC, no `..`) below the library's root; never store an absolute path. In Rust go
+  between absolute and relative paths with `libraries::Roots` (`locate` = deepest library;
+  `locate_or_create` where a move may leave every library), in SQL read
+  `schema_sql::archive_path_sql` / `archive_folder_sql` or `models_view.archive_path`, and look
+  batches up with `crawl::located_json` + `crawl::LOCATED` (the unique index).
 - **Library lock:** `stl_core::lock::LibraryLock` (`library.lock` + `library.owner`). The
   server holds it for its lifetime; never open a library's database or store from a second
   process without it. One `ThumbStore` per process (LMDB).

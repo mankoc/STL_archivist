@@ -214,61 +214,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/crawled-folders": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** The folders tracked for crawling (Update Crawled Folders). */
-        get: operations["get_crawled_folders"];
-        put?: never;
-        /** Track a folder for crawling (201), or 200 when it is already tracked. */
-        post: operations["post_crawled_folders"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/crawled-folders/monitor": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Monitor a crawled folder, or stop (editors): a monitored folder is checked
-         *     every `monitor_interval_minutes` and crawled when its archives changed.
-         */
-        post: operations["post_crawled_folders_monitor"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/crawled-folders/remove": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Stop tracking a folder (its models stay). */
-        post: operations["post_crawled_folders_remove"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/editor/choices": {
         parameters: {
             query?: never;
@@ -470,6 +415,68 @@ export interface paths {
          *     (what it finished so far stays). 409 when it has already finished.
          */
         delete: operations["delete_jobs_by_id"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/libraries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every library, by name. */
+        get: operations["get_libraries"];
+        put?: never;
+        /**
+         * Add a library at a folder (editors, inside their roots): 201, or 200 with
+         *     the library already there. Records of libraries around it below the folder
+         *     move into it.
+         */
+        post: operations["post_libraries"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/libraries/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Rename a library, set its pattern, or monitor it (editors). A name another
+         *     library has gets a number.
+         */
+        patch: operations["patch_libraries_by_id"];
+        trace?: never;
+    };
+    "/api/libraries/{id}/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove a library (editors): its records go to the library around it, or
+         *     are deleted with their images when there is none. Files are not touched.
+         */
+        post: operations["post_libraries_by_id_remove"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1351,13 +1358,6 @@ export interface components {
             /** Format: int64 */
             count: number;
         };
-        CrawledFolder: {
-            /** @description Checked for changes and crawled automatically (see `crate::monitor`). */
-            monitored: boolean;
-            path: string;
-            /** @description The path pattern used when crawling it. */
-            pattern?: string | null;
-        };
         Credentials: {
             name: string;
             password: string;
@@ -1492,6 +1492,7 @@ export interface components {
             dates: components["schemas"]["DateDto"][];
             filetypes: string[];
             folders: string[];
+            libraries: components["schemas"]["NamedId"][];
             new_folders?: string[] | null;
             /** @description Models per folder, ancestors included. */
             path_counts?: {
@@ -1537,9 +1538,6 @@ export interface components {
              */
             regex?: boolean;
             replace: string;
-        };
-        FolderPath: {
-            path: string;
         };
         FolderRequest: {
             /** @description A folder from `/api/folders`. */
@@ -1746,6 +1744,14 @@ export interface components {
             pattern: string;
             target_dir: string;
         } | {
+            apply?: boolean;
+            fix_case?: boolean;
+            /** Format: int64 */
+            id: number;
+            /** @enum {string} */
+            kind: "relocate_library";
+            root: string;
+        } | {
             ids: number[];
             /** @enum {string} */
             kind: "delete_files";
@@ -1816,9 +1822,58 @@ export interface components {
         } | (components["schemas"]["AiSuggestion"] & {
             /** @enum {string} */
             type: "ai_suggestion";
+        }) | (components["schemas"]["Relocation"] & {
+            /** @enum {string} */
+            type: "relocation";
         });
         /** @enum {string} */
         JobState: "queued" | "running" | "done" | "failed" | "cancelled";
+        LibraryChange: {
+            monitored?: boolean | null;
+            name?: string | null;
+            /** @description A path pattern; `""` clears it. */
+            pattern?: string | null;
+        };
+        LibraryInfo: {
+            /**
+             * Format: int64
+             * @description Archives found by its last crawl.
+             */
+            archive_count?: number | null;
+            /** Format: int64 */
+            id: number;
+            last_crawled_at?: string | null;
+            /**
+             * Format: int64
+             * @description Records in it.
+             */
+            models: number;
+            monitored: boolean;
+            name: string;
+            /**
+             * @description `migration` when the move to libraries made it for archives outside
+             *     every crawled folder.
+             */
+            origin?: string | null;
+            /** @description Path pattern its crawls use. */
+            pattern?: string | null;
+            /** @description Its root is a folder on the server (else it must be relocated). */
+            reachable: boolean;
+            /** @description Where the library is on the server. */
+            root: string;
+            /** @description The same on every instance (export, sync). */
+            uuid: string;
+        };
+        LibraryRemoved: {
+            /** @description Records deleted (no library around it). The archive files stay. */
+            deleted: number;
+            moved: number;
+            /**
+             * Format: int64
+             * @description The library around it that took its records.
+             */
+            moved_to?: number | null;
+        };
         LibraryStats: {
             /** @description `by_source`, `by_year`, `top_sculptors`, … each most frequent first. */
             rankings: {
@@ -2000,10 +2055,6 @@ export interface components {
             /** @default null */
             sort: null | components["schemas"]["Sort"];
         };
-        MonitorFolder: {
-            monitored: boolean;
-            path: string;
-        };
         MovedRecord: {
             /**
              * Format: int64
@@ -2017,6 +2068,12 @@ export interface components {
             /** Format: int64 */
             id: number;
             name: string;
+        };
+        NewLibrary: {
+            name?: string | null;
+            /** @description The library's root folder on the server. */
+            path: string;
+            pattern?: string | null;
         };
         NewLookup: {
             /** @description The parent collection's name (subcollections only). */
@@ -2082,6 +2139,23 @@ export interface components {
             status: string;
             title: string;
         };
+        /** @description The check (and move) of a library to a new root. */
+        Relocation: {
+            /** @description The root was changed (else only checked). */
+            applied: boolean;
+            /** @description Found only with another letter case. */
+            case_only: number;
+            found: number;
+            /** @description Libraries inside it, moved along. */
+            inner: number;
+            /** Format: int64 */
+            library: number;
+            missing: number;
+            /** @description Some relative paths not found. */
+            missing_examples: string[];
+            root: string;
+            total: number;
+        };
         RemoveRecords: {
             ids: number[];
         };
@@ -2124,7 +2198,12 @@ export interface components {
             images: number;
             /** @description The archive was not on disk when last checked. */
             is_missing: boolean;
+            library: string;
+            /** Format: int64 */
+            library_id: number;
             presupports?: string | null;
+            /** @description The archive's path relative to its library (`/` form). */
+            rel_path: string;
             release?: string | null;
             /** Format: int64 */
             release_month?: number | null;
@@ -2772,102 +2851,6 @@ export interface operations {
             };
         };
     };
-    get_crawled_folders: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CrawledFolder"][];
-                };
-            };
-        };
-    };
-    post_crawled_folders: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["FolderPath"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    post_crawled_folders_monitor: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MonitorFolder"];
-            };
-        };
-        responses: {
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorBody"];
-                };
-            };
-        };
-    };
-    post_crawled_folders_remove: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["FolderPath"];
-            };
-        };
-        responses: {
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
     get_editor_choices: {
         parameters: {
             query?: never;
@@ -3220,6 +3203,126 @@ export interface operations {
                 };
             };
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_libraries: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryInfo"][];
+                };
+            };
+        };
+    };
+    post_libraries: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewLibrary"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryInfo"];
+                };
+            };
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryInfo"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    patch_libraries_by_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LibraryChange"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryInfo"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    post_libraries_by_id_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryRemoved"];
+                };
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

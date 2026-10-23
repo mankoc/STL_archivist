@@ -296,8 +296,9 @@ fn lib_name(base: &str) -> String {
 pub fn gpus() -> Vec<&'static str> {
     let mut found = Vec::new();
     if cfg!(windows) {
-        let root = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
-        if root.join("System32").join("nvcuda.dll").is_file() {
+        // The Windows folder as the system reports it (no assumed drive).
+        let root = std::env::var_os("SystemRoot").or_else(|| std::env::var_os("WINDIR")).map(PathBuf::from);
+        if root.is_some_and(|r| r.join("System32").join("nvcuda.dll").is_file()) {
             found.push("nvidia");
         }
     } else {

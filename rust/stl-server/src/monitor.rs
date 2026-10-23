@@ -9,11 +9,17 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use stl_core::storage::duplicates;
+use stl_core::storage::libraries;
 
 use crate::Library;
 use crate::jobs::{JobInfo, JobRequest, JobState};
 use crate::library_settings::LibrarySettings;
+
+struct MonitoredFolder {
+    path: String,
+    #[allow(dead_code)]
+    pattern: Option<String>,
+}
 
 /// Who the monitor's crawl jobs are from.
 pub const USER: &str = "monitor";
@@ -42,7 +48,7 @@ fn busy(jobs: &[JobInfo], folder: &str) -> bool {
 pub fn check(lib: &Arc<Library>, force: bool) -> Vec<JobInfo> {
     let settings = LibrarySettings::load(&lib.config.data_dir);
     let every = Duration::from_secs(60 * u64::from(settings.monitor_interval_minutes()));
-    let folders = match lib.db.with(duplicates::crawled_folder_list) {
+    let folders = match lib.db.with(libraries::list) {
         Ok(f) => f,
         Err(e) => {
             tracing::warn!("monitored folders: {e}");
@@ -50,7 +56,8 @@ pub fn check(lib: &Arc<Library>, force: bool) -> Vec<JobInfo> {
         }
     };
     let mut queued = Vec::new();
-    for f in folders.into_iter().filter(|f| f.monitored) {
+    for f in folders.into_iter().filter(|f| f.monitored && !f.root.is_empty()) {
+        let f = MonitoredFolder { path: f.root, pattern: f.pattern };
         {
             let mut checked = lib.monitor.checked.lock().unwrap_or_else(|e| e.into_inner());
             if !force && checked.get(&f.path).is_some_and(|t| t.elapsed() < every) {

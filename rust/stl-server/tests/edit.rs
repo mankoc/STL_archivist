@@ -29,10 +29,12 @@ fn library() -> Lib {
         let id = lib
             .state
             .db
-            .with(|c| {
+            .with_tx(|c| {
+                let root = lib.dir.path().join("lib").to_string_lossy().into_owned();
+                let (library, rel, folder) = common::located(c, &root, &path.to_string_lossy());
                 c.execute(
-                    "INSERT INTO models (title, archive_path, archive_hash, is_missing, to_print) VALUES (?1, ?2, ?3, 0, 0)",
-                    rusqlite::params![format!("old {i}"), path.to_string_lossy(), format!("h{i}")],
+                    "INSERT INTO models (title, library_id, rel_path, rel_folder, archive_hash, is_missing, to_print) VALUES (?1, ?2, ?3, ?4, ?5, 0, 0)",
+                    rusqlite::params![format!("old {i}"), library, rel, folder, format!("h{i}")],
                 )?;
                 Ok::<_, rusqlite::Error>(c.last_insert_rowid())
             })

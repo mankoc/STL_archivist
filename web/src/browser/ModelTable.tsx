@@ -68,6 +68,7 @@ export const COLUMNS: Column[] = [
   { id: "presupports", header: "Presupports", size: 110, sortKey: "presupports", render: (r) => r.presupports, field: "presupports", text: text("presupports") },
   { id: "size", header: "File Size", size: 90, sortKey: "archive_size", render: (r) => formatSize(r.archive_size) },
   { id: "path", header: "Path", size: 360, sortKey: "archive_path", render: (r) => r.archive_path },
+  { id: "library", header: "Library", size: 140, sortKey: "library_name", render: (r) => r.library },
   // Optional columns.
   { id: "warning", header: "Warning", size: 220, optional: true, render: (r) => r.warning?.split("\n").join("; ") },
   { id: "sequence", header: "Sequence", size: 90, sortKey: "sequence", optional: true, render: (r) => r.sequence, field: "sequence", text: (r) => String(r.sequence ?? "") },

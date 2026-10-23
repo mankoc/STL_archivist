@@ -126,6 +126,7 @@ pub struct FilterTree {
     pub tags: Vec<String>,
     pub sources: Vec<String>,
     pub dates: Vec<DateDto>,
+    pub libraries: Vec<NamedId>,
     pub sculptors: Vec<NamedId>,
     pub collections: Vec<NamedId>,
     pub subcollections: Vec<CollectionNode>,
@@ -181,6 +182,7 @@ impl From<library::FilterTree> for FilterTree {
             tags: t.tags,
             sources: t.sources,
             dates: t.dates.into_iter().map(|(year, month)| DateDto { year, month }).collect(),
+            libraries: named(t.libraries),
             sculptors: named(t.sculptors),
             collections: named(t.collections),
             subcollections: t

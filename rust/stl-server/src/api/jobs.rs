@@ -6,8 +6,7 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::Response;
-use serde::{Deserialize, Serialize};
-use stl_core::storage::duplicates;
+use serde::Serialize;
 use tokio::sync::broadcast::error::RecvError;
 use utoipa::ToSchema;
 
@@ -42,7 +41,10 @@ pub async fn submit(
     me.require(if admin { Role::Admin } else { Role::Editor })?;
     request.validate().map_err(ApiError::bad_request)?;
     // A searched folder is read and records may point into it: the same access as a crawl.
-    if let JobRequest::SearchFolder { folder, .. } | JobRequest::SortFiles { target_dir: folder, .. } = &request {
+    if let JobRequest::SearchFolder { folder, .. }
+    | JobRequest::SortFiles { target_dir: folder, .. }
+    | JobRequest::RelocateLibrary { root: folder, .. } = &request
+    {
         let (lib2, me2, path) = (std::sync::Arc::clone(&lib), me.clone(), std::path::PathBuf::from(folder));
         lib2.run(move |lib| super::files::check_access(lib, &me2, &path)).await?;
     }
@@ -134,66 +136,3 @@ async fn stream(mut socket: WebSocket, mut rx: tokio::sync::broadcast::Receiver<
     }
 }
 
-#[derive(Serialize, ToSchema)]
-pub struct CrawledFolder {
-    pub path: String,
-    /// The path pattern used when crawling it.
-    pub pattern: Option<String>,
-    /// Checked for changes and crawled automatically (see `crate::monitor`).
-    pub monitored: bool,
-}
-
-/// The folders tracked for crawling (Update Crawled Folders).
-#[utoipa::path(get, path = "/api/crawled-folders", tag = "jobs", responses((status = 200, body = Vec<CrawledFolder>)))]
-pub async fn crawled_folders(State(lib): State<AppState>, _me: CurrentUser) -> Result<Json<Vec<CrawledFolder>>, ApiError> {
-    let rows = lib.run(|lib| Ok(lib.db.with(duplicates::crawled_folder_list)?)).await?;
-    Ok(Json(rows.into_iter().map(|f| CrawledFolder { path: f.path, pattern: f.pattern, monitored: f.monitored }).collect()))
-}
-
-#[derive(Deserialize, ToSchema)]
-#[serde(deny_unknown_fields)]
-pub struct MonitorFolder {
-    pub path: String,
-    pub monitored: bool,
-}
-
-/// Monitor a crawled folder, or stop (editors): a monitored folder is checked
-/// every `monitor_interval_minutes` and crawled when its archives changed.
-#[utoipa::path(post, path = "/api/crawled-folders/monitor", tag = "jobs", request_body = MonitorFolder,
-    responses((status = 204), (status = 404, body = crate::error::ErrorBody)))]
-pub async fn monitor_folder(State(lib): State<AppState>, me: CurrentUser, Json(f): Json<MonitorFolder>) -> Result<StatusCode, ApiError> {
-    me.require(Role::Editor)?;
-    let path = f.path.clone();
-    let found = lib.run(move |lib| Ok(lib.db.with_tx(|tx| duplicates::set_monitored(tx, &f.path, f.monitored))?)).await?;
-    if !found {
-        return Err(ApiError::not_found(format!("{path} is not a crawled folder")));
-    }
-    Ok(StatusCode::NO_CONTENT)
-}
-
-#[derive(Deserialize, ToSchema)]
-#[serde(deny_unknown_fields)]
-pub struct FolderPath {
-    pub path: String,
-}
-
-/// Track a folder for crawling (201), or 200 when it is already tracked.
-#[utoipa::path(post, path = "/api/crawled-folders", tag = "jobs", request_body = FolderPath,
-    responses((status = 201), (status = 200)))]
-pub async fn add_folder(State(lib): State<AppState>, me: CurrentUser, Json(f): Json<FolderPath>) -> Result<StatusCode, ApiError> {
-    me.require(Role::Editor)?;
-    if f.path.trim().is_empty() {
-        return Err(ApiError::bad_request("a path is needed"));
-    }
-    let added = lib.run(move |lib| Ok(lib.db.with_tx(|tx| duplicates::add_crawled_folder(tx, f.path.trim()))?)).await?;
-    Ok(if added { StatusCode::CREATED } else { StatusCode::OK })
-}
-
-/// Stop tracking a folder (its models stay).
-#[utoipa::path(post, path = "/api/crawled-folders/remove", tag = "jobs", request_body = FolderPath,
-    responses((status = 204)))]
-pub async fn remove_folder(State(lib): State<AppState>, me: CurrentUser, Json(f): Json<FolderPath>) -> Result<StatusCode, ApiError> {
-    me.require(Role::Editor)?;
-    lib.run(move |lib| Ok(lib.db.with_tx(|tx| duplicates::remove_crawled_folder(tx, &f.path))?)).await?;
-    Ok(StatusCode::NO_CONTENT)
-}

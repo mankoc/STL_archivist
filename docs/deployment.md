@@ -224,7 +224,7 @@ the command line (later wins).
 |---|---|---|---|---|
 | | `STL_DATA_DIR` | `--data-dir` | platform default¹ | The library's data directory |
 | `bind` | `STL_BIND` | `--bind` | `127.0.0.1:8770` | Address and port to listen on |
-| `roots` | | | `[]` | Folders editors may browse and crawl; crawled folders count too; administrators may browse anywhere |
+| `roots` | | | `[]` | Folders editors may browse and crawl; libraries count too; administrators may browse anywhere |
 | `path_map` | | | `[]` | `[{"server": "/srv/stl", "client": "\\\\nas\\stl"}]`: how clients see server paths (*Copy path*, *Open folder*); clients on the server's own machine see paths as they are |
 | `unrar` | `STL_UNRAR_PATH` | | `unrar` on `PATH` | UnRAR tool |
 | `pdfium` | `STL_PDFIUM_PATH` | | beside the server, then the data directory | pdfium library |
@@ -250,6 +250,9 @@ Other command-line commands:
 stl-server create-admin NAME [--data-dir DIR]     first administrator (no users yet)
 stl-server restore FILE.7z [--data-dir DIR]        restore a backup (server stopped)
 stl-server openapi                                 print the API description
+stl-server libraries [list] | relocate NAME NEW_ROOT [--apply] [--fix-case] [--data-dir DIR]
+                                                   list libraries, or move one to a new root
+                                                   (checks first; server stopped)
 stl-server worker --server URL [--data-dir DIR]    compute worker for a remote server (token in
                                                    STL_WORKER_TOKEN; the desktop app starts it)
 stl-server components status|install|remove [ID...] [--variant ID=V]... [--data-dir DIR]
@@ -371,7 +374,7 @@ for the event stream).
 
 ## Monitored folders
 
-*Jobs → Crawled folders*: the eye button (editors) monitors a folder. Every
+*Jobs → Libraries*: the eye button (editors) monitors a library. Every
 *Check monitored folders every* minutes (*Settings → Library*, default 30) the server lists
 the folder's archives and compares them with the library by size and modification date —
 no archive is opened, so a check of an unchanged folder is cheap even on a NAS. When an
@@ -379,7 +382,7 @@ archive is new, changed or gone, it queues a crawl of the folder (shown in *Jobs
 user `monitor`; nothing is queued when nothing changed, or while a crawl of the folder or
 *Update all* is waiting or running). The crawl adds and updates records as any crawl does;
 records of archives that vanished are **marked missing** rather than deleted (an archive
-that turns up in another crawled folder is matched by hash), and *Maintenance → Remove
+that turns up in another library is matched by hash), and *Maintenance → Remove
 missing archives* deletes the records of every missing archive. Checks run while the server
 does; changes made while it was off are found at the first check after it starts. Changes
 are picked up at the next check, not at once, which also works on network shares where file
@@ -400,18 +403,37 @@ user menu. Accounts live in `<data dir>/server.db`, apart from the library.
 ## Moving an existing library
 
 The data directory is the whole library: copy it (with the server stopped), or use a backup.
-Libraries made by the earlier PyQt desktop application open as they are.
+Records store their archive paths relative to their **library** (a catalogued folder: a
+name, a root and a permanent id), in a form that is the same on every operating system; the
+only machine-specific part is each library's root.
 
 **Same paths** (same machine, or the archives at the same paths): start the server on the
 copied data directory. Done.
 
-**Different paths** (another drive, a Linux server for a library catalogued on Windows): the
-records still point to the old paths. Restore or copy the library, then add the archive
-folders at their new location (*Jobs → Add folder*) and crawl them. Records whose old path no
-longer exists are matched to the archives by content and moved to the new paths, keeping
-their edits and thumbnails. Archives with byte-identical copies cannot be matched
-unambiguously and come back as new records. Finally remove the old folders from the
-*Crawled folders* list (removing a folder from the list does not touch records or files).
+**Different paths** (another drive or mount point, a Linux server for a library catalogued on
+Windows): start the server on the copied or restored data directory; *Jobs → Libraries* shows
+each library whose folder is not there as *root not found*. Click **Move** on each, choose the
+folder where its archives now are, **Check** (every archive is looked up; found, missing and
+found-with-another-letter-case are counted) and **Move**. Nothing is re-read: records, edits,
+tags, thumbnails and embeddings stay. Moving from Windows to Linux, keep *adopt the letter
+case found on disk* on, since Linux tells `Dragon.zip` and `dragon.zip` apart. On a headless
+server:
+
+```bash
+stl-server libraries list --data-dir /srv/stl-data
+stl-server libraries relocate "STL" /library/STL --data-dir /srv/stl-data            # check
+stl-server libraries relocate "STL" /library/STL --apply --fix-case --data-dir /srv/stl-data
+```
+
+(with the server stopped: the command opens the library itself).
+
+**From a version before libraries** (before 2026.43.7, or the PyQt desktop application): the
+first start converts the library once — each crawled folder becomes a library, archives
+outside every crawled folder get a library of their own (marked *made by the move to
+libraries*), records of an archive catalogued twice under two spellings of its folder are
+merged into one, and the database is rebuilt with relative paths. A backup is written first
+(`backups/stlLibrary_backup_<time>_pre_libraries.7z`); the server refuses to convert without
+it. The earlier versions cannot open the converted library.
 
 **Without the database** (only the archives): crawl them. Folders with `METADATA.7z`
 sidecars restore their records (titles, tags, lookups, thumbnails) from them instead of
@@ -445,7 +467,7 @@ first.
 | "the library is open in another process: …" | Another server, the desktop app, or `restore` has the library open. Stop it. The message names the process. |
 | Setup screen says it must run on the server | First-run setup is accepted only from the server's own machine and not through a proxy. Use a browser on that machine or `stl-server create-admin`. |
 | The page loads but jobs never show progress | The proxy drops WebSocket upgrades on `/api/events`; see the nginx example. |
-| "outside the library's folders" when adding a folder | Editors can only browse `roots` and crawled folders. Add the folder to `roots` in `server.json` (and restart), or let an administrator add it. |
+| "outside the library's folders" when adding a folder | Editors can only browse `roots` and libraries. Add the folder to `roots` in `server.json` (and restart), or let an administrator add it. |
 | `.rar` archives have no thumbnails or fail | UnRAR is missing; install it or set `unrar`. |
 | No AI options | ONNX Runtime or the CLIP model is missing (embeddings), or `llama-server` / the model files are (tagger). *AI tagger* shows the reason. |
 | Some archives are skipped or have no images | The built-in readers refuse a few unusual archives (the crawl log warns "Cannot open archive"), and AVIF and CMYK JPEG images are not decoded. |

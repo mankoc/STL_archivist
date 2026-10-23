@@ -54,16 +54,53 @@ pub struct Library {
 
 pub type AppState = Arc<Library>;
 
+/// The move to libraries is one-way: back the library up first (into
+/// `backups/`, named `…_pre_libraries.7z`), and refuse to go on without it.
+fn backup_before_libraries(config: &Config, thumbs: &ThumbStore) -> Result<(), String> {
+    let db = config.db_path();
+    if !db.is_file() {
+        return Ok(());
+    }
+    let conn = storage::open(&db).map_err(|e| format!("database {}: {e}", db.display()))?;
+    if !storage::libraries::needs_migration(&conn).map_err(|e| e.to_string())? {
+        return Ok(());
+    }
+    let name = api::backups::new_name().replace(".7z", "_pre_libraries.7z");
+    let dest = api::backups::dir(&config.data_dir).join(name);
+    let settings = config.data_dir.join(stl_core::backup::SETTINGS_FILE);
+    tracing::info!(backup = %dest.display(), "backing up before moving archive paths to libraries");
+    stl_core::backup::write(&conn, thumbs, settings.is_file().then_some(settings.as_path()), &dest, &stl_core::control::Control::new())
+        .map_err(|e| format!("could not back up the library before moving it to libraries ({e}); nothing was changed"))?;
+    Ok(())
+}
+
 impl Library {
     /// Lock the data directory, migrate the database and open the thumbnail store.
     pub fn open(config: Config) -> Result<Library, String> {
         let owner = format!("stl-server {}, pid {}", stl_core::VERSION, std::process::id());
         let lock = LibraryLock::acquire(&config.data_dir, &owner).map_err(|e| e.to_string())?;
-        let report = storage::migrate(&config.db_path(), &storage::Vectors::default())
-            .map_err(|e| format!("database {}: {e}", config.db_path().display()))?;
-        tracing::info!(?report, "database ready");
         let thumbs = ThumbStore::open(&config.thumb_dir())
             .map_err(|e| format!("thumbnail store {}: {e}", config.thumb_dir().display()))?;
+        backup_before_libraries(&config, &thumbs)?;
+        let mut report = storage::migrate(&config.db_path(), &storage::Vectors::default())
+            .map_err(|e| format!("database {}: {e}", config.db_path().display()))?;
+        if let Some(p) = &mut report.paths {
+            // The merged-away duplicates' thumbnails (taken out: not for the log).
+            let refs = std::mem::take(&mut p.thumbnail_refs);
+            tracing::warn!(
+                libraries = p.libraries,
+                extra_libraries = p.extra_libraries,
+                models = p.models,
+                duplicates_merged = p.duplicates_merged,
+                thumbnails_deleted = refs.len(),
+                "archive paths moved to libraries (relative paths); the earlier desktop app can no longer open this library"
+            );
+            let ids: Vec<u64> = refs.iter().filter_map(|r| r.trim().parse().ok()).collect();
+            if !ids.is_empty() {
+                thumbs.delete_many(&ids).map_err(|e| format!("thumbnail store: {e}"))?;
+            }
+        }
+        tracing::info!(?report, "database ready");
         let accounts_path = config.data_dir.join(accounts::DB_FILE);
         let accounts = Pool::new(&accounts_path);
         accounts

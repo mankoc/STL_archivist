@@ -23,7 +23,7 @@ pub type ModelInfo = (i64, Option<String>, Option<String>, Value);
 
 /// `(id, title, archive_path, archive_size)` of every model.
 pub fn model_info(conn: &Connection) -> Result<Vec<ModelInfo>> {
-    let mut st = conn.prepare("SELECT id, title, archive_path, archive_size FROM models")?;
+    let mut st = conn.prepare(&format!("SELECT id, title, {}, archive_size FROM models", super::schema_sql::archive_path_sql("models")))?;
     st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect()
 }
 
@@ -35,47 +35,15 @@ pub fn thumbnail_image_ids(conn: &Connection, model_id: i64, limit: i64) -> Resu
     st.query_map([model_id, limit], |r| r.get(0))?.collect()
 }
 
-/// `(path, pattern)` of the crawled folders, by path.
+/// `(root, pattern)` of the libraries (the folders crawls cover), by root.
 pub fn crawled_folders(conn: &Connection) -> Result<Vec<(String, Option<String>)>> {
-    let mut st = conn.prepare("SELECT path, pattern FROM crawled_folders ORDER BY path")?;
+    let mut st = conn.prepare("SELECT root, pattern FROM libraries WHERE root != '' ORDER BY root")?;
     st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()
-}
-
-/// A crawled folder for its list: path, stored pattern, and whether it is monitored.
-#[derive(Debug, Clone, PartialEq)]
-pub struct CrawledFolder {
-    pub path: String,
-    pub pattern: Option<String>,
-    pub monitored: bool,
-}
-
-/// The crawled folders, by path.
-pub fn crawled_folder_list(conn: &Connection) -> Result<Vec<CrawledFolder>> {
-    let mut st = conn.prepare("SELECT path, pattern, coalesce(monitored, 0) FROM crawled_folders ORDER BY path")?;
-    st.query_map([], |r| Ok(CrawledFolder { path: r.get(0)?, pattern: r.get(1)?, monitored: r.get::<_, i64>(2)? != 0 }))?.collect()
-}
-
-/// Monitor a crawled folder or stop; returns whether it is tracked.
-pub fn set_monitored(tx: &rusqlite::Transaction, path: &str, monitored: bool) -> Result<bool> {
-    Ok(tx.execute("UPDATE crawled_folders SET monitored = ?2 WHERE path = ?1", rusqlite::params![path, monitored as i64])? > 0)
-}
-
-/// Track a folder for crawling unless it is tracked already; returns whether it was added.
-pub fn add_crawled_folder(tx: &rusqlite::Transaction, path: &str) -> Result<bool> {
-    let n = tx.execute(
-        "INSERT INTO crawled_folders (path) SELECT ?1 WHERE NOT EXISTS (SELECT 1 FROM crawled_folders WHERE path = ?1)",
-        [path],
-    )?;
-    Ok(n > 0)
-}
-
-pub fn remove_crawled_folder(tx: &rusqlite::Transaction, path: &str) -> Result<usize> {
-    tx.execute("DELETE FROM crawled_folders WHERE path = ?1", [path])
 }
 
 /// Every model's non-empty `archive_path` (sidecar folder lists).
 pub fn all_archive_paths(conn: &Connection) -> Result<Vec<String>> {
-    let mut st = conn.prepare("SELECT archive_path FROM models")?;
+    let mut st = conn.prepare(&format!("SELECT {} FROM models", super::schema_sql::archive_path_sql("models")))?;
     let v: Vec<Option<String>> = st.query_map([], |r| r.get(0))?.collect::<Result<_>>()?;
     Ok(v.into_iter().flatten().filter(|p| !p.is_empty()).collect())
 }
@@ -172,8 +140,9 @@ mod tests {
         migrate(&path, &Vectors::default()).unwrap();
         let conn = open(&path).unwrap();
         conn.execute_batch(
-            "INSERT INTO models (title, archive_path, archive_hash, is_missing, to_print)
-             VALUES ('A', 'a', '1', 0, 0), ('B', 'b', '2', 0, 0), ('C', 'c', '3', 1, 0);
+            "INSERT INTO libraries (uuid, name, root) VALUES ('u1', 'L', '/l');
+             INSERT INTO models (title, library_id, rel_path, archive_hash, is_missing, to_print)
+             VALUES ('A', 1, 'a', '1', 0, 0), ('B', 1, 'b', '2', 0, 0), ('C', 1, 'c', '3', 1, 0);
              INSERT INTO stl_files (model_id, filename, file_size) VALUES
                (1, 'x.stl', 1), (1, 'y.stl', 2), (2, 'x.stl', 1), (2, 'y.stl', 3), (3, 'x.stl', 1);",
         )

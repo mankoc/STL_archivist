@@ -1,5 +1,41 @@
 # Changelog
 
+## 2026.43.7 — 2026-10-23
+
+- **Libraries.** Each catalogued folder is now a *library* — a name, a root folder, a path
+  pattern and a permanent id — and records store their archive's path **relative to their
+  library**, in a portable form (`/` separators, Unicode NFC, the same on Windows, Linux and
+  macOS). Moving a library (another disk, a new mount point, another machine, Windows to
+  Linux) is a change of its root: *Jobs → Libraries → Move* checks every archive under the new
+  folder (found, missing, found with another letter case — which it can adopt) and then moves
+  it; records, edits, tags, thumbnails and embeddings stay, nothing is re-read. Headless:
+  `stl-server libraries list | relocate NAME ROOT [--apply] [--fix-case]`.
+- Libraries can be renamed and removed (records go to the library around it, or are deleted;
+  files stay), show *root not found* when their folder is gone, and may sit inside one
+  another (an archive belongs to the deepest library; outer crawls skip inner roots).
+  *Crawled folders* is now the **Libraries** card; the browser gains a **Library** filter
+  section, column and sort.
+- **One-way conversion of older libraries:** on first start the crawled folders become
+  libraries, archives outside them get libraries of their own, and the database is rebuilt
+  with relative paths — after an automatic backup (`backups/…_pre_libraries.7z`). Records of
+  an archive catalogued twice (the same folder crawled once as `F:/STL` and once as `F:\STL`)
+  become one: the most recently changed is kept, filled in from the other, with both records'
+  tags and scales; the other's images and thumbnails go. Tried on a real library of 89,271
+  records: 28,631 duplicates merged, two libraries, about two minutes including the backup.
+  The PyQt desktop application can no longer open a converted library.
+- No hardcoded paths: GPU detection on Windows reads the Windows folder from `SystemRoot` /
+  `WINDIR` instead of assuming `C:\Windows`.
+- The project's Claude Code settings lose their stale permission entries with personal
+  paths from the Python era, and the tracked `.claude_agent_farm_backups/` copy is removed
+  (and ignored).
+- API: `GET/POST /api/libraries`, `PATCH /api/libraries/{id}`, `POST
+  /api/libraries/{id}/remove`, job `relocate_library` (result `relocation`); model rows gain
+  `library_id`, `library` and `rel_path`; the filter tree gains `libraries` and the facet
+  `library`. Removed: `/api/crawled-folders` and its `remove` / `monitor` routes.
+- The AI tagger sees `library name/relative path` instead of the absolute path.
+- Help: new topic *Libraries* (moving a library, nested libraries, moving to another
+  machine).
+
 ## 2026.43.6 — 2026-10-22
 
 - **Compute worker components from the remote server's page.** In the desktop app,
