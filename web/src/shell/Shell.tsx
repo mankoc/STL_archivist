@@ -13,6 +13,7 @@ import { UserContext } from "../auth/user";
 import { BrowserPage } from "../browser/BrowserPage";
 import { HelpPage } from "../help/HelpPage";
 import { JobsPage } from "../jobs/JobsPage";
+import { LibrariesPage } from "../jobs/LibrariesPage";
 import { MaintenancePage } from "../jobs/MaintenancePage";
 import { LookupsPage } from "../lookups/LookupsPage";
 import { DuplicatesPage } from "../tools/DuplicatesPage";
@@ -45,7 +46,7 @@ export function Shell({ user }: { user: Schemas["User"] }) {
         <AppShell.Header>
           <Group h="100%" px="md" justify="space-between">
             <Group gap="lg">
-              <Title order={4}>stlLibrary</Title>
+              <Title order={4}>StlArchivist</Title>
               <SegmentedControl
                 size="xs"
                 value={page}
@@ -56,6 +57,7 @@ export function Shell({ user }: { user: Schemas["User"] }) {
                   { value: "find", label: "Find by Image" },
                   { value: "duplicates", label: "Duplicates" },
                   { value: "lookups", label: "Lookups" },
+                  { value: "libraries", label: "Libraries" },
                   { value: "jobs", label: "Jobs" },
                   { value: "maintenance", label: "Maintenance" },
                   { value: "stats", label: "Statistics" },
@@ -105,6 +107,8 @@ export function Shell({ user }: { user: Schemas["User"] }) {
         <AppShell.Main style={{ height: "100vh", paddingTop: 48, display: "flex", flexDirection: "column" }}>
           {page === "help" ? (
             <HelpPage />
+          ) : page === "libraries" ? (
+            <LibrariesPage />
           ) : page === "jobs" ? (
             <JobsPage />
           ) : page === "maintenance" ? (
@@ -167,10 +171,10 @@ function PasswordModal({ opened, onClose }: { opened: boolean; onClose: () => vo
 function AboutModal({ opened, onClose }: { opened: boolean; onClose: () => void }) {
   const info = useQuery({ queryKey: ["system-info"], queryFn: async () => unwrap(await api.GET("/api/system/info")), enabled: opened });
   return (
-    <Modal opened={opened} onClose={onClose} title="About stlLibrary">
+    <Modal opened={opened} onClose={onClose} title="About StlArchivist">
       <Stack gap="xs">
         <Text size="sm">
-          stlLibrary catalogues collections of 3D-printable model archives (.zip, .7z, .rar): metadata, thumbnails,
+          StlArchivist catalogues collections of 3D-printable model archives (.zip, .7z, .rar): metadata, thumbnails,
           tags, duplicates and AI tagging, in a server that this web client and the desktop app share.
         </Text>
         <Text size="sm">Server version: {info.data?.version ?? "…"}</Text>

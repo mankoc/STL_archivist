@@ -1,4 +1,4 @@
-//! stlLibrary desktop shell (Phase 7): a native window on an stl-server.
+//! StlArchivist desktop shell (Phase 7): a native window on an stl-server.
 //!
 //! The bundled launcher page (`ui/`) lists remembered servers and can start a
 //! local library: the `stl-server` beside this program, on a free loopback
@@ -32,7 +32,10 @@ use tauri_plugin_dialog::DialogExt;
 
 const MAIN: &str = "main";
 const SERVERS_FILE: &str = "servers.json";
-const LOCAL_START_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long a local server that is still running may take to answer. A first
+/// start can be slow (backing a large library up and moving it to libraries),
+/// and a server that fails exits, so this only bounds a hung one.
+const LOCAL_START_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 /// A remembered server.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -158,7 +161,7 @@ fn normalize_url(url: &str) -> Result<Url, String> {
 fn reachable(base: &Url, timeout: Duration) -> Result<(), String> {
     let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(timeout)).build().into();
     let status = base.join("api/auth/status").map_err(|e| e.to_string())?;
-    agent.get(status.as_str()).call().map(|_| ()).map_err(|e| format!("no stlLibrary server answers at {base}: {e}"))
+    agent.get(status.as_str()).call().map(|_| ()).map_err(|e| format!("no StlArchivist server answers at {base}: {e}"))
 }
 
 #[tauri::command]
@@ -283,7 +286,7 @@ fn spawn_local(app: &AppHandle, data_dir: &str) -> Result<LocalServer, String> {
         }
         if Instant::now() > deadline {
             let _ = child.kill();
-            return Err(format!("the local server did not answer within {}s:\n{}", LOCAL_START_TIMEOUT.as_secs(), log_tail(&log_path)));
+            return Err(format!("the local server did not answer within {} minutes:\n{}", LOCAL_START_TIMEOUT.as_secs() / 60,log_tail(&log_path)));
         }
         std::thread::sleep(Duration::from_millis(300));
     }
@@ -293,7 +296,7 @@ fn spawn_local(app: &AppHandle, data_dir: &str) -> Result<LocalServer, String> {
 
 /// The folder whose components the worker uses: the one chosen for it, else
 /// the local library's, else `worker` in the default data directory (not the
-/// default itself: that is the install folder, and a library beside
+/// default itself: older installers put the program there, and a library beside
 /// `stl-server` counts as configured elsewhere).
 fn worker_data_dir(app: &AppHandle) -> String {
     let saved = load_saved(app);
@@ -656,7 +659,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let menu = MenuBuilder::new(handle).items(&[&file, &edit, &view]).build()?;
 
     let window = WebviewWindowBuilder::new(handle, MAIN, WebviewUrl::App("index.html".into()))
-        .title("stlLibrary")
+        .title("StlArchivist")
         .inner_size(1400.0, 900.0)
         .min_inner_size(800.0, 500.0)
         .menu(menu)
@@ -664,12 +667,12 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     *app.state::<Shell>().launcher.lock().unwrap_or_else(|e| e.into_inner()) = Some(window.url()?);
 
     let tray_menu = MenuBuilder::new(handle)
-        .item(&MenuItemBuilder::with_id("show", "Show stlLibrary").build(handle)?)
+        .item(&MenuItemBuilder::with_id("show", "Show StlArchivist").build(handle)?)
         .item(&MenuItemBuilder::with_id("launcher", "Switch server…").build(handle)?)
         .separator()
         .item(&MenuItemBuilder::with_id("quit", "Quit").build(handle)?)
         .build()?;
-    let mut tray = TrayIconBuilder::with_id("tray").tooltip("stlLibrary").menu(&tray_menu).on_menu_event(|app, e| on_menu(app, e.id().as_ref()));
+    let mut tray = TrayIconBuilder::with_id("tray").tooltip("StlArchivist").menu(&tray_menu).on_menu_event(|app, e| on_menu(app, e.id().as_ref()));
     if let Some(icon) = handle.default_window_icon() {
         tray = tray.icon(icon.clone());
     }
@@ -702,7 +705,7 @@ fn main() {
         .on_menu_event(|app, e| on_menu(app, e.id().as_ref()))
         .setup(setup)
         .build(tauri::generate_context!())
-        .expect("the stlLibrary shell could not start");
+        .expect("the StlArchivist shell could not start");
     app.run(|app, event| {
         if let RunEvent::Exit = event {
             // Stop the local server (and with it the library lock) and the worker.

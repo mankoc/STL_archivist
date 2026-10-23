@@ -1,4 +1,4 @@
-//! stlLibrary core library.
+//! StlArchivist core library.
 //!
 //! Everything the application does without a user interface: storage, archive
 //! reading, hashing, the crawler and the services. It has no Python, UI or HTTP

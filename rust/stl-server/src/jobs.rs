@@ -135,11 +135,12 @@ pub enum JobRequest {
     /// Move the models' archives into a folder tree under `target_dir` built
     /// from `pattern` (Sort Files). Needs *file sorting* in the settings.
     SortFiles { ids: Vec<i64>, target_dir: String, pattern: String },
-    /// Move a library to a new root: check every archive there and, with
-    /// `apply`, set the root (and those of the libraries inside it). With
+    /// Move a library's folder to a new root: check every archive there and,
+    /// with `apply`, set the root (and those of the folders inside it). With
     /// `fix_case`, paths found only with another letter case take the
     /// spelling on disk. Nothing is re-read.
     RelocateLibrary {
+        /// The folder (`LibraryFolder.id`).
         id: i64,
         root: String,
         #[serde(default)]
@@ -704,7 +705,7 @@ fn delete_files(lib: &Library, job: &Job, ids: &[i64]) -> Result<String, String>
 /// the new paths in one transaction.
 fn relocate_library(lib: &Library, job: &Job, id: i64, root: &str, apply: bool, fix_case: bool) -> Result<String, String> {
     use storage::libraries;
-    let name = lib.db.with(|c| libraries::get(c, id)).map_err(db_err)?.ok_or_else(|| format!("no library {id}"))?.name;
+    let name = lib.db.with(|c| libraries::get(c, id)).map_err(db_err)?.ok_or_else(|| format!("no library folder {id}"))?.name;
     lib.job_log(job, format!("Checking the archives of {name} under {root}…"));
     let check = lib.db.with(|c| Ok(libraries::check_relocate(c, id, root, Some(&job.ctl)))).map_err(db_err)??;
     for m in &check.missing_examples {

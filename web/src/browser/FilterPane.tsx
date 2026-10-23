@@ -12,8 +12,10 @@ import {
   IconMinus,
   IconPlus,
 } from "@tabler/icons-react";
+import { useQuery } from "@tanstack/react-query";
 import { type MouseEvent, type ReactNode, useState } from "react";
 
+import { api, unwrap } from "../api/client";
 import {
   countOf,
   cycleGroup,
@@ -25,6 +27,8 @@ import {
   type FolderNode,
   groupCount,
   groupMarkOf,
+  libraryFolderTree,
+  type LibraryNode,
   markOf,
   pathCount,
 } from "./filters";
@@ -213,7 +217,7 @@ export function FilterPane({ tree, spec, onChange }: Props) {
         {(s) => texts("filetype", tree.filetypes, s)}
       </Section>
       <Section title="Path" group="path" {...common}>
-        {() => folderTree(tree.folders).map((n) => <Folder key={n.path} node={n} depth={0} tree={tree} spec={spec} onChange={onChange} />)}
+        {() => <PathTree tree={tree} spec={spec} onChange={onChange} />}
       </Section>
     </div>
   );
@@ -308,6 +312,37 @@ function Collections({ tree, spec, onChange, search }: Props & { search: string 
           );
         })}
     </>
+  );
+}
+
+/** The Path section: each library, its folders' roots and the folders below
+ * them; folders outside every library folder as a plain tree. */
+function PathTree({ tree, spec, onChange }: Props) {
+  const libs = useQuery({ queryKey: ["libraries"], queryFn: async () => unwrap(await api.GET("/api/libraries")) });
+  if (!libs.data) return <>{folderTree(tree.folders).map((n) => <Folder key={n.path} node={n} depth={0} tree={tree} spec={spec} onChange={onChange} />)}</>;
+  const t = libraryFolderTree(tree.folders, libs.data);
+  return (
+    <>
+      {t.libraries.map((l) => <LibraryFolders key={l.id} lib={l} tree={tree} spec={spec} onChange={onChange} />)}
+      {t.other.map((n) => <Folder key={n.path} node={n} depth={0} tree={tree} spec={spec} onChange={onChange} />)}
+    </>
+  );
+}
+
+/** A library in the Path section: a value of the Library facet, over its folders' roots. */
+function LibraryFolders({ lib, tree, spec, onChange }: { lib: LibraryNode } & Props) {
+  const [open, setOpen] = useState(true);
+  return (
+    <Box>
+      <ValueRow
+        label={<b>{lib.name}</b>}
+        count={countOf(tree, "library", String(lib.id))}
+        mark={markOf(spec, "library", lib.id)}
+        onClick={() => onChange(cycleValue(spec, "library", lib.id))}
+        toggle={<Toggle open={open} onClick={() => setOpen(!open)} />}
+      />
+      {open && lib.roots.map((n) => <Folder key={n.path} node={n} depth={1} tree={tree} spec={spec} onChange={onChange} />)}
+    </Box>
   );
 }
 

@@ -222,7 +222,7 @@ pub fn ai_model_inputs(tx: &Connection, model_id: i64) -> Result<Option<AiInputs
     let Some((row, _)) = load_row(tx, model_id)? else { return Ok(None) };
     let archive_path: Option<String> = tx
         .query_row(
-            "SELECT l.name || '/' || m.rel_path FROM models m JOIN libraries l ON l.id = m.library_id WHERE m.id = ?1",
+            "SELECT library_name || '/' || rel_path FROM models_view WHERE id = ?1",
             [model_id],
             |r| r.get(0),
         )

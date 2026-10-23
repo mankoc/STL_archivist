@@ -1,5 +1,46 @@
 # Changelog
 
+## 2026.43.9 — 2026-10-24
+
+- **A library can have several folders** — say your miniatures on two disks as one library.
+  The new **Libraries** page (moved out of *Jobs*, with the log of the crawls started there)
+  shows each library with its folders; **Add folder** (on a library) adds another one, **Add
+  library** makes a new library from a folder. Each folder keeps its own path pattern and
+  monitoring, and is crawled, moved and removed on its own; **Move to another library** takes
+  a folder with its records (edits, tags and thumbnails stay, nothing is re-read) to another
+  library or a new one, and a library left without folders goes. Renaming and removing (all
+  folders) are per library. In the browser the **Library** filter, column and
+  sort cover all of a library's folders, and the **Path** section lists each library, then
+  its folders, then their sub-folders. A crawled sub-folder of a library's folder stays in
+  that library. Existing libraries are unchanged: each becomes a library with one folder
+  (same name and identity) on first start, nothing is converted.
+- API: `GET /api/libraries` returns libraries with their `folders`; `POST /api/libraries`
+  takes `library` to add a folder to one; folder settings, moving a folder to another library (`library` or `new_library`) and
+  removal are `PATCH /api/libraries/folders/{id}` and `POST /api/libraries/folders/{id}/remove`;
+  `PATCH /api/libraries/{id}` renames a library; the `relocate_library` job takes a folder id.
+  `stl-server libraries list` prints libraries and their folders, `relocate` takes a folder.
+  Changes to libraries are now announced to other open clients.
+- **API reference:** `docs/api.md` lists every endpoint (method, path, description, request,
+  response, errors) and the request and response types, written from the OpenAPI document by
+  `tools/api_doc.py`.
+- **The program is now called StlArchivist:** the installer
+  (`StlArchivist_<version>_x64-setup.exe`, publisher *StlArchivist*), the Start menu entry,
+  the window and tray, the launcher page, the web client (title, header, sign-in, *About*),
+  the help, the API description and the guides. The new installer installs to
+  `%LOCALAPPDATA%\StlArchivist`; uninstall the old *stlLibrary* entry by hand.
+- Unchanged, so existing libraries and settings keep working: the data directory's files
+  (`stlLibrary.db`, `stlLibrary_backup_*.7z`), the default library folder
+  (`%LOCALAPPDATA%\stlLibrary`), the app identifier (the desktop's saved servers),
+  `STLLIBRARY_CLIP_MODEL` and the server's `name` in `/api/system/info` (`"stlLibrary"`).
+- **Crawls no longer take folders for archives.** A folder named like an archive
+  (`Dragon.7z/`) was listed as one and failed to read (Python's `rglob` yields folders too);
+  now only files are, and such a folder is searched like any other. This applies to crawls,
+  monitored folders and *Update folders*.
+- **Desktop app: a slow first start is no longer cut off.** The local server was stopped after
+  60 s, which a large older library needs for its backup before the move to libraries alone
+  (the conversion never got to run; nothing was changed). The app now waits as long as the
+  server is running (up to 30 minutes), and says that a first start can take minutes.
+
 ## 2026.43.8 — 2026-10-23
 
 - **New application icon:** the STL Archivist emblem, for the desktop app (window, taskbar,

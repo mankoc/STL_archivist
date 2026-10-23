@@ -75,7 +75,7 @@ $("browse").addEventListener("click", async () => {
 });
 
 $("open-local").addEventListener("click", (e) => busy(e.currentTarget, "Starting…", async () => {
-  status("Starting the local library…");
+  status("Starting the local library… (the first start of an older library backs it up and converts it, which can take several minutes)");
   await invoke("start_local", { dataDir: $("data-dir").value });
 }));
 

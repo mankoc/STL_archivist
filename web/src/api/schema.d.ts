@@ -427,15 +427,57 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Every library, by name. */
+        /** Every library with its folders, by name. */
         get: operations["get_libraries"];
         put?: never;
         /**
-         * Add a library at a folder (editors, inside their roots): 201, or 200 with
-         *     the library already there. Records of libraries around it below the folder
-         *     move into it.
+         * Add a folder (editors, inside their roots) to a library, or as a new
+         *     library: 201, or 200 with the folder already there (in that library).
+         *     Records of folders around it below the folder move into it.
          */
         post: operations["post_libraries"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/libraries/folders/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set a library folder's pattern, monitor it, or move it with its records
+         *     to another library or a new one (editors). A library left without folders
+         *     goes.
+         */
+        patch: operations["patch_libraries_folders_by_id"];
+        trace?: never;
+    };
+    "/api/libraries/folders/{id}/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove one folder of a library (editors): its records go to the folder
+         *     around it, or are deleted with their images when there is none. A library
+         *     left without folders goes too. Files are not touched.
+         */
+        post: operations["post_libraries_folders_by_id_remove"];
         delete?: never;
         options?: never;
         head?: never;
@@ -455,10 +497,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /**
-         * Rename a library, set its pattern, or monitor it (editors). A name another
-         *     library has gets a number.
-         */
+        /** Rename a library (editors). A name another library has gets a number. */
         patch: operations["patch_libraries_by_id"];
         trace?: never;
     };
@@ -472,8 +511,9 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Remove a library (editors): its records go to the library around it, or
-         *     are deleted with their images when there is none. Files are not touched.
+         * Remove a library with all its folders (editors): their records go to a
+         *     folder of another library around them, or are deleted with their images.
+         *     Files are not touched.
          */
         post: operations["post_libraries_by_id_remove"];
         delete?: never;
@@ -1539,6 +1579,18 @@ export interface components {
             regex?: boolean;
             replace: string;
         };
+        FolderChange: {
+            /**
+             * Format: int64
+             * @description Move the folder (with its records) to this library.
+             */
+            library?: number | null;
+            monitored?: boolean | null;
+            /** @description Move the folder (with its records) to a new library with this name. */
+            new_library?: string | null;
+            /** @description A path pattern; `""` clears it. */
+            pattern?: string | null;
+        };
         FolderRequest: {
             /** @description A folder from `/api/folders`. */
             folder: string;
@@ -1746,7 +1798,10 @@ export interface components {
         } | {
             apply?: boolean;
             fix_case?: boolean;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The folder (`LibraryFolder.id`).
+             */
             id: number;
             /** @enum {string} */
             kind: "relocate_library";
@@ -1829,12 +1884,10 @@ export interface components {
         /** @enum {string} */
         JobState: "queued" | "running" | "done" | "failed" | "cancelled";
         LibraryChange: {
-            monitored?: boolean | null;
-            name?: string | null;
-            /** @description A path pattern; `""` clears it. */
-            pattern?: string | null;
+            name: string;
         };
-        LibraryInfo: {
+        /** @description One folder of a library. */
+        LibraryFolder: {
             /**
              * Format: int64
              * @description Archives found by its last crawl.
@@ -1849,6 +1902,7 @@ export interface components {
              */
             models: number;
             monitored: boolean;
+            /** @description Unique among folders (`stl-server libraries relocate` takes it). */
             name: string;
             /**
              * @description `migration` when the move to libraries made it for archives outside
@@ -1859,18 +1913,32 @@ export interface components {
             pattern?: string | null;
             /** @description Its root is a folder on the server (else it must be relocated). */
             reachable: boolean;
-            /** @description Where the library is on the server. */
+            /** @description Where the folder is on the server. */
             root: string;
             /** @description The same on every instance (export, sync). */
             uuid: string;
         };
+        LibraryInfo: {
+            /** @description By root. */
+            folders: components["schemas"]["LibraryFolder"][];
+            /** Format: int64 */
+            id: number;
+            /**
+             * Format: int64
+             * @description Records in its folders.
+             */
+            models: number;
+            name: string;
+            /** @description The same on every instance (export, sync). */
+            uuid: string;
+        };
         LibraryRemoved: {
-            /** @description Records deleted (no library around it). The archive files stay. */
+            /** @description Records deleted (no folder around it). The archive files stay. */
             deleted: number;
             moved: number;
             /**
              * Format: int64
-             * @description The library around it that took its records.
+             * @description The folder (of another library) around it that took its records.
              */
             moved_to?: number | null;
         };
@@ -2070,9 +2138,16 @@ export interface components {
             name: string;
         };
         NewLibrary: {
+            /**
+             * Format: int64
+             * @description The library to add the folder to; without it, a new library.
+             */
+            library?: number | null;
+            /** @description A new library's name (default: the folder's name). */
             name?: string | null;
-            /** @description The library's root folder on the server. */
+            /** @description The folder on the server. */
             path: string;
+            /** @description The folder's path pattern. */
             pattern?: string | null;
         };
         NewLookup: {
@@ -3260,7 +3335,93 @@ export interface operations {
                     "application/json": components["schemas"]["LibraryInfo"];
                 };
             };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    patch_libraries_folders_by_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FolderChange"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryFolder"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    post_libraries_folders_by_id_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryRemoved"];
+                };
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3291,6 +3452,14 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LibraryInfo"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
             404: {

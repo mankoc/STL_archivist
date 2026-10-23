@@ -1,10 +1,10 @@
-# stlLibrary user guide
+# StlArchivist user guide
 
-stlLibrary keeps a catalogue of your 3D-printable model archives (`.zip`, `.7z`, `.rar`):
+StlArchivist keeps a catalogue of your 3D-printable model archives (`.zip`, `.7z`, `.rar`):
 titles, creators, sculptors, collections, tags, scales, preview images. It reads the archives
 where they are; nothing is unpacked or copied.
 
-You use it in a web browser, or in the **stlLibrary** desktop app, which shows the same
+You use it in a web browser, or in the **StlArchivist** desktop app, which shows the same
 pages in its own window. Installing and running the server is covered in
 [deployment.md](deployment.md). The same guide, in more depth and searchable, is built into the
 interface: the **?** button at the top right (or *Help* in the menu under your name).
@@ -24,9 +24,9 @@ interface: the **?** button at the top right (or *Help* in the menu under your n
 
 ## Getting started
 
-**Desktop app, library on this computer.** Start *stlLibrary*. Under **This computer**,
+**Desktop app, library on this computer.** Start *StlArchivist*. Under **This computer**,
 choose the library folder (a new, empty folder starts a new library; an existing one, such as
-a library made by the earlier stlLibrary version, opens as it is) and click **Open**.
+a library made by the earlier version (then called stlLibrary), opens as it is) and click **Open**.
 
 **Desktop app or browser, shared server.** In the desktop app, add the server's address
 (for example `http://nas:8770`) under **Servers** and click **Connect**. In a browser, open
@@ -51,7 +51,8 @@ The bar at the top switches pages:
 | **Find by Image** | Finding models that look like a picture |
 | **Duplicates** | Archives that share files or images; models with similar names |
 | **Lookups** | Tags, categories, collections, subcollections, scales, creators |
-| **Jobs** | Libraries (crawl, monitor, rename, move), and every background job with its log |
+| **Libraries** | Libraries and their folders: add, crawl, monitor, rename, move, remove |
+| **Jobs** | Every background job with its log |
 | **Maintenance** | Checking and repairing the library, sidecars, backups |
 | **Statistics** | Totals, rankings, and the distribution of any column |
 | **Settings** | Your account, the library's settings, users |
@@ -67,7 +68,7 @@ it reads the archive's file list, preview images, `info.json` and `.url` files, 
 scales and presupports, and takes metadata from the folder names when you give a
 [path pattern](#path-patterns).
 
-1. Open **Jobs** and click **Add library** in *Libraries*.
+1. Open **Libraries** and click **Add library**.
 2. Browse to the folder that holds your archives and click **Use this folder**.
 3. In *Crawl folder*, optionally enter a path pattern such as `{sculptor}/{release}/{title}`.
    Tick **Force rescan** only to re-read archives that have not changed.
@@ -89,16 +90,21 @@ archives are recognised by their content and keep their record, edits and images
 Editors can only choose folders the administrator made available; administrators can choose
 any folder on the server.
 
-**Libraries.** Each catalogued folder is a *library*: a name, its folder (the root) and a
-path pattern. Records store their archive's path relative to the library, the same on every
-operating system. When the folder moves (another disk, a new mount point, a new server, from
-Windows to Linux), click **Move** on the library, choose the new folder, **Check** (every
-archive is looked up there) and **Move**: records, edits, tags and thumbnails stay and nothing
-is re-read. A library whose folder is gone shows *root not found*. **Rename** changes the
-name; **Remove** gives its records to the library around it, or deletes them when there is
-none (the files stay). A library may sit inside another: an archive belongs to the deepest
-library above it, and the outer library's crawls skip the inner folder. The browser has a
-**Library** filter section and column.
+**Libraries.** A *library* is a name and one or more folders — your miniatures on two disks
+can be one library. **Add library** makes a new one from a folder; **Add folder** (the folder
+button on a library) adds another folder to it. Each folder has its root and its own path
+pattern, and is crawled, monitored and moved on its own. Records store their archive's path
+relative to their folder, the same on every operating system. When a folder moves (another
+disk, a new mount point, a new server, from Windows to Linux), click **Move** on it, choose
+the new place, **Check** (every archive is looked up there) and **Move**: records, edits,
+tags and thumbnails stay and nothing is re-read. A folder that is gone shows *root not
+found*. **Move to another library** (on a folder) takes the folder and its records to another library or
+a new one, nothing re-read. **Rename** changes the library's name. Removing a folder gives its records to the
+folder around it, or deletes them when there is none (the files stay); a library left
+without folders goes too, and **Remove library** removes all its folders. A folder may sit
+inside another: an archive belongs to the deepest folder above it, and the outer folder's
+crawls skip the inner one. The browser has a **Library** filter section and column, and its
+**Path** section lists each library, then its folders, then their sub-folders.
 
 **Monitored folders.** The eye button on a library monitors it: every *Check monitored
 folders every* minutes (*Settings → Library*, default 30) the server compares the folder with

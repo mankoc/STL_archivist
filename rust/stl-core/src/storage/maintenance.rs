@@ -327,7 +327,7 @@ pub fn compact(conn: &Connection) -> Result<bool> {
 pub fn clear_all(tx: &Transaction) -> Result<()> {
     for table in [
         "model_tags", "model_scales", "stl_files", "images", "models", "subcollections", "collections", "sculptors",
-        "categories", "releases", "scales", "tags", "creators", "libraries", "filter_cache",
+        "categories", "releases", "scales", "tags", "creators", "libraries", "library_groups", "filter_cache",
     ] {
         tx.execute(&format!("DELETE FROM {table}"), [])?;
     }

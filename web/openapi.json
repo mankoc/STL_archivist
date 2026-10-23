@@ -1,13 +1,13 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "stlLibrary API",
-    "description": "The stlLibrary server's HTTP API. Every route except `/api/auth/status`, `/api/auth/setup`, `/api/auth/login` and this document needs a session: `Authorization: Bearer <token>` or the `stl_session` cookie set at sign-in.",
+    "title": "StlArchivist API",
+    "description": "The StlArchivist server's HTTP API. Every route except `/api/auth/status`, `/api/auth/setup`, `/api/auth/login` and this document needs a session: `Authorization: Bearer <token>` or the `stl_session` cookie set at sign-in.",
     "license": {
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.43.7"
+    "version": "2026.43.9"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -993,7 +993,7 @@
         "tags": [
           "libraries"
         ],
-        "summary": "Every library, by name.",
+        "summary": "Every library with its folders, by name.",
         "operationId": "get_libraries",
         "responses": {
           "200": {
@@ -1015,7 +1015,7 @@
         "tags": [
           "libraries"
         ],
-        "summary": "Add a library at a folder (editors, inside their roots): 201, or 200 with\nthe library already there. Records of libraries around it below the folder\nmove into it.",
+        "summary": "Add a folder (editors, inside their roots) to a library, or as a new\nlibrary: 201, or 200 with the folder already there (in that library).\nRecords of folders around it below the folder move into it.",
         "operationId": "post_libraries",
         "requestBody": {
           "content": {
@@ -1048,7 +1048,131 @@
               }
             }
           },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
           "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/libraries/folders/{id}": {
+      "patch": {
+        "tags": [
+          "libraries"
+        ],
+        "summary": "Set a library folder's pattern, monitor it, or move it with its records\nto another library or a new one (editors). A library left without folders\ngoes.",
+        "operationId": "patch_libraries_folders_by_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FolderChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryFolder"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/libraries/folders/{id}/remove": {
+      "post": {
+        "tags": [
+          "libraries"
+        ],
+        "summary": "Remove one folder of a library (editors): its records go to the folder\naround it, or are deleted with their images when there is none. A library\nleft without folders goes too. Files are not touched.",
+        "operationId": "post_libraries_folders_by_id_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryRemoved"
+                }
+              }
+            }
+          },
+          "404": {
             "description": "",
             "content": {
               "application/json": {
@@ -1066,7 +1190,7 @@
         "tags": [
           "libraries"
         ],
-        "summary": "Rename a library, set its pattern, or monitor it (editors). A name another\nlibrary has gets a number.",
+        "summary": "Rename a library (editors). A name another library has gets a number.",
         "operationId": "patch_libraries_by_id",
         "parameters": [
           {
@@ -1100,6 +1224,16 @@
               }
             }
           },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
           "404": {
             "description": "",
             "content": {
@@ -1118,7 +1252,7 @@
         "tags": [
           "libraries"
         ],
-        "summary": "Remove a library (editors): its records go to the library around it, or\nare deleted with their images when there is none. Files are not touched.",
+        "summary": "Remove a library with all its folders (editors): their records go to a\nfolder of another library around them, or are deleted with their images.\nFiles are not touched.",
         "operationId": "post_libraries_by_id_remove",
         "parameters": [
           {
@@ -4134,6 +4268,40 @@
         },
         "additionalProperties": false
       },
+      "FolderChange": {
+        "type": "object",
+        "properties": {
+          "library": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Move the folder (with its records) to this library."
+          },
+          "monitored": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "new_library": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Move the folder (with its records) to a new library with this name."
+          },
+          "pattern": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A path pattern; `\"\"` clears it."
+          }
+        },
+        "additionalProperties": false
+      },
       "FolderRequest": {
         "type": "object",
         "required": [
@@ -4862,7 +5030,7 @@
           },
           {
             "type": "object",
-            "description": "Move a library to a new root: check every archive there and, with\n`apply`, set the root (and those of the libraries inside it). With\n`fix_case`, paths found only with another letter case take the\nspelling on disk. Nothing is re-read.",
+            "description": "Move a library's folder to a new root: check every archive there and,\nwith `apply`, set the root (and those of the folders inside it). With\n`fix_case`, paths found only with another letter case take the\nspelling on disk. Nothing is re-read.",
             "required": [
               "id",
               "root",
@@ -4877,7 +5045,8 @@
               },
               "id": {
                 "type": "integer",
-                "format": "int64"
+                "format": "int64",
+                "description": "The folder (`LibraryFolder.id`)."
               },
               "kind": {
                 "type": "string",
@@ -5244,31 +5413,19 @@
       },
       "LibraryChange": {
         "type": "object",
+        "required": [
+          "name"
+        ],
         "properties": {
-          "monitored": {
-            "type": [
-              "boolean",
-              "null"
-            ]
-          },
           "name": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "pattern": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "A path pattern; `\"\"` clears it."
+            "type": "string"
           }
         },
         "additionalProperties": false
       },
-      "LibraryInfo": {
+      "LibraryFolder": {
         "type": "object",
+        "description": "One folder of a library.",
         "required": [
           "id",
           "uuid",
@@ -5306,7 +5463,8 @@
             "type": "boolean"
           },
           "name": {
-            "type": "string"
+            "type": "string",
+            "description": "Unique among folders (`stl-server libraries relocate` takes it)."
           },
           "origin": {
             "type": [
@@ -5328,7 +5486,42 @@
           },
           "root": {
             "type": "string",
-            "description": "Where the library is on the server."
+            "description": "Where the folder is on the server."
+          },
+          "uuid": {
+            "type": "string",
+            "description": "The same on every instance (export, sync)."
+          }
+        }
+      },
+      "LibraryInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "uuid",
+          "name",
+          "models",
+          "folders"
+        ],
+        "properties": {
+          "folders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LibraryFolder"
+            },
+            "description": "By root."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "models": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Records in its folders."
+          },
+          "name": {
+            "type": "string"
           },
           "uuid": {
             "type": "string",
@@ -5345,7 +5538,7 @@
         "properties": {
           "deleted": {
             "type": "integer",
-            "description": "Records deleted (no library around it). The archive files stay.",
+            "description": "Records deleted (no folder around it). The archive files stay.",
             "minimum": 0
           },
           "moved": {
@@ -5358,7 +5551,7 @@
               "null"
             ],
             "format": "int64",
-            "description": "The library around it that took its records."
+            "description": "The folder (of another library) around it that took its records."
           }
         }
       },
@@ -5819,21 +6012,31 @@
           "path"
         ],
         "properties": {
+          "library": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The library to add the folder to; without it, a new library."
+          },
           "name": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "A new library's name (default: the folder's name)."
           },
           "path": {
             "type": "string",
-            "description": "The library's root folder on the server."
+            "description": "The folder on the server."
           },
           "pattern": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "The folder's path pattern."
           }
         },
         "additionalProperties": false

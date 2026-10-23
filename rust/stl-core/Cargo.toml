@@ -1,6 +1,6 @@
 [package]
 name = "stl-core"
-description = "stlLibrary core: storage, archives, hashing, crawler and services (no UI, no Python)"
+description = "StlArchivist core: storage, archives, hashing, crawler and services (no UI, no Python)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

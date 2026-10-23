@@ -36,7 +36,7 @@ use crate::AppState;
 
 #[derive(OpenApi)]
 #[openapi(
-    info(title = "stlLibrary API", description = "The stlLibrary server's HTTP API. Every route except \
+    info(title = "StlArchivist API", description = "The StlArchivist server's HTTP API. Every route except \
         `/api/auth/status`, `/api/auth/setup`, `/api/auth/login` and this document needs a session: \
         `Authorization: Bearer <token>` or the `stl_session` cookie set at sign-in."),
     paths(
@@ -92,6 +92,8 @@ use crate::AppState;
         libraries::add,
         libraries::change,
         libraries::remove,
+        libraries::change_folder,
+        libraries::remove_folder,
         files::browse,
         files::download,
         settings::get,
@@ -196,6 +198,8 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/libraries", get(libraries::list).post(libraries::add))
         .route("/api/libraries/{id}", patch(libraries::change))
         .route("/api/libraries/{id}/remove", post(libraries::remove))
+        .route("/api/libraries/folders/{id}", patch(libraries::change_folder))
+        .route("/api/libraries/folders/{id}/remove", post(libraries::remove_folder))
         .route("/api/files/browse", get(files::browse))
         .route("/api/models/{id}/archive", get(files::download))
         .route("/api/settings/library", get(settings::get).put(settings::put))
@@ -232,7 +236,7 @@ async fn announce_changes(State(lib): State<AppState>, req: Request, next: Next)
             // POSTs that only read.
             "/api/models/ids" | "/api/models/rows" | "/api/models/parse-paths" | "/api/filter-tree" => None,
             p if p.starts_with("/api/models") || p.starts_with("/api/images") => Some("models"),
-            p if p.starts_with("/api/maintenance") || p.starts_with("/api/ai/commit") => Some("models"),
+            p if p.starts_with("/api/maintenance") || p.starts_with("/api/ai/commit") || p.starts_with("/api/libraries") => Some("models"),
             p if p.starts_with("/api/lookups") || p.starts_with("/api/tags") || p.starts_with("/api/authors") => Some("lookups"),
             _ => None,
         };

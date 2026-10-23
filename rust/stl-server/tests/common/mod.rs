@@ -97,7 +97,7 @@ pub async fn call(state: &AppState, method: &str, uri: &str, token: Option<&str>
 /// id, path relative to it, its folder)`, for inserting models by hand.
 #[allow(dead_code)]
 pub fn located(tx: &rusqlite::Transaction, root: &str, abs: &str) -> (i64, String, String) {
-    let id = stl_core::storage::libraries::create(tx, root, None, None, None).unwrap();
+    let id = stl_core::storage::libraries::create(tx, root, stl_core::storage::libraries::Target::Around, None, None).unwrap();
     let rel = stl_core::relpath::RelPath::from_abs(root, abs).unwrap_or_else(|| panic!("{abs} is not under {root}"));
     (id, rel.as_str().to_string(), rel.folder().to_string())
 }

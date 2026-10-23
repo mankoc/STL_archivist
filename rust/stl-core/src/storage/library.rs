@@ -40,9 +40,10 @@ pub const SHOW: &[&str] = &[
     "scale", "presupports", "path",
 ];
 
-/// Facets compared against a lookup FK column.
+/// Facets compared against a lookup FK column (`library`: a model's library,
+/// the group of its folder; see [`column_of`]).
 const ID_FACETS: &[(&str, &str)] = &[
-    ("library", "library_id"),
+    ("library", LIBRARY),
     ("sculptor", "sculptor_id"),
     ("collection", "collection_id"),
     ("subcollection", "subcollection_id"),
@@ -248,7 +249,7 @@ fn conditions(spec: &FilterSpec, t: &str, skip: Option<&str>, path_table: Option
             for (values, neg) in [(inc.get(facet), ""), (exc.get(facet), "NOT ")] {
                 if let Some(vs) = values {
                     let p = int_values(vs);
-                    out.push(Sql::with(format!("{t}.{column} {neg}IN ({})", placeholders(p.len())), p));
+                    out.push(Sql::with(format!("{} {neg}IN ({})", column_of(t, column), placeholders(p.len())), p));
                 }
             }
         }
@@ -314,6 +315,15 @@ fn conditions(spec: &FilterSpec, t: &str, skip: Option<&str>, path_table: Option
     out
 }
 
+/// The "column" of a model's library: the library (`library_groups`) of its
+/// folder (`models.library_id`).
+const LIBRARY: &str = "library_group";
+
+/// SQL for the facet column `col` of table `t`.
+fn column_of(t: &str, col: &str) -> String {
+    if col == LIBRARY { format!("(SELECT group_id FROM libraries WHERE libraries.id = {t}.library_id)") } else { format!("{t}.{col}") }
+}
+
 /// SQL for a model's absolute archive path in table `t` (`models_view` has it
 /// as a column).
 fn archive_path_of(t: &str) -> String {
@@ -353,7 +363,7 @@ fn group_has_value(key: &str, t: &str) -> String {
         "date" => format!("{t}.release_year IS NOT NULL"),
         "path" => non_empty("rel_path"),
         k => match ID_FACETS.iter().find(|(f, _)| *f == k) {
-            Some((_, col)) => format!("{t}.{col} IS NOT NULL"),
+            Some((_, col)) => format!("{} IS NOT NULL", column_of(t, col)),
             None => non_empty(k), // creator, source, presupports, warning
         },
     }
@@ -677,7 +687,7 @@ pub fn filter_tree(conn: &Connection, spec: Option<&FilterSpec>, show: &Show, sh
     if show_counts {
         let mut grp: HashMap<String, i64> = HashMap::new();
         for (col, kind) in [
-            ("library_id", "library_id"),
+            (LIBRARY, "library_id"),
             ("creator", "creator"),
             ("source", "source"),
             ("sculptor_id", "sculptor_id"),
@@ -688,11 +698,8 @@ pub fn filter_tree(conn: &Connection, spec: Option<&FilterSpec>, show: &Show, sh
             ("presupports", "presupports"),
         ] {
             let mut total = 0;
-            for (v, c) in rows_i64_text(
-                conn,
-                &format!("SELECT models.{col}, count(models.id) FROM models WHERE models.{col} IS NOT NULL GROUP BY models.{col}"),
-                &[],
-            )? {
+            let col = column_of("models", col);
+            for (v, c) in rows_i64_text(conn, &format!("SELECT {col}, count(models.id) FROM models WHERE {col} IS NOT NULL GROUP BY {col}"), &[])? {
                 if let Some(k) = key_for(kind, v) {
                     ft.counts.insert(k, c);
                 }
@@ -787,7 +794,7 @@ pub fn filter_tree(conn: &Connection, spec: Option<&FilterSpec>, show: &Show, sh
         ft.dates = st.query_map(params_from_iter(params), |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_>>()?;
     }
     for (flag, table, col, target) in [
-        ("library", "libraries", "library_id", 4usize),
+        ("library", "library_groups", LIBRARY, 4usize),
         ("sculptor", "sculptors", "sculptor_id", 0),
         ("collection", "collections", "collection_id", 1),
         ("category", "categories", "category_id", 2),
@@ -921,7 +928,7 @@ fn in_scope(col: &str, sc: &Sql) -> Sql {
 fn scoped_counts(conn: &Connection, scopes: &Scopes, ft: &mut FilterTree) -> Result<()> {
     let scope = |section: &str| scopes.get(section);
     for (section, col, kind) in [
-        ("library", "library_id", "library_id"),
+        ("library", LIBRARY, "library_id"),
         ("creator", "creator", "creator"),
         ("source", "source", "source"),
         ("sculptor", "sculptor_id", "sculptor_id"),
@@ -936,9 +943,10 @@ fn scoped_counts(conn: &Connection, scopes: &Scopes, ft: &mut FilterTree) -> Res
             let rows = rows_i64_text(
                 conn,
                 &format!(
-                    "SELECT models.{col}, count(models.id) FROM models WHERE {} AND models.{col} IS NOT NULL \
-                     GROUP BY models.{col}",
-                    cond.text
+                    "SELECT {col}, count(models.id) FROM models WHERE {} AND {col} IS NOT NULL \
+                     GROUP BY {col}",
+                    cond.text,
+                    col = column_of("models", col)
                 ),
                 &cond.params,
             )?;
@@ -1116,9 +1124,10 @@ fn lookup_list(conn: &Connection, table: &str, fk: &str, sc: Option<&Sql>) -> Re
     let mut params = Vec::new();
     if let Some(sc) = sc {
         sql.push_str(&format!(
-            " WHERE {table}.id IN (SELECT DISTINCT models.{fk} FROM models WHERE models.id IN ({}) \
-             AND models.{fk} IS NOT NULL)",
-            sc.text
+            " WHERE {table}.id IN (SELECT DISTINCT {fk} FROM models WHERE models.id IN ({}) \
+             AND {fk} IS NOT NULL)",
+            sc.text,
+            fk = column_of("models", fk)
         ));
         params = sc.params.clone();
     }

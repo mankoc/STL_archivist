@@ -119,6 +119,56 @@ export function folderTree(folders: string[]): FolderNode[] {
   return roots;
 }
 
+/** A library in the Path section: its folders' roots, each with the folders below it. */
+export interface LibraryNode {
+  id: number;
+  name: string;
+  roots: FolderNode[];
+}
+
+/** A library folder's root as the tree spells folders (the server's `posix_join`). */
+function posixRoot(root: string): string {
+  return root.replace(/\\/g, "/").replace(/\/+$/, "") || "/";
+}
+
+/** The Path section's tree: each folder under the library folder whose root
+ * holds it (the deepest), as Library → root → sub-folders. Folders under no
+ * root (`other`) keep the plain tree. */
+export function libraryFolderTree(
+  folders: string[],
+  libraries: { id: number; name: string; folders: { root: string }[] }[],
+): { libraries: LibraryNode[]; other: FolderNode[] } {
+  const roots = libraries
+    .flatMap((lib) => lib.folders.filter((f) => f.root).map((f) => ({ lib, root: f.root, base: posixRoot(f.root) })))
+    .sort((a, b) => b.base.length - a.base.length);
+  const prefix = (base: string) => (base.endsWith("/") ? base : `${base}/`);
+  const below = new Map<string, string[]>();
+  const other: string[] = [];
+  for (const folder of folders) {
+    const r = roots.find((x) => folder === x.base || folder.startsWith(prefix(x.base)));
+    if (!r) {
+      other.push(folder);
+      continue;
+    }
+    const rels = below.get(r.base) ?? [];
+    if (folder !== r.base) rels.push(folder.slice(prefix(r.base).length));
+    below.set(r.base, rels);
+  }
+  const rebase = (nodes: FolderNode[], base: string): FolderNode[] =>
+    nodes.map((n) => ({ name: n.name, path: `${prefix(base)}${n.path}`, children: rebase(n.children, base) }));
+  const out: LibraryNode[] = [];
+  for (const lib of libraries) {
+    const nodes = lib.folders
+      .filter((f) => f.root && below.has(posixRoot(f.root)))
+      .map((f) => {
+        const base = posixRoot(f.root);
+        return { name: f.root, path: base, children: rebase(folderTree(below.get(base)!), base) };
+      });
+    if (nodes.length) out.push({ id: lib.id, name: lib.name, roots: nodes });
+  }
+  return { libraries: out, other: folderTree(other) };
+}
+
 export function pathCount(tree: FilterTree, path: string): number | undefined {
   if (tree.scoped && tree.scoped_path_counts) return tree.scoped_path_counts[path] ?? 0;
   return tree.path_counts?.[path];

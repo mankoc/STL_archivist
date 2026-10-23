@@ -129,6 +129,9 @@ pub struct MigrateReport {
     pub scales_copied: Option<usize>,
     /// Absolute paths turned into libraries and relative paths (one-way).
     pub paths: Option<libraries::PathsMigration>,
+    /// Folders that became a library of their own (folders from before
+    /// libraries could have several).
+    pub library_groups_made: usize,
 }
 
 fn tables(conn: &Connection) -> Result<HashSet<String>> {
@@ -209,6 +212,10 @@ pub fn migrate(path: &Path, vectors: &Vectors) -> Result<MigrateReport> {
         tx.commit()?;
         conn.execute_batch("PRAGMA foreign_keys=ON")?;
     }
+
+    let tx = conn.transaction()?;
+    report.library_groups_made = libraries::ensure_groups(&tx)?;
+    tx.commit()?;
 
     let tx = conn.transaction()?;
     for ddl in schema_sql::ENSURE_INDEXES {

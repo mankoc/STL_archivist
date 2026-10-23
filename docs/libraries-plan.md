@@ -1,6 +1,7 @@
 # Libraries: relative paths and relocatable collections — plan
 
-Status: **phases 1–3 done in 2026.43.7** (2026-10-23); sync (phases 4–5) follows. As built:
+Status: **phases 1–3 done in 2026.43.7** (2026-10-23); **several folders per library in
+2026.43.9** (see below); sync (phases 4–5) follows. As built:
 the relocation check and move are one job (`relocate_library`, `apply: false` to check);
 absolute paths are computed in SQL by the `path_join` / `posix_join` functions; the AI
 tagger is given `library name/relative path`; sidecar patterns belong to the library whose
@@ -175,6 +176,36 @@ roots and relocated to Linux paths.
    the Library filter/column, path display, the migration report, the help topics
    (*Libraries*, *Moving a library*), README, user guide, deployment guide, changelog,
    migration plan and `CLAUDE.md` rules.
+
+## Several folders per library (2026.43.9)
+
+A library can hold several folders (one collection over two disks). As built:
+
+- `library_groups` (`id`, `uuid`, `name` unique, `created_at`) is the library users see;
+  each row of `libraries` is now one **folder** of a library (`libraries.group_id`), keeping
+  its root, pattern, monitoring, crawl counts, `uuid` and (unique, internal) name. Models
+  still point at their folder (`models.library_id`), so path resolution, relocation, nesting
+  and sidecars are unchanged.
+- Data step (`libraries::ensure_groups`, every start): a folder without a library becomes a
+  library of its own with the folder's name and `uuid`. Nothing is converted; older data
+  directories open as they are.
+- Pattern and monitoring stay **per folder**. A folder belongs to one library; it can be
+  moved to another (`libraries::move_folder`: only `group_id` changes, the records stay with
+  their folder; a library left without folders goes). Libraries are not merged as a whole.
+- The Libraries card has its own **Libraries** page (it was on *Jobs*), with the crawl dialog
+  and the log of the jobs started there.
+- A folder created implicitly (a crawl, a moved archive) joins the library of the folder
+  around it, else a new library; **Add library** always makes a new one, **Add folder** joins
+  the chosen one.
+- The Library facet, column and sort (`models_view.library_name`) go by the library; the
+  AI tagger gets `library name/relative path`; the browser's Path section shows Library →
+  folder root → sub-folders.
+- API: `GET /api/libraries` returns libraries with `folders`; `POST /api/libraries` takes
+  `library` to add a folder to one; `PATCH /api/libraries/{id}` renames, `POST
+  /api/libraries/{id}/remove` removes all folders; `PATCH /api/libraries/folders/{id}`
+  (pattern, monitored, `library` / `new_library` to move it) and `POST /api/libraries/folders/{id}/remove` act on one folder; the
+  `relocate_library` job takes a folder id. `stl-server libraries list` prints libraries and
+  their folders; `relocate` takes a folder.
 
 ## Later: sharing and sync
 

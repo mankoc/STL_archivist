@@ -1299,6 +1299,11 @@ the path is visible. No business logic and no Tauri commands for data.
   untested.
 - 2026.43.8: the icon is the STL Archivist emblem (`resources/icon.png` / `icon.ico`, the
   same files in `icons/` and `ui/`, and `web/public/favicon.png` for the browser tab).
+- 2026.43.9: the product name is StlArchivist (`productName`, window, tray, launcher, web
+  client). The identifier `com.stllibrary.desktop`, the default data directory and the data
+  file names keep the old name. Libraries can have several folders (`library_groups`, see
+  `docs/libraries-plan.md`); the data directory gains a table and a column, nothing is
+  converted.
 
 ### Phase 8: Retire Python (small)
 
