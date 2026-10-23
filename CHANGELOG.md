@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.43.8 — 2026-10-23
+
+- **New application icon:** the STL Archivist emblem, for the desktop app (window, taskbar,
+  tray, installer), the launcher page and the web client's browser tab (`favicon.png`). The
+  old vector `resources/icon.svg` is gone.
+- **Help:** *What stlLibrary is* opens with the archivist illustration (a new `img` help
+  block).
+
 ## 2026.43.7 — 2026-10-23
 
 - **Libraries.** Each catalogued folder is now a *library* — a name, a root folder, a path

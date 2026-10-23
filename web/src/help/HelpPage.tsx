@@ -1,7 +1,7 @@
 // Help: in-depth usage and characteristics of stlLibrary, as topics with a
 // searchable table of contents. A topic is addressed as `#/help/<id>`, so
 // other pages can link to it (HelpLink).
-import { ActionIcon, Alert, Anchor, Badge, Box, Code, List, NavLink, ScrollArea, Stack, Table, Text, TextInput, Title, Tooltip } from "@mantine/core";
+import { ActionIcon, Alert, Anchor, Badge, Box, Code, Image, List, NavLink, ScrollArea, Stack, Table, Text, TextInput, Title, Tooltip } from "@mantine/core";
 import { IconAlertTriangle, IconBulb, IconHelp, IconSearch } from "@tabler/icons-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
@@ -29,6 +29,7 @@ function Rich({ text }: { text: string }) {
 
 function BlockView({ block }: { block: Block }): ReactNode {
   if ("h" in block) return <Title order={4} mt="sm">{block.h}</Title>;
+  if ("img" in block) return <Image src={block.img} alt={block.alt} radius="md" />;
   if ("p" in block) return <Text size="sm" lh={1.65}><Rich text={block.p} /></Text>;
   if ("tip" in block) {
     return (

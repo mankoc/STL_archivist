@@ -1,6 +1,7 @@
 // The in-app help (Help page): every topic as data, so the page can search
 // it and render it one way. Text may use **bold**, `code` and links to other
 // topics written [label](topic-id).
+import splash from "./splash.jpg";
 
 export type Block =
   | { p: string }
@@ -9,7 +10,8 @@ export type Block =
   | { table: { head: string[]; rows: string[][] } }
   | { tip: string }
   | { warn: string }
-  | { h: string };
+  | { h: string }
+  | { img: string; alt: string };
 
 export interface Topic {
   id: string;
@@ -30,6 +32,7 @@ export const TOPICS: Topic[] = [
     title: "What stlLibrary is",
     summary: "A catalogue of your 3D-printable model archives, read where they are.",
     blocks: [
+      { img: splash, alt: "The archivist with a model in his hand" },
       { p: "stlLibrary keeps a catalogue of your 3D-printable model archives (`.zip`, `.7z`, `.rar`): titles, creators, sculptors, collections, tags, scales and preview images. It reads the archives where they are — nothing is unpacked, copied or changed unless you ask for it (Sort files, Delete files, sidecars)." },
       { h: "How it is built" },
       { list: [
