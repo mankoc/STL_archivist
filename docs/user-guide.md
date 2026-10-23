@@ -6,7 +6,8 @@ where they are; nothing is unpacked or copied.
 
 You use it in a web browser, or in the **stlLibrary** desktop app, which shows the same
 pages in its own window. Installing and running the server is covered in
-[deployment.md](deployment.md).
+[deployment.md](deployment.md). The same guide, in more depth and searchable, is built into the
+interface: the **?** button at the top right (or *Help* in the menu under your name).
 
 - [Getting started](#getting-started)
 - [The pages](#the-pages)
@@ -55,7 +56,9 @@ The bar at the top switches pages:
 | **Statistics** | Totals, rankings, and the distribution of any column |
 | **Settings** | Your account, the library's settings, users |
 
-The menu at the top right (your name) has **About**, **Change password** and **Sign out**.
+The **?** button opens the built-in help: every topic of this guide in more depth, with a
+search box; the **?** beside some cards' titles opens the topic about that card. The menu at
+the top right (your name) has **Help**, **About**, **Change password** and **Sign out**.
 
 ## Adding archives: crawling
 
@@ -85,6 +88,13 @@ archives are recognised by their content and keep their record, edits and images
 
 Editors can only choose folders the administrator made available; administrators can choose
 any folder on the server.
+
+**Monitored folders.** The eye button on a crawled folder monitors it: every *Check monitored
+folders every* minutes (*Settings → Library*, default 30) the server compares the folder with
+the library by file size and date, without opening archives, and crawls it only when archives
+were added, changed or removed (the job shows as started by `monitor`). Archives that vanished
+are marked missing instead of deleted; *Maintenance → Remove missing archives* deletes their
+records.
 
 > In the desktop app's *This computer* mode, the server belongs to the window: closing the
 > window stops a running crawl. The next crawl or *Update all* continues from there.
@@ -228,6 +238,19 @@ and the metadata already catalogued.
   **Overwrite filled fields** (by default only empty fields are filled; tags are always added
   to the existing ones).
 
+## AI image embeddings and compute workers
+
+*AI embedding* in Find by Image and Duplicates needs the CLIP encoder and ONNX Runtime
+(*Maintenance → AI and add-on components*) and *Compute missing embeddings*. ONNX Runtime has
+a GPU variant — DirectML on Windows, CUDA on Linux — that the card preselects when it finds a
+GPU; the card also shows where the encoder runs.
+
+A server without a GPU can let a computer with one do the AI work: on that computer, open the
+server in the desktop app, go to *Maintenance → Compute workers*, download the components
+under **This computer** (**Change folder…** chooses where they go) and turn on **Use this
+computer for AI**. The card lists the connected workers. A server set to `"compute":
+"workers"` never runs the models itself: its AI jobs wait for a worker.
+
 ## Maintenance
 
 The **Maintenance** page (editors; some cards for administrators):
@@ -241,6 +264,8 @@ The **Maintenance** page (editors; some cards for administrators):
     metadata onto it. **Search in folder…** looks for the missing archives inside a folder you
     pick and points the records at them. **Remove selected** / **Remove all missing** delete
     records. Actions apply to the ticked rows, or to all matching rows when none is ticked.
+  - **Remove missing archives** deletes the records of every archive marked missing (for
+    example by monitored folders), after a confirmation. Archive files are not touched.
 - **Warnings** — **Check images warning** and **Check presupport warning** re-read every
   archive's file list and fix just that warning, much faster than a rescan.
 - **Images and storage** — compute missing (or all) image hashes and AI embeddings; **Prune

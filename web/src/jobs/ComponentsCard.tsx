@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { api, unwrap } from "../api/client";
 import { formatSize } from "../format";
+import { HelpLink } from "../help/HelpPage";
 import { ComponentsTable, GpuLine } from "./ComponentsTable";
 import type { Job, JobRequest } from "./jobs";
 
@@ -32,7 +33,10 @@ export function ComponentsCard({ jobs, start }: { jobs: Job[] | undefined; start
   return (
     <Card withBorder data-testid="components-card">
       <Group justify="space-between" mb="xs">
-        <Title order={5}>AI and add-on components</Title>
+        <Group gap={4}>
+          <Title order={5}>AI and add-on components</Title>
+          <HelpLink topic="components" label="Help: components" />
+        </Group>
         {info.free_bytes != null && <Text size="xs" c="dimmed">{formatSize(info.free_bytes)} free</Text>}
       </Group>
       <Text size="xs" c="dimmed" mb="xs">

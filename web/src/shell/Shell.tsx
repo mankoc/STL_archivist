@@ -1,8 +1,8 @@
 // The signed-in application frame: header with the user menu, and the pages.
-import { AppShell, Avatar, Button, Group, Menu, Modal, PasswordInput, SegmentedControl, Stack, Text, Title, UnstyledButton, useMantineColorScheme } from "@mantine/core";
+import { ActionIcon, AppShell, Avatar, Button, Group, Menu, Modal, PasswordInput, SegmentedControl, Stack, Text, Title, Tooltip, UnstyledButton, useMantineColorScheme } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconInfoCircle, IconKey, IconLogout } from "@tabler/icons-react";
+import { IconHelp, IconInfoCircle, IconKey, IconLogout } from "@tabler/icons-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { type FormEvent, useEffect, useState } from "react";
@@ -11,6 +11,7 @@ import { api, type Schemas, unwrap } from "../api/client";
 import { useServerEvents } from "../api/events";
 import { UserContext } from "../auth/user";
 import { BrowserPage } from "../browser/BrowserPage";
+import { HelpPage } from "../help/HelpPage";
 import { JobsPage } from "../jobs/JobsPage";
 import { MaintenancePage } from "../jobs/MaintenancePage";
 import { LookupsPage } from "../lookups/LookupsPage";
@@ -63,6 +64,12 @@ export function Shell({ user }: { user: Schemas["User"] }) {
                 data-testid="pages"
               />
             </Group>
+            <Group gap="xs">
+            <Tooltip label="Help">
+              <ActionIcon variant={page === "help" ? "light" : "subtle"} size="lg" aria-label="Help" onClick={() => setPage("help")} data-testid="help-button">
+                <IconHelp size={20} />
+              </ActionIcon>
+            </Tooltip>
             <Menu position="bottom-end">
               <Menu.Target>
                 <UnstyledButton>
@@ -78,6 +85,9 @@ export function Shell({ user }: { user: Schemas["User"] }) {
                 </UnstyledButton>
               </Menu.Target>
               <Menu.Dropdown>
+                <Menu.Item leftSection={<IconHelp size={14} />} onClick={() => setPage("help")}>
+                  Help
+                </Menu.Item>
                 <Menu.Item leftSection={<IconInfoCircle size={14} />} onClick={about.open}>
                   About
                 </Menu.Item>
@@ -89,10 +99,13 @@ export function Shell({ user }: { user: Schemas["User"] }) {
                 </Menu.Item>
               </Menu.Dropdown>
             </Menu>
+            </Group>
           </Group>
         </AppShell.Header>
         <AppShell.Main style={{ height: "100vh", paddingTop: 48, display: "flex", flexDirection: "column" }}>
-          {page === "jobs" ? (
+          {page === "help" ? (
+            <HelpPage />
+          ) : page === "jobs" ? (
             <JobsPage />
           ) : page === "maintenance" ? (
             <MaintenancePage />
