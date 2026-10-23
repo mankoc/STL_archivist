@@ -31,6 +31,7 @@ function blockText(b: Block): string {
   if ("warn" in b) return b.warn;
   if ("list" in b) return b.list.join(" ");
   if ("steps" in b) return b.steps.join(" ");
+  if ("img" in b) return "";
   return [...b.table.head, ...b.table.rows.flat()].join(" ");
 }
 

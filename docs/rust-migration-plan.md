@@ -1297,6 +1297,8 @@ the path is visible. No business logic and no Tauri commands for data.
   library, sign-in, the table, the IPC scope, graceful and forced exits.
 - Not done: installers (Phase 8 ships the server and the shell); macOS / Linux builds are
   untested.
+- 2026.43.8: the icon is the STL Archivist emblem (`resources/icon.png` / `icon.ico`, the
+  same files in `icons/` and `ui/`, and `web/public/favicon.png` for the browser tab).
 
 ### Phase 8: Retire Python (small)
 

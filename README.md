@@ -12,7 +12,7 @@ can open a library on your computer without setting up a server.
 **Guides:** [using stlLibrary](docs/user-guide.md) · [deploying a server](docs/deployment.md) ·
 and in the interface, the **?** button: searchable in-depth help on every feature
 
-Version: 2026.43.7
+Version: 2026.43.8
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). This version opens its data directory and, since 2026.43.7, converts it once
@@ -272,7 +272,7 @@ stl_database/
 │   ├── stl-desktop/         # Desktop app (Tauri): launcher page and window on a server
 │   └── stl-proc/            # Child processes that end with their parent
 ├── web/                     # Web client (React, TypeScript, Mantine, TanStack)
-├── resources/               # Application icon
+├── resources/               # Application icon (the STL Archivist emblem; copies in rust/stl-desktop/icons, rust/stl-desktop/ui and web/public)
 ├── tools/create_ai_model.py # Regenerates the tiny CLIP stand-in used by the server tests
 └── docs/                    # Migration plan and design notes
 ```
