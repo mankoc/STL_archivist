@@ -19,6 +19,7 @@ import {
   workerState,
 } from "../desktop";
 import { formatSize } from "../format";
+import { HelpLink } from "../help/HelpPage";
 import { ComponentsTable, GpuLine } from "./ComponentsTable";
 import { installProgress, modeText, workerSummary } from "./workers";
 
@@ -52,7 +53,10 @@ export function WorkersCard({ editor }: { editor: boolean }) {
   const me = local.data;
   return (
     <Card withBorder data-testid="workers-card">
-      <Title order={5} mb="xs">Compute workers</Title>
+      <Group gap={4} mb="xs">
+        <Title order={5}>Compute workers</Title>
+        <HelpLink topic="compute-workers" label="Help: compute workers" />
+      </Group>
       {status.data && <Text size="xs" c="dimmed" mb="xs">{modeText(status.data.compute)}</Text>}
       <Stack gap={6}>
         {workers.length === 0 && <Text size="sm" c="dimmed">No worker is connected.</Text>}

@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, unwrap } from "../api/client";
 import { type ServerEvent, useServerEvent } from "../api/events";
 import { hasRole, useUser } from "../auth/user";
+import { HelpLink } from "../help/HelpPage";
 import { FolderPicker } from "./FolderPicker";
 import { describe, elapsed, isActive, type Job, type JobRequest, percent, progressText, sortJobs, STATE_COLOR } from "./jobs";
 import classes from "./JobsPage.module.css";
@@ -61,7 +62,10 @@ export function JobsPage() {
       <Stack gap="md" className={classes.column}>
         <Card withBorder>
           <Group justify="space-between" mb="xs">
-            <Title order={5}>Crawled folders</Title>
+            <Group gap={4}>
+              <Title order={5}>Crawled folders</Title>
+              <HelpLink topic="crawling" label="Help: crawling and monitored folders" />
+            </Group>
             {editor && (
               <Group gap="xs">
                 <Button size="xs" variant="light" leftSection={<IconFolderPlus size={14} />} onClick={() => setPicker(true)}>

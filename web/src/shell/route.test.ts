@@ -8,5 +8,6 @@ describe("pages from the hash", () => {
     expect(pageFromHash("#/jobs/12")).toBe("jobs");
     expect(pageFromHash("#/settings")).toBe("settings");
     expect(pageFromHash("#/nope")).toBe("library");
+    expect(pageFromHash("#/help/embeddings")).toBe("help");
   });
 });

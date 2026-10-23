@@ -20,6 +20,14 @@
   `crawled_folders.monitored` (added by the migration; the old desktop app ignores it), routes
   `POST /api/crawled-folders/monitor` and `GET /api/crawled-folders` → `monitored`, crawl
   option `keep_missing`, and `stl_core::monitor`.
+- **Built-in help.** The **?** button in the header (and *Help* in the user menu) opens a Help
+  page (`#/help/<topic>`): 24 topics on usage and characteristics — getting started, crawling,
+  monitored folders, path patterns, warnings, browsing, editing, archive files, duplicates, the
+  AI tagger, embeddings and GPUs, compute workers, maintenance, sidecars, jobs, roles,
+  settings, components, backups, server configuration, shortcuts and troubleshooting — with a
+  grouped table of contents, search, links between topics and previous/next. A **?** beside
+  the Crawled folders, Compute workers and Components cards opens their topic. The written
+  user guide gained the newer features too.
 - **Rounder interface:** a client theme (`web/src/theme.ts`) gives buttons, action icons and
   segmented controls pill shapes, cards, modals, alerts and notifications larger corners, and
   inputs, menus and thumbnails medium ones; the desktop launcher page follows.

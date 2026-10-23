@@ -9,7 +9,8 @@ It is a server (`stl-server`, Rust) with a web client (React) that runs in any b
 a small desktop app (`stl-desktop`, Tauri) that shows the same client in its own window and
 can open a library on your computer without setting up a server.
 
-**Guides:** [using stlLibrary](docs/user-guide.md) · [deploying a server](docs/deployment.md)
+**Guides:** [using stlLibrary](docs/user-guide.md) · [deploying a server](docs/deployment.md) ·
+and in the interface, the **?** button: searchable in-depth help on every feature
 
 Version: 2026.43.6
 

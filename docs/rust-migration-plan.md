@@ -1343,6 +1343,9 @@ server (installer and Docker image) and the desktop shell.
   library is open) and `stl-server components status|install|remove` drives it from the
   command line (JSON lines); the shell runs it for the worker's folder, which the page can
   change.
+- 2026.43.6 also added the built-in help (`web/src/help/`): topics as data (`topics.ts`) with
+  a small inline syntax (bold, code, topic links), searched and rendered by `HelpPage`; a
+  test keeps ids unique and links working.
 - 2026.43.6 also added monitored folders: `crawled_folders.monitored` (an `ADD_COLUMNS`
   entry with `DEFAULT 0`, so the old app's inserts still work), `stl_core::monitor::changes`
   (size and mtime against `archive_size` / `archive_mtime_ns`, the crawler's own unchanged
