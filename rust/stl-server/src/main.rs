@@ -10,10 +10,11 @@
 //! `stl-server components status|install|remove [ID...] [--variant ID=V]... [--data-dir DIR]`:
 //! the optional components of a data directory, without opening its library
 //! (the desktop app manages its compute worker's folder with it).
-//! `stl-server libraries [list] [--data-dir DIR]`: the libraries and their roots;
-//! `stl-server libraries relocate NAME|ID NEW_ROOT [--apply] [--fix-case] [--data-dir DIR]`:
-//! check a library's archives under a new root and, with `--apply`, move it there
-//! (after restoring a backup on another machine). The server must not be running.
+//! `stl-server libraries [list] [--data-dir DIR]`: the libraries and their folders;
+//! `stl-server libraries relocate FOLDER NEW_ROOT [--apply] [--fix-case] [--data-dir DIR]`:
+//! check a folder's archives under a new root and, with `--apply`, move it there
+//! (after restoring a backup on another machine; FOLDER is a folder's id, name
+//! or uuid from the list). The server must not be running.
 //! `stl-server worker --server URL [--data-dir DIR] [--name NAME]`: compute CLIP
 //! embeddings and AI tags for a remote server (see `stl_server::worker`); it ends
 //! with exit code 2 when it cannot work (a refused token, nothing installed).
@@ -124,7 +125,7 @@ fn restore(args: &[String]) -> Result<(), String> {
 
 fn libraries(args: &[String]) -> Result<(), String> {
     use stl_core::storage::libraries as libs;
-    let usage = "usage: stl-server libraries [list] | relocate NAME|ID NEW_ROOT [--apply] [--fix-case] [--data-dir DIR]";
+    let usage = "usage: stl-server libraries [list] | relocate FOLDER NEW_ROOT [--apply] [--fix-case] [--data-dir DIR]";
     let (mut words, mut rest, mut apply, mut fix_case) = (Vec::new(), Vec::new(), false, false);
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -140,9 +141,12 @@ fn libraries(args: &[String]) -> Result<(), String> {
     let all = lib.db.with(libs::list).map_err(|e| e.to_string())?;
     match words.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
         [] | ["list"] => {
-            for l in &all {
-                let state = if std::path::Path::new(&l.root).is_dir() { "ok" } else { "ROOT NOT FOUND" };
-                println!("{:>4}  {:<30} {:>7} model(s)  {}  [{state}]", l.id, l.name, l.models, l.root);
+            for g in lib.db.with(libs::groups).map_err(|e| e.to_string())? {
+                println!("{}  ({} model(s))", g.name, g.models());
+                for f in &g.folders {
+                    let state = if std::path::Path::new(&f.root).is_dir() { "ok" } else { "ROOT NOT FOUND" };
+                    println!("  {:>4}  {:<30} {:>7} model(s)  {}  [{state}]", f.id, f.name, f.models, f.root);
+                }
             }
             Ok(())
         }
@@ -150,7 +154,7 @@ fn libraries(args: &[String]) -> Result<(), String> {
             let l = all
                 .iter()
                 .find(|l| l.id.to_string() == *which || l.name.eq_ignore_ascii_case(which) || l.uuid == *which)
-                .ok_or_else(|| format!("no library {which:?} (see stl-server libraries list)"))?;
+                .ok_or_else(|| format!("no library folder {which:?} (see stl-server libraries list)"))?;
             let check = lib.db.with(|c| Ok(libs::check_relocate(c, l.id, root, None))).map_err(|e: rusqlite::Error| e.to_string())??;
             println!("{}: {} of {} archive(s) found under {root}", l.name, check.found, check.total);
             if !check.case_only.is_empty() {
@@ -160,7 +164,7 @@ fn libraries(args: &[String]) -> Result<(), String> {
                 println!("  not found: {m}");
             }
             if !apply {
-                println!("Nothing changed: add --apply to move the library.");
+                println!("Nothing changed: add --apply to move the folder.");
                 return Ok(());
             }
             lib.db.with_tx(|tx| libs::relocate(tx, l.id, root, &check, fix_case)).map_err(|e| e.to_string())?;

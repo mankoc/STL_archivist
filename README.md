@@ -1,6 +1,6 @@
-# stlLibrary
+# StlArchivist
 
-**stlLibrary** manages local collections of 3D-printable model archives. It scans folders of
+**StlArchivist** manages local collections of 3D-printable model archives. It scans folders of
 `.zip`, `.7z` and `.rar` files, extracts metadata and thumbnails, and stores everything in a
 library database so you can browse, search, tag and de-duplicate your collection without
 unpacking anything.
@@ -9,10 +9,11 @@ It is a server (`stl-server`, Rust) with a web client (React) that runs in any b
 a small desktop app (`stl-desktop`, Tauri) that shows the same client in its own window and
 can open a library on your computer without setting up a server.
 
-**Guides:** [using stlLibrary](docs/user-guide.md) · [deploying a server](docs/deployment.md) ·
+**Guides:** [using StlArchivist](docs/user-guide.md) · [deploying a server](docs/deployment.md) ·
+[the HTTP API](docs/api.md) ·
 and in the interface, the **?** button: searchable in-depth help on every feature
 
-Version: 2026.43.8
+Version: 2026.43.9
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). This version opens its data directory and, since 2026.43.7, converts it once
@@ -25,10 +26,11 @@ Version: 2026.43.8
 - **Archive scanning** — crawls folders of archives in parallel using CRC-based
   fingerprints (no decompression needed to notice what changed); moved archives keep their
   record, metadata and thumbnails, even when moved between libraries
-- **Libraries** — each catalogued folder is a named library; records store paths relative
-  to it, in a form that is the same on Windows, Linux and macOS, so a library moves to
-  another disk, mount point or machine (and from Windows to Linux) by pointing it at its new
-  folder — no re-crawl, nothing lost; libraries can sit inside one another
+- **Libraries** — named collections of one or more folders (one library over several disks);
+  records store paths relative to their folder, in a form that is the same on Windows, Linux
+  and macOS, so a folder moves to another disk, mount point or machine (and from Windows to
+  Linux) by pointing it at its new place — no re-crawl, nothing lost; folders can sit inside
+  one another
 - **Metadata extraction** — from embedded `info.json`, `.url` files and the folder structure
   through [path patterns](#path-patterns)
 - **Thumbnails** — up to N images per archive (JPEG; animated GIFs stay animated), stored
@@ -68,13 +70,13 @@ Version: 2026.43.8
 
 ### Windows installer
 
-The [Releases](../../releases) page has `stlLibrary_<version>_x64-setup.exe`: the desktop
+The [Releases](../../releases) page has `StlArchivist_<version>_x64-setup.exe`: the desktop
 app with the server and the web client. It installs for the current user and needs no
 administrator rights (Windows 10 and 11 ship the WebView2 runtime it uses).
 
 Releases are built by GitHub Actions: push a tag named after the version
 (`git tag v2026.26.0 && git push origin v2026.26.0`) and the *Windows installer* workflow
-publishes `stlLibrary_<version>_x64-setup.exe` on a release. It can also be run by hand from
+publishes `StlArchivist_<version>_x64-setup.exe` on a release. It can also be run by hand from
 the Actions tab.
 
 ### From source
@@ -114,7 +116,7 @@ docker exec -it stl stl-server create-admin admin
 
 ### Desktop app
 
-Start `stl-desktop` (or *stlLibrary* from the Start menu). Its start page offers:
+Start `stl-desktop` (or *StlArchivist* from the Start menu). Its start page offers:
 
 - **This computer** — pick a data directory (by default `%LOCALAPPDATA%\stlLibrary` on
   Windows) and **Open**. The app starts a server for that window on a free local port and
@@ -142,12 +144,12 @@ server) on the same data directory is refused.
 
 ### First steps
 
-1. **Jobs → Add library**: browse to your archive folder, set a path pattern if your folders
+1. **Libraries → Add library**: browse to your archive folder, set a path pattern if your folders
    follow one, and **Crawl**. Jobs run in the server, one at a time; the page can be closed.
 2. **Library**: filter, search, edit; *Columns* chooses the table's columns, *Images* shows a
    grid. Select models for *Mass edit*, the *AI tagger* or *Archives* (rescan, thumbnails,
    sort files, delete files).
-3. **Jobs → Update all** re-crawls every library later, keeping the records of archives moved
+3. **Libraries → Update all** re-crawls every library later, keeping the records of archives moved
    between libraries and removing those of archives that are gone.
 4. Or let the server keep up: the eye button on a library **monitors** it. The server
    compares it with the library every 30 minutes (*Settings → Library*) by file size and
@@ -274,6 +276,7 @@ stl_database/
 ├── web/                     # Web client (React, TypeScript, Mantine, TanStack)
 ├── resources/               # Application icon (the STL Archivist emblem; copies in rust/stl-desktop/icons, rust/stl-desktop/ui and web/public)
 ├── tools/create_ai_model.py # Regenerates the tiny CLIP stand-in used by the server tests
+├── tools/api_doc.py         # Writes docs/api.md (the API reference) from web/openapi.json
 └── docs/                    # Migration plan and design notes
 ```
 

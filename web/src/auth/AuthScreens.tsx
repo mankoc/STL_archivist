@@ -52,7 +52,7 @@ export function LoginScreen() {
   const queryClient = useQueryClient();
   return (
     <Form
-      title="stlLibrary"
+      title="StlArchivist"
       submit="Sign in"
       onSubmit={async (name, password) => {
         unwrap(await api.POST("/api/auth/login", { body: { name, password } }));
@@ -66,7 +66,7 @@ export function SetupScreen() {
   const queryClient = useQueryClient();
   return (
     <Form
-      title="Welcome to stlLibrary"
+      title="Welcome to StlArchivist"
       intro="Create the administrator account. This works only on the server's own machine; elsewhere, run `stl-server create-admin` there."
       submit="Create administrator"
       onSubmit={async (name, password) => {

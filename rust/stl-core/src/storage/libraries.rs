@@ -1,11 +1,13 @@
-//! Libraries: named, relocatable collections of archives. A library is a root
-//! folder (where it is on this machine) plus a permanent `uuid`; each model
-//! belongs to one library and stores its archive's [`RelPath`] below the root.
-//! Moving a library is a change of its root; nothing else is rewritten.
+//! Libraries: named, relocatable collections of archives. A library
+//! ([`Group`], a row of `library_groups`) has one or more folders ([`Folder`],
+//! a row of `libraries`): a root (where it is on this machine) plus a
+//! permanent `uuid`. Each model belongs to one folder (`models.library_id`)
+//! and stores its archive's [`RelPath`] below the folder's root. Moving a
+//! folder is a change of its root; nothing else is rewritten.
 //!
-//! Libraries may sit inside one another: an archive belongs to the **deepest**
-//! library above it ([`Roots::locate`]); creating an inner library adopts the
-//! records below its root, removing it gives them back to the library around it.
+//! Folders may sit inside one another: an archive belongs to the **deepest**
+//! folder above it ([`Roots::locate`]); creating an inner folder adopts the
+//! records below its root, removing it gives them back to the folder around it.
 
 use std::path::Path;
 
@@ -15,10 +17,12 @@ use super::edit::utc_now_text;
 use crate::relpath::{self, RelPath, path_key};
 use crate::winpath::WinPath;
 
+/// One folder of a library (a row of `libraries`).
 #[derive(Debug, Clone, PartialEq)]
-pub struct Library {
+pub struct Folder {
     pub id: i64,
     pub uuid: String,
+    /// Unique among folders (the command line names a folder by it).
     pub name: String,
     pub root: String,
     pub pattern: Option<String>,
@@ -32,13 +36,15 @@ pub struct Library {
     pub origin: Option<String>,
     /// Records in it.
     pub models: i64,
+    /// The library it is a folder of.
+    pub group_id: Option<i64>,
 }
 
 const COLUMNS: &str = "l.id, l.uuid, l.name, l.root, l.pattern, l.monitored, l.last_crawled_at, l.archive_count, \
-     l.new_count, l.updated_count, l.origin, (SELECT count(*) FROM models m WHERE m.library_id = l.id)";
+     l.new_count, l.updated_count, l.origin, (SELECT count(*) FROM models m WHERE m.library_id = l.id), l.group_id";
 
-fn from_row(r: &rusqlite::Row) -> Result<Library> {
-    Ok(Library {
+fn from_row(r: &rusqlite::Row) -> Result<Folder> {
+    Ok(Folder {
         id: r.get(0)?,
         uuid: r.get(1)?,
         name: r.get(2)?,
@@ -51,21 +57,22 @@ fn from_row(r: &rusqlite::Row) -> Result<Library> {
         updated_count: r.get(9)?,
         origin: r.get(10)?,
         models: r.get(11)?,
+        group_id: r.get(12)?,
     })
 }
 
-/// Every library, by name.
-pub fn list(conn: &Connection) -> Result<Vec<Library>> {
+/// Every folder, by name.
+pub fn list(conn: &Connection) -> Result<Vec<Folder>> {
     let mut st = conn.prepare(&format!("SELECT {COLUMNS} FROM libraries l ORDER BY l.name COLLATE NOCASE"))?;
     st.query_map([], from_row)?.collect()
 }
 
-pub fn get(conn: &Connection, id: i64) -> Result<Option<Library>> {
+pub fn get(conn: &Connection, id: i64) -> Result<Option<Folder>> {
     conn.query_row(&format!("SELECT {COLUMNS} FROM libraries l WHERE l.id = ?1"), [id], from_row).optional()
 }
 
-/// The library whose root is `root` (compared as this system does).
-pub fn by_root(conn: &Connection, root: &str) -> Result<Option<Library>> {
+/// The folder whose root is `root` (compared as this system does).
+pub fn by_root(conn: &Connection, root: &str) -> Result<Option<Folder>> {
     let key = path_key(root);
     Ok(list(conn)?.into_iter().find(|l| path_key(&l.root) == key))
 }
@@ -88,9 +95,83 @@ pub fn contains(root: &str, path: &str) -> bool {
     path_key(root) == path_key(path) || RelPath::from_abs(root, path).is_some()
 }
 
+// ── libraries (groups of folders) ────────────────────────────────────────────
+
+/// A library: a name, a permanent `uuid` and its folders.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Group {
+    pub id: i64,
+    pub uuid: String,
+    pub name: String,
+    /// By root.
+    pub folders: Vec<Folder>,
+}
+
+impl Group {
+    /// Records in its folders.
+    pub fn models(&self) -> i64 {
+        self.folders.iter().map(|f| f.models).sum()
+    }
+}
+
+/// Every library with its folders, by name.
+pub fn groups(conn: &Connection) -> Result<Vec<Group>> {
+    let mut st = conn.prepare("SELECT id, uuid, name FROM library_groups ORDER BY name COLLATE NOCASE")?;
+    let mut out: Vec<Group> =
+        st.query_map([], |r| Ok(Group { id: r.get(0)?, uuid: r.get(1)?, name: r.get(2)?, folders: Vec::new() }))?.collect::<Result<_>>()?;
+    let mut folders = list(conn)?;
+    folders.sort_by_key(|f| path_key(&f.root));
+    for f in folders {
+        if let Some(g) = out.iter_mut().find(|g| Some(g.id) == f.group_id) {
+            g.folders.push(f);
+        }
+    }
+    Ok(out)
+}
+
+pub fn group(conn: &Connection, id: i64) -> Result<Option<Group>> {
+    Ok(groups(conn)?.into_iter().find(|g| g.id == id))
+}
+
+/// `base`, or `base (2)`, `base (3)`… so that no other library has the name.
+fn unique_group_name(conn: &Connection, base: &str, except: Option<i64>) -> Result<String> {
+    numbered(base, |n| {
+        conn.query_row("SELECT EXISTS (SELECT 1 FROM library_groups WHERE name = ?1 COLLATE NOCASE AND id IS NOT ?2)", params![n, except], |r| r.get(0))
+    })
+}
+
+/// A new, empty library named `name` (numbered when another has it).
+pub fn new_group(tx: &Transaction, name: &str) -> Result<i64> {
+    let name = unique_group_name(tx, name, None)?;
+    tx.execute("INSERT INTO library_groups (uuid, name, created_at) VALUES (?1, ?2, ?3)", params![new_uuid(), name, utc_now_text()])?;
+    Ok(tx.last_insert_rowid())
+}
+
+pub fn rename_group(tx: &Transaction, id: i64, name: &str) -> Result<String> {
+    let name = unique_group_name(tx, name, Some(id))?;
+    tx.execute("UPDATE library_groups SET name = ?2 WHERE id = ?1", params![id, name])?;
+    Ok(name)
+}
+
+/// Data step: each folder without a library becomes a library of its own,
+/// with the folder's name and `uuid` (libraries made before folders could be
+/// grouped keep their identity). Returns how many were made.
+pub fn ensure_groups(tx: &Transaction) -> Result<usize> {
+    let mut st = tx.prepare("SELECT id, uuid, name FROM libraries WHERE group_id IS NULL ORDER BY id")?;
+    let lone: Vec<(i64, String, String)> = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<Result<_>>()?;
+    for (id, uuid, name) in &lone {
+        let taken: bool = tx.query_row("SELECT EXISTS (SELECT 1 FROM library_groups WHERE uuid = ?1)", [uuid], |r| r.get(0))?;
+        let uuid = if taken { new_uuid() } else { uuid.clone() };
+        let name = unique_group_name(tx, name, None)?;
+        tx.execute("INSERT INTO library_groups (uuid, name, created_at) VALUES (?1, ?2, ?3)", params![uuid, name, utc_now_text()])?;
+        tx.execute("UPDATE libraries SET group_id = ?2 WHERE id = ?1", params![id, tx.last_insert_rowid()])?;
+    }
+    Ok(lone.len())
+}
+
 // ── roots ────────────────────────────────────────────────────────────────────
 
-/// The libraries' roots, for going between absolute and relative paths.
+/// The folders' roots, for going between absolute and relative paths.
 #[derive(Debug, Clone, Default)]
 pub struct Roots {
     /// `(id, root)`, deepest roots first.
@@ -155,11 +236,15 @@ fn new_uuid() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
-/// `base`, or `base (2)`, `base (3)`… so that no other library has the name.
+/// `base`, or `base (2)`, `base (3)`… so that no other folder has the name.
 fn unique_name(conn: &Connection, base: &str, except: Option<i64>) -> Result<String> {
-    let taken = |n: &str| -> Result<bool> {
+    numbered(base, |n| {
         conn.query_row("SELECT EXISTS (SELECT 1 FROM libraries WHERE name = ?1 COLLATE NOCASE AND id IS NOT ?2)", params![n, except], |r| r.get(0))
-    };
+    })
+}
+
+/// `base`, or `base (2)`, `base (3)`… whichever `taken` refuses first.
+fn numbered(base: &str, taken: impl Fn(&str) -> Result<bool>) -> Result<String> {
     let base = if base.trim().is_empty() { "Library" } else { base.trim() };
     if !taken(base)? {
         return Ok(base.to_string());
@@ -173,7 +258,8 @@ fn unique_name(conn: &Connection, base: &str, except: Option<i64>) -> Result<Str
     unreachable!()
 }
 
-/// A library's default name: its root's last folder (or the root itself).
+/// A folder's (and a new library's) default name: its root's last folder (or
+/// the root itself).
 pub fn default_name(root: &str) -> String {
     let name = WinPath::new(root).name().to_string();
     if name.is_empty() { root.trim_end_matches(['/', '\\']).to_string() } else { name }
@@ -195,17 +281,44 @@ fn adopt(tx: &Transaction, from: i64, from_root: &str, to: i64, inner_root: &str
     Ok(moved)
 }
 
-/// Create a library at `root` (or return the one already there). Records of
-/// libraries around it that lie below `root` move into it.
-pub fn create(tx: &Transaction, root: &str, name: Option<&str>, pattern: Option<&str>, origin: Option<&str>) -> Result<i64> {
+/// Which library a new folder joins.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Target<'a> {
+    /// The library of the folder around it (a crawl of a sub-folder), else a
+    /// new one named after the folder.
+    Around,
+    /// A new library with this name (numbered when another has it).
+    New(&'a str),
+    /// This library.
+    Group(i64),
+}
+
+/// Create a folder at `root` in the library `into` says (or return the one
+/// already there; asked into another library, that is an error). Records of
+/// folders around it that lie below `root` move into it.
+pub fn create(tx: &Transaction, root: &str, into: Target, pattern: Option<&str>, origin: Option<&str>) -> Result<i64> {
     let root = clean_root(root);
-    if let Some(l) = by_root(tx, &root)? {
-        return Ok(l.id);
+    if let Some(f) = by_root(tx, &root)? {
+        if let Target::Group(g) = into
+            && f.group_id != Some(g)
+        {
+            return Err(rusqlite::Error::InvalidParameterName(format!("{root} is already a folder of another library")));
+        }
+        return Ok(f.id);
     }
-    let name = unique_name(tx, name.unwrap_or(&default_name(&root)), None)?;
+    let around = Roots::load(tx)?.locate_folder(&root).map(|(id, _)| id);
+    let group = match into {
+        Target::Group(g) => g,
+        Target::New(name) => new_group(tx, name)?,
+        Target::Around => match around.map(|id| get(tx, id)).transpose()?.flatten().and_then(|f| f.group_id) {
+            Some(g) => g,
+            None => new_group(tx, &default_name(&root))?,
+        },
+    };
+    let name = unique_name(tx, &default_name(&root), None)?;
     tx.execute(
-        "INSERT INTO libraries (uuid, name, root, pattern, monitored, origin, created_at) VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6)",
-        params![new_uuid(), name, root, pattern, origin, utc_now_text()],
+        "INSERT INTO libraries (uuid, name, root, pattern, monitored, origin, created_at, group_id) VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7)",
+        params![new_uuid(), name, root, pattern, origin, utc_now_text(), group],
     )?;
     let id = tx.last_insert_rowid();
     for (outer, outer_root) in Roots::load(tx)?.libs.iter().filter(|(i, r)| *i != id && RelPath::from_abs(r, &root).is_some()) {
@@ -222,7 +335,7 @@ pub fn locate_or_create(tx: &Transaction, abs: &str, fallback_root: Option<&str>
     }
     let folder = WinPath::new(abs).parent().as_posix();
     let root = fallback_root.filter(|r| RelPath::from_abs(r, abs).is_some()).map(str::to_string).unwrap_or_else(|| crate::winpath::native(&folder));
-    let id = create(tx, &root, None, None, None)?;
+    let id = create(tx, &root, Target::Around, None, None)?;
     let rel = Roots::load(tx)?.locate(abs).filter(|(i, _)| *i == id).map(|(_, r)| r);
     rel.map(|r| (id, r)).ok_or_else(|| rusqlite::Error::InvalidParameterName(format!("{abs} is not a usable archive path")))
 }
@@ -241,6 +354,18 @@ pub fn set_monitored(tx: &Transaction, id: i64, monitored: bool) -> Result<bool>
     Ok(tx.execute("UPDATE libraries SET monitored = ?2 WHERE id = ?1", params![id, monitored as i64])? > 0)
 }
 
+/// Move folder `id` with its records to library `to` (records point at their
+/// folder: nothing else changes). The library it leaves goes when it has no
+/// folder left. Returns whether it did.
+pub fn move_folder(tx: &Transaction, id: i64, to: i64) -> Result<bool> {
+    let from: Option<i64> = tx.query_row("SELECT group_id FROM libraries WHERE id = ?1", [id], |r| r.get(0))?;
+    tx.execute("UPDATE libraries SET group_id = ?2 WHERE id = ?1", params![id, to])?;
+    match from.filter(|f| *f != to) {
+        Some(f) => Ok(tx.execute("DELETE FROM library_groups WHERE id = ?1 AND NOT EXISTS (SELECT 1 FROM libraries WHERE group_id = ?1)", [f])? > 0),
+        None => Ok(false),
+    }
+}
+
 /// After a crawl: its counts and pattern.
 pub fn record_crawl(tx: &Transaction, id: i64, pattern: Option<&str>, archive_count: i64, new_count: i64, updated_count: i64) -> Result<()> {
     tx.execute(
@@ -251,10 +376,10 @@ pub fn record_crawl(tx: &Transaction, id: i64, pattern: Option<&str>, archive_co
     Ok(())
 }
 
-/// What removing a library did.
+/// What removing a folder or a library did.
 #[derive(Debug, Default, PartialEq)]
 pub struct Removed {
-    /// The library around it that took its records.
+    /// The folder around it that took its records.
     pub moved_to: Option<i64>,
     pub moved: usize,
     pub deleted: usize,
@@ -262,8 +387,9 @@ pub struct Removed {
     pub refs: Vec<String>,
 }
 
-/// Remove a library: its records go to the library around it, or are deleted
-/// when there is none (the archive files are not touched).
+/// Remove a folder: its records go to the folder around it, or are deleted
+/// when there is none (the archive files are not touched). A library left
+/// without folders goes too.
 pub fn remove(tx: &Transaction, id: i64) -> Result<Removed> {
     let Some(lib) = get(tx, id)? else { return Ok(Removed::default()) };
     let roots = Roots::load(tx)?;
@@ -289,6 +415,31 @@ pub fn remove(tx: &Transaction, id: i64) -> Result<Removed> {
         }
     }
     tx.execute("DELETE FROM libraries WHERE id = ?1", [id])?;
+    if let Some(g) = lib.group_id {
+        tx.execute("DELETE FROM library_groups WHERE id = ?1 AND NOT EXISTS (SELECT 1 FROM libraries WHERE group_id = ?1)", [g])?;
+    }
+    Ok(out)
+}
+
+/// Remove a library: each of its folders, the innermost first (see [`remove`];
+/// records go to a folder of another library around them, or are deleted).
+pub fn remove_group(tx: &Transaction, id: i64) -> Result<Removed> {
+    let Some(g) = group(tx, id)? else { return Ok(Removed::default()) };
+    let before = g.models() as usize;
+    let mut folders = g.folders;
+    folders.sort_by_key(|f| std::cmp::Reverse(path_key(&f.root).len()));
+    let ids: Vec<i64> = folders.iter().map(|f| f.id).collect();
+    let mut out = Removed::default();
+    for f in &folders {
+        let r = remove(tx, f.id)?;
+        out.deleted += r.deleted;
+        out.refs.extend(r.refs);
+        if let Some(to) = r.moved_to.filter(|to| !ids.contains(to)) {
+            out.moved_to = Some(to);
+        }
+    }
+    out.moved = before - out.deleted;
+    tx.execute("DELETE FROM library_groups WHERE id = ?1", [id])?;
     Ok(out)
 }
 
@@ -771,18 +922,19 @@ mod tests {
         let (dir, mut conn) = db();
         let root = dir.path().join("stl").to_string_lossy().into_owned();
         let tx = conn.transaction().unwrap();
-        let outer = create(&tx, &root, None, Some("{title}"), None).unwrap();
+        let outer = create(&tx, &root, Target::Around, Some("{title}"), None).unwrap();
         tx.commit().unwrap();
         let a = insert(&conn, outer, "Gambody/Dragon.zip");
         let b = insert(&conn, outer, "Other/Knight.zip");
         let inner_root = relpath::join(&root, "Gambody");
         let tx = conn.transaction().unwrap();
-        let inner = create(&tx, &inner_root, None, None, None).unwrap();
-        assert_eq!(create(&tx, &format!("{inner_root}/"), None, None, None).unwrap(), inner, "the same root");
+        let inner = create(&tx, &inner_root, Target::Around, None, None).unwrap();
+        assert_eq!(create(&tx, &format!("{inner_root}/"), Target::Around, None, None).unwrap(), inner, "the same root");
         tx.commit().unwrap();
         assert_eq!(of(&conn, a), (inner, "Dragon.zip".into()), "adopted");
         assert_eq!(of(&conn, b), (outer, "Other/Knight.zip".into()));
         assert_eq!(get(&conn, inner).unwrap().unwrap().name, "Gambody");
+        assert_eq!(groups(&conn).unwrap().len(), 1, "a crawled sub-folder joins the library around it");
 
         let tx = conn.transaction().unwrap();
         let r = remove(&tx, inner).unwrap();
@@ -795,14 +947,89 @@ mod tests {
         tx.commit().unwrap();
         assert_eq!((r.moved_to, r.deleted), (None, 2), "no library around it: records go");
         assert!(list(&conn).unwrap().is_empty());
+        assert!(groups(&conn).unwrap().is_empty(), "the library goes with its last folder");
+    }
+
+    #[test]
+    fn libraries_have_several_folders() {
+        let (dir, mut conn) = db();
+        let (a_root, b_root) = (relpath::join(&dir.path().to_string_lossy(), "a"), relpath::join(&dir.path().to_string_lossy(), "b"));
+        let tx = conn.transaction().unwrap();
+        let a = create(&tx, &a_root, Target::New("Minis"), Some("{title}"), None).unwrap();
+        let minis = get(&tx, a).unwrap().unwrap().group_id.unwrap();
+        let b = create(&tx, &b_root, Target::Group(minis), None, None).unwrap();
+        assert_eq!(create(&tx, &b_root, Target::Group(minis), None, None).unwrap(), b, "already there");
+        let other = new_group(&tx, "minis").unwrap();
+        assert!(create(&tx, &b_root, Target::Group(other), None, None).is_err(), "a folder belongs to one library");
+        let inner = create(&tx, &relpath::join(&b_root, "x"), Target::New("Inner"), None, None).unwrap();
+        tx.commit().unwrap();
+        let gs = groups(&conn).unwrap();
+        let names: Vec<&str> = gs.iter().map(|g| g.name.as_str()).collect();
+        assert_eq!(names, ["Inner", "Minis", "minis (2)"], "names are unique, ignoring case");
+        let g = group(&conn, minis).unwrap().unwrap();
+        assert_eq!(g.folders.iter().map(|f| f.id).collect::<Vec<_>>(), [a, b]);
+        assert_eq!(g.folders[0].pattern.as_deref(), Some("{title}"), "patterns are per folder");
+        insert(&conn, a, "one.zip");
+        insert(&conn, b, "x/two.zip");
+        insert(&conn, b, "three.zip");
+        let (lib_name, folder_name): (String, String) =
+            conn.query_row("SELECT library_name, folder_name FROM models_view WHERE rel_path = 'one.zip'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((lib_name.as_str(), folder_name.as_str()), ("Minis", "a"));
+
+        let tx = conn.transaction().unwrap();
+        assert_eq!(rename_group(&tx, minis, "Inner").unwrap(), "Inner (2)");
+        let r = remove_group(&tx, minis).unwrap();
+        tx.commit().unwrap();
+        assert_eq!((r.moved, r.deleted, r.moved_to), (0, 3, None));
+        assert!(group(&conn, minis).unwrap().is_none());
+        assert_eq!(list(&conn).unwrap().iter().map(|f| f.id).collect::<Vec<_>>(), [inner], "another library's inner folder stays");
+    }
+
+    #[test]
+    fn folders_move_between_libraries() {
+        let (_dir, mut conn) = db();
+        let tx = conn.transaction().unwrap();
+        let a = create(&tx, "/a", Target::New("A"), None, None).unwrap();
+        let b = create(&tx, "/b", Target::New("B"), Some("{title}"), None).unwrap();
+        let b2 = create(&tx, "/b2", Target::Group(get(&tx, b).unwrap().unwrap().group_id.unwrap()), None, None).unwrap();
+        tx.commit().unwrap();
+        let rec = insert(&conn, b, "Studio/Dragon.zip");
+        let (ga, gb) = (get(&conn, a).unwrap().unwrap().group_id.unwrap(), get(&conn, b).unwrap().unwrap().group_id.unwrap());
+
+        let tx = conn.transaction().unwrap();
+        assert!(!move_folder(&tx, b2, ga).unwrap(), "B keeps a folder");
+        assert!(move_folder(&tx, b, ga).unwrap(), "B, left empty, goes");
+        assert!(!move_folder(&tx, b, ga).unwrap(), "already there");
+        tx.commit().unwrap();
+        assert_eq!(of(&conn, rec), (b, "Studio/Dragon.zip".into()), "records stay with their folder");
+        assert_eq!(get(&conn, b).unwrap().unwrap().pattern.as_deref(), Some("{title}"), "and so do its settings");
+        let gs = groups(&conn).unwrap();
+        assert_eq!(gs.len(), 1);
+        assert_eq!(gs[0].folders.iter().map(|f| f.id).collect::<Vec<_>>(), [a, b, b2]);
+        assert!(group(&conn, gb).unwrap().is_none());
+    }
+
+    #[test]
+    fn folders_without_a_library_get_one() {
+        let (_dir, mut conn) = db();
+        conn.execute("INSERT INTO libraries (uuid, name, root) VALUES ('u1', 'STL', '/stl'), ('u2', 'Old', '/old')", []).unwrap();
+        let tx = conn.transaction().unwrap();
+        new_group(&tx, "stl").unwrap();
+        assert_eq!(ensure_groups(&tx).unwrap(), 2);
+        assert_eq!(ensure_groups(&tx).unwrap(), 0, "once");
+        tx.commit().unwrap();
+        let gs = groups(&conn).unwrap();
+        let old = gs.iter().find(|g| g.name == "Old").unwrap();
+        assert_eq!((old.uuid.as_str(), old.folders.len()), ("u2", 1), "the folder's identity");
+        assert!(gs.iter().any(|g| g.name == "STL (2)" && g.folders.len() == 1));
     }
 
     #[test]
     fn names_are_unique() {
         let (_dir, mut conn) = db();
         let tx = conn.transaction().unwrap();
-        let a = create(&tx, "/a/STL", None, None, None).unwrap();
-        let b = create(&tx, "/b/STL", None, None, None).unwrap();
+        let a = create(&tx, "/a/STL", Target::Around, None, None).unwrap();
+        let b = create(&tx, "/b/STL", Target::Around, None, None).unwrap();
         assert_eq!(get(&tx, b).unwrap().unwrap().name, "STL (2)");
         assert_eq!(rename(&tx, a, "stl (2)").unwrap(), "stl (2) (2)");
         assert_eq!(rename(&tx, b, "Minis").unwrap(), "Minis");
@@ -820,8 +1047,8 @@ mod tests {
         std::fs::write(new.join("Studio").join("KNIGHT.zip"), b"x").unwrap();
         let (old_s, new_s) = (old.to_string_lossy().into_owned(), new.to_string_lossy().into_owned());
         let tx = conn.transaction().unwrap();
-        let lib = create(&tx, &old_s, None, None, None).unwrap();
-        let inner = create(&tx, &relpath::join(&old_s, "Studio/Sub"), None, None, None).unwrap();
+        let lib = create(&tx, &old_s, Target::Around, None, None).unwrap();
+        let inner = create(&tx, &relpath::join(&old_s, "Studio/Sub"), Target::Around, None, None).unwrap();
         tx.commit().unwrap();
         insert(&conn, lib, "Studio/Dragon.zip");
         let knight = insert(&conn, lib, "Studio/Knight.zip");
@@ -844,7 +1071,7 @@ mod tests {
         }
         assert!(check_relocate(&conn, lib, &dir.path().join("nowhere").to_string_lossy(), None).is_err());
         let tx = conn.transaction().unwrap();
-        let other = create(&tx, &dir.path().join("other").to_string_lossy(), None, None, None).unwrap();
+        let other = create(&tx, &dir.path().join("other").to_string_lossy(), Target::Around, None, None).unwrap();
         tx.commit().unwrap();
         std::fs::create_dir_all(dir.path().join("other").join("in")).unwrap();
         let err = check_relocate(&conn, lib, &dir.path().join("other").join("in").to_string_lossy(), None).unwrap_err();

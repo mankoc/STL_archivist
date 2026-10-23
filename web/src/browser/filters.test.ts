@@ -4,6 +4,7 @@ import {
   cycleGroup,
   cycleValue,
   folderTree,
+  libraryFolderTree,
   groupMarkOf,
   isEmpty,
   markOf,
@@ -81,5 +82,25 @@ describe("folder tree", () => {
     const t = folderTree(["/srv/stl/a"]);
     expect(t[0].path).toBe("/");
     expect(t[0].children[0].path).toBe("/srv");
+  });
+
+  it("groups folders as library, then folder, then sub-folders", () => {
+    const libs = [
+      { id: 1, name: "Minis", folders: [{ root: "D:\\STL" }, { root: "/srv/more/" }, { root: "E:\\empty" }] },
+      { id: 2, name: "Gambody", folders: [{ root: "D:\\STL\\Gambody" }] },
+      { id: 3, name: "Unused", folders: [{ root: "/nowhere" }] },
+    ];
+    const folders = ["D:/STL", "D:/STL/Studio/A", "D:/STL/Gambody/Dragon", "/srv/more/x", "F:/loose/y", "D:/STLX/z"];
+    const t = libraryFolderTree(folders, libs);
+    expect(t.libraries.map((l) => l.name)).toEqual(["Minis", "Gambody"]);
+    const [stl, more] = t.libraries[0].roots;
+    expect([stl.name, stl.path, more.name, more.path]).toEqual(["D:\\STL", "D:/STL", "/srv/more/", "/srv/more"]);
+    expect(stl.children.map((n) => n.path)).toEqual(["D:/STL/Studio"]);
+    expect(stl.children[0].children[0].path).toBe("D:/STL/Studio/A");
+    expect(more.children[0].path).toBe("/srv/more/x");
+    // The deepest root wins.
+    expect(t.libraries[1].roots[0].children.map((n) => n.path)).toEqual(["D:/STL/Gambody/Dragon"]);
+    // Folders under no root, and look-alike prefixes, stay plain.
+    expect(t.other.map((n) => n.name)).toEqual(["D:", "F:"]);
   });
 });

@@ -1,4 +1,4 @@
-//! stlLibrary server (Phase 5 of `docs/rust-migration-plan.md`): the HTTP API
+//! StlArchivist server (Phase 5 of `docs/rust-migration-plan.md`): the HTTP API
 //! over `stl-core`. The server owns the data directory (compatibility rule 7):
 //! it holds the library lock, migrates the database and opens the thumbnail
 //! store once. Accounts live in their own database (`accounts`).

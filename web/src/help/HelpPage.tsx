@@ -1,4 +1,4 @@
-// Help: in-depth usage and characteristics of stlLibrary, as topics with a
+// Help: in-depth usage and characteristics of StlArchivist, as topics with a
 // searchable table of contents. A topic is addressed as `#/help/<id>`, so
 // other pages can link to it (HelpLink).
 import { ActionIcon, Alert, Anchor, Badge, Box, Code, Image, List, NavLink, ScrollArea, Stack, Table, Text, TextInput, Title, Tooltip } from "@mantine/core";

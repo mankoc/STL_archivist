@@ -1,6 +1,6 @@
-# Deploying stlLibrary
+# Deploying StlArchivist
 
-This guide is for whoever installs and runs stlLibrary: on one Windows PC, or as a server
+This guide is for whoever installs and runs StlArchivist: on one Windows PC, or as a server
 that several people reach from their browsers or the desktop app. For using the program,
 see the [user guide](user-guide.md).
 
@@ -34,18 +34,19 @@ lock file, `library.lock`, enforces it). Stop one before starting another on the
 
 ## Option A: one Windows PC
 
-1. Run `stlLibrary_<version>_x64-setup.exe`. It installs for the current user; no
+1. Run `StlArchivist_<version>_x64-setup.exe`. It installs for the current user; no
    administrator rights are needed.
-2. Start **stlLibrary** from the Start menu.
+2. Start **StlArchivist** from the Start menu.
 3. Under **This computer**, keep or change the data directory (default
    `%LOCALAPPDATA%\stlLibrary`; pick an existing library's folder to open it) and click
    **Open**.
 4. The first time, create the administrator account (name and a password of at least 8
    characters).
 
-The program is installed in `%LOCALAPPDATA%\stlLibrary`, which is also the default library
-folder; that is harmless (uninstalling removes only the program's own files, never the
-library), but you may prefer a library folder of its own, on a drive with room for the
+The program is installed in `%LOCALAPPDATA%\StlArchivist`; the default library folder is
+`%LOCALAPPDATA%\stlLibrary` (the program's former name, kept so existing libraries open as
+they are). Uninstalling removes only the program's own files, never the library, but you may
+prefer a library folder of its own, on a drive with room for the
 thumbnails.
 
 The app starts its own server on a free local port and stops it when the window closes.
@@ -99,7 +100,7 @@ Use `"0.0.0.0:8770"` to listen on the network directly (only on a trusted LAN; s
 
 ```ini
 [Unit]
-Description=stlLibrary server
+Description=StlArchivist server
 After=network-online.target
 Wants=network-online.target
 
@@ -161,7 +162,7 @@ and run it with `--gpus all` (NVIDIA Container Toolkit).
 ## Option D: a Windows server
 
 Copy `stl-server.exe` and the `web` folder side by side (both are in the desktop app's
-install folder, `%LOCALAPPDATA%\stlLibrary` by default, or in `rust\target\release` and
+install folder, `%LOCALAPPDATA%\StlArchivist` by default, or in `rust\target\release` and
 `web\dist` of a source build) and run:
 
 ```powershell
@@ -169,7 +170,7 @@ stl-server.exe --data-dir D:\STL_DB --bind 0.0.0.0:8770
 ```
 
 To run it without anyone signed in, register it as a service with a service wrapper such as
-[NSSM](https://nssm.cc) (`nssm install stlLibrary C:\stlLibrary\stl-server.exe --data-dir
+[NSSM](https://nssm.cc) (`nssm install StlArchivist C:\StlArchivist\stl-server.exe --data-dir
 D:\STL_DB`), or as a Task Scheduler task that starts at boot. Allow the port in Windows
 Firewall. Run it under an account that can read (and, for sidecars, write) the archive
 folders.
@@ -250,8 +251,8 @@ Other command-line commands:
 stl-server create-admin NAME [--data-dir DIR]     first administrator (no users yet)
 stl-server restore FILE.7z [--data-dir DIR]        restore a backup (server stopped)
 stl-server openapi                                 print the API description
-stl-server libraries [list] | relocate NAME NEW_ROOT [--apply] [--fix-case] [--data-dir DIR]
-                                                   list libraries, or move one to a new root
+stl-server libraries [list] | relocate FOLDER NEW_ROOT [--apply] [--fix-case] [--data-dir DIR]
+                                                   list libraries and their folders, or move a folder
                                                    (checks first; server stopped)
 stl-server worker --server URL [--data-dir DIR]    compute worker for a remote server (token in
                                                    STL_WORKER_TOKEN; the desktop app starts it)
@@ -374,7 +375,7 @@ for the event stream).
 
 ## Monitored folders
 
-*Jobs → Libraries*: the eye button (editors) monitors a library. Every
+*Libraries*: the eye button (editors) monitors a library's folder. Every
 *Check monitored folders every* minutes (*Settings → Library*, default 30) the server lists
 the folder's archives and compares them with the library by size and modification date —
 no archive is opened, so a check of an unchanged folder is cheap even on a NAS. When an
@@ -403,16 +404,16 @@ user menu. Accounts live in `<data dir>/server.db`, apart from the library.
 ## Moving an existing library
 
 The data directory is the whole library: copy it (with the server stopped), or use a backup.
-Records store their archive paths relative to their **library** (a catalogued folder: a
-name, a root and a permanent id), in a form that is the same on every operating system; the
-only machine-specific part is each library's root.
+Records store their archive paths relative to their **library folder** (a library is a name
+and one or more folders, each with a root and a permanent id), in a form that is the same on
+every operating system; the only machine-specific part is each folder's root.
 
 **Same paths** (same machine, or the archives at the same paths): start the server on the
 copied data directory. Done.
 
 **Different paths** (another drive or mount point, a Linux server for a library catalogued on
-Windows): start the server on the copied or restored data directory; *Jobs → Libraries* shows
-each library whose folder is not there as *root not found*. Click **Move** on each, choose the
+Windows): start the server on the copied or restored data directory; the *Libraries* page shows
+each folder that is not there as *root not found*. Click **Move** on each, choose the
 folder where its archives now are, **Check** (every archive is looked up; found, missing and
 found-with-another-letter-case are counted) and **Move**. Nothing is re-read: records, edits,
 tags, thumbnails and embeddings stay. Moving from Windows to Linux, keep *adopt the letter
@@ -420,7 +421,7 @@ case found on disk* on, since Linux tells `Dragon.zip` and `dragon.zip` apart. O
 server:
 
 ```bash
-stl-server libraries list --data-dir /srv/stl-data
+stl-server libraries list --data-dir /srv/stl-data                                 # folders: id, name, root
 stl-server libraries relocate "STL" /library/STL --data-dir /srv/stl-data            # check
 stl-server libraries relocate "STL" /library/STL --apply --fix-case --data-dir /srv/stl-data
 ```

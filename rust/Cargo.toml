@@ -1,10 +1,10 @@
 [workspace]
-# stlLibrary Rust core. See docs/rust-migration-plan.md.
+# StlArchivist Rust core. See docs/rust-migration-plan.md.
 resolver = "2"
 members = ["stl-core", "stl-server", "stl-desktop", "stl-proc"]
 
 [workspace.package]
-version = "2026.43.8"
+version = "2026.43.9"
 edition = "2024"
 license = "CC-BY-NC-SA-4.0"
 

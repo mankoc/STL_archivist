@@ -1,31 +1,15 @@
-// Crawls (the desktop's Crawler): the libraries, the job queue, and a live
-// log. Database Maintenance has its own page (MaintenancePage).
-import {
-  ActionIcon, Badge, Box, Button, Card, Checkbox, Group, Modal, Progress, ScrollArea, Stack,
-  Text, TextInput, Title, UnstyledButton,
-} from "@mantine/core";
-import { notifications } from "@mantine/notifications";
+// Jobs: the job queue and a live log. Libraries (crawls) and Database
+// Maintenance have their own pages (LibrariesPage, MaintenancePage).
+import { ActionIcon, Badge, Box, Card, Group, Progress, ScrollArea, Stack, Text, Title, UnstyledButton } from "@mantine/core";
 import { IconPlayerStop } from "@tabler/icons-react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api, unwrap } from "../api/client";
 import { type ServerEvent, useServerEvent } from "../api/events";
 import { hasRole, useUser } from "../auth/user";
-import { LibrariesCard } from "./LibrariesCard";
-import { describe, elapsed, isActive, type Job, type JobRequest, percent, progressText, sortJobs, STATE_COLOR } from "./jobs";
+import { describe, elapsed, isActive, type Job, percent, progressText, sortJobs, STATE_COLOR } from "./jobs";
 import classes from "./JobsPage.module.css";
-
-async function submit(request: JobRequest) {
-  try {
-    const job = unwrap(await api.POST("/api/jobs", { body: request }));
-    notifications.show({ message: `Queued: ${describe(job)}` });
-    return job;
-  } catch (err) {
-    notifications.show({ color: "red", title: "Could not start", message: (err as Error).message });
-    return null;
-  }
-}
 
 function useNow(active: boolean) {
   const [now, setNow] = useState(() => Date.now() / 1000);
@@ -40,33 +24,20 @@ function useNow(active: boolean) {
 export function JobsPage() {
   const user = useUser();
   const editor = hasRole(user, "editor");
-  const queryClient = useQueryClient();
   const jobs = useQuery({ queryKey: ["jobs"], queryFn: async () => unwrap(await api.GET("/api/jobs")) });
   const [selected, setSelected] = useState<number | null>(null);
-  const [crawl, setCrawl] = useState<{ folder: string; pattern: string; force: boolean } | null>(null);
   const list = sortJobs(jobs.data ?? []);
   const now = useNow(list.some(isActive));
   const shown = selected ?? list[0]?.id ?? null;
 
-  const refreshLibraries = () => queryClient.invalidateQueries({ queryKey: ["libraries"] });
-  const start = async (request: JobRequest) => {
-    const job = await submit(request);
-    if (job) setSelected(job.id);
-  };
-
   return (
     <div className={classes.layout}>
-      <Stack gap="md" className={classes.column}>
-        <LibrariesCard editor={editor} onCrawl={(folder, pattern) => setCrawl({ folder, pattern, force: false })} start={start} />
-
-      </Stack>
-
       <Stack gap="md" className={classes.column}>
         <Card withBorder className={classes.jobs}>
           <Title order={5} mb="xs">
             Jobs
           </Title>
-          <ScrollArea.Autosize mah={280}>
+          <ScrollArea.Autosize mah="calc(100vh - 160px)">
             {list.map((job) => {
               const p = percent(job);
               return (
@@ -113,41 +84,12 @@ export function JobsPage() {
             )}
           </ScrollArea.Autosize>
         </Card>
+      </Stack>
+
+      <Stack gap="md" className={classes.column}>
         {shown != null && <JobLog id={shown} job={list.find((j) => j.id === shown)} />}
       </Stack>
 
-      <Modal opened={crawl != null} onClose={() => setCrawl(null)} title="Crawl folder">
-        {crawl && (
-          <Stack>
-            <Text size="sm" style={{ wordBreak: "break-all" }}>
-              {crawl.folder}
-            </Text>
-            <TextInput
-              label="Path pattern"
-              description="For example {sculptor}/{release}/{title}; empty to take values from the archives only"
-              value={crawl.pattern}
-              onChange={(e) => setCrawl({ ...crawl, pattern: e.currentTarget.value })}
-            />
-            <Checkbox label="Re-extract archives whose content did not change" checked={crawl.force} onChange={(e) => setCrawl({ ...crawl, force: e.currentTarget.checked })} />
-            <Group justify="flex-end">
-              <Button variant="default" onClick={() => setCrawl(null)}>
-                Cancel
-              </Button>
-              <Button
-                data-testid="start-crawl"
-                onClick={async () => {
-                  const c = crawl;
-                  setCrawl(null);
-                  await start({ kind: "crawl", folder: c.folder, pattern: c.pattern, force_rescan: c.force });
-                  await refreshLibraries();
-                }}
-              >
-                Start
-              </Button>
-            </Group>
-          </Stack>
-        )}
-      </Modal>
     </div>
   );
 }

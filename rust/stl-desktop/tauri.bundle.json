@@ -1,10 +1,10 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "version": "2026.43.8",
+  "version": "2026.43.9",
   "bundle": {
     "active": true,
     "targets": ["nsis"],
-    "publisher": "stlLibrary",
+    "publisher": "StlArchivist",
     "shortDescription": "Catalogue and browse collections of 3D-printable model archives",
     "resources": {
       "../target/release/stl-server.exe": "stl-server.exe",

@@ -169,8 +169,9 @@ fn sort_paths(v: &mut [String]) {
     v.sort_by_cached_key(|p| p.to_lowercase().split(['\\', '/']).map(str::to_string).collect::<Vec<_>>());
 }
 
-/// `iter_archives` (`rglob("*")`: files and folders, no symlinked folders
-/// followed) or the folder's own archive files, sorted, without `METADATA.7z`.
+/// `iter_archives` (`rglob("*")`, no symlinked folders followed) or the
+/// folder's own archive files, sorted, without `METADATA.7z`. Only files count:
+/// a folder named like an archive (`Dragon.7z/`) is entered, not listed.
 /// Folders in `skip` (the roots of libraries inside this one) are not entered.
 pub fn list_archives(root: &str, recurse: bool, skip: &[String]) -> Vec<String> {
     let skip: Vec<String> = skip.iter().map(|s| crate::relpath::path_key(s)).collect();
@@ -185,7 +186,7 @@ pub fn list_archives(root: &str, recurse: bool, skip: &[String]) -> Vec<String> 
             let ft = e.file_type().ok();
             let is_dir = ft.is_some_and(|t| t.is_dir());
             if recurse {
-                if is_archive_suffix(&name) && name != sidecar::METADATA_FILENAME {
+                if is_archive_suffix(&name) && name != sidecar::METADATA_FILENAME && std::path::Path::new(&path).is_file() {
                     out.push(path.clone());
                 }
                 if is_dir && !skip.contains(&crate::relpath::path_key(&path)) {
@@ -711,7 +712,7 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
     // libraries inside it are crawled on their own.
     let library = {
         let t = tx(&mut run.conn)?;
-        let id = storage::libraries::create(&t, &cfg.source_dir, None, None, None)?;
+        let id = storage::libraries::create(&t, &cfg.source_dir, storage::libraries::Target::Around, None, None)?;
         t.commit()?;
         id
     };
@@ -942,15 +943,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = crate::winpath::native(&dir.path().to_string_lossy());
         std::fs::create_dir_all(dir.path().join("B")).unwrap();
-        for f in ["a.ZIP", "B/c.7z", "b.rar", "METADATA.7z", "x.txt", "B/METADATA.7z"] {
+        std::fs::create_dir_all(dir.path().join("D.7z")).unwrap();
+        for f in ["a.ZIP", "B/c.7z", "b.rar", "METADATA.7z", "x.txt", "B/METADATA.7z", "D.7z/e.zip"] {
             std::fs::write(dir.path().join(f), b"x").unwrap();
         }
         let names = |v: Vec<String>| v.iter().map(|p| p[root.len() + 1..].to_string()).collect::<Vec<_>>();
         // Python sorts Windows paths by lowercased components: "b" < "b.rar".
+        // The folder `D.7z` is entered, not listed.
         let sep = crate::winpath::SEP;
-        assert_eq!(names(list_archives(&root, true, &[])), ["a.ZIP", &format!("B{sep}c.7z"), "b.rar"]);
+        assert_eq!(names(list_archives(&root, true, &[])), ["a.ZIP", &format!("B{sep}c.7z"), "b.rar", &format!("D.7z{sep}e.zip")]);
         assert_eq!(names(list_archives(&root, false, &[])), ["a.ZIP", "b.rar"]);
-        assert_eq!(names(list_archives(&root, true, &[crate::winpath::join(&root, "B")])), ["a.ZIP", "b.rar"], "an inner library");
+        assert_eq!(names(list_archives(&root, true, &[crate::winpath::join(&root, "B")])), ["a.ZIP", "b.rar", &format!("D.7z{sep}e.zip")], "an inner library");
         let stl = stl_dict(
             [("a.stl", Some(1)), ("x.png", Some(2)), ("a.stl", Some(3)), ("b.OBJ", None)]
                 .into_iter()

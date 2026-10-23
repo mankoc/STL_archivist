@@ -42,6 +42,23 @@ CREATE TABLE collections (
         ],
     },
     TableDdl {
+        name: "library_groups",
+        create: r#"
+CREATE TABLE library_groups (
+	id INTEGER NOT NULL, 
+	uuid VARCHAR(36) NOT NULL, 
+	name VARCHAR(256) NOT NULL, 
+	created_at DATETIME, 
+	PRIMARY KEY (id), 
+	UNIQUE (uuid), 
+	UNIQUE (name)
+)
+
+"#,
+        indexes: &[
+        ],
+    },
+    TableDdl {
         name: "libraries",
         create: r#"
 CREATE TABLE libraries (
@@ -57,9 +74,11 @@ CREATE TABLE libraries (
 	updated_count INTEGER, 
 	origin VARCHAR(32), 
 	created_at DATETIME, 
+	group_id INTEGER, 
 	PRIMARY KEY (id), 
 	UNIQUE (uuid), 
-	UNIQUE (name)
+	UNIQUE (name), 
+	FOREIGN KEY(group_id) REFERENCES library_groups (id)
 )
 
 "#,
@@ -296,6 +315,7 @@ CREATE TABLE stl_files (
 
 /// `(table, column, ddl)`.
 pub const ADD_COLUMNS: &[(&str, &str, &str)] = &[
+    ("libraries", "group_id", r#"ALTER TABLE "libraries" ADD COLUMN "group_id" INTEGER REFERENCES library_groups (id)"#),
     ("categories", "id", r#"ALTER TABLE "categories" ADD COLUMN "id" INTEGER NOT NULL"#),
     ("categories", "name", r#"ALTER TABLE "categories" ADD COLUMN "name" VARCHAR(128) NOT NULL"#),
     ("collections", "id", r#"ALTER TABLE "collections" ADD COLUMN "id" INTEGER NOT NULL"#),
@@ -382,7 +402,8 @@ SELECT
     m.id, m.title, m.creator, m.source,
     m.release_year, m.release_month,
     path_join(lib.root, m.rel_path) AS archive_path, m.presupports, m.warning,
-    m.library_id, m.rel_path, m.rel_folder, lib.name AS library_name,
+    m.library_id, m.rel_path, m.rel_folder, coalesce(grp.name, lib.name) AS library_name,
+    lib.group_id AS library_group_id, lib.name AS folder_name,
     m.archive_size, m.compression_rate,
     m.sequence, m.created_at,
     m.sculptor_id, m.collection_id, m.subcollection_id,
@@ -399,7 +420,8 @@ LEFT JOIN collections    col ON m.collection_id    = col.id
 LEFT JOIN subcollections sub ON m.subcollection_id = sub.id
 LEFT JOIN categories     cat ON m.category_id      = cat.id
 LEFT JOIN releases       rel ON m.release_id       = rel.id
-JOIN libraries           lib ON m.library_id       = lib.id"#;
+JOIN libraries           lib ON m.library_id       = lib.id
+LEFT JOIN library_groups grp ON lib.group_id       = grp.id"#;
 
 /// SQL for a model's absolute archive path (`m` is the models table's alias):
 /// its library's root joined with its relative path, in this system's spelling.

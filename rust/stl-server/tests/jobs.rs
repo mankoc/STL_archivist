@@ -102,8 +102,8 @@ async fn crawl_job_catalogues_a_folder() {
     assert!(changed);
 
     // The folder is tracked with its pattern; a second crawl finds nothing new.
-    let folders = call(&lib.state, "GET", "/api/libraries", Some(&ed), None).await.json();
-    assert_eq!(folders[0]["pattern"], "{sculptor}/{title}");
+    let libs = call(&lib.state, "GET", "/api/libraries", Some(&ed), None).await.json();
+    assert_eq!(libs[0]["folders"][0]["pattern"], "{sculptor}/{title}");
     let id = submit(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy()})).await;
     assert_eq!(wait(&lib, &ed, id).await["job"]["message"], "0 new, 0 updated, 2 unchanged");
 

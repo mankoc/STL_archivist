@@ -1,4 +1,4 @@
-# stlLibrary server (rust/stl-server) and web client (web/), with pdfium (PDF
+# StlArchivist server (rust/stl-server) and web client (web/), with pdfium (PDF
 # previews) and ONNX Runtime (AI embeddings). See docs/deployment.md → "Option C: Docker".
 #
 #   docker build -t stllibrary-server .

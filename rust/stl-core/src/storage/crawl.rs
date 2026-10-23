@@ -812,7 +812,7 @@ pub fn record_folder(
     new_count: i64,
     updated_count: i64,
 ) -> Result<()> {
-    let id = libraries::create(tx, path, None, None, None)?;
+    let id = libraries::create(tx, path, libraries::Target::Around, None, None)?;
     tx.execute(
         "UPDATE libraries SET pattern = ?2, last_crawled_at = ?3, archive_count = ?4, new_count = ?5, \
          updated_count = ?6 WHERE id = ?1",

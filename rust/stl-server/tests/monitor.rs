@@ -68,14 +68,14 @@ async fn monitored_folders_are_crawled_when_they_change() {
 
     // The switch: editors, on a library.
     let libs = call(&lib.state, "GET", "/api/libraries", Some(&viewer), None).await.json();
-    let id = libs[0]["id"].as_i64().unwrap();
+    let id = libs[0]["folders"][0]["id"].as_i64().unwrap();
     let body = json!({"monitored": true});
-    let uri = format!("/api/libraries/{id}");
+    let uri = format!("/api/libraries/folders/{id}");
     assert_eq!(call(&lib.state, "PATCH", &uri, Some(&viewer), Some(body.clone())).await.status, StatusCode::FORBIDDEN);
-    assert_eq!(call(&lib.state, "PATCH", "/api/libraries/999", Some(&ed), Some(body.clone())).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(call(&lib.state, "PATCH", "/api/libraries/folders/999", Some(&ed), Some(body.clone())).await.status, StatusCode::NOT_FOUND);
     assert_eq!(call(&lib.state, "PATCH", &uri, Some(&ed), Some(body)).await.status, StatusCode::OK);
     let folders = call(&lib.state, "GET", "/api/libraries", Some(&viewer), None).await.json();
-    assert_eq!(folders[0]["monitored"], true, "{folders}");
+    assert_eq!(folders[0]["folders"][0]["monitored"], true, "{folders}");
 
     // A new archive: one crawl, by the monitor.
     let crawls = check(&lib, &ed).await;

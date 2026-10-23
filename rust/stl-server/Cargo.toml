@@ -1,6 +1,6 @@
 [package]
 name = "stl-server"
-description = "stlLibrary server: HTTP + WebSocket API over stl-core (Phase 5)"
+description = "StlArchivist server: HTTP + WebSocket API over stl-core (Phase 5)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

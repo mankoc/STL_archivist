@@ -1,8 +1,8 @@
-# stlLibrary — Developer Guide
+# StlArchivist — Developer Guide
 
 ## Overview
 
-stlLibrary catalogues local collections of 3D-printable model archives (`.zip`, `.7z`,
+StlArchivist (formerly stlLibrary) catalogues local collections of 3D-printable model archives (`.zip`, `.7z`,
 `.rar`): metadata, thumbnails, tags, duplicates, AI tagging. It is a Rust server
 (`stl-server`, over the `stl-core` library) with a React web client served by it, and a Tauri
 desktop app (`stl-desktop`) that shows the client in a window and can run a local server.
@@ -25,7 +25,8 @@ cd rust && cargo build -p stl-server -p stl-desktop && cargo run -p stl-desktop
 cd web && npm install && npm run dev
 npm run build        # web/dist, served by stl-server
 npm test             # vitest
-npm run gen:api      # after changing server routes or schemas
+npm run gen:api      # after changing server routes or schemas, then (from the repository root)
+python tools/api_doc.py  # docs/api.md, the API reference, from web/openapi.json
 
 # Checks (all must pass)
 cd rust && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings
@@ -60,7 +61,9 @@ stl_database/
   thumbnails and settings must still open older data directories. See
   `docs/libraries-plan.md` and the migration plan's compatibility rules before changing formats.
 - **Paths:** a model's archive is `library_id` + `rel_path` (a `relpath::RelPath`: `/`
-  separators, NFC, no `..`) below the library's root; never store an absolute path. In Rust go
+  separators, NFC, no `..`) below the root of its library *folder* (a row of `libraries`,
+  `storage::libraries::Folder`; the library users see is its `library_groups` row, a
+  `Group`, through `libraries.group_id`); never store an absolute path. In Rust go
   between absolute and relative paths with `libraries::Roots` (`locate` = deepest library;
   `locate_or_create` where a move may leave every library), in SQL read
   `schema_sql::archive_path_sql` / `archive_folder_sql` or `models_view.archive_path`, and look
@@ -90,7 +93,7 @@ stl_database/
   a session with `TestLib::user(name, role)`; `library_with` adjusts the config.
 - **Edits:** after a write commits, call `lib.schedule_sidecars(archive_paths)`; delete
   thumbnails with one `thumbs.delete_many` after the commit. Writes under `/api/models`,
-  `/api/images`, `/api/lookups`, `/api/maintenance` and `/api/ai/commit` are announced by
+  `/api/images`, `/api/lookups`, `/api/maintenance`, `/api/libraries` and `/api/ai/commit` are announced by
   the `announce_changes` middleware (POSTs that only read are listed there). Library settings
   come from `library_settings::LibrarySettings` (`settings.json`, read per use).
 - **Jobs:** `jobs.rs`. A new kind is a `JobRequest` variant, a `kind()` name, a `run` arm,

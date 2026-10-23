@@ -3,7 +3,7 @@ name = "stl-desktop"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "stlLibrary desktop shell: a Tauri window on an stl-server (Phase 7)"
+description = "StlArchivist desktop shell: a Tauri window on an stl-server (Phase 7)"
 
 [[bin]]
 name = "stl-desktop"

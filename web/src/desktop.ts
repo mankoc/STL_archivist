@@ -1,4 +1,4 @@
-// The stlLibrary desktop shell (rust/stl-desktop): when the web client runs in
+// The StlArchivist desktop shell (rust/stl-desktop): when the web client runs in
 // its window, the shell lets this page show folders in the file manager and run
 // a compute worker for this server. Those are the only shell commands a
 // server's page may call.
