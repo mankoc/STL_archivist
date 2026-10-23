@@ -69,6 +69,23 @@ pub struct Removed {
     pub pruned: BTreeMap<String, usize>,
 }
 
+/// Remove the records of every missing archive (editors), as *Remove* does for
+/// a selection: archives gone from monitored folders are marked missing, and
+/// this clears them out. The archive files are not touched.
+#[utoipa::path(post, path = "/api/maintenance/remove-missing", tag = "maintenance",
+    responses((status = 200, body = Removed), (status = 403, body = crate::error::ErrorBody)))]
+pub async fn remove_missing(State(lib): State<AppState>, me: CurrentUser) -> Result<Json<Removed>, ApiError> {
+    me.require(Role::Editor)?;
+    let ids = lib
+        .run(|lib| {
+            Ok(lib.db.with(|c| {
+                c.prepare("SELECT id FROM models WHERE coalesce(is_missing, 0)")?.query_map([], |r| r.get::<_, i64>(0))?.collect::<rusqlite::Result<Vec<_>>>()
+            })?)
+        })
+        .await?;
+    remove(State(lib), me, Json(RemoveRecords { ids })).await
+}
+
 /// Remove records from the library and prune lookups left unused (Remove
 /// Selected / All Missing). The archive files are not touched.
 #[utoipa::path(post, path = "/api/maintenance/remove", tag = "maintenance", request_body = RemoveRecords,

@@ -157,7 +157,7 @@ function Review({ ids, maxTags, ignoreMeta, overwrite, onDone }: { ids: number[]
       )}
       {shownImages.length > 0 && (
         <SimpleGrid cols={6} spacing={6}>
-          {shownImages.map((i) => <Image key={i} src={`/api/images/${i}/thumbnail`} radius="sm" h={80} fit="contain" alt="" />)}
+          {shownImages.map((i) => <Image key={i} src={`/api/images/${i}/thumbnail`} radius="md" h={80} fit="contain" alt="" />)}
         </SimpleGrid>
       )}
       {suggestion && (

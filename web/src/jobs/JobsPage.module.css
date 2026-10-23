@@ -5,18 +5,30 @@
   padding: var(--mantine-spacing-md);
   height: 100%;
   min-height: 0;
+  /* Side by side, each column gets the page's height and scrolls on its own. */
+  grid-template-rows: minmax(0, 1fr);
   overflow: auto;
 }
 
 .column {
   min-height: 0;
+  overflow-y: auto;
+  /* Room for the scroll bar beside the cards' borders. */
+  padding-right: 2px;
+}
+
+/* Cards keep their full height (a short window scrolls the column instead of
+   squeezing them and hiding their buttons); a card that fills the rest sets
+   its own flex and minimum height. */
+.column > * {
+  flex-shrink: 0;
 }
 
 .job {
   display: block;
   width: 100%;
   padding: 6px 8px;
-  border-radius: var(--mantine-radius-sm);
+  border-radius: var(--mantine-radius-md);
 }
 
 .job:hover {
@@ -41,7 +53,13 @@
 }
 
 @media (max-width: 62em) {
+  /* One column under the other: the page scrolls as a whole. */
   .layout {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+  }
+
+  .column {
+    overflow-y: visible;
   }
 }

@@ -1,0 +1,108 @@
+// The optional components with their variants, sizes and state, and the
+// Download / Remove buttons: the server's (Maintenance → AI and add-on
+// components) and the compute worker's on this computer share it.
+import { Alert, Anchor, Badge, Button, Checkbox, Group, SegmentedControl, Table, Text } from "@mantine/core";
+import { useEffect, useMemo, useState } from "react";
+
+import { formatSize } from "../format";
+import { type ComponentsInfo, defaultVariants, installable, NEEDS_ACCEPTANCE, sizeOf, totalBytes, variantLabel } from "./components";
+
+const GPU: Record<string, string> = { nvidia: "NVIDIA", amd: "AMD", intel: "Intel" };
+
+const STATE: Record<string, [string, string]> = {
+  installed: ["green", "installed"],
+  missing: ["gray", "not installed"],
+  external: ["blue", "configured elsewhere"],
+  unavailable: ["orange", "not offered here"],
+};
+
+/** The GPUs found, and where CLIP runs. */
+export function GpuLine({ info }: { info: ComponentsInfo }) {
+  return (
+    <Text size="xs" c="dimmed" mb="xs" data-testid="gpus">
+      {info.gpus.length ? `GPU found: ${info.gpus.map((g) => GPU[g] ?? g).join(", ")}` : "No GPU detected"}
+      {info.clip_provider ? ` · CLIP encoder runs on ${info.clip_provider}` : ""}
+    </Text>
+  );
+}
+
+export function ComponentsTable({ info, busy, onInstall, onRemove }: {
+  info: ComponentsInfo;
+  /** An install or removal is running: the buttons wait. */
+  busy?: boolean;
+  onInstall: (components: string[], variants: Record<string, string>) => void;
+  onRemove: (components: string[]) => void;
+}) {
+  const [variants, setVariants] = useState<Record<string, string> | null>(null);
+  const [chosen, setChosen] = useState<string[]>([]);
+  const [accepted, setAccepted] = useState(false);
+  useEffect(() => {
+    if (variants == null) setVariants(defaultVariants(info));
+  }, [info, variants]);
+  const vs = useMemo(() => variants ?? {}, [variants]);
+  const components = info.components;
+  const toInstall = chosen.filter((id) => components.some((c) => c.id === id && installable(c, vs[id])));
+  const toRemove = chosen.filter((id) => components.some((c) => c.id === id && c.state === "installed"));
+  const total = totalBytes(components, chosen, vs);
+  const needsLicence = toInstall.some((id) => NEEDS_ACCEPTANCE.includes(id));
+  const toggle = (id: string) => setChosen((c) => (c.includes(id) ? c.filter((x) => x !== id) : [...c, id]));
+
+  return (
+    <>
+      <Table fz="sm" verticalSpacing={4}>
+        <Table.Tbody>
+          {components.map((c) => {
+            const [color, label] = STATE[c.state] ?? ["gray", c.state];
+            const v = vs[c.id];
+            const selectable = installable(c, v) || c.state === "installed";
+            return (
+              <Table.Tr key={c.id} data-testid="component-row">
+                <Table.Td w={32}>
+                  <Checkbox size="xs" disabled={!selectable} checked={chosen.includes(c.id)} onChange={() => toggle(c.id)} aria-label={c.label} />
+                </Table.Td>
+                <Table.Td>
+                  <Text size="sm">{c.label}</Text>
+                  <Text size="xs" c="dimmed">
+                    {c.enables} · <Anchor href={c.license_url} target="_blank" size="xs">{c.license}</Anchor>
+                    {c.state !== "missing" && c.detail ? ` · ${c.detail}` : ""}
+                  </Text>
+                  {c.variants.length > 1 && c.state !== "external" && (
+                    <SegmentedControl size="xs" mt={4} value={v} data-testid={`variant-${c.id}`}
+                      onChange={(x) => setVariants({ ...vs, [c.id]: x })}
+                      data={c.variants.map((x) => ({ value: x, label: variantLabel(x) }))} />
+                  )}
+                </Table.Td>
+                <Table.Td w={90} ta="right">{formatSize(sizeOf(c, v))}</Table.Td>
+                <Table.Td w={150}>
+                  <Badge size="sm" variant="light" color={color}>
+                    {label}{c.variant ? ` (${variantLabel(c.variant)})` : ""}
+                  </Badge>
+                </Table.Td>
+              </Table.Tr>
+            );
+          })}
+        </Table.Tbody>
+      </Table>
+      {needsLicence && (
+        <Alert mt="xs" color="yellow">
+          <Checkbox size="xs" checked={accepted} onChange={(e) => setAccepted(e.currentTarget.checked)} data-testid="accept-licence"
+            label={<>I accept the <Anchor href={components.find((c) => c.id === "ai_model")?.license_url} target="_blank" size="xs">Qwen Research License</Anchor> of the AI tagger model (it limits commercial use).</>} />
+        </Alert>
+      )}
+      <Group mt="xs" gap="xs">
+        <Button size="xs" disabled={busy || !toInstall.length || (needsLicence && !accepted)} data-testid="install-components"
+          onClick={() => {
+            onInstall(toInstall, Object.fromEntries(toInstall.filter((id) => vs[id]).map((id) => [id, vs[id]])));
+            setChosen([]);
+            setAccepted(false);
+          }}>
+          Download {toInstall.length ? `(${formatSize(total)})` : ""}
+        </Button>
+        <Button size="xs" variant="light" color="red" disabled={busy || !toRemove.length}
+          onClick={() => { onRemove(toRemove); setChosen([]); }}>
+          Remove selected
+        </Button>
+      </Group>
+    </>
+  );
+}

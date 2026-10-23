@@ -1,5 +1,35 @@
 # Changelog
 
+## 2026.43.6 — 2026-10-22
+
+- **Compute worker components from the remote server's page.** In the desktop app,
+  *Maintenance → Compute workers → This computer* lists the worker's components and
+  downloads or removes them (ONNX Runtime with DirectML or CUDA, the CLIP encoder, the AI
+  tagger's runtime and model; defaults follow the GPUs found, with the model's licence to
+  accept), with progress — no local library needed any more. *Change folder…* chooses where
+  they go (default: the local library's folder, else `%LOCALAPPDATA%\stlLibrary\worker`).
+  The worker pauses during an install and starts again with the new components.
+- New command `stl-server components status|install|remove [ID...] [--variant ID=V]
+  [--data-dir DIR]`: the components of a folder without opening its library (JSON output).
+- The components table is shared by the server's card and the worker's (`ComponentsTable`).
+- **Monitored folders.** The eye button on a crawled folder (*Jobs*) monitors it: every
+  *Check monitored folders every* minutes (*Settings → Library*, `monitor_interval_minutes`,
+  default 30) the server compares the folder with the library by file size and date, without
+  opening archives, and queues a crawl (user `monitor`) only when archives were added,
+  changed or removed. Removed archives are marked missing instead of deleted. New column
+  `crawled_folders.monitored` (added by the migration; the old desktop app ignores it), routes
+  `POST /api/crawled-folders/monitor` and `GET /api/crawled-folders` → `monitored`, crawl
+  option `keep_missing`, and `stl_core::monitor`.
+- **Rounder interface:** a client theme (`web/src/theme.ts`) gives buttons, action icons and
+  segmented controls pill shapes, cards, modals, alerts and notifications larger corners, and
+  inputs, menus and thumbnails medium ones; the desktop launcher page follows.
+- **Maintenance and Jobs on short windows:** the cards keep their full height and each column
+  scrolls, instead of squeezing the cards and hiding their buttons; on narrow screens the
+  columns stack and the page scrolls.
+- **Remove missing archives** (*Maintenance → Records*, editors; `POST
+  /api/maintenance/remove-missing`): deletes the records of every archive marked missing
+  (files are not touched).
+
 ## 2026.43.5 — 2026-10-22
 
 - **Compute workers.** A server without a GPU can hand CLIP embeddings and the AI tagger

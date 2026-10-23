@@ -1338,6 +1338,17 @@ server (installer and Docker image) and the desktop shell.
   (`ai.rs` now takes a `Config`, so the worker needs no library). `compute: workers` makes
   the server wait for a worker instead of computing. The desktop shell gained the worker
   commands for server pages (only for the calling origin).
+- 2026.43.6 let the desktop download a worker's components without a local library:
+  `components.rs` works on a `Place` (a config, plus the running AI runtime and tools when a
+  library is open) and `stl-server components status|install|remove` drives it from the
+  command line (JSON lines); the shell runs it for the worker's folder, which the page can
+  change.
+- 2026.43.6 also added monitored folders: `crawled_folders.monitored` (an `ADD_COLUMNS`
+  entry with `DEFAULT 0`, so the old app's inserts still work), `stl_core::monitor::changes`
+  (size and mtime against `archive_size` / `archive_mtime_ns`, the crawler's own unchanged
+  test) and `stl-server/src/monitor.rs` (a background pass each minute; due folders that
+  changed get a `crawl` job with `keep_missing`, which defers deletion as Update Folders
+  does). `POST /api/maintenance/remove-missing` removes the missing records.
 - 2026.43.4 also fixed crawling on Linux: the crawler, rescans and sidecars built paths with
   `\` (the Windows spelling the old app stored), so a Linux server never entered subfolders.
   `winpath::{SEP, native, join}` now spell paths with the platform's separator; Windows keeps

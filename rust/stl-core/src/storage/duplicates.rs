@@ -41,6 +41,25 @@ pub fn crawled_folders(conn: &Connection) -> Result<Vec<(String, Option<String>)
     st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()
 }
 
+/// A crawled folder for its list: path, stored pattern, and whether it is monitored.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CrawledFolder {
+    pub path: String,
+    pub pattern: Option<String>,
+    pub monitored: bool,
+}
+
+/// The crawled folders, by path.
+pub fn crawled_folder_list(conn: &Connection) -> Result<Vec<CrawledFolder>> {
+    let mut st = conn.prepare("SELECT path, pattern, coalesce(monitored, 0) FROM crawled_folders ORDER BY path")?;
+    st.query_map([], |r| Ok(CrawledFolder { path: r.get(0)?, pattern: r.get(1)?, monitored: r.get::<_, i64>(2)? != 0 }))?.collect()
+}
+
+/// Monitor a crawled folder or stop; returns whether it is tracked.
+pub fn set_monitored(tx: &rusqlite::Transaction, path: &str, monitored: bool) -> Result<bool> {
+    Ok(tx.execute("UPDATE crawled_folders SET monitored = ?2 WHERE path = ?1", rusqlite::params![path, monitored as i64])? > 0)
+}
+
 /// Track a folder for crawling unless it is tracked already; returns whether it was added.
 pub fn add_crawled_folder(tx: &rusqlite::Transaction, path: &str) -> Result<bool> {
     let n = tx.execute(

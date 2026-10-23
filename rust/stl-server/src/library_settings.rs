@@ -112,6 +112,16 @@ impl LibrarySettings {
         self.0.get("ai_temperature").and_then(Value::as_f64).unwrap_or(0.2)
     }
 
+    /// How often monitored folders are checked (minutes).
+    pub fn monitor_interval_minutes(&self) -> u32 {
+        self.0
+            .get("monitor_interval_minutes")
+            .and_then(Value::as_u64)
+            .and_then(|n| u32::try_from(n).ok())
+            .filter(|n| (1..=MONITOR_INTERVAL_MAX).contains(n))
+            .unwrap_or(MONITOR_INTERVAL_DEFAULT)
+    }
+
     pub fn low_compression_threshold(&self) -> f64 {
         self.0.get("low_compression_threshold").and_then(Value::as_f64).unwrap_or(0.95)
     }
@@ -127,6 +137,9 @@ impl LibrarySettings {
 }
 
 pub const MAX_THUMBS_DEFAULT: usize = 5;
+pub const MONITOR_INTERVAL_DEFAULT: u32 = 30;
+/// A day.
+pub const MONITOR_INTERVAL_MAX: u32 = 1440;
 
 /// `rules.LEGACY_PRESUPPORT_PATTERNS`: a saved list equal to it is upgraded to the defaults.
 const LEGACY_PRESUPPORT_PATTERNS: [&str; 3] = [r"(?<!un)[ _-]supported\.stl$", r"^sup_.*\.stl$", r"^(?:s|\[s\])_.*\.stl$"];

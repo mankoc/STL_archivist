@@ -176,7 +176,7 @@ export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: num
                 style={{ cursor: "zoom-in" }}
                 data-testid="detail-image"
               >
-                <Image src={img.thumbnail} radius="sm" alt="" loading="lazy" />
+                <Image src={img.thumbnail} radius="md" alt="" loading="lazy" />
               </UnstyledButton>
               {editor && (
                 <ActionIcon

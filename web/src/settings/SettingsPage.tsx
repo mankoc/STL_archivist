@@ -117,6 +117,14 @@ function LibrarySettingsForm({ editable }: { editable: boolean }) {
           <NumberInput label="Thumbnails per archive" min={0} max={1000} value={form.max_thumbnails} disabled={!editable} onChange={(v) => set("max_thumbnails", Number(v) || 0)} />
           <NumberInput label="Thumbnail size (px)" min={1} max={10000} value={form.max_thumb_size} disabled={!editable} onChange={(v) => set("max_thumb_size", Number(v) || 1)} />
           <NumberInput label="Parallel workers" min={1} max={64} value={form.max_workers} disabled={!editable} onChange={(v) => set("max_workers", Number(v) || 1)} />
+          <NumberInput
+            label="Check monitored folders every (minutes)"
+            min={1}
+            max={1440}
+            value={form.monitor_interval_minutes}
+            disabled={!editable}
+            onChange={(v) => set("monitor_interval_minutes", Number(v) || 1)}
+          />
         </SimpleGrid>
         <Stack gap="xs" mt="sm">
           {check("recurse_subdirs", "Crawl subfolders")}

@@ -51,7 +51,7 @@ export function CellGrid({ count, cell, selected, onOpen, onRange }: {
                       <UnstyledButton onClick={() => onOpen(m.id)} w="100%" data-testid="cell">
                         <Card withBorder p={6} style={selected === m.id ? { outline: "2px solid var(--mantine-primary-color-filled)" } : undefined}>
                           {m.thumbnail ? (
-                            <Image src={m.thumbnail} h={150} fit="contain" radius="sm" alt="" loading="lazy" />
+                            <Image src={m.thumbnail} h={150} fit="contain" radius="md" alt="" loading="lazy" />
                           ) : (
                             <Box h={150} bg="var(--mantine-color-default-hover)" style={{ borderRadius: 4 }} />
                           )}
@@ -60,7 +60,7 @@ export function CellGrid({ count, cell, selected, onOpen, onRange }: {
                         </Card>
                       </UnstyledButton>
                     ) : (
-                      <Skeleton h={ROW_HEIGHT - 16} radius="sm" />
+                      <Skeleton h={ROW_HEIGHT - 16} radius="md" />
                     )}
                   </Box>
                 );

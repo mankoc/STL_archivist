@@ -37,9 +37,29 @@ export function MaintenancePage() {
     }
   };
   const current = (jobs.data ?? []).find((j) => j.id === last);
+  const [confirmMissing, setConfirmMissing] = useState(false);
+  const removeMissing = async () => {
+    setConfirmMissing(false);
+    try {
+      const r = unwrap(await api.POST("/api/maintenance/remove-missing"));
+      notifications.show({ message: `${r.removed} missing archive record(s) removed.` });
+    } catch (err) {
+      notifications.show({ color: "red", title: "Could not remove", message: (err as Error).message });
+    }
+  };
 
   return (
     <div className={classes.layout}>
+      <Modal opened={confirmMissing} onClose={() => setConfirmMissing(false)} title="Remove missing archives" size="sm">
+        <Text size="sm" mb="md">
+          Delete the records, tags and thumbnails of every archive marked missing? The archive files are not touched; an archive
+          that comes back is added again by the next crawl.
+        </Text>
+        <Group justify="flex-end" gap="xs">
+          <Button size="xs" variant="default" onClick={() => setConfirmMissing(false)}>Cancel</Button>
+          <Button size="xs" color="red" onClick={() => void removeMissing()} data-testid="confirm-remove-missing">Remove</Button>
+        </Group>
+      </Modal>
       <Stack gap="md" className={classes.column}>
         {!editor && (
           <Alert>Maintenance runs as server jobs, which need the editor role.</Alert>
@@ -108,6 +128,11 @@ export function MaintenancePage() {
                   Compact database
                 </Button>
               )}
+              <Tooltip label="Delete the records of every archive marked missing (monitored folders mark vanished archives missing); the files are not touched">
+                <Button size="xs" variant="default" color="red" disabled={!editor} onClick={() => setConfirmMissing(true)} data-testid="remove-missing">
+                  Remove missing archives
+                </Button>
+              </Tooltip>
             </Group>
           </Stack>
         </Card>
@@ -179,7 +204,7 @@ function RecordList({ job, editor, start }: { job: Job | undefined; editor: bool
   };
 
   return (
-    <Card withBorder style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+    <Card withBorder style={{ flex: 1, minHeight: 320, display: "flex", flexDirection: "column" }}>
       <Group justify="space-between" mb="xs">
         <Title order={5}>{job ? describe(job) : "Record list"}</Title>
         {job?.message && finished && <Text size="xs" c="dimmed" data-testid="records-message">{job.message}</Text>}

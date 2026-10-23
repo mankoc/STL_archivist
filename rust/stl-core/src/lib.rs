@@ -18,6 +18,7 @@ pub mod hamming;
 pub mod image_pairs;
 pub mod lock;
 pub mod metadata;
+pub mod monitor;
 pub mod path_pattern;
 pub mod pyunicode;
 pub mod pyjson;

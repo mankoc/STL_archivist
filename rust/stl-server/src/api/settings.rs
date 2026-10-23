@@ -48,6 +48,8 @@ pub struct Settings {
     pub file_sorting_enabled: bool,
     /// The AI tagger's sampling temperature (0 to 2; lower is more literal).
     pub ai_temperature: f64,
+    /// Monitored folders are checked this often (minutes, 1 to 1440).
+    pub monitor_interval_minutes: u32,
 }
 
 impl Settings {
@@ -75,6 +77,7 @@ impl Settings {
             trash_folder_path: s.trash_folder_path(),
             file_sorting_enabled: s.file_sorting_enabled(),
             ai_temperature: s.ai_temperature(),
+            monitor_interval_minutes: s.monitor_interval_minutes(),
         }
     }
 
@@ -90,6 +93,9 @@ impl Settings {
         }
         if !(0.0..=1.0).contains(&self.low_compression_threshold) {
             return Err(ApiError::bad_request("low_compression_threshold is between 0 and 1"));
+        }
+        if !(1..=crate::library_settings::MONITOR_INTERVAL_MAX).contains(&self.monitor_interval_minutes) {
+            return Err(ApiError::bad_request("monitor_interval_minutes is 1 to 1440"));
         }
         if !(0.0..=2.0).contains(&self.ai_temperature) {
             return Err(ApiError::bad_request("ai_temperature is between 0 and 2"));

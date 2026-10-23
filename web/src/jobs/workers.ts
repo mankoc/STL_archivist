@@ -4,6 +4,17 @@ import type { Schemas } from "../api/client";
 
 export type WorkerInfo = Schemas["WorkerInfo"];
 
+/** An install in the worker's folder: the percent done (null before the
+ * download starts) and the line to show. */
+export function installProgress(s: { running: boolean; progress: [number, number] | null; log: string[]; done: string | null; error: string | null }): {
+  percent: number | null;
+  text: string;
+} {
+  const percent = s.running && s.progress && s.progress[1] > 0 ? Math.round((100 * s.progress[0]) / s.progress[1]) : null;
+  const text = s.running ? (s.log[s.log.length - 1] ?? "Starting…") : s.error ? `Failed: ${s.error}` : (s.done ?? "");
+  return { percent, text };
+}
+
 /** What the server does without a worker. */
 export function modeText(compute: string): string {
   return compute === "workers"

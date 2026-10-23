@@ -19,7 +19,26 @@ use sha2::{Digest, Sha256};
 use stl_core::control::Control;
 use utoipa::ToSchema;
 
-use crate::Library;
+use crate::Config;
+use crate::ai::AiRuntime;
+use crate::tools::Tools;
+
+/// Where components are managed: a data directory, and the running parts that
+/// hold their files (an open library has both; `stl-server components` neither).
+#[derive(Clone, Copy)]
+pub struct Place<'a> {
+    pub config: &'a Config,
+    /// Stopped before the AI runtime's files are replaced.
+    pub ai: Option<&'a AiRuntime>,
+    /// Told to load ONNX Runtime / pdfium again after an install.
+    pub tools: Option<&'a Tools>,
+}
+
+impl crate::Library {
+    pub fn place(&self) -> Place<'_> {
+        Place { config: &self.config, ai: Some(&self.ai), tools: Some(&self.tools) }
+    }
+}
 
 /// How an asset becomes files in the data directory.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -355,8 +374,8 @@ mod imp {
 }
 
 /// Where a component was found outside the data directory's managed places.
-fn external(lib: &Library, id: &str) -> Option<String> {
-    let c = &lib.config;
+fn external(at: &Place, id: &str) -> Option<String> {
+    let c = &at.config;
     let env = |k: &str| std::env::var_os(k).map(|v| format!("{k}={}", v.to_string_lossy()));
     match id {
         "ai_runtime" => c.ai.url.clone().map(|u| format!("ai.url = {u}")).or_else(|| c.ai.llama_server.clone().map(|p| format!("ai.llama_server = {p}"))),
@@ -397,8 +416,8 @@ fn remove_outputs(data: &Path, id: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn installed(lib: &Library, id: &str) -> Option<String> {
-    let data = &lib.config.data_dir;
+fn installed(at: &Place, id: &str) -> Option<String> {
+    let data = &at.config.data_dir;
     let file = |rel: &str| {
         let p = data.join(rel);
         p.is_file().then(|| p.display().to_string())
@@ -418,8 +437,8 @@ fn installed(lib: &Library, id: &str) -> Option<String> {
 }
 
 /// What the Maintenance page lists.
-pub fn status(lib: &Library) -> ComponentsInfo {
-    let data = &lib.config.data_dir;
+pub fn status(at: &Place) -> ComponentsInfo {
+    let data = &at.config.data_dir;
     let gpus = gpus();
     let components = IDS
         .iter()
@@ -430,9 +449,9 @@ pub fn status(lib: &Library) -> ComponentsInfo {
             } else {
                 variants(id).iter().map(|v| VariantSize { variant: v.to_string(), bytes: assets(id, v).iter().map(|a| a.size).sum() }).collect()
             };
-            let (state, detail) = if let Some(where_) = external(lib, id) {
+            let (state, detail) = if let Some(where_) = external(at, id) {
                 ("external", where_)
-            } else if let Some(where_) = installed(lib, id) {
+            } else if let Some(where_) = installed(at, id) {
                 ("installed", where_)
             } else if assets(id, variants(id).first().copied().unwrap_or("")).is_empty() {
                 ("unavailable", format!("no download for {} {}", std::env::consts::OS, std::env::consts::ARCH))
@@ -459,7 +478,7 @@ pub fn status(lib: &Library) -> ComponentsInfo {
         components,
         platform: platform().map(str::to_string),
         gpus: gpus.iter().map(|g| g.to_string()).collect(),
-        clip_provider: lib.tools.clip_provider().map(str::to_string),
+        clip_provider: at.tools.and_then(Tools::clip_provider).map(str::to_string),
         free_bytes: free_bytes(data),
     }
 }
@@ -711,17 +730,17 @@ pub fn install_asset(data: &Path, asset: &Asset, mirror: Option<&str>, ctl: &Con
 /// Install components, each in its variant from `chosen` (id → variant) or
 /// its default. Already installed ones are skipped, unless another variant is
 /// asked for.
-pub fn install(lib: &Library, ctl: &Control, log: &dyn Fn(String), ids: &[String], chosen: &BTreeMap<String, String>) -> Result<usize, String> {
-    let data = &lib.config.data_dir;
+pub fn install(at: &Place, ctl: &Control, log: &dyn Fn(String), ids: &[String], chosen: &BTreeMap<String, String>) -> Result<usize, String> {
+    let data = &at.config.data_dir;
     let gpus = gpus();
     let mut plan: Vec<(String, String, Vec<Asset>)> = Vec::new();
     for id in ids {
-        if let Some(where_) = external(lib, id) {
+        if let Some(where_) = external(at, id) {
             log(format!("{}: configured elsewhere ({where_}); skipped", info(id).label));
             continue;
         }
         let variant = chosen.get(id).map(String::as_str).or(default_variant(id, &gpus)).unwrap_or("").to_string();
-        let present = installed(lib, id).is_some();
+        let present = installed(at, id).is_some();
         if present && (variants(id).is_empty() || installed_variant(data, id) == variant) {
             log(format!("{}: already installed", info(id).label));
             continue;
@@ -744,7 +763,7 @@ pub fn install(lib: &Library, ctl: &Control, log: &dyn Fn(String), ids: &[String
         return Err(format!("not enough disk space: {} MB needed, {} MB free", needed / 1_000_000, free / 1_000_000));
     }
     ctl.set_total(total);
-    let mirror = lib.config.components_mirror.clone();
+    let mirror = at.config.components_mirror.clone();
     for (id, variant, assets) in &plan {
         let label = match variant.as_str() {
             "" => info(id).label.to_string(),
@@ -752,11 +771,13 @@ pub fn install(lib: &Library, ctl: &Control, log: &dyn Fn(String), ids: &[String
         };
         log(format!("{label}: downloading {} MB…", assets.iter().map(|a| a.size).sum::<u64>() / 1_000_000));
         if id == "ai_runtime" {
-            lib.ai.stop(); // a running llama-server keeps its files locked
-            if installed(lib, id).is_some() {
+            if let Some(ai) = at.ai {
+                ai.stop(); // a running llama-server keeps its files locked
+            }
+            if installed(at, id).is_some() {
                 let _ = fs::remove_dir_all(data.join("ai").join("bin"));
             }
-        } else if installed(lib, id).is_some() {
+        } else if installed(at, id).is_some() {
             // Another variant: none of its files may stay (they decide the variant).
             remove_outputs(data, id).map_err(|e| format!("{label}: {e} (it is in use; restart the server and try again)"))?;
         }
@@ -767,25 +788,29 @@ pub fn install(lib: &Library, ctl: &Control, log: &dyn Fn(String), ids: &[String
             fs::write(data.join("ai").join("bin").join("variant.txt"), variant).map_err(|e| e.to_string())?;
         }
         log(format!("{label}: installed"));
-        if id == "onnxruntime" && lib.tools.ort_loaded() {
+        if id == "onnxruntime" && at.tools.is_some_and(Tools::ort_loaded) {
             log("ONNX Runtime is already loaded: restart the server to use the new one".into());
         }
     }
-    lib.tools.retry(); // load ONNX Runtime / pdfium on next use
+    if let Some(t) = at.tools {
+        t.retry();
+    } // load ONNX Runtime / pdfium on next use
     Ok(plan.len())
 }
 
 /// Remove installed components (their files under the data directory only).
-pub fn remove(lib: &Library, log: &dyn Fn(String), ids: &[String]) -> Result<usize, String> {
-    let data = &lib.config.data_dir;
+pub fn remove(at: &Place, log: &dyn Fn(String), ids: &[String]) -> Result<usize, String> {
+    let data = &at.config.data_dir;
     let mut removed = 0;
     for id in ids {
-        if installed(lib, id).is_none() {
+        if installed(at, id).is_none() {
             continue;
         }
         let result = match id.as_str() {
             "ai_runtime" => {
-                lib.ai.stop();
+                if let Some(ai) = at.ai {
+                    ai.stop();
+                }
                 fs::remove_dir_all(data.join("ai").join("bin"))
             }
             _ => remove_outputs(data, id),
@@ -799,6 +824,90 @@ pub fn remove(lib: &Library, log: &dyn Fn(String), ids: &[String]) -> Result<usi
         }
     }
     Ok(removed)
+}
+
+// ── command line ─────────────────────────────────────────────────────────────
+
+/// One line of `stl-server components install|remove` output (JSON per line).
+#[derive(Debug, Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum CliLine {
+    Log(String),
+    /// Bytes done and in all.
+    Progress(u64, u64),
+    Done(String),
+    Error(String),
+}
+
+fn emit(line: &CliLine) {
+    let mut out = io::stdout().lock();
+    let _ = writeln!(out, "{}", serde_json::to_string(line).unwrap_or_default());
+    let _ = out.flush();
+}
+
+/// `stl-server components status|install|remove [ID…] [--variant ID=VARIANT]… [--data-dir DIR]`:
+/// the Maintenance page's components for a data directory without opening its
+/// library (the desktop app uses it for its compute worker's folder). `status`
+/// prints [`ComponentsInfo`] as JSON; the others print [`CliLine`]s.
+pub fn cli(args: &[String]) -> Result<(), String> {
+    let usage = "usage: stl-server components status|install|remove [ID...] [--variant ID=VARIANT]... [--data-dir DIR]";
+    let (action, rest) = args.split_first().ok_or(usage)?;
+    let (mut ids, mut chosen, mut config_args) = (Vec::new(), BTreeMap::new(), Vec::new());
+    let mut it = rest.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--variant" => {
+                let (id, v) = it.next().and_then(|s| s.split_once('=')).ok_or(usage)?;
+                chosen.insert(id.to_string(), v.to_string());
+            }
+            "--data-dir" => config_args.extend([a.clone(), it.next().ok_or(usage)?.clone()]),
+            id if IDS.contains(&id) => ids.push(id.to_string()),
+            other => return Err(format!("unknown component {other:?} (one of {IDS:?})")),
+        }
+    }
+    if chosen.iter().any(|(id, v)| !variants(id).contains(&v.as_str())) {
+        return Err(format!("unknown variant in {chosen:?}"));
+    }
+    let config = Config::load(&config_args)?;
+    fs::create_dir_all(&config.data_dir).map_err(|e| format!("{}: {e}", config.data_dir.display()))?;
+    let at = Place { config: &config, ai: None, tools: None };
+    let log = |line: String| emit(&CliLine::Log(line));
+    let result = match action.as_str() {
+        "status" => {
+            println!("{}", serde_json::to_string(&status(&at)).map_err(|e| e.to_string())?);
+            return Ok(());
+        }
+        "install" if !ids.is_empty() => {
+            let ctl = Control::new();
+            let done = std::sync::atomic::AtomicBool::new(false);
+            std::thread::scope(|s| {
+                s.spawn(|| {
+                    while !done.load(std::sync::atomic::Ordering::Relaxed) {
+                        let (d, t) = ctl.progress();
+                        if t > 0 {
+                            emit(&CliLine::Progress(d, t));
+                        }
+                        std::thread::sleep(Duration::from_millis(500));
+                    }
+                });
+                let r = install(&at, &ctl, &log, &ids, &chosen).map(|n| format!("{n} component(s) installed"));
+                done.store(true, std::sync::atomic::Ordering::Relaxed);
+                r
+            })
+        }
+        "remove" if !ids.is_empty() => remove(&at, &log, &ids).map(|n| format!("{n} component(s) removed")),
+        _ => return Err(usage.into()),
+    };
+    match result {
+        Ok(msg) => {
+            emit(&CliLine::Done(msg));
+            Ok(())
+        }
+        Err(e) => {
+            emit(&CliLine::Error(e.clone()));
+            Err(e)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -983,6 +1092,18 @@ mod tests {
         let err = install_asset(data, &bad, Some(&base), &ctl).unwrap_err();
         assert!(err.contains("checksum"), "{err}");
         assert!(!data.join("bad.bin").exists() && !data.join("bad.bin.part").exists());
+    }
+
+    #[test]
+    fn command_line_checks_its_arguments() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().to_string_lossy().into_owned();
+        let args = |a: &[&str]| a.iter().map(|s| s.to_string()).chain(["--data-dir".into(), d.clone()]).collect::<Vec<_>>();
+        assert!(cli(&args(&["install", "everything"])).unwrap_err().contains("unknown component"));
+        assert!(cli(&args(&["install", "pdfium", "--variant", "pdfium=cuda"])).unwrap_err().contains("unknown variant"));
+        assert!(cli(&args(&["install"])).unwrap_err().starts_with("usage"));
+        assert!(cli(&args(&["status"])).is_ok());
+        assert_eq!(serde_json::to_string(&CliLine::Progress(1, 2)).unwrap(), r#"{"progress":[1,2]}"#);
     }
 
     #[test]
