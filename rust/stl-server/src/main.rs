@@ -7,6 +7,9 @@
 //! `stl-server restore BACKUP.7z [--data-dir DIR]`: restore a backup (the server's or the
 //! desktop app's) into the data directory, with the library closed: the server and the
 //! desktop app must not be running. The replaced files go to `pre-restore-<stamp>`.
+//! `stl-server components status|install|remove [ID...] [--variant ID=V]... [--data-dir DIR]`:
+//! the optional components of a data directory, without opening its library
+//! (the desktop app manages its compute worker's folder with it).
 //! `stl-server worker --server URL [--data-dir DIR] [--name NAME]`: compute CLIP
 //! embeddings and AI tags for a remote server (see `stl_server::worker`); it ends
 //! with exit code 2 when it cannot work (a refused token, nothing installed).
@@ -25,6 +28,7 @@ async fn main() {
     let result = match args.first().map(String::as_str) {
         Some("create-admin") => create_admin(&args[1..]),
         Some("restore") => restore(&args[1..]),
+        Some("components") => stl_server::components::cli(&args[1..]),
         Some("worker") => {
             if let Err(e) = stl_server::worker::run(&args[1..]).await {
                 tracing::error!("{e}");
@@ -52,6 +56,7 @@ async fn run(args: &[String]) -> Result<(), String> {
     let listener = tokio::net::TcpListener::bind(bind).await.map_err(|e| format!("bind {bind}: {e}"))?;
     tracing::info!("listening on http://{bind}");
     let library = Arc::new(library);
+    stl_server::monitor::start(&library);
     axum::serve(listener, app(Arc::clone(&library)).into_make_service_with_connect_info::<std::net::SocketAddr>())
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;

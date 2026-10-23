@@ -18,6 +18,7 @@ pub mod error;
 pub mod jobs;
 pub mod library_settings;
 pub mod maint;
+pub mod monitor;
 pub mod sidecars;
 pub mod tools;
 pub mod worker;
@@ -46,6 +47,8 @@ pub struct Library {
     pub ai: Arc<ai::AiRuntime>,
     /// Connected compute workers (see `workers`).
     pub workers: workers::Workers,
+    /// When monitored folders were last checked (see `monitor`).
+    pub monitor: monitor::Monitor,
     _lock: LibraryLock,
 }
 
@@ -76,6 +79,7 @@ impl Library {
             tools: tools::Tools::default(),
             ai: Arc::default(),
             workers: workers::Workers::default(),
+            monitor: monitor::Monitor::default(),
             config,
             _lock: lock,
         })

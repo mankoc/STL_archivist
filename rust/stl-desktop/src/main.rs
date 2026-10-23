@@ -10,11 +10,14 @@
 //! The compute worker: on a server's Maintenance page, "Use this computer for
 //! AI" hands the shell a worker token, and the shell runs `stl-server worker`
 //! for that server (embeddings and AI tags on this machine's GPU), with the
-//! components of the local library's data directory. It is remembered and
-//! started again when the app connects to that server.
+//! components of its folder, which the page can fill with
+//! `stl-server components` (the same downloads as a library's Maintenance). It
+//! is remembered and started again when the app connects to that server.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
+use std::io::BufRead;
+use std::sync::Arc;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
@@ -49,6 +52,9 @@ struct Saved {
     /// The server this computer works for, with its worker token.
     #[serde(default)]
     worker: Option<SavedWorker>,
+    /// Where the worker's components are (chosen on a server's page).
+    #[serde(default)]
+    worker_data_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,10 +91,36 @@ impl Drop for LocalServer {
     }
 }
 
+/// A running `stl-server components install|remove` for the worker's folder.
+struct Installing {
+    child: Child,
+    progress: Arc<Mutex<InstallState>>,
+}
+
+impl Drop for Installing {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// What a components install reported (its JSON lines).
+#[derive(Debug, Clone, Default, Serialize)]
+struct InstallState {
+    running: bool,
+    /// Bytes done and in all.
+    progress: Option<(u64, u64)>,
+    log: Vec<String>,
+    /// How it ended: a summary, or why it failed.
+    done: Option<String>,
+    error: Option<String>,
+}
+
 #[derive(Default)]
 struct Shell {
     local: Mutex<Option<LocalServer>>,
     worker: Mutex<Option<WorkerProc>>,
+    installing: Mutex<Option<Installing>>,
     launcher: Mutex<Option<Url>>,
     granted: Mutex<HashSet<String>>,
 }
@@ -145,7 +177,16 @@ fn save_servers(app: AppHandle, servers: Vec<Server>) -> Result<(), String> {
 }
 
 /// What a server's pages may call.
-const SERVER_PERMISSIONS: &[&str] = &["allow-open-folder", "allow-start-worker", "allow-stop-worker", "allow-worker-state"];
+const SERVER_PERMISSIONS: &[&str] = &[
+    "allow-open-folder",
+    "allow-start-worker",
+    "allow-stop-worker",
+    "allow-worker-state",
+    "allow-worker-components",
+    "allow-change-worker-components",
+    "allow-worker-install-state",
+    "allow-pick-worker-folder",
+];
 
 /// Let `origin`'s pages call [`SERVER_PERMISSIONS`] (and nothing else).
 fn grant(app: &AppHandle, shell: &Shell, origin: &Url) -> Result<(), String> {
@@ -250,9 +291,23 @@ fn spawn_local(app: &AppHandle, data_dir: &str) -> Result<LocalServer, String> {
 
 // ── compute worker ───────────────────────────────────────────────────────────
 
-/// The data directory whose components the worker uses: the local library's.
+/// The folder whose components the worker uses: the one chosen for it, else
+/// the local library's, else `worker` in the default data directory (not the
+/// default itself: that is the install folder, and a library beside
+/// `stl-server` counts as configured elsewhere).
 fn worker_data_dir(app: &AppHandle) -> String {
-    load_saved(app).local_data_dir.unwrap_or_else(default_data_dir)
+    let saved = load_saved(app);
+    saved.worker_data_dir.or(saved.local_data_dir).unwrap_or_else(|| PathBuf::from(default_data_dir()).join("worker").to_string_lossy().into_owned())
+}
+
+/// Start the remembered worker again (after its folder or components changed).
+fn restart_worker(app: &AppHandle) {
+    let running = app.state::<Shell>().worker.lock().unwrap_or_else(|e| e.into_inner()).is_some();
+    if let (true, Some(w)) = (running, load_saved(app).worker)
+        && let Err(e) = run_worker(app, &w.server, &w.token)
+    {
+        eprintln!("compute worker: {e}");
+    }
 }
 
 /// Start `stl-server worker` for `server`, replacing a running one.
@@ -359,6 +414,109 @@ fn stop_worker(app: AppHandle, webview: tauri::Webview) -> Result<WorkerState, S
         store_saved(&app, &saved)?;
     }
     worker_state(app, webview)
+}
+
+/// The worker folder's components (`stl-server components status`), with the folder.
+#[tauri::command]
+async fn worker_components(app: AppHandle) -> Result<serde_json::Value, String> {
+    let dir = worker_data_dir(&app);
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut cmd = Command::new(server_exe()?);
+        cmd.args(["components", "status", "--data-dir", &dir]).stdin(Stdio::null()).stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        }
+        let out = cmd.output().map_err(|e| e.to_string())?;
+        let info: serde_json::Value = serde_json::from_slice(&out.stdout).map_err(|_| format!("cannot read the components of {dir}"))?;
+        Ok(serde_json::json!({"data_dir": dir, "info": info}))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Install or remove components in the worker's folder: `action` is `install`
+/// or `remove`, `variants` maps a component to its variant. The worker stops
+/// meanwhile (it holds the libraries open) and starts again after.
+#[tauri::command]
+fn change_worker_components(app: AppHandle, action: String, components: Vec<String>, variants: BTreeMap<String, String>) -> Result<InstallState, String> {
+    let word = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if !matches!(action.as_str(), "install" | "remove") || components.is_empty() || !components.iter().all(|c| word(c)) || !variants.iter().all(|(k, v)| word(k) && word(v)) {
+        return Err("not a components request".into());
+    }
+    let shell = app.state::<Shell>();
+    let mut slot = shell.installing.lock().unwrap_or_else(|e| e.into_inner());
+    if slot.as_ref().is_some_and(|i| i.progress.lock().unwrap_or_else(|e| e.into_inner()).running) {
+        return Err("components are already being installed".into());
+    }
+    let had_worker = shell.worker.lock().unwrap_or_else(|e| e.into_inner()).take().is_some();
+    let dir = worker_data_dir(&app);
+    let mut cmd = Command::new(server_exe()?);
+    cmd.arg("components").arg(&action).args(&components);
+    for (k, v) in &variants {
+        cmd.arg("--variant").arg(format!("{k}={v}"));
+    }
+    cmd.args(["--data-dir", &dir]).env("NO_COLOR", "1").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let mut child = cmd.spawn().map_err(|e| e.to_string())?;
+    stl_proc::end_with_parent(&child);
+    let stdout = child.stdout.take().ok_or("no output")?;
+    let progress = Arc::new(Mutex::new(InstallState { running: true, ..Default::default() }));
+    let state = Arc::clone(&progress);
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        for line in std::io::BufReader::new(stdout).lines().map_while(Result::ok) {
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
+            let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(l) = v["log"].as_str() {
+                s.log.push(l.to_string());
+            } else if let (Some(d), Some(t)) = (v["progress"][0].as_u64(), v["progress"][1].as_u64()) {
+                s.progress = Some((d, t));
+            } else if let Some(d) = v["done"].as_str() {
+                s.done = Some(d.to_string());
+            } else if let Some(e) = v["error"].as_str() {
+                s.error = Some(e.to_string());
+            }
+        }
+        {
+            let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
+            s.running = false;
+            if s.done.is_none() && s.error.is_none() {
+                s.error = Some("stopped".into());
+            }
+        }
+        if had_worker && let Some(w) = load_saved(&app2).worker {
+            let _ = run_worker(&app2, &w.server, &w.token);
+        }
+    });
+    let snapshot = progress.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    *slot = Some(Installing { child, progress });
+    Ok(snapshot)
+}
+
+/// The last components install or removal in the worker's folder.
+#[tauri::command]
+fn worker_install_state(app: AppHandle) -> InstallState {
+    let shell = app.state::<Shell>();
+    let slot = shell.installing.lock().unwrap_or_else(|e| e.into_inner());
+    slot.as_ref().map(|i| i.progress.lock().unwrap_or_else(|e| e.into_inner()).clone()).unwrap_or_default()
+}
+
+/// Choose the worker's folder (a dialog); the worker starts again with it.
+#[tauri::command]
+async fn pick_worker_folder(app: AppHandle) -> Result<Option<String>, String> {
+    let Some(dir) = pick_folder(app.clone()).await else { return Ok(None) };
+    let mut saved = load_saved(&app);
+    saved.worker_data_dir = Some(dir.clone());
+    store_saved(&app, &saved)?;
+    let app2 = app.clone();
+    tauri::async_runtime::spawn_blocking(move || restart_worker(&app2)).await.map_err(|e| e.to_string())?;
+    Ok(Some(dir))
 }
 
 /// Start (or reuse) a local server on `data_dir` and open it.
@@ -535,7 +693,11 @@ fn main() {
             open_folder,
             start_worker,
             stop_worker,
-            worker_state
+            worker_state,
+            worker_components,
+            change_worker_components,
+            worker_install_state,
+            pick_worker_folder
         ])
         .on_menu_event(|app, e| on_menu(app, e.id().as_ref()))
         .setup(setup)
@@ -546,6 +708,7 @@ fn main() {
             // Stop the local server (and with it the library lock) and the worker.
             *app.state::<Shell>().local.lock().unwrap_or_else(|e| e.into_inner()) = None;
             *app.state::<Shell>().worker.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            *app.state::<Shell>().installing.lock().unwrap_or_else(|e| e.into_inner()) = None;
         }
     });
 }

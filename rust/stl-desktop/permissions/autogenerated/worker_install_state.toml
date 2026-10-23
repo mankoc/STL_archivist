@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-worker-install-state"
+description = "Enables the worker_install_state command without any pre-configured scope."
+commands.allow = ["worker_install_state"]
+
+[[permission]]
+identifier = "deny-worker-install-state"
+description = "Denies the worker_install_state command without any pre-configured scope."
+commands.deny = ["worker_install_state"]

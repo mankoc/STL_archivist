@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-worker-components"
+description = "Enables the worker_components command without any pre-configured scope."
+commands.allow = ["worker_components"]
+
+[[permission]]
+identifier = "deny-worker-components"
+description = "Denies the worker_components command without any pre-configured scope."
+commands.deny = ["worker_components"]

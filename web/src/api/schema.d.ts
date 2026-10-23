@@ -232,6 +232,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/crawled-folders/monitor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Monitor a crawled folder, or stop (editors): a monitored folder is checked
+         *     every `monitor_interval_minutes` and crawled when its archives changed.
+         */
+        post: operations["post_crawled_folders_monitor"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/crawled-folders/remove": {
         parameters: {
             query?: never;
@@ -546,6 +566,27 @@ export interface paths {
          *     Selected / All Missing). The archive files are not touched.
          */
         post: operations["post_maintenance_remove"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/maintenance/remove-missing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove the records of every missing archive (editors), as *Remove* does for
+         *     a selection: archives gone from monitored folders are marked missing, and
+         *     this clears them out. The archive files are not touched.
+         */
+        post: operations["post_maintenance_remove_missing"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1311,6 +1352,8 @@ export interface components {
             count: number;
         };
         CrawledFolder: {
+            /** @description Checked for changes and crawled automatically (see `crate::monitor`). */
+            monitored: boolean;
             path: string;
             /** @description The path pattern used when crawling it. */
             pattern?: string | null;
@@ -1601,6 +1644,12 @@ export interface components {
             folder: string;
             /** @description Re-extract archives whose hash did not change. */
             force_rescan?: boolean;
+            /**
+             * @description Mark the records of archives gone from the folder missing instead
+             *     of deleting them (monitored folders; *Remove missing archives*
+             *     deletes them later).
+             */
+            keep_missing?: boolean;
             /** @enum {string} */
             kind: "crawl";
             /**
@@ -1951,6 +2000,10 @@ export interface components {
             /** @default null */
             sort: null | components["schemas"]["Sort"];
         };
+        MonitorFolder: {
+            monitored: boolean;
+            path: string;
+        };
         MovedRecord: {
             /**
              * Format: int64
@@ -2172,6 +2225,11 @@ export interface components {
             metadata_sidecar_enabled: boolean;
             /** @description Include thumbnails in sidecars. */
             metadata_thumbnails: boolean;
+            /**
+             * Format: int32
+             * @description Monitored folders are checked this often (minutes, 1 to 1440).
+             */
+            monitor_interval_minutes: number;
             /** @description Regular expressions for presupported STL file names (the portable subset). */
             presupport_patterns: string[];
             recurse_subdirs: boolean;
@@ -2757,6 +2815,35 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    post_crawled_folders_monitor: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MonitorFolder"];
+            };
+        };
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
             };
         };
     };
@@ -3383,6 +3470,33 @@ export interface operations {
                 "application/json": components["schemas"]["RemoveRecords"];
             };
         };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Removed"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    post_maintenance_remove_missing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             200: {
                 headers: {

@@ -52,6 +52,7 @@ CREATE TABLE crawled_folders (
 	archive_count INTEGER, 
 	new_count INTEGER, 
 	updated_count INTEGER, 
+	monitored INTEGER NOT NULL DEFAULT 0, 
 	PRIMARY KEY (id), 
 	UNIQUE (path)
 )
@@ -299,6 +300,7 @@ pub const ADD_COLUMNS: &[(&str, &str, &str)] = &[
     ("crawled_folders", "archive_count", r#"ALTER TABLE "crawled_folders" ADD COLUMN "archive_count" INTEGER"#),
     ("crawled_folders", "new_count", r#"ALTER TABLE "crawled_folders" ADD COLUMN "new_count" INTEGER"#),
     ("crawled_folders", "updated_count", r#"ALTER TABLE "crawled_folders" ADD COLUMN "updated_count" INTEGER"#),
+    ("crawled_folders", "monitored", r#"ALTER TABLE "crawled_folders" ADD COLUMN "monitored" INTEGER NOT NULL DEFAULT 0"#),
     ("creators", "name", r#"ALTER TABLE "creators" ADD COLUMN "name" VARCHAR(256) NOT NULL"#),
     ("creators", "full_name", r#"ALTER TABLE "creators" ADD COLUMN "full_name" VARCHAR(512)"#),
     ("creators", "patreon_url", r#"ALTER TABLE "creators" ADD COLUMN "patreon_url" TEXT"#),

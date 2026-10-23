@@ -14,5 +14,5 @@ use crate::{ApiError, AppState};
     responses((status = 200, body = ComponentsInfo), (status = 403, body = crate::error::ErrorBody)))]
 pub async fn status(State(lib): State<AppState>, me: CurrentUser) -> Result<Json<ComponentsInfo>, ApiError> {
     me.require(Role::Admin)?;
-    Ok(Json(lib.run(|lib| Ok::<_, ApiError>(crate::components::status(lib))).await?))
+    Ok(Json(lib.run(|lib| Ok::<_, ApiError>(crate::components::status(&lib.place()))).await?))
 }

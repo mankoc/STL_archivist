@@ -68,7 +68,7 @@ export function FindByImagePage() {
           <Stack>
             <Dropzone accept={[...IMAGE_MIME_TYPE, "image/tiff"]} multiple={false} onDrop={(files) => files[0] && setFile(files[0])} data-testid="search-drop">
               {preview ? (
-                <Image src={preview} radius="sm" alt="" />
+                <Image src={preview} radius="md" alt="" />
               ) : (
                 <Stack align="center" gap="xs" py="lg" style={{ pointerEvents: "none" }}>
                   <IconPhotoSearch size={32} />
@@ -122,7 +122,7 @@ export function FindByImagePage() {
             {result?.matches.map((m) => (
               <UnstyledButton key={m.model_id} onClick={() => setOpen(m.model_id)} data-testid="search-match">
                 <Card withBorder p="xs">
-                  {m.thumbnail ? <Image src={m.thumbnail} radius="sm" alt="" h={140} fit="contain" /> : <Box h={140} />}
+                  {m.thumbnail ? <Image src={m.thumbnail} radius="md" alt="" h={140} fit="contain" /> : <Box h={140} />}
                   <Text size="sm" truncate mt={4}>
                     {m.title || m.archive}
                   </Text>

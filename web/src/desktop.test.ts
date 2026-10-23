@@ -1,4 +1,4 @@
-import { inDesktopShell, openFolder, startWorker, stopWorker, workerState } from "./desktop";
+import { changeWorkerComponents, inDesktopShell, openFolder, pickWorkerFolder, startWorker, stopWorker, workerState } from "./desktop";
 
 describe("desktop shell bridge", () => {
   afterEach(() => {
@@ -35,6 +35,22 @@ describe("desktop shell bridge", () => {
     await workerState();
     await stopWorker();
     expect(calls).toEqual([["start_worker", { token: "ab12" }], ["worker_state", undefined], ["stop_worker", undefined]]);
+  });
+
+  it("manages this computer's components through the shell", async () => {
+    const calls: unknown[] = [];
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
+      invoke: async (cmd: string, args: unknown) => {
+        calls.push([cmd, args]);
+        return null;
+      },
+    };
+    await changeWorkerComponents("install", ["onnxruntime"], { onnxruntime: "directml" });
+    await pickWorkerFolder();
+    expect(calls).toEqual([
+      ["change_worker_components", { action: "install", components: ["onnxruntime"], variants: { onnxruntime: "directml" } }],
+      ["pick_worker_folder", undefined],
+    ]);
   });
 
   it("has no worker in a browser", async () => {

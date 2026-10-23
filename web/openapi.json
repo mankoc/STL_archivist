@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.43.5"
+    "version": "2026.43.6"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -571,6 +571,40 @@
           },
           "201": {
             "description": ""
+          }
+        }
+      }
+    },
+    "/api/crawled-folders/monitor": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Monitor a crawled folder, or stop (editors): a monitored folder is checked\nevery `monitor_interval_minutes` and crawled when its archives changed.",
+        "operationId": "post_crawled_folders_monitor",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MonitorFolder"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         }
       }
@@ -1410,6 +1444,37 @@
           },
           "required": true
         },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Removed"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/maintenance/remove-missing": {
+      "post": {
+        "tags": [
+          "maintenance"
+        ],
+        "summary": "Remove the records of every missing archive (editors), as *Remove* does for\na selection: archives gone from monitored folders are marked missing, and\nthis clears them out. The archive files are not touched.",
+        "operationId": "post_maintenance_remove_missing",
         "responses": {
           "200": {
             "description": "",
@@ -3419,9 +3484,14 @@
       "CrawledFolder": {
         "type": "object",
         "required": [
-          "path"
+          "path",
+          "monitored"
         ],
         "properties": {
+          "monitored": {
+            "type": "boolean",
+            "description": "Checked for changes and crawled automatically (see `crate::monitor`)."
+          },
           "path": {
             "type": "string"
           },
@@ -4353,6 +4423,10 @@
               "force_rescan": {
                 "type": "boolean",
                 "description": "Re-extract archives whose hash did not change."
+              },
+              "keep_missing": {
+                "type": "boolean",
+                "description": "Mark the records of archives gone from the folder missing instead\nof deleting them (monitored folders; *Remove missing archives*\ndeletes them later)."
               },
               "kind": {
                 "type": "string",
@@ -5499,6 +5573,22 @@
         },
         "additionalProperties": false
       },
+      "MonitorFolder": {
+        "type": "object",
+        "required": [
+          "path",
+          "monitored"
+        ],
+        "properties": {
+          "monitored": {
+            "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "MovedRecord": {
         "type": "object",
         "required": [
@@ -6185,7 +6275,8 @@
           "use_trash_folder",
           "trash_folder_path",
           "file_sorting_enabled",
-          "ai_temperature"
+          "ai_temperature",
+          "monitor_interval_minutes"
         ],
         "properties": {
           "ai_embeddings_during_crawl": {
@@ -6235,6 +6326,12 @@
           "metadata_thumbnails": {
             "type": "boolean",
             "description": "Include thumbnails in sidecars."
+          },
+          "monitor_interval_minutes": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Monitored folders are checked this often (minutes, 1 to 1440).",
+            "minimum": 0
           },
           "presupport_patterns": {
             "type": "array",

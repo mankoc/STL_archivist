@@ -89,7 +89,8 @@ stl_database/
   checks in `JobRequest::validate` and (for read-only jobs) `read_only`. Report through
   `job.ctl` and `lib.job_log`, check `job.stopped()` between batches, queue sidecars with
   `job.touch_sidecars`. Results go in `JobResult` (`dupes.rs`), returned in
-  `JobDetail.result`. Crawls run `stl_core::crawler::crawl` with `ServerHost`.
+  `JobDetail.result`. Crawls run `stl_core::crawler::crawl` with `ServerHost`. Monitored
+  folders (`monitor.rs`) queue ordinary `crawl` jobs (`keep_missing`) from a background pass.
 - **Files:** browsing, crawling and any job given a folder (search folder, sort files,
   update folders) go through `api::files::check_access` (editors inside roots, admins
   anywhere; canonical paths). A crawl of a known folder takes its stored spelling
@@ -127,8 +128,9 @@ conveniences (wrap it in try/catch). Pages are hash routes (`shell/route.ts`).
 No library logic and no data commands. New commands go into `build.rs`'s app manifest; the
 launcher capability (`capabilities/launcher.json`) lists what the bundled page may call, and
 server origins get only `SERVER_PERMISSIONS` (`open_folder` and the compute worker's
-`start_worker` / `stop_worker` / `worker_state`; runtime capability in `grant`). The worker
-commands act for the calling page's origin only. Installer
+commands: start/stop/state, its folder's components through `stl-server components`, and
+picking its folder; runtime capability in `grant`). The worker commands act for the calling
+page's origin only; component changes run the server binary, never code in the shell. Installer
 settings are in `tauri.bundle.json`, merged only by `cargo tauri build --config …`, so plain
 builds need neither the web client nor the server built.
 

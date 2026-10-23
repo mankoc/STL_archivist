@@ -13,6 +13,10 @@ fn main() {
         "start_worker",
         "stop_worker",
         "worker_state",
+        "worker_components",
+        "change_worker_components",
+        "worker_install_state",
+        "pick_worker_folder",
     ];
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(COMMANDS)))
         .expect("tauri build");

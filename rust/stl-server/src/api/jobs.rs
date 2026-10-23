@@ -139,13 +139,36 @@ pub struct CrawledFolder {
     pub path: String,
     /// The path pattern used when crawling it.
     pub pattern: Option<String>,
+    /// Checked for changes and crawled automatically (see `crate::monitor`).
+    pub monitored: bool,
 }
 
 /// The folders tracked for crawling (Update Crawled Folders).
 #[utoipa::path(get, path = "/api/crawled-folders", tag = "jobs", responses((status = 200, body = Vec<CrawledFolder>)))]
 pub async fn crawled_folders(State(lib): State<AppState>, _me: CurrentUser) -> Result<Json<Vec<CrawledFolder>>, ApiError> {
-    let rows = lib.run(|lib| Ok(lib.db.with(duplicates::crawled_folders)?)).await?;
-    Ok(Json(rows.into_iter().map(|(path, pattern)| CrawledFolder { path, pattern }).collect()))
+    let rows = lib.run(|lib| Ok(lib.db.with(duplicates::crawled_folder_list)?)).await?;
+    Ok(Json(rows.into_iter().map(|f| CrawledFolder { path: f.path, pattern: f.pattern, monitored: f.monitored }).collect()))
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MonitorFolder {
+    pub path: String,
+    pub monitored: bool,
+}
+
+/// Monitor a crawled folder, or stop (editors): a monitored folder is checked
+/// every `monitor_interval_minutes` and crawled when its archives changed.
+#[utoipa::path(post, path = "/api/crawled-folders/monitor", tag = "jobs", request_body = MonitorFolder,
+    responses((status = 204), (status = 404, body = crate::error::ErrorBody)))]
+pub async fn monitor_folder(State(lib): State<AppState>, me: CurrentUser, Json(f): Json<MonitorFolder>) -> Result<StatusCode, ApiError> {
+    me.require(Role::Editor)?;
+    let path = f.path.clone();
+    let found = lib.run(move |lib| Ok(lib.db.with_tx(|tx| duplicates::set_monitored(tx, &f.path, f.monitored))?)).await?;
+    if !found {
+        return Err(ApiError::not_found(format!("{path} is not a crawled folder")));
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize, ToSchema)]

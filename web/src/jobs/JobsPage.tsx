@@ -5,7 +5,7 @@ import {
   Table, Text, TextInput, Title, Tooltip, UnstyledButton,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { IconFolderPlus, IconPlayerPlay, IconPlayerStop, IconTrash } from "@tabler/icons-react";
+import { IconEye, IconEyeOff, IconFolderPlus, IconPlayerPlay, IconPlayerStop, IconTrash } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -93,10 +93,31 @@ export function JobsPage() {
                         {f.pattern}
                       </Text>
                     )}
+                    {f.monitored && (
+                      <Badge size="xs" variant="light" ml={0} data-testid="monitored">
+                        monitored
+                      </Badge>
+                    )}
                   </Table.Td>
                   {editor && (
-                    <Table.Td w={90}>
+                    <Table.Td w={120}>
                       <Group gap={4} wrap="nowrap">
+                        <Tooltip label={f.monitored ? "Stop monitoring" : "Monitor: check for new or changed archives and crawl automatically"}>
+                          <ActionIcon
+                            variant={f.monitored ? "light" : "subtle"}
+                            aria-label={f.monitored ? "Stop monitoring" : "Monitor"}
+                            onClick={async () => {
+                              try {
+                                unwrap(await api.POST("/api/crawled-folders/monitor", { body: { path: f.path, monitored: !f.monitored } }));
+                              } catch (err) {
+                                notifications.show({ color: "red", title: "Monitor", message: (err as Error).message });
+                              }
+                              await refreshFolders();
+                            }}
+                          >
+                            {f.monitored ? <IconEye size={16} /> : <IconEyeOff size={16} />}
+                          </ActionIcon>
+                        </Tooltip>
                         <Tooltip label="Crawl">
                           <ActionIcon variant="subtle" onClick={() => setCrawl({ folder: f.path, pattern: f.pattern ?? "", force: false })} aria-label="Crawl">
                             <IconPlayerPlay size={16} />

@@ -11,7 +11,7 @@ can open a library on your computer without setting up a server.
 
 **Guides:** [using stlLibrary](docs/user-guide.md) · [deploying a server](docs/deployment.md)
 
-Version: 2026.43.5
+Version: 2026.43.6
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). Libraries are compatible: this version opens the same data directory
@@ -44,8 +44,10 @@ Version: 2026.43.5
 - **AI tagger** — Qwen2.5-VL through llama.cpp suggests tags, title, creator, sculptor,
   collection, scale, source, year and description; review one by one or tag a selection in
   one job
+- **Monitored folders** — crawled automatically when their archives change (checked by size
+  and date at an interval); archives that vanish are marked missing
 - **Maintenance** — verify archives, find moved and duplicate records, search a folder for
-  missing archives, re-check warnings, recompute image hashes and embeddings, prune images,
+  missing archives, remove the records of missing archives, re-check warnings, recompute image hashes and embeddings, prune images,
   compact the database, rescan archives, regenerate thumbnails, delete files to a trash
   folder, sort files into a folder tree by pattern
 - **Metadata sidecars** — a `METADATA.7z` per archive folder lets a new library restore its
@@ -140,6 +142,10 @@ server) on the same data directory is refused.
    sort files, delete files).
 3. **Jobs → Update all** re-crawls every folder later, keeping the records of archives moved
    between folders and removing those of archives that are gone.
+4. Or let the server keep up: the eye button on a crawled folder **monitors** it. The server
+   compares it with the library every 30 minutes (*Settings → Library*) by file size and
+   date, and crawls it when archives were added, changed or removed. Removed archives are
+   marked missing; *Maintenance → Remove missing archives* deletes their records.
 
 ## Server configuration
 
@@ -198,7 +204,8 @@ and cuDNN 9 must be installed). To install by hand:
   CPU; the components card shows which.
 - **Compute workers** — a server on a machine without a GPU can let a computer with one do
   the embeddings and tagging: in the desktop app, *Maintenance → Compute workers → Use this
-  computer for AI*. With `"compute": "workers"` (or `STL_COMPUTE=workers`) the server never
+  computer for AI*; the same card downloads the models into a folder of that computer you
+  choose. With `"compute": "workers"` (or `STL_COMPUTE=workers`) the server never
   runs the models itself and its jobs wait for a worker. See the deployment guide.
 
 ### Backups and restore

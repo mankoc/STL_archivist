@@ -112,6 +112,8 @@ use crate::AppState;
         stats::column,
         search::by_image,
         workers::list,
+        jobs::monitor_folder,
+        maintenance::remove_missing,
         workers::token,
         workers::connect,
     ),
@@ -192,6 +194,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/events", get(jobs::events))
         .route("/api/crawled-folders", get(jobs::crawled_folders).post(jobs::add_folder))
         .route("/api/crawled-folders/remove", post(jobs::remove_folder))
+        .route("/api/crawled-folders/monitor", post(jobs::monitor_folder))
         .route("/api/files/browse", get(files::browse))
         .route("/api/models/{id}/archive", get(files::download))
         .route("/api/settings/library", get(settings::get).put(settings::put))
@@ -208,6 +211,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/backups/{name}", get(backups::download).delete(backups::delete))
         .route("/api/maintenance/merge-moved", post(maintenance::merge_moved))
         .route("/api/maintenance/remove", post(maintenance::remove))
+        .route("/api/maintenance/remove-missing", post(maintenance::remove_missing))
         .route("/api/stats/library", get(stats::library))
         .route("/api/stats/column", get(stats::column))
         .route("/api/search/image", post(search::by_image))

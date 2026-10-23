@@ -252,6 +252,9 @@ stl-server restore FILE.7z [--data-dir DIR]        restore a backup (server stop
 stl-server openapi                                 print the API description
 stl-server worker --server URL [--data-dir DIR]    compute worker for a remote server (token in
                                                    STL_WORKER_TOKEN; the desktop app starts it)
+stl-server components status|install|remove [ID...] [--variant ID=V]... [--data-dir DIR]
+                                                   the optional components of a folder, without
+                                                   opening a library (JSON output)
 ```
 
 The API is described at `/api/openapi.json` on a running server.
@@ -338,12 +341,15 @@ AI tagger to a computer that has one. On that computer, open the server in the d
 go to *Maintenance → Compute workers* and turn on **Use this computer for AI** (editors).
 The desktop app then runs `stl-server worker`, which connects to the server (out from the
 computer, over the same address and a WebSocket like the event stream, so it works behind
-NAT and through the reverse proxy), and does the work with the components of the computer's
-local library folder: install them there from that library's *Maintenance → AI and add-on
-components* (DirectML on Windows for CLIP; the CUDA AI runtime for an NVIDIA card). The
-switch is remembered: the worker starts again whenever the app connects to that server, and
-stops when the app closes. The card lists the connected workers, what each does, and how
-many requests it answered.
+NAT and through the reverse proxy), and does the work with the components in a folder of
+that computer. Under *This computer* the card lists them and downloads them — the same
+choices as a library's *AI and add-on components* (DirectML for CLIP on Windows, the CUDA AI
+runtime for an NVIDIA card; the defaults follow the GPUs found) — and *Change folder…* picks
+where they go (by default the local library's folder, if the app has opened one, else
+`%LOCALAPPDATA%\stlLibrary\worker`). The worker pauses while components are installed and
+starts again with them. The switch is remembered: the worker starts again whenever the app
+connects to that server, and stops when the app closes. The card lists the connected
+workers, what each does, and how many requests it answered.
 
 Jobs, progress, the review of suggestions and the database stay on the server; only images
 and prompts travel to the worker, and vectors and replies come back. A worker's CLIP encoder
@@ -362,6 +368,22 @@ The worker's session is a new session of the user who turned it on, stored by th
 app (`servers.json` in its configuration folder); disabling that user, or turning the switch
 off, ends it. Behind a reverse proxy, WebSocket upgrades must be passed on (they already are
 for the event stream).
+
+## Monitored folders
+
+*Jobs → Crawled folders*: the eye button (editors) monitors a folder. Every
+*Check monitored folders every* minutes (*Settings → Library*, default 30) the server lists
+the folder's archives and compares them with the library by size and modification date —
+no archive is opened, so a check of an unchanged folder is cheap even on a NAS. When an
+archive is new, changed or gone, it queues a crawl of the folder (shown in *Jobs* from the
+user `monitor`; nothing is queued when nothing changed, or while a crawl of the folder or
+*Update all* is waiting or running). The crawl adds and updates records as any crawl does;
+records of archives that vanished are **marked missing** rather than deleted (an archive
+that turns up in another crawled folder is matched by hash), and *Maintenance → Remove
+missing archives* deletes the records of every missing archive. Checks run while the server
+does; changes made while it was off are found at the first check after it starts. Changes
+are picked up at the next check, not at once, which also works on network shares where file
+notifications do not.
 
 ## Users and roles
 

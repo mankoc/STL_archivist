@@ -46,6 +46,11 @@ pub enum JobRequest {
         /// Default: the `recurse_subdirs` setting.
         #[serde(default)]
         recurse: Option<bool>,
+        /// Mark the records of archives gone from the folder missing instead
+        /// of deleting them (monitored folders; *Remove missing archives*
+        /// deletes them later).
+        #[serde(default)]
+        keep_missing: bool,
     },
     /// Re-crawl crawled folders (all of them, or `folders`) with their stored
     /// patterns, matching archives moved from one folder to another before
@@ -594,7 +599,7 @@ async fn worker(lib: Weak<Library>, wake: Arc<Notify>) {
 fn run(lib: &Library, job: &Job) -> Result<String, String> {
     let request = job.info().request;
     match request {
-        JobRequest::Crawl { folder, pattern, force_rescan, recurse } => crawl(lib, job, folder, pattern, force_rescan, recurse),
+        JobRequest::Crawl { folder, pattern, force_rescan, recurse, keep_missing } => crawl(lib, job, folder, pattern, force_rescan, recurse, keep_missing),
         JobRequest::UpdateFolders { folders } => update_folders(lib, job, folders),
         JobRequest::ClearLibrary { .. } => clear_library(lib, job),
         JobRequest::VerifyArchives => verify(lib, job),
@@ -605,7 +610,7 @@ fn run(lib: &Library, job: &Job) -> Result<String, String> {
         JobRequest::InstallComponents { components, variants } => install_components(lib, job, &components, &variants),
         JobRequest::RemoveComponents { components } => {
             let log = |line: String| lib.job_log(job, line);
-            let n = crate::components::remove(lib, &log, &components)?;
+            let n = crate::components::remove(&lib.place(), &log, &components)?;
             Ok(format!("{n} component(s) removed"))
         }
         JobRequest::Rescan { ids } => rescan(lib, job, &ids),
@@ -650,7 +655,7 @@ fn components_hint() -> String {
 
 fn install_components(lib: &Library, job: &Job, ids: &[String], variants: &BTreeMap<String, String>) -> Result<String, String> {
     let log = |line: String| lib.job_log(job, line);
-    let n = crate::components::install(lib, &job.ctl, &log, ids, variants)?;
+    let n = crate::components::install(&lib.place(), &job.ctl, &log, ids, variants)?;
     Ok(format!("{n} component(s) installed"))
 }
 
@@ -1105,8 +1110,9 @@ fn crawl(
     pattern: Option<String>,
     force_rescan: bool,
     recurse: Option<bool>,
+    keep_missing: bool,
 ) -> Result<String, String> {
-    let s = crawl_folder(lib, job, folder, pattern, force_rescan, recurse, false, None)?;
+    let s = crawl_folder(lib, job, folder, pattern, force_rescan, recurse, keep_missing, None)?;
     Ok(format!("{} new, {} updated, {} unchanged", s.new, s.updated, s.unchanged))
 }
 
