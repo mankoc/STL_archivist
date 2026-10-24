@@ -171,7 +171,8 @@ in this browser.
   **Open in MeshPeek**. In the view, left drag orbits, middle or Shift drag pans, the wheel
   or right drag zooms, **F** frames everything, **W** switches the wireframe of the shown
   files and **0**–**6** pick the standard views; the view cube (top right) turns with the
-  model, and clicking a face looks from that side. The buttons top left switch the
+  model: clicking a face looks from that side (Top, Front, Right…), dragging the cube turns
+  the view. The buttons top left switch the
   wireframe, *Colour each model* and the build plate. Lychee and CHITUBOX scenes show their
   supports and build plate.
 - **Open in MeshPeek** (desktop app) opens the archive in the

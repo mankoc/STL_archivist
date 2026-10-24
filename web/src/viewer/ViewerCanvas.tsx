@@ -1,7 +1,8 @@
 // The model files drawn by MeshPeek's renderer (rust/stl-viewer, WebAssembly):
 // the server loads each file from the archive (`GET /api/models/{id}/view`),
 // the canvas shows them together with MeshPeek's mouse and keyboard controls
-// (input.ts) and a view cube (viewCube.ts). Files are added and removed as
+// (input.ts) and a view cube (viewCube.ts: click a face for that view, drag
+// it to orbit). Files are added and removed as
 // `files` changes; each is drawn as `styles` says. The WebAssembly is fetched
 // the first time a viewer opens.
 import { ActionIcon, Alert, Box, Center, Group, Loader, Menu, Text, Tooltip, useComputedColorScheme } from "@mantine/core";
@@ -9,9 +10,9 @@ import { IconCube, IconFocusCentered } from "@tabler/icons-react";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
 import { api, unwrap } from "../api/client";
-import { dragAction, dragZoom, keyAction, orbitDegrees, VIEWS, wheelZoom } from "./input";
+import { dragAction, dragZoom, keyAction, orbitDegrees, type ViewName, VIEWS, wheelZoom } from "./input";
 import { type FileStyle, styleOf } from "./state";
-import { cubeFaces } from "./viewCube";
+import { cubeFaces, isClick } from "./viewCube";
 import type { Viewer } from "./wasm/stl_viewer";
 
 type Wasm = typeof import("./wasm/stl_viewer");
@@ -41,6 +42,7 @@ export type FileStatus =
   | { state: "failed"; error: string };
 
 const CUBE = 34; // half-size in CSS pixels
+const CUBE_BOX = CUBE * 2 + 24; // the cube's square, margin included
 const AXIS_TINT = { x: "230, 70, 70", y: "90, 200, 90", z: "90, 130, 255" };
 
 export function ViewerCanvas({ id, files, styles, colorEach, plates, focus, onStatus, onWireframeKey, tools }: {
@@ -238,6 +240,39 @@ export function ViewerCanvas({ id, files, styles, colorEach, plates, focus, onSt
     else if (action === "zoom") v.zoom(dragZoom(dy));
     draw();
   };
+  // A press on the view cube: where it started and last was, the face under it, whether it became a drag.
+  const cubePress = useRef<{ x0: number; y0: number; x: number; y: number; view: ViewName | null; drag: boolean } | null>(null);
+  const [cubeHover, setCubeHover] = useState<ViewName | null>(null);
+  const [cubeDragging, setCubeDragging] = useState(false);
+  const onCubeDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault(); // no text selection
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const view = (e.target as Element).closest("[data-view]")?.getAttribute("data-view") as ViewName | null;
+    cubePress.current = { x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, view, drag: false };
+  };
+  const onCubeMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    const p = cubePress.current;
+    const v = viewerRef.current;
+    if (!p || !v) return;
+    if (!p.drag) {
+      if (isClick(e.clientX - p.x0, e.clientY - p.y0)) return;
+      p.drag = true;
+      setCubeDragging(true);
+    }
+    // The cube's width turns 200 degrees, as a full-width drag of the view does.
+    v.orbit(...orbitDegrees(e.clientX - p.x, e.clientY - p.y, CUBE_BOX, CUBE_BOX));
+    p.x = e.clientX;
+    p.y = e.clientY;
+    draw();
+  };
+  const onCubeUp = () => {
+    const p = cubePress.current;
+    cubePress.current = null;
+    setCubeDragging(false);
+    if (p && !p.drag && p.view) act(p.view);
+  };
+
   const act = (action: ReturnType<typeof keyAction>) => {
     const v = viewerRef.current;
     if (!v || !action) return;
@@ -301,18 +336,36 @@ export function ViewerCanvas({ id, files, styles, colorEach, plates, focus, onSt
       )}
       {ready && basis && (
         <svg
-          width={CUBE * 2 + 24}
-          height={CUBE * 2 + 24}
-          viewBox={`${-CUBE - 12} ${-CUBE - 12} ${CUBE * 2 + 24} ${CUBE * 2 + 24}`}
-          style={{ position: "absolute", top: 8, right: 8, overflow: "visible" }}
+          width={CUBE_BOX}
+          height={CUBE_BOX}
+          viewBox={`${-CUBE_BOX / 2} ${-CUBE_BOX / 2} ${CUBE_BOX} ${CUBE_BOX}`}
+          style={{ position: "absolute", top: 8, right: 8, overflow: "visible", touchAction: "none", cursor: cubeDragging ? "grabbing" : "grab" }}
+          onPointerDown={onCubeDown}
+          onPointerMove={onCubeMove}
+          onPointerUp={onCubeUp}
+          onPointerCancel={() => {
+            cubePress.current = null;
+            setCubeDragging(false);
+          }}
+          onWheel={(e) => {
+            viewerRef.current?.zoom(wheelZoom(e.deltaY, e.deltaMode));
+            draw();
+          }}
           data-testid="view-cube"
         >
+          <title>Click a face for that view; drag to turn the view</title>
           {cubeFaces(basis, CUBE / Math.sqrt(3)).map((f) => (
-            <g key={f.view} onClick={() => act(f.view)} style={{ cursor: "pointer" }}>
+            <g
+              key={f.view}
+              data-view={f.view}
+              style={{ cursor: cubeDragging ? "grabbing" : "pointer" }}
+              onPointerEnter={() => setCubeHover(f.view)}
+              onPointerLeave={() => setCubeHover((h) => (h === f.view ? null : h))}
+            >
               <title>{`${f.label} view`}</title>
               <polygon
                 points={f.points.map((p) => p.join(",")).join(" ")}
-                fill={`rgba(${AXIS_TINT[f.axis]}, ${0.25 + 0.45 * f.facing})`}
+                fill={`rgba(${AXIS_TINT[f.axis]}, ${Math.min(1, 0.25 + 0.45 * f.facing + (cubeHover === f.view && !cubeDragging ? 0.3 : 0))})`}
                 stroke={dark ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.45)"}
                 strokeWidth={1}
                 strokeLinejoin="round"

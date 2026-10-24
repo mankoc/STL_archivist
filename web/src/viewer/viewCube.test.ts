@@ -1,4 +1,4 @@
-import { cubeFaces } from "./viewCube";
+import { cubeFaces, isClick } from "./viewCube";
 
 describe("view cube", () => {
   it("shows only the top face from above", () => {
@@ -18,5 +18,12 @@ describe("view cube", () => {
     expect(faces.map((x) => x.view).sort()).toEqual(["back", "right", "top"]);
     // Top is drawn above the centre (screen y up is negative).
     expect(faces.find((x) => x.view === "top")!.centre[1]).toBeLessThan(0);
+  });
+
+  it("tells a click on a face from a drag", () => {
+    expect(isClick(0, 0)).toBe(true);
+    expect(isClick(2, -2)).toBe(true);
+    expect(isClick(4, 0)).toBe(false);
+    expect(isClick(-3, 3)).toBe(false);
   });
 });

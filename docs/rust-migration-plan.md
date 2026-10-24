@@ -1344,6 +1344,8 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.43.15: the view cube is dragged to orbit (pointer capture on the cube's SVG; a press
+  under `viewCube.ts`'s `CLICK_SLOP` is a click on the face it started on).
 
 ### Phase 8: Retire Python (small)
 
