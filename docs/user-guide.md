@@ -53,9 +53,8 @@ The bar at the top switches pages:
 | **Lookups** | Tags, categories, collections, subcollections, scales, creators |
 | **Libraries** | Libraries and their folders: add, crawl, monitor, rename, move, remove |
 | **Jobs** | Every background job with its log |
-| **Maintenance** | Checking and repairing the library, sidecars, backups |
 | **Statistics** | Totals, rankings, and the distribution of any column |
-| **Settings** | Your account, the library's settings, components, users |
+| **Settings** | Your account, the library's settings, and tabs for maintenance, sidecars, backups, compute workers, components and users |
 
 The **status bar** at the bottom of every page shows the running job with its progress (and
 how many wait behind it; click it for the Jobs page), and how many archives all libraries
@@ -114,7 +113,7 @@ crawls skip the inner one. The browser has a **Library** filter section and colu
 folders every* minutes (*Settings → Library*, default 30) the server compares the folder with
 the library by file size and date, without opening archives, and crawls it only when archives
 were added, changed or removed (the job shows as started by `monitor`). Archives that vanished
-are marked missing instead of deleted; *Maintenance → Remove missing archives* deletes their
+are marked missing instead of deleted; *Settings → Maintenance → Remove missing archives* deletes their
 records.
 
 > In the desktop app's *This computer* mode, the server belongs to the window: closing the
@@ -267,14 +266,14 @@ a GPU variant — DirectML on Windows, CUDA on Linux — that the card preselect
 GPU; the card also shows where the encoder runs.
 
 A server without a GPU can let a computer with one do the AI work: on that computer, open the
-server in the desktop app, go to *Maintenance → Compute workers*, download the components
+server in the desktop app, go to *Settings → Workers*, download the components
 under **This computer** (**Change folder…** chooses where they go) and turn on **Use this
 computer for AI**. The card lists the connected workers. A server set to `"compute":
 "workers"` never runs the models itself: its AI jobs wait for a worker.
 
 ## Maintenance
 
-The **Maintenance** page (editors; some cards for administrators):
+Maintenance is in **Settings**: the **Maintenance** tab (editors run its jobs) holds the cards below; **Sidecars**, **Backups** (administrators) and **Workers** are tabs of their own:
 
 - **Records**
   - **Verify archives** checks that every archive is still on disk, unchanged in size, and

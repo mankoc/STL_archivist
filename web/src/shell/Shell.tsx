@@ -1,6 +1,6 @@
 // The signed-in application frame: header with the user menu, the pages, and
 // the status bar at the bottom.
-import { ActionIcon, AppShell, Avatar, Button, Group, Menu, Modal, PasswordInput, SegmentedControl, Stack, Text, Title, Tooltip, UnstyledButton, useMantineColorScheme } from "@mantine/core";
+import { ActionIcon, AppShell, Avatar, Button, Group, Menu, Modal, PasswordInput, Stack, Text, Title, Tooltip, UnstyledButton, useMantineColorScheme } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import { IconHelp, IconInfoCircle, IconKey, IconLogout } from "@tabler/icons-react";
@@ -15,7 +15,6 @@ import { BrowserPage } from "../browser/BrowserPage";
 import { HelpPage } from "../help/HelpPage";
 import { JobsPage } from "../jobs/JobsPage";
 import { LibrariesPage } from "../jobs/LibrariesPage";
-import { MaintenancePage } from "../jobs/MaintenancePage";
 import { LookupsPage } from "../lookups/LookupsPage";
 import { DuplicatesPage } from "../tools/DuplicatesPage";
 import { FindByImagePage } from "../tools/FindByImagePage";
@@ -24,6 +23,19 @@ import { StatsPage } from "../tools/StatsPage";
 import { SettingsPage } from "../settings/SettingsPage";
 import { type Page, usePage } from "./route";
 import { STATUS_BAR_HEIGHT, StatusBar } from "./StatusBar";
+
+/** The header's page buttons, in order (Help is the ? button). */
+const PAGE_BUTTONS: { value: Page; label: string }[] = [
+  { value: "library", label: "Library" },
+  { value: "folders", label: "Folders" },
+  { value: "find", label: "Find by Image" },
+  { value: "duplicates", label: "Duplicates" },
+  { value: "lookups", label: "Lookups" },
+  { value: "libraries", label: "Libraries" },
+  { value: "jobs", label: "Jobs" },
+  { value: "stats", label: "Statistics" },
+  { value: "settings", label: "Settings" },
+];
 
 export function Shell({ user }: { user: Schemas["User"] }) {
   useServerEvents();
@@ -47,26 +59,22 @@ export function Shell({ user }: { user: Schemas["User"] }) {
       <AppShell header={{ height: 48 }} footer={{ height: STATUS_BAR_HEIGHT }} padding={0}>
         <AppShell.Header>
           <Group h="100%" px="md" justify="space-between">
-            <Group gap="lg">
-              <Title order={4}>StlArchivist</Title>
-              <SegmentedControl
-                size="xs"
-                value={page}
-                onChange={(v) => setPage(v as Page)}
-                data={[
-                  { value: "library", label: "Library" },
-                  { value: "folders", label: "Folders" },
-                  { value: "find", label: "Find by Image" },
-                  { value: "duplicates", label: "Duplicates" },
-                  { value: "lookups", label: "Lookups" },
-                  { value: "libraries", label: "Libraries" },
-                  { value: "jobs", label: "Jobs" },
-                  { value: "maintenance", label: "Maintenance" },
-                  { value: "stats", label: "Statistics" },
-                  { value: "settings", label: "Settings" },
-                ]}
-                data-testid="pages"
-              />
+            <Group gap="lg" wrap="nowrap" style={{ minWidth: 0 }}>
+              <Title order={4} style={{ flexShrink: 0 }}>StlArchivist</Title>
+              <Group gap={4} wrap="nowrap" style={{ overflowX: "auto", minWidth: 0 }} data-testid="pages">
+                {PAGE_BUTTONS.map((p) => (
+                  <Button
+                    key={p.value}
+                    size="compact-sm"
+                    variant={page === p.value ? "filled" : "default"}
+                    aria-current={page === p.value ? "page" : undefined}
+                    onClick={() => setPage(p.value)}
+                    style={{ flexShrink: 0 }}
+                  >
+                    {p.label}
+                  </Button>
+                ))}
+              </Group>
             </Group>
             <Group gap="xs">
             <Tooltip label="Help">
@@ -113,8 +121,6 @@ export function Shell({ user }: { user: Schemas["User"] }) {
             <LibrariesPage />
           ) : page === "jobs" ? (
             <JobsPage />
-          ) : page === "maintenance" ? (
-            <MaintenancePage />
           ) : page === "settings" ? (
             <SettingsPage />
           ) : page === "lookups" ? (

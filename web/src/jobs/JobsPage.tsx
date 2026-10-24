@@ -1,5 +1,5 @@
 // Jobs: the job queue and a live log. Libraries (crawls) and Database
-// Maintenance have their own pages (LibrariesPage, MaintenancePage).
+// Maintenance have their own places (LibrariesPage, Settings → Maintenance).
 import { ActionIcon, Badge, Box, Card, Group, Progress, ScrollArea, Stack, Text, Title, UnstyledButton } from "@mantine/core";
 import { IconPlayerStop } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";

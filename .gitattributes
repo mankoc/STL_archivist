@@ -5,3 +5,5 @@ Dockerfile text eol=lf
 .dockerignore text eol=lf
 # Shell scripts run on Linux / macOS.
 *.sh text eol=lf
+# Batch files run in cmd, which needs CRLF (labels and goto break with LF).
+*.bat text eol=crlf

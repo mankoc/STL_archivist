@@ -1,7 +1,7 @@
-// Database Maintenance (the desktop dialog): checks that produce a record list
-// (Verify, duplicate entries), the actions on that list (Find Moved in DB,
-// Search in Folder, Merge Moved, Remove), warning re-checks, the store jobs,
-// sidecars and backups.
+// Settings → Maintenance (the desktop's Database Maintenance dialog): checks that
+// produce a record list (Verify, duplicate entries), the actions on that list
+// (Find Moved in DB, Search in Folder, Merge Moved, Remove), warning re-checks and
+// the store jobs. Sidecars, backups and workers have tabs of their own.
 import { Alert, Badge, Button, Card, Checkbox, Group, Modal, NumberInput, Progress, Stack, Table, Text, Title, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -9,33 +9,19 @@ import { useMemo, useState } from "react";
 
 import { api, unwrap } from "../api/client";
 import { hasRole, useUser } from "../auth/user";
-import { BackupCard, DangerCard, SidecarCard } from "./BackupCards";
-import { WorkersCard } from "./WorkersCard";
 import { FolderPicker } from "./FolderPicker";
-import { addJob, describe, isActive, type Job, type JobRequest, percent, progressText } from "./jobs";
+import { describe, isActive, type Job, type JobRequest, percent, progressText } from "./jobs";
 import { JobLog } from "./JobsPage";
 import classes from "./JobsPage.module.css";
 import { isMissing, isMoved, latestRecordsJob, type RecordRow, STATUS_COLOR, targets } from "./maintenance";
+import { useStartJob } from "./useStartJob";
 
-export function MaintenancePage() {
+export function MaintenanceTab() {
   const user = useUser();
   const editor = hasRole(user, "editor");
   const admin = hasRole(user, "admin");
-  const queryClient = useQueryClient();
-  const jobs = useQuery({ queryKey: ["jobs"], queryFn: async () => unwrap(await api.GET("/api/jobs")) });
+  const { jobs, start, current } = useStartJob();
   const [keep, setKeep] = useState<number>(5);
-  const [last, setLast] = useState<number | null>(null);
-
-  const start = async (request: JobRequest) => {
-    try {
-      const job = unwrap(await api.POST("/api/jobs", { body: request }));
-      queryClient.setQueryData<Job[]>(["jobs"], (old) => addJob(old, job));
-      setLast(job.id);
-    } catch (err) {
-      notifications.show({ color: "red", title: "Could not start", message: (err as Error).message });
-    }
-  };
-  const current = (jobs.data ?? []).find((j) => j.id === last);
   const [confirmMissing, setConfirmMissing] = useState(false);
   const removeMissing = async () => {
     setConfirmMissing(false);
@@ -135,14 +121,10 @@ export function MaintenancePage() {
             </Group>
           </Stack>
         </Card>
-        <SidecarCard editor={editor} start={start} />
-        <WorkersCard editor={editor} />
-        {admin && <BackupCard jobs={jobs.data} start={start} />}
-        {admin && <DangerCard start={start} />}
         {current && <JobLog id={current.id} job={current} />}
       </Stack>
       <Stack gap="md" className={classes.column}>
-        <RecordList job={latestRecordsJob(jobs.data)} editor={editor} start={start} />
+        <RecordList job={latestRecordsJob(jobs)} editor={editor} start={start} />
       </Stack>
     </div>
   );
