@@ -28,8 +28,9 @@ describe("viewer input", () => {
     expect(wheelZoom(100, 0)).toBeLessThan(1);
   });
 
-  it("maps F and the number keys", () => {
+  it("maps F, W and the number keys", () => {
     expect(keyAction("f")).toBe("fit");
+    expect(keyAction("W")).toBe("wireframe");
     expect(keyAction("0")).toBe("isometric");
     expect(keyAction("5")).toBe("top");
     expect(keyAction("7")).toBe(null);

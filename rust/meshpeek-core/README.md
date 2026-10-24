@@ -10,7 +10,10 @@ Changes from MeshPeek (carry them over when syncing a newer MeshPeek):
 - `meshpeek-core`: file loading (`io`) is behind the default `io` feature, so the web viewer
   builds without it; `zip` 9 with deflate only (the archivist's version); new `wire` module (the
   scene as bytes, for the server to send and the viewer to read).
-- `meshpeek-render`: depends on `meshpeek-core` without `io`.
+- `meshpeek-render`: depends on `meshpeek-core` without `io`; per-object wireframe that needs
+  no `POLYGON_MODE_LINE` (edge index buffers from `GpuMesh::upload_with(.., edges)`, drawn
+  as line lists by `Renderer::set_object_wireframe`); `Renderer::remove_object`, `set_mesh`
+  and `set_plates`, for a scene whose files come and go.
 - Tests that need MeshPeek's `samples/` (golden, render) are not copied.
 - `meshpeek-core/src/lib.rs` and `meshpeek-render/src/lib.rs` allow the clippy lints of newer toolchains that MeshPeek's code
   trips (`chunks_exact_to_as_chunks`, `collapsible_if`, `manual_is_multiple_of`), rather than

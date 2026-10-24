@@ -1,7 +1,7 @@
 /* @ts-self-types="./stl_viewer.d.ts" */
 
 /**
- * What [`Viewer::load`] put in the view.
+ * What [`Viewer::add`] put in the view.
  */
 export class Loaded {
     static __wrap(ptr) {
@@ -50,7 +50,7 @@ export class Loaded {
 if (Symbol.dispose) Loaded.prototype[Symbol.dispose] = Loaded.prototype.free;
 
 /**
- * A canvas showing one scene.
+ * A canvas showing one or more scenes.
  */
 export class Viewer {
     static __wrap(ptr) {
@@ -70,6 +70,25 @@ export class Viewer {
         wasm.__wbg_viewer_free(ptr, 0);
     }
     /**
+     * Show the file `key` (a scene from `GET /api/models/{id}/view`), replacing what it showed before. The
+     * first file shown is seen from the isometric view; later ones are framed with everything, keeping the
+     * viewing direction.
+     * @param {string} key
+     * @param {Uint8Array} data
+     * @returns {Loaded}
+     */
+    add(key, data) {
+        const ptr0 = passStringToWasm0(key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.viewer_add(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return Loaded.__wrap(ret[0]);
+    }
+    /**
      * "WebGPU" or "WebGL2".
      * @returns {string}
      */
@@ -84,6 +103,16 @@ export class Viewer {
         } finally {
             wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
         }
+    }
+    /**
+     * The camera's right, up and viewing directions in world coordinates (9 numbers), for the view cube.
+     * @returns {Float64Array}
+     */
+    camera_basis() {
+        const ret = wasm.viewer_camera_basis(this.__wbg_ptr);
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
     }
     /**
      * Draw into `canvas` (sized by the page) with WebGPU when the browser has it, otherwise WebGL2;
@@ -103,18 +132,13 @@ export class Viewer {
         wasm.viewer_fit(this.__wbg_ptr);
     }
     /**
-     * Replace what is shown with a scene from `GET /api/models/{id}/view`, seen from the isometric view.
-     * @param {Uint8Array} data
-     * @returns {Loaded}
+     * Frame the file's objects.
+     * @param {string} key
      */
-    load(data) {
-        const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+    focus(key) {
+        const ptr0 = passStringToWasm0(key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.viewer_load(this.__wbg_ptr, ptr0, len0);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return Loaded.__wrap(ret[0]);
+        wasm.viewer_focus(this.__wbg_ptr, ptr0, len0);
     }
     /**
      * Turntable orbit: `azimuth` about the world Z axis, `elevation` toward the poles, in degrees.
@@ -131,6 +155,15 @@ export class Viewer {
      */
     pan(dx, dy) {
         wasm.viewer_pan(this.__wbg_ptr, dx, dy);
+    }
+    /**
+     * Stop showing the file `key`.
+     * @param {string} key
+     */
+    remove(key) {
+        const ptr0 = passStringToWasm0(key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.viewer_remove(this.__wbg_ptr, ptr0, len0);
     }
     /**
      * Draw a frame.
@@ -150,11 +183,69 @@ export class Viewer {
         wasm.viewer_resize(this.__wbg_ptr, width, height);
     }
     /**
+     * Colour the file's models `#rrggbb`, or (`None` or anything else) as by default.
+     * @param {string} key
+     * @param {string | null} [color]
+     */
+    set_color(key, color) {
+        const ptr0 = passStringToWasm0(key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        var ptr1 = isLikeNone(color) ? 0 : passStringToWasm0(color, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len1 = WASM_VECTOR_LEN;
+        wasm.viewer_set_color(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+    }
+    /**
+     * Give each model its own colour (MeshPeek's "Colour each model"); colours set per file still win.
+     * @param {boolean} on
+     */
+    set_color_each(on) {
+        wasm.viewer_set_color_each(this.__wbg_ptr, on);
+    }
+    /**
      * Follow the page's theme (background and plate colours).
      * @param {boolean} dark
      */
     set_dark(dark) {
         wasm.viewer_set_dark(this.__wbg_ptr, dark);
+    }
+    /**
+     * Give the file's objects one of MeshPeek's materials: `Matte`, `Plastic`, `Glossy` or `Metal`.
+     * @param {string} key
+     * @param {string} name
+     */
+    set_material(key, name) {
+        const ptr0 = passStringToWasm0(key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        wasm.viewer_set_material(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+    }
+    /**
+     * Show or hide the build plates and volumes of slicer scenes.
+     * @param {boolean} show
+     */
+    set_show_plates(show) {
+        wasm.viewer_set_show_plates(this.__wbg_ptr, show);
+    }
+    /**
+     * Show or hide the file (it stays loaded).
+     * @param {string} key
+     * @param {boolean} on
+     */
+    set_visible(key, on) {
+        const ptr0 = passStringToWasm0(key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.viewer_set_visible(this.__wbg_ptr, ptr0, len0, on);
+    }
+    /**
+     * Draw the file's objects as their edges, or as surfaces again.
+     * @param {string} key
+     * @param {boolean} on
+     */
+    set_wireframe(key, on) {
+        const ptr0 = passStringToWasm0(key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.viewer_set_wireframe(this.__wbg_ptr, ptr0, len0, on);
     }
     /**
      * Look along a standard view (`isometric`, `front`, `back`, `left`, `right`, `top`, `bottom`) and frame
@@ -2174,6 +2265,11 @@ function getArrayF32FromWasm0(ptr, len) {
     return getFloat32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
 }
 
+function getArrayF64FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getFloat64ArrayMemory0().subarray(ptr / 8, ptr / 8 + len);
+}
+
 function getArrayI16FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return getInt16ArrayMemory0().subarray(ptr / 2, ptr / 2 + len);
@@ -2229,6 +2325,14 @@ function getFloat32ArrayMemory0() {
         cachedFloat32ArrayMemory0 = new Float32Array(wasm.memory.buffer);
     }
     return cachedFloat32ArrayMemory0;
+}
+
+let cachedFloat64ArrayMemory0 = null;
+function getFloat64ArrayMemory0() {
+    if (cachedFloat64ArrayMemory0 === null || cachedFloat64ArrayMemory0.byteLength === 0) {
+        cachedFloat64ArrayMemory0 = new Float64Array(wasm.memory.buffer);
+    }
+    return cachedFloat64ArrayMemory0;
 }
 
 let cachedInt16ArrayMemory0 = null;
@@ -2410,6 +2514,7 @@ function __wbg_finalize_init(instance, module) {
     wasmModule = module;
     cachedDataViewMemory0 = null;
     cachedFloat32ArrayMemory0 = null;
+    cachedFloat64ArrayMemory0 = null;
     cachedInt16ArrayMemory0 = null;
     cachedInt32ArrayMemory0 = null;
     cachedInt8ArrayMemory0 = null;

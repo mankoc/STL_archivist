@@ -24,16 +24,28 @@ export async function openFolder(path: string): Promise<void> {
   await invoke("open_folder", { path });
 }
 
-/** Whether MeshPeek is installed on this computer (false outside the desktop app, or in an older one). */
-export async function meshpeekInstalled(): Promise<boolean> {
+/** MeshPeek on this computer: the program chosen in Settings, and the one "Open in MeshPeek" runs. */
+export interface MeshPeekState {
+  chosen: string | null;
+  /** null: no MeshPeek (the chosen one is missing, or none was found). */
+  program: string | null;
+}
+
+/** MeshPeek on this computer; null outside the desktop app, or in an older one. */
+export async function meshpeekState(): Promise<MeshPeekState | null> {
   const invoke = shellInvoke();
-  if (!invoke) return false;
+  if (!invoke) return null;
   try {
-    return (await invoke("meshpeek_installed")) === true;
+    return (await invoke("meshpeek_state")) as MeshPeekState;
   } catch {
-    return false;
+    return null;
   }
 }
+
+/** Choose MeshPeek's program in the shell's file dialog; null when cancelled. */
+export const pickMeshPeek = () => shellCall<MeshPeekState | null>("pick_meshpeek");
+/** Forget the chosen program: the shell looks for MeshPeek again. */
+export const clearMeshPeek = () => shellCall<MeshPeekState>("clear_meshpeek");
 
 /** Open an archive (`path`, as this computer sees it) in MeshPeek, or one model file inside it (`entry`). */
 export async function openInMeshPeek(path: string, entry?: string): Promise<void> {

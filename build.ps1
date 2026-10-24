@@ -8,10 +8,18 @@ param([switch]$Installer)
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
 
+# One build at a time: two would fight over node_modules and the cargo target
+# folder. Windows releases the mutex when this process ends, even on a crash.
+$lock = [System.Threading.Mutex]::new($false, "Local\StlArchivistBuild")
+if (-not $lock.WaitOne(0)) { throw "another StlArchivist build is running; wait for it to finish" }
+
 Write-Host "== Web client"
 Push-Location "$root\web"
-npm ci --no-fund --no-audit
-if ($LASTEXITCODE) { throw "npm ci failed" }
+# A fresh checkout gets exactly the lockfile (npm ci); an existing node_modules is
+# brought up to it in place, as npm ci would first delete it (which fails while an
+# editor or a dev server holds files there).
+if (Test-Path "node_modules") { npm install --no-fund --no-audit } else { npm ci --no-fund --no-audit }
+if ($LASTEXITCODE) { throw "npm install failed" }
 npm run build
 if ($LASTEXITCODE) { throw "web build failed" }
 Pop-Location

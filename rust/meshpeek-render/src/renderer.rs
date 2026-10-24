@@ -101,6 +101,8 @@ struct Object {
     model: DMat4,
     style: Style,
     visible: bool,
+    /// Drawn as its edges (needs a mesh uploaded with them).
+    wire: bool,
     uniform: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
 }
@@ -122,6 +124,8 @@ struct Pipelines {
     /// Lit meshes with vertex colours.
     colored: wgpu::RenderPipeline,
     wire: Option<(wgpu::RenderPipeline, wgpu::RenderPipeline)>, // (plain, colored) with PolygonMode::Line
+    /// (plain, colored) line lists over a mesh's edge buffers: one object's wireframe, on any adapter.
+    edges: (wgpu::RenderPipeline, wgpu::RenderPipeline),
     /// Plate outline and origin axes.
     lines: wgpu::RenderPipeline,
     /// Plate floor (blended, no depth writes).
@@ -262,7 +266,7 @@ impl Renderer {
         });
         let id = ObjectId(self.next_id);
         self.next_id += 1;
-        self.objects.push((id, Object { mesh, model, style, visible, uniform, bind_group }));
+        self.objects.push((id, Object { mesh, model, style, visible, wire: false, uniform, bind_group }));
         self.overlays_dirty = true;
         self.dirty = true;
         id
@@ -299,6 +303,41 @@ impl Renderer {
                 queue.write_buffer(&object.uniform, 0, bytemuck::bytes_of(&object_uniform(object.model, style)));
             }
         }
+        self.dirty = true;
+    }
+
+    /// Remove one object.
+    pub fn remove_object(&mut self, id: ObjectId) {
+        self.objects.retain(|(i, _)| *i != id);
+        self.overlays_dirty = true;
+        self.dirty = true;
+    }
+
+    /// Draw an object as its edges, or as surfaces again. Its mesh must have edge buffers
+    /// ([`GpuMesh::upload_with`], see [`Renderer::set_mesh`]); without them it stays solid.
+    pub fn set_object_wireframe(&mut self, id: ObjectId, on: bool) {
+        if let Some(object) = self.object(id) {
+            object.wire = on;
+        }
+        self.dirty = true;
+    }
+
+    /// Give an object another GPU copy of its mesh (e.g. one with edge buffers).
+    pub fn set_mesh(&mut self, id: ObjectId, mesh: Arc<GpuMesh>) {
+        if let Some(object) = self.object(id) {
+            object.mesh = mesh;
+        }
+        self.overlays_dirty = true;
+        self.dirty = true;
+    }
+
+    /// Replace the build plates (identical ones are drawn once).
+    pub fn set_plates(&mut self, plates: impl IntoIterator<Item = Plate>) {
+        self.plates.clear();
+        for plate in plates {
+            self.add_plate(plate);
+        }
+        self.overlays_dirty = true;
         self.dirty = true;
     }
 
@@ -419,6 +458,21 @@ impl Renderer {
             let wire = self.pipelines.wire.as_ref().filter(|_| self.wireframe);
             for (_, object) in self.objects.iter().filter(|(_, o)| o.visible) {
                 let colored = object.mesh.has_colors;
+                if object.wire && object.mesh.has_edges {
+                    let (plain, with_colors) = &self.pipelines.edges;
+                    pass.set_pipeline(if colored { with_colors } else { plain });
+                    pass.set_bind_group(1, &object.bind_group, &[]);
+                    for chunk in &object.mesh.chunks {
+                        let Some(edges) = &chunk.edges else { continue };
+                        pass.set_vertex_buffer(0, chunk.vertices.slice(..));
+                        if let Some(colors) = &chunk.colors {
+                            pass.set_vertex_buffer(1, colors.slice(..));
+                        }
+                        pass.set_index_buffer(edges.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.draw_indexed(0..chunk.edge_count, 0, 0..1);
+                    }
+                    continue;
+                }
                 let pipeline = match (wire, colored) {
                     (Some((plain, _)), false) => plain,
                     (Some((_, colored)), true) => colored,
@@ -686,8 +740,24 @@ impl Pipelines {
                 mesh("wire colored", "vs_colored", "fs_wire", &position_and_color, PolygonMode::Line),
             )
         });
+        let edge_lines = |label, vs, buffers: &[wgpu::VertexBufferLayout]| {
+            pipeline(
+                label,
+                &mesh_layout,
+                &mesh_shader,
+                vs,
+                "fs_wire",
+                buffers,
+                Topo::LineList,
+                PolygonMode::Fill,
+                depth(true, Cmp::Less),
+                None,
+            )
+        };
+        let edges = (edge_lines("edges", "vs_plain", &position), edge_lines("edges colored", "vs_colored", &position_and_color));
         let alpha = Some(wgpu::BlendState::ALPHA_BLENDING);
         Self {
+            edges,
             plain: mesh("mesh", "vs_plain", "fs_lit", &position, PolygonMode::Fill),
             colored: mesh("mesh colored", "vs_colored", "fs_lit", &position_and_color, PolygonMode::Fill),
             wire,
