@@ -1,0 +1,24 @@
+[package]
+name = "meshpeek-core"
+# Vendored from MeshPeek 0.5.6 (https://github.com/mankoc/meshpeek, commit e2138f2); see README.md.
+version = "0.5.6"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+default = ["io"]
+# Loading files (everything but meshes, scenes and the wire format); off in the web viewer.
+io = ["dep:aes", "dep:fast-float2", "dep:memchr", "dep:memmap2", "dep:rmpv", "dep:serde_json", "dep:zip"]
+
+[dependencies]
+aes = { version = "0.8.4", optional = true }
+fast-float2 = { version = "0.2.4", optional = true }
+glam = "0.34.1"
+memchr = { version = "2.8.3", optional = true }
+memmap2 = { version = "0.9.11", optional = true }
+rayon = "1.12.0"
+rmpv = { version = "1.3.1", optional = true }
+serde_json = { version = "1.0.151", optional = true }
+thiserror = "2.0.21"
+zip = { version = "9.0.5", default-features = false, features = ["deflate"], optional = true }

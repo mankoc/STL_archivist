@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-meshpeek-installed"
+description = "Enables the meshpeek_installed command without any pre-configured scope."
+commands.allow = ["meshpeek_installed"]
+
+[[permission]]
+identifier = "deny-meshpeek-installed"
+description = "Denies the meshpeek_installed command without any pre-configured scope."
+commands.deny = ["meshpeek_installed"]

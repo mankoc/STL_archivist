@@ -1,4 +1,4 @@
-import { changeWorkerComponents, inDesktopShell, openFolder, pickWorkerFolder, startWorker, stopWorker, workerState } from "./desktop";
+import { changeWorkerComponents, inDesktopShell, meshpeekInstalled, openFolder, openInMeshPeek, pickWorkerFolder, startWorker, stopWorker, workerState } from "./desktop";
 
 describe("desktop shell bridge", () => {
   afterEach(() => {
@@ -20,6 +20,35 @@ describe("desktop shell bridge", () => {
     expect(inDesktopShell()).toBe(true);
     await openFolder("D:/STL/a.zip");
     expect(calls).toEqual([["open_folder", { path: "D:/STL/a.zip" }]]);
+  });
+
+  it("opens archives in MeshPeek through the shell", async () => {
+    expect(await meshpeekInstalled()).toBe(false);
+    await expect(openInMeshPeek("C:/x.zip")).rejects.toThrow("desktop app");
+    const calls: unknown[] = [];
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
+      invoke: async (cmd: string, args: unknown) => {
+        calls.push([cmd, args]);
+        return true;
+      },
+    };
+    expect(await meshpeekInstalled()).toBe(true);
+    await openInMeshPeek("D:/STL/a.zip", "parts/b.stl");
+    await openInMeshPeek("D:/STL/a.zip");
+    expect(calls).toEqual([
+      ["meshpeek_installed", undefined],
+      ["open_in_meshpeek", { path: "D:/STL/a.zip", entry: "parts/b.stl" }],
+      ["open_in_meshpeek", { path: "D:/STL/a.zip", entry: null }],
+    ]);
+  });
+
+  it("finds no MeshPeek in a shell without the command", async () => {
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
+      invoke: async () => {
+        throw new Error("unknown command");
+      },
+    };
+    expect(await meshpeekInstalled()).toBe(false);
   });
 
   it("runs the compute worker through the shell", async () => {

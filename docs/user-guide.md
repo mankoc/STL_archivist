@@ -157,7 +157,18 @@ in this browser.
 - **Download** the archive; **Copy path** (when the server's path makes sense on your
   computer); **Open folder** in the desktop app shows the archive in the file manager.
 - **Files** lists every file inside the archive with its size and CRC-32, as the last crawl
-  or rescan read the archive's catalog.
+  or rescan read the archive's catalog. The cube beside a model file opens it in the model
+  viewer.
+- **View model** opens the model viewer: the archive's 3D model files (STL, OBJ, PLY, 3MF,
+  Lychee `.lys`, CHITUBOX `.chitubox`, `.ctp` and `.ctb`) on the left, the chosen one drawn
+  with MeshPeek's renderer (WebGPU, or WebGL2 in browsers without it). The server unpacks the
+  file, so it works in any browser. Left drag orbits, middle or Shift drag pans, the wheel or
+  right drag zooms, **F** frames everything and **0**–**6** pick the standard views (also in
+  the cube menu). Lychee and CHITUBOX scenes show their supports and build plate.
+- **Open in MeshPeek** (desktop app) opens the archive in the
+  [MeshPeek](https://github.com/mankoc/meshpeek) viewer, when it is installed (`meshpeek` on
+  the `PATH`, or in Program Files) and the archive is reachable from your computer; in the
+  model viewer it opens the file shown.
 - Warnings (for example *Archive without images*) show as orange badges; **Warning
   details** lists the files that trigger each one.
 - Click an image to view it full screen at full resolution: the original is read from the

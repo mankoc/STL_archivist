@@ -1,7 +1,7 @@
 // The StlArchivist desktop shell (rust/stl-desktop): when the web client runs in
-// its window, the shell lets this page show folders in the file manager and run
-// a compute worker for this server. Those are the only shell commands a
-// server's page may call.
+// its window, the shell lets this page show folders in the file manager, open
+// archives in MeshPeek, and run a compute worker for this server. Those are the
+// only shell commands a server's page may call.
 
 import type { ComponentsInfo } from "./jobs/components";
 
@@ -22,6 +22,24 @@ export async function openFolder(path: string): Promise<void> {
   const invoke = shellInvoke();
   if (!invoke) throw new Error("only the desktop app can open folders");
   await invoke("open_folder", { path });
+}
+
+/** Whether MeshPeek is installed on this computer (false outside the desktop app, or in an older one). */
+export async function meshpeekInstalled(): Promise<boolean> {
+  const invoke = shellInvoke();
+  if (!invoke) return false;
+  try {
+    return (await invoke("meshpeek_installed")) === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Open an archive (`path`, as this computer sees it) in MeshPeek, or one model file inside it (`entry`). */
+export async function openInMeshPeek(path: string, entry?: string): Promise<void> {
+  const invoke = shellInvoke();
+  if (!invoke) throw new Error("only the desktop app can open MeshPeek");
+  await invoke("open_in_meshpeek", { path, entry: entry ?? null });
 }
 
 /** The desktop app's compute worker, as this server's page sees it. */

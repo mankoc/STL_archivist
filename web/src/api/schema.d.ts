@@ -898,6 +898,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/models/{id}/view": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One model file of the archive, loaded for the viewer: the scene (models,
+         *     supports, build plates) in MeshPeek's wire format (`meshpeek_core::wire`).
+         */
+        get: operations["get_models_by_id_view"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/models/{id}/viewable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The model files in the archive the viewer can show (STL, OBJ, PLY, 3MF,
+         *     Lychee and CHITUBOX files), from the archive's catalog read now, by name.
+         */
+        get: operations["get_models_by_id_viewable"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/models/{id}/warnings": {
         parameters: {
             query?: never;
@@ -2484,6 +2524,16 @@ export interface components {
             /** Format: int64 */
             bytes: number;
             variant: string;
+        };
+        /** @description A model file inside an archive that the viewer can show. */
+        ViewableFile: {
+            /** @description The member's name in the archive (`/` separators). */
+            name: string;
+            /**
+             * Format: int64
+             * @description Uncompressed size, when the archive records it.
+             */
+            size?: number | null;
         };
         WarningDetails: {
             /** @description Why the archive's files could not be listed. */
@@ -4278,6 +4328,92 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_models_by_id_view: {
+        parameters: {
+            query: {
+                /** @description The model file's name in the archive, as `viewable` lists it. */
+                name: string;
+            };
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The scene */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_models_by_id_viewable: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ViewableFile"][];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

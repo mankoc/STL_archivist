@@ -32,6 +32,7 @@ pub mod storage;
 pub mod strings;
 pub mod thumbstore;
 pub mod thumbnail;
+pub mod view;
 pub mod winpath;
 
 /// Version of the core library.

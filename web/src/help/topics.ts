@@ -264,7 +264,9 @@ export const TOPICS: Topic[] = [
       { list: [
         "The model's fields, tags, warnings, path and images. Drag its left edge to resize (double-click resets).",
         "**Download** the archive; **Copy path**; **Open folder** (desktop app) shows it in the file manager. Paths are translated with the server's `path_map` so they make sense on your computer.",
-        "**Files** lists every file inside the archive with its size and CRC-32 (from the archive's catalog: every crawl stores it, nothing is unpacked).",
+        "**Files** lists every file inside the archive with its size and CRC-32 (from the archive's catalog: every crawl stores it, nothing is unpacked). The cube beside a model file opens it in the model viewer.",
+        "**View model** shows the archive's 3D models (STL, OBJ, PLY, 3MF, Lychee `.lys`, CHITUBOX `.chitubox`, `.ctp` and `.ctb`) with MeshPeek's renderer: pick a file on the left; left drag orbits, middle or **Shift** drag pans, the wheel or right drag zooms, **F** frames everything, **0**–**6** are the standard views. Lychee and CHITUBOX scenes show their supports and build plate.",
+        "**Open in MeshPeek** (desktop app, when the MeshPeek viewer is installed and the archive is reachable from your computer) opens the archive, or the file shown in the viewer, in MeshPeek.",
         "Click an image for the full-resolution original read from the archive; **←**/**→** step through the images.",
       ] },
       { h: "Folders and Statistics" },
