@@ -6,12 +6,14 @@
 // `files` are hidden, not dropped, so showing them again is instant (the
 // oldest hidden ones are forgotten); each is drawn as `styles` says, restyled
 // only when its style changes. The WebAssembly is fetched the first time a
-// viewer opens (again after a failed download).
-import { ActionIcon, Alert, Box, Button, Center, Group, Loader, Menu, Text, Tooltip, useComputedColorScheme } from "@mantine/core";
+// viewer opens (again after a failed download). `ref` gives the view as an
+// image (`snapshot`: the canvas alone, without the toolbar or view cube).
+import { ActionIcon, Alert, Box, Button, Center, Group, Loader, Menu, Modal, Table, Text, Tooltip, useComputedColorScheme } from "@mantine/core";
 import { IconCube, IconFocusCentered } from "@tabler/icons-react";
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, type Ref, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 
 import { api, unwrap } from "../api/client";
+import { infoRows } from "./info";
 import { canvasSize, dragAction, dragZoom, keyAction, orbitDegrees, type ViewName, VIEWS, wheelZoom } from "./input";
 import { evictHidden, planBatches, splitBundle } from "./loading";
 import { type FileStyle, styleOf } from "./state";
@@ -63,11 +65,18 @@ type Entry =
   | { state: "shown" | "hidden"; info: Shown }
   | { state: "failed"; error: string };
 
+/** What the page can ask of the canvas. */
+export interface ViewerHandle {
+  /** The view as drawn now, as a PNG at the canvas's size. */
+  snapshot: () => Promise<Blob>;
+}
+
 const CUBE = 34; // half-size in CSS pixels
 const CUBE_BOX = CUBE * 2 + 24; // the cube's square, margin included
 const AXIS_TINT = { x: "230, 70, 70", y: "90, 200, 90", z: "90, 130, 255" };
 
-export function ViewerCanvas({ id, files, sizes, styles, colorEach, plates, focus, onStatus, onWireframeKey, tools }: {
+export function ViewerCanvas({ ref, id, files, sizes, styles, colorEach, plates, focus, info, onInfoClose, onStatus, onWireframeKey, tools }: {
+  ref?: Ref<ViewerHandle>;
   id: number;
   /** The files to show (member names). */
   files: string[];
@@ -78,6 +87,9 @@ export function ViewerCanvas({ id, files, sizes, styles, colorEach, plates, focu
   plates: boolean;
   /** Frame this file (a new `n` asks again). */
   focus: { name: string; n: number } | null;
+  /** The file whose information panel is open. */
+  info: string | null;
+  onInfoClose: () => void;
   /** A file's state changed; null: it is no longer shown. */
   onStatus: (name: string, status: FileStatus | null) => void;
   /** W was pressed. */
@@ -188,6 +200,18 @@ export function ViewerCanvas({ id, files, sizes, styles, colorEach, plates, focu
   }, [webgl, attempt, onStatus]);
 
   const ready = backend != null;
+
+  useImperativeHandle(ref, () => ({
+    snapshot: () =>
+      new Promise<Blob>((resolve, reject) => {
+        const v = viewerRef.current;
+        const canvas = canvasRef.current;
+        if (!v || !canvas) return reject(new Error("The viewer is not ready."));
+        // Drawn and read in one task: a WebGL2 canvas may be cleared once the browser has shown it.
+        v.render();
+        canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("The view could not be read."))), "image/png");
+      }),
+  }), []);
 
   useEffect(() => {
     if (!ready) return;
@@ -388,6 +412,24 @@ export function ViewerCanvas({ id, files, sizes, styles, colorEach, plates, focu
     draw();
   };
 
+  // The information panel's rows (read when it opens, or when the file finishes loading).
+  const infoState = info ? shown[info]?.state : undefined;
+  const panel = useMemo(() => {
+    const v = viewerRef.current;
+    const facts = info && infoState === "shown" ? v?.file_info(info) : undefined;
+    if (!info || !facts) return null;
+    const rows = infoRows(info, {
+      objects: facts.objects,
+      models: facts.models,
+      triangles: facts.triangles,
+      support_triangles: facts.support_triangles,
+      size: facts.size,
+      facts: facts.facts,
+    });
+    facts.free();
+    return rows;
+  }, [info, infoState]);
+
   const statuses = Object.values(shown);
   const done = statuses.flatMap((s) => (s.state === "shown" ? [s] : []));
   const loading = statuses.some((s) => s.state === "loading");
@@ -513,6 +555,22 @@ export function ViewerCanvas({ id, files, sizes, styles, colorEach, plates, focu
           </Alert>
         </Center>
       )}
+      <Modal opened={info != null} onClose={onInfoClose} title={`Information: ${info?.split("/").pop() ?? ""}`} size="md">
+        {panel ? (
+          <Table withRowBorders={false} verticalSpacing={3} fz="sm" data-testid="file-info">
+            <Table.Tbody>
+              {panel.map(([label, value], i) => (
+                <Table.Tr key={i}>
+                  <Table.Td c="dimmed" w={150} style={{ verticalAlign: "top" }}>{label}</Table.Td>
+                  <Table.Td style={{ wordBreak: "break-all" }}>{value}</Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        ) : (
+          <Text size="sm" c="dimmed">Show the file to see its information.</Text>
+        )}
+      </Modal>
       {done.length > 0 && (
         <Box pos="absolute" bottom={8} left={8} right={8} style={{ pointerEvents: "none" }}>
           {skipped.length > 0 && (

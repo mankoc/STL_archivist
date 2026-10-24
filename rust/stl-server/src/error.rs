@@ -50,6 +50,13 @@ impl From<heed::Error> for ApiError {
     }
 }
 
+/// A bad upload: 413 past the route's body limit, else 400.
+impl From<axum::extract::multipart::MultipartError> for ApiError {
+    fn from(e: axum::extract::multipart::MultipartError) -> Self {
+        Self::new(e.status(), e.body_text())
+    }
+}
+
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         (self.status, Json(ErrorBody { error: self.message })).into_response()

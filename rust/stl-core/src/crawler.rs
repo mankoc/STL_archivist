@@ -39,7 +39,6 @@ pub struct CrawlConfig {
     pub pattern: String,
     pub recurse: bool,
     pub force_rescan: bool,
-    pub store_stl: bool,
     pub max_thumbnails: usize,
     pub max_thumb_size: u32,
     pub max_workers: usize,
@@ -570,7 +569,7 @@ impl Run<'_> {
         let pairs: Vec<(String, String)> = batch.iter().cloned().zip(hashes.iter().cloned()).collect();
         let diff = {
             let t = tx(&mut self.conn)?;
-            let d = db::diff(&t, &pairs, self.cfg.force_rescan, self.cfg.store_stl, &self.candidates)?;
+            let d = db::diff(&t, &pairs, self.cfg.force_rescan, &self.candidates)?;
             t.commit()?;
             d
         };
@@ -714,7 +713,7 @@ impl Run<'_> {
             uncompressed_size: x.uncompressed,
             thumbs,
             folder_images: if fresh { folder_images(path, cfg, host) } else { Vec::new() },
-            stl_info: if cfg.store_stl { Some(x.stl_info.clone()) } else { None },
+            stl_info: x.stl_info.clone(),
         }
     }
 }

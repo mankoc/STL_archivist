@@ -55,8 +55,9 @@ fn parse_dhash(s: &str) -> Option<u128> {
 
 /// Search with an image (multipart, one file).
 #[utoipa::path(post, path = "/api/search/image", tag = "search", params(SearchQuery),
-    request_body(content_type = "multipart/form-data", description = "The image"),
-    responses((status = 200, body = SearchResult), (status = 400, body = crate::error::ErrorBody)))]
+    request_body(content_type = "multipart/form-data", description = "The image (64 MB at most)"),
+    responses((status = 200, body = SearchResult), (status = 400, body = crate::error::ErrorBody),
+              (status = 413, body = crate::error::ErrorBody)))]
 pub async fn by_image(
     State(lib): State<AppState>,
     _me: CurrentUser,
@@ -64,8 +65,8 @@ pub async fn by_image(
     mut form: Multipart,
 ) -> Result<Json<SearchResult>, ApiError> {
     let mut image = None;
-    while let Some(field) = form.next_field().await.map_err(|e| ApiError::bad_request(e.to_string()))? {
-        image = Some(field.bytes().await.map_err(|e| ApiError::bad_request(e.to_string()))?.to_vec());
+    while let Some(field) = form.next_field().await? {
+        image = Some(field.bytes().await?.to_vec());
     }
     let image = image.ok_or_else(|| ApiError::bad_request("no image uploaded"))?;
     let method = q.method.clone().unwrap_or_else(|| "dhash".into());

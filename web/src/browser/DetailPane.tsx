@@ -233,7 +233,22 @@ export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: num
       </SimpleGrid>
       <ImageViewer images={viewable} index={viewing} onIndex={setViewing} onClose={() => setViewing(null)} />
       {modelView && (
-        <ModelViewer id={id} title={title} file={modelView.file} clientPath={d.client_path ?? null} onClose={() => setModelView(null)} />
+        <ModelViewer
+          id={id}
+          title={title}
+          file={modelView.file}
+          clientPath={d.client_path ?? null}
+          onAddImage={
+            editor
+              ? async (image) => {
+                  const r = await uploadImages(id, [image]);
+                  if (r.failed.length) throw new Error("The server could not read the view as an image.");
+                  await refresh();
+                }
+              : null
+          }
+          onClose={() => setModelView(null)}
+        />
       )}
       {d.images.length === 0 && (
         <Text size="sm" c="dimmed">

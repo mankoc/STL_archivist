@@ -85,7 +85,6 @@ async fn suggest_commit_and_batch() {
     let url = fake_model(Arc::clone(&seen)).await;
     let lib = library_with(|c| c.ai.url = Some(url.clone()));
     let ed = lib.user("ed", Role::Editor);
-    std::fs::write(lib.dir.path().join("settings.json"), r#"{"store_stl_file_list": true}"#).unwrap();
     let root = lib.dir.path().join("archives");
     write_zip(&root.join("Studio").join("Dragon.zip"), &[("dragon 32mm.stl", b"solid d\nendsolid\n"), ("render.png", &png())]);
     write_zip(&root.join("Studio").join("Knight.zip"), &[("knight.stl", b"solid k\nendsolid\n")]);

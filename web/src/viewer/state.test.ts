@@ -1,4 +1,4 @@
-import { currentOf, DEFAULT_STYLE, folderState, restyle, stepFile, toggleFile, toggleFiles } from "./state";
+import { currentOf, DEFAULT_STYLE, folderState, restyle, stepFile, toggleFile, toggleFiles, viewImageName } from "./state";
 
 describe("viewer state", () => {
   it("adds and takes away shown files", () => {
@@ -35,5 +35,12 @@ describe("viewer state", () => {
     expect(stepFile(order, "a", -1)).toBe("a");
     expect(stepFile(order, null, 1)).toBe("a");
     expect(stepFile([], "a", 1)).toBe(null);
+  });
+
+  it("names an image of the view after the file", () => {
+    expect(viewImageName("supports/Bust.stl")).toBe("Bust view.png");
+    expect(viewImageName("Bust.v2.3mf")).toBe("Bust.v2 view.png");
+    expect(viewImageName("README")).toBe("README view.png");
+    expect(viewImageName(".stl")).toBe(".stl view.png");
   });
 });

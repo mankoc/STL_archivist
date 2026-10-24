@@ -1344,6 +1344,21 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.43.17: `meshpeek_core::wire` version 2 carries each object's facts (`SceneObject::info`);
+  `Viewer::file_info` gathers a file's counts, size and facts for the information panel
+  (`web/src/viewer/info.ts`). The accent colour is Mantine's `primaryColor` from
+  `web/src/accent.ts` (per-user setting `primary_color`, provided by `main.tsx`'s `Root`).
+  The page bar hides Jobs unless `shell/status.ts`'s `showJobsButton`. The viewer's camera
+  button takes `ViewerCanvas`'s `ref` `snapshot()` (one `render()` and `canvas.toBlob` in the
+  same task, as a WebGL2 canvas may be cleared once shown) and posts the PNG to
+  `POST /api/models/{id}/images` (`DetailPane`'s upload; named by `state.ts`'s
+  `viewImageName`). That route and `POST /api/search/image` get a `DefaultBodyLimit`
+  (`edit::MAX_IMAGES_REQUEST_BYTES`, `edit::MAX_IMAGE_BYTES`), and multipart errors keep
+  their status (`From<MultipartError> for ApiError`). The Folders page's tree is
+  `web/src/tools/folderTree.ts`. The `store_stl_file_list` setting is gone, and with it
+  `store_stl` in `CrawlConfig`, `UpsertConfig`, `crawl::diff` and `rescan::Options`: the STL
+  list is always stored (`Changed::stl_info` and `Rescan::stl_files` are plain lists), and a
+  record without one is backfilled (`Diff::stl_backfill`) on the next crawl.
 - 2026.43.16 (code review): `POST /api/models/{id}/view` loads a batch
   (`stl_core::view::load_members`: one catalog read, one `read_members_with` pass, limits
   `MAX_MEMBER_BYTES` / `MAX_BATCH_BYTES` / `MAX_BATCH_FILES`) and answers with

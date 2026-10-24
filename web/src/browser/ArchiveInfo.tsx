@@ -143,7 +143,7 @@ function FileTreeView({ files, viewable, onView }: {
               {info.kind === "folder" ? <IconFolder size={14} style={{ flexShrink: 0 }} /> : <IconFile size={14} style={{ flexShrink: 0 }} />}
               <Text size="xs" style={{ flex: 1, minWidth: 0, wordBreak: "break-all" }}>{node.label}</Text>
               {info.kind === "folder" ? (
-                <Text size="xs" c="dimmed" w={170} ta="right">{info.files!.length} files · {formatSize(info.size)}</Text>
+                <Text size="xs" c="dimmed" w={170} ta="right">{info.files!.length} file{info.files!.length === 1 ? "" : "s"} · {formatSize(info.size)}</Text>
               ) : (
                 <>
                   <Text size="xs" w={80} ta="right">{formatSize(info.size)}</Text>

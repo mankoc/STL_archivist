@@ -58,7 +58,7 @@ fn scalar<T: rusqlite::types::FromSql>(lib: &TestLib, sql: &str) -> T {
 async fn files_warnings_rescan_and_thumbnails() {
     let lib = empty_library();
     let ed = lib.user("ed", Role::Editor);
-    std::fs::write(lib.dir.path().join("settings.json"), r#"{"store_stl_file_list": true, "max_thumbnails": 5}"#).unwrap();
+    std::fs::write(lib.dir.path().join("settings.json"), r#"{"max_thumbnails": 5}"#).unwrap();
     let root = lib.dir.path().join("archives");
     let (red, green) = (png([200, 0, 0]), png([0, 200, 0]));
     write_zip(&root.join("Studio").join("Dragon.zip"), &[("dragon_presupported.stl", b"solid d\nendsolid\n"), ("a.png", &red), ("b.png", &green)]);

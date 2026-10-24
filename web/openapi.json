@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.43.16"
+    "version": "2026.43.17"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -2250,7 +2250,7 @@
         "tags": [
           "library"
         ],
-        "summary": "The printable files the crawl stored for a model (empty unless the library\nstores STL file lists), by name.",
+        "summary": "The printable files the crawl stored for a model, by name.",
         "operationId": "get_models_by_id_files",
         "parameters": [
           {
@@ -2300,7 +2300,7 @@
           }
         ],
         "requestBody": {
-          "description": "Image files",
+          "description": "Image files (64 MB each, 256 MB in all)",
           "content": {
             "multipart/form-data": {}
           }
@@ -2317,6 +2317,16 @@
             }
           },
           "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
             "description": "",
             "content": {
               "application/json": {
@@ -2553,7 +2563,7 @@
           }
         ],
         "requestBody": {
-          "description": "The image",
+          "description": "The image (64 MB at most)",
           "content": {
             "multipart/form-data": {}
           }
@@ -2570,6 +2580,16 @@
             }
           },
           "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
             "description": "",
             "content": {
               "application/json": {
@@ -6946,7 +6966,6 @@
           "max_thumb_size",
           "max_workers",
           "recurse_subdirs",
-          "store_stl_file_list",
           "metadata_sidecar_enabled",
           "metadata_thumbnails",
           "warn_presupported_stl",
@@ -7028,9 +7047,6 @@
             "description": "Regular expressions for presupported STL file names (the portable subset)."
           },
           "recurse_subdirs": {
-            "type": "boolean"
-          },
-          "store_stl_file_list": {
             "type": "boolean"
           },
           "trash_folder_path": {

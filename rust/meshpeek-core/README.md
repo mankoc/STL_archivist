@@ -9,7 +9,7 @@ Changes from MeshPeek (carry them over when syncing a newer MeshPeek):
 
 - `meshpeek-core`: file loading (`io`) is behind the default `io` feature, so the web viewer
   builds without it; `zip` 9 with deflate only (the archivist's version); new `wire` module (the
-  scene as bytes, for the server to send and the viewer to read).
+  scene as bytes, with each object's facts, for the server to send and the viewer to read).
 - `meshpeek-render`: depends on `meshpeek-core` without `io`; per-object wireframe that needs
   no `POLYGON_MODE_LINE` (edge index buffers from `GpuMesh::upload_with(.., edges)`, drawn
   as line lists by `Renderer::set_object_wireframe`); `Renderer::remove_object`, `set_mesh`

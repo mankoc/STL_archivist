@@ -92,4 +92,10 @@ async fn find_by_image_dhash() {
     assert_eq!(r.status, StatusCode::BAD_REQUEST);
     let r = send_from(&lib.state, LOCAL, upload("/api/search/image?method=nope", &token, &same)).await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST);
+
+    // Past axum's default 2 MB body limit: read, then refused as no image; past 64 MB: too large.
+    let r = send_from(&lib.state, LOCAL, upload("/api/search/image", &token, &vec![b'x'; 3 << 20])).await;
+    assert!(r.json()["error"].as_str().unwrap().starts_with("not a readable image"), "{:?}", r.json());
+    let r = send_from(&lib.state, LOCAL, upload("/api/search/image", &token, &vec![b'x'; 65 << 20])).await;
+    assert_eq!(r.status, StatusCode::PAYLOAD_TOO_LARGE);
 }

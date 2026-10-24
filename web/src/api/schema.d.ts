@@ -865,10 +865,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * The printable files the crawl stored for a model (empty unless the library
-         *     stores STL file lists), by name.
-         */
+        /** The printable files the crawl stored for a model, by name. */
         get: operations["get_models_by_id_files"];
         put?: never;
         post?: never;
@@ -2464,7 +2461,6 @@ export interface components {
             /** @description Regular expressions for presupported STL file names (the portable subset). */
             presupport_patterns: string[];
             recurse_subdirs: boolean;
-            store_stl_file_list: boolean;
             trash_folder_path: string;
             /** @description Deleted archives go to `trash_folder_path` (when set) instead of being deleted. */
             use_trash_folder: boolean;
@@ -4322,7 +4318,7 @@ export interface operations {
             };
             cookie?: never;
         };
-        /** @description Image files */
+        /** @description Image files (64 MB each, 256 MB in all) */
         requestBody?: {
             content: {
                 "multipart/form-data": unknown;
@@ -4338,6 +4334,14 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4485,7 +4489,7 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        /** @description The image */
+        /** @description The image (64 MB at most) */
         requestBody?: {
             content: {
                 "multipart/form-data": unknown;
@@ -4501,6 +4505,14 @@ export interface operations {
                 };
             };
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -1278,7 +1278,6 @@ fn crawl_folder(
         pattern,
         recurse: recurse.unwrap_or_else(|| settings.recurse_subdirs()),
         force_rescan,
-        store_stl: settings.store_stl_file_list(),
         max_thumbnails: settings.max_thumbnails(),
         max_thumb_size: settings.max_thumb_size(),
         max_workers: settings.max_workers(),
@@ -1291,7 +1290,6 @@ fn crawl_folder(
         log_unchanged: false,
         defer_missing_deletion,
         upsert: crawl_db::UpsertConfig {
-            store_stl: settings.store_stl_file_list(),
             warn_low_compression: settings.warn_low_compression(),
             low_compression_threshold: settings.low_compression_threshold(),
             embed_dim: storage::schema_sql::EMBED_DIM as usize,

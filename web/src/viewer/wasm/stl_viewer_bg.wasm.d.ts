@@ -1,15 +1,23 @@
 /* tslint:disable */
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
+export const __wbg_fileinfo_free: (a: number, b: number) => void;
+export const __wbg_get_fileinfo_models: (a: number) => number;
+export const __wbg_get_fileinfo_objects: (a: number) => number;
+export const __wbg_get_fileinfo_support_triangles: (a: number) => number;
+export const __wbg_get_fileinfo_triangles: (a: number) => number;
 export const __wbg_get_loaded_objects: (a: number) => number;
 export const __wbg_get_loaded_triangles: (a: number) => number;
 export const __wbg_loaded_free: (a: number, b: number) => void;
 export const __wbg_viewer_free: (a: number, b: number) => void;
+export const fileinfo_facts: (a: number) => [number, number];
+export const fileinfo_size: (a: number) => [number, number];
 export const loaded_skipped: (a: number) => [number, number];
 export const viewer_add: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
 export const viewer_backend: (a: number) => [number, number];
 export const viewer_camera_basis: (a: number) => [number, number];
 export const viewer_create: (a: any, b: number) => any;
+export const viewer_file_info: (a: number, b: number, c: number) => number;
 export const viewer_fit: (a: number) => void;
 export const viewer_focus: (a: number, b: number, c: number) => void;
 export const viewer_orbit: (a: number, b: number, c: number) => void;
