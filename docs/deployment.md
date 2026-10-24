@@ -300,7 +300,7 @@ curl -L -o <data dir>/models/clip_image_encoder.onnx \
   https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/d15189d7028b43f1d3e65039190477f6af591c2a/onnx/vision_model.onnx
 ```
 
-Then run *Maintenance → Compute missing embeddings* once; new crawls embed their thumbnails
+Then run *Settings → Maintenance → Compute missing embeddings* once; new crawls embed their thumbnails
 when *compute embeddings during crawl* is on in the library settings.
 
 The encoder runs on a GPU when the loaded ONNX Runtime supports one for the GPUs found, and
@@ -343,7 +343,7 @@ model server that is already running (any OpenAI-compatible endpoint with vision
 
 A server on a small machine (a NAS, a mini PC without a GPU) can hand CLIP embeddings and the
 AI tagger to a computer that has one. On that computer, open the server in the desktop app,
-go to *Maintenance → Compute workers* and turn on **Use this computer for AI** (editors).
+go to *Settings → Workers* and turn on **Use this computer for AI** (editors).
 The desktop app then runs `stl-server worker`, which connects to the server (out from the
 computer, over the same address and a WebSocket like the event stream, so it works behind
 NAT and through the reverse proxy), and does the work with the components in a folder of
@@ -384,7 +384,7 @@ archive is new, changed or gone, it queues a crawl of the folder (shown in *Jobs
 user `monitor`; nothing is queued when nothing changed, or while a crawl of the folder or
 *Update all* is waiting or running). The crawl adds and updates records as any crawl does;
 records of archives that vanished are **marked missing** rather than deleted (an archive
-that turns up in another library is matched by hash), and *Maintenance → Remove
+that turns up in another library is matched by hash), and *Settings → Maintenance → Remove
 missing archives* deletes the records of every missing archive. Checks run while the server
 does; changes made while it was off are found at the first check after it starts. Changes
 are picked up at the next check, not at once, which also works on network shares where file
@@ -443,7 +443,7 @@ starting from scratch.
 
 ## Backups, restore and upgrades
 
-**Backups.** Administrators click *Maintenance → Backups → Back up now*. The server writes
+**Backups.** Administrators click *Settings → Backups → Back up now*. The server writes
 `<data dir>/backups/stlLibrary_backup_<UTC time>.7z` with the database, the thumbnails and the
 library settings, taken consistently while the server runs. Download backups from the same
 card and keep copies elsewhere; delete old ones there too. User accounts (`server.db`) and

@@ -13,7 +13,7 @@ can open a library on your computer without setting up a server.
 [the HTTP API](docs/api.md) ·
 and in the interface, the **?** button: searchable in-depth help on every feature
 
-Version: 2026.43.11
+Version: 2026.43.12
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). This version opens its data directory and, since 2026.43.7, converts it once
@@ -59,7 +59,7 @@ Version: 2026.43.11
   one job
 - **Monitored folders** — crawled automatically when their archives change (checked by size
   and date at an interval); archives that vanish are marked missing
-- **Maintenance** — verify archives, find moved and duplicate records, search a folder for
+- **Maintenance** (*Settings* tabs) — verify archives, find moved and duplicate records, search a folder for
   missing archives, remove the records of missing archives, re-check warnings, recompute image hashes and embeddings, prune images,
   compact the database, rescan archives, regenerate thumbnails, delete files to a trash
   folder, sort files into a folder tree by pattern
@@ -95,6 +95,11 @@ You need [Rust](https://rustup.rs) (on Windows with the Visual Studio C++ Build 
 cargo install tauri-cli --version 2.12.3 --locked
 .\build.ps1 -Installer
 ```
+
+Or double-click **`build-installer.bat`**: it finds Node.js (on `PATH`, in `NODE_HOME` or its
+usual folders), installs the Tauri CLI when missing, builds the installer and shows where it
+is. `build-installer.bat --no-pause` does the same unattended (for a scheduled task; exit
+code 0 on success).
 
 ```bash
 # Linux / macOS
@@ -158,7 +163,7 @@ server) on the same data directory is refused.
 4. Or let the server keep up: the eye button on a library **monitors** it. The server
    compares it with the library every 30 minutes (*Settings → Library*) by file size and
    date, and crawls it when archives were added, changed or removed. Removed archives are
-   marked missing; *Maintenance → Remove missing archives* deletes their records.
+   marked missing; *Settings → Maintenance → Remove missing archives* deletes their records.
 
 ## Server configuration
 
@@ -211,19 +216,19 @@ and cuDNN 9 must be installed). To install by hand:
 - **AI image embeddings (CLIP)** — needs ONNX Runtime and the CLIP image encoder at
   `<data dir>/models/clip_image_encoder.onnx` (or `STLLIBRARY_CLIP_MODEL`): `onnx/vision_model.onnx`
   from [Xenova/clip-vit-base-patch32](https://huggingface.co/Xenova/clip-vit-base-patch32).
-  Then run *Maintenance → Compute missing embeddings*; the AI method appears in *Find by
+  Then run *Settings → Maintenance → Compute missing embeddings*; the AI method appears in *Find by
   Image* and *Duplicates*. The encoder runs on a GPU when the ONNX Runtime build supports
   one for the GPUs found (DirectML; CUDA, MIGraphX, ROCm or OpenVINO on Linux), else on the
   CPU; the components card shows which.
 - **Compute workers** — a server on a machine without a GPU can let a computer with one do
-  the embeddings and tagging: in the desktop app, *Maintenance → Compute workers → Use this
+  the embeddings and tagging: in the desktop app, *Settings → Workers → Use this
   computer for AI*; the same card downloads the models into a folder of that computer you
   choose. With `"compute": "workers"` (or `STL_COMPUTE=workers`) the server never
   runs the models itself and its jobs wait for a worker. See the deployment guide.
 
 ### Backups and restore
 
-Administrators back up from *Maintenance → Backups*; backups are kept in
+Administrators back up from *Settings → Backups*; backups are kept in
 `<data dir>/backups`. To restore, stop the server (and close the desktop app) and run:
 
 ```bash
@@ -271,6 +276,7 @@ placeholders.
 ```
 stl_database/
 ├── build.ps1, build.sh      # Build the web client, the server and the desktop app
+├── build-installer.bat      # Builds the Windows installer unattended (wraps build.ps1)
 ├── Dockerfile               # Server image
 ├── rust/
 │   ├── stl-core/            # The library: archives, metadata, rules, thumbnails, storage, crawler

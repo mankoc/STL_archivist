@@ -1317,6 +1317,10 @@ the path is visible. No business logic and no Tauri commands for data.
 - 2026.43.11: a status bar in the web client's shell (`shell/StatusBar.tsx`, logic in
   `shell/status.ts`): the running job from the `jobs` query and the archive total from
   `libraries`, both kept current by `api/events.ts`.
+- 2026.43.12: the Maintenance page became Settings tabs (`jobs/MaintenanceTab.tsx`,
+  `jobs/SettingsTabs.tsx`, jobs started through `jobs/useStartJob.ts`); `shell/route.ts`
+  sends moved pages' links on (`#/maintenance` → `#/settings/maintenance`).
+  `build-installer.bat` wraps `build.ps1 -Installer` for unattended builds.
 
 ### Phase 8: Retire Python (small)
 

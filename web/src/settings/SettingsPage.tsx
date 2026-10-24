@@ -1,6 +1,7 @@
 // Settings: this user's preferences, the library's crawler and sidecar
-// settings (administrators change them), the downloadable components, and user
-// administration. A tab is addressed as `#/settings/<tab>`.
+// settings (administrators change them), maintenance, sidecars, backups, compute
+// workers, the downloadable components, and user administration. A tab is
+// addressed as `#/settings/<tab>`.
 import {
   ActionIcon, Badge, Button, Card, Checkbox, Group, Modal, NumberInput, PasswordInput, SegmentedControl, Select, SimpleGrid,
   Stack, Switch, Table, Tabs, Text, Textarea, TextInput, Title, Tooltip, useMantineColorScheme,
@@ -14,6 +15,8 @@ import { api, type Schemas, unwrap } from "../api/client";
 import { hasRole, useUser } from "../auth/user";
 import { inDesktopShell } from "../desktop";
 import { ComponentsPanel } from "../jobs/ComponentsPanel";
+import { MaintenanceTab } from "../jobs/MaintenanceTab";
+import { BackupsTab, SidecarsTab, WorkersTab } from "../jobs/SettingsTabs";
 import { settingsTab } from "./tabs";
 
 type LibrarySettings = Schemas["Settings"];
@@ -31,8 +34,12 @@ function fail(err: unknown) {
 export function SettingsPage() {
   const user = useUser();
   const admin = hasRole(user, "admin");
+  const editor = hasRole(user, "editor");
   const components = admin || inDesktopShell();
-  const tabs = ["account", "library", ...(components ? ["components"] : []), ...(admin ? ["users"] : [])];
+  const tabs = [
+    "account", "library", "maintenance", "sidecars", ...(admin ? ["backups"] : []), "workers",
+    ...(components ? ["components"] : []), ...(admin ? ["users"] : []),
+  ];
   return (
     <Tabs
       defaultValue={settingsTab(location.hash, tabs)}
@@ -43,6 +50,10 @@ export function SettingsPage() {
       <Tabs.List mb="md">
         <Tabs.Tab value="account">Account</Tabs.Tab>
         <Tabs.Tab value="library">Library</Tabs.Tab>
+        <Tabs.Tab value="maintenance">Maintenance</Tabs.Tab>
+        <Tabs.Tab value="sidecars">Sidecars</Tabs.Tab>
+        {admin && <Tabs.Tab value="backups">Backups</Tabs.Tab>}
+        <Tabs.Tab value="workers">Workers</Tabs.Tab>
         {components && <Tabs.Tab value="components">Components</Tabs.Tab>}
         {admin && <Tabs.Tab value="users">Users</Tabs.Tab>}
       </Tabs.List>
@@ -51,6 +62,20 @@ export function SettingsPage() {
       </Tabs.Panel>
       <Tabs.Panel value="library">
         <LibrarySettingsForm editable={admin} />
+      </Tabs.Panel>
+      <Tabs.Panel value="maintenance">
+        <MaintenanceTab />
+      </Tabs.Panel>
+      <Tabs.Panel value="sidecars">
+        <SidecarsTab editor={editor} />
+      </Tabs.Panel>
+      {admin && (
+        <Tabs.Panel value="backups">
+          <BackupsTab />
+        </Tabs.Panel>
+      )}
+      <Tabs.Panel value="workers">
+        <WorkersTab editor={editor} />
       </Tabs.Panel>
       {components && (
         <Tabs.Panel value="components">

@@ -1,4 +1,4 @@
-# Build stlLibrary: the web client, the server and the desktop shell.
+# Build StlArchivist: the web client, the server and the desktop shell.
 #
 #   .\build.ps1              # release binaries in rust\target\release
 #   .\build.ps1 -Installer   # also the Windows installer (needs: cargo install tauri-cli --version 2.12.3)

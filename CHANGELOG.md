@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026.43.12 — 2026-10-24
+
+- **Maintenance moved into Settings.** The Maintenance page is gone from the top bar; its
+  cards are Settings tabs: **Maintenance** (records, warnings, images and storage, with the
+  record list), **Sidecars**, **Backups** (administrators, with Delete all records) and
+  **Workers**, beside **Components**. Old `#/maintenance` links open Settings → Maintenance.
+- **The page bar is a row of buttons** (the current page filled) instead of a segmented
+  control; on a narrow window it scrolls sideways.
+- **`build-installer.bat`** builds the Windows installer without questions: it finds Node.js
+  (`PATH`, `NODE_HOME` or its usual folders), installs the Tauri CLI when missing, runs
+  `build.ps1 -Installer` and shows the installer's path; `--no-pause` for scheduled runs.
+  Batch files keep CRLF line ends (`.gitattributes`).
+
 ## 2026.43.11 — 2026-10-24
 
 - **Status bar** at the bottom of every page: the running job with a progress bar, its
