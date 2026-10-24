@@ -1,6 +1,6 @@
 # StlArchivist API
 
-Version 2026.43.12. Generated from `web/openapi.json` by `tools/api_doc.py`; the
+Version 2026.43.13. Generated from `web/openapi.json` by `tools/api_doc.py`; the
 running server serves the same document at `GET /api/openapi.json`. Do not edit by hand:
 run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after changing routes.
 
@@ -18,12 +18,12 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
   or `GET /api/jobs/{id}`.
 - Writes that change the library are announced on `/api/events` as `library_changed`.
 
-## Endpoints (80)
+## Endpoints (82)
 
 - [Sign-in and sessions](#sign-in-and-sessions) (5)
 - [Users and preferences](#users-and-preferences) (7)
 - [System](#system) (1)
-- [Browsing the library](#browsing-the-library) (10)
+- [Browsing the library](#browsing-the-library) (12)
 - [Editing models](#editing-models) (11)
 - [Lookups (sculptors, collections, tags…)](#lookups-sculptors-collections-tags) (13)
 - [Thumbnails and images](#thumbnails-and-images) (3)
@@ -79,6 +79,8 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 | `GET /api/models/{id}` | One model's display fields and its images. | path `id`: integer | 200 [ModelDetail](#modeldetail) | 404 |
 | `GET /api/models/{id}/archive-files` | Every file inside the model's archive (name, size, CRC-32), as the last crawl or rescan read the archive's catalog; empty until then. | path `id`: integer | 200 [ArchiveFile](#archivefile)[] |  |
 | `GET /api/models/{id}/files` | The printable files the crawl stored for a model (empty unless the library stores STL file lists), by name. | path `id`: integer | 200 [StlFile](#stlfile)[] |  |
+| `GET /api/models/{id}/view` | One model file of the archive, loaded for the viewer: the scene (models, supports, build plates) in MeshPeek's wire format (`meshpeek_core::wire`). | path `id`: integer<br>query `name`: string | 200 `application/octet-stream` | 400, 404, 422 |
+| `GET /api/models/{id}/viewable` | The model files in the archive the viewer can show (STL, OBJ, PLY, 3MF, Lychee and CHITUBOX files), from the archive's catalog read now, by name. | path `id`: integer | 200 [ViewableFile](#viewablefile)[] | 404, 422 |
 | `GET /api/models/{id}/warnings` | Which archive members trigger each of the model's stored warnings (the archive's catalog is read now). | path `id`: integer | 200 [WarningDetails](#warningdetails) | 404 |
 | `POST /api/views/folder` | Thumbnail cells for the archives in a folder (and its subfolders), by path. | body: [FolderRequest](#folderrequest) | 200 [Cell](#cell)[] |  |
 | `POST /api/views/grid` | Thumbnail cells for models, in the order asked. | body: [GridRequest](#gridrequest) | 200 [Cell](#cell)[] | 400 |
@@ -1197,6 +1199,15 @@ The settings, with their effective values (defaults filled in).
 |---|---|---|
 | `bytes` | integer |  |
 | `variant` | string |  |
+
+### ViewableFile
+
+A model file inside an archive that the viewer can show.
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | The member's name in the archive (`/` separators). |
+| `size` (optional) | integer \| null | Uncompressed size, when the archive records it. |
 
 ### WarningDetails
 

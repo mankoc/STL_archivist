@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026.43.13 — 2026-10-24
+
+- **Model viewer.** **View model** in the details pane shows the archive's 3D model files
+  (STL, OBJ, PLY, 3MF, Lychee `.lys`, CHITUBOX `.chitubox`, `.ctp`, `.ctb`) with
+  [MeshPeek](https://github.com/mankoc/meshpeek)'s renderer in the browser: the files on the
+  left, MeshPeek's mouse and keyboard controls (orbit, pan, zoom, **F**, standard views
+  **0**–**6**), supports and build plates of slicer scenes. The **Files** list opens a model
+  file directly (the cube beside it). The server unpacks and loads the file
+  (`GET /api/models/{id}/viewable`, `GET /api/models/{id}/view`); the browser draws it
+  with WebGPU, or WebGL2 where WebGPU is missing.
+- **Open in MeshPeek** (desktop app): when MeshPeek is installed and the archive is
+  reachable from this computer, opens the archive, or the file shown in the viewer, in
+  MeshPeek.
+- MeshPeek's loaders and renderer are vendored as `rust/meshpeek-core` and
+  `rust/meshpeek-render` (from MeshPeek 0.5.6); `rust/stl-viewer` is the renderer in
+  WebAssembly, built into `web/src/viewer/wasm` by `npm run gen:viewer`.
+
 ## 2026.43.12 — 2026-10-24
 
 - **Maintenance moved into Settings.** The Maintenance page is gone from the top bar; its

@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.43.12"
+    "version": "2026.43.13"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -2317,6 +2317,128 @@
             }
           },
           "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/{id}/view": {
+      "get": {
+        "tags": [
+          "library"
+        ],
+        "summary": "One model file of the archive, loaded for the viewer: the scene (models,\nsupports, build plates) in MeshPeek's wire format (`meshpeek_core::wire`).",
+        "operationId": "get_models_by_id_view",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "description": "The model file's name in the archive, as `viewable` lists it.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The scene",
+            "content": {
+              "application/octet-stream": {}
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/{id}/viewable": {
+      "get": {
+        "tags": [
+          "library"
+        ],
+        "summary": "The model files in the archive the viewer can show (STL, OBJ, PLY, 3MF,\nLychee and CHITUBOX files), from the archive's catalog read now, by name.",
+        "operationId": "get_models_by_id_viewable",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ViewableFile"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
             "description": "",
             "content": {
               "application/json": {
@@ -7105,6 +7227,27 @@
           },
           "variant": {
             "type": "string"
+          }
+        }
+      },
+      "ViewableFile": {
+        "type": "object",
+        "description": "A model file inside an archive that the viewer can show.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The member's name in the archive (`/` separators)."
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Uncompressed size, when the archive records it."
           }
         }
       },

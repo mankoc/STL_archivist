@@ -1,0 +1,31 @@
+/* tslint:disable */
+/* eslint-disable */
+export const memory: WebAssembly.Memory;
+export const __wbg_get_loaded_objects: (a: number) => number;
+export const __wbg_get_loaded_triangles: (a: number) => number;
+export const __wbg_loaded_free: (a: number, b: number) => void;
+export const __wbg_viewer_free: (a: number, b: number) => void;
+export const loaded_skipped: (a: number) => [number, number];
+export const viewer_backend: (a: number) => [number, number];
+export const viewer_create: (a: any, b: number) => any;
+export const viewer_fit: (a: number) => void;
+export const viewer_load: (a: number, b: number, c: number) => [number, number, number];
+export const viewer_orbit: (a: number, b: number, c: number) => void;
+export const viewer_pan: (a: number, b: number, c: number) => void;
+export const viewer_render: (a: number) => [number, number];
+export const viewer_resize: (a: number, b: number, c: number) => void;
+export const viewer_set_dark: (a: number, b: number) => void;
+export const viewer_show_view: (a: number, b: number, c: number) => void;
+export const viewer_zoom: (a: number, b: number) => void;
+export const wasm_bindgen_dac0731650b473ce___convert__closures_____invoke___js_sys_a89202e6452953cf___Function_fn_wasm_bindgen_dac0731650b473ce___JsValue_____wasm_bindgen_dac0731650b473ce___sys__Undefined___js_sys_a89202e6452953cf___Function_fn_wasm_bindgen_dac0731650b473ce___JsValue_____wasm_bindgen_dac0731650b473ce___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
+export const wasm_bindgen_dac0731650b473ce___convert__closures_____invoke___wasm_bindgen_dac0731650b473ce___JsValue__core_608f92abc48d28da___result__Result_____wasm_bindgen_dac0731650b473ce___JsError___true_: (a: number, b: number, c: any) => [number, number];
+export const __wbindgen_malloc: (a: number, b: number) => number;
+export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+export const __wbindgen_exn_store: (a: number) => void;
+export const __externref_table_alloc: () => number;
+export const __wbindgen_externrefs: WebAssembly.Table;
+export const __wbindgen_free: (a: number, b: number, c: number) => void;
+export const __wbindgen_destroy_closure: (a: number, b: number) => void;
+export const __externref_drop_slice: (a: number, b: number) => void;
+export const __externref_table_dealloc: (a: number) => void;
+export const __wbindgen_start: () => void;

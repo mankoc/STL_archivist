@@ -1321,6 +1321,18 @@ the path is visible. No business logic and no Tauri commands for data.
   `jobs/SettingsTabs.tsx`, jobs started through `jobs/useStartJob.ts`); `shell/route.ts`
   sends moved pages' links on (`#/maintenance` → `#/settings/maintenance`).
   `build-installer.bat` wraps `build.ps1 -Installer` for unattended builds.
+- 2026.43.13: the model viewer. MeshPeek's `meshpeek-core` (loaders) and `meshpeek-render`
+  (wgpu renderer) are vendored in `rust/` (changes from MeshPeek in
+  `meshpeek-core/README.md`: loading behind the default `io` feature, `zip` 9, the new
+  `wire` scene encoding). `stl_core::view` lists an archive's model members and loads one
+  (`archive::read_members_with`, so RAR needs UnRAR as elsewhere) into `wire` bytes, served
+  by `GET /api/models/{id}/view`; `rust/stl-viewer` (wasm-bindgen, built only for
+  `wasm32`) draws them into a canvas with `meshpeek-render` and a blit to the canvas
+  (WebGPU, else WebGL2 on a fresh canvas). The page does the input (`web/src/viewer/input.ts`,
+  MeshPeek's mapping). The generated `web/src/viewer/wasm` is committed (the Docker web stage
+  has no Rust); `npm run gen:viewer` regenerates it. The shell's `open_in_meshpeek` starts an
+  installed MeshPeek on `<archive>` or `<archive>/<entry>` (its virtual paths); it is not
+  ended with the shell.
 
 ### Phase 8: Retire Python (small)
 

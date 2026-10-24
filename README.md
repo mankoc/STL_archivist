@@ -13,7 +13,7 @@ can open a library on your computer without setting up a server.
 [the HTTP API](docs/api.md) ·
 and in the interface, the **?** button: searchable in-depth help on every feature
 
-Version: 2026.43.12
+Version: 2026.43.13
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). This version opens its data directory and, since 2026.43.7, converts it once
@@ -69,6 +69,9 @@ Version: 2026.43.12
   `stl-server restore`
 - **Users** — viewer, editor and administrator roles; per-user preferences
 - **Statistics** — totals, rankings and the distribution of any column
+- **Model viewer** — the 3D models inside an archive (STL, OBJ, PLY, 3MF, Lychee, CHITUBOX)
+  in the browser, with the renderer of [MeshPeek](https://github.com/mankoc/meshpeek)
+  (WebGPU or WebGL2); in the desktop app, **Open in MeshPeek** when it is installed
 
 ## Installation
 
@@ -106,6 +109,11 @@ code 0 on success).
 ./build.sh             # everything (the desktop app needs WebKitGTK on Linux)
 ./build.sh --server    # only the web client and the server, for a headless host
 ```
+
+The model viewer's WebAssembly is committed (`web/src/viewer/wasm`), so building needs no
+WebAssembly tools. After changing `rust/stl-viewer` or the vendored MeshPeek crates,
+regenerate it with `npm run gen:viewer` (in `web/`; needs `rustup target add
+wasm32-unknown-unknown` and `cargo install wasm-bindgen-cli --version 0.2.129`).
 
 The binaries end up in `rust/target/release`. Keep `stl-server` beside `stl-desktop`; the
 server finds the web client in `web/` beside it, or in `web/dist` of the checkout.
@@ -282,7 +290,10 @@ stl_database/
 │   ├── stl-core/            # The library: archives, metadata, rules, thumbnails, storage, crawler
 │   ├── stl-server/          # HTTP + WebSocket API (axum), jobs, accounts, AI, backups
 │   ├── stl-desktop/         # Desktop app (Tauri): launcher page and window on a server
-│   └── stl-proc/            # Child processes that end with their parent
+│   ├── stl-proc/            # Child processes that end with their parent
+│   ├── meshpeek-core/       # MeshPeek's model loaders (vendored; see its README.md)
+│   ├── meshpeek-render/     # MeshPeek's wgpu renderer (vendored)
+│   └── stl-viewer/          # The web client's model viewer: meshpeek-render in WebAssembly
 ├── web/                     # Web client (React, TypeScript, Mantine, TanStack)
 ├── resources/               # Application icon (the STL Archivist emblem; copies in rust/stl-desktop/icons, rust/stl-desktop/ui and web/public)
 ├── tools/create_ai_model.py # Regenerates the tiny CLIP stand-in used by the server tests

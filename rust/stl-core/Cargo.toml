@@ -19,6 +19,8 @@ jpeg-decoder = "0.3.2"
 avif-parse = "2.1.0"
 rav1d = { version = "1.1.0", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
 jpeg-encoder = { version = "0.7.1", features = ["simd"] }
+# Model files for the viewer (vendored from MeshPeek, see meshpeek-core/README.md).
+meshpeek-core = { path = "../meshpeek-core" }
 rayon = "1.12.0"
 regex = "1.13.1"
 rusqlite = { version = "0.40.2", features = ["bundled", "functions"] }

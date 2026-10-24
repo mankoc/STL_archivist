@@ -1,18 +1,20 @@
-// The selected model: its fields, thumbnails, and the archive (download, or
-// the folder path when this client can open it there).
+// The selected model: its fields, thumbnails, and the archive (download, the
+// model viewer, or the folder path and MeshPeek when this client can open it
+// there).
 import { ActionIcon, Badge, Box, Button, Center, CopyButton, Group, Image, Loader, SimpleGrid, Stack, Table, Text, Title, UnstyledButton } from "@mantine/core";
 import { useEffect, useState } from "react";
 import { Dropzone, IMAGE_MIME_TYPE } from "@mantine/dropzone";
 import { notifications } from "@mantine/notifications";
-import { IconCopy, IconDownload, IconEdit, IconFolderOpen, IconPhotoPlus, IconTrash } from "@tabler/icons-react";
+import { IconCopy, IconCube, IconDownload, IconEdit, IconExternalLink, IconFolderOpen, IconPhotoPlus, IconTrash } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api, ApiError, type Schemas, unwrap } from "../api/client";
 import { hasRole, useUser } from "../auth/user";
-import { inDesktopShell, openFolder } from "../desktop";
+import { inDesktopShell, meshpeekInstalled, openFolder, openInMeshPeek } from "../desktop";
 import { ArchiveInfo } from "./ArchiveInfo";
 import { ImageViewer, type ViewerImage } from "./ImageViewer";
 import { baseName, formatDate, formatSize } from "../format";
+import { ModelViewer } from "../viewer/ModelViewer";
 import classes from "./DetailPane.module.css";
 
 const FIELDS: [string, string][] = [
@@ -40,7 +42,13 @@ export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: num
   const editor = hasRole(user, "editor");
   // The image open in the full-size viewer (an index into the shown images).
   const [viewing, setViewing] = useState<number | null>(null);
-  useEffect(() => setViewing(null), [id]);
+  // The model viewer, open on a file (null: the archive's first).
+  const [modelView, setModelView] = useState<{ file: string | null } | null>(null);
+  useEffect(() => {
+    setViewing(null);
+    setModelView(null);
+  }, [id]);
+  const meshpeek = useQuery({ queryKey: ["meshpeek-installed"], queryFn: meshpeekInstalled, enabled: inDesktopShell(), staleTime: Infinity });
   const queryClient = useQueryClient();
   const refresh = async () => {
     for (const key of ["model", "rows", "editor"]) await queryClient.invalidateQueries({ queryKey: [key] });
@@ -79,6 +87,8 @@ export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: num
   const viewable: ViewerImage[] = d.images.flatMap((i) => (i.thumbnail ? [{ id: i.id, thumbnail: i.thumbnail }] : []));
   const f = d.fields as Record<string, string | number | null>;
   const path = (f.archive_path as string | null) ?? "";
+  const title = (f.title as string) || baseName(path);
+  const notify = (err: unknown) => notifications.show({ color: "red", message: String(err) });
   const tags = String(f.tags ?? "")
     .split(",")
     .map((t) => t.trim())
@@ -86,7 +96,7 @@ export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: num
   return (
     <Stack gap="sm" p="sm" style={{ height: "100%", overflowY: "auto" }}>
       <Group justify="space-between" wrap="nowrap" align="flex-start">
-        <Title order={4}>{(f.title as string) || baseName(path)}</Title>
+        <Title order={4}>{title}</Title>
         {editor && (
           <Button size="xs" variant="light" leftSection={<IconEdit size={14} />} onClick={() => onEdit(id)}>
             Edit
@@ -120,7 +130,7 @@ export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: num
           </Table.Tr>
         </Table.Tbody>
       </Table>
-      <ArchiveInfo id={id} warning={(f.warning as string | null) ?? null} />
+      <ArchiveInfo id={id} warning={(f.warning as string | null) ?? null} onView={(file) => setModelView({ file })} />
       {tags.length > 0 && (
         <Group gap={4}>
           {tags.map((t) => (
@@ -145,12 +155,32 @@ export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: num
           >
             Download
           </Button>
+          <Button
+            size="xs"
+            variant="light"
+            leftSection={<IconCube size={14} />}
+            disabled={f.is_missing === 1}
+            onClick={() => setModelView({ file: null })}
+            data-testid="view-model"
+          >
+            View model
+          </Button>
+          {d.client_path && meshpeek.data && (
+            <Button
+              size="xs"
+              variant="subtle"
+              leftSection={<IconExternalLink size={14} />}
+              onClick={() => openInMeshPeek(d.client_path!).catch(notify)}
+            >
+              Open in MeshPeek
+            </Button>
+          )}
           {d.client_path && inDesktopShell() && (
             <Button
               size="xs"
               variant="subtle"
               leftSection={<IconFolderOpen size={14} />}
-              onClick={() => openFolder(d.client_path!).catch((err) => notifications.show({ color: "red", message: String(err) }))}
+              onClick={() => openFolder(d.client_path!).catch(notify)}
             >
               Open folder
             </Button>
@@ -202,6 +232,9 @@ export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: num
         )}
       </SimpleGrid>
       <ImageViewer images={viewable} index={viewing} onIndex={setViewing} onClose={() => setViewing(null)} />
+      {modelView && (
+        <ModelViewer id={id} title={title} file={modelView.file} clientPath={d.client_path ?? null} onClose={() => setModelView(null)} />
+      )}
       {d.images.length === 0 && (
         <Text size="sm" c="dimmed">
           No images.

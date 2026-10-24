@@ -1,0 +1,21 @@
+[package]
+name = "stl-viewer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "The web client's model viewer: MeshPeek's renderer in WebAssembly"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# Built only for the browser (`npm run gen:viewer`); on other targets the crate is empty.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+console_error_panic_hook = "0.1.7"
+glam = "0.34.1"
+meshpeek-core = { path = "../meshpeek-core", default-features = false }
+meshpeek-render = { path = "../meshpeek-render" }
+wasm-bindgen = "=0.2.129" # = the wasm-bindgen CLI gen:viewer runs
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["HtmlCanvasElement"] }
+wgpu = { version = "=25.0.2", default-features = false, features = ["webgpu", "webgl", "wgsl"] }

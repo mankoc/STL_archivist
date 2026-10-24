@@ -4,8 +4,12 @@
 //! local library: the `stl-server` beside this program, on a free loopback
 //! port. Connecting navigates the window to the server, which serves the web
 //! client itself. The shell holds no library logic; a server's pages may call
-//! only `open_folder` and the compute worker's commands (granted per server at
-//! connect).
+//! only `open_folder`, the MeshPeek ones and the compute worker's commands
+//! (granted per server at connect).
+//!
+//! MeshPeek: when the MeshPeek viewer is installed, "Open in MeshPeek" starts
+//! it on a model's archive (or one model file inside it, MeshPeek's
+//! `<archive>/<entry>` path). It runs on its own, not ended with the shell.
 //!
 //! The compute worker: on a server's Maintenance page, "Use this computer for
 //! AI" hands the shell a worker token, and the shell runs `stl-server worker`
@@ -182,6 +186,8 @@ fn save_servers(app: AppHandle, servers: Vec<Server>) -> Result<(), String> {
 /// What a server's pages may call.
 const SERVER_PERMISSIONS: &[&str] = &[
     "allow-open-folder",
+    "allow-meshpeek-installed",
+    "allow-open-in-meshpeek",
     "allow-start-worker",
     "allow-stop-worker",
     "allow-worker-state",
@@ -607,6 +613,48 @@ fn open_folder(path: String) -> Result<(), String> {
     }
 }
 
+/// MeshPeek's program: `meshpeek` on the `PATH`, else where its Windows
+/// installer puts it.
+fn meshpeek_program() -> Option<PathBuf> {
+    let exe = if cfg!(windows) { "meshpeek.exe" } else { "meshpeek" };
+    let on_path = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default();
+    let installed = ["ProgramFiles", "ProgramW6432"].into_iter().filter_map(std::env::var_os).map(|d| PathBuf::from(d).join("MeshPeek"));
+    on_path.into_iter().chain(installed).map(|d| d.join(exe)).find(|p| p.is_file())
+}
+
+/// Whether MeshPeek is installed on this computer.
+#[tauri::command]
+fn meshpeek_installed() -> bool {
+    meshpeek_program().is_some()
+}
+
+/// What MeshPeek is given: the archive, or `<archive>/<entry>` for one file
+/// inside it. The archive must be an absolute path to a `.zip`, `.7z` or
+/// `.rar` file; the entry a relative name with `/` separators.
+fn meshpeek_target(path: &str, entry: Option<&str>) -> Result<PathBuf, String> {
+    let archive = PathBuf::from(path);
+    let ext = archive.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+    if !archive.is_absolute() || !archive.is_file() || !["zip", "7z", "rar"].contains(&ext.as_str()) {
+        return Err(format!("{path} is not an archive on this computer"));
+    }
+    let Some(entry) = entry else { return Ok(archive) };
+    let parts: Vec<&str> = entry.split('/').collect();
+    if parts.iter().any(|p| p.is_empty() || *p == "." || *p == ".." || p.contains(['\\', ':'])) {
+        return Err(format!("{entry} is not a file name inside an archive"));
+    }
+    Ok(parts.iter().fold(archive, |p, part| p.join(part)))
+}
+
+/// Open an archive (MeshPeek shows its first model and lists the others), or
+/// one model file inside it, in MeshPeek.
+#[tauri::command]
+fn open_in_meshpeek(path: String, entry: Option<String>) -> Result<(), String> {
+    let target = meshpeek_target(&path, entry.as_deref())?;
+    let program = meshpeek_program().ok_or("MeshPeek is not installed (no meshpeek on the PATH or in Program Files)")?;
+    Command::new(program).arg(target).spawn().map_err(|e| format!("MeshPeek could not start: {e}"))?;
+    Ok(())
+}
+
 /// Back to the launcher page.
 fn show_launcher(app: &AppHandle) {
     let url = app.state::<Shell>().launcher.lock().unwrap_or_else(|e| e.into_inner()).clone();
@@ -694,6 +742,8 @@ fn main() {
             default_data_dir,
             local_state,
             open_folder,
+            meshpeek_installed,
+            open_in_meshpeek,
             start_worker,
             stop_worker,
             worker_state,
@@ -733,5 +783,23 @@ mod tests {
     fn open_folder_refuses_relative_and_missing_paths() {
         assert!(open_folder("relative/dir".into()).is_err());
         assert!(open_folder("C:/definitely/not/here/xyz".into()).is_err());
+    }
+
+    #[test]
+    fn meshpeek_gets_an_archive_or_a_file_inside_it() {
+        let dir = std::env::temp_dir().join(format!("stl-desktop-meshpeek-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let archive = dir.join("Dragon.ZIP");
+        std::fs::write(&archive, b"PK").unwrap();
+        std::fs::write(dir.join("notes.txt"), b"").unwrap();
+        let path = archive.to_string_lossy();
+        assert_eq!(meshpeek_target(&path, None).unwrap(), archive);
+        assert_eq!(meshpeek_target(&path, Some("parts/body.stl")).unwrap(), archive.join("parts").join("body.stl"));
+        for bad in ["../x.stl", "a//b.stl", "/abs.stl", "a\\..\\b.stl","C:x.stl", ""] {
+            assert!(meshpeek_target(&path, Some(bad)).is_err(), "{bad}");
+        }
+        assert!(meshpeek_target(&dir.join("notes.txt").to_string_lossy(), None).is_err());
+        assert!(meshpeek_target("relative.zip", None).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

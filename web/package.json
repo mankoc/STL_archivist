@@ -1,7 +1,7 @@
 {
   "name": "stllibrary-web",
   "private": true,
-  "version": "2026.43.12",
+  "version": "2026.43.13",
   "type": "module",
   "description": "StlArchivist web client (Phase 6 of docs/rust-migration-plan.md)",
   "scripts": {
@@ -9,7 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
     "gen:api": "cd ../rust && cargo run -q -p stl-server -- openapi > ../web/openapi.json && cd ../web && openapi-typescript openapi.json -o src/api/schema.d.ts",
-    "check:api": "openapi-typescript openapi.json -o src/api/schema.d.ts --check"
+    "check:api": "openapi-typescript openapi.json -o src/api/schema.d.ts --check",
+    "gen:viewer": "cd ../rust && cargo build -q -p stl-viewer --target wasm32-unknown-unknown --release && wasm-bindgen --target web --out-dir ../web/src/viewer/wasm --out-name stl_viewer target/wasm32-unknown-unknown/release/stl_viewer.wasm"
   },
   "dependencies": {
     "@mantine/core": "^8.3.18",

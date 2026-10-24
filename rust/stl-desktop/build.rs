@@ -1,6 +1,6 @@
 fn main() {
-    // The launcher page may call its commands; a server's pages only `open_folder`
-    // and the worker's (granted per server at runtime, see `grant`).
+    // The launcher page may call its commands; a server's pages only `open_folder`,
+    // the MeshPeek ones and the worker's (granted per server at runtime, see `grant`).
     const COMMANDS: &[&str] = &[
         "list_servers",
         "save_servers",
@@ -10,6 +10,8 @@ fn main() {
         "default_data_dir",
         "local_state",
         "open_folder",
+        "meshpeek_installed",
+        "open_in_meshpeek",
         "start_worker",
         "stop_worker",
         "worker_state",

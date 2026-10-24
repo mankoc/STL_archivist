@@ -1,5 +1,5 @@
 //! Archive tools on selected models: Show Files, Warning Details, Rescan,
-//! Generate Thumbnails and Delete Files.
+//! Generate Thumbnails and Delete Files; the model viewer's files.
 
 mod common;
 
@@ -106,6 +106,47 @@ async fn files_warnings_rescan_and_thumbnails() {
     assert_eq!(scalar::<i64>(&lib, &format!("SELECT count(*) FROM images WHERE model_id = {knight}")), 1);
     let image: i64 = scalar(&lib, &format!("SELECT id FROM images WHERE model_id = {dragon}"));
     assert_eq!(lib.state.thumbs.get_many(&[image as u64]).unwrap().len(), 1, "the thumbnail is stored");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn viewer_lists_and_loads_model_files() {
+    let lib = empty_library();
+    let viewer = lib.user("vi", Role::Viewer);
+    let root = lib.dir.path().join("archives");
+    let triangle = b"solid t
+facet normal 0 0 1
+outer loop
+vertex 0 0 0
+vertex 1 0 0
+vertex 0 1 0
+endloop
+endfacet
+endsolid t
+";
+    let archive = root.join("Studio").join("Dragon.zip");
+    write_zip(&archive, &[("parts/Dragon.STL", triangle), ("broken.obj", b"f 1 2 3
+"), ("a.png", &png([1, 2, 3]))]);
+    run(&lib, &lib.user("ed", Role::Editor), json!({"kind": "crawl", "folder": root.to_string_lossy()})).await;
+    let dragon: i64 = scalar(&lib, "SELECT id FROM models");
+
+    let files = call(&lib.state, "GET", &format!("/api/models/{dragon}/viewable"), Some(&viewer), None).await.json();
+    assert_eq!(files, json!([{"name": "broken.obj", "size": 8}, {"name": "parts/Dragon.STL", "size": triangle.len()}]));
+
+    let r = call(&lib.state, "GET", &format!("/api/models/{dragon}/view?name=parts%2FDragon.STL"), Some(&viewer), None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.headers["content-type"], "application/octet-stream");
+    let scene = meshpeek_core::wire::decode(&r.body).unwrap();
+    assert_eq!(scene.objects[0].mesh.n_faces(), 1);
+
+    let (state, token) = (&lib.state, viewer.as_str());
+    let status = |uri: String| async move { call(state, "GET", &uri, Some(token), None).await.status };
+    assert_eq!(status(format!("/api/models/{dragon}/view?name=missing.stl")).await, StatusCode::NOT_FOUND);
+    assert_eq!(status(format!("/api/models/{dragon}/view?name=a.png")).await, StatusCode::BAD_REQUEST);
+    assert_eq!(status(format!("/api/models/{dragon}/view?name=broken.obj")).await, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(status(format!("/api/models/{dragon}/view?name=x.stl&other=1")).await, StatusCode::BAD_REQUEST);
+    assert_eq!(status("/api/models/9999/viewable".into()).await, StatusCode::NOT_FOUND);
+    std::fs::remove_file(&archive).unwrap();
+    assert_eq!(status(format!("/api/models/{dragon}/viewable")).await, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test(flavor = "multi_thread")]
