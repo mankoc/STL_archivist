@@ -217,7 +217,7 @@ impl Viewer {
         let objects = parts.len() as u32;
         let file = File { key: key.to_string(), parts, plates: scene.plates, color: None, material: MATERIALS[1].1, wire: false, visible: true };
         self.files.push(file);
-        self.restyle();
+        self.restyle_file(self.files.len() - 1);
         self.update_plates();
         if first {
             self.show_view("isometric");
@@ -233,42 +233,36 @@ impl Viewer {
         for part in self.files.remove(at).parts {
             self.renderer.remove_object(part.id);
         }
-        self.restyle(); // "colour each model" counts the models that are left
+        if self.color_each {
+            self.restyle(); // the files after it move up in "colour each model"
+        }
         self.update_plates();
     }
 
-    /// Colour the file's models `#rrggbb`, or (`None` or anything else) as by default.
-    pub fn set_color(&mut self, key: &str, color: Option<String>) {
-        if let Some(file) = self.file(key) {
-            file.color = color.as_deref().and_then(parse_hex);
-            self.restyle();
-        }
-    }
-
-    /// Give the file's objects one of MeshPeek's materials: `Matte`, `Plastic`, `Glossy` or `Metal`.
-    pub fn set_material(&mut self, key: &str, name: &str) {
-        let Some(&(_, material)) = MATERIALS.iter().find(|(n, _)| *n == name) else { return };
-        if let Some(file) = self.file(key) {
-            file.material = material;
-            self.restyle();
-        }
-    }
-
-    /// Draw the file's objects as their edges, or as surfaces again.
-    pub fn set_wireframe(&mut self, key: &str, on: bool) {
+    /// Draw the file's models in `color` (`#rrggbb`; `None` or anything else: as by default), with one of
+    /// MeshPeek's materials (`Matte`, `Plastic`, `Glossy` or `Metal`; others keep the current one), as its
+    /// edges (`wire`) or as surfaces. Only this file is restyled.
+    pub fn set_style(&mut self, key: &str, color: Option<String>, material: &str, wire: bool) {
         let max_buffer = self.device.limits().max_buffer_size;
         let Some(at) = self.files.iter().position(|f| f.key == key) else { return };
         let file = &mut self.files[at];
-        file.wire = on;
-        for part in &mut file.parts {
-            if on && !part.has_edges {
-                #[allow(clippy::arc_with_non_send_sync)]
-                let gpu = Arc::new(GpuMesh::upload_with(&self.device, &part.mesh, max_buffer, true));
-                self.renderer.set_mesh(part.id, gpu);
-                part.has_edges = true;
-            }
-            self.renderer.set_object_wireframe(part.id, on);
+        file.color = color.as_deref().and_then(parse_hex);
+        if let Some(&(_, m)) = MATERIALS.iter().find(|(n, _)| *n == material) {
+            file.material = m;
         }
+        if file.wire != wire {
+            file.wire = wire;
+            for part in &mut file.parts {
+                if wire && !part.has_edges {
+                    #[allow(clippy::arc_with_non_send_sync)]
+                    let gpu = Arc::new(GpuMesh::upload_with(&self.device, &part.mesh, max_buffer, true));
+                    self.renderer.set_mesh(part.id, gpu);
+                    part.has_edges = true;
+                }
+                self.renderer.set_object_wireframe(part.id, wire);
+            }
+        }
+        self.restyle_file(at);
     }
 
     /// Show or hide the file (it stays loaded).
@@ -279,14 +273,18 @@ impl Viewer {
         for id in ids {
             self.renderer.set_visible(id, on);
         }
-        self.restyle();
+        if self.color_each {
+            self.restyle(); // "colour each model" counts the shown models
+        }
         self.update_plates();
     }
 
     /// Give each model its own colour (MeshPeek's "Colour each model"); colours set per file still win.
     pub fn set_color_each(&mut self, on: bool) {
-        self.color_each = on;
-        self.restyle();
+        if self.color_each != on {
+            self.color_each = on;
+            self.restyle();
+        }
     }
 
     /// Show or hide the build plates and volumes of slicer scenes.
@@ -382,24 +380,31 @@ impl Viewer {
         self.files.iter_mut().find(|f| f.key == key)
     }
 
-    /// Every object's style: its file's colour, else (models) the next "colour each model" colour or the
-    /// default; supports keep the support colour unless their file has one.
+    /// Every object's style (see [`Viewer::restyle_file`]).
     fn restyle(&mut self) {
-        let mut ordinal = 0;
-        for file in &self.files {
-            for part in &file.parts {
-                let color = match (file.color, part.kind) {
-                    (Some(c), _) => c,
-                    (None, ObjectKind::Support) => SUPPORT_COLOR,
-                    (None, ObjectKind::Model) if self.color_each && file.visible => MODEL_COLORS[ordinal % MODEL_COLORS.len()],
-                    (None, ObjectKind::Model) => MODEL_COLOR,
-                };
-                if part.kind == ObjectKind::Model && file.visible {
-                    ordinal += 1;
-                }
-                let style = Style { color: color.map(|c| c as f32 / 255.0), material: file.material };
-                self.renderer.set_style(&self.queue, part.id, style);
+        for at in 0..self.files.len() {
+            self.restyle_file(at);
+        }
+    }
+
+    /// The style of the file's objects: its colour, else (models) the next "colour each model" colour (counting
+    /// the shown models before it) or the default; supports keep the support colour unless the file has one.
+    fn restyle_file(&mut self, at: usize) {
+        let models = |f: &File| f.parts.iter().filter(|p| p.kind == ObjectKind::Model).count();
+        let mut ordinal: usize = self.files[..at].iter().filter(|f| f.visible).map(models).sum();
+        let file = &self.files[at];
+        for part in &file.parts {
+            let color = match (file.color, part.kind) {
+                (Some(c), _) => c,
+                (None, ObjectKind::Support) => SUPPORT_COLOR,
+                (None, ObjectKind::Model) if self.color_each && file.visible => MODEL_COLORS[ordinal % MODEL_COLORS.len()],
+                (None, ObjectKind::Model) => MODEL_COLOR,
+            };
+            if part.kind == ObjectKind::Model {
+                ordinal += 1;
             }
+            let style = Style { color: color.map(|c| c as f32 / 255.0), material: file.material };
+            self.renderer.set_style(&self.queue, part.id, style);
         }
     }
 

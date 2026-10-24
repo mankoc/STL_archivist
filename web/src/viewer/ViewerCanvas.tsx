@@ -1,16 +1,19 @@
 // The model files drawn by MeshPeek's renderer (rust/stl-viewer, WebAssembly):
-// the server loads each file from the archive (`GET /api/models/{id}/view`),
-// the canvas shows them together with MeshPeek's mouse and keyboard controls
-// (input.ts) and a view cube (viewCube.ts: click a face for that view, drag
-// it to orbit). Files are added and removed as
-// `files` changes; each is drawn as `styles` says. The WebAssembly is fetched
-// the first time a viewer opens.
-import { ActionIcon, Alert, Box, Center, Group, Loader, Menu, Text, Tooltip, useComputedColorScheme } from "@mantine/core";
+// the server loads them from the archive in batches (`POST
+// /api/models/{id}/view`, loading.ts), the canvas shows them together with
+// MeshPeek's mouse and keyboard controls (input.ts) and a view cube
+// (viewCube.ts: click a face for that view, drag it to orbit). Files leaving
+// `files` are hidden, not dropped, so showing them again is instant (the
+// oldest hidden ones are forgotten); each is drawn as `styles` says, restyled
+// only when its style changes. The WebAssembly is fetched the first time a
+// viewer opens (again after a failed download).
+import { ActionIcon, Alert, Box, Button, Center, Group, Loader, Menu, Text, Tooltip, useComputedColorScheme } from "@mantine/core";
 import { IconCube, IconFocusCentered } from "@tabler/icons-react";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
 import { api, unwrap } from "../api/client";
-import { dragAction, dragZoom, keyAction, orbitDegrees, type ViewName, VIEWS, wheelZoom } from "./input";
+import { canvasSize, dragAction, dragZoom, keyAction, orbitDegrees, type ViewName, VIEWS, wheelZoom } from "./input";
+import { evictHidden, planBatches, splitBundle } from "./loading";
 import { type FileStyle, styleOf } from "./state";
 import { cubeFaces, isClick } from "./viewCube";
 import type { Viewer } from "./wasm/stl_viewer";
@@ -18,37 +21,58 @@ import type { Viewer } from "./wasm/stl_viewer";
 type Wasm = typeof import("./wasm/stl_viewer");
 let wasm: Promise<Wasm> | null = null;
 
+/** The WebAssembly module, downloaded once; a failed download is tried again next time. */
 function loadWasm(): Promise<Wasm> {
-  wasm ??= import("./wasm/stl_viewer").then(async (m) => {
-    await m.default();
-    return m;
-  });
+  wasm ??= import("./wasm/stl_viewer")
+    .then(async (m) => {
+      await m.default();
+      return m;
+    })
+    .catch((e) => {
+      wasm = null;
+      throw e;
+    });
   return wasm;
 }
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-/** Size the canvas's image to its box in device pixels (WebGL2 allows at least 4096). */
 function sizeCanvas(canvas: HTMLCanvasElement) {
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = Math.min(4096, Math.max(1, Math.round(canvas.clientWidth * dpr)));
-  canvas.height = Math.min(4096, Math.max(1, Math.round(canvas.clientHeight * dpr)));
+  [canvas.width, canvas.height] = canvasSize(canvas.clientWidth, canvas.clientHeight, window.devicePixelRatio);
+}
+
+/** What a loaded file holds. */
+interface Shown {
+  objects: number;
+  triangles: number;
+  skipped: string[];
 }
 
 /** A file's state in the view, reported to the file list. */
-export type FileStatus =
-  | { state: "loading" }
-  | { state: "shown"; objects: number; triangles: number; skipped: string[] }
+export type FileStatus = { state: "loading" } | ({ state: "shown" } & Shown) | { state: "failed"; error: string };
+
+/** One request for files, aborted when none of them is wanted any more. */
+interface Batch {
+  ctl: AbortController;
+  names: string[];
+}
+
+/** A file the viewer knows: being loaded, shown, hidden (loaded, kept to show again), or failed. */
+type Entry =
+  | { state: "loading"; batch: Batch }
+  | { state: "shown" | "hidden"; info: Shown }
   | { state: "failed"; error: string };
 
 const CUBE = 34; // half-size in CSS pixels
 const CUBE_BOX = CUBE * 2 + 24; // the cube's square, margin included
 const AXIS_TINT = { x: "230, 70, 70", y: "90, 200, 90", z: "90, 130, 255" };
 
-export function ViewerCanvas({ id, files, styles, colorEach, plates, focus, onStatus, onWireframeKey, tools }: {
+export function ViewerCanvas({ id, files, sizes, styles, colorEach, plates, focus, onStatus, onWireframeKey, tools }: {
   id: number;
   /** The files to show (member names). */
   files: string[];
+  /** The files' sizes in the archive, for grouping requests. */
+  sizes: Record<string, number | null | undefined>;
   styles: Record<string, FileStyle>;
   colorEach: boolean;
   plates: boolean;
@@ -65,13 +89,19 @@ export function ViewerCanvas({ id, files, styles, colorEach, plates, focus, onSt
   const viewerRef = useRef<Viewer | null>(null);
   // WebGPU first; a canvas it failed on gets replaced by one for WebGL2.
   const [webgl, setWebgl] = useState(false);
+  // Counts "Try again" after a failed download (a new canvas each time).
+  const [attempt, setAttempt] = useState(0);
   const [backend, setBackend] = useState<string | null>(null);
-  const [failed, setFailed] = useState<string | null>(null);
+  const [failed, setFailed] = useState<{ message: string; retry: boolean } | null>(null);
   const dark = useComputedColorScheme("light") === "dark";
-  // Each file's request (while loading) or result, by name.
-  const loaded = useRef(new Map<string, AbortController | FileStatus>());
+  const entries = useRef(new Map<string, Entry>());
+  // Hidden files, the oldest first.
+  const hidden = useRef<string[]>([]);
+  // The style each file was last drawn with, so unchanged ones are left alone.
+  const applied = useRef(new Map<string, string>());
+  const stylesRef = useRef(styles);
+  stylesRef.current = styles;
   const [shown, setShown] = useState<Record<string, FileStatus>>({});
-  const [added, setAdded] = useState(0); // counts additions, so styles are applied to new files
   const [basis, setBasis] = useState<number[] | null>(null);
 
   const frame = useRef(0);
@@ -85,7 +115,7 @@ export function ViewerCanvas({ id, files, styles, colorEach, plates, focus, onSt
         v.render();
         setBasis(Array.from(v.camera_basis()));
       } catch (e) {
-        setFailed(message(e));
+        setFailed({ message: message(e), retry: false });
       }
     });
   }, []);
@@ -103,40 +133,59 @@ export function ViewerCanvas({ id, files, styles, colorEach, plates, focus, onSt
     [onStatus],
   );
 
+  /** Draw the file as its style says, unless it already is. */
+  const applyStyle = useCallback((name: string) => {
+    const v = viewerRef.current;
+    if (!v) return;
+    const s = styleOf(stylesRef.current, name);
+    const key = `${s.color}|${s.material}|${s.wire}`;
+    if (applied.current.get(name) === key) return;
+    applied.current.set(name, key);
+    v.set_style(name, s.color, s.material, s.wire);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     const canvas = canvasRef.current!;
     sizeCanvas(canvas);
-    loadWasm()
-      .then((m) => m.Viewer.create(canvas, webgl))
-      .then(
-        (v) => {
-          if (cancelled) return v.free();
-          viewerRef.current = v;
-          setBackend(v.backend);
-        },
-        (e) => {
-          if (cancelled) return;
-          if (!webgl) setWebgl(true);
-          else setFailed(`This browser cannot show 3D models: ${message(e)}`);
-        },
-      );
-    const files = loaded.current;
+    loadWasm().then(
+      (m) =>
+        m.Viewer.create(canvas, webgl).then(
+          (v) => {
+            if (cancelled) return v.free();
+            viewerRef.current = v;
+            setBackend(v.backend);
+          },
+          (e) => {
+            if (cancelled) return;
+            if (!webgl) setWebgl(true);
+            else setFailed({ message: `This browser cannot show 3D models: ${message(e)}`, retry: false });
+          },
+        ),
+      (e) => {
+        if (!cancelled) setFailed({ message: `The 3D viewer could not be downloaded: ${message(e)}`, retry: true });
+      },
+    );
+    const known = entries.current;
+    const hiddenFiles = hidden;
+    const styled = applied.current;
     return () => {
       cancelled = true;
       cancelAnimationFrame(frame.current);
       frame.current = 0;
-      for (const [name, entry] of files) {
-        if (entry instanceof AbortController) entry.abort();
-        onStatus(name, null);
+      for (const [name, entry] of known) {
+        if (entry.state === "loading") entry.batch.ctl.abort();
+        if (entry.state !== "hidden") onStatus(name, null);
       }
-      files.clear();
+      known.clear();
+      hiddenFiles.current = [];
+      styled.clear();
       setShown({});
       viewerRef.current?.free();
       viewerRef.current = null;
       setBackend(null);
     };
-  }, [webgl, onStatus]);
+  }, [webgl, attempt, onStatus]);
 
   const ready = backend != null;
 
@@ -146,58 +195,114 @@ export function ViewerCanvas({ id, files, styles, colorEach, plates, focus, onSt
     draw();
   }, [ready, dark, draw]);
 
-  // Load the files asked for, drop the others.
+  // Hide the files no longer asked for, show again the hidden ones asked for, load the rest.
   useEffect(() => {
     if (!ready) return;
     const v = viewerRef.current!;
+    const known = entries.current;
     const wanted = new Set(files);
-    for (const [name, entry] of loaded.current) {
-      if (wanted.has(name)) continue;
-      if (entry instanceof AbortController) entry.abort();
-      else v.remove(name);
-      loaded.current.delete(name);
+    const fail = (name: string, error: string) => {
+      known.set(name, { state: "failed", error });
+      report(name, { state: "failed", error });
+    };
+    const loadingIn = (name: string, batch: Batch) => {
+      const e = known.get(name);
+      return e?.state === "loading" && e.batch === batch;
+    };
+    for (const [name, e] of known) {
+      if (wanted.has(name) || e.state === "hidden") continue;
+      if (e.state === "shown") {
+        v.set_visible(name, false);
+        known.set(name, { state: "hidden", info: e.info });
+        hidden.current.push(name);
+      } else {
+        known.delete(name); // a failed file is tried again when it is asked for again
+        if (e.state === "loading" && !e.batch.names.some((n) => loadingIn(n, e.batch))) e.batch.ctl.abort();
+      }
       report(name, null);
     }
-    draw();
-    for (const name of files) {
-      if (loaded.current.has(name)) continue;
-      const ctl = new AbortController();
-      loaded.current.set(name, ctl);
-      report(name, { state: "loading" });
-      (async () => {
-        const data = unwrap(
-          await api.GET("/api/models/{id}/view", { params: { path: { id }, query: { name } }, parseAs: "arrayBuffer", signal: ctl.signal }),
-        ) as ArrayBuffer;
-        if (ctl.signal.aborted || viewerRef.current !== v) return;
-        const r = v.add(name, new Uint8Array(data));
-        const status: FileStatus = { state: "shown", objects: r.objects, triangles: r.triangles, skipped: r.skipped };
-        r.free();
-        loaded.current.set(name, status);
-        report(name, status);
-        setAdded((n) => n + 1);
-      })().catch((e) => {
-        if (ctl.signal.aborted) return;
-        const status: FileStatus = { state: "failed", error: message(e) };
-        loaded.current.set(name, status);
-        report(name, status);
-      });
+    const trianglesOf = (name: string) => {
+      const e = known.get(name);
+      return e && "info" in e ? e.info.triangles : 0;
+    };
+    const drop = evictHidden(hidden.current.filter((n) => !wanted.has(n)).map((name) => ({ name, triangles: trianglesOf(name) })));
+    for (const name of drop) {
+      v.remove(name);
+      known.delete(name);
+      applied.current.delete(name);
     }
-  }, [ready, id, files, draw, report]);
+    hidden.current = hidden.current.filter((n) => !drop.includes(n) && !wanted.has(n));
+    for (const name of files) {
+      const e = known.get(name);
+      if (e?.state !== "hidden") continue;
+      v.set_visible(name, true);
+      known.set(name, { state: "shown", info: e.info });
+      report(name, { state: "shown", ...e.info });
+    }
+    draw();
+
+    const missing = files.filter((n) => !known.has(n));
+    if (!missing.length) return;
+    const batches: Batch[] = planBatches(missing, sizes).map((names) => ({ ctl: new AbortController(), names }));
+    for (const batch of batches) {
+      for (const name of batch.names) {
+        known.set(name, { state: "loading", batch });
+        report(name, { state: "loading" });
+      }
+    }
+    // One batch after another: each answer is held in memory until its files are on the GPU.
+    void (async () => {
+      for (const batch of batches) {
+        if (batch.ctl.signal.aborted) continue;
+        try {
+          const data = unwrap(
+            await api.POST("/api/models/{id}/view", {
+              params: { path: { id } },
+              body: { names: batch.names },
+              parseAs: "arrayBuffer",
+              signal: batch.ctl.signal,
+            }),
+          ) as ArrayBuffer;
+          if (viewerRef.current !== v) return;
+          for (const f of splitBundle(data)) {
+            if (!loadingIn(f.name, batch)) continue; // no longer wanted
+            if ("error" in f) {
+              fail(f.name, f.error);
+              continue;
+            }
+            try {
+              const r = v.add(f.name, f.scene);
+              const info: Shown = { objects: r.objects, triangles: r.triangles, skipped: r.skipped };
+              r.free();
+              known.set(f.name, { state: "shown", info });
+              applyStyle(f.name);
+              report(f.name, { state: "shown", ...info });
+            } catch (e) {
+              fail(f.name, message(e));
+            }
+          }
+          for (const name of batch.names) if (loadingIn(name, batch)) fail(name, "the server did not send it");
+          draw();
+        } catch (e) {
+          if (batch.ctl.signal.aborted || viewerRef.current !== v) continue;
+          for (const name of batch.names) if (loadingIn(name, batch)) fail(name, message(e));
+        }
+      }
+    })();
+  }, [ready, id, files, sizes, draw, report, applyStyle]);
 
   useEffect(() => {
     if (!ready) return;
-    const v = viewerRef.current!;
-    for (const [name, entry] of loaded.current) {
-      if (entry instanceof AbortController || entry.state !== "shown") continue;
-      const s = styleOf(styles, name);
-      v.set_color(name, s.color);
-      v.set_material(name, s.material);
-      v.set_wireframe(name, s.wire);
-    }
-    v.set_color_each(colorEach);
-    v.set_show_plates(plates);
+    for (const [name, e] of entries.current) if (e.state === "shown" || e.state === "hidden") applyStyle(name);
     draw();
-  }, [ready, styles, colorEach, plates, added, draw]);
+  }, [ready, styles, applyStyle, draw]);
+
+  useEffect(() => {
+    if (!ready) return;
+    viewerRef.current!.set_color_each(colorEach);
+    viewerRef.current!.set_show_plates(plates);
+    draw();
+  }, [ready, colorEach, plates, draw]);
 
   useEffect(() => {
     if (!ready || !focus) return;
@@ -231,8 +336,9 @@ export function ViewerCanvas({ id, files, styles, colorEach, plates, focus, onSt
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const v = viewerRef.current;
     if (!last.current || !v) return;
-    const dpr = window.devicePixelRatio || 1;
-    const [dx, dy] = [(e.clientX - last.current.x) * dpr, (e.clientY - last.current.y) * dpr];
+    // CSS pixels to canvas pixels, as the canvas is really sized (see canvasSize).
+    const scale = e.currentTarget.width / Math.max(1, e.currentTarget.clientWidth);
+    const [dx, dy] = [(e.clientX - last.current.x) * scale, (e.clientY - last.current.y) * scale];
     last.current = { x: e.clientX, y: e.clientY };
     const action = dragAction(e.buttons, e.shiftKey);
     if (action === "orbit") v.orbit(...orbitDegrees(dx, dy, e.currentTarget.width, e.currentTarget.height));
@@ -292,7 +398,7 @@ export function ViewerCanvas({ id, files, styles, colorEach, plates, focus, onSt
   return (
     <Box pos="relative" h="100%" w="100%" data-testid="model-canvas">
       <canvas
-        key={String(webgl)}
+        key={`${webgl}-${attempt}`}
         ref={canvasRef}
         tabIndex={0}
         style={{ width: "100%", height: "100%", display: "block", outline: "none", touchAction: "none" }}
@@ -387,7 +493,24 @@ export function ViewerCanvas({ id, files, styles, colorEach, plates, focus, onSt
       )}
       {failed && (
         <Center pos="absolute" inset={0} p="md">
-          <Alert color="red" maw={520}>{failed}</Alert>
+          <Alert color="red" maw={520}>
+            {failed.message}
+            {failed.retry && (
+              <Button
+                size="xs"
+                variant="light"
+                color="red"
+                mt="xs"
+                display="block"
+                onClick={() => {
+                  setFailed(null);
+                  setAttempt((n) => n + 1);
+                }}
+              >
+                Try again
+              </Button>
+            )}
+          </Alert>
         </Center>
       )}
       {done.length > 0 && (

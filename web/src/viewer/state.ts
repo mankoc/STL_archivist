@@ -43,6 +43,11 @@ export function folderState(shown: string[], names: string[]): "all" | "some" | 
   return n === 0 ? "none" : n === names.length ? "all" : "some";
 }
 
+/** The file the title and ↑/↓ go from: the one last picked while it is shown, else the last one shown. */
+export function currentOf(shown: string[], picked: string | null): string | null {
+  return picked != null && shown.includes(picked) ? picked : (shown[shown.length - 1] ?? null);
+}
+
 /** The file `delta` steps from `current` in `order`, stopping at the ends; the first without a current one. */
 export function stepFile(order: string[], current: string | null, delta: number): string | null {
   if (!order.length) return null;

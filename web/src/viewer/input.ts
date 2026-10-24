@@ -3,12 +3,14 @@
 // everything, W toggles the wireframe and 0–6 pick the standard views. Pixels
 // are canvas pixels.
 
-/** Model files the viewer shows (MeshPeek's `SUPPORTED_EXTENSIONS`). */
-export const VIEWABLE_EXTENSIONS = ["stl", "obj", "ply", "3mf", "lys", "chitubox", "ctp", "ctb"];
-
-export function isViewable(name: string): boolean {
-  const dot = name.lastIndexOf(".");
-  return dot >= 0 && VIEWABLE_EXTENSIONS.includes(name.slice(dot + 1).toLowerCase());
+/**
+ * The canvas's image size for a box of `width` x `height` CSS pixels: device
+ * pixels, scaled down as a whole (keeping the box's shape) when a side would
+ * pass `max` (WebGL2 allows at least 4096).
+ */
+export function canvasSize(width: number, height: number, dpr: number, max = 4096): [number, number] {
+  const scale = Math.min(dpr || 1, max / Math.max(width, height, 1));
+  return [Math.max(1, Math.round(width * scale)), Math.max(1, Math.round(height * scale))];
 }
 
 export type DragAction = "orbit" | "pan" | "zoom";

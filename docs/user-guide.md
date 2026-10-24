@@ -166,7 +166,9 @@ in this browser.
   file, so it works in any browser. The files are a folder tree (drag its edge to widen it):
   click a file to show it alone; tick files, or a folder for all its files, or **Ctrl**-click,
   to show several together (in their own coordinates, so the parts of a model fit together);
-  **↑** / **↓** step through the files. Right-click a file (or a folder, for all its files)
+  **↑** / **↓** step through the files (in the tree, **Enter** shows the focused file and
+  **Space** adds or takes it away). Files taken out of the view are kept for a while, so
+  showing them again is instant. Right-click a file (or a folder, for all its files)
   for its colour, material (Matte, Plastic, Glossy, Metal), wireframe, **Centre on it** and
   **Open in MeshPeek**. In the view, left drag orbits, middle or Shift drag pans, the wheel
   or right drag zooms, **F** frames everything, **W** switches the wireframe of the shown

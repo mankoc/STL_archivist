@@ -209,7 +209,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/models/{id}/files", get(archive::files))
         .route("/api/models/{id}/archive-files", get(archive::archive_files))
         .route("/api/models/{id}/viewable", get(archive::viewable))
-        .route("/api/models/{id}/view", get(archive::view))
+        .route("/api/models/{id}/view", post(archive::view))
         .route("/api/views/grid", post(views::grid))
         .route("/api/sort/preview", post(sort::preview))
         .route("/api/views/folder", post(views::folder))
@@ -241,6 +241,7 @@ async fn announce_changes(State(lib): State<AppState>, req: Request, next: Next)
         let what = match path.as_str() {
             // POSTs that only read.
             "/api/models/ids" | "/api/models/rows" | "/api/models/parse-paths" | "/api/filter-tree" => None,
+            p if p.starts_with("/api/models/") && p.ends_with("/view") => None,
             p if p.starts_with("/api/models") || p.starts_with("/api/images") => Some("models"),
             p if p.starts_with("/api/maintenance") || p.starts_with("/api/ai/commit") || p.starts_with("/api/libraries") => Some("models"),
             p if p.starts_with("/api/lookups") || p.starts_with("/api/tags") || p.starts_with("/api/authors") => Some("lookups"),

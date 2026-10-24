@@ -48,11 +48,8 @@ export const pickMeshPeek = () => shellCall<MeshPeekState | null>("pick_meshpeek
 export const clearMeshPeek = () => shellCall<MeshPeekState>("clear_meshpeek");
 
 /** Open an archive (`path`, as this computer sees it) in MeshPeek, or one model file inside it (`entry`). */
-export async function openInMeshPeek(path: string, entry?: string): Promise<void> {
-  const invoke = shellInvoke();
-  if (!invoke) throw new Error("only the desktop app can open MeshPeek");
-  await invoke("open_in_meshpeek", { path, entry: entry ?? null });
-}
+export const openInMeshPeek = (path: string, entry?: string) =>
+  shellCall<void>("open_in_meshpeek", { path, entry: entry ?? null });
 
 /** The desktop app's compute worker, as this server's page sees it. */
 export interface WorkerState {
@@ -90,7 +87,7 @@ export interface InstallState {
 
 async function shellCall<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const invoke = shellInvoke();
-  if (!invoke) throw new Error("only the desktop app can manage this computer's components");
+  if (!invoke) throw new Error(`only the desktop app can do this (${cmd})`);
   return (await invoke(cmd, args)) as T;
 }
 

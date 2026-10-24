@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026.43.16 — 2026-10-24
+
+From a code review of the model viewer:
+
+- **Loading many files no longer floods the server.** The viewer asks for files in batches
+  (`POST /api/models/{id}/view` with up to 16 names, replacing the one-file `GET`): the
+  server reads the archive's catalog once and extracts the batch in one pass (a solid 7z
+  block is decompressed once), answers with a bundle of scenes (or why a file has none),
+  loads at most two batches at a time, and refuses files over 1 GB (and batches over 1 GB
+  or 16 files). The client sends batches of up to 8 files / 256 MB, one after another.
+- **Showing a file again is instant:** files taken out of the view are hidden, not dropped
+  (the last 8, up to 4 million triangles); a file that failed is tried again when it is
+  shown again.
+- **Styling is cheaper:** one call per file sets its colour, material and wireframe, only
+  when they changed, and only that file is restyled.
+- Fixes: a failed download of the viewer is tried again (and **Try again** offers it)
+  instead of being remembered until the page reloads, and is no longer reported as a
+  browser without 3D; on very large screens the image keeps its shape (both sides scale
+  together) and drags follow the mouse; the title, ↑/↓ and *Open in MeshPeek* follow a
+  file that is still shown after another is taken away, and taking every file away no
+  longer brings the first back; in the file tree ↑/↓ only move its focus (Enter shows the
+  focused file, Space adds or takes it away).
+- The Files window's view buttons come from the server's list of model files (no copy of
+  MeshPeek's extensions in the web client).
+- `build.ps1` releases its build lock when it ends, so a build run in an open PowerShell
+  window no longer blocks the next one.
+
 ## 2026.43.15 — 2026-10-24
 
 - **The view cube can be dragged** to turn the view (its width turns 200 degrees, as a drag

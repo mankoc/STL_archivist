@@ -2,7 +2,8 @@
 // tree (read from the archive now) and the chosen ones drawn together by
 // MeshPeek's renderer. Clicking a file shows it alone; its checkbox (or
 // Ctrl-click) adds it to the view; a folder's checkbox shows all its files;
-// ↑/↓ step through the files. Right-click a file for its colour, material,
+// ↑/↓ step through the files (in the tree: Enter shows the focused file
+// alone, Space adds or takes it away). Right-click a file for its colour, material,
 // wireframe and centring (MeshPeek's options), or a folder to show its files.
 // In the desktop app, with MeshPeek installed and the archive reachable from
 // this computer, "Open in MeshPeek" opens a file there.
@@ -15,7 +16,7 @@ import {
   IconAlertTriangle, IconCheck, IconChevronRight, IconExternalLink, IconFocus2, IconLayoutBoardSplit, IconPalette, IconPolygon,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, unwrap } from "../api/client";
 import { type FileTree, fileTree, foldersOf, treeFiles } from "../browser/fileTree";
@@ -23,7 +24,7 @@ import { clampWidth } from "../browser/paneWidth";
 import { inDesktopShell, meshpeekState, openInMeshPeek } from "../desktop";
 import { formatSize } from "../format";
 import {
-  COLORS, type FileStyle, folderState, MATERIALS, restyle, stepFile, styleOf, toggleFile, toggleFiles,
+  COLORS, currentOf, type FileStyle, folderState, MATERIALS, restyle, stepFile, styleOf, toggleFile, toggleFiles,
 } from "./state";
 import { type FileStatus, ViewerCanvas } from "./ViewerCanvas";
 
@@ -46,16 +47,20 @@ export function ModelViewer({ id, title, file, clientPath, onClose }: {
   const meshpeek = useQuery({ queryKey: ["meshpeek"], queryFn: meshpeekState, enabled: inDesktopShell() });
   const tree = useMemo(() => (files.data ? fileTree(files.data) : null), [files.data]);
   const order = useMemo(() => (tree ? treeFiles(tree) : []), [tree]);
+  const sizes = useMemo(() => Object.fromEntries((files.data ?? []).map((f) => [f.name, f.size])), [files.data]);
 
   const [shown, setShown] = useState<string[]>(file ? [file] : []);
-  // The file last picked: the title, ↑/↓ and "Open in MeshPeek" go from it.
-  const [current, setCurrent] = useState<string | null>(file);
+  // The file last picked; the title, ↑/↓ and "Open in MeshPeek" go from it while it is shown.
+  const [picked, setPicked] = useState<string | null>(file);
+  const current = currentOf(shown, picked);
+  // Without a file to start with, the archive's first one (once: taking every file away leaves the view empty).
+  const started = useRef(file != null);
   useEffect(() => {
-    if (current == null && order.length) {
-      setShown([order[0]]);
-      setCurrent(order[0]);
-    }
-  }, [current, order]);
+    if (started.current || !order.length) return;
+    started.current = true;
+    setShown([order[0]]);
+    setPicked(order[0]);
+  }, [order]);
 
   const [styles, setStyles] = useState<Record<string, FileStyle>>({});
   const [status, setStatus] = useState<Record<string, FileStatus>>({});
@@ -74,11 +79,11 @@ export function ModelViewer({ id, title, file, clientPath, onClose }: {
 
   const showOnly = (name: string) => {
     setShown([name]);
-    setCurrent(name);
+    setPicked(name);
   };
   const toggle = (name: string) => {
     setShown((s) => toggleFile(s, name));
-    setCurrent(name);
+    setPicked(name);
   };
   const allWire = shown.length > 0 && shown.every((n) => styleOf(styles, n).wire);
   const toggleWireAll = () => setStyles((s) => restyle(s, shown, { wire: !allWire }));
@@ -86,12 +91,13 @@ export function ModelViewer({ id, title, file, clientPath, onClose }: {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-      if ((e.target as HTMLElement | null)?.closest("input, textarea, [role=menu]")) return;
+      // In the tree the arrows move its focus (Enter then shows the focused file).
+      if ((e.target as HTMLElement | null)?.closest("input, textarea, [role=menu], [role=tree]")) return;
       const next = stepFile(order, current, e.key === "ArrowDown" ? 1 : -1);
       if (next) {
         e.preventDefault();
         setShown([next]);
-        setCurrent(next);
+        setPicked(next);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -155,7 +161,7 @@ export function ModelViewer({ id, title, file, clientPath, onClose }: {
                 onToggleFolder={(names) => setShown((s) => toggleFiles(s, names))}
                 onShowFolderOnly={(names) => {
                   setShown(names);
-                  setCurrent(names[0] ?? null);
+                  setPicked(names[0] ?? null);
                 }}
                 onStyle={(names, patch) => setStyles((s) => restyle(s, names, patch))}
                 onFocus={(name) => setFocus({ name, n: Date.now() })}
@@ -175,6 +181,7 @@ export function ModelViewer({ id, title, file, clientPath, onClose }: {
             <ViewerCanvas
               id={id}
               files={shown}
+              sizes={sizes}
               styles={styles}
               colorEach={colorEach}
               plates={plates}
@@ -247,8 +254,20 @@ function FileTreePane({ tree, order, current, shown, status, styles, onShowOnly,
   const [menu, setMenu] = useState<{ value: string; x: number; y: number } | null>(null);
   const menuInfo = menu ? tree.info.get(menu.value) : undefined;
 
+  // Enter shows the focused file alone, Space adds it to the view or takes it away (Mantine's tree moves the focus).
+  const onTreeKey = (e: React.KeyboardEvent) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const value = (e.target as HTMLElement).closest("[role=treeitem]")?.getAttribute("data-value");
+    const info = value != null ? tree.info.get(value) : undefined;
+    if (info?.kind !== "file") return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.key === "Enter") onShowOnly(info.name!);
+    else onToggle(info.name!);
+  };
+
   return (
-    <>
+    <div onKeyDownCapture={onTreeKey}>
       <Tree
         data={tree.data}
         tree={controller}
@@ -324,7 +343,7 @@ function FileTreePane({ tree, order, current, shown, status, styles, onShowOnly,
           )}
         </Menu.Dropdown>
       </Menu>
-    </>
+    </div>
   );
 }
 

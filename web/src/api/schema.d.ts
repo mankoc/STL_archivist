@@ -905,13 +905,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * One model file of the archive, loaded for the viewer: the scene (models,
-         *     supports, build plates) in MeshPeek's wire format (`meshpeek_core::wire`).
-         */
-        get: operations["get_models_by_id_view"];
+        get?: never;
         put?: never;
-        post?: never;
+        /**
+         * Model files of the archive, loaded for the viewer in one pass over the
+         *     archive: a bundle (`stl_core::view::encode_bundle`) of each file's scene
+         *     (models, supports, build plates) in MeshPeek's wire format
+         *     (`meshpeek_core::wire`), or why it has none. A file is at most 1 GB, the
+         *     files together too; the server loads two requests at a time.
+         */
+        post: operations["post_models_by_id_view"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2524,6 +2527,13 @@ export interface components {
             /** Format: int64 */
             bytes: number;
             variant: string;
+        };
+        ViewRequest: {
+            /**
+             * @description The model files' names in the archive, as `viewable` lists them: 1 to
+             *     16 different names.
+             */
+            names: string[];
         };
         /** @description A model file inside an archive that the viewer can show. */
         ViewableFile: {
@@ -4337,21 +4347,22 @@ export interface operations {
             };
         };
     };
-    get_models_by_id_view: {
+    post_models_by_id_view: {
         parameters: {
-            query: {
-                /** @description The model file's name in the archive, as `viewable` lists it. */
-                name: string;
-            };
+            query?: never;
             header?: never;
             path: {
                 id: number;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ViewRequest"];
+            };
+        };
         responses: {
-            /** @description The scene */
+            /** @description The scenes */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4369,6 +4380,14 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };

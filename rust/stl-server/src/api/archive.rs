@@ -3,7 +3,7 @@
 //! files for the viewer (`stl_core::view`).
 
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
@@ -100,31 +100,45 @@ pub async fn viewable(State(lib): State<AppState>, _me: CurrentUser, Path(id): P
     Ok(Json(members.into_iter().map(|m| ViewableFile { name: m.name, size: m.size.map(|s| s as i64) }).collect()))
 }
 
-#[derive(Deserialize, utoipa::IntoParams)]
+#[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub struct ViewQuery {
-    /// The model file's name in the archive, as `viewable` lists it.
-    pub name: String,
+pub struct ViewRequest {
+    /// The model files' names in the archive, as `viewable` lists them: 1 to
+    /// 16 different names.
+    pub names: Vec<String>,
 }
 
-/// One model file of the archive, loaded for the viewer: the scene (models,
-/// supports, build plates) in MeshPeek's wire format (`meshpeek_core::wire`).
-#[utoipa::path(get, path = "/api/models/{id}/view", tag = "library", params(("id" = i64, Path), ViewQuery),
-    responses((status = 200, description = "The scene", content_type = "application/octet-stream"),
+/// Model files of the archive, loaded for the viewer in one pass over the
+/// archive: a bundle (`stl_core::view::encode_bundle`) of each file's scene
+/// (models, supports, build plates) in MeshPeek's wire format
+/// (`meshpeek_core::wire`), or why it has none. A file is at most 1 GB, the
+/// files together too; the server loads two requests at a time.
+#[utoipa::path(post, path = "/api/models/{id}/view", tag = "library", params(("id" = i64, Path)), request_body = ViewRequest,
+    responses((status = 200, description = "The scenes", content_type = "application/octet-stream"),
               (status = 400, body = crate::error::ErrorBody), (status = 404, body = crate::error::ErrorBody),
-              (status = 422, body = crate::error::ErrorBody)))]
-pub async fn view(State(lib): State<AppState>, _me: CurrentUser, Path(id): Path<i64>, Query(q): Query<ViewQuery>) -> Result<Response, ApiError> {
-    let bytes = lib
+              (status = 413, body = crate::error::ErrorBody), (status = 422, body = crate::error::ErrorBody)))]
+pub async fn view(State(lib): State<AppState>, _me: CurrentUser, Path(id): Path<i64>, Json(req): Json<ViewRequest>) -> Result<Response, ApiError> {
+    let unique: std::collections::HashSet<&str> = req.names.iter().map(String::as_str).collect();
+    if req.names.is_empty() || req.names.len() > view::MAX_BATCH_FILES || unique.len() != req.names.len() {
+        return Err(ApiError::bad_request(format!("names: 1 to {} different model files", view::MAX_BATCH_FILES)));
+    }
+    if req.names.iter().any(|n| n.is_empty() || n.len() > 4096) {
+        return Err(ApiError::bad_request("names: a file name in the archive"));
+    }
+    // Loading takes a few times the files' size in memory: two at a time.
+    let _permit = lib.view_loads.acquire().await.map_err(|e| ApiError::internal(e.to_string()))?;
+    let bundle = lib
         .run(move |lib| {
             let path = archive_on_disk(lib, id)?;
-            view::load_member(&path, &q.name, &lib.config.unrar_tool()).map_err(|e| match e {
-                ViewError::Missing(_) => ApiError::not_found(e.to_string()),
-                ViewError::NotViewable(_) => ApiError::bad_request(e.to_string()),
-                ViewError::Archive(_) | ViewError::Model(_) => ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("{}: {e}", q.name)),
-            })
+            let loaded = view::load_members(&path, &req.names, &lib.config.unrar_tool()).map_err(|e| match e {
+                ViewError::BatchTooLarge { .. } => ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, e.to_string()),
+                _ => ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, format!("the archive could not be read: {e}")),
+            })?;
+            let files: Vec<view::BundleFile> = loaded.into_iter().map(|(n, r)| (n, r.map_err(|e| e.to_string()))).collect();
+            Ok(view::encode_bundle(&files))
         })
         .await?;
-    let mut resp = bytes.into_response();
+    let mut resp = bundle.into_response();
     resp.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static("application/octet-stream"));
     Ok(resp)
 }
