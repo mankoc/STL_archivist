@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 /// The library database's file name inside the data directory (as the desktop app).
-pub const DB_FILE: &str = "stlLibrary.db";
+pub const DB_FILE: &str = stl_core::backup::DB_FILE;
 /// The thumbnail store's directory inside the data directory.
 pub const THUMB_DIR: &str = "thumbnails.lmdb";
 /// The optional settings file inside the data directory.
@@ -105,9 +105,15 @@ impl Config {
             .find(|d| d.join("index.html").is_file())
     }
 
-    /// The UnRAR executable as a full path, or `""` when none is found (as
-    /// `archive._unrar_tool`: a name is looked up on `PATH`, a path must exist).
+    /// The UnRAR executable as a full path, or `""` when none is found: the
+    /// configured `unrar`, else the UnRAR component's download in the data
+    /// directory, else `unrar` on `PATH` (as `archive._unrar_tool`: a name is
+    /// looked up on `PATH`, a path must exist).
     pub fn unrar_tool(&self) -> String {
+        let downloaded = self.data_dir.join(crate::components::unrar_file());
+        if self.unrar.is_none() && downloaded.is_file() {
+            return downloaded.display().to_string();
+        }
         let tool = self.unrar.clone().unwrap_or_else(|| "unrar".into());
         which(&tool).unwrap_or_else(|| if Path::new(&tool).is_file() { tool } else { String::new() })
     }
@@ -221,6 +227,21 @@ mod tests {
         assert_eq!(Config::resolve(&[], env2).unwrap().bind.to_string(), "127.0.0.1:5555");
         std::fs::write(dir.path().join(SETTINGS_FILE), r#"{"unrar": "C:/Tools/UnRAR.exe"}"#).unwrap();
         assert_eq!(Config::resolve(&[], env).unwrap().unrar.as_deref(), Some("C:/Tools/UnRAR.exe"));
+    }
+
+    #[test]
+    fn the_downloaded_unrar_is_used_unless_one_is_configured() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().to_str().unwrap().to_string();
+        let mut config = Config::resolve(&args(&["--data-dir", &d]), |_| None).unwrap();
+        let downloaded = dir.path().join(crate::components::unrar_file());
+        std::fs::create_dir_all(downloaded.parent().unwrap()).unwrap();
+        std::fs::write(&downloaded, b"x").unwrap();
+        assert_eq!(config.unrar_tool(), downloaded.display().to_string());
+        let mine = dir.path().join("my-unrar.exe");
+        std::fs::write(&mine, b"x").unwrap();
+        config.unrar = Some(mine.display().to_string());
+        assert_eq!(config.unrar_tool(), mine.display().to_string(), "the configured one wins");
     }
 
     #[test]

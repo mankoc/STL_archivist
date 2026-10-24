@@ -1,4 +1,4 @@
-import { defaultVariants, installable, sizeOf, totalBytes, variantLabel, type ComponentStatus, type ComponentsInfo } from "./components";
+import { defaultVariants, installable, sameFolder, sizeOf, totalBytes, variantLabel, type ComponentStatus, type ComponentsInfo } from "./components";
 
 const comp = (id: string, state: string, sizes: [string, number][], variant: string | null = null, def: string | null = null): ComponentStatus =>
   ({
@@ -9,7 +9,7 @@ const comp = (id: string, state: string, sizes: [string, number][], variant: str
   }) as ComponentStatus;
 
 const info = (components: ComponentStatus[]): ComponentsInfo =>
-  ({ components, platform: "windows-x64", gpus: [], clip_provider: null, free_bytes: null }) as ComponentsInfo;
+  ({ components, platform: "windows-x64", gpus: [], clip_provider: null, free_bytes: null, data_dir: "/data" }) as ComponentsInfo;
 
 describe("components", () => {
   it("offers each component's default variant", () => {
@@ -38,5 +38,15 @@ describe("components", () => {
     expect(installable(onnx, "directml")).toBe(true);
     expect(installable(comp("pdfium", "installed", [["default", 4]]), undefined)).toBe(false);
     expect(installable(comp("pdfium", "external", []), undefined)).toBe(false);
+  });
+});
+
+describe("the worker's folder", () => {
+  it("is the server's when both name the same directory", () => {
+    expect(sameFolder("C:\\Users\\me\\AppData\\Local\\stlLibrary", "c:/users/me/appdata/local/stlLibrary/")).toBe(true);
+    expect(sameFolder("/srv/stl", "/srv/stl")).toBe(true);
+    expect(sameFolder("/srv/stl", "/srv/STL")).toBe(false);
+    expect(sameFolder("D:\\lib", "D:\\lib\\worker")).toBe(false);
+    expect(sameFolder(undefined, "/srv/stl")).toBe(false);
   });
 });

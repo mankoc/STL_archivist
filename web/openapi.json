@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.43.9"
+    "version": "2026.43.10"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -2113,6 +2113,41 @@
         }
       }
     },
+    "/api/models/{id}/archive-files": {
+      "get": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Every file inside the model's archive (name, size, CRC-32), as the last\ncrawl or rescan read the archive's catalog; empty until then.",
+        "operationId": "get_models_by_id_archive_files",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ArchiveFile"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/models/{id}/editor": {
       "get": {
         "tags": [
@@ -3225,6 +3260,32 @@
           }
         }
       },
+      "ArchiveFile": {
+        "type": "object",
+        "description": "One file inside a model's archive.",
+        "required": [
+          "name",
+          "crc"
+        ],
+        "properties": {
+          "crc": {
+            "type": "string",
+            "description": "The member's CRC-32 from the archive's catalog, as 8 hex digits."
+          },
+          "name": {
+            "type": "string",
+            "description": "The member's name in the archive (`/` separators)."
+          },
+          "size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Uncompressed size, when the archive records it."
+          }
+        }
+      },
       "AuthStatus": {
         "type": "object",
         "required": [
@@ -3558,7 +3619,8 @@
         "type": "object",
         "required": [
           "components",
-          "gpus"
+          "gpus",
+          "data_dir"
         ],
         "properties": {
           "clip_provider": {
@@ -3573,6 +3635,10 @@
             "items": {
               "$ref": "#/components/schemas/ComponentStatus"
             }
+          },
+          "data_dir": {
+            "type": "string",
+            "description": "The data directory the components go into."
           },
           "free_bytes": {
             "type": [

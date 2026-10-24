@@ -10,7 +10,6 @@ import { useMemo, useState } from "react";
 import { api, unwrap } from "../api/client";
 import { hasRole, useUser } from "../auth/user";
 import { BackupCard, DangerCard, SidecarCard } from "./BackupCards";
-import { ComponentsCard } from "./ComponentsCard";
 import { WorkersCard } from "./WorkersCard";
 import { FolderPicker } from "./FolderPicker";
 import { addJob, describe, isActive, type Job, type JobRequest, percent, progressText } from "./jobs";
@@ -138,7 +137,6 @@ export function MaintenancePage() {
         </Card>
         <SidecarCard editor={editor} start={start} />
         <WorkersCard editor={editor} />
-        {admin && <ComponentsCard jobs={jobs.data} start={start} />}
         {admin && <BackupCard jobs={jobs.data} start={start} />}
         {admin && <DangerCard start={start} />}
         {current && <JobLog id={current.id} job={current} />}

@@ -70,6 +70,18 @@ async fn files_warnings_rescan_and_thumbnails() {
     let files = call(&lib.state, "GET", &format!("/api/models/{dragon}/files"), Some(&ed), None).await.json();
     assert_eq!(files[0]["filename"], "dragon_presupported.stl", "{files}");
 
+    // Every file of the archive, with the CRC-32 its catalog records.
+    let all = call(&lib.state, "GET", &format!("/api/models/{dragon}/archive-files"), Some(&ed), None).await.json();
+    let mut zip = zip::ZipArchive::new(std::fs::File::open(root.join("Studio").join("Dragon.zip")).unwrap()).unwrap();
+    let mut want: Vec<Value> = (0..zip.len())
+        .map(|i| {
+            let f = zip.by_index(i).unwrap();
+            json!({"name": f.name().unwrap(), "size": f.size(), "crc": format!("{:08x}", f.crc32())})
+        })
+        .collect();
+    want.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+    assert_eq!(all, Value::Array(want));
+
     // Warning Details: the presupported member, and an absence without members.
     let w = call(&lib.state, "GET", &format!("/api/models/{dragon}/warnings"), Some(&ed), None).await.json();
     assert_eq!(w["error"], Value::Null, "{w}");

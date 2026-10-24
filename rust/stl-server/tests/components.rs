@@ -41,11 +41,13 @@ async fn status_install_and_remove() {
 
     let v = call(&lib.state, "GET", "/api/components", Some(&admin), None).await.json();
     let ids: Vec<&str> = v["components"].as_array().unwrap().iter().map(|c| c["id"].as_str().unwrap()).collect();
-    assert_eq!(ids, ["ai_runtime", "ai_model", "clip_model", "onnxruntime", "pdfium"]);
+    assert_eq!(ids, ["ai_runtime", "ai_model", "clip_model", "onnxruntime", "pdfium", "unrar"]);
     if v["platform"].is_null() {
         return; // nothing is offered on this platform
     }
     assert_eq!(state_of(&v, "pdfium"), "missing");
+    assert_eq!(state_of(&v, "unrar"), "missing");
+    assert_eq!(v["data_dir"], lib.dir.path().display().to_string());
     assert!(v["components"][1]["sizes"][0]["bytes"].as_u64().unwrap() > 3_000_000_000, "the model is over 3 GB");
     assert_eq!(v["components"][0]["variants"][0], "cpu");
     let onnx = &v["components"][3];

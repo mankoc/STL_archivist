@@ -13,13 +13,15 @@ can open a library on your computer without setting up a server.
 [the HTTP API](docs/api.md) ·
 and in the interface, the **?** button: searchable in-depth help on every feature
 
-Version: 2026.43.9
+Version: 2026.43.10
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). This version opens its data directory and, since 2026.43.7, converts it once
 > to libraries with relative paths (backing it up first); the earlier application cannot
 > open the converted library. Before that conversion it opened the same data directory
-> (`stlLibrary.db`, `thumbnails.lmdb/`, `settings.json`).
+> (`stlLibrary.db`, `thumbnails.lmdb/`, `settings.json`). Since 2026.43.10 the model
+> database is `models.db`; a data directory holding only `stlLibrary.db` opens as a new,
+> empty library (crawl the folders again).
 
 ## Features
 
@@ -180,7 +182,7 @@ line:
 | `bind` / `--bind` | `STL_BIND` | Address and port (default `127.0.0.1:8770`) |
 | `roots` | | Folders editors may browse and crawl (administrators: anywhere; libraries count too) |
 | `path_map` | | How clients see the server's paths (for *Open folder* and *Copy path*) |
-| `unrar` | `STL_UNRAR_PATH` | UnRAR for compressed `.rar` members (default: `unrar` on `PATH`) |
+| `unrar` | `STL_UNRAR_PATH` | UnRAR for compressed `.rar` members (default: the one *Settings → Components* downloads, else `unrar` on `PATH`) |
 | `pdfium` | `STL_PDFIUM_PATH` | pdfium for PDF previews ([builds](https://github.com/bblanchon/pdfium-binaries), 7881) |
 | `onnxruntime` | `ORT_DYLIB_PATH` | ONNX Runtime 1.17+ for AI image embeddings |
 | `web_dir` | `STL_WEB_DIR` | The built web client |
@@ -192,8 +194,8 @@ and sorting, AI temperature, …) live in `<data dir>/settings.json` and are edi
 
 ### AI features
 
-Administrators can download everything below from *Maintenance → AI and add-on components*
-(Windows x64 and Linux x64; checked by SHA-256). Where a GPU helps, the page offers it and
+Administrators can download everything below, and UnRAR, from *Settings → Components*
+(Windows x64 and Linux x64; checked by SHA-256, UnRAR on Windows by RARLab's signature). Where a GPU helps, the page offers it and
 picks the default from the GPUs it finds: the AI tagger's runtime with CUDA (Windows, NVIDIA),
 and ONNX Runtime with DirectML (Windows, any DirectX 12 GPU) or CUDA (Linux, NVIDIA; CUDA 12
 and cuDNN 9 must be installed). To install by hand:
@@ -234,7 +236,7 @@ Compared with the earlier desktop application, which could fall back to Python l
 
 - an archive the built-in readers refuse is skipped (its fingerprint falls back to its size
   and date) rather than read another way;
-- images only Pillow decoded (AVIF, CMYK JPEG) get no thumbnail;
+- CMYK JPEG and tiled ("grid") AVIF images get no thumbnail (other AVIF images do);
 - custom presupport patterns must use syntax the Rust regex engine reads the same way
   (a crawl logs a warning and skips the presupport check when one does not);
 - the interface is in English only.

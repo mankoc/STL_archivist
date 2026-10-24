@@ -101,9 +101,11 @@ pub fn read_members_with(path: &Path, names: &[String], unrar: &str) -> Result<V
 
 /// Archive fingerprint (`archive_hash`) computed from the catalog.
 pub fn fingerprint(path: &Path) -> Result<String, ArchiveError> {
-    let mut members: Vec<Member> = list_members(path)?
-        .into_iter()
-        .map(|m| Member { name: m.name, crc: m.crc })
-        .collect();
-    Ok(fingerprint::archive_fingerprint(&mut members))
+    Ok(fingerprint_of(&list_members(path)?))
+}
+
+/// Archive fingerprint (`archive_hash`) of a catalog [`list_members`] read.
+pub fn fingerprint_of(members: &[ArchiveMember]) -> String {
+    let mut members: Vec<Member> = members.iter().map(|m| Member { name: m.name.clone(), crc: m.crc }).collect();
+    fingerprint::archive_fingerprint(&mut members)
 }

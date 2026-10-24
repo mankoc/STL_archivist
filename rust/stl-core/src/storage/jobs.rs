@@ -112,6 +112,9 @@ pub struct Rescan {
     pub scales: Vec<String>,
     /// The STL file list to store, when the option is on.
     pub stl_files: Option<Vec<String>>,
+    /// Every member as the archive's catalog lists it (`archive_files`);
+    /// `None` when the native readers cannot list it (the stored list stays).
+    pub files: Option<Vec<crate::archive::ArchiveMember>>,
 }
 
 /// Rescan for one model; `Ok(false)` without the model. A file listed twice
@@ -172,6 +175,16 @@ pub fn apply_rescan(tx: &Transaction, model_id: i64, r: &Rescan) -> std::result:
         tx.execute("DELETE FROM model_scales WHERE model_id = ?1", [model_id]).map_err(db)?;
         for id in ids {
             tx.execute("INSERT INTO model_scales (model_id, scale_id) VALUES (?1, ?2)", [model_id, id]).map_err(db)?;
+        }
+    }
+    if let Some(files) = &r.files {
+        tx.execute("DELETE FROM archive_files WHERE model_id = ?1", [model_id]).map_err(db)?;
+        for m in files {
+            tx.execute(
+                "INSERT INTO archive_files (model_id, name, size, crc) VALUES (?1, ?2, ?3, ?4)",
+                params![model_id, m.name, m.size.map(|s| s as i64), m.crc as i64],
+            )
+            .map_err(db)?;
         }
     }
     if let Some(files) = &r.stl_files {

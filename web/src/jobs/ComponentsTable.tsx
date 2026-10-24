@@ -1,6 +1,6 @@
 // The optional components with their variants, sizes and state, and the
-// Download / Remove buttons: the server's (Maintenance → AI and add-on
-// components) and the compute worker's on this computer share it.
+// Download / Remove buttons: the server's and the compute worker's on this
+// computer (both in Settings → Components) share it.
 import { Alert, Anchor, Badge, Button, Checkbox, Group, SegmentedControl, Table, Text } from "@mantine/core";
 import { useEffect, useMemo, useState } from "react";
 

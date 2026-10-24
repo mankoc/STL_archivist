@@ -237,7 +237,7 @@ async fn a_library_moves_without_a_recrawl() {
 async fn a_library_from_before_libraries_is_backed_up_and_migrated() {
     let dir = tempfile::tempdir().unwrap();
     {
-        let c = rusqlite::Connection::open(dir.path().join("stlLibrary.db")).unwrap();
+        let c = rusqlite::Connection::open(dir.path().join(stl_core::backup::DB_FILE)).unwrap();
         c.execute_batch(
             "CREATE TABLE crawled_folders (id INTEGER NOT NULL, path TEXT NOT NULL, pattern TEXT, PRIMARY KEY (id), UNIQUE (path));
              CREATE TABLE models (id INTEGER NOT NULL, title VARCHAR(512), archive_path TEXT NOT NULL, archive_folder VARCHAR(512),

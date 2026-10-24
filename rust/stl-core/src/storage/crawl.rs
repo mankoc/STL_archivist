@@ -821,6 +821,44 @@ pub fn record_folder(
     Ok(())
 }
 
+// ── archive files ────────────────────────────────────────────────────────────
+
+/// Of `paths`, the archives whose record has no stored file list
+/// (`archive_files`): records crawled before it was kept.
+pub fn lacking_files(conn: &Connection, paths: &[String]) -> Result<Vec<String>> {
+    let sql = format!(
+        "SELECT j.value->>2 FROM {LOCATED} WHERE NOT EXISTS (SELECT 1 FROM archive_files f WHERE f.model_id = models.id)"
+    );
+    let mut st = conn.prepare(&sql)?;
+    st.query_map([located_json(conn, paths)?], |r| r.get(0))?.collect()
+}
+
+/// Store the file lists (every member's name, size and CRC, as the archive's
+/// catalog records them) of the records at these paths, replacing what they
+/// had. Paths without a record are skipped. Returns how many lists were stored.
+pub fn store_files(tx: &Transaction, lists: &[(String, Vec<crate::archive::ArchiveMember>)]) -> Result<usize> {
+    if lists.is_empty() {
+        return Ok(0);
+    }
+    let paths: Vec<String> = lists.iter().map(|(p, _)| p.clone()).collect();
+    let ids: HashMap<String, i64> = {
+        let mut st = tx.prepare(&format!("SELECT j.value->>2, models.id FROM {LOCATED}"))?;
+        st.query_map([located_json(tx, &paths)?], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_>>()?
+    };
+    let mut clear = tx.prepare("DELETE FROM archive_files WHERE model_id = ?1")?;
+    let mut ins = tx.prepare("INSERT INTO archive_files (model_id, name, size, crc) VALUES (?1, ?2, ?3, ?4)")?;
+    let mut stored = 0;
+    for (path, members) in lists {
+        let Some(&id) = ids.get(path) else { continue };
+        clear.execute([id])?;
+        for m in members {
+            ins.execute(params![id, m.name, m.size.map(|s| s as i64), m.crc as i64])?;
+        }
+        stored += 1;
+    }
+    Ok(stored)
+}
+
 /// `ids` that still exist (helper for the savepoint loop).
 pub fn existing_ids(conn: &Connection, ids: &[i64]) -> Result<HashSet<i64>> {
     let mut st = conn.prepare("SELECT id FROM models WHERE id IN (SELECT value FROM json_each(?1))")?;

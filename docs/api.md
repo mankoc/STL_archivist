@@ -1,6 +1,6 @@
 # StlArchivist API
 
-Version 2026.43.9. Generated from `web/openapi.json` by `tools/api_doc.py`; the
+Version 2026.43.10. Generated from `web/openapi.json` by `tools/api_doc.py`; the
 running server serves the same document at `GET /api/openapi.json`. Do not edit by hand:
 run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after changing routes.
 
@@ -18,12 +18,12 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
   or `GET /api/jobs/{id}`.
 - Writes that change the library are announced on `/api/events` as `library_changed`.
 
-## Endpoints (79)
+## Endpoints (80)
 
 - [Sign-in and sessions](#sign-in-and-sessions) (5)
 - [Users and preferences](#users-and-preferences) (7)
 - [System](#system) (1)
-- [Browsing the library](#browsing-the-library) (9)
+- [Browsing the library](#browsing-the-library) (10)
 - [Editing models](#editing-models) (11)
 - [Lookups (sculptors, collections, tags…)](#lookups-sculptors-collections-tags) (13)
 - [Thumbnails and images](#thumbnails-and-images) (3)
@@ -77,6 +77,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 | `POST /api/models/ids` | The ids of the models matching the query, in display order. | body: [ModelQuery](#modelquery) | 200 [IdList](#idlist) | 400 |
 | `POST /api/models/rows` | Rows for `ids`, in that order; unknown ids are skipped. | body: [RowsRequest](#rowsrequest) | 200 [Rows](#rows) | 400 |
 | `GET /api/models/{id}` | One model's display fields and its images. | path `id`: integer | 200 [ModelDetail](#modeldetail) | 404 |
+| `GET /api/models/{id}/archive-files` | Every file inside the model's archive (name, size, CRC-32), as the last crawl or rescan read the archive's catalog; empty until then. | path `id`: integer | 200 [ArchiveFile](#archivefile)[] |  |
 | `GET /api/models/{id}/files` | The printable files the crawl stored for a model (empty unless the library stores STL file lists), by name. | path `id`: integer | 200 [StlFile](#stlfile)[] |  |
 | `GET /api/models/{id}/warnings` | Which archive members trigger each of the model's stored warnings (the archive's catalog is read now). | path `id`: integer | 200 [WarningDetails](#warningdetails) | 404 |
 | `POST /api/views/folder` | Thumbnail cells for the archives in a folder (and its subfolders), by path. | body: [FolderRequest](#folderrequest) | 200 [Cell](#cell)[] |  |
@@ -274,6 +275,16 @@ What the model suggests for one model.
 | `tags` | string[] |  |
 | `title` | string |  |
 
+### ArchiveFile
+
+One file inside a model's archive.
+
+| Field | Type | Description |
+|---|---|---|
+| `crc` | string | The member's CRC-32 from the archive's catalog, as 8 hex digits. |
+| `name` | string | The member's name in the archive (`/` separators). |
+| `size` (optional) | integer \| null | Uncompressed size, when the archive records it. |
+
 ### AuthStatus
 
 | Field | Type | Description |
@@ -388,6 +399,7 @@ One component as the Maintenance page shows it.
 |---|---|---|
 | `clip_provider` (optional) | string \| null | The execution provider of the loaded CLIP encoder (`CPU`, `CUDA`, `DirectML`, …); null until it is first used. |
 | `components` | [ComponentStatus](#componentstatus)[] |  |
+| `data_dir` | string | The data directory the components go into. |
 | `free_bytes` (optional) | integer \| null | Free space where the data directory is. |
 | `gpus` | string[] | GPU vendors found: `nvidia`, `amd`, `intel` (on Windows only `nvidia` is detected). |
 | `platform` (optional) | string \| null | `windows-x64`, `linux-x64`, or null when nothing can be downloaded here. |

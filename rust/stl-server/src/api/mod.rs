@@ -99,6 +99,7 @@ use crate::AppState;
         settings::get,
         settings::put,
         archive::files,
+        archive::archive_files,
         views::grid,
         sort::preview,
         views::folders,
@@ -204,6 +205,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/models/{id}/archive", get(files::download))
         .route("/api/settings/library", get(settings::get).put(settings::put))
         .route("/api/models/{id}/files", get(archive::files))
+        .route("/api/models/{id}/archive-files", get(archive::archive_files))
         .route("/api/views/grid", post(views::grid))
         .route("/api/sort/preview", post(sort::preview))
         .route("/api/views/folder", post(views::folder))
