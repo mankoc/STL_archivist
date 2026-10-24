@@ -10,6 +10,8 @@
 //! MeshPeek: when the MeshPeek viewer is installed, "Open in MeshPeek" starts
 //! it on a model's archive (or one model file inside it, MeshPeek's
 //! `<archive>/<entry>` path). It runs on its own, not ended with the shell.
+//! Its program can be chosen (Settings → Account), only in a file dialog: a
+//! page never names a program for the shell to run.
 //!
 //! The compute worker: on a server's Maintenance page, "Use this computer for
 //! AI" hands the shell a worker token, and the shell runs `stl-server worker`
@@ -62,6 +64,9 @@ struct Saved {
     /// Where the worker's components are (chosen on a server's page).
     #[serde(default)]
     worker_data_dir: Option<String>,
+    /// MeshPeek's program, when chosen (else it is looked for).
+    #[serde(default)]
+    meshpeek_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -186,7 +191,9 @@ fn save_servers(app: AppHandle, servers: Vec<Server>) -> Result<(), String> {
 /// What a server's pages may call.
 const SERVER_PERMISSIONS: &[&str] = &[
     "allow-open-folder",
-    "allow-meshpeek-installed",
+    "allow-meshpeek-state",
+    "allow-pick-meshpeek",
+    "allow-clear-meshpeek",
     "allow-open-in-meshpeek",
     "allow-start-worker",
     "allow-stop-worker",
@@ -613,19 +620,63 @@ fn open_folder(path: String) -> Result<(), String> {
     }
 }
 
-/// MeshPeek's program: `meshpeek` on the `PATH`, else where its Windows
-/// installer puts it.
-fn meshpeek_program() -> Option<PathBuf> {
+/// MeshPeek found without a chosen program: `meshpeek` on the `PATH`, else
+/// where its Windows installer puts it.
+fn find_meshpeek() -> Option<PathBuf> {
     let exe = if cfg!(windows) { "meshpeek.exe" } else { "meshpeek" };
     let on_path = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default();
     let installed = ["ProgramFiles", "ProgramW6432"].into_iter().filter_map(std::env::var_os).map(|d| PathBuf::from(d).join("MeshPeek"));
     on_path.into_iter().chain(installed).map(|d| d.join(exe)).find(|p| p.is_file())
 }
 
-/// Whether MeshPeek is installed on this computer.
+/// MeshPeek's program: the chosen one (none while it is missing), else the one found.
+fn meshpeek_program(chosen: Option<&str>) -> Option<PathBuf> {
+    match chosen {
+        Some(path) => Some(PathBuf::from(path)).filter(|p| p.is_file()),
+        None => find_meshpeek(),
+    }
+}
+
+/// The MeshPeek program chosen in Settings, and the one "Open in MeshPeek" runs.
+#[derive(Serialize)]
+struct MeshPeekState {
+    chosen: Option<String>,
+    program: Option<String>,
+}
+
+fn meshpeek_state_of(app: &AppHandle) -> MeshPeekState {
+    let chosen = load_saved(app).meshpeek_path;
+    let program = meshpeek_program(chosen.as_deref()).map(|p| p.to_string_lossy().into_owned());
+    MeshPeekState { chosen, program }
+}
+
 #[tauri::command]
-fn meshpeek_installed() -> bool {
-    meshpeek_program().is_some()
+fn meshpeek_state(app: AppHandle) -> MeshPeekState {
+    meshpeek_state_of(&app)
+}
+
+/// Choose MeshPeek's program in a file dialog; `None` when cancelled.
+#[tauri::command]
+async fn pick_meshpeek(app: AppHandle) -> Result<Option<MeshPeekState>, String> {
+    let mut dialog = app.dialog().file().set_title("MeshPeek's program");
+    if cfg!(windows) {
+        dialog = dialog.add_filter("Programs", &["exe"]);
+    }
+    let Some(picked) = dialog.blocking_pick_file() else { return Ok(None) };
+    let path = picked.into_path().map_err(|e| e.to_string())?;
+    let mut saved = load_saved(&app);
+    saved.meshpeek_path = Some(path.to_string_lossy().into_owned());
+    store_saved(&app, &saved)?;
+    Ok(Some(meshpeek_state_of(&app)))
+}
+
+/// Forget the chosen program: look for MeshPeek again.
+#[tauri::command]
+fn clear_meshpeek(app: AppHandle) -> Result<MeshPeekState, String> {
+    let mut saved = load_saved(&app);
+    saved.meshpeek_path = None;
+    store_saved(&app, &saved)?;
+    Ok(meshpeek_state_of(&app))
 }
 
 /// What MeshPeek is given: the archive, or `<archive>/<entry>` for one file
@@ -648,9 +699,13 @@ fn meshpeek_target(path: &str, entry: Option<&str>) -> Result<PathBuf, String> {
 /// Open an archive (MeshPeek shows its first model and lists the others), or
 /// one model file inside it, in MeshPeek.
 #[tauri::command]
-fn open_in_meshpeek(path: String, entry: Option<String>) -> Result<(), String> {
+fn open_in_meshpeek(app: AppHandle, path: String, entry: Option<String>) -> Result<(), String> {
     let target = meshpeek_target(&path, entry.as_deref())?;
-    let program = meshpeek_program().ok_or("MeshPeek is not installed (no meshpeek on the PATH or in Program Files)")?;
+    let chosen = load_saved(&app).meshpeek_path;
+    let program = meshpeek_program(chosen.as_deref()).ok_or_else(|| match &chosen {
+        Some(p) => format!("MeshPeek is not at {p} (Settings → Account)"),
+        None => "MeshPeek is not installed (no meshpeek on the PATH or in Program Files)".to_string(),
+    })?;
     Command::new(program).arg(target).spawn().map_err(|e| format!("MeshPeek could not start: {e}"))?;
     Ok(())
 }
@@ -742,7 +797,9 @@ fn main() {
             default_data_dir,
             local_state,
             open_folder,
-            meshpeek_installed,
+            meshpeek_state,
+            pick_meshpeek,
+            clear_meshpeek,
             open_in_meshpeek,
             start_worker,
             stop_worker,
@@ -800,6 +857,9 @@ mod tests {
         }
         assert!(meshpeek_target(&dir.join("notes.txt").to_string_lossy(), None).is_err());
         assert!(meshpeek_target("relative.zip", None).is_err());
+        // A chosen program wins, and counts as missing while it is not there.
+        assert_eq!(meshpeek_program(Some(&path)), Some(archive.clone()));
+        assert_eq!(meshpeek_program(Some(&dir.join("gone.exe").to_string_lossy())), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

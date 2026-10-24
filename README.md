@@ -13,7 +13,7 @@ can open a library on your computer without setting up a server.
 [the HTTP API](docs/api.md) ·
 and in the interface, the **?** button: searchable in-depth help on every feature
 
-Version: 2026.43.13
+Version: 2026.43.14
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). This version opens its data directory and, since 2026.43.7, converts it once
@@ -71,7 +71,9 @@ Version: 2026.43.13
 - **Statistics** — totals, rankings and the distribution of any column
 - **Model viewer** — the 3D models inside an archive (STL, OBJ, PLY, 3MF, Lychee, CHITUBOX)
   in the browser, with the renderer of [MeshPeek](https://github.com/mankoc/meshpeek)
-  (WebGPU or WebGL2); in the desktop app, **Open in MeshPeek** when it is installed
+  (WebGPU or WebGL2): a folder tree of the files, several shown together, per-file colour,
+  material and wireframe, a view cube; in the desktop app, **Open in MeshPeek** when it is installed (found
+  on the `PATH` or in Program Files, or chosen in *Settings → Account*)
 
 ## Installation
 

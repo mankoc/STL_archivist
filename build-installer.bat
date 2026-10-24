@@ -23,6 +23,9 @@ where cargo >nul 2>&1 || (echo Rust was not found: install it from https://rustu
 
 rem -- Node.js
 where npm >nul 2>&1 && goto :node_found
+rem A NODE_HOME saved after this window opened (setx) is read from the registry.
+if not defined NODE_HOME for /f "tokens=2,*" %%A in ('reg query "HKCU\Environment" /v NODE_HOME 2^>nul ^| find "NODE_HOME"') do set "NODE_HOME=%%B"
+if not defined NODE_HOME for /f "tokens=2,*" %%A in ('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v NODE_HOME 2^>nul ^| find "NODE_HOME"') do set "NODE_HOME=%%B"
 for %%D in ("%NODE_HOME%" "%ProgramFiles%\nodejs" "%LOCALAPPDATA%\Programs\nodejs") do (
     if exist "%%~D\npm.cmd" (
         set "PATH=%%~D;%PATH%"

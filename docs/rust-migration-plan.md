@@ -1333,6 +1333,17 @@ the path is visible. No business logic and no Tauri commands for data.
   has no Rust); `npm run gen:viewer` regenerates it. The shell's `open_in_meshpeek` starts an
   installed MeshPeek on `<archive>` or `<archive>/<entry>` (its virtual paths); it is not
   ended with the shell.
+- 2026.43.14: MeshPeek's program can be chosen per computer (`Saved::meshpeek_path` in the
+  shell's `servers.json`; `meshpeek_state`, `pick_meshpeek` (a file dialog), `clear_meshpeek`
+  replace `meshpeek_installed`). Pages can only open the dialog, never set a path, so a
+  server cannot make the shell run a program of its choosing.
+  The viewer shows several files at once: `stl-viewer` keys each file's objects by its member
+  name (`add` / `remove`, per-file `set_color` / `set_material` / `set_wireframe`,
+  `set_color_each`, `camera_basis` for the view cube in `web/src/viewer/viewCube.ts`). The
+  vendored renderer gained per-object wireframe from edge index buffers built on request
+  (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
+  `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
+  the viewer and the Files window (`web/src/browser/fileTree.ts`).
 
 ### Phase 8: Retire Python (small)
 

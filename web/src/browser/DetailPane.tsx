@@ -10,7 +10,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api, ApiError, type Schemas, unwrap } from "../api/client";
 import { hasRole, useUser } from "../auth/user";
-import { inDesktopShell, meshpeekInstalled, openFolder, openInMeshPeek } from "../desktop";
+import { inDesktopShell, meshpeekState, openFolder, openInMeshPeek } from "../desktop";
 import { ArchiveInfo } from "./ArchiveInfo";
 import { ImageViewer, type ViewerImage } from "./ImageViewer";
 import { baseName, formatDate, formatSize } from "../format";
@@ -48,7 +48,7 @@ export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: num
     setViewing(null);
     setModelView(null);
   }, [id]);
-  const meshpeek = useQuery({ queryKey: ["meshpeek-installed"], queryFn: meshpeekInstalled, enabled: inDesktopShell(), staleTime: Infinity });
+  const meshpeek = useQuery({ queryKey: ["meshpeek"], queryFn: meshpeekState, enabled: inDesktopShell() });
   const queryClient = useQueryClient();
   const refresh = async () => {
     for (const key of ["model", "rows", "editor"]) await queryClient.invalidateQueries({ queryKey: [key] });
@@ -165,7 +165,7 @@ export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: num
           >
             View model
           </Button>
-          {d.client_path && meshpeek.data && (
+          {d.client_path && meshpeek.data?.program && (
             <Button
               size="xs"
               variant="subtle"

@@ -1,4 +1,5 @@
-// Settings: this user's preferences, the library's crawler and sidecar
+// Settings: this user's preferences (and, in the desktop app, this computer's
+// MeshPeek), the library's crawler and sidecar
 // settings (administrators change them), maintenance, sidecars, backups, compute
 // workers, the downloadable components, and user administration. A tab is
 // addressed as `#/settings/<tab>`.
@@ -13,7 +14,7 @@ import { type FormEvent, useEffect, useState } from "react";
 
 import { api, type Schemas, unwrap } from "../api/client";
 import { hasRole, useUser } from "../auth/user";
-import { inDesktopShell } from "../desktop";
+import { clearMeshPeek, inDesktopShell, meshpeekState, pickMeshPeek } from "../desktop";
 import { ComponentsPanel } from "../jobs/ComponentsPanel";
 import { MaintenanceTab } from "../jobs/MaintenanceTab";
 import { BackupsTab, SidecarsTab, WorkersTab } from "../jobs/SettingsTabs";
@@ -58,7 +59,10 @@ export function SettingsPage() {
         {admin && <Tabs.Tab value="users">Users</Tabs.Tab>}
       </Tabs.List>
       <Tabs.Panel value="account">
-        <AccountSettings />
+        <Stack maw={520}>
+          <AccountSettings />
+          {inDesktopShell() && <MeshPeekSettings />}
+        </Stack>
       </Tabs.Panel>
       <Tabs.Panel value="library">
         <LibrarySettingsForm editable={admin} />
@@ -94,7 +98,7 @@ export function SettingsPage() {
 function AccountSettings() {
   const { colorScheme, setColorScheme } = useMantineColorScheme();
   return (
-    <Card withBorder maw={520}>
+    <Card withBorder>
       <Title order={5} mb="sm">
         Appearance
       </Title>
@@ -114,6 +118,44 @@ function AccountSettings() {
       <Text size="xs" c="dimmed" mt="xs">
         Saved for your account; change your password from the menu at the top right.
       </Text>
+    </Card>
+  );
+}
+
+/** The MeshPeek program "Open in MeshPeek" runs on this computer (the desktop shell keeps it). */
+function MeshPeekSettings() {
+  const queryClient = useQueryClient();
+  const state = useQuery({ queryKey: ["meshpeek"], queryFn: meshpeekState });
+  const change = async (call: () => Promise<unknown>) => {
+    try {
+      await call();
+      await queryClient.invalidateQueries({ queryKey: ["meshpeek"] });
+    } catch (err) {
+      fail(err);
+    }
+  };
+  const s = state.data;
+  return (
+    <Card withBorder data-testid="meshpeek-settings">
+      <Title order={5} mb="sm">
+        MeshPeek on this computer
+      </Title>
+      <Text size="sm" style={{ wordBreak: "break-all" }}>
+        {s?.program ?? (s?.chosen ? `Not found at ${s.chosen}` : "Not found (no meshpeek on the PATH or in Program Files)")}
+      </Text>
+      <Text size="xs" c="dimmed" mb="sm">
+        {s?.chosen ? "Chosen here." : "Found automatically; choose the program if MeshPeek is somewhere else."}
+      </Text>
+      <Group gap="xs">
+        <Button size="xs" variant="light" onClick={() => change(pickMeshPeek)}>
+          Choose program…
+        </Button>
+        {s?.chosen && (
+          <Button size="xs" variant="subtle" onClick={() => change(clearMeshPeek)}>
+            Find automatically
+          </Button>
+        )}
+      </Group>
     </Card>
   );
 }

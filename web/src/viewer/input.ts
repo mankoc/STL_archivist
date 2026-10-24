@@ -1,6 +1,7 @@
 // The model viewer's controls, as MeshPeek's: left drag orbits (turntable),
 // middle or Shift + left drag pans, right drag or the wheel zooms; F frames
-// everything and 0–6 pick the standard views. Pixels are canvas pixels.
+// everything, W toggles the wireframe and 0–6 pick the standard views. Pixels
+// are canvas pixels.
 
 /** Model files the viewer shows (MeshPeek's `SUPPORTED_EXTENSIONS`). */
 export const VIEWABLE_EXTENSIONS = ["stl", "obj", "ply", "3mf", "lys", "chitubox", "ctp", "ctb"];
@@ -46,9 +47,10 @@ export const VIEWS = [
 
 export type ViewName = (typeof VIEWS)[number][0];
 
-/** The key's action: frame everything, or a standard view (its number). */
-export function keyAction(key: string): "fit" | ViewName | null {
+/** The key's action: frame everything, toggle the wireframe, or a standard view (its number). */
+export function keyAction(key: string): "fit" | "wireframe" | ViewName | null {
   if (key === "f" || key === "F") return "fit";
+  if (key === "w" || key === "W") return "wireframe";
   const n = key.length === 1 ? "0123456".indexOf(key) : -1;
   return n >= 0 ? VIEWS[n][0] : null;
 }

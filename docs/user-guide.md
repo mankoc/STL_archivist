@@ -156,19 +156,30 @@ in this browser.
 
 - **Download** the archive; **Copy path** (when the server's path makes sense on your
   computer); **Open folder** in the desktop app shows the archive in the file manager.
-- **Files** lists every file inside the archive with its size and CRC-32, as the last crawl
-  or rescan read the archive's catalog. The cube beside a model file opens it in the model
+- **Files** shows the archive's folders and files as a tree (a chain of single folders is one
+  row), with each file's size and CRC-32 and each folder's file count, as the last crawl or
+  rescan read the archive's catalog. The cube beside a model file opens it in the model
   viewer.
 - **View model** opens the model viewer: the archive's 3D model files (STL, OBJ, PLY, 3MF,
   Lychee `.lys`, CHITUBOX `.chitubox`, `.ctp` and `.ctb`) on the left, the chosen one drawn
   with MeshPeek's renderer (WebGPU, or WebGL2 in browsers without it). The server unpacks the
-  file, so it works in any browser. Left drag orbits, middle or Shift drag pans, the wheel or
-  right drag zooms, **F** frames everything and **0**–**6** pick the standard views (also in
-  the cube menu). Lychee and CHITUBOX scenes show their supports and build plate.
+  file, so it works in any browser. The files are a folder tree (drag its edge to widen it):
+  click a file to show it alone; tick files, or a folder for all its files, or **Ctrl**-click,
+  to show several together (in their own coordinates, so the parts of a model fit together);
+  **↑** / **↓** step through the files. Right-click a file (or a folder, for all its files)
+  for its colour, material (Matte, Plastic, Glossy, Metal), wireframe, **Centre on it** and
+  **Open in MeshPeek**. In the view, left drag orbits, middle or Shift drag pans, the wheel
+  or right drag zooms, **F** frames everything, **W** switches the wireframe of the shown
+  files and **0**–**6** pick the standard views; the view cube (top right) turns with the
+  model, and clicking a face looks from that side. The buttons top left switch the
+  wireframe, *Colour each model* and the build plate. Lychee and CHITUBOX scenes show their
+  supports and build plate.
 - **Open in MeshPeek** (desktop app) opens the archive in the
   [MeshPeek](https://github.com/mankoc/meshpeek) viewer, when it is installed (`meshpeek` on
   the `PATH`, or in Program Files) and the archive is reachable from your computer; in the
-  model viewer it opens the file shown.
+  model viewer it opens the file shown. When MeshPeek is elsewhere, **Settings → Account →
+  MeshPeek on this computer → Choose program…** picks it (kept by the desktop app for this
+  computer); **Find automatically** goes back to looking for it.
 - Warnings (for example *Archive without images*) show as orange badges; **Warning
   details** lists the files that trigger each one.
 - Click an image to view it full screen at full resolution: the original is read from the

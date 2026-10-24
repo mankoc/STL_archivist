@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026.43.14 — 2026-10-24
+
+- **The model viewer's files are a folder tree**, and **several can be shown together**:
+  tick files or folders (or Ctrl-click); a click shows one alone, ↑/↓ step through them. A
+  right-click on a file or folder sets its colour, material (MeshPeek's Matte, Plastic,
+  Glossy, Metal) and wireframe, centres on it, or opens it in MeshPeek. Toolbar: wireframe
+  (**W**), *Colour each model*, build plate. A **view cube** in the corner turns with the
+  model; clicking a face looks from that side. The file list is resizable.
+- **The Files window is a folder tree** too (sizes, CRCs, file counts; expand/collapse all).
+- **MeshPeek's program can be chosen** (desktop app): *Settings → Account → MeshPeek on this
+  computer* shows the program **Open in MeshPeek** runs, **Choose program…** picks another in
+  a file dialog (kept by the desktop app, per computer), **Find automatically** goes back to
+  the `PATH` and Program Files. A page can only open the dialog, never name a program.
+
 ## 2026.43.13 — 2026-10-24
 
 - **Model viewer.** **View model** in the details pane shows the archive's 3D model files

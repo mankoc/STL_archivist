@@ -3,7 +3,21 @@
 import { ActionIcon, AppShell, Avatar, Button, Group, Menu, Modal, PasswordInput, Stack, Text, Title, Tooltip, UnstyledButton, useMantineColorScheme } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconHelp, IconInfoCircle, IconKey, IconLogout } from "@tabler/icons-react";
+import {
+  IconBooks,
+  IconChartBar,
+  IconCopy,
+  IconFolders,
+  IconHelp,
+  IconInfoCircle,
+  IconKey,
+  IconLibrary,
+  IconListCheck,
+  IconLogout,
+  IconPhotoSearch,
+  IconSettings,
+  IconTags,
+} from "@tabler/icons-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { type FormEvent, useEffect, useState } from "react";
@@ -25,16 +39,16 @@ import { type Page, usePage } from "./route";
 import { STATUS_BAR_HEIGHT, StatusBar } from "./StatusBar";
 
 /** The header's page buttons, in order (Help is the ? button). */
-const PAGE_BUTTONS: { value: Page; label: string }[] = [
-  { value: "library", label: "Library" },
-  { value: "folders", label: "Folders" },
-  { value: "find", label: "Find by Image" },
-  { value: "duplicates", label: "Duplicates" },
-  { value: "lookups", label: "Lookups" },
-  { value: "libraries", label: "Libraries" },
-  { value: "jobs", label: "Jobs" },
-  { value: "stats", label: "Statistics" },
-  { value: "settings", label: "Settings" },
+const PAGE_BUTTONS: { value: Page; label: string; icon: typeof IconBooks }[] = [
+  { value: "library", label: "Library", icon: IconBooks },
+  { value: "folders", label: "Folders", icon: IconFolders },
+  { value: "find", label: "Find by Image", icon: IconPhotoSearch },
+  { value: "duplicates", label: "Duplicates", icon: IconCopy },
+  { value: "lookups", label: "Lookups", icon: IconTags },
+  { value: "libraries", label: "Libraries", icon: IconLibrary },
+  { value: "jobs", label: "Jobs", icon: IconListCheck },
+  { value: "stats", label: "Statistics", icon: IconChartBar },
+  { value: "settings", label: "Settings", icon: IconSettings },
 ];
 
 export function Shell({ user }: { user: Schemas["User"] }) {
@@ -65,13 +79,17 @@ export function Shell({ user }: { user: Schemas["User"] }) {
                 {PAGE_BUTTONS.map((p) => (
                   <Button
                     key={p.value}
-                    size="compact-sm"
+                    h={40}
+                    px={8}
                     variant={page === p.value ? "filled" : "default"}
                     aria-current={page === p.value ? "page" : undefined}
                     onClick={() => setPage(p.value)}
                     style={{ flexShrink: 0 }}
                   >
-                    {p.label}
+                    <Stack gap={1} align="center">
+                      <p.icon size={17} stroke={1.8} />
+                      <Text span fz={11} fw={500} lh={1}>{p.label}</Text>
+                    </Stack>
                   </Button>
                 ))}
               </Group>

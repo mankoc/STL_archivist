@@ -2,7 +2,7 @@
 /* eslint-disable */
 
 /**
- * What [`Viewer::load`] put in the view.
+ * What [`Viewer::add`] put in the view.
  */
 export class Loaded {
     private constructor();
@@ -23,12 +23,22 @@ export class Loaded {
 }
 
 /**
- * A canvas showing one scene.
+ * A canvas showing one or more scenes.
  */
 export class Viewer {
     private constructor();
     free(): void;
     [Symbol.dispose](): void;
+    /**
+     * Show the file `key` (a scene from `GET /api/models/{id}/view`), replacing what it showed before. The
+     * first file shown is seen from the isometric view; later ones are framed with everything, keeping the
+     * viewing direction.
+     */
+    add(key: string, data: Uint8Array): Loaded;
+    /**
+     * The camera's right, up and viewing directions in world coordinates (9 numbers), for the view cube.
+     */
+    camera_basis(): Float64Array;
     /**
      * Draw into `canvas` (sized by the page) with WebGPU when the browser has it, otherwise WebGL2;
      * `webgl` forces WebGL2. A canvas WebGPU failed on cannot be used for WebGL2: retry on a new one.
@@ -39,9 +49,9 @@ export class Viewer {
      */
     fit(): void;
     /**
-     * Replace what is shown with a scene from `GET /api/models/{id}/view`, seen from the isometric view.
+     * Frame the file's objects.
      */
-    load(data: Uint8Array): Loaded;
+    focus(key: string): void;
     /**
      * Turntable orbit: `azimuth` about the world Z axis, `elevation` toward the poles, in degrees.
      */
@@ -51,6 +61,10 @@ export class Viewer {
      */
     pan(dx: number, dy: number): void;
     /**
+     * Stop showing the file `key`.
+     */
+    remove(key: string): void;
+    /**
      * Draw a frame.
      */
     render(): void;
@@ -59,9 +73,33 @@ export class Viewer {
      */
     resize(width: number, height: number): void;
     /**
+     * Colour the file's models `#rrggbb`, or (`None` or anything else) as by default.
+     */
+    set_color(key: string, color?: string | null): void;
+    /**
+     * Give each model its own colour (MeshPeek's "Colour each model"); colours set per file still win.
+     */
+    set_color_each(on: boolean): void;
+    /**
      * Follow the page's theme (background and plate colours).
      */
     set_dark(dark: boolean): void;
+    /**
+     * Give the file's objects one of MeshPeek's materials: `Matte`, `Plastic`, `Glossy` or `Metal`.
+     */
+    set_material(key: string, name: string): void;
+    /**
+     * Show or hide the build plates and volumes of slicer scenes.
+     */
+    set_show_plates(show: boolean): void;
+    /**
+     * Show or hide the file (it stays loaded).
+     */
+    set_visible(key: string, on: boolean): void;
+    /**
+     * Draw the file's objects as their edges, or as surfaces again.
+     */
+    set_wireframe(key: string, on: boolean): void;
     /**
      * Look along a standard view (`isometric`, `front`, `back`, `left`, `right`, `top`, `bottom`) and frame
      * everything; other names are ignored.
@@ -86,15 +124,24 @@ export interface InitOutput {
     readonly __wbg_loaded_free: (a: number, b: number) => void;
     readonly __wbg_viewer_free: (a: number, b: number) => void;
     readonly loaded_skipped: (a: number) => [number, number];
+    readonly viewer_add: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
     readonly viewer_backend: (a: number) => [number, number];
+    readonly viewer_camera_basis: (a: number) => [number, number];
     readonly viewer_create: (a: any, b: number) => any;
     readonly viewer_fit: (a: number) => void;
-    readonly viewer_load: (a: number, b: number, c: number) => [number, number, number];
+    readonly viewer_focus: (a: number, b: number, c: number) => void;
     readonly viewer_orbit: (a: number, b: number, c: number) => void;
     readonly viewer_pan: (a: number, b: number, c: number) => void;
+    readonly viewer_remove: (a: number, b: number, c: number) => void;
     readonly viewer_render: (a: number) => [number, number];
     readonly viewer_resize: (a: number, b: number, c: number) => void;
+    readonly viewer_set_color: (a: number, b: number, c: number, d: number, e: number) => void;
+    readonly viewer_set_color_each: (a: number, b: number) => void;
     readonly viewer_set_dark: (a: number, b: number) => void;
+    readonly viewer_set_material: (a: number, b: number, c: number, d: number, e: number) => void;
+    readonly viewer_set_show_plates: (a: number, b: number) => void;
+    readonly viewer_set_visible: (a: number, b: number, c: number, d: number) => void;
+    readonly viewer_set_wireframe: (a: number, b: number, c: number, d: number) => void;
     readonly viewer_show_view: (a: number, b: number, c: number) => void;
     readonly viewer_zoom: (a: number, b: number) => void;
     readonly wasm_bindgen_dac0731650b473ce___convert__closures_____invoke___js_sys_a89202e6452953cf___Function_fn_wasm_bindgen_dac0731650b473ce___JsValue_____wasm_bindgen_dac0731650b473ce___sys__Undefined___js_sys_a89202e6452953cf___Function_fn_wasm_bindgen_dac0731650b473ce___JsValue_____wasm_bindgen_dac0731650b473ce___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;

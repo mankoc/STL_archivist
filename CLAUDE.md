@@ -149,8 +149,9 @@ conveniences (wrap it in try/catch). Pages are hash routes (`shell/route.ts`).
 
 No library logic and no data commands. New commands go into `build.rs`'s app manifest; the
 launcher capability (`capabilities/launcher.json`) lists what the bundled page may call, and
-server origins get only `SERVER_PERMISSIONS` (`open_folder`, `meshpeek_installed` /
-`open_in_meshpeek` (an installed MeshPeek on a local archive) and the compute worker's
+server origins get only `SERVER_PERMISSIONS` (`open_folder`, the MeshPeek commands
+(`meshpeek_state`, `pick_meshpeek` / `clear_meshpeek` — its program is chosen only in a
+file dialog, never named by a page — and `open_in_meshpeek` on a local archive) and the compute worker's
 commands: start/stop/state, its folder's components through `stl-server components`, and
 picking its folder; runtime capability in `grant`). The worker commands act for the calling
 page's origin only; component changes run the server binary, never code in the shell. Installer

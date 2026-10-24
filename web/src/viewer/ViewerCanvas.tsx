@@ -1,13 +1,17 @@
-// One model file drawn by MeshPeek's renderer (rust/stl-viewer, WebAssembly):
-// the server loads the file from the archive (`GET /api/models/{id}/view`),
-// the canvas shows it with MeshPeek's mouse and keyboard controls (input.ts).
-// The WebAssembly is fetched the first time a viewer opens.
+// The model files drawn by MeshPeek's renderer (rust/stl-viewer, WebAssembly):
+// the server loads each file from the archive (`GET /api/models/{id}/view`),
+// the canvas shows them together with MeshPeek's mouse and keyboard controls
+// (input.ts) and a view cube (viewCube.ts). Files are added and removed as
+// `files` changes; each is drawn as `styles` says. The WebAssembly is fetched
+// the first time a viewer opens.
 import { ActionIcon, Alert, Box, Center, Group, Loader, Menu, Text, Tooltip, useComputedColorScheme } from "@mantine/core";
 import { IconCube, IconFocusCentered } from "@tabler/icons-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
 import { api, unwrap } from "../api/client";
 import { dragAction, dragZoom, keyAction, orbitDegrees, VIEWS, wheelZoom } from "./input";
+import { type FileStyle, styleOf } from "./state";
+import { cubeFaces } from "./viewCube";
 import type { Viewer } from "./wasm/stl_viewer";
 
 type Wasm = typeof import("./wasm/stl_viewer");
@@ -30,35 +34,72 @@ function sizeCanvas(canvas: HTMLCanvasElement) {
   canvas.height = Math.min(4096, Math.max(1, Math.round(canvas.clientHeight * dpr)));
 }
 
-interface Shown {
-  objects: number;
-  triangles: number;
-  skipped: string[];
-}
+/** A file's state in the view, reported to the file list. */
+export type FileStatus =
+  | { state: "loading" }
+  | { state: "shown"; objects: number; triangles: number; skipped: string[] }
+  | { state: "failed"; error: string };
 
-export function ViewerCanvas({ id, name }: { id: number; name: string }) {
+const CUBE = 34; // half-size in CSS pixels
+const AXIS_TINT = { x: "230, 70, 70", y: "90, 200, 90", z: "90, 130, 255" };
+
+export function ViewerCanvas({ id, files, styles, colorEach, plates, focus, onStatus, onWireframeKey, tools }: {
+  id: number;
+  /** The files to show (member names). */
+  files: string[];
+  styles: Record<string, FileStyle>;
+  colorEach: boolean;
+  plates: boolean;
+  /** Frame this file (a new `n` asks again). */
+  focus: { name: string; n: number } | null;
+  /** A file's state changed; null: it is no longer shown. */
+  onStatus: (name: string, status: FileStatus | null) => void;
+  /** W was pressed. */
+  onWireframeKey: () => void;
+  /** More buttons for the toolbar. */
+  tools?: ReactNode;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewerRef = useRef<Viewer | null>(null);
   // WebGPU first; a canvas it failed on gets replaced by one for WebGL2.
   const [webgl, setWebgl] = useState(false);
   const [backend, setBackend] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [shown, setShown] = useState<Shown | null>(null);
   const dark = useComputedColorScheme("light") === "dark";
+  // Each file's request (while loading) or result, by name.
+  const loaded = useRef(new Map<string, AbortController | FileStatus>());
+  const [shown, setShown] = useState<Record<string, FileStatus>>({});
+  const [added, setAdded] = useState(0); // counts additions, so styles are applied to new files
+  const [basis, setBasis] = useState<number[] | null>(null);
 
   const frame = useRef(0);
   const draw = useCallback(() => {
     if (frame.current) return;
     frame.current = requestAnimationFrame(() => {
       frame.current = 0;
+      const v = viewerRef.current;
+      if (!v) return;
       try {
-        viewerRef.current?.render();
+        v.render();
+        setBasis(Array.from(v.camera_basis()));
       } catch (e) {
         setFailed(message(e));
       }
     });
   }, []);
+
+  const report = useCallback(
+    (name: string, status: FileStatus | null) => {
+      setShown((m) => {
+        const next = { ...m };
+        if (status) next[name] = status;
+        else delete next[name];
+        return next;
+      });
+      onStatus(name, status);
+    },
+    [onStatus],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -78,15 +119,22 @@ export function ViewerCanvas({ id, name }: { id: number; name: string }) {
           else setFailed(`This browser cannot show 3D models: ${message(e)}`);
         },
       );
+    const files = loaded.current;
     return () => {
       cancelled = true;
       cancelAnimationFrame(frame.current);
       frame.current = 0;
+      for (const [name, entry] of files) {
+        if (entry instanceof AbortController) entry.abort();
+        onStatus(name, null);
+      }
+      files.clear();
+      setShown({});
       viewerRef.current?.free();
       viewerRef.current = null;
       setBackend(null);
     };
-  }, [webgl]);
+  }, [webgl, onStatus]);
 
   const ready = backend != null;
 
@@ -96,30 +144,64 @@ export function ViewerCanvas({ id, name }: { id: number; name: string }) {
     draw();
   }, [ready, dark, draw]);
 
+  // Load the files asked for, drop the others.
   useEffect(() => {
     if (!ready) return;
-    const ctl = new AbortController();
-    setLoading(true);
-    setFailed(null);
-    setShown(null);
-    (async () => {
-      const data = unwrap(
-        await api.GET("/api/models/{id}/view", {
-          params: { path: { id }, query: { name } },
-          parseAs: "arrayBuffer",
-          signal: ctl.signal,
-        }),
-      ) as ArrayBuffer;
-      if (ctl.signal.aborted || !viewerRef.current) return;
-      const loaded = viewerRef.current.load(new Uint8Array(data));
-      setShown({ objects: loaded.objects, triangles: loaded.triangles, skipped: loaded.skipped });
-      loaded.free();
-      draw();
-    })()
-      .catch((e) => !ctl.signal.aborted && setFailed(message(e)))
-      .finally(() => !ctl.signal.aborted && setLoading(false));
-    return () => ctl.abort();
-  }, [ready, id, name, draw]);
+    const v = viewerRef.current!;
+    const wanted = new Set(files);
+    for (const [name, entry] of loaded.current) {
+      if (wanted.has(name)) continue;
+      if (entry instanceof AbortController) entry.abort();
+      else v.remove(name);
+      loaded.current.delete(name);
+      report(name, null);
+    }
+    draw();
+    for (const name of files) {
+      if (loaded.current.has(name)) continue;
+      const ctl = new AbortController();
+      loaded.current.set(name, ctl);
+      report(name, { state: "loading" });
+      (async () => {
+        const data = unwrap(
+          await api.GET("/api/models/{id}/view", { params: { path: { id }, query: { name } }, parseAs: "arrayBuffer", signal: ctl.signal }),
+        ) as ArrayBuffer;
+        if (ctl.signal.aborted || viewerRef.current !== v) return;
+        const r = v.add(name, new Uint8Array(data));
+        const status: FileStatus = { state: "shown", objects: r.objects, triangles: r.triangles, skipped: r.skipped };
+        r.free();
+        loaded.current.set(name, status);
+        report(name, status);
+        setAdded((n) => n + 1);
+      })().catch((e) => {
+        if (ctl.signal.aborted) return;
+        const status: FileStatus = { state: "failed", error: message(e) };
+        loaded.current.set(name, status);
+        report(name, status);
+      });
+    }
+  }, [ready, id, files, draw, report]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const v = viewerRef.current!;
+    for (const [name, entry] of loaded.current) {
+      if (entry instanceof AbortController || entry.state !== "shown") continue;
+      const s = styleOf(styles, name);
+      v.set_color(name, s.color);
+      v.set_material(name, s.material);
+      v.set_wireframe(name, s.wire);
+    }
+    v.set_color_each(colorEach);
+    v.set_show_plates(plates);
+    draw();
+  }, [ready, styles, colorEach, plates, added, draw]);
+
+  useEffect(() => {
+    if (!ready || !focus) return;
+    viewerRef.current!.focus(focus.name);
+    draw();
+  }, [ready, focus, draw]);
 
   useEffect(() => {
     if (!ready) return;
@@ -159,10 +241,18 @@ export function ViewerCanvas({ id, name }: { id: number; name: string }) {
   const act = (action: ReturnType<typeof keyAction>) => {
     const v = viewerRef.current;
     if (!v || !action) return;
+    if (action === "wireframe") return onWireframeKey();
     if (action === "fit") v.fit();
     else v.show_view(action);
     draw();
   };
+
+  const statuses = Object.values(shown);
+  const done = statuses.flatMap((s) => (s.state === "shown" ? [s] : []));
+  const loading = statuses.some((s) => s.state === "loading");
+  const skipped = done.flatMap((s) => s.skipped);
+  const objects = done.reduce((n, s) => n + s.objects, 0);
+  const triangles = done.reduce((n, s) => n + s.triangles, 0);
 
   return (
     <Box pos="relative" h="100%" w="100%" data-testid="model-canvas">
@@ -206,7 +296,36 @@ export function ViewerCanvas({ id, name }: { id: number; name: string }) {
               <IconFocusCentered size={16} />
             </ActionIcon>
           </Tooltip>
+          {tools}
         </Group>
+      )}
+      {ready && basis && (
+        <svg
+          width={CUBE * 2 + 24}
+          height={CUBE * 2 + 24}
+          viewBox={`${-CUBE - 12} ${-CUBE - 12} ${CUBE * 2 + 24} ${CUBE * 2 + 24}`}
+          style={{ position: "absolute", top: 8, right: 8, overflow: "visible" }}
+          data-testid="view-cube"
+        >
+          {cubeFaces(basis, CUBE / Math.sqrt(3)).map((f) => (
+            <g key={f.view} onClick={() => act(f.view)} style={{ cursor: "pointer" }}>
+              <title>{`${f.label} view`}</title>
+              <polygon
+                points={f.points.map((p) => p.join(",")).join(" ")}
+                fill={`rgba(${AXIS_TINT[f.axis]}, ${0.25 + 0.45 * f.facing})`}
+                stroke={dark ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.45)"}
+                strokeWidth={1}
+                strokeLinejoin="round"
+              />
+              {f.facing > 0.35 && (
+                <text x={f.centre[0]} y={f.centre[1]} textAnchor="middle" dominantBaseline="central" fontSize={10}
+                  fill={dark ? "#fff" : "#111"} style={{ pointerEvents: "none", userSelect: "none" }}>
+                  {f.label}
+                </text>
+              )}
+            </g>
+          ))}
+        </svg>
       )}
       {(loading || (!ready && !failed)) && (
         <Center pos="absolute" inset={0} style={{ pointerEvents: "none" }}>
@@ -218,16 +337,17 @@ export function ViewerCanvas({ id, name }: { id: number; name: string }) {
           <Alert color="red" maw={520}>{failed}</Alert>
         </Center>
       )}
-      {shown && (
+      {done.length > 0 && (
         <Box pos="absolute" bottom={8} left={8} right={8} style={{ pointerEvents: "none" }}>
-          {shown.skipped.length > 0 && (
+          {skipped.length > 0 && (
             <Alert color="yellow" p={6} mb={4} maw={520}>
-              <Text size="xs">Not shown: {shown.skipped.join("; ")}</Text>
+              <Text size="xs">Not shown: {skipped.join("; ")}</Text>
             </Alert>
           )}
           <Text size="xs" c="dimmed" px={6} py={2} display="inline-block"
             style={{ borderRadius: 6, background: "color-mix(in srgb, var(--mantine-color-body) 70%, transparent)" }}>
-            {shown.objects} object{shown.objects === 1 ? "" : "s"} · {shown.triangles.toLocaleString()} triangles · {backend} ·
+            {done.length > 1 && `${done.length} files · `}
+            {objects} object{objects === 1 ? "" : "s"} · {triangles.toLocaleString()} triangles · {backend} ·
             left drag orbits, middle or Shift drag pans, wheel or right drag zooms
           </Text>
         </Box>
