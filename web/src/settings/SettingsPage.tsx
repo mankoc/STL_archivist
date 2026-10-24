@@ -4,14 +4,15 @@
 // workers, the downloadable components, and user administration. A tab is
 // addressed as `#/settings/<tab>`.
 import {
-  ActionIcon, Badge, Button, Card, Checkbox, Group, Modal, NumberInput, PasswordInput, SegmentedControl, Select, SimpleGrid,
+  ActionIcon, Badge, Button, Card, Checkbox, ColorSwatch, Group, Modal, NumberInput, PasswordInput, SegmentedControl, Select, SimpleGrid,
   Stack, Switch, Table, Tabs, Text, Textarea, TextInput, Title, Tooltip, useMantineColorScheme,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { IconKey, IconTrash } from "@tabler/icons-react";
+import { IconCheck, IconKey, IconTrash } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useEffect, useState } from "react";
 
+import { type Accent, ACCENT_SETTING, ACCENTS, DEFAULT_ACCENT, isAccent, useSetAccent } from "../accent";
 import { api, type Schemas, unwrap } from "../api/client";
 import { hasRole, useUser } from "../auth/user";
 import { clearMeshPeek, inDesktopShell, meshpeekState, pickMeshPeek } from "../desktop";
@@ -97,6 +98,20 @@ export function SettingsPage() {
 
 function AccountSettings() {
   const { colorScheme, setColorScheme } = useMantineColorScheme();
+  const queryClient = useQueryClient();
+  const setAccent = useSetAccent();
+  const prefs = useQuery({ queryKey: ["me-settings"], queryFn: async () => unwrap(await api.GET("/api/me/settings")) as Record<string, unknown> });
+  const stored = prefs.data?.[ACCENT_SETTING];
+  const accent: Accent = isAccent(stored) ? stored : DEFAULT_ACCENT;
+  const chooseAccent = async (a: Accent) => {
+    setAccent(a);
+    queryClient.setQueryData(["me-settings"], (d: Record<string, unknown> | undefined) => ({ ...d, [ACCENT_SETTING]: a }));
+    try {
+      unwrap(await api.PUT("/api/me/settings/{key}", { params: { path: { key: ACCENT_SETTING } }, body: a as never }));
+    } catch (err) {
+      fail(err);
+    }
+  };
   return (
     <Card withBorder>
       <Title order={5} mb="sm">
@@ -115,8 +130,29 @@ function AccountSettings() {
         ]}
         data-testid="color-scheme"
       />
+      <Text size="sm" fw={500} mt="md" mb={6}>
+        Accent colour
+      </Text>
+      <Group gap={8} data-testid="accent-colours">
+        {ACCENTS.map((a) => (
+          <Tooltip key={a} label={a[0].toUpperCase() + a.slice(1)}>
+            <ColorSwatch
+              component="button"
+              type="button"
+              color={`var(--mantine-color-${a}-filled)`}
+              size={26}
+              aria-label={`Accent colour ${a}`}
+              aria-pressed={a === accent}
+              style={{ cursor: "pointer", outline: a === accent ? "2px solid var(--mantine-color-text)" : undefined, outlineOffset: 2 }}
+              onClick={() => chooseAccent(a)}
+            >
+              {a === accent && <IconCheck size={14} color="white" />}
+            </ColorSwatch>
+          </Tooltip>
+        ))}
+      </Group>
       <Text size="xs" c="dimmed" mt="xs">
-        Saved for your account; change your password from the menu at the top right.
+        Buttons, selections and highlights. Saved for your account; change your password from the menu at the top right.
       </Text>
     </Card>
   );
@@ -212,7 +248,6 @@ function LibrarySettingsForm({ editable }: { editable: boolean }) {
         </SimpleGrid>
         <Stack gap="xs" mt="sm">
           {check("recurse_subdirs", "Crawl subfolders")}
-          {check("store_stl_file_list", "Store the list of STL files")}
           {check("ai_embeddings_enabled", "AI image embeddings")}
           {check("ai_embeddings_during_crawl", "Compute embeddings during crawls")}
         </Stack>

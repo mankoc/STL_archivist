@@ -110,8 +110,8 @@ pub struct Rescan {
     pub warning: Option<String>,
     /// Empty keeps the current scales.
     pub scales: Vec<String>,
-    /// The STL file list to store, when the option is on.
-    pub stl_files: Option<Vec<String>>,
+    /// The STL file list to store.
+    pub stl_files: Vec<String>,
     /// Every member as the archive's catalog lists it (`archive_files`);
     /// `None` when the native readers cannot list it (the stored list stays).
     pub files: Option<Vec<crate::archive::ArchiveMember>>,
@@ -121,11 +121,9 @@ pub struct Rescan {
 /// raises (as the ORM's flush does) before anything is written.
 pub fn apply_rescan(tx: &Transaction, model_id: i64, r: &Rescan) -> std::result::Result<bool, String> {
     let db = |e: rusqlite::Error| e.to_string();
-    if let Some(files) = &r.stl_files {
-        let mut seen = HashSet::new();
-        if files.iter().any(|f| !seen.insert(f)) {
-            return Err("UNIQUE constraint failed: stl_files.model_id, stl_files.filename".into());
-        }
+    let mut seen = HashSet::new();
+    if r.stl_files.iter().any(|f| !seen.insert(f)) {
+        return Err("UNIQUE constraint failed: stl_files.model_id, stl_files.filename".into());
     }
     type Cur = (Option<f64>, Option<String>, Option<String>, Option<String>, Option<i64>, Option<i64>, Option<String>, Option<String>);
     let cur: Option<Cur> = tx
@@ -187,15 +185,13 @@ pub fn apply_rescan(tx: &Transaction, model_id: i64, r: &Rescan) -> std::result:
             .map_err(db)?;
         }
     }
-    if let Some(files) = &r.stl_files {
-        tx.execute("DELETE FROM stl_files WHERE model_id = ?1", [model_id]).map_err(db)?;
-        for f in files {
-            tx.execute(
-                "INSERT INTO stl_files (model_id, filename, file_size, archive_hash) VALUES (?1, ?2, NULL, ?3)",
-                params![model_id, f, r.archive_hash],
-            )
-            .map_err(db)?;
-        }
+    tx.execute("DELETE FROM stl_files WHERE model_id = ?1", [model_id]).map_err(db)?;
+    for f in &r.stl_files {
+        tx.execute(
+            "INSERT INTO stl_files (model_id, filename, file_size, archive_hash) VALUES (?1, ?2, NULL, ?3)",
+            params![model_id, f, r.archive_hash],
+        )
+        .map_err(db)?;
     }
     Ok(true)
 }

@@ -22,7 +22,6 @@ fn options(lib: &Library, settings: &LibrarySettings) -> Options {
         unrar: lib.config.unrar_tool(),
         warn: settings.checks(),
         presupport_patterns: settings.presupport_patterns(),
-        store_stl: settings.store_stl_file_list(),
     }
 }
 

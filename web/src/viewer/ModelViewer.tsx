@@ -4,7 +4,10 @@
 // Ctrl-click) adds it to the view; a folder's checkbox shows all its files;
 // ↑/↓ step through the files (in the tree: Enter shows the focused file
 // alone, Space adds or takes it away). Right-click a file for its colour, material,
-// wireframe and centring (MeshPeek's options), or a folder to show its files.
+// wireframe, centring and information (MeshPeek's options; the ⓘ beside a
+// shown file and the toolbar's ⓘ open the information too), or a folder to
+// show its files. Editors can add the view as it is drawn to the model's
+// images (the camera button).
 // In the desktop app, with MeshPeek installed and the archive reachable from
 // this computer, "Open in MeshPeek" opens a file there.
 import {
@@ -13,7 +16,8 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import {
-  IconAlertTriangle, IconCheck, IconChevronRight, IconExternalLink, IconFocus2, IconLayoutBoardSplit, IconPalette, IconPolygon,
+  IconAlertTriangle, IconCameraPlus, IconCheck, IconChevronRight, IconExternalLink, IconFocus2, IconInfoCircle, IconLayoutBoardSplit,
+  IconPalette, IconPolygon,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -24,20 +28,22 @@ import { clampWidth } from "../browser/paneWidth";
 import { inDesktopShell, meshpeekState, openInMeshPeek } from "../desktop";
 import { formatSize } from "../format";
 import {
-  COLORS, currentOf, type FileStyle, folderState, MATERIALS, restyle, stepFile, styleOf, toggleFile, toggleFiles,
+  COLORS, currentOf, type FileStyle, folderState, MATERIALS, restyle, stepFile, styleOf, toggleFile, toggleFiles, viewImageName,
 } from "./state";
-import { type FileStatus, ViewerCanvas } from "./ViewerCanvas";
+import { type FileStatus, ViewerCanvas, type ViewerHandle } from "./ViewerCanvas";
 
 const notify = (e: unknown) => notifications.show({ color: "red", message: String(e) });
 const leaf = (name: string) => name.split("/").pop() ?? name;
 
-export function ModelViewer({ id, title, file, clientPath, onClose }: {
+export function ModelViewer({ id, title, file, clientPath, onAddImage, onClose }: {
   id: number;
   title: string;
   /** The model file to show first; the archive's first one when null. */
   file: string | null;
   /** The archive's path on this computer, when it is reachable from here. */
   clientPath: string | null;
+  /** Add an image to the model; null: not offered (viewers). */
+  onAddImage: ((image: File) => Promise<void>) | null;
   onClose: () => void;
 }) {
   const files = useQuery({
@@ -75,7 +81,27 @@ export function ModelViewer({ id, title, file, clientPath, onClose }: {
   const [colorEach, setColorEach] = useState(false);
   const [plates, setPlates] = useState(true);
   const [focus, setFocus] = useState<{ name: string; n: number } | null>(null);
+  // The file whose information panel is open.
+  const [infoFor, setInfoFor] = useState<string | null>(null);
   const [width, setWidth] = useState(320);
+  const canvas = useRef<ViewerHandle>(null);
+  const [adding, setAdding] = useState(false);
+  const statuses = Object.values(status);
+  const canAdd = statuses.some((s) => s.state === "shown") && !statuses.some((s) => s.state === "loading");
+
+  const addView = async () => {
+    if (!onAddImage || !canvas.current || !current) return;
+    setAdding(true);
+    try {
+      const png = await canvas.current.snapshot();
+      await onAddImage(new File([png], viewImageName(current), { type: "image/png" }));
+      notifications.show({ message: "The view was added to the model's images." });
+    } catch (e) {
+      notifications.show({ color: "red", message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setAdding(false);
+    }
+  };
 
   const showOnly = (name: string) => {
     setShown([name]);
@@ -165,6 +191,7 @@ export function ModelViewer({ id, title, file, clientPath, onClose }: {
                 }}
                 onStyle={(names, patch) => setStyles((s) => restyle(s, names, patch))}
                 onFocus={(name) => setFocus({ name, n: Date.now() })}
+                onInfo={setInfoFor}
                 onOpen={canOpen ? openHere : null}
               />
             </ScrollArea>
@@ -179,6 +206,7 @@ export function ModelViewer({ id, title, file, clientPath, onClose }: {
             <Center h="100%"><Alert color="red">{files.error.message}</Alert></Center>
           ) : order.length || shown.length ? (
             <ViewerCanvas
+              ref={canvas}
               id={id}
               files={shown}
               sizes={sizes}
@@ -186,13 +214,28 @@ export function ModelViewer({ id, title, file, clientPath, onClose }: {
               colorEach={colorEach}
               plates={plates}
               focus={focus}
+              info={infoFor}
+              onInfoClose={() => setInfoFor(null)}
               onStatus={onStatus}
               onWireframeKey={toggleWireAll}
               tools={
                 <>
+                  <Tooltip label="Information about the file">
+                    <ActionIcon variant="default" aria-label="Information" disabled={!current} onClick={() => setInfoFor(current)}>
+                      <IconInfoCircle size={16} />
+                    </ActionIcon>
+                  </Tooltip>
                   <Toggle label="Wireframe (W)" on={allWire} onClick={toggleWireAll}><IconPolygon size={16} /></Toggle>
                   <Toggle label="Colour each model" on={colorEach} onClick={() => setColorEach((c) => !c)}><IconPalette size={16} /></Toggle>
                   <Toggle label="Build plate" on={plates} onClick={() => setPlates((p) => !p)}><IconLayoutBoardSplit size={16} /></Toggle>
+                  {onAddImage && (
+                    <Tooltip label="Add this view to the model's images">
+                      <ActionIcon variant="default" aria-label="Add this view to the model's images" disabled={!canAdd}
+                        loading={adding} onClick={addView}>
+                        <IconCameraPlus size={16} />
+                      </ActionIcon>
+                    </Tooltip>
+                  )}
                 </>
               }
             />
@@ -228,7 +271,7 @@ function Toggle({ label, on, onClick, children }: { label: string; on: boolean; 
 type Patch = Partial<FileStyle>;
 
 /** The file tree with checkboxes, each file's state, and right-click menus. */
-function FileTreePane({ tree, order, current, shown, status, styles, onShowOnly, onToggle, onToggleFolder, onShowFolderOnly, onStyle, onFocus, onOpen }: {
+function FileTreePane({ tree, order, current, shown, status, styles, onShowOnly, onToggle, onToggleFolder, onShowFolderOnly, onStyle, onFocus, onInfo, onOpen }: {
   tree: FileTree;
   order: string[];
   current: string | null;
@@ -241,6 +284,7 @@ function FileTreePane({ tree, order, current, shown, status, styles, onShowOnly,
   onShowFolderOnly: (names: string[]) => void;
   onStyle: (names: string[], patch: Patch) => void;
   onFocus: (name: string) => void;
+  onInfo: (name: string) => void;
   onOpen: ((name: string) => void) | null;
 }) {
   // Small archives open fully; large ones at the first file's folder.
@@ -319,6 +363,15 @@ function FileTreePane({ tree, order, current, shown, status, styles, onShowOnly,
                   <IconAlertTriangle size={14} color="var(--mantine-color-red-6)" />
                 </Tooltip>
               )}
+              {s?.state === "shown" && (
+                <ActionIcon size="xs" variant="subtle" color="gray" aria-label={`Information about ${name}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onInfo(name);
+                  }}>
+                  <IconInfoCircle size={13} />
+                </ActionIcon>
+              )}
               <Text size="xs" c="dimmed">{formatSize(info.size)}</Text>
             </Group>
           );
@@ -339,7 +392,7 @@ function FileTreePane({ tree, order, current, shown, status, styles, onShowOnly,
           )}
           {menuInfo?.kind === "file" && (
             <FileMenu name={menuInfo.name!} shown={shown.includes(menuInfo.name!)} styles={styles}
-              onShowOnly={onShowOnly} onToggle={onToggle} onStyle={onStyle} onFocus={onFocus} onOpen={onOpen} />
+              onShowOnly={onShowOnly} onToggle={onToggle} onStyle={onStyle} onFocus={onFocus} onInfo={onInfo} onOpen={onOpen} />
           )}
         </Menu.Dropdown>
       </Menu>
@@ -347,7 +400,7 @@ function FileTreePane({ tree, order, current, shown, status, styles, onShowOnly,
   );
 }
 
-function FileMenu({ name, shown, styles, onShowOnly, onToggle, onStyle, onFocus, onOpen }: {
+function FileMenu({ name, shown, styles, onShowOnly, onToggle, onStyle, onFocus, onInfo, onOpen }: {
   name: string;
   shown: boolean;
   styles: Record<string, FileStyle>;
@@ -355,6 +408,7 @@ function FileMenu({ name, shown, styles, onShowOnly, onToggle, onStyle, onFocus,
   onToggle: (name: string) => void;
   onStyle: (names: string[], patch: Patch) => void;
   onFocus: (name: string) => void;
+  onInfo: (name: string) => void;
   onOpen: ((name: string) => void) | null;
 }) {
   return (
@@ -365,6 +419,11 @@ function FileMenu({ name, shown, styles, onShowOnly, onToggle, onStyle, onFocus,
       {shown && (
         <Menu.Item leftSection={<IconFocus2 size={14} />} onClick={() => onFocus(name)}>
           Centre on it
+        </Menu.Item>
+      )}
+      {shown && (
+        <Menu.Item leftSection={<IconInfoCircle size={14} />} onClick={() => onInfo(name)}>
+          Information
         </Menu.Item>
       )}
       <StyleItems names={[name]} styles={styles} onStyle={onStyle} />

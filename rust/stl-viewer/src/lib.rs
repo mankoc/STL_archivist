@@ -84,12 +84,47 @@ impl Loaded {
     }
 }
 
+/// Facts about a shown file, for its information panel (MeshPeek's "Information").
+#[wasm_bindgen]
+pub struct FileInfo {
+    /// Objects (models and supports).
+    #[wasm_bindgen(readonly)]
+    pub objects: u32,
+    /// Objects that are models.
+    #[wasm_bindgen(readonly)]
+    pub models: u32,
+    /// Triangles of the models.
+    #[wasm_bindgen(readonly)]
+    pub triangles: f64,
+    /// Triangles of the supports (and rafts).
+    #[wasm_bindgen(readonly)]
+    pub support_triangles: f64,
+    size: Vec<f64>,
+    facts: Vec<String>,
+}
+
+#[wasm_bindgen]
+impl FileInfo {
+    /// Width, depth and height (X, Y, Z) of everything in the file, in its units (mm); empty without geometry.
+    #[wasm_bindgen(getter)]
+    pub fn size(&self) -> Vec<f64> {
+        self.size.clone()
+    }
+
+    /// What the file says about itself (format, file size, slicer, printer…) as label, value, label, value…
+    #[wasm_bindgen(getter)]
+    pub fn facts(&self) -> Vec<String> {
+        self.facts.clone()
+    }
+}
+
 /// One object of a shown file: the CPU mesh is kept to add edge buffers when its wireframe is first asked for.
 struct Part {
     id: ObjectId,
     kind: ObjectKind,
     mesh: Mesh,
     has_edges: bool,
+    info: Vec<(String, String)>,
 }
 
 /// A shown file and how it is drawn.
@@ -212,7 +247,7 @@ impl Viewer {
             #[allow(clippy::arc_with_non_send_sync)]
             let gpu = Arc::new(GpuMesh::upload(&self.device, &object.mesh, max_buffer));
             let id = self.renderer.add_object(&self.device, gpu, object.transform, Style { color: [1.0; 3], material: MATERIALS[1].1 }, object.visible);
-            parts.push(Part { id, kind: object.kind, mesh: object.mesh, has_edges: false });
+            parts.push(Part { id, kind: object.kind, mesh: object.mesh, has_edges: false, info: object.info });
         }
         let objects = parts.len() as u32;
         let file = File { key: key.to_string(), parts, plates: scene.plates, color: None, material: MATERIALS[1].1, wire: false, visible: true };
@@ -290,6 +325,28 @@ impl Viewer {
     /// Show or hide the build plates and volumes of slicer scenes.
     pub fn set_show_plates(&mut self, show: bool) {
         self.renderer.set_show_plates(show);
+    }
+
+    /// Facts about the file `key` (none when it is not loaded).
+    pub fn file_info(&self, key: &str) -> Option<FileInfo> {
+        let file = self.files.iter().find(|f| f.key == key)?;
+        let models: Vec<&Part> = file.parts.iter().filter(|p| p.kind == ObjectKind::Model).collect();
+        let triangles = |parts: &mut dyn Iterator<Item = &Part>| parts.map(|p| p.mesh.n_faces()).sum::<usize>() as f64;
+        let bounds = file.parts.iter().filter_map(|p| self.renderer.object_bounds(p.id)).reduce(|(a0, a1), (b0, b1)| (a0.min(b0), a1.max(b1)));
+        let mut facts: Vec<&(String, String)> = Vec::new();
+        for fact in file.parts.iter().flat_map(|p| &p.info) {
+            if !facts.contains(&fact) {
+                facts.push(fact);
+            }
+        }
+        Some(FileInfo {
+            objects: file.parts.len() as u32,
+            models: models.len() as u32,
+            triangles: triangles(&mut models.iter().copied()),
+            support_triangles: triangles(&mut file.parts.iter().filter(|p| p.kind == ObjectKind::Support)),
+            size: bounds.map(|(lo, hi)| (hi - lo).to_array().to_vec()).unwrap_or_default(),
+            facts: facts.into_iter().flat_map(|(label, value)| [label.clone(), value.clone()]).collect(),
+        })
     }
 
     /// Frame the file's objects.

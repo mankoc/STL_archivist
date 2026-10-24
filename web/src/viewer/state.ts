@@ -55,3 +55,9 @@ export function stepFile(order: string[], current: string | null, delta: number)
   if (at < 0) return order[0];
   return order[Math.min(order.length - 1, Math.max(0, at + delta))];
 }
+
+/** The name an image of the view is added under: the file's name without its folder and extension, + " view.png". */
+export function viewImageName(file: string): string {
+  const leaf = file.split("/").pop() || file;
+  return `${leaf.replace(/(.)\.[^.]*$/, "$1")} view.png`;
+}

@@ -22,6 +22,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { type FormEvent, useEffect, useState } from "react";
 
+import { ACCENT_SETTING, DEFAULT_ACCENT, isAccent, useSetAccent } from "../accent";
 import { api, type Schemas, unwrap } from "../api/client";
 import { useServerEvents } from "../api/events";
 import { UserContext } from "../auth/user";
@@ -36,6 +37,7 @@ import { FoldersPage } from "../tools/FoldersPage";
 import { StatsPage } from "../tools/StatsPage";
 import { SettingsPage } from "../settings/SettingsPage";
 import { type Page, usePage } from "./route";
+import { showJobsButton } from "./status";
 import { STATUS_BAR_HEIGHT, StatusBar } from "./StatusBar";
 
 /** The header's page buttons, in order (Help is the ? button). */
@@ -46,9 +48,10 @@ const PAGE_BUTTONS: { value: Page; label: string; icon: typeof IconBooks }[] = [
   { value: "duplicates", label: "Duplicates", icon: IconCopy },
   { value: "lookups", label: "Lookups", icon: IconTags },
   { value: "libraries", label: "Libraries", icon: IconLibrary },
-  { value: "jobs", label: "Jobs", icon: IconListCheck },
   { value: "stats", label: "Statistics", icon: IconChartBar },
   { value: "settings", label: "Settings", icon: IconSettings },
+  // Last, and only while jobs wait or run (showJobsButton); the status bar also leads to it.
+  { value: "jobs", label: "Jobs", icon: IconListCheck },
 ];
 
 export function Shell({ user }: { user: Schemas["User"] }) {
@@ -57,13 +60,19 @@ export function Shell({ user }: { user: Schemas["User"] }) {
   const [passwordOpen, password] = useDisclosure(false);
   const [aboutOpen, about] = useDisclosure(false);
   const [page, setPage] = usePage();
-  // The colour scheme this user chose (Settings → Account).
+  // The colour scheme and accent colour this user chose (Settings → Account).
   const { setColorScheme } = useMantineColorScheme();
+  const setAccent = useSetAccent();
   const prefs = useQuery({ queryKey: ["me-settings"], queryFn: async () => unwrap(await api.GET("/api/me/settings")) as Record<string, unknown> });
+  // The status bar's query (kept current by the server's events).
+  const jobs = useQuery({ queryKey: ["jobs"], queryFn: async () => unwrap(await api.GET("/api/jobs")) });
+  const buttons = PAGE_BUTTONS.filter((p) => p.value !== "jobs" || showJobsButton(jobs.data, page === "jobs"));
   useEffect(() => {
     const scheme = prefs.data?.color_scheme;
     if (scheme === "light" || scheme === "dark" || scheme === "auto") setColorScheme(scheme);
-  }, [prefs.data, setColorScheme]);
+    const accent = prefs.data?.[ACCENT_SETTING];
+    if (prefs.data) setAccent(isAccent(accent) ? accent : DEFAULT_ACCENT);
+  }, [prefs.data, setColorScheme, setAccent]);
   const logout = async () => {
     await api.POST("/api/auth/logout");
     await queryClient.invalidateQueries({ queryKey: ["auth"] });
@@ -76,7 +85,7 @@ export function Shell({ user }: { user: Schemas["User"] }) {
             <Group gap="lg" wrap="nowrap" style={{ minWidth: 0 }}>
               <Title order={4} style={{ flexShrink: 0 }}>StlArchivist</Title>
               <Group gap={4} wrap="nowrap" style={{ overflowX: "auto", minWidth: 0 }} data-testid="pages">
-                {PAGE_BUTTONS.map((p) => (
+                {buttons.map((p) => (
                   <Button
                     key={p.value}
                     h={40}

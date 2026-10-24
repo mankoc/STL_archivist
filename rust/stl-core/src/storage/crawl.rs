@@ -104,7 +104,6 @@ pub fn diff(
     tx: &Transaction,
     batch: &[(String, String)],
     force: bool,
-    store_stl: bool,
     candidates: &HashMap<String, i64>,
 ) -> Result<Diff> {
     let paths: Vec<String> = batch.iter().map(|(p, _)| p.clone()).collect();
@@ -170,7 +169,7 @@ pub fn diff(
         } else if &ex_hash != h {
             out.to_extract.push(p.clone());
             set_stat(tx, id, p)?;
-        } else if store_stl && !has_stl && stl_list_hash.as_deref() != Some(h.as_str()) {
+        } else if !has_stl && stl_list_hash.as_deref() != Some(h.as_str()) {
             out.stl_backfill.push(p.clone());
         }
     }
@@ -182,7 +181,6 @@ pub fn diff(
 /// What the crawl configuration contributes to an upsert.
 #[derive(Debug, Clone, Default)]
 pub struct UpsertConfig {
-    pub store_stl: bool,
     pub warn_low_compression: bool,
     pub low_compression_threshold: f64,
     pub force_creator: Option<String>,
@@ -229,7 +227,8 @@ pub struct Changed {
     pub thumbs: Vec<Thumb>,
     /// Images from the archive's folders: name (the file path), JPEG, dHash.
     pub folder_images: Vec<(String, Option<Vec<u8>>, Option<String>)>,
-    pub stl_info: Option<Vec<(String, Option<i64>)>>,
+    /// The printable files (the STL file list): name, size.
+    pub stl_info: Vec<(String, Option<i64>)>,
 }
 
 #[derive(Debug, Clone)]
@@ -548,9 +547,7 @@ pub fn upsert(
             tag_ids.push(tag(tx, t)?);
         }
     }
-    if cfg.store_stl && ch.stl_info.is_some() {
-        row.stl_list_hash = Some(input.hash.clone());
-    }
+    row.stl_list_hash = Some(input.hash.clone());
 
     let model_id = match (input.existing, &old) {
         (Some(id), Some(o)) => {
@@ -626,16 +623,12 @@ pub fn upsert(
         }
         flush(&mut pending)?;
     }
-    if cfg.store_stl
-        && let Some(info) = &ch.stl_info
-    {
-        tx.execute("DELETE FROM stl_files WHERE model_id = ?1", [model_id])?;
-        for (name, size) in info {
-            tx.execute(
-                "INSERT INTO stl_files (model_id, filename, file_size, archive_hash) VALUES (?1, ?2, ?3, ?4)",
-                params![model_id, name, size, input.hash],
-            )?;
-        }
+    tx.execute("DELETE FROM stl_files WHERE model_id = ?1", [model_id])?;
+    for (name, size) in &ch.stl_info {
+        tx.execute(
+            "INSERT INTO stl_files (model_id, filename, file_size, archive_hash) VALUES (?1, ?2, ?3, ?4)",
+            params![model_id, name, size, input.hash],
+        )?;
     }
     Ok(out)
 }

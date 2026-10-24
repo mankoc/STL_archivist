@@ -58,10 +58,6 @@ impl LibrarySettings {
         self.get_bool("recurse_subdirs", true)
     }
 
-    pub fn store_stl_file_list(&self) -> bool {
-        self.get_bool("store_stl_file_list", false)
-    }
-
     pub fn checks(&self) -> stl_core::rules::Checks {
         stl_core::rules::Checks {
             presupported: self.get_bool("warn_presupported_stl", true),

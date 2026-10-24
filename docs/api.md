@@ -1,6 +1,6 @@
 # StlArchivist API
 
-Version 2026.43.16. Generated from `web/openapi.json` by `tools/api_doc.py`; the
+Version 2026.43.17. Generated from `web/openapi.json` by `tools/api_doc.py`; the
 running server serves the same document at `GET /api/openapi.json`. Do not edit by hand:
 run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after changing routes.
 
@@ -78,7 +78,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 | `POST /api/models/rows` | Rows for `ids`, in that order; unknown ids are skipped. | body: [RowsRequest](#rowsrequest) | 200 [Rows](#rows) | 400 |
 | `GET /api/models/{id}` | One model's display fields and its images. | path `id`: integer | 200 [ModelDetail](#modeldetail) | 404 |
 | `GET /api/models/{id}/archive-files` | Every file inside the model's archive (name, size, CRC-32), as the last crawl or rescan read the archive's catalog; empty until then. | path `id`: integer | 200 [ArchiveFile](#archivefile)[] |  |
-| `GET /api/models/{id}/files` | The printable files the crawl stored for a model (empty unless the library stores STL file lists), by name. | path `id`: integer | 200 [StlFile](#stlfile)[] |  |
+| `GET /api/models/{id}/files` | The printable files the crawl stored for a model, by name. | path `id`: integer | 200 [StlFile](#stlfile)[] |  |
 | `POST /api/models/{id}/view` | Model files of the archive, loaded for the viewer in one pass over the archive: a bundle (`stl_core::view::encode_bundle`) of each file's scene (models, supports, build plates) in MeshPeek's wire format (`meshpeek_core::wire`), or why it has none. A file is at most 1 GB, the files together too; the server loads two requests at a time. | path `id`: integer<br>body: [ViewRequest](#viewrequest) | 200 `application/octet-stream` | 400, 404, 413, 422 |
 | `GET /api/models/{id}/viewable` | The model files in the archive the viewer can show (STL, OBJ, PLY, 3MF, Lychee and CHITUBOX files), from the archive's catalog read now, by name. | path `id`: integer | 200 [ViewableFile](#viewablefile)[] | 404, 422 |
 | `GET /api/models/{id}/warnings` | Which archive members trigger each of the model's stored warnings (the archive's catalog is read now). | path `id`: integer | 200 [WarningDetails](#warningdetails) | 404 |
@@ -98,7 +98,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 | `POST /api/models/parse-paths` | What a path pattern extracts from each model's archive path (the mass editor's "Show parsed values"); nothing is saved. | body: [ParseRequest](#parserequest) | 200 [Parsed](#parsed)[] |  |
 | `GET /api/models/{id}/editor` | A model as the editor shows it. | path `id`: integer | 200 [EditorModel](#editormodel) | 404 |
 | `PUT /api/models/{id}/editor` | Save the editor's form for one model. | path `id`: integer<br>body: [EditorSave](#editorsave) | 204 | 400, 404 |
-| `POST /api/models/{id}/images` | Add images to a model (multipart form, one file per part). Each becomes a thumbnail (resized to the library's thumbnail size); the original is not kept. | path `id`: integer<br>body: `multipart/form-data` | 200 [AddedImages](#addedimages) | 404 |
+| `POST /api/models/{id}/images` | Add images to a model (multipart form, one file per part). Each becomes a thumbnail (resized to the library's thumbnail size); the original is not kept. | path `id`: integer<br>body: `multipart/form-data` | 200 [AddedImages](#addedimages) | 404, 413 |
 | `POST /api/sort/preview` | Where the archives would go (nothing is moved). | body: [SortRequest](#sortrequest) | 200 [SortRow](#sortrow)[] | 403 |
 
 ### Lookups (sculptors, collections, tags…)
@@ -175,7 +175,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 
 | Endpoint | Description | Request | Response | Errors |
 |---|---|---|---|---|
-| `POST /api/search/image` | Search with an image (multipart, one file). | query `method`?: string \| null<br>query `max_distance`?: integer \| null<br>query `threshold`?: number \| null<br>body: `multipart/form-data` | 200 [SearchResult](#searchresult) | 400 |
+| `POST /api/search/image` | Search with an image (multipart, one file). | query `method`?: string \| null<br>query `max_distance`?: integer \| null<br>query `threshold`?: number \| null<br>body: `multipart/form-data` | 200 [SearchResult](#searchresult) | 400, 413 |
 
 ### Statistics
 
@@ -1128,7 +1128,6 @@ The settings, with their effective values (defaults filled in).
 | `monitor_interval_minutes` | integer | Monitored folders are checked this often (minutes, 1 to 1440). |
 | `presupport_patterns` | string[] | Regular expressions for presupported STL file names (the portable subset). |
 | `recurse_subdirs` | boolean |  |
-| `store_stl_file_list` | boolean |  |
 | `trash_folder_path` | string |  |
 | `use_trash_folder` | boolean | Deleted archives go to `trash_folder_path` (when set) instead of being deleted. |
 | `warn_low_compression` | boolean |  |

@@ -2,6 +2,39 @@
 /* eslint-disable */
 
 /**
+ * Facts about a shown file, for its information panel (MeshPeek's "Information").
+ */
+export class FileInfo {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * What the file says about itself (format, file size, slicer, printer…) as label, value, label, value…
+     */
+    readonly facts: string[];
+    /**
+     * Width, depth and height (X, Y, Z) of everything in the file, in its units (mm); empty without geometry.
+     */
+    readonly size: Float64Array;
+    /**
+     * Objects that are models.
+     */
+    readonly models: number;
+    /**
+     * Objects (models and supports).
+     */
+    readonly objects: number;
+    /**
+     * Triangles of the supports (and rafts).
+     */
+    readonly support_triangles: number;
+    /**
+     * Triangles of the models.
+     */
+    readonly triangles: number;
+}
+
+/**
  * What [`Viewer::add`] put in the view.
  */
 export class Loaded {
@@ -44,6 +77,10 @@ export class Viewer {
      * `webgl` forces WebGL2. A canvas WebGPU failed on cannot be used for WebGL2: retry on a new one.
      */
     static create(canvas: HTMLCanvasElement, webgl: boolean): Promise<Viewer>;
+    /**
+     * Facts about the file `key` (none when it is not loaded).
+     */
+    file_info(key: string): FileInfo | undefined;
     /**
      * Frame everything.
      */
@@ -113,15 +150,23 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
+    readonly __wbg_fileinfo_free: (a: number, b: number) => void;
+    readonly __wbg_get_fileinfo_models: (a: number) => number;
+    readonly __wbg_get_fileinfo_objects: (a: number) => number;
+    readonly __wbg_get_fileinfo_support_triangles: (a: number) => number;
+    readonly __wbg_get_fileinfo_triangles: (a: number) => number;
     readonly __wbg_get_loaded_objects: (a: number) => number;
     readonly __wbg_get_loaded_triangles: (a: number) => number;
     readonly __wbg_loaded_free: (a: number, b: number) => void;
     readonly __wbg_viewer_free: (a: number, b: number) => void;
+    readonly fileinfo_facts: (a: number) => [number, number];
+    readonly fileinfo_size: (a: number) => [number, number];
     readonly loaded_skipped: (a: number) => [number, number];
     readonly viewer_add: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
     readonly viewer_backend: (a: number) => [number, number];
     readonly viewer_camera_basis: (a: number) => [number, number];
     readonly viewer_create: (a: any, b: number) => any;
+    readonly viewer_file_info: (a: number, b: number, c: number) => number;
     readonly viewer_fit: (a: number) => void;
     readonly viewer_focus: (a: number, b: number, c: number) => void;
     readonly viewer_orbit: (a: number, b: number, c: number) => void;

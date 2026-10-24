@@ -1,5 +1,5 @@
 // The status bar's content: the running job and the size of the libraries.
-import { describe, type Job, percent, progressText, sortJobs } from "../jobs/jobs";
+import { ACTIVE, describe, type Job, percent, progressText, sortJobs } from "../jobs/jobs";
 
 export interface Status {
   /** The running job, if any. */
@@ -27,6 +27,11 @@ export function status(jobs: Job[] | undefined, libraries: { models: number }[] 
     archives: libraries ? libraries.reduce((n, l) => n + l.models, 0) : null,
     libraries: libraries?.length ?? 0,
   };
+}
+
+/** Whether the page bar shows Jobs: while jobs are queued or running, and on the Jobs page itself. */
+export function showJobsButton(jobs: Job[] | undefined, onJobsPage: boolean): boolean {
+  return onJobsPage || (jobs ?? []).some((j) => ACTIVE.includes(j.state));
 }
 
 /** "12,345 archives in 3 libraries". */

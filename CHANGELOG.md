@@ -1,5 +1,35 @@
 # Changelog
 
+## 2026.43.17 — 2026-10-24
+
+- **File information in the viewer**, as in MeshPeek: the ⓘ beside a shown file, its
+  right-click **Information**, or the toolbar's ⓘ (the current file) show its path,
+  triangles, support triangles, width, depth and height, and the file's own facts (format,
+  file size, STL comment, slicer, printer, layers, contact points, 3MF title and units…).
+  The scene format sent to the viewer carries them (wire version 2).
+- **Accent colour:** *Settings → Account* offers 13 colours for buttons, selections and
+  highlights instead of the fixed blue, saved for your account (this browser remembers the
+  last one, so pages start in it).
+- **Add this view to the model's images:** a camera button in the model viewer's toolbar
+  (editors) makes the view as drawn (without the buttons and view cube) one of the model's
+  images, as a dropped image would be: a thumbnail for archives that came without renders.
+- **The Folders page is a folder tree** instead of a flat list: the first level open, every
+  match open while filtering, single-folder chains on one row (`F: / STL`), folders without
+  archives of their own dimmed (with a hint to tick *Include subfolders*).
+- **Fixed: images over 2 MB could not be added**, nor searched with in *Find by Image*: the
+  server kept axum's default 2 MB request limit and answered "Error parsing
+  `multipart/form-data` request". Adding images now takes 64 MB per image (256 MB per
+  request), *Find by Image* 64 MB; past that the answer is 413 "Request payload is too large".
+- **The list of STL files is always stored:** *Settings → Library → Store the list of STL
+  files* is gone (it was off unless turned on). Crawls and *Rescan Files* now always keep each
+  model's printable files, which duplicate detection by shared files, the AI tagger's prompt
+  and the Statistics page's total file size read. The next crawl of a library that did not store them lists the archives
+  that lack one (a catalog read, nothing unpacked) and stores it; a `store_stl_file_list` left
+  in `settings.json` is ignored.
+- **Jobs** moved to the end of the page bar and shows only while jobs wait or run (and on
+  the Jobs page); the status bar still opens it at any time.
+- The Files window says "1 file", not "1 files".
+
 ## 2026.43.16 — 2026-10-24
 
 From a code review of the model viewer:

@@ -433,6 +433,8 @@ fn delete_thumbnails(lib: &Library, refs: &[String]) -> Result<(), ApiError> {
 
 /// Largest upload accepted per image.
 pub const MAX_IMAGE_BYTES: usize = 64 * 1024 * 1024;
+/// Largest request of images (the route's body limit; axum's default is 2 MB).
+pub const MAX_IMAGES_REQUEST_BYTES: usize = 4 * MAX_IMAGE_BYTES;
 
 #[derive(Serialize, ToSchema)]
 pub struct AddedImages {
@@ -445,8 +447,9 @@ pub struct AddedImages {
 /// thumbnail (resized to the library's thumbnail size); the original is not kept.
 #[utoipa::path(post, path = "/api/models/{id}/images", tag = "editing",
     params(("id" = i64, Path, description = "Model id")),
-    request_body(content_type = "multipart/form-data", description = "Image files"),
-    responses((status = 200, body = AddedImages), (status = 404, body = crate::error::ErrorBody)))]
+    request_body(content_type = "multipart/form-data", description = "Image files (64 MB each, 256 MB in all)"),
+    responses((status = 200, body = AddedImages), (status = 404, body = crate::error::ErrorBody),
+              (status = 413, body = crate::error::ErrorBody)))]
 pub async fn add_images(
     State(lib): State<AppState>,
     me: CurrentUser,
@@ -455,9 +458,9 @@ pub async fn add_images(
 ) -> Result<Json<AddedImages>, ApiError> {
     editor(&me)?;
     let mut files: Vec<(String, Vec<u8>)> = Vec::new();
-    while let Some(field) = form.next_field().await.map_err(|e| ApiError::bad_request(e.to_string()))? {
+    while let Some(field) = form.next_field().await? {
         let name = field.file_name().unwrap_or("image").to_string();
-        let data = field.bytes().await.map_err(|e| ApiError::bad_request(e.to_string()))?;
+        let data = field.bytes().await?;
         if data.len() > MAX_IMAGE_BYTES {
             return Err(ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, format!("{name} is larger than 64 MB")));
         }

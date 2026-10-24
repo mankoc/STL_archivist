@@ -1,5 +1,5 @@
 import type { Job } from "../jobs/jobs";
-import { status, totalsText } from "./status";
+import { showJobsButton, status, totalsText } from "./status";
 
 const job = (over: Partial<Job>): Job =>
   ({
@@ -8,6 +8,14 @@ const job = (over: Partial<Job>): Job =>
   }) as Job;
 
 describe("status bar", () => {
+  it("shows the Jobs button while jobs wait or run, and on the Jobs page", () => {
+    expect(showJobsButton([job({ state: "running" })], false)).toBe(true);
+    expect(showJobsButton([job({ state: "queued" })], false)).toBe(true);
+    expect(showJobsButton([job({ state: "done" }), job({ state: "failed" })], false)).toBe(false);
+    expect(showJobsButton(undefined, false)).toBe(false);
+    expect(showJobsButton([], true)).toBe(true);
+  });
+
   it("shows the running job and counts the queued ones", () => {
     const jobs = [
       job({ id: 1, state: "done" }),

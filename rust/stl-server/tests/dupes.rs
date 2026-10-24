@@ -53,7 +53,6 @@ async fn run(lib: &TestLib, token: &str, body: Value) -> Value {
 async fn library() -> (TestLib, String) {
     let lib = empty_library();
     let ed = lib.user("ed", Role::Editor);
-    std::fs::write(lib.dir.path().join("settings.json"), r#"{"store_stl_file_list": true}"#).unwrap();
     let root = lib.dir.path().join("archives");
     let parts: &[(&str, &[u8])] = &[("body.stl", b"solid body\nendsolid\n"), ("head.stl", b"solid head\nendsolid\n")];
     let render = png([200, 30, 30], true);

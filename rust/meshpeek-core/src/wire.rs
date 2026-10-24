@@ -4,15 +4,16 @@
 //! Little-endian throughout:
 //!
 //! ```text
-//! "MPKS" u32:version(1)
+//! "MPKS" u32:version(2)
 //! u32:plates   { f32 x6: size xyz, position xyz }
 //! u32:skipped  { u32:len, utf-8 }
-//! u32:objects  { u32:len, utf-8 name, u8:kind (0 model, 1 support), u8:visible, u8:colours, u8:0,
+//! u32:objects  { u32:len, utf-8 name, u32:facts { u32:len, utf-8 label, u32:len, utf-8 value },
+//!                u8:kind (0 model, 1 support), u8:visible, u8:colours, u8:0,
 //!                f32 x16: transform (column-major), u32:vertices, u32:faces,
 //!                f32 x3 per vertex, u32 x3 per face, [u8 x3 per vertex, zero-padded to 4 bytes] }
 //! ```
 //!
-//! Names, sources and the per-object info are not sent; decoded objects have neither parent nor source.
+//! Sources and parents are not sent; decoded objects have neither. Version 2 added the facts (`info`).
 
 use glam::DMat4;
 
@@ -21,11 +22,11 @@ use crate::mesh::Mesh;
 use crate::scene::{ObjectKind, Plate, Scene, SceneObject};
 
 const MAGIC: &[u8; 4] = b"MPKS";
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 
 /// The scene as bytes (see the module documentation).
 pub fn encode(scene: &Scene) -> Vec<u8> {
-    let size: usize = scene.objects.iter().map(|o| 100 + o.name.len() + o.mesh.vertices.len() * 15 + o.mesh.faces.len() * 12).sum();
+    let size: usize = scene.objects.iter().map(|o| 100 + o.name.len() + o.info.len() * 40 + o.mesh.vertices.len() * 15 + o.mesh.faces.len() * 12).sum();
     let mut out = Vec::with_capacity(size + 64);
     out.extend_from_slice(MAGIC);
     put_u32(&mut out, VERSION);
@@ -42,6 +43,11 @@ pub fn encode(scene: &Scene) -> Vec<u8> {
     put_u32(&mut out, scene.objects.len() as u32);
     for object in &scene.objects {
         put_str(&mut out, &object.name);
+        put_u32(&mut out, object.info.len() as u32);
+        for (label, value) in &object.info {
+            put_str(&mut out, label);
+            put_str(&mut out, value);
+        }
         let mesh = &object.mesh;
         let colors = mesh.colors.as_ref().filter(|c| c.len() == mesh.vertices.len());
         out.extend_from_slice(&[(object.kind == ObjectKind::Support) as u8, object.visible as u8, colors.is_some() as u8, 0]);
@@ -84,6 +90,7 @@ pub fn decode(data: &[u8]) -> Result<Scene> {
     }
     for _ in 0..r.u32()? {
         let name = r.string()?;
+        let info = (0..r.u32()?).map(|_| Ok((r.string()?, r.string()?))).collect::<Result<Vec<_>>>()?;
         let flags = r.take(4)?;
         let kind = if flags[0] == 1 { ObjectKind::Support } else { ObjectKind::Model };
         let (visible, has_colors) = (flags[1] != 0, flags[2] != 0);
@@ -104,7 +111,7 @@ pub fn decode(data: &[u8]) -> Result<Scene> {
             None
         };
         let mesh = Mesh { vertices, faces, colors };
-        scene.objects.push(SceneObject { kind, visible, transform, ..SceneObject::new(name, mesh, "") });
+        scene.objects.push(SceneObject { kind, visible, transform, info, ..SceneObject::new(name, mesh, "") });
     }
     if r.at != data.len() {
         return Err(LoadError::format("unexpected bytes after the scene"));
@@ -176,6 +183,7 @@ mod tests {
         let mut colored = tri.clone();
         colored.colors = Some(vec![[1, 2, 3], [4, 5, 6], [7, 8, 9]]);
         let mut support = SceneObject::new("Supports", tri.clone(), "a.lys");
+        support.info = vec![("Format".into(), "Lychee scene (.lys)".into()), ("Contact points".into(), "12".into())];
         support.kind = ObjectKind::Support;
         support.visible = false;
         support.transform = DMat4::from_translation(DVec3::new(1.0, 2.0, 3.0));
@@ -194,7 +202,10 @@ mod tests {
         assert_eq!(decoded.skipped, original.skipped);
         assert_eq!(decoded.objects.len(), 2);
         for (a, b) in decoded.objects.iter().zip(&original.objects) {
-            assert_eq!((&a.name, &a.mesh, a.kind, a.visible, a.transform), (&b.name, &b.mesh, b.kind, b.visible, b.transform));
+            assert_eq!(
+                (&a.name, &a.mesh, a.kind, a.visible, a.transform, &a.info),
+                (&b.name, &b.mesh, b.kind, b.visible, b.transform, &b.info)
+            );
         }
     }
 

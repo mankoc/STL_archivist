@@ -238,6 +238,25 @@ async fn images_upload_and_delete() {
 }
 
 #[tokio::test]
+async fn images_upload_past_two_megabytes() {
+    // axum's default body limit (2 MB) is raised for this route: a large render (the model
+    // viewer's "Add this view", a photo) is read.
+    let l = library();
+    let id = l.ids[0];
+    let big = vec![b'x'; 3 << 20];
+    let (ct, body) = multipart(&[("view.png", &png()), ("big.png", &big)]);
+    let req = Request::post(format!("/api/models/{id}/images"))
+        .header(header::AUTHORIZATION, format!("Bearer {}", l.editor))
+        .header(header::CONTENT_TYPE, ct)
+        .body(Body::from(body))
+        .unwrap();
+    let r = send_from(&l.lib.state, LOCAL, req).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    let v = r.json();
+    assert_eq!((v["added"].as_array().unwrap().len(), v["failed"].clone()), (1, json!(["big.png"])));
+}
+
+#[tokio::test]
 async fn deleting_models_removes_their_thumbnails() {
     let l = library();
     let id = l.ids[0];

@@ -23,8 +23,7 @@ pub struct StlFile {
     pub hash: Option<String>,
 }
 
-/// The printable files the crawl stored for a model (empty unless the library
-/// stores STL file lists), by name.
+/// The printable files the crawl stored for a model, by name.
 #[utoipa::path(get, path = "/api/models/{id}/files", tag = "library", params(("id" = i64, Path)),
     responses((status = 200, body = Vec<StlFile>)))]
 pub async fn files(State(lib): State<AppState>, _me: CurrentUser, Path(id): Path<i64>) -> Result<Json<Vec<StlFile>>, ApiError> {

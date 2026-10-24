@@ -23,7 +23,6 @@ pub struct Settings {
     /// Parallel crawl workers.
     pub max_workers: usize,
     pub recurse_subdirs: bool,
-    pub store_stl_file_list: bool,
     /// Write `METADATA.7z` sidecars into archive folders.
     pub metadata_sidecar_enabled: bool,
     /// Include thumbnails in sidecars.
@@ -60,7 +59,6 @@ impl Settings {
             max_thumb_size: s.max_thumb_size(),
             max_workers: s.max_workers(),
             recurse_subdirs: s.recurse_subdirs(),
-            store_stl_file_list: s.store_stl_file_list(),
             metadata_sidecar_enabled: s.sidecars_enabled(),
             metadata_thumbnails: s.sidecar_thumbnails(),
             warn_presupported_stl: checks.presupported,

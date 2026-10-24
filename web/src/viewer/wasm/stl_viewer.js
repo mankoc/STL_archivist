@@ -1,6 +1,81 @@
 /* @ts-self-types="./stl_viewer.d.ts" */
 
 /**
+ * Facts about a shown file, for its information panel (MeshPeek's "Information").
+ */
+export class FileInfo {
+    static __wrap(ptr) {
+        const obj = Object.create(FileInfo.prototype);
+        obj.__wbg_ptr = ptr;
+        FileInfoFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        FileInfoFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_fileinfo_free(ptr, 0);
+    }
+    /**
+     * What the file says about itself (format, file size, slicer, printer…) as label, value, label, value…
+     * @returns {string[]}
+     */
+    get facts() {
+        const ret = wasm.fileinfo_facts(this.__wbg_ptr);
+        var v1 = getArrayJsValueFromWasm0(ret[0], ret[1]);
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * Width, depth and height (X, Y, Z) of everything in the file, in its units (mm); empty without geometry.
+     * @returns {Float64Array}
+     */
+    get size() {
+        const ret = wasm.fileinfo_size(this.__wbg_ptr);
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
+    }
+    /**
+     * Objects that are models.
+     * @returns {number}
+     */
+    get models() {
+        const ret = wasm.__wbg_get_fileinfo_models(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Objects (models and supports).
+     * @returns {number}
+     */
+    get objects() {
+        const ret = wasm.__wbg_get_fileinfo_objects(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * Triangles of the supports (and rafts).
+     * @returns {number}
+     */
+    get support_triangles() {
+        const ret = wasm.__wbg_get_fileinfo_support_triangles(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * Triangles of the models.
+     * @returns {number}
+     */
+    get triangles() {
+        const ret = wasm.__wbg_get_fileinfo_triangles(this.__wbg_ptr);
+        return ret;
+    }
+}
+if (Symbol.dispose) FileInfo.prototype[Symbol.dispose] = FileInfo.prototype.free;
+
+/**
  * What [`Viewer::add`] put in the view.
  */
 export class Loaded {
@@ -124,6 +199,17 @@ export class Viewer {
     static create(canvas, webgl) {
         const ret = wasm.viewer_create(canvas, webgl);
         return ret;
+    }
+    /**
+     * Facts about the file `key` (none when it is not loaded).
+     * @param {string} key
+     * @returns {FileInfo | undefined}
+     */
+    file_info(key) {
+        const ptr0 = passStringToWasm0(key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.viewer_file_info(this.__wbg_ptr, ptr0, len0);
+        return ret === 0 ? undefined : FileInfo.__wrap(ret);
     }
     /**
      * Frame everything.
@@ -2162,6 +2248,9 @@ const __wbindgen_enum_GpuVertexFormat = ["uint8", "uint8x2", "uint8x4", "sint8",
 
 
 const __wbindgen_enum_GpuVertexStepMode = ["vertex", "instance"];
+const FileInfoFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_fileinfo_free(ptr, 1));
 const LoadedFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_loaded_free(ptr, 1));

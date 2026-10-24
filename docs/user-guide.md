@@ -52,9 +52,9 @@ The bar at the top switches pages:
 | **Duplicates** | Archives that share files or images; models with similar names |
 | **Lookups** | Tags, categories, collections, subcollections, scales, creators |
 | **Libraries** | Libraries and their folders: add, crawl, monitor, rename, move, remove |
-| **Jobs** | Every background job with its log |
 | **Statistics** | Totals, rankings, and the distribution of any column |
 | **Settings** | Your account, the library's settings, and tabs for maintenance, sidecars, backups, compute workers, components and users |
+| **Jobs** | Every background job with its log. The button appears at the end of the bar while jobs wait or run; the status bar opens the page at any time |
 
 The **status bar** at the bottom of every page shows the running job with its progress (and
 how many wait behind it; click it for the Jobs page), and how many archives all libraries
@@ -169,14 +169,20 @@ in this browser.
   **↑** / **↓** step through the files (in the tree, **Enter** shows the focused file and
   **Space** adds or takes it away). Files taken out of the view are kept for a while, so
   showing them again is instant. Right-click a file (or a folder, for all its files)
-  for its colour, material (Matte, Plastic, Glossy, Metal), wireframe, **Centre on it** and
-  **Open in MeshPeek**. In the view, left drag orbits, middle or Shift drag pans, the wheel
+  for its colour, material (Matte, Plastic, Glossy, Metal), wireframe, **Centre on it**,
+  **Information** and **Open in MeshPeek**. The ⓘ beside a shown file (or in the toolbar,
+  for the current file) shows its information as MeshPeek does: path, triangles, support
+  triangles, width, depth and height, and what the file says about itself (format, file
+  size, the slicer and printer, layers, contact points…). In the view, left drag orbits, middle or Shift drag pans, the wheel
   or right drag zooms, **F** frames everything, **W** switches the wireframe of the shown
   files and **0**–**6** pick the standard views; the view cube (top right) turns with the
   model: clicking a face looks from that side (Top, Front, Right…), dragging the cube turns
   the view. The buttons top left switch the
   wireframe, *Colour each model* and the build plate. Lychee and CHITUBOX scenes show their
-  supports and build plate.
+  supports and build plate. Editors also have **Add this view to the model's images** (the
+  camera button): the view as drawn, without the buttons and view cube, becomes one of the
+  model's images, made into a thumbnail like an image you drop (handy for archives without
+  renders: frame the model, pick a material, then click).
 - **Open in MeshPeek** (desktop app) opens the archive in the
   [MeshPeek](https://github.com/mankoc/meshpeek) viewer, when it is installed (`meshpeek` on
   the `PATH`, or in Program Files) and the archive is reachable from your computer; in the
@@ -192,9 +198,12 @@ in this browser.
 
 ### Folders page
 
-Lists the folders that hold catalogued archives (filter the list with the box above it).
-Pick a folder to see its archives as thumbnails; **Include subfolders** adds the archives
-below it. Click a thumbnail for the model's details.
+Shows the folders that hold catalogued archives as a tree (the first level open; the box
+above it filters, showing every match open). A folder with nothing but one folder in it
+shares its row (`F: / STL`); folders without archives of their own are dimmed. Click a
+folder (or press **Enter** on it) to see its archives as thumbnails and open it; its arrow
+opens or closes it. **Include subfolders** adds the archives below it. Click a thumbnail for
+the model's details.
 
 ### Statistics
 
@@ -347,10 +356,12 @@ at the bottom of the page.
 
 ## Settings and accounts
 
-- **Account** — your colour scheme (light, dark, or follow the system).
+- **Account** — your colour scheme (light, dark, or follow the system) and **accent colour**
+  (buttons, selections and highlights: one of 13 colours, saved for your account); in the
+  desktop app also the MeshPeek program **Open in MeshPeek** runs.
 - **Library** (changed by administrators, shown to everyone):
   - *Crawler* — thumbnails per archive, thumbnail size, parallel workers, crawl subfolders,
-    store the list of STL files, AI image embeddings, compute embeddings during crawls;
+    AI image embeddings, compute embeddings during crawls (the list of STL files is always stored);
   - *Warnings* — which warnings crawls raise, the low-compression threshold, and the file
     name patterns that mark presupported STLs;
   - *Metadata sidecars* — write `METADATA.7z` into archive folders, with or without

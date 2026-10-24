@@ -25,7 +25,7 @@ pub mod workers;
 
 use axum::Json;
 use axum::Router;
-use axum::extract::{Request, State};
+use axum::extract::{DefaultBodyLimit, Request, State};
 use axum::http::Method;
 use axum::middleware::{self, Next};
 use axum::response::Response;
@@ -180,7 +180,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/models/mass-edit", post(edit::mass_edit))
         .route("/api/models/parse-paths", post(edit::parse_paths))
         .route("/api/models/delete", post(edit::delete_models))
-        .route("/api/models/{id}/images", post(edit::add_images))
+        .route("/api/models/{id}/images", post(edit::add_images).layer(DefaultBodyLimit::max(edit::MAX_IMAGES_REQUEST_BYTES)))
         .route("/api/images/{id}", delete(edit::delete_image))
         .route("/api/editor/choices", get(edit::choices))
         .route("/api/editor/subcollections", get(edit::subcollections))
@@ -225,7 +225,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/maintenance/remove-missing", post(maintenance::remove_missing))
         .route("/api/stats/library", get(stats::library))
         .route("/api/stats/column", get(stats::column))
-        .route("/api/search/image", post(search::by_image))
+        .route("/api/search/image", post(search::by_image).layer(DefaultBodyLimit::max(edit::MAX_IMAGE_BYTES)))
         .route("/api/workers", get(workers::list))
         .route("/api/workers/token", post(workers::token))
         .route("/api/workers/connect", get(workers::connect))

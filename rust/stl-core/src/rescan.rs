@@ -17,7 +17,6 @@ pub struct Options {
     pub unrar: String,
     pub warn: Checks,
     pub presupport_patterns: Vec<String>,
-    pub store_stl: bool,
 }
 
 /// The printable suffixes the rescan stores in the STL file list (the
@@ -72,13 +71,11 @@ pub fn rescan(path: &str, old_size: Option<i64>, old_mtime: Option<i64>, old_has
         (Some(s), Some(u)) if u > 0 => Some(round4(s as f64 / u as f64)),
         _ => None,
     };
-    let stl_files = opts.store_stl.then(|| {
-        names
-            .iter()
-            .filter(|n| RESCAN_STL_EXTS.contains(&MemberPath::new(&n.replace('\\', "/")).suffix().to_lowercase().as_str()))
-            .cloned()
-            .collect()
-    });
+    let stl_files = names
+        .iter()
+        .filter(|n| RESCAN_STL_EXTS.contains(&MemberPath::new(&n.replace('\\', "/")).suffix().to_lowercase().as_str()))
+        .cloned()
+        .collect();
     Ok(Rescan {
         archive_hash: hash,
         archive_size: fs_size,
@@ -167,12 +164,11 @@ mod tests {
         z.finish().unwrap();
     }
 
-    fn opts(store_stl: bool) -> Options {
+    fn opts() -> Options {
         Options {
             unrar: String::new(),
             warn: Checks::default(),
             presupport_patterns: rules::DEFAULT_PRESUPPORT_PATTERNS.iter().map(|s| s.to_string()).collect(),
-            store_stl,
         }
     }
 
@@ -183,18 +179,18 @@ mod tests {
         let info = br#"{"name": "The Hero", "author": "Studio"}"#;
         zip(&p, &[("hero_supported.stl", b"solid\nendsolid\n"), ("parts/arm.obj", b"o"), ("info.json", info)]);
         let path = p.to_string_lossy().into_owned();
-        let r = rescan(&path, None, None, "", &opts(true)).unwrap();
+        let r = rescan(&path, None, None, "", &opts()).unwrap();
         assert_eq!(r.archive_hash, crate::archive::fingerprint(&p).unwrap());
         assert_eq!(r.files, Some(crate::archive::list_members(&p).unwrap()), "the file list, read again");
         assert_eq!((r.title.as_deref(), r.creator.as_deref()), (Some("The Hero"), Some("Studio")));
         assert_eq!(r.scales, vec!["32 mm".to_string()]);
-        assert_eq!(r.stl_files, Some(vec!["hero_supported.stl".to_string(), "parts/arm.obj".to_string()]));
+        assert_eq!(r.stl_files, vec!["hero_supported.stl".to_string(), "parts/arm.obj".to_string()]);
         assert!(r.warning.as_deref().unwrap().contains(rules::WARNING_NO_IMAGES));
         assert!(r.compression_rate.is_some());
         // Unchanged size and time: the stored hash is kept.
         let (s, m) = stat(&path).unwrap();
-        assert_eq!(rescan(&path, Some(s), Some(m), "kept", &opts(false)).unwrap().archive_hash, "kept");
-        assert!(rescan(&dir.path().join("gone.zip").to_string_lossy(), None, None, "", &opts(false)).is_err());
+        assert_eq!(rescan(&path, Some(s), Some(m), "kept", &opts()).unwrap().archive_hash, "kept");
+        assert!(rescan(&dir.path().join("gone.zip").to_string_lossy(), None, None, "", &opts()).is_err());
     }
 
     #[test]
@@ -203,10 +199,10 @@ mod tests {
         let p = dir.path().join("a.zip");
         let (r, g) = (png([255, 0, 0]), png([0, 255, 0]));
         zip(&p, &[("b.png", &g), ("a.png", &r), ("broken.jpg", b"not an image"), ("c.png", &r), ("x.stl", b"s")]);
-        let t = thumbnails(&p.to_string_lossy(), 2, 64, &opts(false)).unwrap();
+        let t = thumbnails(&p.to_string_lossy(), 2, 64, &opts()).unwrap();
         let names: Vec<&str> = t.thumbs.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(names, ["a.png", "b.png"]);
-        let t = thumbnails(&p.to_string_lossy(), 3, 64, &opts(false)).unwrap();
+        let t = thumbnails(&p.to_string_lossy(), 3, 64, &opts()).unwrap();
         let names: Vec<&str> = t.thumbs.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(names, ["a.png", "b.png", "broken.jpg", "c.png"]);
         assert_eq!(t.failed, ["broken.jpg"]);
