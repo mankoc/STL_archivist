@@ -1,6 +1,7 @@
 // The view cube: a cube that turns with the camera, its faces named after the
-// standard views (clicking one looks from that side). Pure projection here;
-// the viewer draws it as SVG.
+// standard views. Clicking a face looks from that side; dragging the cube
+// orbits the view. Pure projection and gesture rules here; the viewer draws it
+// as SVG.
 import type { ViewName } from "./input";
 
 type Vec3 = [number, number, number];
@@ -56,3 +57,9 @@ export function cubeFaces(basis: ArrayLike<number>, half: number): CubeFace[] {
       };
     });
 }
+
+/** Pointer travel (CSS pixels) under which a press on the cube is a click on a face, not a drag. */
+export const CLICK_SLOP = 4;
+
+/** Whether a press that ended `dx`, `dy` from where it started was a click. */
+export const isClick = (dx: number, dy: number) => Math.hypot(dx, dy) < CLICK_SLOP;

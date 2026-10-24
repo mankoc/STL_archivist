@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.43.15 — 2026-10-24
+
+- **The view cube can be dragged** to turn the view (its width turns 200 degrees, as a drag
+  across the whole view does); a click without moving still looks from the face's side.
+  Faces light up under the pointer, and the wheel over the cube zooms.
+
 ## 2026.43.14 — 2026-10-24
 
 - **The model viewer's files are a folder tree**, and **several can be shown together**:
