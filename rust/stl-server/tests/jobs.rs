@@ -68,6 +68,8 @@ async fn crawl_job_catalogues_a_folder() {
     let lib = empty_library();
     let ed = lib.user("ed", Role::Editor);
     let root = archives(&lib);
+    // An image beside the archives: each new record takes it too (stored with the batch's thumbnails).
+    std::fs::write(root.join("Studio").join("cover.jpg"), jpeg([30, 200, 30])).unwrap();
     let mut events = lib.state.jobs.events.subscribe();
 
     let id = submit(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy(), "pattern": "{sculptor}/{title}"})).await;
@@ -78,7 +80,8 @@ async fn crawl_job_catalogues_a_folder() {
     assert!(!v["log"].as_array().unwrap().is_empty());
     assert_eq!(count(&lib, "SELECT count(*) FROM models"), 2);
     assert_eq!(count(&lib, "SELECT count(*) FROM models m JOIN sculptors s ON s.id = m.sculptor_id WHERE s.name = 'Studio'"), 2);
-    assert_eq!(count(&lib, "SELECT count(*) FROM images WHERE thumbnail_path IS NOT NULL"), 2);
+    assert_eq!(count(&lib, "SELECT count(*) FROM images WHERE thumbnail_path IS NOT NULL"), 4);
+    assert_eq!(count(&lib, "SELECT count(*) FROM images WHERE filename LIKE '%cover.jpg'"), 2);
     // Every record keeps its archive's file list: each member with its own CRC.
     assert_eq!(count(&lib, "SELECT count(DISTINCT model_id) FROM archive_files"), 2);
     assert_eq!(count(&lib, "SELECT count(*) FROM archive_files WHERE crc = 0 AND size > 0"), 0);
@@ -86,7 +89,7 @@ async fn crawl_job_catalogues_a_folder() {
         let mut st = c.prepare("SELECT id FROM images")?;
         st.query_map([], |r| r.get::<_, i64>(0).map(|i| i as u64))?.collect::<rusqlite::Result<Vec<_>>>()
     }).unwrap();
-    assert_eq!(lib.state.thumbs.get_many(&ids).unwrap().len(), 2, "thumbnails stored");
+    assert_eq!(lib.state.thumbs.get_many(&ids).unwrap().len(), 4, "thumbnails stored");
     assert!(root.join("Studio").join("METADATA.7z").is_file(), "sidecar written");
 
     // Events: the job went queued → running → done, and the library changed.

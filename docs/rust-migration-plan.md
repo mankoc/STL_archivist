@@ -1344,6 +1344,11 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.43.18: `storage::crawl::upsert` (now private) gathers its thumbnails in a buffer
+  (image id, JPEG, borrowed from the inputs) and `upsert_batch` writes them with one
+  `ThumbStore::put_many` (one LMDB write transaction, one sync) before the caller commits;
+  a failed archive's savepoint drops its entries, and a refused write deletes the batch's
+  new image rows (`maintenance::delete_images`; the vector trigger follows).
 - 2026.43.17: `meshpeek_core::wire` version 2 carries each object's facts (`SceneObject::info`);
   `Viewer::file_info` gathers a file's counts, size and facts for the information panel
   (`web/src/viewer/info.ts`). The accent colour is Mantine's `primaryColor` from

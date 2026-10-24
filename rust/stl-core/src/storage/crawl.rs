@@ -454,11 +454,14 @@ fn ref_ids(refs: &[String]) -> Vec<u64> {
 }
 
 /// Phase 4 for one archive (`_upsert_archive`), inside the caller's savepoint.
-pub fn upsert(
+/// The thumbnails to store go to `puts` (image id, JPEG), written by
+/// [`upsert_batch`] in one transaction of the store.
+fn upsert<'a>(
     tx: &Transaction,
     store: Option<&ThumbStore>,
     cfg: &UpsertConfig,
-    input: &UpsertInput,
+    input: &'a UpsertInput,
+    puts: &mut Vec<(u64, &'a [u8])>,
 ) -> Result<Upserted> {
     let Some(ch) = &input.changed else {
         // Unchanged: re-apply the pattern without overwriting.
@@ -593,9 +596,8 @@ pub fn upsert(
                 None => pending.push(*id),
             }
         }
-        if let Some(s) = store {
-            let items: Vec<(u64, &[u8])> = resolved.iter().map(|(id, j, ..)| (*id as u64, j.as_slice())).collect();
-            let _ = s.put_many(&items);
+        if store.is_some() {
+            puts.extend(resolved.iter().map(|(id, j, ..)| (*id as u64, j.as_slice())));
         }
         for (id, _, dhash, _) in &resolved {
             tx.execute("UPDATE images SET thumbnail_path = ?2, dhash = ?3 WHERE id = ?1", params![id, id.to_string(), dhash])?;
@@ -610,11 +612,9 @@ pub fn upsert(
             tx.execute("INSERT INTO images (model_id, filename) VALUES (?1, ?2)", params![model_id, name])?;
             let id = tx.last_insert_rowid();
             flush(&mut pending)?;
-            let stored = match (jpeg.as_ref().filter(|j| !j.is_empty()), store) {
-                (Some(j), Some(s)) => s.put_many(&[(id as u64, j.as_slice())]).is_ok(),
-                _ => false,
-            };
-            if stored {
+            let jpeg = jpeg.as_ref().filter(|j| !j.is_empty() && store.is_some());
+            if let Some(j) = jpeg {
+                puts.push((id as u64, j.as_slice()));
                 tx.execute("UPDATE images SET thumbnail_path = ?2, dhash = ?3 WHERE id = ?1", params![id, id.to_string(), dhash])?;
                 out.folder_images += 1;
             } else {
@@ -862,6 +862,10 @@ pub fn existing_ids(conn: &Connection, ids: &[i64]) -> Result<HashSet<i64>> {
 /// worker's `begin_nested()`. Stops after `max_failures` consecutive failures
 /// (counting `failures_before` from earlier batches); the remaining archives
 /// get no result. Returns per archive `Ok(counts)` or the error text.
+///
+/// The batch's thumbnails go to the store in one write transaction at the end
+/// (one disk sync per batch, not one per archive and image), before the caller
+/// commits `tx`; when the store refuses them, their image rows are removed.
 pub fn upsert_batch(
     tx: &Transaction,
     store: Option<&ThumbStore>,
@@ -872,9 +876,11 @@ pub fn upsert_batch(
 ) -> Result<Vec<std::result::Result<Upserted, String>>> {
     let mut out = Vec::with_capacity(inputs.len());
     let mut failures = failures_before;
+    let mut puts: Vec<(u64, &[u8])> = Vec::new();
     for input in inputs {
         tx.execute_batch("SAVEPOINT crawl_upsert")?;
-        match upsert(tx, store, cfg, input) {
+        let before = puts.len();
+        match upsert(tx, store, cfg, input, &mut puts) {
             Ok(u) => {
                 tx.execute_batch("RELEASE crawl_upsert")?;
                 failures = 0;
@@ -882,6 +888,7 @@ pub fn upsert_batch(
             }
             Err(e) => {
                 tx.execute_batch("ROLLBACK TO crawl_upsert; RELEASE crawl_upsert")?;
+                puts.truncate(before);
                 failures += 1;
                 out.push(Err(e.to_string()));
                 if failures >= max_failures {
@@ -889,6 +896,13 @@ pub fn upsert_batch(
                 }
             }
         }
+    }
+    if let Some(s) = store
+        && !puts.is_empty()
+        && s.put_many(&puts).is_err()
+    {
+        let ids: Vec<i64> = puts.iter().map(|(id, _)| *id as i64).collect();
+        super::maintenance::delete_images(tx, &ids)?;
     }
     Ok(out)
 }
