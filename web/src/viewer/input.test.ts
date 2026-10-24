@@ -1,11 +1,11 @@
-import { dragAction, dragZoom, isViewable, keyAction, orbitDegrees, wheelZoom } from "./input";
+import { canvasSize, dragAction, dragZoom, keyAction, orbitDegrees, wheelZoom } from "./input";
 
 describe("viewer input", () => {
-  it("knows the model files", () => {
-    expect(isViewable("parts/Dragon.STL")).toBe(true);
-    expect(isViewable("scene.chitubox")).toBe(true);
-    expect(isViewable("readme.txt")).toBe(false);
-    expect(isViewable("stl")).toBe(false);
+  it("sizes the canvas in device pixels, keeping its shape under the limit", () => {
+    expect(canvasSize(800, 600, 2)).toEqual([1600, 1200]);
+    expect(canvasSize(5120, 2880, 1)).toEqual([4096, 2304]);
+    expect(canvasSize(3000, 1000, 2)).toEqual([4096, 1365]);
+    expect(canvasSize(0, 0, 1)).toEqual([1, 1]);
   });
 
   it("maps buttons to MeshPeek's drags", () => {

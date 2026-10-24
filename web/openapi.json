@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.43.15"
+    "version": "2026.43.16"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -2330,12 +2330,12 @@
       }
     },
     "/api/models/{id}/view": {
-      "get": {
+      "post": {
         "tags": [
           "library"
         ],
-        "summary": "One model file of the archive, loaded for the viewer: the scene (models,\nsupports, build plates) in MeshPeek's wire format (`meshpeek_core::wire`).",
-        "operationId": "get_models_by_id_view",
+        "summary": "Model files of the archive, loaded for the viewer in one pass over the\narchive: a bundle (`stl_core::view::encode_bundle`) of each file's scene\n(models, supports, build plates) in MeshPeek's wire format\n(`meshpeek_core::wire`), or why it has none. A file is at most 1 GB, the\nfiles together too; the server loads two requests at a time.",
+        "operationId": "post_models_by_id_view",
         "parameters": [
           {
             "name": "id",
@@ -2345,20 +2345,21 @@
               "type": "integer",
               "format": "int64"
             }
-          },
-          {
-            "name": "name",
-            "in": "query",
-            "description": "The model file's name in the archive, as `viewable` lists it.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ViewRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
-            "description": "The scene",
+            "description": "The scenes",
             "content": {
               "application/octet-stream": {}
             }
@@ -2374,6 +2375,16 @@
             }
           },
           "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
             "description": "",
             "content": {
               "application/json": {
@@ -7229,6 +7240,22 @@
             "type": "string"
           }
         }
+      },
+      "ViewRequest": {
+        "type": "object",
+        "required": [
+          "names"
+        ],
+        "properties": {
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The model files' names in the archive, as `viewable` lists them: 1 to\n16 different names."
+          }
+        },
+        "additionalProperties": false
       },
       "ViewableFile": {
         "type": "object",

@@ -73,10 +73,6 @@ export class Viewer {
      */
     resize(width: number, height: number): void;
     /**
-     * Colour the file's models `#rrggbb`, or (`None` or anything else) as by default.
-     */
-    set_color(key: string, color?: string | null): void;
-    /**
      * Give each model its own colour (MeshPeek's "Colour each model"); colours set per file still win.
      */
     set_color_each(on: boolean): void;
@@ -85,21 +81,19 @@ export class Viewer {
      */
     set_dark(dark: boolean): void;
     /**
-     * Give the file's objects one of MeshPeek's materials: `Matte`, `Plastic`, `Glossy` or `Metal`.
-     */
-    set_material(key: string, name: string): void;
-    /**
      * Show or hide the build plates and volumes of slicer scenes.
      */
     set_show_plates(show: boolean): void;
     /**
+     * Draw the file's models in `color` (`#rrggbb`; `None` or anything else: as by default), with one of
+     * MeshPeek's materials (`Matte`, `Plastic`, `Glossy` or `Metal`; others keep the current one), as its
+     * edges (`wire`) or as surfaces. Only this file is restyled.
+     */
+    set_style(key: string, color: string | null | undefined, material: string, wire: boolean): void;
+    /**
      * Show or hide the file (it stays loaded).
      */
     set_visible(key: string, on: boolean): void;
-    /**
-     * Draw the file's objects as their edges, or as surfaces again.
-     */
-    set_wireframe(key: string, on: boolean): void;
     /**
      * Look along a standard view (`isometric`, `front`, `back`, `left`, `right`, `top`, `bottom`) and frame
      * everything; other names are ignored.
@@ -135,13 +129,11 @@ export interface InitOutput {
     readonly viewer_remove: (a: number, b: number, c: number) => void;
     readonly viewer_render: (a: number) => [number, number];
     readonly viewer_resize: (a: number, b: number, c: number) => void;
-    readonly viewer_set_color: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly viewer_set_color_each: (a: number, b: number) => void;
     readonly viewer_set_dark: (a: number, b: number) => void;
-    readonly viewer_set_material: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly viewer_set_show_plates: (a: number, b: number) => void;
+    readonly viewer_set_style: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
     readonly viewer_set_visible: (a: number, b: number, c: number, d: number) => void;
-    readonly viewer_set_wireframe: (a: number, b: number, c: number, d: number) => void;
     readonly viewer_show_view: (a: number, b: number, c: number) => void;
     readonly viewer_zoom: (a: number, b: number) => void;
     readonly wasm_bindgen_dac0731650b473ce___convert__closures_____invoke___js_sys_a89202e6452953cf___Function_fn_wasm_bindgen_dac0731650b473ce___JsValue_____wasm_bindgen_dac0731650b473ce___sys__Undefined___js_sys_a89202e6452953cf___Function_fn_wasm_bindgen_dac0731650b473ce___JsValue_____wasm_bindgen_dac0731650b473ce___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;

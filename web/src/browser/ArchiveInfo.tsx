@@ -1,7 +1,8 @@
 // The detail pane's archive section: the stored warnings with the members that
 // trigger them (Warning Details), and the files in the archive with their CRC-32
 // (Show Files, as a folder tree), as the last crawl or rescan read the
-// archive's catalog. Model files there open in the model viewer.
+// archive's catalog. The model files the server can show (`/viewable`, read
+// from the archive now) open in the model viewer.
 import { ActionIcon, Alert, Badge, Button, getTreeExpandedState, Group, Loader, Modal, Stack, Table, Text, Tooltip, Tree, useTree } from "@mantine/core";
 import { IconAlertTriangle, IconChevronRight, IconCube, IconFile, IconFiles, IconFolder } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
@@ -9,7 +10,6 @@ import { useMemo, useState } from "react";
 
 import { api, unwrap } from "../api/client";
 import { formatSize } from "../format";
-import { isViewable } from "../viewer/input";
 import { fileTree } from "./fileTree";
 
 export function ArchiveInfo({ id, warning, onView }: { id: number; warning: string | null; onView: (file: string) => void }) {
@@ -94,16 +94,28 @@ function FileList({ id, onView }: { id: number; onView: (file: string) => void }
     queryKey: ["model-files", id],
     queryFn: async () => unwrap(await api.GET("/api/models/{id}/archive-files", { params: { path: { id } } })),
   });
+  // The same query as the model viewer's file list; none when the archive cannot be read.
+  const models = useQuery({
+    queryKey: ["model-viewable", id],
+    queryFn: async () => unwrap(await api.GET("/api/models/{id}/viewable", { params: { path: { id } } })),
+    retry: false,
+  });
+  const viewable = useMemo(() => new Set((models.data ?? []).map((f) => f.name)), [models.data]);
   if (q.isPending) return <Loader size="sm" />;
   if (q.isError) return <Alert color="red">{q.error.message}</Alert>;
   if (!q.data.length) {
     return <Text size="sm" c="dimmed">No file list yet: the next crawl or rescan of this archive stores it.</Text>;
   }
-  return <FileTreeView files={q.data} onView={onView} />;
+  return <FileTreeView files={q.data} viewable={viewable} onView={onView} />;
 }
 
 /** The archive's folders and files, all folders open; model files have a view button. */
-function FileTreeView({ files, onView }: { files: { name: string; size?: number | null; crc: string }[]; onView: (file: string) => void }) {
+function FileTreeView({ files, viewable, onView }: {
+  files: { name: string; size?: number | null; crc: string }[];
+  /** The model files the viewer can show. */
+  viewable: Set<string>;
+  onView: (file: string) => void;
+}) {
   const tree = useMemo(() => fileTree(files), [files]);
   const controller = useTree({ initialExpandedState: getTreeExpandedState(tree.data, "*") });
   return (
@@ -139,7 +151,7 @@ function FileTreeView({ files, onView }: { files: { name: string; size?: number 
                 </>
               )}
               <span style={{ width: 28, flexShrink: 0 }}>
-                {info.kind === "file" && isViewable(info.name!) && (
+                {info.kind === "file" && viewable.has(info.name!) && (
                   <Tooltip label="View">
                     <ActionIcon
                       size="sm"

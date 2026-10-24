@@ -1,4 +1,4 @@
-import { DEFAULT_STYLE, folderState, restyle, stepFile, toggleFile, toggleFiles } from "./state";
+import { currentOf, DEFAULT_STYLE, folderState, restyle, stepFile, toggleFile, toggleFiles } from "./state";
 
 describe("viewer state", () => {
   it("adds and takes away shown files", () => {
@@ -19,6 +19,13 @@ describe("viewer state", () => {
     const s = restyle({}, ["a", "b"], { wire: true });
     expect(s.a).toEqual({ ...DEFAULT_STYLE, wire: true });
     expect(restyle(s, ["a"], { color: "#4e9ae6" }).a).toEqual({ ...DEFAULT_STYLE, wire: true, color: "#4e9ae6" });
+  });
+
+  it("keeps the current file one that is shown", () => {
+    expect(currentOf(["a", "b"], "a")).toBe("a");
+    expect(currentOf(["a"], "b")).toBe("a"); // b was taken out of the view
+    expect(currentOf([], "b")).toBe(null);
+    expect(currentOf(["a", "c"], null)).toBe("c");
   });
 
   it("steps through the files, stopping at the ends", () => {

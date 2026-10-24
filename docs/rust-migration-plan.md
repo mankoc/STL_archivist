@@ -1344,6 +1344,14 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.43.16 (code review): `POST /api/models/{id}/view` loads a batch
+  (`stl_core::view::load_members`: one catalog read, one `read_members_with` pass, limits
+  `MAX_MEMBER_BYTES` / `MAX_BATCH_BYTES` / `MAX_BATCH_FILES`) and answers with
+  `encode_bundle` (`"MPKB"`, split in `web/src/viewer/loading.ts`); `Library::view_loads` (a
+  semaphore of 2) bounds concurrent loads. The viewer hides unwanted files
+  (`Viewer::set_visible`, evicted by `loading.ts`'s `evictHidden`) and styles a file with
+  one `Viewer::set_style` (only that file is restyled; all of them only when "colour each
+  model" changes or files move). `build.ps1` releases its mutex in `finally`.
 - 2026.43.15: the view cube is dragged to orbit (pointer capture on the cube's SVG; a press
   under `viewCube.ts`'s `CLICK_SLOP` is a click on the face it started on).
 

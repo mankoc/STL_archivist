@@ -49,6 +49,8 @@ pub struct Library {
     pub workers: workers::Workers,
     /// When monitored folders were last checked (see `monitor`).
     pub monitor: monitor::Monitor,
+    /// Model viewer loads running at once (`POST /api/models/{id}/view`).
+    pub view_loads: tokio::sync::Semaphore,
     _lock: LibraryLock,
 }
 
@@ -117,6 +119,7 @@ impl Library {
             ai: Arc::default(),
             workers: workers::Workers::default(),
             monitor: monitor::Monitor::default(),
+            view_loads: tokio::sync::Semaphore::new(2),
             config,
             _lock: lock,
         })
