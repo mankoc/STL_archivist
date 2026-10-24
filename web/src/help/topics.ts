@@ -94,6 +94,7 @@ export const TOPICS: Topic[] = [
         ["**Settings**", "Your account, the library's settings, users"],
       ] } },
       { p: "The menu under your name (top right) has **Help**, **About**, **Change password** and **Sign out**. The **?** button opens this help." },
+      { p: "The **status bar** at the bottom of every page shows the running [job](jobs) with its progress and how many wait behind it (click it to open **Jobs**), and how many archives all [libraries](libraries) hold." },
     ],
   },
 

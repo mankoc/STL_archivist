@@ -1314,6 +1314,9 @@ the path is visible. No business logic and no Tauri commands for data.
   shares the library's folder; UnRAR is a component (`tools/`, preferred over `PATH` by
   `Config::unrar_tool`; on Windows the latest `unrarw64.exe`, checked by its Authenticode
   signature and self-extracted).
+- 2026.43.11: a status bar in the web client's shell (`shell/StatusBar.tsx`, logic in
+  `shell/status.ts`): the running job from the `jobs` query and the archive total from
+  `libraries`, both kept current by `api/events.ts`.
 
 ### Phase 8: Retire Python (small)
 

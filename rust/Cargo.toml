@@ -4,7 +4,7 @@ resolver = "2"
 members = ["stl-core", "stl-server", "stl-desktop", "stl-proc"]
 
 [workspace.package]
-version = "2026.43.10"
+version = "2026.43.11"
 edition = "2024"
 license = "CC-BY-NC-SA-4.0"
 

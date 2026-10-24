@@ -1,4 +1,5 @@
-// The signed-in application frame: header with the user menu, and the pages.
+// The signed-in application frame: header with the user menu, the pages, and
+// the status bar at the bottom.
 import { ActionIcon, AppShell, Avatar, Button, Group, Menu, Modal, PasswordInput, SegmentedControl, Stack, Text, Title, Tooltip, UnstyledButton, useMantineColorScheme } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
@@ -22,6 +23,7 @@ import { FoldersPage } from "../tools/FoldersPage";
 import { StatsPage } from "../tools/StatsPage";
 import { SettingsPage } from "../settings/SettingsPage";
 import { type Page, usePage } from "./route";
+import { STATUS_BAR_HEIGHT, StatusBar } from "./StatusBar";
 
 export function Shell({ user }: { user: Schemas["User"] }) {
   useServerEvents();
@@ -42,7 +44,7 @@ export function Shell({ user }: { user: Schemas["User"] }) {
   };
   return (
     <UserContext.Provider value={user}>
-      <AppShell header={{ height: 48 }} padding={0}>
+      <AppShell header={{ height: 48 }} footer={{ height: STATUS_BAR_HEIGHT }} padding={0}>
         <AppShell.Header>
           <Group h="100%" px="md" justify="space-between">
             <Group gap="lg">
@@ -104,7 +106,7 @@ export function Shell({ user }: { user: Schemas["User"] }) {
             </Group>
           </Group>
         </AppShell.Header>
-        <AppShell.Main style={{ height: "100vh", paddingTop: 48, display: "flex", flexDirection: "column" }}>
+        <AppShell.Main style={{ height: "100vh", paddingTop: 48, paddingBottom: STATUS_BAR_HEIGHT, display: "flex", flexDirection: "column" }}>
           {page === "help" ? (
             <HelpPage />
           ) : page === "libraries" ? (
@@ -129,6 +131,9 @@ export function Shell({ user }: { user: Schemas["User"] }) {
             <BrowserPage />
           )}
         </AppShell.Main>
+        <AppShell.Footer>
+          <StatusBar />
+        </AppShell.Footer>
         <PasswordModal opened={passwordOpen} onClose={password.close} />
         <AboutModal opened={aboutOpen} onClose={about.close} />
       </AppShell>
