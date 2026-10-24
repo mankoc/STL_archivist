@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.43.18 — 2026-10-24
+
+- **Crawls write thumbnails once per batch:** the thumbnails of each batch of 50 archives,
+  and the images found beside them, go to the thumbnail store in one write (one disk sync)
+  instead of one per archive and per image, which kept the data directory's drive busy
+  during crawls of new archives. When the store refuses a batch, its new image records are
+  removed rather than left pointing at no thumbnail.
+
 ## 2026.43.17 — 2026-10-24
 
 - **File information in the viewer**, as in MeshPeek: the ⓘ beside a shown file, its
