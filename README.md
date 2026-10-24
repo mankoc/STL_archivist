@@ -13,7 +13,7 @@ can open a library on your computer without setting up a server.
 [the HTTP API](docs/api.md) ·
 and in the interface, the **?** button: searchable in-depth help on every feature
 
-Version: 2026.43.10
+Version: 2026.43.11
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). This version opens its data directory and, since 2026.43.7, converts it once
@@ -28,6 +28,8 @@ Version: 2026.43.10
 - **Archive scanning** — crawls folders of archives in parallel using CRC-based
   fingerprints (no decompression needed to notice what changed); moved archives keep their
   record, metadata and thumbnails, even when moved between libraries
+- **Status bar** — the running job's progress and the number of archives catalogued, on
+  every page
 - **Libraries** — named collections of one or more folders (one library over several disks);
   records store paths relative to their folder, in a form that is the same on Windows, Linux
   and macOS, so a folder moves to another disk, mount point or machine (and from Windows to

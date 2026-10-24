@@ -55,7 +55,11 @@ The bar at the top switches pages:
 | **Jobs** | Every background job with its log |
 | **Maintenance** | Checking and repairing the library, sidecars, backups |
 | **Statistics** | Totals, rankings, and the distribution of any column |
-| **Settings** | Your account, the library's settings, users |
+| **Settings** | Your account, the library's settings, components, users |
+
+The **status bar** at the bottom of every page shows the running job with its progress (and
+how many wait behind it; click it for the Jobs page), and how many archives all libraries
+hold.
 
 The **?** button opens the built-in help: every topic of this guide in more depth, with a
 search box; the **?** beside some cards' titles opens the topic about that card. The menu at

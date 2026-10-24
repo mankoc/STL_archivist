@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.43.11 — 2026-10-24
+
+- **Status bar** at the bottom of every page: the running job with a progress bar, its
+  phase, count and time left, and how many jobs wait (click: the Jobs page); on the right,
+  how many archives all libraries hold. It follows the server's events, no polling.
+
 ## 2026.43.10 — 2026-10-24
 
 - **Every crawl keeps each archive's file list:** every file inside with its size and its
