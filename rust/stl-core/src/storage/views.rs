@@ -21,6 +21,13 @@ pub fn stl_files(conn: &Connection, model_id: i64) -> Result<Vec<StlFileRow>> {
     st.query_map([model_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect()
 }
 
+/// `(name, size, crc)` of every member of a model's archive, as the crawl
+/// stored them (`archive_files`), by name.
+pub fn archive_files(conn: &Connection, model_id: i64) -> Result<Vec<(String, Option<i64>, i64)>> {
+    let mut st = conn.prepare("SELECT name, size, crc FROM archive_files WHERE model_id = ?1 ORDER BY name, rowid")?;
+    st.query_map([model_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect()
+}
+
 /// `(archive path, image file name)` of one image: where its original is
 /// (an archive member, or a file beside the archive given by its full path).
 pub fn image_source(conn: &Connection, image_id: i64) -> Result<Option<(Option<String>, Option<String>)>> {

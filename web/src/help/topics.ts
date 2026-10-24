@@ -36,7 +36,7 @@ export const TOPICS: Topic[] = [
       { p: "StlArchivist keeps a catalogue of your 3D-printable model archives (`.zip`, `.7z`, `.rar`): titles, creators, sculptors, collections, tags, scales and preview images. It reads the archives where they are — nothing is unpacked, copied or changed unless you ask for it (Sort files, Delete files, sidecars)." },
       { h: "How it is built" },
       { list: [
-        "**The server** (`stl-server`) owns the library: the database `stlLibrary.db`, the thumbnail store `thumbnails.lmdb/` and the settings, all in one **data directory**. It does the heavy work (crawls, thumbnails, AI) as background [jobs](jobs).",
+        "**The server** (`stl-server`) owns the library: the model database `models.db`, the thumbnail store `thumbnails.lmdb/` and the settings, all in one **data directory**. It does the heavy work (crawls, thumbnails, AI) as background [jobs](jobs).",
         "**The web client** — these pages — runs in any browser and talks to the server. Several people can use one server at the same time, each with their own account and [role](roles).",
         "**The desktop app** shows the same pages in a window. It can open a library on your computer (it starts a private server for that window) or connect to a server elsewhere. Inside the app a few extra things work: showing an archive in the file manager, and [using the computer for AI](compute-workers).",
       ] },
@@ -264,7 +264,7 @@ export const TOPICS: Topic[] = [
       { list: [
         "The model's fields, tags, warnings, path and images. Drag its left edge to resize (double-click resets).",
         "**Download** the archive; **Copy path**; **Open folder** (desktop app) shows it in the file manager. Paths are translated with the server's `path_map` so they make sense on your computer.",
-        "**Files** lists the printable files inside (when the library stores file lists).",
+        "**Files** lists every file inside the archive with its size and CRC-32 (from the archive's catalog: every crawl stores it, nothing is unpacked).",
         "Click an image for the full-resolution original read from the archive; **←**/**→** step through the images.",
       ] },
       { h: "Folders and Statistics" },
@@ -349,7 +349,7 @@ export const TOPICS: Topic[] = [
       ] },
       { h: "Where it runs" },
       { list: [
-        "On the server, when an administrator installed the runtime and the model (**Maintenance → AI and add-on components**). The server starts the model on first use and stops it after ten idle minutes. The CUDA runtime uses an NVIDIA GPU.",
+        "On the server, when an administrator installed the runtime and the model (**Settings → Components**). The server starts the model on first use and stops it after ten idle minutes. The CUDA runtime uses an NVIDIA GPU.",
         "Or on a [compute worker](compute-workers): a desktop app on a computer with a GPU.",
       ] },
       { p: "*Settings → Library → AI tagger temperature* sets how literal suggestions are (lower is more literal; default 0.2)." },
@@ -365,7 +365,7 @@ export const TOPICS: Topic[] = [
       { p: "An embedding is a vector describing what an image shows. Two renders of the same model in other colours or angles get similar vectors, so **Find by Image** and **Duplicates → Images** can find them where a perceptual hash would not." },
       { h: "Setting it up" },
       { steps: [
-        "An administrator downloads **ONNX Runtime** and the **CLIP image encoder** in **Maintenance → AI and add-on components** (or a [compute worker](compute-workers) provides them).",
+        "An administrator downloads **ONNX Runtime** and the **CLIP image encoder** in **Settings → Components** (or a [compute worker](compute-workers) provides them).",
         "**Maintenance → Compute missing embeddings** computes the vectors of all thumbnails.",
         "Optionally turn on *Compute embeddings during crawls* in **Settings → Library**, so new archives get theirs at once.",
       ] },
@@ -427,7 +427,7 @@ export const TOPICS: Topic[] = [
       { list: [
         "**Metadata sidecars** — see [sidecars](sidecars).",
         "**Compute workers** — see [compute workers](compute-workers).",
-        "**AI and add-on components** (administrators) — see [components](components).",
+        "Downloads of components are in **Settings → Components** — see [components](components).",
         "**Backups** (administrators) — see [backups](backups).",
         "**Delete all records** (administrators) — empties the library after you type `DELETE`. Archive files are not touched. Back up first.",
       ] },
@@ -508,21 +508,23 @@ export const TOPICS: Topic[] = [
   {
     id: "components",
     group: "Administration",
-    title: "AI and add-on components",
-    summary: "Downloading the optional parts: AI runtime and model, CLIP, ONNX Runtime, pdfium.",
+    title: "Components",
+    summary: "Downloading the optional parts: AI runtime and model, CLIP, ONNX Runtime, pdfium, UnRAR.",
     blocks: [
-      { p: "**Maintenance → AI and add-on components** (administrators) downloads optional parts into the library's folder from their official sources, checking each file's checksum. The same list appears for a [compute worker](compute-workers) under *This computer*." },
+      { p: "**Settings → Components** is the one place for downloads. *Server components* (administrators) go into the library's folder, from their official sources, each file checked by its checksum (UnRAR on Windows by its publisher's signature). In the desktop app, *This computer* lists the components of this computer's [compute worker](compute-workers) — unless the worker uses the library's own folder (a library opened on this computer), when the server's list serves both and is shown once." },
       { table: { head: ["Component", "Enables", "Variants"], rows: [
         ["AI tagger runtime (llama.cpp)", "AI tagger", "CPU, NVIDIA GPU (CUDA, Windows)"],
         ["AI tagger model (Qwen2.5-VL, 3.3 GB)", "AI tagger", "—"],
         ["CLIP image encoder", "AI image similarity", "—"],
         ["ONNX Runtime", "AI image similarity", "CPU, GPU (DirectML, Windows), NVIDIA GPU (CUDA, Linux)"],
         ["pdfium", "PDF previews as thumbnails", "—"],
+        ["UnRAR (RARLab)", "Compressed `.rar` archives: thumbnails, metadata, Rescan", "—"],
       ] } },
       { list: [
         "The card shows the GPUs found and preselects the fitting variants. Choosing another variant of an installed component replaces it.",
         "States: *installed*, *not installed*, *configured elsewhere* (the server's configuration points at another copy; not managed here), *not offered here* (no download for this platform).",
         "An interrupted download resumes where it stopped. **Remove selected** deletes downloaded components.",
+        "UnRAR goes to `tools/` in the library's folder and is used whenever `unrar` is not set in `server.json` (or `STL_UNRAR_PATH`). On Linux it is version 7.23; on Windows RARLab offers only its latest UnRAR, which is checked by its signature (win.rar GmbH) and unpacks itself.",
       ] },
     ],
   },
@@ -550,7 +552,7 @@ export const TOPICS: Topic[] = [
         ["`roots`", "", "Folders editors may browse and crawl"],
         ["`path_map`", "", "How clients see server paths, for Copy path and Open folder"],
         ["`compute`", "`STL_COMPUTE`", "`local` or `workers` (see compute workers)"],
-        ["`unrar`", "`STL_UNRAR_PATH`", "UnRAR for compressed `.rar` members"],
+        ["`unrar`", "`STL_UNRAR_PATH`", "UnRAR for compressed `.rar` members (default: the downloaded component, else `unrar` on `PATH`)"],
         ["`pdfium` / `onnxruntime`", "`STL_PDFIUM_PATH` / `ORT_DYLIB_PATH`", "Libraries outside the data directory"],
         ["`ai`", "`STL_AI_URL`", "The AI tagger's model server, or a running one to use"],
         ["`components_mirror`", "", "Download components from your own mirror"],
@@ -584,7 +586,7 @@ export const TOPICS: Topic[] = [
       { table: { head: ["Problem", "What to check"], rows: [
         ["A crawl finds 0 archives", "The folder as the server sees it (in Docker, the container path such as `/library/...`), and that the server's user can read it. Editors can only crawl inside the allowed roots."],
         ["The library is refused (already open)", "Another server or the desktop app has the same data directory open; close it."],
-        ["No AI options, or AI tagger unavailable", "The components are missing (Maintenance → AI and add-on components), or with `compute: workers` no worker is connected. The AI tagger drawer says which."],
+        ["No AI options, or AI tagger unavailable", "The components are missing (Settings → Components), or with `compute: workers` no worker is connected. The AI tagger drawer says which."],
         ["Embeddings run on the CPU", "Install ONNX Runtime's GPU variant (DirectML or CUDA) and restart the server; on Linux CUDA 12 and cuDNN 9 are needed."],
         ["The compute worker stopped", "The card shows why: no components in its folder (download them under This computer), or its session was ended (turn the switch on again)."],
         ["Jobs wait forever", "With `compute: workers`, AI jobs wait for a worker; connect one or stop the job."],

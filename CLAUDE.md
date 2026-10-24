@@ -52,7 +52,8 @@ stl_database/
 
 ## Rules
 
-- **Compatibility:** the data directory (`stlLibrary.db`, `thumbnails.lmdb/`, `settings.json`,
+- **Compatibility:** the data directory (`models.db` — `stlLibrary.db` before 2026.43.10, not
+  read any more —, `thumbnails.lmdb/`, `settings.json`,
   `METADATA.7z` sidecars, backups) keeps its formats: bit-identical `archive_hash`, perceptual
   hashes as `"2:" + 32 hex`, the schema in `rust/stl-core/src/storage/schema_sql.rs` (`TABLES`
   plus `ADD_COLUMNS`, migrated by `storage::migrate`; data steps in `storage/mod.rs`). Since

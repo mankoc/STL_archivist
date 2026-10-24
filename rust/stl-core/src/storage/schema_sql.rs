@@ -303,12 +303,29 @@ CREATE TABLE stl_files (
 	filename VARCHAR(512) NOT NULL, 
 	file_size INTEGER, 
 	archive_hash VARCHAR(64), 
-	PRIMARY KEY (model_id, filename), 
+	PRIMARY KEY (model_id, filename),
 	FOREIGN KEY(model_id) REFERENCES models (id) ON DELETE CASCADE
 )
 
 "#,
         indexes: &[
+        ],
+    },
+    TableDdl {
+        name: "archive_files",
+        create: r#"
+CREATE TABLE archive_files (
+	model_id INTEGER NOT NULL,
+	name TEXT NOT NULL,
+	size INTEGER,
+	crc INTEGER NOT NULL,
+	FOREIGN KEY(model_id) REFERENCES models (id) ON DELETE CASCADE
+)
+
+"#,
+        indexes: &[
+            r#"CREATE INDEX ix_archive_files_model ON archive_files (model_id)"#,
+            r#"CREATE INDEX ix_archive_files_crc ON archive_files (crc, size)"#,
         ],
     },
 ];

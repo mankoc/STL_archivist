@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026.43.10 — 2026-10-24
+
+- **Every crawl keeps each archive's file list:** every file inside with its size and its
+  own CRC-32, from the archive's catalog (nothing is unpacked; the archive hash is computed
+  from the same list, unchanged). Unchanged archives keep their list; records crawled before
+  get theirs at the next crawl (only the catalog is read), Rescan reads it again. The
+  details pane's **Files** shows it; `GET /api/models/{id}/archive-files` returns it. New
+  table `archive_files` (added to existing databases).
+- **Components moved to *Settings → Components*, in one list.** The server's downloads
+  (administrators) and, in the desktop app, those of this computer's compute worker are on
+  one tab (it was *Maintenance → AI and add-on components*, and the Workers card had a second
+  copy). When the worker uses the library's own folder — a library opened on this computer,
+  where both lists showed the same files — the list appears once. Settings tabs have links
+  (`#/settings/components`).
+- **UnRAR as a component:** *Settings → Components* downloads RARLab's UnRAR into the
+  library's `tools/` folder, and the server uses it for compressed `.rar` archives whenever
+  no `unrar` is configured (before: only `unrar` on `PATH`). Linux: UnRAR 7.23, checked by
+  SHA-256. Windows: RARLab offers only its latest UnRAR, so the download is checked by its
+  Authenticode signature (win.rar GmbH) and unpacks itself silently.
+- **The model database is `models.db`** (it was `stlLibrary.db`). Older data directories
+  are not converted: one holding only `stlLibrary.db` opens as a new, empty library, and
+  backups made before this version do not restore. Crawl the folders again.
+- **AVIF images get thumbnails** (renders inside archives, images beside them): decoded by
+  `rav1d`, a Rust port of the dav1d AV1 decoder, with nothing extra to install or to build
+  with. Tiled ("grid") AVIF, which some phones write, is still skipped.
+
 ## 2026.43.9 — 2026-10-24
 
 - **A library can have several folders** — say your miniatures on two disks as one library.

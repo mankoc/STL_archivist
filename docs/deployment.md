@@ -24,7 +24,7 @@ see the [user guide](user-guide.md).
 | `stl-server` | The program that owns a library: database, thumbnails, crawls, jobs, users. Serves the web client and the API on one port (default `127.0.0.1:8770`). |
 | Web client | The user interface, in `web/` beside the server (built from `web/` in the source). Any modern browser. |
 | `stl-desktop` | The desktop app (Windows; Linux and macOS untested). Shows the web client in a window; can start a private server for a library on the same PC, or connect to a remote server. |
-| Data directory | One folder per library: `stlLibrary.db` (database), `thumbnails.lmdb/` (thumbnails), `settings.json` (library settings), `server.db` (user accounts), `server.json` (server settings), `backups/`. |
+| Data directory | One folder per library: `models.db` (the model database), `thumbnails.lmdb/` (thumbnails), `settings.json` (library settings), `server.db` (user accounts), `server.json` (server settings), `backups/`. |
 
 Archives stay where they are. The server reads them (and, when allowed, moves or deletes them)
 at the paths it catalogued.
@@ -133,7 +133,7 @@ files*. For a network share, mount it (for example with `cifs` and `uid=stl`) be
 service starts.
 
 **RAR archives.** Stored (uncompressed) RAR members are read directly; compressed ones need
-UnRAR: `sudo apt install unrar` (Debian *non-free*, Ubuntu *multiverse*).
+UnRAR: *Settings → Components* downloads it (RARLab's 7.23), or `sudo apt install unrar` (Debian *non-free*, Ubuntu *multiverse*).
 
 ## Option C: Docker
 
@@ -154,7 +154,8 @@ docker exec -it stl stl-server create-admin admin
 
 Mount the archives read-only (`:ro`) if you do not want sidecars, sorting or deletion. Paths
 inside the container are what the library records: crawl `/library/...`. UnRAR is not
-included (it is not free software); add it in a derived image and set `STL_UNRAR_PATH`.
+included (it is not free software): download it in *Settings → Components* (it lands in the
+data volume), or add it in a derived image and set `STL_UNRAR_PATH`.
 The image's ONNX Runtime is the CPU build; for CLIP on an NVIDIA GPU, derive an image with
 CUDA 12, cuDNN 9 and the `onnxruntime-linux-x64-gpu` build (`ORT_DYLIB_PATH` pointing at it),
 and run it with `--gpus all` (NVIDIA Container Toolkit).
@@ -227,7 +228,7 @@ the command line (later wins).
 | `bind` | `STL_BIND` | `--bind` | `127.0.0.1:8770` | Address and port to listen on |
 | `roots` | | | `[]` | Folders editors may browse and crawl; libraries count too; administrators may browse anywhere |
 | `path_map` | | | `[]` | `[{"server": "/srv/stl", "client": "\\\\nas\\stl"}]`: how clients see server paths (*Copy path*, *Open folder*); clients on the server's own machine see paths as they are |
-| `unrar` | `STL_UNRAR_PATH` | | `unrar` on `PATH` | UnRAR tool |
+| `unrar` | `STL_UNRAR_PATH` | | the downloaded component, else `unrar` on `PATH` | UnRAR tool |
 | `pdfium` | `STL_PDFIUM_PATH` | | beside the server, then the data directory | pdfium library |
 | `onnxruntime` | `ORT_DYLIB_PATH` | | beside the server, then the data directory | ONNX Runtime library |
 | `components_mirror` | | | official sources | base URL serving the component downloads by file name |
@@ -266,7 +267,7 @@ The API is described at `/api/openapi.json` on a running server.
 ## Optional features
 
 Each is enabled by making its files available; without them the rest works. On Windows x64
-and Linux x64 the easiest way is *Maintenance → AI and add-on components* (administrators),
+and Linux x64 the easiest way is *Settings → Components* (administrators),
 which downloads pinned versions from their official sources into the data directory and
 checks each file's SHA-256: llama.cpp build b9789 (`ai/bin/`; CPU, or CUDA 12.4 with its
 runtime on Windows — Linux gets the CPU build), the Qwen2.5-VL model (`ai/models/`), the CLIP
@@ -347,7 +348,7 @@ The desktop app then runs `stl-server worker`, which connects to the server (out
 computer, over the same address and a WebSocket like the event stream, so it works behind
 NAT and through the reverse proxy), and does the work with the components in a folder of
 that computer. Under *This computer* the card lists them and downloads them — the same
-choices as a library's *AI and add-on components* (DirectML for CLIP on Windows, the CUDA AI
+choices as the server's *Settings → Components* (DirectML for CLIP on Windows, the CUDA AI
 runtime for an NVIDIA card; the defaults follow the GPUs found) — and *Change folder…* picks
 where they go (by default the local library's folder, if the app has opened one, else
 `%LOCALAPPDATA%\stlLibrary\worker`). The worker pauses while components are installed and
@@ -469,7 +470,7 @@ first.
 | Setup screen says it must run on the server | First-run setup is accepted only from the server's own machine and not through a proxy. Use a browser on that machine or `stl-server create-admin`. |
 | The page loads but jobs never show progress | The proxy drops WebSocket upgrades on `/api/events`; see the nginx example. |
 | "outside the library's folders" when adding a folder | Editors can only browse `roots` and libraries. Add the folder to `roots` in `server.json` (and restart), or let an administrator add it. |
-| `.rar` archives have no thumbnails or fail | UnRAR is missing; install it or set `unrar`. |
+| `.rar` archives have no thumbnails or fail | UnRAR is missing; download it in *Settings → Components*, install it, or set `unrar`. |
 | No AI options | ONNX Runtime or the CLIP model is missing (embeddings), or `llama-server` / the model files are (tagger). *AI tagger* shows the reason. |
-| Some archives are skipped or have no images | The built-in readers refuse a few unusual archives (the crawl log warns "Cannot open archive"), and AVIF and CMYK JPEG images are not decoded. |
+| Some archives are skipped or have no images | The built-in readers refuse a few unusual archives (the crawl log warns "Cannot open archive"), and CMYK JPEG and tiled ("grid") AVIF images are not decoded. |
 | Thumbnails missing after moving the server | The `thumbnails.lmdb` folder was not copied with the database. |

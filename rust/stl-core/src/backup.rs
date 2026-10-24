@@ -1,5 +1,5 @@
 //! Library backups: the desktop's Backup / Restore (`backup_restore_dialog.py`)
-//! layout, one `.7z` holding `stlLibrary.db`, `thumbnails.lmdb/` and
+//! layout, one `.7z` holding `models.db`, `thumbnails.lmdb/` and
 //! `settings.json` at its root, so either side restores the other's backups.
 //!
 //! Writing takes consistent snapshots of the open library (`VACUUM INTO` for the
@@ -17,7 +17,9 @@ use sevenz_rust2::{ArchiveEntry, ArchiveWriter, EncoderMethod};
 use crate::control::Control;
 use crate::thumbstore::ThumbStore;
 
-pub const DB_FILE: &str = "stlLibrary.db";
+/// The model database in the data directory (and in backups). Before 2026.43.10 it was
+/// `stlLibrary.db`; older data directories are not read (their libraries are recreated).
+pub const DB_FILE: &str = "models.db";
 pub const THUMB_DIR: &str = "thumbnails.lmdb";
 pub const SETTINGS_FILE: &str = "settings.json";
 const LMDB_DATA: &str = "data.mdb";
@@ -214,7 +216,7 @@ mod tests {
 
     #[test]
     fn only_library_entries_are_restored() {
-        assert!(wanted("stlLibrary.db"));
+        assert!(wanted("models.db"));
         assert!(wanted("settings.json"));
         assert!(wanted("thumbnails.lmdb/data.mdb"));
         assert!(wanted("thumbnails.lmdb\\lock.mdb"));

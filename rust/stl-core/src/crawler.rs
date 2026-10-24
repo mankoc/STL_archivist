@@ -213,15 +213,20 @@ pub(crate) fn fallback_fingerprint(path: &str) -> String {
     }
 }
 
-fn hash_one(path: &str, host: &dyn Host) -> String {
-    match archive::fingerprint(Path::new(path)) {
-        Ok(h) => h,
+/// The fingerprint, and the catalog it came from when the native readers
+/// read it (stored as the record's file list).
+fn hash_one(path: &str, host: &dyn Host) -> (String, Option<Vec<archive::ArchiveMember>>) {
+    match archive::list_members(Path::new(path)) {
+        Ok(members) => (archive::fingerprint_of(&members), Some(members)),
         Err(_) => match host.call(Request::Hash(path.to_string())) {
-            Response::Hash(h) => h,
-            _ => fallback_fingerprint(path),
+            Response::Hash(h) => (h, None),
+            _ => (fallback_fingerprint(path), None),
         },
     }
 }
+
+/// An archive's file list, as `store_files` takes it.
+type FileList = (String, Vec<archive::ArchiveMember>);
 
 // ── phase 3 ──────────────────────────────────────────────────────────────────
 
@@ -502,7 +507,9 @@ impl Run<'_> {
         self.host.emit(Event::Log(s.into()));
     }
 
-    fn phase1(&mut self, batch: &[String]) -> Result<Vec<String>, CrawlError> {
+    /// The batch's fingerprints, and the file lists of the archives whose
+    /// catalog was read for them (not those whose stored hash was kept).
+    fn phase1(&mut self, batch: &[String]) -> Result<(Vec<String>, Vec<FileList>), CrawlError> {
         let stats: Vec<Option<(i64, i64)>> = self.pool.install(|| batch.par_iter().map(|p| db::stat(p)).collect());
         let existing: HashMap<String, (String, Option<i64>, Option<i64>)> =
             db::existing(&self.conn, batch)?.into_iter().map(|(p, h, s, m)| (p, (h, s, m))).collect();
@@ -511,7 +518,7 @@ impl Run<'_> {
         }
         let host = self.host;
         let force = self.cfg.force_rescan;
-        let hashes: Vec<String> = self.pool.install(|| {
+        let hashed: Vec<(String, Option<Vec<archive::ArchiveMember>>)> = self.pool.install(|| {
             batch
                 .par_iter()
                 .zip(stats.par_iter())
@@ -521,17 +528,42 @@ impl Run<'_> {
                         && size == fs
                         && mtime == fm
                     {
-                        return h.clone();
+                        return (h.clone(), None);
                     }
                     hash_one(p, host)
                 })
                 .collect()
         });
-        Ok(hashes)
+        let mut hashes = Vec::with_capacity(hashed.len());
+        let mut lists = Vec::new();
+        for (p, (h, members)) in batch.iter().zip(hashed) {
+            hashes.push(h);
+            if let Some(m) = members {
+                lists.push((p.clone(), m));
+            }
+        }
+        Ok((hashes, lists))
+    }
+
+    /// Store the batch's file lists: those read for the fingerprints, and for
+    /// records still without one (crawled before lists were kept) a fresh read
+    /// of their catalog. Nothing is decompressed.
+    fn store_files(&mut self, batch: &[String], lists: Vec<FileList>) -> Result<(), CrawlError> {
+        let read: HashSet<&String> = lists.iter().map(|(p, _)| p).collect();
+        let rest: Vec<String> = batch.iter().filter(|p| !read.contains(p)).cloned().collect();
+        let lacking = db::lacking_files(&self.conn, &rest)?;
+        let backfill: Vec<FileList> = self
+            .pool
+            .install(|| lacking.par_iter().filter_map(|p| archive::list_members(Path::new(p)).ok().map(|m| (p.clone(), m))).collect());
+        let t = tx(&mut self.conn)?;
+        db::store_files(&t, &lists)?;
+        db::store_files(&t, &backfill)?;
+        t.commit()?;
+        Ok(())
     }
 
     fn batch(&mut self, batch: &[String], start: usize, modified: &mut HashSet<String>) -> Result<bool, CrawlError> {
-        let hashes = self.phase1(batch)?;
+        let (hashes, lists) = self.phase1(batch)?;
         if start == 0 {
             self.host.emit(Event::Phase("Checking database for changes…".into()));
         }
@@ -641,6 +673,7 @@ impl Run<'_> {
             }
             self.host.emit(Event::Progress(idx, total));
         }
+        self.store_files(batch, lists)?;
         self.host.emit(Event::Counts(self.summary.new, self.summary.updated, self.summary.unchanged));
         Ok(host.should_stop())
     }

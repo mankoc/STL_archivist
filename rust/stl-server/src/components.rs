@@ -1,8 +1,10 @@
 //! Optional components the server can download into the data directory: the AI
-//! tagger's runtime (llama.cpp) and model, the CLIP image encoder, ONNX Runtime
-//! and pdfium. Everything is pinned here (URL, size, SHA-256): clients choose
-//! components by id, never by URL or path. Files land where the server already
-//! looks for them (`ai`, `tools`), so an install needs no configuration.
+//! tagger's runtime (llama.cpp) and model, the CLIP image encoder, ONNX Runtime,
+//! pdfium and UnRAR. Everything is pinned here (URL, size, SHA-256; for UnRAR on
+//! Windows, whose only download is RARLab's latest, its publisher's signature):
+//! clients choose components by id, never by URL or path. Files land where the
+//! server already looks for them (`ai`, `tools`), so an install needs no
+//! configuration.
 //!
 //! Downloads resume (`.part` files under `<data dir>/downloads`), are verified
 //! before use, and archives are unpacked into a staging folder first, so a
@@ -54,6 +56,9 @@ pub enum Unpack {
     ZipPick(&'static [(&'static str, &'static str)]),
     /// Members of a `.tar.gz`, as [`Unpack::ZipPick`].
     TarPick(&'static [(&'static str, &'static str)]),
+    /// A RAR self-extractor (Windows), run once silently (`-s -d<staging>`);
+    /// the files it writes, as [`Unpack::ZipPick`].
+    SelfExtract(&'static [(&'static str, &'static str)]),
 }
 
 /// One file to download.
@@ -64,6 +69,10 @@ pub struct Asset {
     pub url: String,
     pub sha256: &'static str,
     pub size: u64,
+    /// Checked by its Authenticode signature (valid, this signer's name)
+    /// instead of `sha256` and `size` (then only an estimate): a download that
+    /// always serves the publisher's latest version.
+    pub signer: Option<&'static str>,
     pub unpack: Unpack,
     /// Destination relative to the data directory (a file or a folder, see [`Unpack`]).
     pub to: &'static str,
@@ -74,7 +83,7 @@ impl Asset {
     fn outputs(&self) -> Vec<&'static str> {
         match self.unpack {
             Unpack::File => vec![self.to],
-            Unpack::ZipPick(m) | Unpack::TarPick(m) => m.iter().map(|(_, to)| *to).collect(),
+            Unpack::ZipPick(m) | Unpack::TarPick(m) | Unpack::SelfExtract(m) => m.iter().map(|(_, to)| *to).collect(),
             Unpack::Zip | Unpack::Tar { .. } => Vec::new(),
         }
     }
@@ -88,15 +97,24 @@ const DIRECTML: &str = "https://api.nuget.org/v3-flatcontainer/microsoft.ai.dire
 /// SHA-256 of the CLIP encoder the server downloads (compute workers' must match).
 pub const CLIP_SHA256: &str = "fd6e1402a588279d1723c7534d4bcba5bc0b14b47dfab0e46f8c47b8270d7d40";
 const PDFIUM: &str = "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F7881/";
+const RARLAB: &str = "https://www.rarlab.com/rar/";
+/// The Authenticode signer of RARLab's Windows downloads.
+const RARLAB_SIGNER: &str = "win.rar GmbH";
 
 macro_rules! asset {
     ($base:expr, $file:literal, $sha:literal, $size:literal, $unpack:expr, $to:literal) => {
-        Asset { file: $file, url: format!("{}{}", $base, $file), sha256: $sha, size: $size, unpack: $unpack, to: $to }
+        Asset { file: $file, url: format!("{}{}", $base, $file), sha256: $sha, size: $size, signer: None, unpack: $unpack, to: $to }
     };
 }
 
 /// The component ids, in display order.
-pub const IDS: [&str; 5] = ["ai_runtime", "ai_model", "clip_model", "onnxruntime", "pdfium"];
+pub const IDS: [&str; 6] = ["ai_runtime", "ai_model", "clip_model", "onnxruntime", "pdfium", "unrar"];
+
+/// Where the UnRAR component puts its tool (the server uses it when no
+/// `unrar` is configured).
+pub fn unrar_file() -> &'static str {
+    if cfg!(windows) { "tools/UnRAR.exe" } else { "tools/unrar" }
+}
 
 /// Which platform's assets this server uses (`None`: not offered here).
 pub fn platform() -> Option<&'static str> {
@@ -156,6 +174,7 @@ pub fn assets(id: &str, variant: &str) -> Vec<Asset> {
             url: "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/d15189d7028b43f1d3e65039190477f6af591c2a/onnx/vision_model.onnx".into(),
             sha256: CLIP_SHA256,
             size: 351_685_709,
+            signer: None,
             unpack: Unpack::File,
             to: "models/clip_image_encoder.onnx",
         }],
@@ -197,6 +216,21 @@ pub fn assets(id: &str, variant: &str) -> Vec<Asset> {
             PDFIUM, "pdfium-linux-x64.tgz", "1470e21b8b4a3b4ad7f85684e2da11d94f3b69a86d81dee11b9b6709d927ac1d", 3_644_759,
             Unpack::TarPick(&[("lib/libpdfium.so", "libpdfium.so")]), "libpdfium.so"
         )],
+        // RARLab offers no versioned UnRAR for Windows: the latest, checked by
+        // its signature, unpacks itself.
+        "unrar" if windows => vec![Asset {
+            file: "unrarw64.exe",
+            url: format!("{RARLAB}unrarw64.exe"),
+            sha256: "",
+            size: 744_096,
+            signer: Some(RARLAB_SIGNER),
+            unpack: Unpack::SelfExtract(&[("UnRAR.exe", "tools/UnRAR.exe"), ("license.txt", "tools/unrar-license.txt")]),
+            to: "tools/UnRAR.exe",
+        }],
+        "unrar" if linux => vec![asset!(
+            RARLAB, "rarlinux-x64-723.tar.gz", "759b4b6aa0d9f77131882162951193f3a0e54bf60e1d8dc4255aa308accab588", 746_868,
+            Unpack::TarPick(&[("rar/unrar", "tools/unrar"), ("rar/license.txt", "tools/unrar-license.txt")]), "tools/unrar"
+        )],
         _ => Vec::new(),
     }
 }
@@ -233,6 +267,12 @@ fn info(id: &str) -> Info {
             enables: "AI image similarity (Find by Image, Duplicates)",
             license: "MIT",
             license_url: "https://github.com/microsoft/onnxruntime/blob/main/LICENSE",
+        },
+        "unrar" => Info {
+            label: if cfg!(windows) { "UnRAR (RARLab, latest)" } else { "UnRAR 7.23 (RARLab)" },
+            enables: "Compressed RAR archives (thumbnails, metadata, Rescan)",
+            license: "UnRAR freeware",
+            license_url: "https://www.rarlab.com/license.htm",
         },
         _ => Info {
             label: "pdfium (chromium 7881)",
@@ -285,6 +325,8 @@ pub struct ComponentsInfo {
     pub clip_provider: Option<String>,
     /// Free space where the data directory is.
     pub free_bytes: Option<u64>,
+    /// The data directory the components go into.
+    pub data_dir: String,
 }
 
 fn lib_name(base: &str) -> String {
@@ -384,6 +426,7 @@ fn external(at: &Place, id: &str) -> Option<String> {
         "clip_model" => env("STLLIBRARY_CLIP_MODEL"),
         "onnxruntime" => c.onnxruntime.clone().map(|p| format!("onnxruntime = {p}")).or_else(|| env("ORT_DYLIB_PATH")).or_else(|| beside_server(&lib_name("onnxruntime"))),
         "pdfium" => c.pdfium.clone().map(|p| format!("pdfium = {p}")).or_else(|| env("STL_PDFIUM_PATH")).or_else(|| beside_server(&lib_name("pdfium"))),
+        "unrar" => c.unrar.clone().map(|p| format!("unrar = {p}")),
         _ => None,
     }
 }
@@ -433,6 +476,7 @@ fn installed(at: &Place, id: &str) -> Option<String> {
         "clip_model" => file("models/clip_image_encoder.onnx"),
         "onnxruntime" => file(&lib_name("onnxruntime")),
         "pdfium" => file(&lib_name("pdfium")),
+        "unrar" => file(unrar_file()),
         _ => None,
     }
 }
@@ -481,6 +525,7 @@ pub fn status(at: &Place) -> ComponentsInfo {
         gpus: gpus.iter().map(|g| g.to_string()).collect(),
         clip_provider: at.tools.and_then(Tools::clip_provider).map(str::to_string),
         free_bytes: free_bytes(data),
+        data_dir: data.display().to_string(),
     }
 }
 
@@ -513,6 +558,29 @@ fn sha256_of(path: &Path) -> io::Result<String> {
 /// check its size and hash. Progress goes to `ctl` (bytes); a stop request
 /// keeps the `.part` for the next try.
 pub fn download(url: &str, dest: &Path, size: u64, sha256: &str, ctl: &Control) -> Result<(), String> {
+    download_checked(url, dest, size, sha256, None, ctl)
+}
+
+/// [`download`], or with `signer` a download of unknown size (fetched whole,
+/// never resumed: the file behind the URL may have changed) checked by its
+/// Authenticode signature instead.
+fn download_checked(url: &str, dest: &Path, size: u64, sha256: &str, signer: Option<&str>, ctl: &Control) -> Result<(), String> {
+    if let Some(signer) = signer {
+        if let Some(dir) = dest.parent() {
+            fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        }
+        let part = PathBuf::from(format!("{}.part", dest.display()));
+        let mut resp = agent().get(url).call().map_err(|e| format!("download {url}: {e}"))?;
+        let mut out = File::create(&part).map_err(|e| format!("{}: {e}", part.display()))?;
+        let copied = io::copy(&mut resp.body_mut().as_reader(), &mut out).map_err(|e| format!("download {url}: {e}"))?;
+        drop(out);
+        ctl.advance(copied.min(size));
+        if let Err(e) = check_signature(&part, signer) {
+            let _ = fs::remove_file(&part);
+            return Err(format!("{url}: {e}; the download was deleted"));
+        }
+        return fs::rename(&part, dest).map_err(|e| format!("{}: {e}", dest.display()));
+    }
     if dest.is_file() && fs::metadata(dest).map(|m| m.len()).ok() == Some(size) && sha256_of(dest).ok().as_deref() == Some(sha256) {
         ctl.advance(size);
         return Ok(());
@@ -658,6 +726,66 @@ fn unpack_tar(archive: &Path, into: &Path, strip: usize, picks: Option<&[(&str, 
     picks.map_or(Ok(()), |p| check_picks(archive, into, p))
 }
 
+/// Run a RAR self-extractor silently into `into`, then name its files as
+/// [`picked`] expects. The archive's signature was checked when downloaded.
+fn self_extract(archive: &Path, into: &Path, picks: &[(&str, &str)]) -> Result<(), String> {
+    if !cfg!(windows) {
+        return Err("self-extracting downloads run on Windows only".into());
+    }
+    let out = into.join("x");
+    fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+    let mut cmd = std::process::Command::new(archive);
+    cmd.arg("-s").arg(format!("-d{}", out.display()));
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let status = cmd.status().map_err(|e| format!("{}: {e}", archive.display()))?;
+    if !status.success() {
+        return Err(format!("{} did not unpack ({status})", archive.display()));
+    }
+    for (i, (member, _)) in picks.iter().enumerate() {
+        let from = out.join(member);
+        if !from.is_file() {
+            return Err(format!("{} does not contain {member}", archive.display()));
+        }
+        fs::rename(&from, into.join(i.to_string())).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Fails unless `path` carries a valid Authenticode signature by `signer`
+/// (Windows' own check, through PowerShell's `Get-AuthenticodeSignature`).
+fn check_signature(path: &Path, signer: &str) -> Result<(), String> {
+    if !cfg!(windows) {
+        return Err("signed downloads are checked on Windows only".into());
+    }
+    let quoted = path.display().to_string().replace('\'', "''");
+    let script = format!(
+        "$s = Get-AuthenticodeSignature -LiteralPath '{quoted}'; $s.Status.ToString(); \
+         if ($s.SignerCertificate) {{ $s.SignerCertificate.GetNameInfo('SimpleName', $false) }}"
+    );
+    let mut cmd = std::process::Command::new("powershell");
+    // Started from PowerShell 7, Windows PowerShell would take its module path
+    // and fail to load `Get-AuthenticodeSignature`.
+    cmd.args(["-NoProfile", "-NonInteractive", "-Command", &script]).env_remove("PSModulePath");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let out = cmd.output().map_err(|e| format!("cannot check the signature: {e}"))?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut lines = text.lines().map(str::trim);
+    match (lines.next(), lines.next()) {
+        (Some("Valid"), Some(name)) if name == signer => Ok(()),
+        (Some("Valid"), name) => Err(format!("signed by {}, not by {signer}", name.unwrap_or("nobody"))),
+        (Some(status), _) => Err(format!("its signature is not valid ({status})")),
+        (None, _) => Err(format!("its signature could not be checked: {}", String::from_utf8_lossy(&out.stderr).trim())),
+    }
+}
+
 /// Move everything in `from` into `to`, replacing files of the same name.
 fn merge_into(from: &Path, to: &Path) -> Result<(), String> {
     fs::create_dir_all(to).map_err(|e| e.to_string())?;
@@ -685,10 +813,10 @@ pub fn install_asset(data: &Path, asset: &Asset, mirror: Option<&str>, ctl: &Con
     };
     let target = data.join(asset.to);
     if asset.unpack == Unpack::File {
-        return download(&url, &target, asset.size, asset.sha256, ctl);
+        return download_checked(&url, &target, asset.size, asset.sha256, asset.signer, ctl);
     }
     let archive = data.join("downloads").join(asset.file);
-    download(&url, &archive, asset.size, asset.sha256, ctl)?;
+    download_checked(&url, &archive, asset.size, asset.sha256, asset.signer, ctl)?;
     let staging = data.join("downloads").join(format!(".unpack-{}", asset.file));
     let _ = fs::remove_dir_all(&staging);
     fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
@@ -701,11 +829,11 @@ pub fn install_asset(data: &Path, asset: &Asset, mirror: Option<&str>, ctl: &Con
             unpack_tar(&archive, &staging, strip, None)?;
             merge_into(&staging, &target)
         }
-        Unpack::ZipPick(picks) | Unpack::TarPick(picks) => {
-            if matches!(asset.unpack, Unpack::ZipPick(_)) {
-                unpack_zip(&archive, &staging, Some(picks))?;
-            } else {
-                unpack_tar(&archive, &staging, 0, Some(picks))?;
+        Unpack::ZipPick(picks) | Unpack::TarPick(picks) | Unpack::SelfExtract(picks) => {
+            match asset.unpack {
+                Unpack::ZipPick(_) => unpack_zip(&archive, &staging, Some(picks))?,
+                Unpack::TarPick(_) => unpack_tar(&archive, &staging, 0, Some(picks))?,
+                _ => self_extract(&archive, &staging, picks)?,
             }
             for (i, (_, to)) in picks.iter().enumerate() {
                 let target = data.join(to);
@@ -985,7 +1113,7 @@ mod tests {
 
     fn asset(file: &'static str, body: &[u8], unpack: Unpack, to: &'static str) -> Asset {
         let sha: &'static str = Box::leak(sha(body).into_boxed_str());
-        Asset { file, url: String::new(), sha256: sha, size: body.len() as u64, unpack, to }
+        Asset { file, url: String::new(), sha256: sha, size: body.len() as u64, signer: None, unpack, to }
     }
 
     #[test]
@@ -998,7 +1126,8 @@ mod tests {
             for v in vs {
                 let a = assets(id, v);
                 assert!(!a.is_empty(), "{id} {v}");
-                assert!(a.iter().all(|a| a.sha256.len() == 64 && a.size > 0 && a.url.ends_with(a.file)), "{id} {v}");
+                // Pinned by checksum, or (UnRAR on Windows) by its publisher's signature.
+                assert!(a.iter().all(|a| (a.sha256.len() == 64 || a.signer.is_some()) && a.size > 0 && a.url.ends_with(a.file)), "{id} {v}");
                 assert!(a.iter().all(|a| a.outputs().first().is_none_or(|o| *o == a.to)), "{id} {v}: `to` is the first output");
             }
         }
@@ -1120,5 +1249,19 @@ mod tests {
         fs::write(&path, zip).unwrap();
         assert!(unpack_zip(&path, &dir.path().join("out"), None).is_err());
         assert!(!dir.path().join("escape.txt").exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn signatures_are_checked() {
+        let dir = tempfile::tempdir().unwrap();
+        let unsigned = dir.path().join("it's unsigned.exe");
+        fs::write(&unsigned, b"MZ").unwrap();
+        let err = check_signature(&unsigned, RARLAB_SIGNER).unwrap_err();
+        assert!(err.contains("not valid"), "{err}");
+        // Signed, but by someone else.
+        let root = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap();
+        let err = check_signature(&root.join("System32").join("notepad.exe"), RARLAB_SIGNER).unwrap_err();
+        assert!(err.contains("Microsoft"), "{err}");
     }
 }

@@ -1,6 +1,6 @@
-// Maintenance → AI and add-on components (administrators): download the AI
-// tagger's runtime and model, the CLIP encoder, ONNX Runtime and pdfium into the
-// library's folder, or remove them.
+// Settings → Components, the server's part (administrators): download the AI
+// tagger's runtime and model, the CLIP encoder, ONNX Runtime, pdfium and UnRAR
+// into the library's folder, or remove them.
 import { Card, Group, Text, Title } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 
@@ -25,7 +25,7 @@ export function ComponentsCard({ jobs, start }: { jobs: Job[] | undefined; start
   if (!info.platform) {
     return (
       <Card withBorder>
-        <Title order={5} mb="xs">AI and add-on components</Title>
+        <Title order={5} mb="xs">Server components</Title>
         <Text size="sm" c="dimmed">There are no downloads for this server's platform; place the files by hand (see the deployment guide).</Text>
       </Card>
     );
@@ -34,7 +34,7 @@ export function ComponentsCard({ jobs, start }: { jobs: Job[] | undefined; start
     <Card withBorder data-testid="components-card">
       <Group justify="space-between" mb="xs">
         <Group gap={4}>
-          <Title order={5}>AI and add-on components</Title>
+          <Title order={5}>Server components</Title>
           <HelpLink topic="components" label="Help: components" />
         </Group>
         {info.free_bytes != null && <Text size="xs" c="dimmed">{formatSize(info.free_bytes)} free</Text>}

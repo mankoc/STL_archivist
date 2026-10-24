@@ -1304,6 +1304,16 @@ the path is visible. No business logic and no Tauri commands for data.
   file names keep the old name. Libraries can have several folders (`library_groups`, see
   `docs/libraries-plan.md`); the data directory gains a table and a column, nothing is
   converted.
+- 2026.43.10: every crawl keeps each archive's catalog (`archive_files`: name, size, CRC-32
+  per member, from the same `list_members` the fingerprint reads; backfilled from the
+  catalog for unchanged records, refreshed by Rescan). AVIF thumbnails are back without C:
+  `stl_core::avif` (`avif-parse` + `rav1d` without its assembly, YUV → RGB here; grid
+  images are still refused). The model database is `models.db` (no migration from
+  `stlLibrary.db`: libraries are crawled again). Components moved to *Settings →
+  Components* (`web/src/jobs/ComponentsPanel.tsx`), shown once when the compute worker
+  shares the library's folder; UnRAR is a component (`tools/`, preferred over `PATH` by
+  `Config::unrar_tool`; on Windows the latest `unrarw64.exe`, checked by its Authenticode
+  signature and self-extracted).
 
 ### Phase 8: Retire Python (small)
 

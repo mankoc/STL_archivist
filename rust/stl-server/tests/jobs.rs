@@ -79,6 +79,9 @@ async fn crawl_job_catalogues_a_folder() {
     assert_eq!(count(&lib, "SELECT count(*) FROM models"), 2);
     assert_eq!(count(&lib, "SELECT count(*) FROM models m JOIN sculptors s ON s.id = m.sculptor_id WHERE s.name = 'Studio'"), 2);
     assert_eq!(count(&lib, "SELECT count(*) FROM images WHERE thumbnail_path IS NOT NULL"), 2);
+    // Every record keeps its archive's file list: each member with its own CRC.
+    assert_eq!(count(&lib, "SELECT count(DISTINCT model_id) FROM archive_files"), 2);
+    assert_eq!(count(&lib, "SELECT count(*) FROM archive_files WHERE crc = 0 AND size > 0"), 0);
     let ids: Vec<u64> = lib.state.db.with(|c| {
         let mut st = c.prepare("SELECT id FROM images")?;
         st.query_map([], |r| r.get::<_, i64>(0).map(|i| i as u64))?.collect::<rusqlite::Result<Vec<_>>>()
@@ -104,8 +107,11 @@ async fn crawl_job_catalogues_a_folder() {
     // The folder is tracked with its pattern; a second crawl finds nothing new.
     let libs = call(&lib.state, "GET", "/api/libraries", Some(&ed), None).await.json();
     assert_eq!(libs[0]["folders"][0]["pattern"], "{sculptor}/{title}");
+    let files = count(&lib, "SELECT count(*) FROM archive_files");
+    lib.state.db.with(|c| c.execute("DELETE FROM archive_files", [])).unwrap();
     let id = submit(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy()})).await;
     assert_eq!(wait(&lib, &ed, id).await["job"]["message"], "0 new, 0 updated, 2 unchanged");
+    assert_eq!(count(&lib, "SELECT count(*) FROM archive_files"), files, "unchanged archives without a list get one");
 
     // Another spelling of the same folder is crawled under the stored one,
     // and so is a folder inside it, rather than duplicating every record.

@@ -1,5 +1,6 @@
 // Settings: this user's preferences, the library's crawler and sidecar
-// settings (administrators change them), and user administration.
+// settings (administrators change them), the downloadable components, and user
+// administration. A tab is addressed as `#/settings/<tab>`.
 import {
   ActionIcon, Badge, Button, Card, Checkbox, Group, Modal, NumberInput, PasswordInput, SegmentedControl, Select, SimpleGrid,
   Stack, Switch, Table, Tabs, Text, Textarea, TextInput, Title, Tooltip, useMantineColorScheme,
@@ -11,6 +12,9 @@ import { type FormEvent, useEffect, useState } from "react";
 
 import { api, type Schemas, unwrap } from "../api/client";
 import { hasRole, useUser } from "../auth/user";
+import { inDesktopShell } from "../desktop";
+import { ComponentsPanel } from "../jobs/ComponentsPanel";
+import { settingsTab } from "./tabs";
 
 type LibrarySettings = Schemas["Settings"];
 type Role = Schemas["Role"];
@@ -27,11 +31,19 @@ function fail(err: unknown) {
 export function SettingsPage() {
   const user = useUser();
   const admin = hasRole(user, "admin");
+  const components = admin || inDesktopShell();
+  const tabs = ["account", "library", ...(components ? ["components"] : []), ...(admin ? ["users"] : [])];
   return (
-    <Tabs defaultValue="account" p="md" keepMounted={false}>
+    <Tabs
+      defaultValue={settingsTab(location.hash, tabs)}
+      onChange={(t) => history.replaceState(null, "", `#/settings/${t}`)}
+      p="md"
+      keepMounted={false}
+    >
       <Tabs.List mb="md">
         <Tabs.Tab value="account">Account</Tabs.Tab>
         <Tabs.Tab value="library">Library</Tabs.Tab>
+        {components && <Tabs.Tab value="components">Components</Tabs.Tab>}
         {admin && <Tabs.Tab value="users">Users</Tabs.Tab>}
       </Tabs.List>
       <Tabs.Panel value="account">
@@ -40,6 +52,11 @@ export function SettingsPage() {
       <Tabs.Panel value="library">
         <LibrarySettingsForm editable={admin} />
       </Tabs.Panel>
+      {components && (
+        <Tabs.Panel value="components">
+          <ComponentsPanel admin={admin} />
+        </Tabs.Panel>
+      )}
       {admin && (
         <Tabs.Panel value="users">
           <Users />

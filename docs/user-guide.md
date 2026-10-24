@@ -153,8 +153,8 @@ in this browser.
 
 - **Download** the archive; **Copy path** (when the server's path makes sense on your
   computer); **Open folder** in the desktop app shows the archive in the file manager.
-- **Files** lists the printable files inside the archive (when the library stores file
-  lists).
+- **Files** lists every file inside the archive with its size and CRC-32, as the last crawl
+  or rescan read the archive's catalog.
 - Warnings (for example *Archive without images*) show as orange badges; **Warning
   details** lists the files that trigger each one.
 - Click an image to view it full screen at full resolution: the original is read from the
@@ -258,7 +258,7 @@ and the metadata already catalogued.
 ## AI image embeddings and compute workers
 
 *AI embedding* in Find by Image and Duplicates needs the CLIP encoder and ONNX Runtime
-(*Maintenance → AI and add-on components*) and *Compute missing embeddings*. ONNX Runtime has
+(*Settings → Components*) and *Compute missing embeddings*. ONNX Runtime has
 a GPU variant — DirectML on Windows, CUDA on Linux — that the card preselects when it finds a
 GPU; the card also shows where the encoder runs.
 
@@ -295,11 +295,13 @@ The **Maintenance** page (editors; some cards for administrators):
   the folder imports them), and leftover `METADATA.7z.tmp` files are deleted. **Remove all
   sidecars** deletes them. Sidecars let a new library restore its records when it crawls the
   folders.
-- **AI and add-on components** (administrators) — downloads the optional parts into the
-  library's folder: the AI tagger's runtime (llama.cpp, with a *CPU* / *NVIDIA GPU (CUDA)*
+- **Components** (*Settings → Components*; administrators for the server's) — downloads the
+  optional parts into the library's folder (in the desktop app also those of this computer's
+  compute worker, when it uses another folder): the AI tagger's runtime (llama.cpp, with a *CPU* / *NVIDIA GPU (CUDA)*
   choice on Windows; CUDA is preselected when an NVIDIA GPU is found) and model (about 3.3 GB;
   tick the box accepting its licence, which limits commercial use), the CLIP encoder and
-  ONNX Runtime (AI image embeddings) and pdfium (PDF previews). Tick components, then
+  ONNX Runtime (AI image embeddings), pdfium (PDF previews) and UnRAR (compressed RAR
+  archives). Tick components, then
   **Download**; the card shows each one's size, licence and state (*installed*, *not
   installed*, or *configured elsewhere* when the server's configuration points at another
   copy). An interrupted download resumes where it stopped. **Remove selected** deletes

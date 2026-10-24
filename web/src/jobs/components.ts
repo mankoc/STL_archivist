@@ -1,6 +1,7 @@
-// Optional components (Maintenance → AI and add-on components): what a choice
-// downloads, and the defaults.
+// Optional components (Settings → Components): what a choice downloads, the
+// defaults, and whether this computer's worker shares the server's folder.
 import type { Schemas } from "../api/client";
+import { pathKey } from "./libraries";
 
 export type ComponentsInfo = Schemas["ComponentsInfo"];
 export type ComponentStatus = Schemas["ComponentStatus"];
@@ -37,3 +38,9 @@ export function totalBytes(components: ComponentStatus[], chosen: string[], vari
 
 /** Components whose licence must be accepted before downloading. */
 export const NEEDS_ACCEPTANCE = ["ai_model"];
+
+/** Whether the compute worker's folder on this computer is the server's data
+ * directory (a local library): then one list of components serves both. */
+export function sameFolder(serverDir: string | undefined, workerDir: string | undefined): boolean {
+  return !!serverDir && !!workerDir && pathKey(serverDir) === pathKey(workerDir);
+}

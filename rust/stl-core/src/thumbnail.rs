@@ -13,8 +13,8 @@
 //!
 //! JPEGs are decoded with DCT scaling to the smallest size of at least twice the
 //! target, which Pillow never did here (`convert` loads the full image first).
-//! Formats this module does not decode (AVIF, CMYK JPEG, ...) return
-//! [`ThumbError::Unsupported`] and the caller uses Pillow.
+//! AVIF stills are decoded by [`crate::avif`]. Formats this module does not
+//! decode (CMYK JPEG, grid AVIF, ...) return [`ThumbError::Unsupported`].
 
 use std::fmt;
 use std::io::Cursor;
@@ -106,6 +106,13 @@ pub fn make_thumbnail(data: &[u8], max_size: u32, animate: bool) -> Result<Vec<u
 
 /// The still image (first frame) shrunk to fit `max_size`, as RGB.
 pub(crate) fn decode_fitted(data: &[u8], max_size: u32) -> Result<Rgb, ThumbError> {
+    if is_avif(data) {
+        let (w, h, rgb) = crate::avif::decode(data).map_err(|e| match e {
+            crate::avif::Error::Decode(m) => ThumbError::Decode(m),
+            crate::avif::Error::Unsupported(m) => ThumbError::Unsupported(m),
+        })?;
+        return shrink(Rgb::new(w, h, rgb), max_size);
+    }
     let format = image::guess_format(data).map_err(|_| ThumbError::Unsupported("unknown format".into()))?;
     let img = match format {
         ImageFormat::Jpeg => decode_jpeg(data, max_size)?,
@@ -115,6 +122,17 @@ pub(crate) fn decode_fitted(data: &[u8], max_size: u32) -> Result<Rgb, ThumbErro
         other => return Err(ThumbError::Unsupported(format!("{other:?}"))),
     };
     shrink(img, max_size)
+}
+
+/// An ISO media file whose brands include AVIF (`avif` stills, `avis` sequences).
+fn is_avif(data: &[u8]) -> bool {
+    if data.len() < 16 || &data[4..8] != b"ftyp" {
+        return false;
+    }
+    let size = (u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize).clamp(16, data.len());
+    // The major brand, then (after the minor version) the compatible brands.
+    let brands = data[16..size].as_chunks::<4>().0;
+    std::iter::once(&data[8..12]).chain(brands.iter().map(|b| &b[..])).any(|b| b == b"avif" || b == b"avis")
 }
 
 fn decode_jpeg(data: &[u8], max_size: u32) -> Result<Rgb, ThumbError> {
@@ -283,5 +301,16 @@ mod tests {
     fn garbage_and_unknown_formats_fail() {
         assert!(matches!(make_thumbnail(b"not an image", 100, true), Err(ThumbError::Unsupported(_))));
         assert!(matches!(make_thumbnail(b"\x89PNG\r\n\x1a\n broken", 100, true), Err(ThumbError::Decode(_))));
+    }
+
+    #[test]
+    fn avif_becomes_a_jpeg() {
+        let avif = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/quads_420.avif")).unwrap();
+        assert!(is_avif(&avif));
+        let jpeg = make_thumbnail(&avif, 32, true).unwrap();
+        let img = decode_fitted(&jpeg, 1000).unwrap();
+        assert_eq!((img.width, img.height), (32, 24), "fitted as Image.thumbnail");
+        assert!(img.data[0] > 180 && img.data[1] < 80, "red corner: {:?}", &img.data[..3]);
+        assert!(!is_avif(b"\0\0\0\x18ftypmp42\0\0\0\0isommp42"), "an MP4 is no AVIF");
     }
 }

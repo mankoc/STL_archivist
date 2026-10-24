@@ -32,7 +32,7 @@ fn patterns(list: &[String]) -> Result<PresupportPatterns, String> {
 
 /// Rescan values for the archive at `path`, whose record has `old_size`,
 /// `old_mtime` and `old_hash`. The hash is recomputed only when the size or
-/// modification time changed.
+/// modification time changed; the file list (`files`) is always read again.
 pub fn rescan(path: &str, old_size: Option<i64>, old_mtime: Option<i64>, old_hash: &str, opts: &Options) -> Result<Rescan, String> {
     let p = std::path::Path::new(path);
     if !p.exists() {
@@ -43,10 +43,11 @@ pub fn rescan(path: &str, old_size: Option<i64>, old_mtime: Option<i64>, old_has
         None => (None, None),
     };
     let unchanged = fs_size.is_some() && fs_mtime.is_some() && fs_size == old_size && fs_mtime == old_mtime;
-    let hash = if unchanged {
-        old_hash.to_string()
-    } else {
-        crate::archive::fingerprint(p).unwrap_or_else(|_| fallback_fingerprint(path))
+    let members = crate::archive::list_members(p).ok();
+    let hash = match &members {
+        _ if unchanged => old_hash.to_string(),
+        Some(members) => crate::archive::fingerprint_of(members),
+        None => fallback_fingerprint(path),
     };
     let pats = patterns(&opts.presupport_patterns)?;
     let extracted = extract_native(path, &opts.unrar).ok_or("the server cannot read this archive; left unchanged")?;
@@ -93,6 +94,7 @@ pub fn rescan(path: &str, old_size: Option<i64>, old_mtime: Option<i64>, old_has
         warning: Some(warnings).filter(|w| !w.is_empty()),
         scales: rules::detect_scale(&scale_names),
         stl_files,
+        files: members,
     })
 }
 
@@ -183,6 +185,7 @@ mod tests {
         let path = p.to_string_lossy().into_owned();
         let r = rescan(&path, None, None, "", &opts(true)).unwrap();
         assert_eq!(r.archive_hash, crate::archive::fingerprint(&p).unwrap());
+        assert_eq!(r.files, Some(crate::archive::list_members(&p).unwrap()), "the file list, read again");
         assert_eq!((r.title.as_deref(), r.creator.as_deref()), (Some("The Hero"), Some("Studio")));
         assert_eq!(r.scales, vec!["32 mm".to_string()]);
         assert_eq!(r.stl_files, Some(vec!["hero_supported.stl".to_string(), "parts/arm.obj".to_string()]));

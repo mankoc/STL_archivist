@@ -820,6 +820,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/models/{id}/archive-files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every file inside the model's archive (name, size, CRC-32), as the last
+         *     crawl or rescan read the archive's catalog; empty until then.
+         */
+        get: operations["get_models_by_id_archive_files"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/models/{id}/editor": {
         parameters: {
             query?: never;
@@ -1238,6 +1258,18 @@ export interface components {
             tags: string[];
             title: string;
         };
+        /** @description One file inside a model's archive. */
+        ArchiveFile: {
+            /** @description The member's CRC-32 from the archive's catalog, as 8 hex digits. */
+            crc: string;
+            /** @description The member's name in the archive (`/` separators). */
+            name: string;
+            /**
+             * Format: int64
+             * @description Uncompressed size, when the archive records it.
+             */
+            size?: number | null;
+        };
         AuthStatus: {
             /**
              * @description No user exists yet: the first administrator must be created
@@ -1356,6 +1388,8 @@ export interface components {
              */
             clip_provider?: string | null;
             components: components["schemas"]["ComponentStatus"][];
+            /** @description The data directory the components go into. */
+            data_dir: string;
             /**
              * Format: int64
              * @description Free space where the data directory is.
@@ -4102,6 +4136,27 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_models_by_id_archive_files: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchiveFile"][];
                 };
             };
         };
