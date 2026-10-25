@@ -20,6 +20,8 @@ pub struct Settings {
     pub max_thumbnails: usize,
     /// Longest thumbnail edge in pixels.
     pub max_thumb_size: u32,
+    /// Longest edge of a thumbnail made from a model viewer capture (default: `max_thumb_size`).
+    pub view_thumb_size: u32,
     /// Parallel crawl workers.
     pub max_workers: usize,
     pub recurse_subdirs: bool,
@@ -57,6 +59,7 @@ impl Settings {
         Settings {
             max_thumbnails: s.max_thumbnails(),
             max_thumb_size: s.max_thumb_size(),
+            view_thumb_size: s.view_thumb_size(),
             max_workers: s.max_workers(),
             recurse_subdirs: s.recurse_subdirs(),
             metadata_sidecar_enabled: s.sidecars_enabled(),
@@ -82,6 +85,9 @@ impl Settings {
     fn validate(&self) -> Result<(), ApiError> {
         if !(1..=10_000).contains(&self.max_thumb_size) {
             return Err(ApiError::bad_request("max_thumb_size is 1 to 10000 pixels"));
+        }
+        if !(1..=10_000).contains(&self.view_thumb_size) {
+            return Err(ApiError::bad_request("view_thumb_size is 1 to 10000 pixels"));
         }
         if self.max_thumbnails > 1000 {
             return Err(ApiError::bad_request("max_thumbnails is at most 1000"));

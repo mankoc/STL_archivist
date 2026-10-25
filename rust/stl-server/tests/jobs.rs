@@ -131,6 +131,56 @@ async fn crawl_job_catalogues_a_folder() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn images_beside_an_archive_count_as_its_images() {
+    let lib = empty_library();
+    let ed = lib.user("ed", Role::Editor);
+    let root = lib.dir.path().join("archives");
+    write_zip(&root.join("Bare").join("Golem.zip"), &[("golem.stl", b"solid g\nendsolid\n")]);
+    write_zip(&root.join("Lonely").join("Imp.zip"), &[("imp.stl", b"solid i\nendsolid\n")]);
+    std::fs::write(root.join("Bare").join("cover.jpg"), jpeg([90, 90, 90])).unwrap();
+    let id = submit(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy()})).await;
+    assert_eq!(wait(&lib, &ed, id).await["job"]["state"], "done");
+    let flagged = |title: &str| {
+        count(&lib, &format!("SELECT count(*) FROM models WHERE title = '{title}' AND warning LIKE '%Archive without images%'"))
+    };
+    assert_eq!((flagged("Golem"), flagged("Imp")), (0, 1), "the cover beside Golem counts");
+    // A rescan keeps it so.
+    let golem: i64 = lib.state.db.with(|c| c.query_row("SELECT id FROM models WHERE title = 'Golem'", [], |r| r.get(0))).unwrap();
+    let id = submit(&lib, &ed, json!({"kind": "rescan", "ids": [golem]})).await;
+    assert_eq!(wait(&lib, &ed, id).await["job"]["state"], "done");
+    assert_eq!(flagged("Golem"), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn empty_archives_are_read_and_old_failures_retried() {
+    let lib = empty_library();
+    let ed = lib.user("ed", Role::Editor);
+    let root = lib.dir.path().join("archives");
+    std::fs::create_dir_all(&root).unwrap();
+    // What 7-Zip writes for an archive of nothing (32 bytes).
+    let mut empty = vec![0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c, 0x00, 0x04, 0x8d, 0x9b, 0xd5, 0x0f];
+    empty.resize(32, 0);
+    std::fs::write(root.join("Nothing.7z"), &empty).unwrap();
+    let crawl = || async {
+        let id = submit(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy()})).await;
+        let v = wait(&lib, &ed, id).await;
+        assert_eq!(v["job"]["state"], "done", "{v}");
+        v
+    };
+    let unreadable = "SELECT count(*) FROM models WHERE archive_hash LIKE 'fallback:%' OR warning LIKE '%Unreadable archive%'";
+    let v = crawl().await;
+    assert_eq!(count(&lib, unreadable), 0, "read as an archive without files");
+    assert!(!v["log"].to_string().contains("cannot read archive"), "{v}");
+    // A record an older version could not read is read again, though the file did not change.
+    lib.state
+        .db
+        .with(|c| c.execute("UPDATE models SET archive_hash = 'fallback:32:1', warning = 'Unreadable archive'", []))
+        .unwrap();
+    crawl().await;
+    assert_eq!(count(&lib, unreadable), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn maintenance_jobs() {
     let lib = empty_library();
     let ed = lib.user("ed", Role::Editor);
@@ -163,7 +213,13 @@ async fn maintenance_jobs() {
     let id = submit(&lib, &admin, json!({"kind": "compact_database"})).await;
     let v = wait(&lib, &admin, id).await;
     assert_eq!(v["job"]["state"], "done", "{v}");
-    assert!(v["job"]["message"].as_str().unwrap().contains("MB"));
+    let message = v["job"]["message"].as_str().unwrap();
+    assert!(message.starts_with("database ") && message.contains("; thumbnails "), "{message}");
+    // The pruned images' thumbnails are gone from the store, and it still works.
+    let stats = lib.state.thumbs.stats().unwrap();
+    assert_eq!((stats.thumbnails, stats.blobs), (0, 0), "{stats:?}");
+    lib.state.thumbs.put_many(&[(999, b"after".as_slice())]).unwrap();
+    assert_eq!(lib.state.thumbs.get_many(&[999]).unwrap().len(), 1);
 
     let jobs = call(&lib.state, "GET", "/api/jobs", Some(&ed), None).await.json();
     assert_eq!(jobs.as_array().unwrap().len(), 5);

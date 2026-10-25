@@ -82,13 +82,6 @@ impl DerefMut for Pooled<'_> {
     }
 }
 
-impl Pooled<'_> {
-    /// Take the connection out of the pool's care (it closes when dropped).
-    pub fn detach(mut self) -> Connection {
-        self.conn.take().expect("connection present until drop")
-    }
-}
-
 impl Drop for Pooled<'_> {
     fn drop(&mut self) {
         if let Some(conn) = self.conn.take() {

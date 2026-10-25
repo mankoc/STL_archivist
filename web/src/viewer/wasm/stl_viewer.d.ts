@@ -78,6 +78,11 @@ export class Viewer {
      */
     static create(canvas: HTMLCanvasElement, webgl: boolean): Promise<Viewer>;
     /**
+     * Where the file `key` places itself (without its offset): `x0, y0, z0, x1, y1, z1`; empty
+     * when it is not loaded or has no geometry.
+     */
+    file_bounds(key: string): Float64Array;
+    /**
      * Facts about the file `key` (none when it is not loaded).
      */
     file_info(key: string): FileInfo | undefined;
@@ -118,6 +123,10 @@ export class Viewer {
      */
     set_dark(dark: boolean): void;
     /**
+     * Move the file `key` by `dx`, `dy` from where it places itself.
+     */
+    set_offset(key: string, dx: number, dy: number): void;
+    /**
      * Show or hide the build plates and volumes of slicer scenes.
      */
     set_show_plates(show: boolean): void;
@@ -136,6 +145,12 @@ export class Viewer {
      * everything; other names are ignored.
      */
     show_view(name: string): void;
+    /**
+     * The canvas rectangle the shown files cover as drawn now (`x0, y0, x1, y1`
+     * in pixels from the top left, within the canvas; the build plate not
+     * included), from their vertices; empty when nothing is shown.
+     */
+    shown_rect(): Float64Array;
     /**
      * Move toward (`factor` > 1) or away from the focal point.
      */
@@ -166,6 +181,7 @@ export interface InitOutput {
     readonly viewer_backend: (a: number) => [number, number];
     readonly viewer_camera_basis: (a: number) => [number, number];
     readonly viewer_create: (a: any, b: number) => any;
+    readonly viewer_file_bounds: (a: number, b: number, c: number) => [number, number];
     readonly viewer_file_info: (a: number, b: number, c: number) => number;
     readonly viewer_fit: (a: number) => void;
     readonly viewer_focus: (a: number, b: number, c: number) => void;
@@ -176,10 +192,12 @@ export interface InitOutput {
     readonly viewer_resize: (a: number, b: number, c: number) => void;
     readonly viewer_set_color_each: (a: number, b: number) => void;
     readonly viewer_set_dark: (a: number, b: number) => void;
+    readonly viewer_set_offset: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly viewer_set_show_plates: (a: number, b: number) => void;
     readonly viewer_set_style: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
     readonly viewer_set_visible: (a: number, b: number, c: number, d: number) => void;
     readonly viewer_show_view: (a: number, b: number, c: number) => void;
+    readonly viewer_shown_rect: (a: number) => [number, number];
     readonly viewer_zoom: (a: number, b: number) => void;
     readonly wasm_bindgen_dac0731650b473ce___convert__closures_____invoke___js_sys_a89202e6452953cf___Function_fn_wasm_bindgen_dac0731650b473ce___JsValue_____wasm_bindgen_dac0731650b473ce___sys__Undefined___js_sys_a89202e6452953cf___Function_fn_wasm_bindgen_dac0731650b473ce___JsValue_____wasm_bindgen_dac0731650b473ce___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
     readonly wasm_bindgen_dac0731650b473ce___convert__closures_____invoke___wasm_bindgen_dac0731650b473ce___JsValue__core_608f92abc48d28da___result__Result_____wasm_bindgen_dac0731650b473ce___JsError___true_: (a: number, b: number, c: any) => [number, number];

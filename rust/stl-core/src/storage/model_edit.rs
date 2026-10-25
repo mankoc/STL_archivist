@@ -322,61 +322,6 @@ pub fn ai_commit(tx: &Transaction, model_id: i64, f: &AiFields, tags: &[String],
     Ok(true)
 }
 
-/// `mass_choices`.
-pub fn mass_choices(conn: &Connection, ids: &[i64]) -> Result<Vec<(&'static str, Vec<String>)>> {
-    let large = ids.len() > 999;
-    let json = format!("[{}]", ids.iter().map(i64::to_string).collect::<Vec<_>>().join(","));
-    let scope = (!large).then_some(json.as_str());
-    let tags: Vec<String> = if large {
-        names(conn, "tags")?
-    } else {
-        let mut v = sorted_distinct_texts(
-            conn,
-            &format!(
-                "SELECT DISTINCT tags.name FROM tags JOIN model_tags ON tags.id = model_tags.tag_id \
-                 WHERE model_tags.model_id IN (SELECT value FROM json_each('{json}'))"
-            ),
-        )?;
-        v.sort();
-        v
-    };
-    let used = |col: &str| -> Result<Vec<i64>> {
-        let mut sql = format!("SELECT DISTINCT {col} FROM models WHERE {col} IS NOT NULL");
-        if let Some(j) = scope {
-            sql.push_str(&format!(" AND id IN (SELECT value FROM json_each('{j}'))"));
-        }
-        let mut st = conn.prepare(&sql)?;
-        st.query_map([], |r| r.get(0))?.collect()
-    };
-    let scoped_names = |table: &str, col: &str| -> Result<Vec<String>> {
-        let ids = used(col)?;
-        if ids.is_empty() {
-            return all_names(conn, table);
-        }
-        let j = format!("[{}]", ids.iter().map(i64::to_string).collect::<Vec<_>>().join(","));
-        let mut v = {
-            let mut st = conn.prepare(&format!("SELECT name FROM {table} WHERE id IN (SELECT value FROM json_each(?1))"))?;
-            st.query_map([j], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>>>()?
-        };
-        v.retain(|s| !s.is_empty());
-        v.sort();
-        Ok(v)
-    };
-    Ok(vec![
-        ("sources", sorted_distinct_texts(conn, "SELECT DISTINCT source FROM models")?),
-        ("creators", sorted_distinct_texts(conn, "SELECT DISTINCT creator FROM models")?),
-        ("titles", sorted_distinct_texts(conn, "SELECT DISTINCT title FROM models")?),
-        ("dates", dates(conn, scope)?),
-        ("tags", tags),
-        ("releases", scoped_names("releases", "release_id")?),
-        ("collections", scoped_names("collections", "collection_id")?),
-        ("subcollections", scoped_names("subcollections", "subcollection_id")?),
-        ("categories", names(conn, "categories")?),
-        ("scales", names(conn, "scales")?),
-        ("sculptors", names(conn, "sculptors")?),
-    ])
-}
-
 /// `archive_paths`: `{model_id: archive_path}` for the models that exist.
 pub fn archive_paths(conn: &Connection, ids: &[i64]) -> Result<HashMap<i64, String>> {
     let json = format!("[{}]", ids.iter().map(i64::to_string).collect::<Vec<_>>().join(","));

@@ -238,6 +238,33 @@ async fn images_upload_and_delete() {
 }
 
 #[tokio::test]
+async fn view_captures_take_their_own_thumbnail_size() {
+    let l = library();
+    let id = l.ids[0];
+    std::fs::write(l.lib.dir.path().join("settings.json"), r#"{"view_thumb_size": 16}"#).unwrap();
+    let width = |query: &'static str| {
+        let (ct, body) = multipart(&[("view.png", &png())]);
+        let req = Request::post(format!("/api/models/{id}/images{query}"))
+            .header(header::AUTHORIZATION, format!("Bearer {}", l.editor))
+            .header(header::CONTENT_TYPE, ct)
+            .body(Body::from(body))
+            .unwrap();
+        async {
+            let r = send_from(&l.lib.state, LOCAL, req).await;
+            assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+            let thumb = l.call("GET", r.json()["added"][0]["thumbnail"].as_str().unwrap(), None).await.body;
+            let mut dec = jpeg_decoder::Decoder::new(std::io::Cursor::new(&thumb));
+            dec.read_info().unwrap();
+            dec.info().unwrap().width
+        }
+    };
+    assert_eq!(width("?view=true").await, 16, "64 x 48 fitted into 16");
+    assert_eq!(width("").await, 64, "other images: the thumbnail size (512)");
+    let settings = l.call("GET", "/api/settings/library", None).await.json();
+    assert_eq!((settings["view_thumb_size"].clone(), settings["max_thumb_size"].clone()), (json!(16), json!(512)));
+}
+
+#[tokio::test]
 async fn images_upload_past_two_megabytes() {
     // axum's default body limit (2 MB) is raised for this route: a large render (the model
     // viewer's "Add this view", a photo) is read.

@@ -5,9 +5,11 @@
 // (viewCube.ts: click a face for that view, drag it to orbit). Files leaving
 // `files` are hidden, not dropped, so showing them again is instant (the
 // oldest hidden ones are forgotten); each is drawn as `styles` says, restyled
-// only when its style changes. The WebAssembly is fetched the first time a
+// only when its style changes; `spread` lays the shown files out side by side
+// (spread.ts). The WebAssembly is fetched the first time a
 // viewer opens (again after a failed download). `ref` gives the view as an
-// image (`snapshot`: the canvas alone, without the toolbar or view cube).
+// image (`snapshot`: the shown objects as drawn, cropped with a margin
+// (snapshot.ts), without the toolbar or view cube).
 import { ActionIcon, Alert, Box, Button, Center, Group, Loader, Menu, Modal, Table, Text, Tooltip, useComputedColorScheme } from "@mantine/core";
 import { IconCube, IconFocusCentered } from "@tabler/icons-react";
 import { type ReactNode, type Ref, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
@@ -16,6 +18,8 @@ import { api, unwrap } from "../api/client";
 import { infoRows } from "./info";
 import { canvasSize, dragAction, dragZoom, keyAction, orbitDegrees, type ViewName, VIEWS, wheelZoom } from "./input";
 import { evictHidden, planBatches, splitBundle } from "./loading";
+import { snapshotCrop } from "./snapshot";
+import { spreadOffsets } from "./spread";
 import { type FileStyle, styleOf } from "./state";
 import { cubeFaces, isClick } from "./viewCube";
 import type { Viewer } from "./wasm/stl_viewer";
@@ -67,7 +71,7 @@ type Entry =
 
 /** What the page can ask of the canvas. */
 export interface ViewerHandle {
-  /** The view as drawn now, as a PNG at the canvas's size. */
+  /** The shown objects as drawn now, as a PNG (cropped to them with a margin). */
   snapshot: () => Promise<Blob>;
 }
 
@@ -75,7 +79,7 @@ const CUBE = 34; // half-size in CSS pixels
 const CUBE_BOX = CUBE * 2 + 24; // the cube's square, margin included
 const AXIS_TINT = { x: "230, 70, 70", y: "90, 200, 90", z: "90, 130, 255" };
 
-export function ViewerCanvas({ ref, id, files, sizes, styles, colorEach, plates, focus, info, onInfoClose, onStatus, onWireframeKey, tools }: {
+export function ViewerCanvas({ ref, id, files, sizes, styles, colorEach, plates, spread, focus, info, onInfoClose, onStatus, onWireframeKey, tools }: {
   ref?: Ref<ViewerHandle>;
   id: number;
   /** The files to show (member names). */
@@ -85,6 +89,8 @@ export function ViewerCanvas({ ref, id, files, sizes, styles, colorEach, plates,
   styles: Record<string, FileStyle>;
   colorEach: boolean;
   plates: boolean;
+  /** Show the files side by side on the XY plane (spread.ts) instead of where they place themselves. */
+  spread: boolean;
   /** Frame this file (a new `n` asks again). */
   focus: { name: string; n: number } | null;
   /** The file whose information panel is open. */
@@ -207,9 +213,13 @@ export function ViewerCanvas({ ref, id, files, sizes, styles, colorEach, plates,
         const v = viewerRef.current;
         const canvas = canvasRef.current;
         if (!v || !canvas) return reject(new Error("The viewer is not ready."));
-        // Drawn and read in one task: a WebGL2 canvas may be cleared once the browser has shown it.
+        // Drawn and copied in one task: a WebGL2 canvas may be cleared once the browser has shown it.
         v.render();
-        canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("The view could not be read."))), "image/png");
+        const [x, y, w, h] = snapshotCrop(v.shown_rect(), canvas.width, canvas.height);
+        const out = document.createElement("canvas");
+        [out.width, out.height] = [w, h];
+        out.getContext("2d")!.drawImage(canvas, x, y, w, h, 0, 0, w, h);
+        out.toBlob((b) => (b ? resolve(b) : reject(new Error("The view could not be read."))), "image/png");
       }),
   }), []);
 
@@ -327,6 +337,30 @@ export function ViewerCanvas({ ref, id, files, sizes, styles, colorEach, plates,
     viewerRef.current!.set_show_plates(plates);
     draw();
   }, [ready, colorEach, plates, draw]);
+
+  // Spread out: the shown files side by side, again whenever they change; otherwise every
+  // loaded file (hidden ones too) where it places itself. Switching it frames the view.
+  const shownNames = Object.entries(shown).flatMap(([name, s]) => (s.state === "shown" ? [name] : [])).sort().join("\n");
+  const spreadWas = useRef(spread);
+  useEffect(() => {
+    if (!ready) return;
+    const v = viewerRef.current!;
+    if (spread) {
+      const shownSet = new Set(shownNames.split("\n"));
+      const prints = files.filter((n) => shownSet.has(n)).flatMap((name) => {
+        const b = v.file_bounds(name);
+        return b.length === 6 ? [{ name, lo: [b[0], b[1]] as [number, number], hi: [b[3], b[4]] as [number, number] }] : [];
+      });
+      for (const [name, [dx, dy]] of Object.entries(spreadOffsets(prints))) v.set_offset(name, dx, dy);
+    } else {
+      for (const [name, e] of entries.current) if (e.state === "shown" || e.state === "hidden") v.set_offset(name, 0, 0);
+    }
+    if (spreadWas.current !== spread) {
+      spreadWas.current = spread;
+      v.fit();
+    }
+    draw();
+  }, [ready, spread, files, shownNames, draw]);
 
   useEffect(() => {
     if (!ready || !focus) return;

@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use glam::DVec3;
+use glam::{DMat4, DVec2, DVec3, DVec4};
 use meshpeek_core::{Mesh, ObjectKind, Plate, wire};
 use meshpeek_render::{Camera, GpuMesh, Material, ObjectId, Palette, Renderer, Style, wgpu};
 use wasm_bindgen::prelude::*;
@@ -121,6 +121,8 @@ impl FileInfo {
 /// One object of a shown file: the CPU mesh is kept to add edge buffers when its wireframe is first asked for.
 struct Part {
     id: ObjectId,
+    /// Object to world, as the renderer draws it.
+    transform: DMat4,
     kind: ObjectKind,
     mesh: Mesh,
     has_edges: bool,
@@ -136,6 +138,8 @@ struct File {
     material: Material,
     wire: bool,
     visible: bool,
+    /// How far the file is moved from where it places itself (spreading files out).
+    offset: DVec3,
 }
 
 /// A canvas showing one or more scenes.
@@ -247,10 +251,10 @@ impl Viewer {
             #[allow(clippy::arc_with_non_send_sync)]
             let gpu = Arc::new(GpuMesh::upload(&self.device, &object.mesh, max_buffer));
             let id = self.renderer.add_object(&self.device, gpu, object.transform, Style { color: [1.0; 3], material: MATERIALS[1].1 }, object.visible);
-            parts.push(Part { id, kind: object.kind, mesh: object.mesh, has_edges: false, info: object.info });
+            parts.push(Part { id, transform: object.transform, kind: object.kind, mesh: object.mesh, has_edges: false, info: object.info });
         }
         let objects = parts.len() as u32;
-        let file = File { key: key.to_string(), parts, plates: scene.plates, color: None, material: MATERIALS[1].1, wire: false, visible: true };
+        let file = File { key: key.to_string(), parts, plates: scene.plates, color: None, material: MATERIALS[1].1, wire: false, visible: true, offset: DVec3::ZERO };
         self.files.push(file);
         self.restyle_file(self.files.len() - 1);
         self.update_plates();
@@ -347,6 +351,55 @@ impl Viewer {
             size: bounds.map(|(lo, hi)| (hi - lo).to_array().to_vec()).unwrap_or_default(),
             facts: facts.into_iter().flat_map(|(label, value)| [label.clone(), value.clone()]).collect(),
         })
+    }
+
+    /// The canvas rectangle the shown files cover as drawn now (`x0, y0, x1, y1`
+    /// in pixels from the top left, within the canvas; the build plate not
+    /// included), from their vertices; empty when nothing is shown.
+    pub fn shown_rect(&self) -> Vec<f64> {
+        let (w, h) = (self.config.width as f64, self.config.height as f64);
+        let (view, projection) = self.camera.matrices(w / h, self.renderer.scene_bounds());
+        let clip = (projection * view).as_dmat4();
+        let (mut lo, mut hi) = (DVec2::splat(f64::MAX), DVec2::splat(f64::MIN));
+        for (file, part) in self.files.iter().filter(|f| f.visible).flat_map(|f| f.parts.iter().map(move |p| (f, p))) {
+            let to_clip = clip * DMat4::from_translation(file.offset) * part.transform;
+            for v in &part.mesh.vertices {
+                let c = to_clip * DVec4::new(v[0] as f64, v[1] as f64, v[2] as f64, 1.0);
+                if c.w > 1e-9 {
+                    let p = DVec2::new(c.x / c.w, c.y / c.w);
+                    (lo, hi) = (lo.min(p), hi.max(p));
+                }
+            }
+        }
+        if lo.x > hi.x {
+            return Vec::new();
+        }
+        // Clip space to pixels: x from -1 (left), y from 1 (top).
+        let px = |x: f64| ((x + 1.0) / 2.0 * w).clamp(0.0, w);
+        let py = |y: f64| ((1.0 - y) / 2.0 * h).clamp(0.0, h);
+        vec![px(lo.x), py(hi.y), px(hi.x), py(lo.y)]
+    }
+
+    /// Where the file `key` places itself (without its offset): `x0, y0, z0, x1, y1, z1`; empty
+    /// when it is not loaded or has no geometry.
+    pub fn file_bounds(&self, key: &str) -> Vec<f64> {
+        let Some(file) = self.files.iter().find(|f| f.key == key) else { return Vec::new() };
+        let bounds = file.parts.iter().filter_map(|p| self.renderer.object_bounds(p.id)).reduce(|(a0, a1), (b0, b1)| (a0.min(b0), a1.max(b1)));
+        bounds.map(|(lo, hi)| [(lo - file.offset).to_array(), (hi - file.offset).to_array()].concat()).unwrap_or_default()
+    }
+
+    /// Move the file `key` by `dx`, `dy` from where it places itself.
+    pub fn set_offset(&mut self, key: &str, dx: f64, dy: f64) {
+        let Some(at) = self.files.iter().position(|f| f.key == key) else { return };
+        let target = DVec3::new(dx, dy, 0.0);
+        let delta = target - self.files[at].offset;
+        if delta == DVec3::ZERO {
+            return;
+        }
+        for part in &self.files[at].parts {
+            self.renderer.translate(&self.queue, part.id, delta);
+        }
+        self.files[at].offset = target;
     }
 
     /// Frame the file's objects.

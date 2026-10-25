@@ -27,14 +27,6 @@ pub fn model_info(conn: &Connection) -> Result<Vec<ModelInfo>> {
     st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect()
 }
 
-/// Ids of a model's thumbnailed images, by id, at most `limit`.
-pub fn thumbnail_image_ids(conn: &Connection, model_id: i64, limit: i64) -> Result<Vec<i64>> {
-    let mut st = conn.prepare(
-        "SELECT id FROM images WHERE model_id = ?1 AND thumbnail_path IS NOT NULL ORDER BY id LIMIT ?2",
-    )?;
-    st.query_map([model_id, limit], |r| r.get(0))?.collect()
-}
-
 /// `(root, pattern)` of the libraries (the folders crawls cover), by root.
 pub fn crawled_folders(conn: &Connection) -> Result<Vec<(String, Option<String>)>> {
     let mut st = conn.prepare("SELECT root, pattern FROM libraries WHERE root != '' ORDER BY root")?;

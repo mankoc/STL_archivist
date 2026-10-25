@@ -366,16 +366,6 @@ pub fn move_folder(tx: &Transaction, id: i64, to: i64) -> Result<bool> {
     }
 }
 
-/// After a crawl: its counts and pattern.
-pub fn record_crawl(tx: &Transaction, id: i64, pattern: Option<&str>, archive_count: i64, new_count: i64, updated_count: i64) -> Result<()> {
-    tx.execute(
-        "UPDATE libraries SET pattern = coalesce(?2, pattern), last_crawled_at = ?3, archive_count = ?4, new_count = ?5, \
-         updated_count = ?6 WHERE id = ?1",
-        params![id, pattern.filter(|p| !p.trim().is_empty()), utc_now_text(), archive_count, new_count, updated_count],
-    )?;
-    Ok(())
-}
-
 /// What removing a folder or a library did.
 #[derive(Debug, Default, PartialEq)]
 pub struct Removed {

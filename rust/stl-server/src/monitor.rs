@@ -17,8 +17,6 @@ use crate::library_settings::LibrarySettings;
 
 struct MonitoredFolder {
     path: String,
-    #[allow(dead_code)]
-    pattern: Option<String>,
 }
 
 /// Who the monitor's crawl jobs are from.
@@ -57,7 +55,7 @@ pub fn check(lib: &Arc<Library>, force: bool) -> Vec<JobInfo> {
     };
     let mut queued = Vec::new();
     for f in folders.into_iter().filter(|f| f.monitored && !f.root.is_empty()) {
-        let f = MonitoredFolder { path: f.root, pattern: f.pattern };
+        let f = MonitoredFolder { path: f.root };
         {
             let mut checked = lib.monitor.checked.lock().unwrap_or_else(|e| e.into_inner());
             if !force && checked.get(&f.path).is_some_and(|t| t.elapsed() < every) {

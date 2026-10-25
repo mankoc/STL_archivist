@@ -201,6 +201,20 @@ export class Viewer {
         return ret;
     }
     /**
+     * Where the file `key` places itself (without its offset): `x0, y0, z0, x1, y1, z1`; empty
+     * when it is not loaded or has no geometry.
+     * @param {string} key
+     * @returns {Float64Array}
+     */
+    file_bounds(key) {
+        const ptr0 = passStringToWasm0(key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.viewer_file_bounds(this.__wbg_ptr, ptr0, len0);
+        var v2 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v2;
+    }
+    /**
      * Facts about the file `key` (none when it is not loaded).
      * @param {string} key
      * @returns {FileInfo | undefined}
@@ -283,6 +297,17 @@ export class Viewer {
         wasm.viewer_set_dark(this.__wbg_ptr, dark);
     }
     /**
+     * Move the file `key` by `dx`, `dy` from where it places itself.
+     * @param {string} key
+     * @param {number} dx
+     * @param {number} dy
+     */
+    set_offset(key, dx, dy) {
+        const ptr0 = passStringToWasm0(key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.viewer_set_offset(this.__wbg_ptr, ptr0, len0, dx, dy);
+    }
+    /**
      * Show or hide the build plates and volumes of slicer scenes.
      * @param {boolean} show
      */
@@ -326,6 +351,18 @@ export class Viewer {
         const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         wasm.viewer_show_view(this.__wbg_ptr, ptr0, len0);
+    }
+    /**
+     * The canvas rectangle the shown files cover as drawn now (`x0, y0, x1, y1`
+     * in pixels from the top left, within the canvas; the build plate not
+     * included), from their vertices; empty when nothing is shown.
+     * @returns {Float64Array}
+     */
+    shown_rect() {
+        const ret = wasm.viewer_shown_rect(this.__wbg_ptr);
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
     }
     /**
      * Move toward (`factor` > 1) or away from the focal point.

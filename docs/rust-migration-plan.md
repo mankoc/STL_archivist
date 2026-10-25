@@ -1344,6 +1344,24 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.43.19: `ThumbStore` keeps its environment in `RwLock<Option<Inner>>` (transactions
+  share it; map growth and `compact` take it exclusively). `ThumbStore::compact` copies with
+  `CompactionOption::Enabled` to `data.mdb.compact`, closes the environment, renames the copy
+  over `data.mdb` and reopens; `delete_orphan_blobs` finds and deletes unreferenced blobs in
+  one write transaction. The `compact_database` job runs both after `maintenance::compact`.
+  `maintenance::has_folder_images` / `models_with_folder_images` (images stored by absolute
+  path: from beside the archive) drop *Archive without images* in `crawl::upsert`,
+  `jobs::apply_rescan` and `maint::recheck_warnings`. `stl-viewer`'s `Viewer::shown_rect`
+  projects the shown parts' vertices (each `Part` keeps its transform); the snapshot crops to
+  it (`web/src/viewer/snapshot.ts`) on a 2D canvas in the same task as the render.
+  Spread out: `Viewer::file_bounds` (where a file places itself) and `set_offset` (each
+  `File` keeps its `offset`; `Renderer::translate` moves its parts); the layout is
+  `web/src/viewer/spread.ts`. `view_thumb_size` (library settings) sizes the thumbnails of
+  `POST /api/models/{id}/images?view=true`. Dead code removed (see the changelog); the
+  thumbnail store no longer converts legacy entries (it reads them, and a write replaces
+  one). `archive::sevenz` reads an empty archive (signature header announcing an empty next
+  header, which `sevenz-rust2` fails on) as no entries, as py7zr 1.1.4 does; the crawl's
+  phase 1 re-fingerprints archives whose stored hash is a `fallback:` one.
 - 2026.43.18: `storage::crawl::upsert` (now private) gathers its thumbnails in a buffer
   (image id, JPEG, borrowed from the inputs) and `upsert_batch` writes them with one
   `ThumbStore::put_many` (one LMDB write transaction, one sync) before the caller commits;

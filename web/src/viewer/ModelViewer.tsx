@@ -6,8 +6,9 @@
 // alone, Space adds or takes it away). Right-click a file for its colour, material,
 // wireframe, centring and information (MeshPeek's options; the ⓘ beside a
 // shown file and the toolbar's ⓘ open the information too), or a folder to
-// show its files. Editors can add the view as it is drawn to the model's
-// images (the camera button).
+// show its files. "Spread out" puts the shown files side by side on the XY
+// plane. Editors can add the view as it is drawn to the model's images (the
+// camera button).
 // In the desktop app, with MeshPeek installed and the archive reachable from
 // this computer, "Open in MeshPeek" opens a file there.
 import {
@@ -17,7 +18,7 @@ import {
 import { notifications } from "@mantine/notifications";
 import {
   IconAlertTriangle, IconCameraPlus, IconCheck, IconChevronRight, IconExternalLink, IconFocus2, IconInfoCircle, IconLayoutBoardSplit,
-  IconPalette, IconPolygon,
+  IconLayoutDistributeHorizontal, IconPalette, IconPolygon,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -80,6 +81,7 @@ export function ModelViewer({ id, title, file, clientPath, onAddImage, onClose }
   }, []);
   const [colorEach, setColorEach] = useState(false);
   const [plates, setPlates] = useState(true);
+  const [spread, setSpread] = useState(false);
   const [focus, setFocus] = useState<{ name: string; n: number } | null>(null);
   // The file whose information panel is open.
   const [infoFor, setInfoFor] = useState<string | null>(null);
@@ -213,6 +215,7 @@ export function ModelViewer({ id, title, file, clientPath, onAddImage, onClose }
               styles={styles}
               colorEach={colorEach}
               plates={plates}
+              spread={spread}
               focus={focus}
               info={infoFor}
               onInfoClose={() => setInfoFor(null)}
@@ -228,6 +231,9 @@ export function ModelViewer({ id, title, file, clientPath, onAddImage, onClose }
                   <Toggle label="Wireframe (W)" on={allWire} onClick={toggleWireAll}><IconPolygon size={16} /></Toggle>
                   <Toggle label="Colour each model" on={colorEach} onClick={() => setColorEach((c) => !c)}><IconPalette size={16} /></Toggle>
                   <Toggle label="Build plate" on={plates} onClick={() => setPlates((p) => !p)}><IconLayoutBoardSplit size={16} /></Toggle>
+                  <Toggle label="Spread out: the shown files side by side" on={spread} onClick={() => setSpread((s) => !s)}>
+                    <IconLayoutDistributeHorizontal size={16} />
+                  </Toggle>
                   {onAddImage && (
                     <Tooltip label="Add this view to the model's images">
                       <ActionIcon variant="default" aria-label="Add this view to the model's images" disabled={!canAdd}

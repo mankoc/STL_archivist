@@ -33,6 +33,16 @@ impl LibrarySettings {
             .unwrap_or(MAX_THUMB_SIZE_DEFAULT)
     }
 
+    /// Longest edge of a thumbnail made from a model viewer capture; default: [`Self::max_thumb_size`].
+    pub fn view_thumb_size(&self) -> u32 {
+        self.0
+            .get("view_thumb_size")
+            .and_then(Value::as_u64)
+            .and_then(|n| u32::try_from(n).ok())
+            .filter(|&n| n > 0)
+            .unwrap_or_else(|| self.max_thumb_size())
+    }
+
     pub fn sidecars_enabled(&self) -> bool {
         self.get_bool("metadata_sidecar_enabled", true)
     }

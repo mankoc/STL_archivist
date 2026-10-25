@@ -443,10 +443,19 @@ pub struct AddedImages {
     pub failed: Vec<String>,
 }
 
+#[derive(Deserialize, utoipa::IntoParams)]
+#[serde(deny_unknown_fields)]
+pub struct ImagesQuery {
+    /// The images are captures of the model viewer: thumbnails at the library's `view_thumb_size`.
+    #[serde(default)]
+    pub view: bool,
+}
+
 /// Add images to a model (multipart form, one file per part). Each becomes a
-/// thumbnail (resized to the library's thumbnail size); the original is not kept.
+/// thumbnail (resized to the library's thumbnail size, or its view capture
+/// size with `view`); the original is not kept.
 #[utoipa::path(post, path = "/api/models/{id}/images", tag = "editing",
-    params(("id" = i64, Path, description = "Model id")),
+    params(("id" = i64, Path, description = "Model id"), ImagesQuery),
     request_body(content_type = "multipart/form-data", description = "Image files (64 MB each, 256 MB in all)"),
     responses((status = 200, body = AddedImages), (status = 404, body = crate::error::ErrorBody),
               (status = 413, body = crate::error::ErrorBody)))]
@@ -454,6 +463,7 @@ pub async fn add_images(
     State(lib): State<AppState>,
     me: CurrentUser,
     Path(id): Path<i64>,
+    Query(q): Query<ImagesQuery>,
     mut form: Multipart,
 ) -> Result<Json<AddedImages>, ApiError> {
     editor(&me)?;
@@ -470,7 +480,8 @@ pub async fn add_images(
         .run(move |lib| {
             let path = lib.db.with(|c| model_edit::archive_paths(c, &[id]))?.remove(&id);
             let Some(path) = path else { return Err(ApiError::not_found(format!("no model {id}"))) };
-            let size = LibrarySettings::load(&lib.config.data_dir).max_thumb_size();
+            let settings = LibrarySettings::load(&lib.config.data_dir);
+            let size = if q.view { settings.view_thumb_size() } else { settings.max_thumb_size() };
             let mut thumbs = Vec::new();
             let mut failed = Vec::new();
             for (name, data) in files {

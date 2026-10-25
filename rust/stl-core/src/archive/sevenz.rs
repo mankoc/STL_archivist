@@ -10,7 +10,24 @@ use sevenz_rust2::{Archive, BlockDecoder, Password};
 
 use super::{ArchiveError, ArchiveMember};
 
+/// Whether `path` is an archive without entries: a valid signature header
+/// announcing an empty next header, which is what 7-Zip writes for an archive
+/// of nothing (32 bytes). py7zr lists no entries; `sevenz-rust2` fails on it.
+fn is_empty_archive(path: &Path) -> std::io::Result<bool> {
+    let mut head = [0u8; 32];
+    if std::io::Read::read_exact(&mut std::fs::File::open(path)?, &mut head).is_err() {
+        return Ok(false);
+    }
+    let start_crc = u32::from_le_bytes(head[8..12].try_into().expect("4 bytes"));
+    Ok(head[..6] == [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c]
+        && crc32fast::hash(&head[12..32]) == start_crc
+        && head[20..32].iter().all(|&b| b == 0)) // next header size and CRC
+}
+
 pub(super) fn list_members(path: &Path) -> Result<Vec<ArchiveMember>, ArchiveError> {
+    if is_empty_archive(path)? {
+        return Ok(Vec::new());
+    }
     let archive = Archive::open_with_password(path, &Password::empty()).map_err(map_err)?;
     Ok(archive
         .files
@@ -35,6 +52,9 @@ pub(super) fn read_members(
 ) -> Result<Vec<(String, Vec<u8>)>, ArchiveError> {
     use std::collections::{HashMap, HashSet};
 
+    if is_empty_archive(path)? {
+        return Ok(Vec::new());
+    }
     let mut file = std::fs::File::open(path)?;
     let archive = Archive::read(&mut file, &Password::empty()).map_err(map_err)?;
     let wanted: HashSet<&str> = wanted.iter().map(String::as_str).collect();
@@ -98,5 +118,39 @@ fn map_err(e: sevenz_rust2::Error) -> ArchiveError {
     match e {
         sevenz_rust2::Error::Io(io, _) => ArchiveError::Io(io),
         other => ArchiveError::Format(other.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What 7-Zip writes for an archive of nothing: the signature header alone.
+    fn empty_7z() -> Vec<u8> {
+        let mut b = vec![0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c, 0x00, 0x04, 0x8d, 0x9b, 0xd5, 0x0f];
+        b.resize(32, 0);
+        b
+    }
+
+    #[test]
+    fn an_empty_archive_lists_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("empty.7z");
+        std::fs::write(&p, empty_7z()).unwrap();
+        assert_eq!(list_members(&p).unwrap(), Vec::<ArchiveMember>::new(), "as py7zr 1.1.4 lists it");
+        assert_eq!(read_members(&p, &["x.stl".into()]).unwrap(), Vec::<(String, Vec<u8>)>::new());
+        assert_eq!(crate::archive::fingerprint(&p).unwrap(), crate::archive::fingerprint_of(&[]));
+
+        // A wrong start header CRC, or a header that announces more, is still refused.
+        let mut bad = empty_7z();
+        bad[8] ^= 1;
+        std::fs::write(&p, bad).unwrap();
+        assert!(list_members(&p).is_err());
+        let mut more = empty_7z();
+        more[20] = 1;
+        let crc = crc32fast::hash(&more[12..32]).to_le_bytes();
+        more[8..12].copy_from_slice(&crc);
+        std::fs::write(&p, more).unwrap();
+        assert!(list_members(&p).is_err(), "a next header that is not there");
     }
 }

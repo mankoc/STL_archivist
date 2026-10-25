@@ -7,7 +7,12 @@ import { api, unwrap } from "../api/client";
 import { type Cell, CellGrid } from "./CellGrid";
 import { GRID_PAGE, pagesFor } from "./grid";
 
-export function GridView({ ids, selected, onOpen }: { ids: number[]; selected: number | null; onOpen: (id: number) => void }) {
+export function GridView({ ids, selected, onOpen, onContextMenu }: {
+  ids: number[];
+  selected: number | null;
+  onOpen: (id: number) => void;
+  onContextMenu?: (id: number, e: React.MouseEvent) => void;
+}) {
   const [pages, setPages] = useState<number[]>([0]);
   const onRange = useCallback(
     (first: number, last: number, cols: number) => {
@@ -32,5 +37,5 @@ export function GridView({ ids, selected, onOpen }: { ids: number[]; selected: n
     for (const r of results) for (const c of r.data ?? []) m.set(c.id, c);
     return m;
   }, [results]);
-  return <CellGrid count={ids.length} cell={(i) => byId.get(ids[i])} selected={selected} onOpen={onOpen} onRange={onRange} />;
+  return <CellGrid count={ids.length} cell={(i) => byId.get(ids[i])} selected={selected} onOpen={onOpen} onContextMenu={onContextMenu} onRange={onRange} />;
 }

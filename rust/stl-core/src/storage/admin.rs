@@ -56,15 +56,6 @@ pub fn list(conn: &Connection, kind: &str) -> Result<Vec<AdminRow>> {
     .collect()
 }
 
-/// `tags_for_merge_scan`: `(id, name, models)` for every tag, by id.
-pub fn tags_for_scan(conn: &Connection) -> Result<Vec<(i64, String, i64)>> {
-    let mut st = conn.prepare(
-        "SELECT tags.id, tags.name, count(model_tags.model_id) FROM tags \
-         LEFT OUTER JOIN model_tags ON model_tags.tag_id = tags.id GROUP BY tags.id, tags.name ORDER BY tags.id",
-    )?;
-    st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect()
-}
-
 fn id_by_name(tx: &Connection, t: &str, name: &str) -> Result<Option<i64>> {
     tx.query_row(&format!("SELECT id FROM {t} WHERE name = ?1 ORDER BY id LIMIT 1"), [name], |r| r.get(0)).optional()
 }
@@ -262,10 +253,6 @@ pub fn author_counts(conn: &Connection) -> Result<Vec<(String, i64)>> {
         "SELECT creator, count(id) FROM models WHERE creator IS NOT NULL GROUP BY creator ORDER BY creator",
     )?;
     st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()
-}
-
-pub fn author_model_count(conn: &Connection, name: &str) -> Result<i64> {
-    conn.query_row("SELECT count(*) FROM models WHERE creator = ?1", [name], |r| r.get(0))
 }
 
 fn profile_exists(tx: &Connection, name: &str) -> Result<bool> {

@@ -1,5 +1,48 @@
 # Changelog
 
+## 2026.43.19 — 2026-10-25
+
+- **Compact database compacts the thumbnails too:** after rewriting the database, the job
+  drops the thumbnails no image uses any more (deleted models and pruned images left them in
+  the store) and rewrites `thumbnails.lmdb` without its free pages, which LMDB reuses but
+  never gives back to the disk. The job reports both sizes, before and after; thumbnails
+  wait while the store is rewritten.
+- **"Archive without images" leaves out archives with images beside them:** an image found
+  in the archive's folder (taken as one of its images by the crawl) counts as its image in
+  crawls, *Rescan* and *Check images warning*; run *Check images warning* once to clear the
+  warnings already stored. Images added by hand still do not count.
+- **"Add this view" keeps only the models:** the image is cropped to the shown models (with a
+  small margin) instead of the whole view with its empty sides; the build plate does not
+  widen it. The viewer finds their extent from their vertices as drawn (`shown_rect`).
+- **Fixed: empty `.7z` archives were reported as "possibly corrupted".** An archive of
+  nothing (the 32 bytes 7-Zip writes when there was nothing to pack) is now read as an
+  archive without files, as py7zr reads it, so its record gets the usual warnings (no
+  images, no printable files) instead of *Unreadable archive*. Archives the readers failed
+  on are tried again by every crawl even when the file did not change, so records left
+  unreadable by earlier versions heal on the next crawl. The crawl log says "cannot read
+  archive (damaged, or in a format this server does not read)" once, not "Warning: WARNING:
+  Cannot open archive (possibly corrupted)".
+- **Right-click Rescan:** editors can right-click a row of the table, or an image of the
+  image grid, to rescan that archive (or the whole selection, when the row is part of it; a
+  row outside the selection is selected first).
+- **Spread out** in the model viewer's toolbar puts the shown files side by side on the build
+  plane, in rows of about √n, around where they were (each file with its supports, heights
+  unchanged); switching it off puts them back. Files shown later join the rows.
+- **Model viewer captures have their own size:** *Settings → Library → Model viewer captures
+  (px)* sets the thumbnail size of images added with the camera button (the thumbnail size
+  unless set; `POST /api/models/{id}/images?view=true`).
+- **Dead code removed:** unused storage functions (`tags_for_scan`, `author_model_count`,
+  `tag_names`, `model_panel`, `lookup_names`, `add_tag`, `existing_ids`,
+  `thumbnail_image_ids`, `record_crawl`, the `filter_cache` helpers, `any_archive_path`,
+  `mass_choices`, `title_path`, `Pooled::detach`, `RelPath::windows_unsafe`), the thumbnail
+  store's Python-era sweep (`convert_legacy`, `orphan_blobs`, `delete_keys`), an unused
+  monitor field, `sectionActive` in the web client, and the unused test libraries
+  (`@testing-library/react`, `user-event`, `jest-dom` and its setup file). The
+  `filter_cache` table stays, for older data directories.
+- Unused thumbnails are found and deleted in one store transaction, so a crawl running at the
+  same time can no longer lose a thumbnail that started sharing one of them (also when
+  deleting the database).
+
 ## 2026.43.18 — 2026-10-24
 
 - **Crawls write thumbnails once per batch:** the thumbnails of each batch of 50 archives,

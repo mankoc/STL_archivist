@@ -279,6 +279,11 @@ pub fn recheck_warnings(lib: &Library, ctl: &Control, log: &dyn Fn(String), whic
         let found = rules::explain_warnings(&names, only, &patterns).ok()?;
         Some(found.iter().any(|(w, _)| *w == which.line()))
     };
+    // Images beside the archive count as its images.
+    let beside = match which {
+        Recheck::NoImages => lib.db.with(maintenance::models_with_folder_images).map_err(db)?,
+        Recheck::Presupported => Default::default(),
+    };
     ctl.set_total(records.len() as u64);
     let mut out = Rechecked::default();
     for chunk in records.chunks(WARNING_BATCH) {
@@ -286,7 +291,8 @@ pub fn recheck_warnings(lib: &Library, ctl: &Control, log: &dyn Fn(String), whic
             log("Stopped by user.".into());
             break;
         }
-        let verdicts: Vec<Option<bool>> = chunk.par_iter().map(|(_, path, _)| evaluate(path)).collect();
+        let verdicts: Vec<Option<bool>> =
+            chunk.par_iter().map(|(id, path, _)| if beside.contains(id) { Some(false) } else { evaluate(path) }).collect();
         ctl.advance(chunk.len() as u64);
         let mut pending = Vec::new();
         for ((id, path, warning), verdict) in chunk.iter().zip(verdicts) {

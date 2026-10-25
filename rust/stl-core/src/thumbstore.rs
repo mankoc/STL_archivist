@@ -18,10 +18,12 @@
 //!
 //! LMDB's map has a fixed size; a write that fills it grows the map and retries.
 //! Growing requires that no transaction is open in the process, so every
-//! transaction holds a shared lock and growing takes it exclusively.
+//! transaction holds a shared lock and growing takes it exclusively, as does
+//! compacting (which closes the environment, swaps the file and reopens it).
 
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
+use std::sync::{RwLock, RwLockReadGuard};
 
 use heed::types::Bytes;
 use heed::{CompactionOption, Database, Env, EnvOpenOptions, MdbError, RwTxn};
@@ -49,14 +51,33 @@ pub struct Stats {
     pub payload_bytes: u64,
 }
 
-pub struct ThumbStore {
+/// The open environment and its (unnamed) database.
+struct Inner {
     env: Env,
     db: Database<Bytes, Bytes>,
+}
+
+pub struct ThumbStore {
+    /// Shared by every transaction, exclusive while the map grows or the file
+    /// is compacted; `None` only when reopening after a compaction failed.
+    inner: RwLock<Option<Inner>>,
     dir: PathBuf,
-    /// Shared by every transaction, exclusive while the map is resized.
-    resize: RwLock<()>,
     /// Content digest of a payload; replaceable in tests to force collisions.
     digest: fn(&[u8]) -> [u8; 16],
+}
+
+/// A shared hold on the open environment.
+struct Shared<'a>(RwLockReadGuard<'a, Option<Inner>>);
+
+impl Deref for Shared<'_> {
+    type Target = Inner;
+    fn deref(&self) -> &Inner {
+        self.0.as_ref().expect("checked when taken")
+    }
+}
+
+fn closed() -> heed::Error {
+    heed::Error::Io(std::io::Error::other("the thumbnail store is closed"))
 }
 
 fn xxh3_digest(data: &[u8]) -> [u8; 16] {
@@ -84,13 +105,39 @@ fn blob_key(digest: &[u8; 16], slot: u8) -> Vec<u8> {
     k
 }
 
-fn is_legacy(key: &[u8]) -> bool {
-    !matches!(key.first(), Some(&REF_PREFIX) | Some(&BLOB_PREFIX))
-}
-
 fn page_align(n: usize) -> usize {
     const PAGE: usize = 64 * 1024; // a multiple of every page size LMDB runs on
     n.div_ceil(PAGE) * PAGE
+}
+
+/// Open (creating if needed) the environment in `dir`; see [`ThumbStore::open`].
+fn open_env(dir: &Path) -> Result<Inner> {
+    std::fs::create_dir_all(dir)?;
+    // SAFETY: the file is only modified through LMDB; rule 3 keeps py-lmdb
+    // from opening the same environment in this process. LMDB raises the
+    // map to the pages in use when it is smaller.
+    let env = unsafe { EnvOpenOptions::new().map_size(page_align(MAP_SIZE)).max_dbs(0).open(dir)? };
+    // The unnamed main database always exists; opening it needs no write.
+    let rtxn = env.read_txn()?;
+    let db = env.open_database(&rtxn, None)?;
+    rtxn.commit()?;
+    let db = match db {
+        Some(db) => db,
+        None => {
+            let mut wtxn = env.write_txn()?;
+            let db = env.create_database(&mut wtxn, None)?;
+            wtxn.commit()?;
+            db
+        }
+    };
+    let rtxn = env.read_txn()?;
+    let used = (env.info().last_page_number + 1) * db.stat(&rtxn)?.page_size as usize;
+    rtxn.commit()?;
+    if env.info().map_size < used + GROW_STEP {
+        // SAFETY: no transaction is open on this environment yet.
+        unsafe { env.resize(page_align(used + GROW_STEP))? };
+    }
+    Ok(Inner { env, db })
 }
 
 impl ThumbStore {
@@ -102,65 +149,52 @@ impl ThumbStore {
     /// LMDB extends `data.mdb` to the map size, so sizing from the file grew the
     /// map (and the file) by a step on every open.
     pub fn open(dir: &Path) -> Result<Self> {
-        std::fs::create_dir_all(dir)?;
-        // SAFETY: the file is only modified through LMDB; rule 3 keeps py-lmdb
-        // from opening the same environment in this process. LMDB raises the
-        // map to the pages in use when it is smaller.
-        let env = unsafe { EnvOpenOptions::new().map_size(page_align(MAP_SIZE)).max_dbs(0).open(dir)? };
-        // The unnamed main database always exists; opening it needs no write.
-        let rtxn = env.read_txn()?;
-        let db = env.open_database(&rtxn, None)?;
-        rtxn.commit()?;
-        let db = match db {
-            Some(db) => db,
-            None => {
-                let mut wtxn = env.write_txn()?;
-                let db = env.create_database(&mut wtxn, None)?;
-                wtxn.commit()?;
-                db
-            }
-        };
-        let rtxn = env.read_txn()?;
-        let used = (env.info().last_page_number + 1) * db.stat(&rtxn)?.page_size as usize;
-        rtxn.commit()?;
-        if env.info().map_size < used + GROW_STEP {
-            // SAFETY: no transaction is open in this process yet.
-            unsafe { env.resize(page_align(used + GROW_STEP))? };
-        }
-        Ok(ThumbStore { env, db, dir: dir.to_path_buf(), resize: RwLock::new(()), digest: xxh3_digest })
+        let inner = open_env(dir)?;
+        Ok(ThumbStore { inner: RwLock::new(Some(inner)), dir: dir.to_path_buf(), digest: xxh3_digest })
     }
 
     pub fn dir(&self) -> &Path {
         &self.dir
     }
 
+    /// Hold the environment for a transaction (map growth and compaction wait).
+    fn shared(&self) -> Result<Shared<'_>> {
+        let guard = self.inner.read().unwrap_or_else(|e| e.into_inner());
+        if guard.is_none() {
+            return Err(closed());
+        }
+        Ok(Shared(guard))
+    }
+
     pub fn map_size(&self) -> usize {
-        self.env.info().map_size
+        self.shared().map(|s| s.env.info().map_size).unwrap_or(0)
     }
 
     /// Close the environment and wait until LMDB has released it.
     pub fn close(self) {
-        let ThumbStore { env, .. } = self;
-        env.prepare_for_closing().wait();
+        if let Some(inner) = self.inner.into_inner().unwrap_or_else(|e| e.into_inner()) {
+            inner.env.prepare_for_closing().wait();
+        }
     }
 
     /// Run `f` in a write transaction and commit, growing the map on MDB_MAP_FULL.
     fn write<T>(&self, mut f: impl FnMut(&mut RwTxn, Database<Bytes, Bytes>) -> Result<T>) -> Result<T> {
         loop {
             let outcome = {
-                let _shared = self.resize.read().unwrap_or_else(|e| e.into_inner());
-                let mut txn = self.env.write_txn()?;
-                match f(&mut txn, self.db) {
+                let s = self.shared()?;
+                let mut txn = s.env.write_txn()?;
+                match f(&mut txn, s.db) {
                     Ok(v) => txn.commit().map(|_| v),
                     Err(e) => Err(e), // dropping txn aborts it
                 }
             };
             match outcome {
                 Err(heed::Error::Mdb(MdbError::MapFull)) => {
-                    let _exclusive = self.resize.write().unwrap_or_else(|e| e.into_inner());
-                    let new_size = page_align(self.map_size() + GROW_STEP);
+                    let mut exclusive = self.inner.write().unwrap_or_else(|e| e.into_inner());
+                    let inner = exclusive.as_mut().ok_or_else(closed)?;
+                    let new_size = page_align(inner.env.info().map_size + GROW_STEP);
                     // SAFETY: the exclusive lock means no transaction is open.
-                    unsafe { self.env.resize(new_size)? };
+                    unsafe { inner.env.resize(new_size)? };
                 }
                 other => return other,
             }
@@ -210,13 +244,13 @@ impl ThumbStore {
 
     /// Thumbnails of `ids` that exist, in one read transaction.
     pub fn get_many(&self, ids: &[u64]) -> Result<Vec<(u64, Vec<u8>)>> {
-        let _shared = self.resize.read().unwrap_or_else(|e| e.into_inner());
-        let txn = self.env.read_txn()?;
+        let s = self.shared()?;
+        let txn = s.env.read_txn()?;
         let mut out = Vec::with_capacity(ids.len());
         for &id in ids {
-            let data = match self.db.get(&txn, &ref_key(id))? {
-                Some(blob) => self.db.get(&txn, blob)?,
-                None => self.db.get(&txn, &legacy_key(id))?,
+            let data = match s.db.get(&txn, &ref_key(id))? {
+                Some(blob) => s.db.get(&txn, blob)?,
+                None => s.db.get(&txn, &legacy_key(id))?,
             };
             if let Some(d) = data {
                 out.push((id, d.to_vec()));
@@ -229,13 +263,13 @@ impl ThumbStore {
     /// (16 bytes, plus a slot byte after a hash collision), or `None` for a
     /// legacy entry, which has no content address yet. Missing ids are left out.
     pub fn digests(&self, ids: &[u64]) -> Result<Vec<(u64, Option<Vec<u8>>)>> {
-        let _shared = self.resize.read().unwrap_or_else(|e| e.into_inner());
-        let txn = self.env.read_txn()?;
+        let s = self.shared()?;
+        let txn = s.env.read_txn()?;
         let mut out = Vec::with_capacity(ids.len());
         for &id in ids {
-            if let Some(blob) = self.db.get(&txn, &ref_key(id))? {
+            if let Some(blob) = s.db.get(&txn, &ref_key(id))? {
                 out.push((id, Some(blob[1..].to_vec())));
-            } else if self.db.get(&txn, &legacy_key(id))?.is_some() {
+            } else if s.db.get(&txn, &legacy_key(id))?.is_some() {
                 out.push((id, None));
             }
         }
@@ -250,12 +284,12 @@ impl ThumbStore {
         let mut key = Vec::with_capacity(18);
         key.push(BLOB_PREFIX);
         key.extend_from_slice(digest);
-        let _shared = self.resize.read().unwrap_or_else(|e| e.into_inner());
-        let txn = self.env.read_txn()?;
-        Ok(self.db.get(&txn, &key)?.map(<[u8]>::to_vec))
+        let s = self.shared()?;
+        let txn = s.env.read_txn()?;
+        Ok(s.db.get(&txn, &key)?.map(<[u8]>::to_vec))
     }
 
-    /// Remove the references of `ids` (blobs stay; [`Self::orphan_blobs`] finds them).
+    /// Remove the references of `ids` (blobs stay; [`Self::delete_orphan_blobs`] sweeps them).
     pub fn delete_many(&self, ids: &[u64]) -> Result<()> {
         if ids.is_empty() {
             return Ok(());
@@ -270,78 +304,47 @@ impl ThumbStore {
     }
 
     pub fn stats(&self) -> Result<Stats> {
-        let _shared = self.resize.read().unwrap_or_else(|e| e.into_inner());
-        let txn = self.env.read_txn()?;
-        let mut s = Stats::default();
-        for item in self.db.iter(&txn)? {
+        let s = self.shared()?;
+        let txn = s.env.read_txn()?;
+        let mut st = Stats::default();
+        for item in s.db.iter(&txn)? {
             let (k, v) = item?;
             match k.first() {
-                Some(&REF_PREFIX) => s.thumbnails += 1,
+                Some(&REF_PREFIX) => st.thumbnails += 1,
                 Some(&BLOB_PREFIX) => {
-                    s.blobs += 1;
-                    s.payload_bytes += v.len() as u64;
+                    st.blobs += 1;
+                    st.payload_bytes += v.len() as u64;
                 }
                 _ => {
-                    s.legacy += 1;
-                    s.thumbnails += 1;
-                    s.payload_bytes += v.len() as u64;
+                    st.legacy += 1;
+                    st.thumbnails += 1;
+                    st.payload_bytes += v.len() as u64;
                 }
             }
         }
-        Ok(s)
+        Ok(st)
     }
 
-    /// Convert up to `limit` legacy entries to the content-addressed layout.
-    /// Returns how many were converted (0 when none are left).
-    pub fn convert_legacy(&self, limit: usize) -> Result<usize> {
-        let batch: Vec<(u64, Vec<u8>)> = {
-            let _shared = self.resize.read().unwrap_or_else(|e| e.into_inner());
-            let txn = self.env.read_txn()?;
-            let mut batch = Vec::new();
-            for item in self.db.iter(&txn)? {
-                let (k, v) = item?;
-                if is_legacy(k) && k.len() == 8 {
-                    batch.push((u64::from_be_bytes(k.try_into().unwrap()), v.to_vec()));
-                    if batch.len() >= limit {
-                        break;
-                    }
-                }
-            }
-            batch
-        };
-        let items: Vec<(u64, &[u8])> = batch.iter().map(|(id, d)| (*id, d.as_slice())).collect();
-        self.put_many(&items)?;
-        Ok(batch.len())
-    }
-
-    /// Keys of blobs no reference points at.
-    pub fn orphan_blobs(&self) -> Result<Vec<Vec<u8>>> {
-        let _shared = self.resize.read().unwrap_or_else(|e| e.into_inner());
-        let txn = self.env.read_txn()?;
-        let mut live = std::collections::HashSet::new();
-        for item in self.db.prefix_iter(&txn, &[REF_PREFIX])? {
-            live.insert(item?.1.to_vec());
-        }
-        let mut orphans = Vec::new();
-        for item in self.db.prefix_iter(&txn, &[BLOB_PREFIX])? {
-            let (k, _) = item?;
-            if !live.contains(k) {
-                orphans.push(k.to_vec());
-            }
-        }
-        Ok(orphans)
-    }
-
-    /// Delete raw keys (orphan blobs) in one transaction.
-    pub fn delete_keys(&self, keys: &[Vec<u8>]) -> Result<()> {
-        if keys.is_empty() {
-            return Ok(());
-        }
+    /// Delete the blobs no reference points at, finding them in the same write
+    /// transaction (so no write can start pointing at one meanwhile). Returns
+    /// how many were deleted.
+    pub fn delete_orphan_blobs(&self) -> Result<usize> {
         self.write(|txn, db| {
-            for k in keys {
+            let mut live = std::collections::HashSet::new();
+            for item in db.prefix_iter(txn, &[REF_PREFIX])? {
+                live.insert(item?.1.to_vec());
+            }
+            let mut orphans = Vec::new();
+            for item in db.prefix_iter(txn, &[BLOB_PREFIX])? {
+                let (k, _) = item?;
+                if !live.contains(k) {
+                    orphans.push(k.to_vec());
+                }
+            }
+            for k in &orphans {
                 db.delete(txn, k)?;
             }
-            Ok(())
+            Ok(orphans.len())
         })
     }
 
@@ -357,9 +360,31 @@ impl ThumbStore {
 
     /// Write a compacted copy of the environment to the file `path` (`data.mdb`).
     pub fn copy_compacted(&self, path: &Path) -> Result<()> {
-        let _shared = self.resize.read().unwrap_or_else(|e| e.into_inner());
-        self.env.copy_to_path(path, CompactionOption::Enabled)?;
+        let s = self.shared()?;
+        s.env.copy_to_path(path, CompactionOption::Enabled)?;
         Ok(())
+    }
+
+    /// Rewrite `data.mdb` without its free pages (LMDB reuses them but never
+    /// shrinks the file): a compacted copy beside it replaces it while the
+    /// environment is closed. Every other use of the store waits meanwhile.
+    /// Returns the file's size before and after, in bytes.
+    pub fn compact(&self) -> Result<(u64, u64)> {
+        let data = self.dir.join("data.mdb");
+        let tmp = self.dir.join("data.mdb.compact");
+        let size = |p: &Path| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
+        let before = size(&data);
+        let mut exclusive = self.inner.write().unwrap_or_else(|e| e.into_inner());
+        let inner = exclusive.take().ok_or_else(closed)?;
+        let _ = std::fs::remove_file(&tmp);
+        let copied = inner.env.copy_to_path(&tmp, CompactionOption::Enabled);
+        inner.env.prepare_for_closing().wait();
+        // Replaced only by a complete copy; the store reopens either way.
+        let swapped = copied.and_then(|_| Ok(std::fs::rename(&tmp, &data)?));
+        let _ = std::fs::remove_file(&tmp);
+        *exclusive = Some(open_env(&self.dir)?);
+        swapped?;
+        Ok((before, size(&data)))
     }
 }
 
@@ -415,24 +440,21 @@ mod tests {
         s.delete_many(&[1, 3]).unwrap();
         assert_eq!(get(&s, 2).as_deref(), Some(&b"a"[..]));
         assert_eq!(get(&s, 1), None);
-        let orphans = s.orphan_blobs().unwrap();
-        assert_eq!(orphans.len(), 1);
-        s.delete_keys(&orphans).unwrap();
+        assert_eq!(s.delete_orphan_blobs().unwrap(), 1);
         assert_eq!(s.stats().unwrap().blobs, 1);
     }
 
     #[test]
-    fn legacy_entries_read_and_convert() {
+    fn legacy_entries_read_and_are_replaced() {
         let (_d, s) = store();
         s.put_raw(&[(7u64.to_be_bytes().to_vec(), b"old".to_vec()), (8u64.to_be_bytes().to_vec(), b"old".to_vec())])
             .unwrap();
         assert_eq!(get(&s, 7).as_deref(), Some(&b"old"[..]));
         assert_eq!(s.stats().unwrap().legacy, 2);
-        assert_eq!(s.convert_legacy(1).unwrap(), 1);
-        assert_eq!(s.convert_legacy(10).unwrap(), 1);
-        assert_eq!(s.convert_legacy(10).unwrap(), 0);
+        s.put_many(&[(7, b"new".as_slice())]).unwrap(); // drops 7's legacy entry
         let st = s.stats().unwrap();
-        assert_eq!((st.legacy, st.blobs, st.thumbnails), (0, 1, 2));
+        assert_eq!((st.legacy, st.blobs, st.thumbnails), (1, 1, 2));
+        assert_eq!(get(&s, 7).as_deref(), Some(&b"new"[..]));
         assert_eq!(get(&s, 8).as_deref(), Some(&b"old"[..]));
     }
 
@@ -468,8 +490,8 @@ mod tests {
         let s = ThumbStore::open(&dir.path().join("t.lmdb")).unwrap();
         // Shrink the map so a modest write fills it.
         {
-            let _x = s.resize.write().unwrap();
-            unsafe { s.env.resize(page_align(1024 * 1024)).unwrap() };
+            let mut x = s.inner.write().unwrap();
+            unsafe { x.as_mut().unwrap().env.resize(page_align(1024 * 1024)).unwrap() };
         }
         let big: Vec<Vec<u8>> = (0..40u8).map(|k| vec![k; 100_000]).collect();
         let items: Vec<(u64, &[u8])> = big.iter().enumerate().map(|(i, d)| (i as u64, d.as_slice())).collect();
@@ -489,6 +511,26 @@ mod tests {
         let c = ThumbStore::open(&out).unwrap();
         assert_eq!(get(&c, 1).as_deref(), Some(&b"keep"[..]));
         c.close();
+        s.close();
+    }
+
+    #[test]
+    fn compacting_shrinks_the_file_and_keeps_the_rest() {
+        let (_d, s) = store();
+        let big: Vec<Vec<u8>> = (0..60u8).map(|k| vec![k; 200_000]).collect();
+        let items: Vec<(u64, &[u8])> = big.iter().enumerate().map(|(i, d)| (i as u64, d.as_slice())).collect();
+        s.put_many(&items).unwrap();
+        s.put_many(&[(200, big[0].as_slice())]).unwrap(); // shares id 0's blob
+        s.delete_many(&(1..60).collect::<Vec<u64>>()).unwrap();
+        assert_eq!(s.delete_orphan_blobs().unwrap(), 59, "id 0's blob is still used");
+        assert_eq!(s.delete_orphan_blobs().unwrap(), 0);
+        let (before, after) = s.compact().unwrap();
+        assert!(after < before / 4, "{before} -> {after}");
+        assert_eq!(get(&s, 0).unwrap(), big[0], "kept after the swap");
+        assert_eq!(get(&s, 1), None);
+        s.put_many(&[(100, b"new".as_slice())]).unwrap();
+        assert_eq!(get(&s, 100).as_deref(), Some(&b"new"[..]), "writable after the swap");
+        assert!(!s.dir().join("data.mdb.compact").exists());
         s.close();
     }
 }

@@ -229,7 +229,7 @@ export const TOPICS: Topic[] = [
       { h: "Warnings" },
       { table: { head: ["Warning", "Raised when"], rows: [
         ["Presupported STL", "An STL looks presupported (by the patterns)"],
-        ["No images", "The archive has no preview image"],
+        ["No images", "The archive has no preview image, and none was found beside it in its folder"],
         ["Nested archive", "The archive contains another archive"],
         ["No printable files", "No printable model file inside"],
         ["Low compression", "The archive's compression rate is above the threshold (default 0.95)"],
@@ -265,7 +265,7 @@ export const TOPICS: Topic[] = [
         "The model's fields, tags, warnings, path and images. Drag its left edge to resize (double-click resets).",
         "**Download** the archive; **Copy path**; **Open folder** (desktop app) shows it in the file manager. Paths are translated with the server's `path_map` so they make sense on your computer.",
         "**Files** shows the archive's folders and files as a tree, with each file's size and CRC-32 (from the archive's catalog: every crawl stores it, nothing is unpacked). The cube beside a model file opens it in the model viewer.",
-        "**View model** shows the archive's 3D models (STL, OBJ, PLY, 3MF, Lychee `.lys`, CHITUBOX `.chitubox`, `.ctp` and `.ctb`) with MeshPeek's renderer. The files are a folder tree on the left: click a file to show it alone, tick files or folders (or **Ctrl**-click) to show several together, **↑**/**↓** step through them (in the tree, **Enter** shows the focused file and **Space** adds or takes it away). Files taken out of the view are kept for a while, so showing them again is instant. Right-click a file or folder for its colour, material (Matte, Plastic, Glossy, Metal), wireframe, **Centre on it**, **Information** and **Open in MeshPeek**. The ⓘ beside a shown file (or in the toolbar, for the current file) shows its information as MeshPeek does: path, triangles, support triangles, size in X, Y and Z, and what the file says about itself (format, file size, slicer, printer, layers…). Editors can click the camera button (**Add this view to the model's images**) to make the view, as drawn, one of the model's images.",
+        "**View model** shows the archive's 3D models (STL, OBJ, PLY, 3MF, Lychee `.lys`, CHITUBOX `.chitubox`, `.ctp` and `.ctb`) with MeshPeek's renderer. The files are a folder tree on the left: click a file to show it alone, tick files or folders (or **Ctrl**-click) to show several together, **↑**/**↓** step through them (in the tree, **Enter** shows the focused file and **Space** adds or takes it away). Files taken out of the view are kept for a while, so showing them again is instant. Right-click a file or folder for its colour, material (Matte, Plastic, Glossy, Metal), wireframe, **Centre on it**, **Information** and **Open in MeshPeek**. The ⓘ beside a shown file (or in the toolbar, for the current file) shows its information as MeshPeek does: path, triangles, support triangles, size in X, Y and Z, and what the file says about itself (format, file size, slicer, printer, layers…). **Spread out** (toolbar) puts the shown files side by side on the build plane instead of on top of each other. Editors can click the camera button (**Add this view to the model's images**) to make the shown models, as drawn and cropped to them, one of the model's images (at the library's *Model viewer captures* size).",
         "In the view: left drag orbits, middle or **Shift** drag pans, the wheel or right drag zooms, **F** frames everything, **W** switches the wireframe, **0**–**6** are the standard views; click a face of the view cube (top right) to look from that side, or drag the cube to turn the view. The buttons top left switch the wireframe, *Colour each model* and the build plate. Lychee and CHITUBOX scenes show their supports and build plate.",
         "**Open in MeshPeek** (desktop app, when the MeshPeek viewer is installed and the archive is reachable from your computer) opens the archive, or the file shown in the viewer, in MeshPeek. MeshPeek is looked for on the `PATH` and in Program Files; **Settings → Account → MeshPeek on this computer** chooses the program instead.",
         "Click an image for the full-resolution original read from the archive; **←**/**→** step through the images.",
@@ -306,7 +306,7 @@ export const TOPICS: Topic[] = [
     blocks: [
       { p: "Select models, then open **Archives** above the table. These run as [jobs](jobs)." },
       { list: [
-        "**Rescan** re-reads the archives (metadata, file list, presupports, warnings, scales) — after replacing an archive's contents in place.",
+        "**Rescan** re-reads the archives (metadata, file list, presupports, warnings, scales) — after replacing an archive's contents in place. Right-clicking a row or image offers it too: for the selection when the row is part of it, else for that model.",
         "**Generate thumbnails** replaces the models' images with new ones from their archives, up to *Thumbnails per archive*.",
         "**Sort files…** moves the archives into a folder tree built from a [pattern](path-patterns) under a target folder. **Preview** shows every move first (*COLLISION*: a file of that name exists and a numbered name is used; *MISS*: the archive is not on disk). **Move** moves all or none: if one move fails, the others are put back. Needs *Allow file sorting* in the settings.",
         "**Delete files…** deletes the archive files and their records. With a trash folder set, files go there with a small `.json` note for recovery. Needs *Allow file delete* in the settings.",
@@ -420,7 +420,7 @@ export const TOPICS: Topic[] = [
         "**Find duplicate entries** lists records that catalogue the same archive twice.",
         "On that list: **Find moved in DB** looks for each missing record's archive among the other records; **Merge moved** moves its metadata there. **Search in folder…** looks for missing archives in a folder you pick and points the records at them. **Remove selected** / **Remove all missing** delete records. Actions apply to ticked rows, or to all when none is ticked.",
         "**Remove missing archives** deletes the records of every archive marked missing — for example those [monitored folders](monitored-folders) marked. Files are not touched.",
-        "**Prune images** keeps at most N images per model; **Compact database** (administrators) reclaims space after large deletions.",
+        "**Prune images** keeps at most N images per model; **Compact database** (administrators) reclaims space after large deletions: the database and the thumbnail store are rewritten without their free pages, and thumbnails no image uses any more are dropped (thumbnails wait while the store is rewritten; each file needs room for a copy on its drive).",
       ] },
       { h: "Warnings, hashes and embeddings" },
       { list: [
@@ -500,7 +500,7 @@ export const TOPICS: Topic[] = [
         "**Library** (administrators change, everyone sees):",
       ] },
       { table: { head: ["Section", "Settings"], rows: [
-        ["Crawler", "Thumbnails per archive, thumbnail size, parallel workers, check monitored folders every N minutes, crawl subfolders, AI image embeddings, compute embeddings during crawls (the list of STL files is always stored)"],
+        ["Crawler", "Thumbnails per archive, thumbnail size, the size of model viewer captures (the thumbnail size unless set), parallel workers, check monitored folders every N minutes, crawl subfolders, AI image embeddings, compute embeddings during crawls (the list of STL files is always stored)"],
         ["Warnings", "Which warnings crawls raise, the low-compression threshold, presupport file-name patterns"],
         ["Metadata sidecars", "Write METADATA.7z into archive folders, with or without thumbnails"],
         ["Archive files", "Allow Sort files, allow Delete files, the trash folder"],

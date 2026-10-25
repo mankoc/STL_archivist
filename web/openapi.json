@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.43.18"
+    "version": "2026.43.19"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -2285,7 +2285,7 @@
         "tags": [
           "editing"
         ],
-        "summary": "Add images to a model (multipart form, one file per part). Each becomes a\nthumbnail (resized to the library's thumbnail size); the original is not kept.",
+        "summary": "Add images to a model (multipart form, one file per part). Each becomes a\nthumbnail (resized to the library's thumbnail size, or its view capture\nsize with `view`); the original is not kept.",
         "operationId": "post_models_by_id_images",
         "parameters": [
           {
@@ -2296,6 +2296,15 @@
             "schema": {
               "type": "integer",
               "format": "int64"
+            }
+          },
+          {
+            "name": "view",
+            "in": "query",
+            "description": "The images are captures of the model viewer: thumbnails at the library's `view_thumb_size`.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
             }
           }
         ],
@@ -4964,7 +4973,7 @@
           },
           {
             "type": "object",
-            "description": "`VACUUM` the database and truncate its write-ahead log.",
+            "description": "`VACUUM` the database and truncate its write-ahead log; drop unused\nthumbnails and rewrite the thumbnail store without its free pages.",
             "required": [
               "kind"
             ],
@@ -6964,6 +6973,7 @@
         "required": [
           "max_thumbnails",
           "max_thumb_size",
+          "view_thumb_size",
           "max_workers",
           "recurse_subdirs",
           "metadata_sidecar_enabled",
@@ -7055,6 +7065,12 @@
           "use_trash_folder": {
             "type": "boolean",
             "description": "Deleted archives go to `trash_folder_path` (when set) instead of being deleted."
+          },
+          "view_thumb_size": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Longest edge of a thumbnail made from a model viewer capture (default: `max_thumb_size`).",
+            "minimum": 0
           },
           "warn_low_compression": {
             "type": "boolean"

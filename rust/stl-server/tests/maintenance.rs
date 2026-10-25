@@ -175,6 +175,22 @@ async fn warning_rechecks() {
     let knight: Option<String> = scalar(&lib, "SELECT warning FROM models WHERE title = 'Knight'");
     assert_eq!(knight.as_deref(), Some("Archive without images"));
 
+    // An image added by hand (a relative name) leaves the warning; one beside the archive clears it.
+    let add = |name: &str| {
+        lib.state
+            .db
+            .with(|c| c.execute("INSERT INTO images (model_id, filename) SELECT id, ?1 FROM models WHERE title = 'Knight'", [name]))
+            .unwrap()
+    };
+    add("Knight view.png");
+    let v = run(&lib, &ed, json!({"kind": "recheck_warnings", "warning": "no_images"})).await;
+    assert_eq!(v["job"]["message"], "0 cleared, 0 added, 0 skipped (missing or unreadable)");
+    add("D:\\minis\\Studio\\cover.jpg");
+    let v = run(&lib, &ed, json!({"kind": "recheck_warnings", "warning": "no_images"})).await;
+    assert_eq!(v["job"]["message"], "1 cleared, 0 added, 0 skipped (missing or unreadable)");
+    let knight: Option<String> = scalar(&lib, "SELECT warning FROM models WHERE title = 'Knight'");
+    assert_eq!(knight, None);
+
     for bad in [json!({"kind": "recheck_warnings", "warning": "colour"}), json!({"kind": "find_moved", "ids": []})] {
         let r = call(&lib.state, "POST", "/api/jobs", Some(&ed), Some(bad.clone())).await;
         assert_eq!(r.status, StatusCode::BAD_REQUEST, "{bad}");

@@ -236,6 +236,14 @@ function LibrarySettingsForm({ editable }: { editable: boolean }) {
         <SimpleGrid cols={{ base: 1, sm: 3 }}>
           <NumberInput label="Thumbnails per archive" min={0} max={1000} value={form.max_thumbnails} disabled={!editable} onChange={(v) => set("max_thumbnails", Number(v) || 0)} />
           <NumberInput label="Thumbnail size (px)" min={1} max={10000} value={form.max_thumb_size} disabled={!editable} onChange={(v) => set("max_thumb_size", Number(v) || 1)} />
+          <NumberInput
+            label="Model viewer captures (px)"
+            min={1}
+            max={10000}
+            value={form.view_thumb_size}
+            disabled={!editable}
+            onChange={(v) => set("view_thumb_size", Number(v) || 1)}
+          />
           <NumberInput label="Parallel workers" min={1} max={64} value={form.max_workers} disabled={!editable} onChange={(v) => set("max_workers", Number(v) || 1)} />
           <NumberInput
             label="Check monitored folders every (minutes)"

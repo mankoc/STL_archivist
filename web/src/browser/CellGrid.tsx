@@ -11,11 +11,13 @@ import { CARD_GAP, CARD_WIDTH, columnsFor } from "./grid";
 export type Cell = Schemas["Cell"];
 const ROW_HEIGHT = 220;
 
-export function CellGrid({ count, cell, selected, onOpen, onRange }: {
+export function CellGrid({ count, cell, selected, onOpen, onContextMenu, onRange }: {
   count: number;
   cell: (index: number) => Cell | undefined;
   selected?: number | null;
   onOpen: (id: number) => void;
+  /** A cell was right-clicked (none: the browser's own menu). */
+  onContextMenu?: (id: number, e: React.MouseEvent) => void;
   /** Rows first..last are visible, in `cols` columns (to load their cells). */
   onRange?: (first: number, last: number, cols: number) => void;
 }) {
@@ -48,7 +50,15 @@ export function CellGrid({ count, cell, selected, onOpen, onRange }: {
                 return (
                   <Box key={i} w={CARD_WIDTH}>
                     {m ? (
-                      <UnstyledButton onClick={() => onOpen(m.id)} w="100%" data-testid="cell">
+                      <UnstyledButton
+                        onClick={() => onOpen(m.id)}
+                        onContextMenu={onContextMenu && ((e) => {
+                          e.preventDefault();
+                          onContextMenu(m.id, e);
+                        })}
+                        w="100%"
+                        data-testid="cell"
+                      >
                         <Card withBorder p={6} style={selected === m.id ? { outline: "2px solid var(--mantine-primary-color-filled)" } : undefined}>
                           {m.thumbnail ? (
                             <Image src={m.thumbnail} h={150} fit="contain" radius="md" alt="" loading="lazy" />

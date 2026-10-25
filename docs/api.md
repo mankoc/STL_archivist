@@ -1,6 +1,6 @@
 # StlArchivist API
 
-Version 2026.43.18. Generated from `web/openapi.json` by `tools/api_doc.py`; the
+Version 2026.43.19. Generated from `web/openapi.json` by `tools/api_doc.py`; the
 running server serves the same document at `GET /api/openapi.json`. Do not edit by hand:
 run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after changing routes.
 
@@ -98,7 +98,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 | `POST /api/models/parse-paths` | What a path pattern extracts from each model's archive path (the mass editor's "Show parsed values"); nothing is saved. | body: [ParseRequest](#parserequest) | 200 [Parsed](#parsed)[] |  |
 | `GET /api/models/{id}/editor` | A model as the editor shows it. | path `id`: integer | 200 [EditorModel](#editormodel) | 404 |
 | `PUT /api/models/{id}/editor` | Save the editor's form for one model. | path `id`: integer<br>body: [EditorSave](#editorsave) | 204 | 400, 404 |
-| `POST /api/models/{id}/images` | Add images to a model (multipart form, one file per part). Each becomes a thumbnail (resized to the library's thumbnail size); the original is not kept. | path `id`: integer<br>body: `multipart/form-data` | 200 [AddedImages](#addedimages) | 404, 413 |
+| `POST /api/models/{id}/images` | Add images to a model (multipart form, one file per part). Each becomes a thumbnail (resized to the library's thumbnail size, or its view capture size with `view`); the original is not kept. | path `id`: integer<br>query `view`?: boolean<br>body: `multipart/form-data` | 200 [AddedImages](#addedimages) | 404, 413 |
 | `POST /api/sort/preview` | Where the archives would go (nothing is moved). | body: [SortRequest](#sortrequest) | 200 [SortRow](#sortrow)[] | 403 |
 
 ### Lookups (sculptors, collections, tags…)
@@ -689,7 +689,7 @@ One of:
 - `kind: "verify_archives"`: Check that every archive is still on disk, unchanged in size.
 - `kind: "recompute_dhashes"` — `all`: Compute perceptual hashes from stored thumbnails (all, or only missing / outdated).
 - `kind: "prune_images"` — `keep`: Keep at most `keep` images per model (the oldest).
-- `kind: "compact_database"`: `VACUUM` the database and truncate its write-ahead log.
+- `kind: "compact_database"`: `VACUUM` the database and truncate its write-ahead log; drop unused thumbnails and rewrite the thumbnail store without its free pages.
 - `kind: "compute_embeddings"` — `all`: Compute CLIP embeddings from stored thumbnails (all, or only images without one).
 - `kind: "find_content_duplicates"` — `threshold`: Find Duplicate Archives → STL files: archive pairs whose file lists (name and size) overlap by at least `threshold` (0–1) of the larger list.
 - `kind: "find_image_duplicates"` — `max_distance`, `max_models`, `method`, `threshold`: Find Duplicate Archives → Images: archive pairs with matching images.
@@ -1130,6 +1130,7 @@ The settings, with their effective values (defaults filled in).
 | `recurse_subdirs` | boolean |  |
 | `trash_folder_path` | string |  |
 | `use_trash_folder` | boolean | Deleted archives go to `trash_folder_path` (when set) instead of being deleted. |
+| `view_thumb_size` | integer | Longest edge of a thumbnail made from a model viewer capture (default: `max_thumb_size`). |
 | `warn_low_compression` | boolean |  |
 | `warn_nested_archive` | boolean |  |
 | `warn_no_images` | boolean |  |
