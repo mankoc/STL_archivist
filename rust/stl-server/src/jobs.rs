@@ -1278,6 +1278,7 @@ fn crawl_folder(
         pattern,
         recurse: recurse.unwrap_or_else(|| settings.recurse_subdirs()),
         force_rescan,
+        size_only: settings.detect_changes_by_size(),
         max_thumbnails: settings.max_thumbnails(),
         max_thumb_size: settings.max_thumb_size(),
         max_workers: settings.max_workers(),

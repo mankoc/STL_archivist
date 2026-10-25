@@ -43,6 +43,11 @@ impl LibrarySettings {
             .unwrap_or_else(|| self.max_thumb_size())
     }
 
+    /// Crawls and the monitor take an archive of the stored size as unchanged, whatever its time.
+    pub fn detect_changes_by_size(&self) -> bool {
+        self.get_bool("detect_changes_by_size", false)
+    }
+
     pub fn sidecars_enabled(&self) -> bool {
         self.get_bool("metadata_sidecar_enabled", true)
     }

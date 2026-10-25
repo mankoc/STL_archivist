@@ -1,6 +1,6 @@
 # StlArchivist API
 
-Version 2026.43.19. Generated from `web/openapi.json` by `tools/api_doc.py`; the
+Version 2026.43.20. Generated from `web/openapi.json` by `tools/api_doc.py`; the
 running server serves the same document at `GET /api/openapi.json`. Do not edit by hand:
 run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after changing routes.
 
@@ -1118,6 +1118,7 @@ The settings, with their effective values (defaults filled in).
 | `ai_embeddings_enabled` | boolean |  |
 | `ai_temperature` | number | The AI tagger's sampling temperature (0 to 2; lower is more literal). |
 | `allow_file_delete` | boolean | *Delete files* may remove archives from disk. |
+| `detect_changes_by_size` | boolean | Crawls and monitored folders take an archive of the stored size as unchanged, whatever its modification time. |
 | `file_sorting_enabled` | boolean | *Sort files* may move archives. |
 | `low_compression_threshold` | number | Compression rate above which an archive counts as poorly compressed. |
 | `max_thumb_size` | integer | Longest thumbnail edge in pixels. |

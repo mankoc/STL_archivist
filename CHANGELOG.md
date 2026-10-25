@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026.43.20 — 2026-10-25
+
+Faster re-crawls:
+
+- **Sidecars are read only when they can add something.** Each crawl opened every
+  `METADATA.7z` in the crawled folders and decompressed it, thumbnails included, only to find
+  that its models were already catalogued (on the reference library: 4,606 sidecars, 6.3 GB).
+  A folder whose archives all have a record is now left alone; the crawled folder's own
+  sidecar is still read (it can give the library its pattern).
+- **Detect changed archives by size only** (*Settings → Library*, off by default): crawls
+  and monitored folders then take an archive of its recorded size as unchanged whatever its
+  modification time, for drives or sync tools that change times without changing files. An
+  archive changed in place to the very same size then needs *Rescan*.
+- **An unchanged archive is not read again and again.** A crawl skips an archive whose size
+  and modification time match the stored ones; when they differed (the file was touched,
+  copied, or the times come from another file system) but its catalog had not changed, the
+  new time was not stored, so every crawl read the archive again. It is stored now.
+
 ## 2026.43.19 — 2026-10-25
 
 - **Compact database compacts the thumbnails too:** after rewriting the database, the job

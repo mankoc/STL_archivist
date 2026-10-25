@@ -39,6 +39,8 @@ pub struct CrawlConfig {
     pub pattern: String,
     pub recurse: bool,
     pub force_rescan: bool,
+    /// An archive of the stored size is unchanged whatever its modification time.
+    pub size_only: bool,
     pub max_thumbnails: usize,
     pub max_thumb_size: u32,
     pub max_workers: usize,
@@ -517,6 +519,7 @@ impl Run<'_> {
         }
         let host = self.host;
         let force = self.cfg.force_rescan;
+        let size_only = self.cfg.size_only;
         let hashed: Vec<(String, Option<Vec<archive::ArchiveMember>>)> = self.pool.install(|| {
             batch
                 .par_iter()
@@ -525,9 +528,8 @@ impl Run<'_> {
                     // An unchanged archive keeps its fingerprint, unless the readers failed on it
                     // last time (they may read it now).
                     if !force
-                        && let (Some((h, Some(size), Some(mtime))), Some((fs, fm))) = (existing.get(p), st)
-                        && size == fs
-                        && mtime == fm
+                        && let (Some((h, size, mtime)), Some(now)) = (existing.get(p), st)
+                        && db::unchanged(*size, *mtime, *now, size_only)
                         && !h.starts_with("fallback:")
                     {
                         return (h.clone(), None);
@@ -570,9 +572,10 @@ impl Run<'_> {
             self.host.emit(Event::Phase("Checking database for changes…".into()));
         }
         let pairs: Vec<(String, String)> = batch.iter().cloned().zip(hashes.iter().cloned()).collect();
+        let read: HashSet<String> = lists.iter().map(|(p, _)| p.clone()).collect();
         let diff = {
             let t = tx(&mut self.conn)?;
-            let d = db::diff(&t, &pairs, self.cfg.force_rescan, &self.candidates)?;
+            let d = db::diff(&t, &pairs, self.cfg.force_rescan, &read, &self.candidates)?;
             t.commit()?;
             d
         };
@@ -785,15 +788,35 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
     if cfg.sidecars
         && let Some(st) = store
     {
-        let mut seen = HashSet::new();
+        // The folders in crawl order, with their archives.
+        let mut folders: Vec<(String, Vec<String>)> = Vec::new();
+        let mut at: HashMap<String, usize> = HashMap::new();
         for p in &archives {
+            let folder = crate::winpath::native(&WinPath::new(p).parent().as_posix());
+            match at.get(&folder) {
+                Some(&i) => folders[i].1.push(p.clone()),
+                None => {
+                    at.insert(folder.clone(), folders.len());
+                    folders.push((folder, vec![p.clone()]));
+                }
+            }
+        }
+        let root = WinPath::new(&cfg.source_dir).as_posix();
+        for (folder, paths) in &folders {
             if host.should_stop() {
                 break;
             }
-            let folder = crate::winpath::native(&WinPath::new(p).parent().as_posix());
-            if !seen.insert(folder.clone()) || !Path::new(&folder).join(sidecar::METADATA_FILENAME).exists() {
+            if !Path::new(folder).join(sidecar::METADATA_FILENAME).exists() {
                 continue;
             }
+            // Importing only adds the archives without a record, and reading a sidecar
+            // decompresses all its thumbnails: a folder whose archives all have one is left
+            // alone (but the crawled folder's own sidecar can still give the library its pattern).
+            let is_root = WinPath::new(folder).as_posix().trim_end_matches('/').eq_ignore_ascii_case(root.trim_end_matches('/'));
+            if !is_root && db::existing(&run.conn, paths)?.len() == paths.len() {
+                continue;
+            }
+            let folder = folder.clone();
             let imported = {
                 let t = tx(&mut run.conn)?;
                 match sidecar::import(&t, st, &folder) {

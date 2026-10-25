@@ -25,6 +25,9 @@ pub struct Settings {
     /// Parallel crawl workers.
     pub max_workers: usize,
     pub recurse_subdirs: bool,
+    /// Crawls and monitored folders take an archive of the stored size as
+    /// unchanged, whatever its modification time.
+    pub detect_changes_by_size: bool,
     /// Write `METADATA.7z` sidecars into archive folders.
     pub metadata_sidecar_enabled: bool,
     /// Include thumbnails in sidecars.
@@ -62,6 +65,7 @@ impl Settings {
             view_thumb_size: s.view_thumb_size(),
             max_workers: s.max_workers(),
             recurse_subdirs: s.recurse_subdirs(),
+            detect_changes_by_size: s.detect_changes_by_size(),
             metadata_sidecar_enabled: s.sidecars_enabled(),
             metadata_thumbnails: s.sidecar_thumbnails(),
             warn_presupported_stl: checks.presupported,

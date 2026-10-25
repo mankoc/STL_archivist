@@ -114,7 +114,7 @@ export const TOPICS: Topic[] = [
       { h: "What a crawl does, step by step" },
       { list: [
         "**Missing records** — records whose archive is no longer on disk are noted first, so they can be matched if the archive turns up elsewhere.",
-        "**Fingerprints** — each archive gets a fingerprint from its contents' CRCs, without decompressing it. An archive whose size and date match its record is not even read again.",
+        "**Fingerprints** — each archive gets a fingerprint from its contents' CRCs, without decompressing it. An archive whose size and date match its record is not even read again (its size alone, with *Detect changed archives by size only* in the library settings: for drives or sync tools that change dates without changing files; an archive changed in place to the very same size then needs Rescan).",
         "**New and changed archives** are read in parallel (*Parallel workers* setting): file list, images (up to *Thumbnails per archive*, at *Thumbnail size*), metadata, scales, presupports and warnings. With embeddings during crawls on, their [AI embeddings](embeddings) are computed too.",
         "**Moved archives** — an archive with a known fingerprint at a new path takes over its old record, keeping its edits, tags and images.",
         "**Gone archives** — records of archives that vanished from the library are deleted (or [marked missing](monitored-folders) by monitored crawls); ones elsewhere are marked missing. Libraries inside the crawled one are left to their own crawls.",
@@ -500,7 +500,7 @@ export const TOPICS: Topic[] = [
         "**Library** (administrators change, everyone sees):",
       ] },
       { table: { head: ["Section", "Settings"], rows: [
-        ["Crawler", "Thumbnails per archive, thumbnail size, the size of model viewer captures (the thumbnail size unless set), parallel workers, check monitored folders every N minutes, crawl subfolders, AI image embeddings, compute embeddings during crawls (the list of STL files is always stored)"],
+        ["Crawler", "Thumbnails per archive, thumbnail size, the size of model viewer captures (the thumbnail size unless set), parallel workers, detect changed archives by size only, check monitored folders every N minutes, crawl subfolders, AI image embeddings, compute embeddings during crawls (the list of STL files is always stored)"],
         ["Warnings", "Which warnings crawls raise, the low-compression threshold, presupport file-name patterns"],
         ["Metadata sidecars", "Write METADATA.7z into archive folders, with or without thumbnails"],
         ["Archive files", "Allow Sort files, allow Delete files, the trash folder"],

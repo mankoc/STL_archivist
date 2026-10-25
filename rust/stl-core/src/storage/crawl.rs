@@ -52,6 +52,14 @@ pub fn stat(path: &str) -> Option<(i64, i64)> {
     Some((md.len() as i64, ns))
 }
 
+/// Whether a file now `size` bytes, modified at `mtime`, is still the archive a
+/// record stored with `stored_size` and `stored_mtime`, without opening it: the
+/// same size and time, or with `size_only` the same size (for file systems or
+/// tools that change times without changing files).
+pub fn unchanged(stored_size: Option<i64>, stored_mtime: Option<i64>, (size, mtime): (i64, i64), size_only: bool) -> bool {
+    stored_size == Some(size) && (size_only || stored_mtime == Some(mtime))
+}
+
 // ── Phase 1 ──────────────────────────────────────────────────────────────────
 
 /// `{archive path: (archive_hash, archive_size, archive_mtime_ns)}` of the given paths.
@@ -94,12 +102,14 @@ fn set_stat(tx: &Transaction, id: i64, path: &str) -> Result<()> {
     Ok(())
 }
 
-/// Phase 2 for one batch: `batch` is `(path, hash)` in crawl order;
+/// Phase 2 for one batch: `batch` is `(path, hash)` in crawl order; `read`: the
+/// paths whose catalog phase 1 read (their stored hash was not reused);
 /// `candidates` maps content hashes to missing record ids (`moves.index_by_hash`).
 pub fn diff(
     tx: &Transaction,
     batch: &[(String, String)],
     force: bool,
+    read: &HashSet<String>,
     candidates: &HashMap<String, i64>,
 ) -> Result<Diff> {
     let paths: Vec<String> = batch.iter().map(|(p, _)| p.clone()).collect();
@@ -165,8 +175,15 @@ pub fn diff(
         } else if &ex_hash != h {
             out.to_extract.push(p.clone());
             set_stat(tx, id, p)?;
-        } else if !has_stl && stl_list_hash.as_deref() != Some(h.as_str()) {
-            out.stl_backfill.push(p.clone());
+        } else {
+            // Read again (its size or time differed) and unchanged: keep its size and time,
+            // so the next crawl does not read it again.
+            if read.contains(p) {
+                set_stat(tx, id, p)?;
+            }
+            if !has_stl && stl_list_hash.as_deref() != Some(h.as_str()) {
+                out.stl_backfill.push(p.clone());
+            }
         }
     }
     Ok(out)

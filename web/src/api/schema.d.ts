@@ -2434,6 +2434,11 @@ export interface components {
             ai_temperature: number;
             /** @description *Delete files* may remove archives from disk. */
             allow_file_delete: boolean;
+            /**
+             * @description Crawls and monitored folders take an archive of the stored size as
+             *     unchanged, whatever its modification time.
+             */
+            detect_changes_by_size: boolean;
             /** @description *Sort files* may move archives. */
             file_sorting_enabled: boolean;
             /**

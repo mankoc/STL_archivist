@@ -256,6 +256,7 @@ function LibrarySettingsForm({ editable }: { editable: boolean }) {
         </SimpleGrid>
         <Stack gap="xs" mt="sm">
           {check("recurse_subdirs", "Crawl subfolders")}
+          {check("detect_changes_by_size", "Detect changed archives by size only (ignore modification times)")}
           {check("ai_embeddings_enabled", "AI image embeddings")}
           {check("ai_embeddings_during_crawl", "Compute embeddings during crawls")}
         </Stack>
