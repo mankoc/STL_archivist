@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.43.20"
+    "version": "2026.43.21"
   },
   "paths": {
     "/api/ai/commit/{id}": {

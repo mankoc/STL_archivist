@@ -1344,6 +1344,12 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.43.21: the STL backfill (`Diff::stl_backfill`) is stored (`crawl::store_stl_lists`,
+  marking `stl_list_hash`) and its catalogs go to `store_files`; `Request::ListStl` is gone.
+  `crawler::list_archives_stat` returns each archive's size and time from the directory
+  listing (`crawl::stat_of`); the crawl walks first, phase 1 reads `Run::listed`, and
+  `crawl::collect_missing` judges the crawled library's records by the listing's
+  `path_key`s; `monitor::changes` compares in memory too.
 - 2026.43.20: the crawl's sidecar pass groups the archives by folder and calls
   `sidecar::import` only where `crawl::existing` misses one of them (or for the crawled
   folder itself); `crawl::diff` takes the paths phase 1 read (`read`) and stores their size

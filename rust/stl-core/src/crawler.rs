@@ -63,8 +63,6 @@ pub enum Request {
     Hash(String),
     /// `extract_archive_contents(path)` with names, STL sizes, uncompressed total.
     Extract(String),
-    /// `list_stl_members(path)`.
-    ListStl(String),
     /// `make_thumbnail` (Pillow) of an image, or of a PDF's first page.
     Thumbnail { data: Vec<u8>, pdf: bool },
     /// CLIP vectors (float32 blobs) of JPEGs.
@@ -90,7 +88,6 @@ pub enum Response {
     None,
     Hash(String),
     Extracted(Extracted),
-    Stl(Vec<(String, Option<i64>)>),
     Thumbnail(Option<Vec<u8>>),
     Vectors(Vec<Option<Vec<u8>>>),
     Metadata(Metadata),
@@ -166,8 +163,12 @@ fn is_archive_suffix(name: &str) -> bool {
 }
 
 /// Windows `sorted(paths)`: by the lowercased path components.
+fn sort_key(p: &str) -> Vec<String> {
+    p.to_lowercase().split(['\\', '/']).map(str::to_string).collect()
+}
+
 fn sort_paths(v: &mut [String]) {
-    v.sort_by_cached_key(|p| p.to_lowercase().split(['\\', '/']).map(str::to_string).collect::<Vec<_>>());
+    v.sort_by_cached_key(|p| sort_key(p));
 }
 
 /// `iter_archives` (`rglob("*")`, no symlinked folders followed) or the
@@ -175,6 +176,13 @@ fn sort_paths(v: &mut [String]) {
 /// a folder named like an archive (`Dragon.7z/`) is entered, not listed.
 /// Folders in `skip` (the roots of libraries inside this one) are not entered.
 pub fn list_archives(root: &str, recurse: bool, skip: &[String]) -> Vec<String> {
+    list_archives_stat(root, recurse, skip).into_iter().map(|(p, _)| p).collect()
+}
+
+/// [`list_archives`] with each archive's `(size, mtime_ns)` as the directory
+/// listing gives it (on Windows it comes with the listing, without opening or
+/// asking about each file; `None` when it could not be had).
+pub fn list_archives_stat(root: &str, recurse: bool, skip: &[String]) -> Vec<(String, Option<(i64, i64)>)> {
     let skip: Vec<String> = skip.iter().map(|s| crate::relpath::path_key(s)).collect();
     let mut out = Vec::new();
     let join = crate::winpath::join;
@@ -186,22 +194,30 @@ pub fn list_archives(root: &str, recurse: bool, skip: &[String]) -> Vec<String> 
             let path = join(&dir, &name);
             let ft = e.file_type().ok();
             let is_dir = ft.is_some_and(|t| t.is_dir());
+            let archive_name = is_archive_suffix(&name) && name != sidecar::METADATA_FILENAME;
             if recurse {
-                if is_archive_suffix(&name) && name != sidecar::METADATA_FILENAME && std::path::Path::new(&path).is_file() {
-                    out.push(path.clone());
+                // A link to a file counts (its target's size and time).
+                let md = match ft {
+                    Some(t) if t.is_file() && archive_name => e.metadata().ok(),
+                    Some(t) if t.is_symlink() && archive_name => std::fs::metadata(&path).ok().filter(|m| m.is_file()),
+                    _ => None,
+                };
+                if let Some(md) = md {
+                    out.push((path.clone(), db::stat_of(&md)));
                 }
                 if is_dir && !skip.contains(&crate::relpath::path_key(&path)) {
                     stack.push(path);
                 }
-            } else if ft.is_some_and(|t| t.is_file()) && is_archive_suffix(&name) && name != sidecar::METADATA_FILENAME {
-                out.push(path);
+            } else if ft.is_some_and(|t| t.is_file()) && archive_name {
+                let stat = e.metadata().ok().and_then(|md| db::stat_of(&md));
+                out.push((path, stat));
             }
         }
         if !recurse {
             break;
         }
     }
-    sort_paths(&mut out);
+    out.sort_by_cached_key(|(p, _)| sort_key(p));
     out
 }
 
@@ -497,6 +513,8 @@ struct Run<'a> {
     existing_hashes: HashMap<String, String>,
     /// Roots of the libraries inside the crawled one (not entered).
     inner_roots: Vec<String>,
+    /// `(size, mtime_ns)` of the archives, from the folder listing.
+    listed: HashMap<String, (i64, i64)>,
 }
 
 fn tx(conn: &mut rusqlite::Connection) -> rusqlite::Result<rusqlite::Transaction<'_>> {
@@ -511,7 +529,8 @@ impl Run<'_> {
     /// The batch's fingerprints, and the file lists of the archives whose
     /// catalog was read for them (not those whose stored hash was kept).
     fn phase1(&mut self, batch: &[String]) -> Result<(Vec<String>, Vec<FileList>), CrawlError> {
-        let stats: Vec<Option<(i64, i64)>> = self.pool.install(|| batch.par_iter().map(|p| db::stat(p)).collect());
+        let stats: Vec<Option<(i64, i64)>> =
+            self.pool.install(|| batch.par_iter().map(|p| self.listed.get(p).copied().or_else(|| db::stat(p))).collect());
         let existing: HashMap<String, (String, Option<i64>, Option<i64>)> =
             db::existing(&self.conn, batch)?.into_iter().map(|(p, h, s, m)| (p, (h, s, m))).collect();
         for (p, (h, ..)) in &existing {
@@ -567,7 +586,7 @@ impl Run<'_> {
     }
 
     fn batch(&mut self, batch: &[String], start: usize, modified: &mut HashSet<String>) -> Result<bool, CrawlError> {
-        let (hashes, lists) = self.phase1(batch)?;
+        let (hashes, mut lists) = self.phase1(batch)?;
         if start == 0 {
             self.host.emit(Event::Phase("Checking database for changes…".into()));
         }
@@ -599,22 +618,22 @@ impl Run<'_> {
         let (cfg, host) = (self.cfg, self.host);
         let prepared: HashMap<String, Prepared> =
             self.pool.install(|| diff.to_extract.par_iter().map(|p| (p.clone(), prepare(p, cfg, host))).collect());
-        let backfill: HashMap<String, Vec<(String, Option<i64>)>> = self.pool.install(|| {
-            diff.stl_backfill
-                .par_iter()
-                .map(|p| {
-                    let stl = match archive::list_members(Path::new(p)) {
-                        Ok(m) => stl_dict(m.into_iter().map(|m| (m.name, m.size.map(|s| s as i64)))),
-                        Err(_) => match host.call(Request::ListStl(p.clone())) {
-                            Response::Stl(v) => v,
-                            _ => Vec::new(),
-                        },
-                    };
-                    (p.clone(), stl)
-                })
-                .collect()
+        // Records without an STL list (crawled before it was always kept): each catalog is read
+        // once, its STL list stored and the record marked, and the same read gives the
+        // archive's file list (Python read these lists and dropped them, so every crawl read
+        // the archives again).
+        let backfill: Vec<FileList> = self.pool.install(|| {
+            diff.stl_backfill.par_iter().filter_map(|p| archive::list_members(Path::new(p)).ok().map(|m| (p.clone(), m))).collect()
         });
-        let _ = backfill; // listed as in Python; the upsert does not store it (as in Python)
+        let hash_of: HashMap<&str, &str> = pairs.iter().map(|(p, h)| (p.as_str(), h.as_str())).collect();
+        let stl_lists: Vec<db::StlList> = backfill
+            .iter()
+            .map(|(p, m)| {
+                let stl = stl_dict(m.iter().map(|m| (m.name.clone(), m.size.map(|s| s as i64))));
+                (p.clone(), hash_of.get(p.as_str()).copied().unwrap_or_default().to_string(), stl)
+            })
+            .collect();
+        lists.extend(backfill);
         let existing: HashMap<String, i64> = diff.existing.into_iter().collect();
         let total = self.summary.total;
         let mut inputs = Vec::new();
@@ -636,6 +655,7 @@ impl Run<'_> {
         let results = {
             let t = tx(&mut self.conn)?;
             let r = db::upsert_batch(&t, self.store, &cfg.upsert, &inputs, self.failures, MAX_CONSECUTIVE_FAILURES)?;
+            db::store_stl_lists(&t, &stl_lists)?;
             t.commit()?;
             r
         };
@@ -745,6 +765,7 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
         moved_new_paths: HashSet::new(),
         existing_hashes: HashMap::new(),
         inner_roots: Vec::new(),
+        listed: HashMap::new(),
     };
     // The crawled folder is a library (made now when it is none yet); the
     // libraries inside it are crawled on their own.
@@ -755,8 +776,16 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
         id
     };
     run.inner_roots = storage::libraries::Roots::load(&run.conn)?.inner(library).into_iter().map(|(_, r)| r).collect();
+    // One listing of the folder gives the archives with their sizes and times: the
+    // comparisons with the records below happen in memory.
+    host.emit(Event::Phase("Retrieving file list…".into()));
+    let listing = list_archives_stat(&cfg.source_dir, cfg.recurse, &run.inner_roots);
+    let archives: Vec<String> = listing.iter().map(|(p, _)| p.clone()).collect();
+    run.listed = listing.into_iter().filter_map(|(p, s)| s.map(|s| (p, s))).collect();
     host.emit(Event::Phase("Scanning for deleted files…".into()));
-    let missing = db::collect_missing(&run.conn)?;
+    // A full (recursive) listing covers every record of the crawled library.
+    let keys: HashSet<String> = archives.iter().map(|p| crate::relpath::path_key(p)).collect();
+    let missing = db::collect_missing(&run.conn, cfg.recurse.then_some((library, &keys)))?;
     if !missing.is_empty() {
         run.log(format!("Found {} missing archive(s) — will check for moved files after crawl.", missing.len()));
     }
@@ -777,8 +806,6 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
         run.candidates.remove(&h);
     }
 
-    host.emit(Event::Phase("Retrieving file list…".into()));
-    let archives = list_archives(&cfg.source_dir, cfg.recurse, &run.inner_roots);
     let total = archives.len();
     run.summary.total = total;
     let msg = format!("Found {total} archives in {}", cfg.source_dir);
@@ -1012,6 +1039,10 @@ mod tests {
         assert_eq!(names(list_archives(&root, true, &[])), ["a.ZIP", &format!("B{sep}c.7z"), "b.rar", &format!("D.7z{sep}e.zip")]);
         assert_eq!(names(list_archives(&root, false, &[])), ["a.ZIP", "b.rar"]);
         assert_eq!(names(list_archives(&root, true, &[crate::winpath::join(&root, "B")])), ["a.ZIP", "b.rar", &format!("D.7z{sep}e.zip")], "an inner library");
+        // The listing's sizes and times are what asking each file gives.
+        for (p, stat) in list_archives_stat(&root, true, &[]) {
+            assert_eq!(stat, db::stat(&p), "{p}");
+        }
         let stl = stl_dict(
             [("a.stl", Some(1)), ("x.png", Some(2)), ("a.stl", Some(3)), ("b.OBJ", None)]
                 .into_iter()

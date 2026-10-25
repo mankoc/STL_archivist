@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026.43.21 — 2026-10-25
+
+- **Fixed: every crawl read the catalog of every archive without an STL list.** A record
+  without one (every record crawled while the list was optional) had its archive listed
+  again by each crawl, and the list was thrown away, as the Python app did, so the next
+  crawl read it again: since 2026.43.19, tens of thousands of archive reads per crawl,
+  whatever *Detect changed archives by size only* said. The list is now stored and the
+  record marked, and the same read gives the archive's file list; the next crawl does this
+  once, later crawls not at all.
+- **One listing per crawl:** the folder walk keeps each archive's size and modification time
+  (on Windows they come with the directory listing), so neither the crawl nor the folder
+  monitor asks the file system about each archive again; the records of the crawled library
+  are found missing by comparing them with that listing (those of other libraries, which can
+  be moves, are still looked up).
+
 ## 2026.43.20 — 2026-10-25
 
 Faster re-crawls:
