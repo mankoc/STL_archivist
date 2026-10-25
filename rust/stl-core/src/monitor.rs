@@ -2,7 +2,7 @@
 //! sizes and dates alone (no archive is opened), so a server can check often
 //! and crawl only when something changed. "Changed" is what a crawl treats as
 //! changed: a new path, or a known one whose size or mtime differs from the
-//! record's; "gone" is a record under the folder, not yet missing, whose file
+//! record's (with `size_only`, its size); "gone" is a record under the folder, not yet missing, whose file
 //! no longer exists (the crawl marks it missing).
 
 use std::collections::HashMap;
@@ -33,8 +33,8 @@ fn under(folder: &str) -> String {
     format!("{}/%", escaped.trim_end_matches('/'))
 }
 
-/// What a crawl of `folder` (`recurse` as the crawl would) would find.
-pub fn changes(conn: &Connection, folder: &str, recurse: bool) -> Result<Changes> {
+/// What a crawl of `folder` (`recurse` and `size_only` as the crawl would) would find.
+pub fn changes(conn: &Connection, folder: &str, recurse: bool, size_only: bool) -> Result<Changes> {
     let roots = crate::storage::libraries::Roots::load(conn)?;
     let inner: Vec<String> = roots.locate_root(folder).map(|id| roots.inner(id).into_iter().map(|(_, r)| r).collect()).unwrap_or_default();
     let files = crate::crawler::list_archives(folder, recurse, &inner);
@@ -45,7 +45,7 @@ pub fn changes(conn: &Connection, folder: &str, recurse: bool) -> Result<Changes
         match known.get(f) {
             None => out.new += 1,
             Some(&(size, mtime)) => {
-                if crawl::stat(f).is_some_and(|(s, m)| Some(s) != size || Some(m) != mtime) {
+                if crawl::stat(f).is_some_and(|now| !crawl::unchanged(size, mtime, now, size_only)) {
                     out.modified += 1;
                 }
             }
@@ -84,7 +84,7 @@ mod tests {
         migrate(&db, &Vectors::default()).unwrap();
         let conn = open(&db).unwrap();
         let folder = crate::winpath::native(&root.to_string_lossy());
-        assert_eq!(changes(&conn, &folder, true).unwrap(), Changes { new: 2, modified: 0, gone: 0 });
+        assert_eq!(changes(&conn, &folder, true, false).unwrap(), Changes { new: 2, modified: 0, gone: 0 });
 
         // Recorded as they are: nothing to do.
         // The monitored folder is a library; a path outside it gets its own.
@@ -108,18 +108,25 @@ mod tests {
             let (s, m) = crawl::stat(&p).unwrap();
             insert(&p, s, m);
         }
-        assert!(!changes(&conn, &folder, true).unwrap().any());
-        assert_eq!(changes(&conn, &folder, false).unwrap(), Changes::default(), "a non-recursive check sees a.zip only");
+        assert!(!changes(&conn, &folder, true, false).unwrap().any());
+        assert_eq!(changes(&conn, &folder, false, false).unwrap(), Changes::default(), "a non-recursive check sees a.zip only");
 
         // A rewritten archive, a deleted one, a new one.
         std::fs::write(root.join("a.zip"), b"aaaa-longer").unwrap();
         std::fs::remove_file(root.join("sub").join("b.zip")).unwrap();
         std::fs::write(root.join("c.7z"), b"c").unwrap();
-        assert_eq!(changes(&conn, &folder, true).unwrap(), Changes { new: 1, modified: 1, gone: 1 });
+        assert_eq!(changes(&conn, &folder, true, false).unwrap(), Changes { new: 1, modified: 1, gone: 1 });
 
         // Records elsewhere, or already missing, are not this folder's business.
         insert(&crate::winpath::native(&dir.path().join("other").join("x.zip").to_string_lossy()), 1, 1);
         conn.execute("UPDATE models SET is_missing = 1 WHERE rel_path LIKE '%b.zip'", []).unwrap();
-        assert_eq!(changes(&conn, &folder, true).unwrap(), Changes { new: 1, modified: 1, gone: 0 });
+        assert_eq!(changes(&conn, &folder, true, false).unwrap(), Changes { new: 1, modified: 1, gone: 0 });
+
+        // Only a time that differs: changed, unless sizes alone count.
+        let a = path("a.zip");
+        let (s, m) = crawl::stat(&a).unwrap();
+        conn.execute("UPDATE models SET archive_size = ?1, archive_mtime_ns = ?2 WHERE rel_path = 'a.zip'", [s, m - 1]).unwrap();
+        assert_eq!(changes(&conn, &folder, true, false).unwrap().modified, 1);
+        assert_eq!(changes(&conn, &folder, true, true).unwrap().modified, 0);
     }
 }

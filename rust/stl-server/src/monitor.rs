@@ -66,7 +66,7 @@ pub fn check(lib: &Arc<Library>, force: bool) -> Vec<JobInfo> {
         if busy(&lib.jobs.list(), &f.path) {
             continue;
         }
-        let changes = match lib.db.with(|c| stl_core::monitor::changes(c, &f.path, settings.recurse_subdirs())) {
+        let changes = match lib.db.with(|c| stl_core::monitor::changes(c, &f.path, settings.recurse_subdirs(), settings.detect_changes_by_size())) {
             Ok(c) => c,
             Err(e) => {
                 tracing::warn!(folder = %f.path, "monitored folder: {e}");

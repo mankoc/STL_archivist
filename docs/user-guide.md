@@ -111,8 +111,8 @@ crawls skip the inner one. The browser has a **Library** filter section and colu
 
 **Monitored folders.** The eye button on a library monitors it: every *Check monitored
 folders every* minutes (*Settings → Library*, default 30) the server compares the folder with
-the library by file size and date, without opening archives, and crawls it only when archives
-were added, changed or removed (the job shows as started by `monitor`). Archives that vanished
+the library by file size and date (size alone with *Detect changed archives by size only*),
+without opening archives, and crawls it only when archives were added, changed or removed (the job shows as started by `monitor`). Archives that vanished
 are marked missing instead of deleted; *Settings → Maintenance → Remove missing archives* deletes their
 records.
 
@@ -369,7 +369,11 @@ at the bottom of the page.
   desktop app also the MeshPeek program **Open in MeshPeek** runs.
 - **Library** (changed by administrators, shown to everyone):
   - *Crawler* — thumbnails per archive, thumbnail size, the size of model viewer captures
-    (the thumbnail size unless set), parallel workers, crawl subfolders,
+    (the thumbnail size unless set), parallel workers, crawl subfolders, **detect changed
+    archives by size only** (a crawl skips an archive whose size and modification time match
+    its record; with this on, the size alone is enough: for drives or sync tools that change
+    times without changing files; an archive changed in place to the very same size then
+    needs *Rescan*),
     AI image embeddings, compute embeddings during crawls (the list of STL files is always stored);
   - *Warnings* — which warnings crawls raise, the low-compression threshold, and the file
     name patterns that mark presupported STLs;

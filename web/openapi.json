@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.43.19"
+    "version": "2026.43.20"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -6976,6 +6976,7 @@
           "view_thumb_size",
           "max_workers",
           "recurse_subdirs",
+          "detect_changes_by_size",
           "metadata_sidecar_enabled",
           "metadata_thumbnails",
           "warn_presupported_stl",
@@ -7009,6 +7010,10 @@
           "allow_file_delete": {
             "type": "boolean",
             "description": "*Delete files* may remove archives from disk."
+          },
+          "detect_changes_by_size": {
+            "type": "boolean",
+            "description": "Crawls and monitored folders take an archive of the stored size as\nunchanged, whatever its modification time."
           },
           "file_sorting_enabled": {
             "type": "boolean",

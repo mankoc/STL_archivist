@@ -152,6 +152,56 @@ async fn images_beside_an_archive_count_as_its_images() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn recrawls_keep_unchanged_archives_and_skip_known_sidecars() {
+    let lib = empty_library();
+    let ed = lib.user("ed", Role::Editor);
+    let root = archives(&lib);
+    let crawl = || async {
+        let id = submit(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy()})).await;
+        let v = wait(&lib, &ed, id).await;
+        assert_eq!(v["job"]["state"], "done", "{v}");
+        v
+    };
+    crawl().await;
+    assert!(root.join("Studio").join("METADATA.7z").is_file());
+
+    // A stored time that differs from the file (touched, copied, another file system): the
+    // catalog is read once, found unchanged, and the file's time is kept for the next crawl.
+    lib.state.db.with(|c| c.execute("UPDATE models SET archive_mtime_ns = 1", [])).unwrap();
+    let v = crawl().await;
+    assert_eq!(v["job"]["message"], "0 new, 0 updated, 2 unchanged");
+    assert_eq!(count(&lib, "SELECT count(*) FROM models WHERE archive_mtime_ns = 1"), 0);
+
+    // Every archive known: the sidecar is not read. One record gone: it comes back from it.
+    assert!(!v["log"].to_string().contains("METADATA.7z in"), "{v}");
+    let dragon: i64 = lib.state.db.with(|c| c.query_row("SELECT id FROM models WHERE title = 'Dragon'", [], |r| r.get(0))).unwrap();
+    lib.state.db.with_tx(|tx| stl_core::storage::browser::delete_models(tx, &[dragon])).unwrap();
+    let v = crawl().await;
+    assert!(v["log"].to_string().contains("Imported 1 record(s) from METADATA.7z in Studio"), "{v}");
+    assert_eq!(count(&lib, "SELECT count(*) FROM models WHERE title = 'Dragon'"), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn size_only_change_detection_ignores_times() {
+    let lib = empty_library();
+    let ed = lib.user("ed", Role::Editor);
+    let root = archives(&lib);
+    std::fs::write(lib.dir.path().join("settings.json"), r#"{"detect_changes_by_size": true}"#).unwrap();
+    let crawl = || async {
+        let id = submit(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy()})).await;
+        let v = wait(&lib, &ed, id).await;
+        assert_eq!(v["job"]["state"], "done", "{v}");
+    };
+    crawl().await;
+    // Times that differ but sizes that match: not read again, so the stored times stay.
+    lib.state.db.with(|c| c.execute("UPDATE models SET archive_mtime_ns = 1", [])).unwrap();
+    crawl().await;
+    assert_eq!(count(&lib, "SELECT count(*) FROM models WHERE archive_mtime_ns = 1"), 2);
+    let v = call(&lib.state, "GET", "/api/settings/library", Some(&ed), None).await.json();
+    assert_eq!(v["detect_changes_by_size"], true);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn empty_archives_are_read_and_old_failures_retried() {
     let lib = empty_library();
     let ed = lib.user("ed", Role::Editor);

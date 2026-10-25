@@ -1344,6 +1344,12 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.43.20: the crawl's sidecar pass groups the archives by folder and calls
+  `sidecar::import` only where `crawl::existing` misses one of them (or for the crawled
+  folder itself); `crawl::diff` takes the paths phase 1 read (`read`) and stores their size
+  and time with `set_stat` when the fingerprint did not change. `crawl::unchanged` is the
+  skip rule both the crawl's phase 1 and `monitor::changes` use; `CrawlConfig::size_only`
+  (library setting `detect_changes_by_size`) drops the time from it.
 - 2026.43.19: `ThumbStore` keeps its environment in `RwLock<Option<Inner>>` (transactions
   share it; map growth and `compact` take it exclusively). `ThumbStore::compact` copies with
   `CompactionOption::Enabled` to `data.mdb.compact`, closes the environment, renames the copy
