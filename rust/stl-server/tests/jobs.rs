@@ -182,6 +182,29 @@ async fn recrawls_keep_unchanged_archives_and_skip_known_sidecars() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn records_without_stl_lists_are_filled_once() {
+    let lib = empty_library();
+    let ed = lib.user("ed", Role::Editor);
+    let root = archives(&lib);
+    let crawl = || async {
+        let id = submit(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy()})).await;
+        let v = wait(&lib, &ed, id).await;
+        assert_eq!(v["job"]["state"], "done", "{v}");
+    };
+    crawl().await;
+    // Records crawled while the STL list was optional (and before file lists were kept).
+    lib.state
+        .db
+        .with(|c| c.execute_batch("DELETE FROM stl_files; DELETE FROM archive_files; UPDATE models SET stl_list_hash = NULL;"))
+        .unwrap();
+    crawl().await;
+    assert_eq!(count(&lib, "SELECT count(*) FROM stl_files"), 2, "one .stl in each archive");
+    assert_eq!(count(&lib, "SELECT count(DISTINCT model_id) FROM archive_files"), 2, "the same read gives the file lists");
+    // Marked as read: the next crawls leave these archives alone.
+    assert_eq!(count(&lib, "SELECT count(*) FROM models WHERE stl_list_hash IS NOT archive_hash"), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn size_only_change_detection_ignores_times() {
     let lib = empty_library();
     let ed = lib.user("ed", Role::Editor);

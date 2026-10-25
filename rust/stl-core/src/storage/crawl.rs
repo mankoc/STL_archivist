@@ -43,7 +43,11 @@ pub(crate) const LOCATED: &str = "json_each(?1) j JOIN models ON models.library_
 
 /// `(size, mtime_ns)` of a file, as `int(st.st_size)`, `int(st.st_mtime_ns)`.
 pub fn stat(path: &str) -> Option<(i64, i64)> {
-    let md = std::fs::metadata(path).ok()?;
+    stat_of(&std::fs::metadata(path).ok()?)
+}
+
+/// [`stat`] from metadata already at hand (a directory listing's).
+pub fn stat_of(md: &std::fs::Metadata) -> Option<(i64, i64)> {
     let mtime = md.modified().ok()?;
     let ns = match mtime.duration_since(std::time::UNIX_EPOCH) {
         Ok(d) => d.as_nanos() as i64,
@@ -181,7 +185,8 @@ pub fn diff(
             if read.contains(p) {
                 set_stat(tx, id, p)?;
             }
-            if !has_stl && stl_list_hash.as_deref() != Some(h.as_str()) {
+            // An archive the readers fail on is retried by phase 1, not here.
+            if !has_stl && stl_list_hash.as_deref() != Some(h.as_str()) && !h.starts_with("fallback:") {
                 out.stl_backfill.push(p.clone());
             }
         }
@@ -661,23 +666,34 @@ fn upsert<'a>(
 pub type Missing = (i64, String, String, String, Option<i64>);
 
 /// `_collect_missing`: records whose archive is gone, plus those already flagged.
-pub fn collect_missing(conn: &Connection) -> Result<Vec<Missing>> {
+///
+/// `listed`: a library and every archive found in it (`relpath::path_key`s of a
+/// full listing): its records are judged by that listing, without asking the
+/// file system about each; those of other libraries are looked up.
+pub fn collect_missing(conn: &Connection, listed: Option<(i64, &HashSet<String>)>) -> Result<Vec<Missing>> {
     use rayon::prelude::*;
-    let mut st =
-        conn.prepare(&format!("SELECT id, {}, archive_hash, archive_size, is_missing FROM models", schema_sql::archive_path_sql("models")))?;
-    let rows: Vec<(i64, Option<String>, Option<String>, Option<i64>, bool)> =
-        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get::<_, Option<bool>>(4)?.unwrap_or(false))))?
-            .collect::<Result<_>>()?;
+    type Row = (i64, Option<i64>, Option<String>, Option<String>, Option<i64>, bool);
+    let mut st = conn.prepare(&format!(
+        "SELECT id, library_id, {}, archive_hash, archive_size, is_missing FROM models",
+        schema_sql::archive_path_sql("models")
+    ))?;
+    let rows: Vec<Row> = st
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get::<_, Option<bool>>(5)?.unwrap_or(false))))?
+        .collect::<Result<_>>()?;
+    let gone = |library: Option<i64>, path: &str| match listed {
+        Some((id, keys)) if library == Some(id) => !keys.contains(&crate::relpath::path_key(path)),
+        _ => !Path::new(path).exists(),
+    };
     let absent: HashSet<i64> = rows
         .par_iter()
-        .filter(|(_, p, _, _, missing)| !missing && p.as_deref().is_some_and(|p| !p.is_empty()))
-        .filter(|(_, p, ..)| !Path::new(p.as_deref().unwrap_or_default()).exists())
+        .filter(|(_, _, p, _, _, missing)| !missing && p.as_deref().is_some_and(|p| !p.is_empty()))
+        .filter(|(_, library, p, ..)| gone(*library, p.as_deref().unwrap_or_default()))
         .map(|(id, ..)| *id)
         .collect();
     Ok(rows
         .into_iter()
-        .filter(|(id, p, _, _, missing)| p.as_deref().is_some_and(|p| !p.is_empty()) && (*missing || absent.contains(id)))
-        .map(|(id, p, h, size, _)| {
+        .filter(|(id, _, p, _, _, missing)| p.as_deref().is_some_and(|p| !p.is_empty()) && (*missing || absent.contains(id)))
+        .map(|(id, _, p, h, size, _)| {
             let p = p.unwrap_or_default();
             let name = WinPath::new(&p).name().to_string();
             (id, p, h.unwrap_or_default(), name, size)
@@ -872,6 +888,35 @@ pub fn store_files(tx: &Transaction, lists: &[(String, Vec<crate::archive::Archi
         stored += 1;
     }
     Ok(stored)
+}
+
+/// An archive's STL file list as [`store_stl_lists`] takes it: path, archive hash, `[(name, size)]`.
+pub type StlList = (String, String, Vec<(String, Option<i64>)>);
+
+/// Store the STL file lists read for records that had none (`stl_backfill`:
+/// `(path, archive hash, [(name, size)])`) and mark them read
+/// (`stl_list_hash`), so later crawls do not read those archives again.
+pub fn store_stl_lists(tx: &Transaction, lists: &[StlList]) -> Result<()> {
+    if lists.is_empty() {
+        return Ok(());
+    }
+    let paths: Vec<String> = lists.iter().map(|(p, ..)| p.clone()).collect();
+    let ids: HashMap<String, i64> = {
+        let mut st = tx.prepare(&format!("SELECT j.value->>2, models.id FROM {LOCATED}"))?;
+        st.query_map([located_json(tx, &paths)?], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_>>()?
+    };
+    let mut clear = tx.prepare("DELETE FROM stl_files WHERE model_id = ?1")?;
+    let mut ins = tx.prepare("INSERT INTO stl_files (model_id, filename, file_size, archive_hash) VALUES (?1, ?2, ?3, ?4)")?;
+    let mut mark = tx.prepare("UPDATE models SET stl_list_hash = ?2 WHERE id = ?1")?;
+    for (path, hash, stl) in lists {
+        let Some(&id) = ids.get(path) else { continue };
+        clear.execute([id])?;
+        for (name, size) in stl {
+            ins.execute(params![id, name, size, hash])?;
+        }
+        mark.execute(params![id, hash])?;
+    }
+    Ok(())
 }
 
 /// Phase 4 for a batch: each archive in its own savepoint, as the Python

@@ -37,15 +37,17 @@ fn under(folder: &str) -> String {
 pub fn changes(conn: &Connection, folder: &str, recurse: bool, size_only: bool) -> Result<Changes> {
     let roots = crate::storage::libraries::Roots::load(conn)?;
     let inner: Vec<String> = roots.locate_root(folder).map(|id| roots.inner(id).into_iter().map(|(_, r)| r).collect()).unwrap_or_default();
-    let files = crate::crawler::list_archives(folder, recurse, &inner);
+    // One listing gives the archives with their sizes and times; the rest is compared in memory.
+    let listing = crate::crawler::list_archives_stat(folder, recurse, &inner);
+    let files: Vec<String> = listing.iter().map(|(p, _)| p.clone()).collect();
     let mut out = Changes::default();
     let known: HashMap<String, (Option<i64>, Option<i64>)> =
         crawl::existing(conn, &files)?.into_iter().map(|(p, _, size, mtime)| (p, (size, mtime))).collect();
-    for f in &files {
+    for (f, stat) in &listing {
         match known.get(f) {
             None => out.new += 1,
             Some(&(size, mtime)) => {
-                if crawl::stat(f).is_some_and(|now| !crawl::unchanged(size, mtime, now, size_only)) {
+                if stat.or_else(|| crawl::stat(f)).is_some_and(|now| !crawl::unchanged(size, mtime, now, size_only)) {
                     out.modified += 1;
                 }
             }
@@ -62,7 +64,13 @@ pub fn changes(conn: &Connection, folder: &str, recurse: bool, size_only: bool) 
             .query_map([under(folder)], |r| r.get(0))?
             .collect::<Result<_>>()?,
     };
-    out.gone = recorded.iter().filter(|p| !Path::new(p).exists()).count();
+    // A recursive listing covers every record counted here; otherwise each is looked up.
+    let listed: std::collections::HashSet<String> = files.iter().map(|p| crate::relpath::path_key(p)).collect();
+    out.gone = if recurse {
+        recorded.iter().filter(|p| !listed.contains(&crate::relpath::path_key(p))).count()
+    } else {
+        recorded.iter().filter(|p| !Path::new(p).exists()).count()
+    };
     Ok(out)
 }
 
