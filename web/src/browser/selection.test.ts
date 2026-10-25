@@ -1,4 +1,4 @@
-import { NONE, click, prune } from "./selection";
+import { NONE, click, contextClick, prune } from "./selection";
 
 const order = [10, 20, 30, 40, 50];
 const plain = { ctrl: false, shift: false };
@@ -41,5 +41,16 @@ describe("selection", () => {
     expect([...p.ids]).toEqual([20]);
     expect(p.current).toBeNull();
     expect(prune(p, [10, 20, 40])).toBe(p);
+  });
+
+  it("right-clicks act on the selection they fall in, or on their own row", () => {
+    const two = click(click(NONE, order, 20, plain), order, 40, { ctrl: true, shift: false });
+    const inside = contextClick(two, order, 40);
+    expect(inside.selection).toBe(two);
+    expect(inside.ids).toEqual([20, 40]);
+    const outside = contextClick(two, order, 30);
+    expect(outside.ids).toEqual([30]);
+    expect([...outside.selection.ids]).toEqual([30]);
+    expect(outside.selection.current).toBe(30);
   });
 });

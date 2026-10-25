@@ -71,11 +71,6 @@ export function isEmpty(spec: FilterSpec): boolean {
   );
 }
 
-/** Whether a section has any value or group filter (its counts are then unscoped). */
-export function sectionActive(spec: FilterSpec, facet: string): boolean {
-  return facet in (spec.include ?? {}) || facet in (spec.exclude ?? {});
-}
-
 /**
  * The count shown beside a value: scoped by the other sections while a filter
  * is active. A section the server did not scope (the only active one: its own

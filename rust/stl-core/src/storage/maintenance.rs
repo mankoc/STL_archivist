@@ -251,6 +251,32 @@ pub fn warning_records(conn: &Connection) -> Result<Vec<WarningRow>> {
     st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect()
 }
 
+/// SQL: the image file name `col` is a file beside the archive, which the
+/// crawler stores by absolute path (`/…`, `\\…`, `X:/…`, `X:\…`); images from
+/// inside the archive and images added by hand have relative names.
+fn folder_image_sql(col: &str) -> String {
+    format!("({col} LIKE '/%' OR {col} LIKE '\\%' OR (substr({col}, 2, 1) = ':' AND substr({col}, 3, 1) IN ('/', '\\')))")
+}
+
+/// The models with an image from beside their archive: such an archive is
+/// not "without images".
+pub fn models_with_folder_images(conn: &Connection) -> Result<std::collections::HashSet<i64>> {
+    let mut st = conn.prepare(&format!("SELECT DISTINCT model_id FROM images WHERE {}", folder_image_sql("filename")))?;
+    st.query_map([], |r| r.get(0))?.collect()
+}
+
+/// Whether model `id` has an image from beside its archive.
+pub fn has_folder_images(conn: &Connection, id: i64) -> Result<bool> {
+    let sql = format!("SELECT EXISTS (SELECT 1 FROM images WHERE model_id = ?1 AND {})", folder_image_sql("filename"));
+    conn.query_row(&sql, [id], |r| r.get(0))
+}
+
+/// `warning` without the line `line` (`None` when nothing is left).
+pub fn without_warning(warning: Option<&str>, line: &str) -> Option<String> {
+    let kept: Vec<&str> = warning.unwrap_or("").split('\n').filter(|l| !l.trim().is_empty() && *l != line).collect();
+    if kept.is_empty() { None } else { Some(kept.join("\n")) }
+}
+
 /// Set `warning` of each model; `updated_at` changes only where it differs.
 pub fn set_warnings(tx: &Transaction, items: &[(i64, Option<String>)]) -> Result<()> {
     let now = super::edit::utc_now_text();
@@ -333,33 +359,6 @@ pub fn clear_all(tx: &Transaction) -> Result<()> {
     }
     tx.execute(&format!("DELETE FROM {}", super::schema_sql::VECTOR_TABLE), []).ok();
     Ok(())
-}
-
-pub fn filter_cache_get(conn: &Connection) -> Result<Option<String>> {
-    conn.query_row("SELECT payload FROM filter_cache WHERE id = 1", [], |r| r.get(0)).optional()
-}
-
-pub fn filter_cache_set(tx: &Transaction, payload: &str) -> Result<()> {
-    tx.execute(
-        "INSERT INTO filter_cache (id, payload, updated_at) VALUES (1, ?1, ?2) \
-         ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at",
-        params![payload, super::edit::utc_now_text()],
-    )?;
-    Ok(())
-}
-
-pub fn filter_cache_clear(tx: &Transaction) -> Result<()> {
-    tx.execute("DELETE FROM filter_cache WHERE id = 1", [])?;
-    Ok(())
-}
-
-/// Whether any of `paths` is a model's archive path (`folder_has_db_records`).
-pub fn any_archive_path(conn: &Connection, paths: &[String]) -> Result<bool> {
-    conn.query_row(
-        &format!("SELECT EXISTS (SELECT 1 FROM {})", super::crawl::LOCATED),
-        [super::crawl::located_json(conn, paths)?],
-        |r| r.get(0),
-    )
 }
 
 /// Image ids that need a dHash: all, or those without a current one

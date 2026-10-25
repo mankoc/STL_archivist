@@ -472,5 +472,5 @@ first.
 | "outside the library's folders" when adding a folder | Editors can only browse `roots` and libraries. Add the folder to `roots` in `server.json` (and restart), or let an administrator add it. |
 | `.rar` archives have no thumbnails or fail | UnRAR is missing; download it in *Settings → Components*, install it, or set `unrar`. |
 | No AI options | ONNX Runtime or the CLIP model is missing (embeddings), or `llama-server` / the model files are (tagger). *AI tagger* shows the reason. |
-| Some archives are skipped or have no images | The built-in readers refuse a few unusual archives (the crawl log warns "Cannot open archive"), and CMYK JPEG and tiled ("grid") AVIF images are not decoded. |
+| Some archives are skipped or have no images | The built-in readers refuse a few unusual archives (the crawl log warns "cannot read archive"; each crawl tries them again), and CMYK JPEG and tiled ("grid") AVIF images are not decoded. |
 | Thumbnails missing after moving the server | The `thumbnails.lmdb` folder was not copied with the database. |

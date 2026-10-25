@@ -27,11 +27,11 @@ const FIELDS: [string, string][] = [
   ["release_name", "Release"],
 ];
 
-/** Upload images to a model (multipart; the server makes the thumbnails). */
-async function uploadImages(id: number, files: File[]): Promise<Schemas["AddedImages"]> {
+/** Upload images to a model (multipart; the server makes the thumbnails, at the view capture size for `view`). */
+async function uploadImages(id: number, files: File[], view = false): Promise<Schemas["AddedImages"]> {
   const form = new FormData();
   for (const f of files) form.append("file", f, f.name);
-  const resp = await fetch(`/api/models/${id}/images`, { method: "POST", body: form, credentials: "same-origin" });
+  const resp = await fetch(`/api/models/${id}/images${view ? "?view=true" : ""}`, { method: "POST", body: form, credentials: "same-origin" });
   const body = await resp.json();
   if (!resp.ok) throw new ApiError(resp.status, body.error ?? resp.statusText);
   return body;
@@ -241,7 +241,7 @@ export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: num
           onAddImage={
             editor
               ? async (image) => {
-                  const r = await uploadImages(id, [image]);
+                  const r = await uploadImages(id, [image], true);
                   if (r.failed.length) throw new Error("The server could not read the view as an image.");
                   await refresh();
                 }

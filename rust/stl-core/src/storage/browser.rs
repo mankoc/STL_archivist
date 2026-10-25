@@ -1,75 +1,10 @@
 //! Browser panel and sort-dialog data: a port of `app/services/browser_data.py`.
 
 use rusqlite::types::Value;
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use rusqlite::{Connection, Transaction, params};
 
 use super::Result;
 use super::edit::{delete_model, utc_now_text};
-
-fn names(conn: &Connection, sql: &str) -> Result<Vec<String>> {
-    let mut st = conn.prepare(sql)?;
-    let v: Vec<Option<String>> = st.query_map([], |r| r.get(0))?.collect::<Result<_>>()?;
-    Ok(v.into_iter().flatten().collect())
-}
-
-/// `lookup_cache` lists: sorted names of a lookup kind (`source`: distinct
-/// non-empty model sources). Unknown kinds give none.
-pub fn lookup_names(conn: &Connection, kind: &str) -> Result<Vec<String>> {
-    let table = match kind {
-        "source" => {
-            let mut v = names(conn, "SELECT DISTINCT source FROM models")?;
-            v.retain(|s| !s.is_empty());
-            v.sort();
-            return Ok(v);
-        }
-        "sculptor" => "sculptors",
-        "collection" => "collections",
-        "subcollection" => "subcollections",
-        "category" => "categories",
-        "release" => "releases",
-        "scale" => "scales",
-        _ => return Ok(Vec::new()),
-    };
-    let mut v = names(conn, &format!("SELECT name FROM {table}"))?;
-    v.sort();
-    Ok(v)
-}
-
-pub fn tag_names(conn: &Connection) -> Result<Vec<String>> {
-    names(conn, "SELECT name FROM tags ORDER BY name")
-}
-
-/// A creator profile's display fields.
-pub type CreatorLinks = [Option<String>; 5];
-
-/// `(url, description)` if the model exists, and the creator profile if one exists.
-pub type Panel = (Option<(Option<String>, Option<String>)>, Option<CreatorLinks>);
-
-/// The info panel's extra fields: the model's `(url, description)` and the
-/// creator profile `(full_name, patreon, artstation, gumroad, myminifactory)`.
-pub fn model_panel(
-    conn: &Connection,
-    model_id: i64,
-    creator: Option<&str>,
-) -> Result<Panel> {
-    let m = conn
-        .query_row("SELECT url, description FROM models WHERE id = ?1", [model_id], |r| {
-            Ok((r.get(0)?, r.get(1)?))
-        })
-        .optional()?;
-    let c = match creator {
-        Some(name) if !name.is_empty() => conn
-            .query_row(
-                "SELECT full_name, patreon_url, artstation_url, gumroad_url, myminifactory_url \
-                 FROM creators WHERE name = ?1",
-                [name],
-                |r| Ok([r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?]),
-            )
-            .optional()?,
-        _ => None,
-    };
-    Ok((m, c))
-}
 
 /// `(id, thumbnail_path)` of a model's images, in id order.
 pub fn model_images(conn: &Connection, model_id: i64) -> Result<Vec<(i64, Option<String>)>> {
@@ -95,15 +30,6 @@ pub fn set_image_thumbnails(tx: &Transaction, items: &[(i64, String)]) -> Result
         st.execute(params![id, path])?;
     }
     Ok(())
-}
-
-/// Create a tag unless one with that exact name exists; returns whether it was created.
-pub fn add_tag(tx: &Transaction, name: &str) -> Result<bool> {
-    let exists = tx.query_row("SELECT 1 FROM tags WHERE name = ?1", [name], |_| Ok(())).optional()?.is_some();
-    if !exists {
-        tx.execute("INSERT INTO tags (name) VALUES (?1)", [name])?;
-    }
-    Ok(!exists)
 }
 
 /// `moves.delete_model` for each existing id; returns all thumbnail references.
@@ -213,11 +139,7 @@ mod tests {
                     ('C', 'patreon', 1, 'c.7z', 'h3', 2, 0, 0);",
         )
         .unwrap();
-        assert_eq!(lookup_names(&conn, "sculptor").unwrap(), ["Alice", "Bob"]);
-        assert_eq!(lookup_names(&conn, "source").unwrap(), ["patreon"]);
         let tx = conn.transaction().unwrap();
-        assert!(add_tag(&tx, "elf").unwrap());
-        assert!(!add_tag(&tx, "elf").unwrap());
         let ids = add_images(&tx, 1, &["a.png".into(), "b.png".into()]).unwrap();
         set_image_thumbnails(&tx, &[(ids[0], ids[0].to_string())]).unwrap();
         set_archive_paths(&tx, &[(2, "G:/s/b.7z".into())], None).unwrap();

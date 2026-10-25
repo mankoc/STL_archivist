@@ -522,10 +522,13 @@ impl Run<'_> {
                 .par_iter()
                 .zip(stats.par_iter())
                 .map(|(p, st)| {
+                    // An unchanged archive keeps its fingerprint, unless the readers failed on it
+                    // last time (they may read it now).
                     if !force
                         && let (Some((h, Some(size), Some(mtime))), Some((fs, fm))) = (existing.get(p), st)
                         && size == fs
                         && mtime == fm
+                        && !h.starts_with("fallback:")
                     {
                         return (h.clone(), None);
                     }
@@ -575,7 +578,7 @@ impl Run<'_> {
         };
         for p in &diff.unreadable {
             self.host
-                .emit(Event::Warning(format!("WARNING: Cannot open archive (possibly corrupted): {}", WinPath::new(p).name())));
+                .emit(Event::Warning(format!("cannot read archive (damaged, or in a format this server does not read): {}", WinPath::new(p).name())));
         }
         for h in &diff.consumed {
             let Some(id) = self.candidates.remove(h) else { continue };

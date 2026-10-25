@@ -101,6 +101,8 @@ interface Props {
   onSort: (sort: Sort | null) => void;
   selection: Selection;
   onRowClick: (id: number, mods: { ctrl: boolean; shift: boolean }) => void;
+  /** A row was right-clicked (none: the browser's own menu). */
+  onRowContextMenu?: (id: number, e: React.MouseEvent) => void;
   /** Cells can be edited (double-click). */
   editable: boolean;
   /** Which columns to show. */
@@ -138,7 +140,7 @@ function CellEditor(props: { initial: string; onDone: (value: string | null) => 
   );
 }
 
-export function ModelTable({ query, onSort, selection, onRowClick, editable, choice }: Props) {
+export function ModelTable({ query, onSort, selection, onRowClick, onRowContextMenu, editable, choice }: Props) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<{ id: number; column: number } | null>(null);
   const ids = useModelIds(query);
@@ -245,6 +247,10 @@ export function ModelTable({ query, onSort, selection, onRowClick, editable, cho
               data-current={selection.current === id || undefined}
               style={{ transform: `translateY(${item.start}px)`, height: ROW_HEIGHT, width }}
               onClick={(e) => onRowClick(id, { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey })}
+              onContextMenu={onRowContextMenu && ((e) => {
+                e.preventDefault();
+                onRowContextMenu(id, e);
+              })}
             >
               {table.getHeaderGroups()[0].headers.map((h, i) => {
                 const c = shown[i];

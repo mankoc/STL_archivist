@@ -1,5 +1,6 @@
 // Table selection as in a desktop list: click selects one row, Ctrl/Cmd+click
-// toggles a row, Shift+click selects the range from the anchor.
+// toggles a row, Shift+click selects the range from the anchor; a right-click
+// acts on the selection it falls in, or on its own row.
 
 export interface Selection {
   ids: Set<number>;
@@ -41,4 +42,14 @@ export function prune(sel: Selection, order: number[]): Selection {
     anchor: sel.anchor != null && present.has(sel.anchor) ? sel.anchor : null,
     current: sel.current != null && present.has(sel.current) ? sel.current : null,
   };
+}
+
+/**
+ * A right-click on row `id`: the selection after it and the rows its menu acts
+ * on, in table order. Inside the selection it acts on the whole selection; on
+ * any other row that row is selected alone first, as in a file manager.
+ */
+export function contextClick(sel: Selection, order: number[], id: number): { selection: Selection; ids: number[] } {
+  if (sel.ids.has(id)) return { selection: sel, ids: order.filter((i) => sel.ids.has(i)) };
+  return { selection: click(sel, order, id, { ctrl: false, shift: false }), ids: [id] };
 }

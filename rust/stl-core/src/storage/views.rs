@@ -47,13 +47,6 @@ pub fn path_warning(conn: &Connection, model_id: i64) -> Result<Option<(Option<S
     .optional()
 }
 
-pub fn title_path(conn: &Connection, model_id: i64) -> Result<Option<(Option<String>, Option<String>)>> {
-    conn.query_row(&format!("SELECT title, {} FROM models WHERE id = ?1", archive_path_sql("models")), [model_id], |r| {
-        Ok((r.get(0)?, r.get(1)?))
-    })
-    .optional()
-}
-
 /// Every folder holding catalogued archives (absolute, `/` form), sorted.
 pub fn archive_folders(conn: &Connection) -> Result<Vec<String>> {
     let mut st = conn.prepare(
@@ -281,6 +274,5 @@ mod tests {
         assert_eq!(stl_files(&conn, 1).unwrap()[0].0, "a.stl");
         assert_eq!(duplicate_rows(&conn).unwrap()[0].scales, ["75mm", "28mm"]);
         assert_eq!(image_hash_rows(&conn).unwrap().len(), 1);
-        assert_eq!(title_path(&conn, 2).unwrap(), Some((None, Some(crate::relpath::join("F:/", "a/b/y.7z")))));
     }
 }

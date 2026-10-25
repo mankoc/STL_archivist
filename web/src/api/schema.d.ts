@@ -886,7 +886,8 @@ export interface paths {
         put?: never;
         /**
          * Add images to a model (multipart form, one file per part). Each becomes a
-         *     thumbnail (resized to the library's thumbnail size); the original is not kept.
+         *     thumbnail (resized to the library's thumbnail size, or its view capture
+         *     size with `view`); the original is not kept.
          */
         post: operations["post_models_by_id_images"];
         delete?: never;
@@ -2464,6 +2465,11 @@ export interface components {
             trash_folder_path: string;
             /** @description Deleted archives go to `trash_folder_path` (when set) instead of being deleted. */
             use_trash_folder: boolean;
+            /**
+             * Format: int32
+             * @description Longest edge of a thumbnail made from a model viewer capture (default: `max_thumb_size`).
+             */
+            view_thumb_size: number;
             warn_low_compression: boolean;
             warn_nested_archive: boolean;
             warn_no_images: boolean;
@@ -4310,7 +4316,10 @@ export interface operations {
     };
     post_models_by_id_images: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The images are captures of the model viewer: thumbnails at the library's `view_thumb_size`. */
+                view?: boolean;
+            };
             header?: never;
             path: {
                 /** @description Model id */

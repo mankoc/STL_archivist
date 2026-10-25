@@ -71,7 +71,8 @@ pub enum JobRequest {
     },
     /// Keep at most `keep` images per model (the oldest).
     PruneImages { keep: usize },
-    /// `VACUUM` the database and truncate its write-ahead log.
+    /// `VACUUM` the database and truncate its write-ahead log; drop unused
+    /// thumbnails and rewrite the thumbnail store without its free pages.
     CompactDatabase,
     /// Compute CLIP embeddings from stored thumbnails (all, or only images without one).
     ComputeEmbeddings {
@@ -1229,8 +1230,7 @@ fn clear_library(lib: &Library, job: &Job) -> Result<String, String> {
     let models = lib.db.with(maintenance::model_count).map_err(db_err)?;
     lib.db.with_tx(maintenance::clear_all).map_err(db_err)?;
     lib.thumbs.delete_many(&ids).map_err(|e| e.to_string())?;
-    let orphans = lib.thumbs.orphan_blobs().map_err(|e| e.to_string())?;
-    lib.thumbs.delete_keys(&orphans).map_err(|e| e.to_string())?;
+    lib.thumbs.delete_orphan_blobs().map_err(|e| e.to_string())?;
     lib.job_log(job, format!("Deleted {models} model(s) and {} thumbnail(s).", ids.len()));
     Ok(format!("library cleared: {models} model(s) deleted"))
 }
@@ -1449,10 +1449,17 @@ fn compact(lib: &Library, job: &Job) -> Result<String, String> {
     let truncated = maintenance::compact(&conn).map_err(db_err)?;
     drop(conn);
     let after = size(&path);
+    let mb = |b: u64| b as f64 / 1e6;
+    lib.job_log(job, format!("Database: {:.1} MB → {:.1} MB.", mb(before), mb(after)));
+    let swept = lib.thumbs.delete_orphan_blobs().map_err(|e| e.to_string())?;
+    lib.job_log(job, format!("Removed {swept} thumbnail(s) no image uses; rewriting the thumbnail store (thumbnails wait meanwhile)…"));
+    let (thumbs_before, thumbs_after) = lib.thumbs.compact().map_err(|e| format!("thumbnail store: {e}"))?;
     Ok(format!(
-        "{:.1} MB → {:.1} MB{}",
-        before as f64 / 1e6,
-        after as f64 / 1e6,
-        if truncated { "" } else { " (the write-ahead log is truncated at a later checkpoint)" }
+        "database {:.1} MB → {:.1} MB{}; thumbnails {:.1} MB → {:.1} MB",
+        mb(before),
+        mb(after),
+        if truncated { "" } else { " (the write-ahead log is truncated at a later checkpoint)" },
+        mb(thumbs_before),
+        mb(thumbs_after)
     ))
 }

@@ -178,11 +178,15 @@ in this browser.
   files and **0**–**6** pick the standard views; the view cube (top right) turns with the
   model: clicking a face looks from that side (Top, Front, Right…), dragging the cube turns
   the view. The buttons top left switch the
-  wireframe, *Colour each model* and the build plate. Lychee and CHITUBOX scenes show their
-  supports and build plate. Editors also have **Add this view to the model's images** (the
-  camera button): the view as drawn, without the buttons and view cube, becomes one of the
-  model's images, made into a thumbnail like an image you drop (handy for archives without
-  renders: frame the model, pick a material, then click).
+  wireframe, *Colour each model*, the build plate and **Spread out**, which puts the shown
+  files side by side on the build plane (in rows, each file with its supports; heights stay)
+  instead of where each file places them, often all on top of each other; switching it back
+  returns them. Lychee and CHITUBOX scenes show their supports and build plate. Editors also
+  have **Add this view to the model's images** (the camera button): the shown models as
+  drawn, cropped to them with a small margin (not the empty sides of the view, the build
+  plate or the buttons), become one of the model's images, made into a thumbnail of the
+  library's *Model viewer captures* size (handy for archives without renders: turn the
+  model, pick a material, then click).
 - **Open in MeshPeek** (desktop app) opens the archive in the
   [MeshPeek](https://github.com/mankoc/meshpeek) viewer, when it is installed (`meshpeek` on
   the `PATH`, or in Program Files) and the archive is reachable from your computer; in the
@@ -241,7 +245,8 @@ Edits update the folder's `METADATA.7z` sidecar shortly afterwards when sidecars
 
 ## Working with archives
 
-Select models, then open **Archives** above the table:
+Select models, then open **Archives** above the table (or right-click a row or image for
+**Rescan**: the selection when the row is part of it, else just that model):
 
 - **Rescan** re-reads the archives (metadata, file list, presupports, warnings, scales). Use it
   after replacing an archive's contents in place.
@@ -324,7 +329,10 @@ Maintenance is in **Settings**: the **Maintenance** tab (editors run its jobs) h
   archive's file list and fix just that warning, much faster than a rescan.
 - **Images and storage** — compute missing (or all) image hashes and AI embeddings; **Prune
   images** keeps at most N images per model; **Compact database** (administrators) reclaims
-  space after large deletions.
+  space after large deletions: it rewrites the database without its free pages, drops the
+  thumbnails no image uses any more, and rewrites the thumbnail store (`thumbnails.lmdb`)
+  the same way. Thumbnails wait while the store is rewritten; both files need room for a
+  copy on their drive while the job runs.
 - **Metadata sidecars** — **Generate sidecars** writes `METADATA.7z` in every archive folder;
   **Clean sidecars** tidies the `METADATA.7z` files under the libraries: one that lists
   other archives than the folder's records is rewritten, one in a folder without records
@@ -360,7 +368,8 @@ at the bottom of the page.
   (buttons, selections and highlights: one of 13 colours, saved for your account); in the
   desktop app also the MeshPeek program **Open in MeshPeek** runs.
 - **Library** (changed by administrators, shown to everyone):
-  - *Crawler* — thumbnails per archive, thumbnail size, parallel workers, crawl subfolders,
+  - *Crawler* — thumbnails per archive, thumbnail size, the size of model viewer captures
+    (the thumbnail size unless set), parallel workers, crawl subfolders,
     AI image embeddings, compute embeddings during crawls (the list of STL files is always stored);
   - *Warnings* — which warnings crawls raise, the low-compression threshold, and the file
     name patterns that mark presupported STLs;

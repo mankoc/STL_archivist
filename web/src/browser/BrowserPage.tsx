@@ -2,7 +2,7 @@
 import { Box, Button, Center, Checkbox, Group, Loader, Menu, Modal, SegmentedControl, Text, TextInput } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconArchive, IconColumns, IconEdit, IconFilterOff, IconSearch, IconSparkles, IconTrash } from "@tabler/icons-react";
+import { IconArchive, IconColumns, IconEdit, IconFilterOff, IconRefresh, IconSearch, IconSparkles, IconTrash } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type CSSProperties, type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
 
@@ -20,7 +20,7 @@ import { MassEditDrawer } from "./MassEditDrawer";
 import { EMPTY, type FilterSpec, isEmpty } from "./filters";
 import { ALWAYS_SHOWN, choiceFrom, HIDDEN_COLUMNS_KEY, isShown, SHOWN_COLUMNS_KEY, toggle } from "./columns";
 import { COLUMNS, ModelTable, type Sort, useModelIds } from "./ModelTable";
-import { NONE, click, prune, type Selection } from "./selection";
+import { NONE, click, contextClick, prune, type Selection } from "./selection";
 import classes from "./BrowserPage.module.css";
 
 const SHOW = ["library", "author", "tags", "source", "date", "sculptor", "collection", "subcollection", "category", "release", "scale", "presupports", "path"];
@@ -79,6 +79,8 @@ export function BrowserPage() {
   );
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [sorting, setSorting] = useState(false);
+  // The right-click menu: where, and the models it acts on.
+  const [menu, setMenu] = useState<{ x: number; y: number; ids: number[] } | null>(null);
   const selectedIds = () => order.filter((i) => selection.ids.has(i));
   const queueJob = async (body: JobRequest, what: string) => {
     try {
@@ -95,6 +97,14 @@ export function BrowserPage() {
   const ids = useModelIds(query);
   const order = ids.data ?? [];
   useEffect(() => setSelection((s) => prune(s, order)), [order]);
+  // Editors get a menu on a right-clicked row (viewers keep the browser's own).
+  const openMenu = editor
+    ? (id: number, e: React.MouseEvent) => {
+        const r = contextClick(selection, order, id);
+        setSelection(r.selection);
+        setMenu({ x: e.clientX, y: e.clientY, ids: r.ids });
+      }
+    : undefined;
 
   const remove = async () => {
     setConfirmRemove(false);
@@ -199,13 +209,15 @@ export function BrowserPage() {
         </Group>
         <Box className={classes.tableBody}>
           {view === "grid" ? (
-            <GridView ids={order} selected={selection.current} onOpen={(id) => setSelection((s) => click(s, order, id, { ctrl: false, shift: false }))} />
+            <GridView ids={order} selected={selection.current} onOpen={(id) => setSelection((s) => click(s, order, id, { ctrl: false, shift: false }))}
+              onContextMenu={openMenu} />
           ) : (
             <ModelTable
               query={query}
               onSort={setSort}
               selection={selection}
               onRowClick={(id, mods) => setSelection((s) => click(s, order, id, mods))}
+              onRowContextMenu={openMenu}
               editable={editor}
               choice={choice}
             />
@@ -226,6 +238,16 @@ export function BrowserPage() {
       <EditorDrawer id={editing} onClose={() => setEditing(null)} />
       <MassEditDrawer ids={order.filter((i) => selection.ids.has(i))} opened={massEdit} onClose={() => setMassEdit(false)} />
       <AiTaggerDrawer ids={order.filter((i) => selection.ids.has(i))} opened={aiTagger} onClose={() => setAiTagger(false)} />
+      <Menu opened={menu != null} onChange={(o) => !o && setMenu(null)} position="bottom-start" withinPortal>
+        <Menu.Target>
+          <div style={{ position: "fixed", left: menu?.x ?? 0, top: menu?.y ?? 0, width: 0, height: 0 }} />
+        </Menu.Target>
+        <Menu.Dropdown data-testid="row-menu">
+          <Menu.Item leftSection={<IconRefresh size={14} />} onClick={() => menu && queueJob({ kind: "rescan", ids: menu.ids }, "Rescan")}>
+            {menu && menu.ids.length > 1 ? `Rescan ${menu.ids.length} archives` : "Rescan"}
+          </Menu.Item>
+        </Menu.Dropdown>
+      </Menu>
       {sorting && <SortModal ids={selectedIds()} opened onClose={() => setSorting(false)} />}
       <Modal opened={confirmDelete} onClose={() => setConfirmDelete(false)} title="Delete archive files">
         <Text size="sm">

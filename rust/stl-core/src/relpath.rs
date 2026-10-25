@@ -81,22 +81,6 @@ impl RelPath {
     pub fn name(&self) -> &str {
         self.0.rfind('/').map_or(&self.0, |i| &self.0[i + 1..])
     }
-
-    /// A part Windows cannot hold (`\ : * ? " < > |`, a trailing dot or space,
-    /// a reserved device name): such a library could not move to Windows.
-    pub fn windows_unsafe(&self) -> Option<&str> {
-        const RESERVED: [&str; 22] = [
-            "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9", "lpt1", "lpt2", "lpt3",
-            "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
-        ];
-        self.0.split('/').find(|p| {
-            let stem = p.split('.').next().unwrap_or("").to_lowercase();
-            p.chars().any(|c| matches!(c, '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c < ' ')
-                || p.ends_with('.')
-                || p.ends_with(' ')
-                || RESERVED.contains(&stem.as_str())
-        })
-    }
 }
 
 impl fmt::Display for RelPath {
@@ -163,13 +147,9 @@ mod tests {
     }
 
     #[test]
-    fn joins_and_flags_names_windows_cannot_hold() {
+    fn joins() {
         assert_eq!(posix_join(r"D:\STL", "a/b.zip"), "D:/STL/a/b.zip");
         assert_eq!(posix_join("/srv/stl/", ""), "/srv/stl");
         assert_eq!(posix_join("/", "x"), "/x");
-        assert_eq!(RelPath::parse("a/b.zip").unwrap().windows_unsafe(), None);
-        assert_eq!(RelPath::parse("what?/b.zip").unwrap().windows_unsafe(), Some("what?"));
-        assert_eq!(RelPath::parse("a/con.zip").unwrap().windows_unsafe(), Some("con.zip"));
-        assert_eq!(RelPath::parse("a /b.zip").unwrap().windows_unsafe(), Some("a "));
     }
 }

@@ -16,6 +16,7 @@ async fn settings_round_trip() {
 
     let mut v = call(s, "GET", "/api/settings/library", Some(&ed), None).await.json();
     assert_eq!(v["max_thumb_size"], 256);
+    assert_eq!(v["view_thumb_size"], 256, "view captures: the thumbnail size unless set");
     assert_eq!(v["max_thumbnails"], 5, "defaults filled in");
     assert_eq!(v["presupport_patterns"].as_array().unwrap().len(), 4);
 
@@ -42,6 +43,9 @@ async fn settings_round_trip() {
     assert_eq!(call(s, "PUT", "/api/settings/library", Some(&admin), Some(bad)).await.status, StatusCode::BAD_REQUEST, "non-portable pattern");
     let mut bad = v.clone();
     bad["max_workers"] = 0.into();
+    assert_eq!(call(s, "PUT", "/api/settings/library", Some(&admin), Some(bad)).await.status, StatusCode::BAD_REQUEST);
+    let mut bad = v.clone();
+    bad["view_thumb_size"] = 0.into();
     assert_eq!(call(s, "PUT", "/api/settings/library", Some(&admin), Some(bad)).await.status, StatusCode::BAD_REQUEST);
     let mut bad = v.clone();
     bad["surprise"] = 1.into();

@@ -29,10 +29,6 @@ pub const WARNING_LOW_COMPRESSION: &str = "Archive with low compression rate";
 
 type Result<T> = rusqlite::Result<T>;
 
-fn json_ids(ids: &[i64]) -> String {
-    format!("[{}]", ids.iter().map(i64::to_string).collect::<Vec<_>>().join(","))
-}
-
 /// `[[library id, relative path, path], …]` for the given absolute paths that
 /// lie in a library, for `json_each` (see [`LOCATED`]).
 pub(crate) fn located_json(conn: &Connection, paths: &[String]) -> Result<String> {
@@ -492,6 +488,15 @@ fn upsert<'a>(
     // _detect_rules
     row.presupports = Some(ch.presupports.clone());
     row.warning = ch.warnings.clone().filter(|w| !w.is_empty());
+    // Images beside the archive count as its images: the new ones read now, else those it has.
+    let beside = ch.folder_images.iter().any(|(_, j, _)| j.as_ref().is_some_and(|j| !j.is_empty()))
+        || match input.existing {
+            Some(id) if !hash_changed => super::maintenance::has_folder_images(tx, id)?,
+            _ => false,
+        };
+    if beside {
+        row.warning = super::maintenance::without_warning(row.warning.as_deref(), crate::rules::WARNING_NO_IMAGES);
+    }
     let mut scales: Option<Vec<i64>> = None;
     if !ch.scales.is_empty() {
         scales = Some(ch.scales.iter().map(|s| lookup(tx, "scales", s)).collect::<Result<_>>()?);
@@ -850,12 +855,6 @@ pub fn store_files(tx: &Transaction, lists: &[(String, Vec<crate::archive::Archi
         stored += 1;
     }
     Ok(stored)
-}
-
-/// `ids` that still exist (helper for the savepoint loop).
-pub fn existing_ids(conn: &Connection, ids: &[i64]) -> Result<HashSet<i64>> {
-    let mut st = conn.prepare("SELECT id FROM models WHERE id IN (SELECT value FROM json_each(?1))")?;
-    st.query_map([json_ids(ids)], |r| r.get(0))?.collect()
 }
 
 /// Phase 4 for a batch: each archive in its own savepoint, as the Python

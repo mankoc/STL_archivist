@@ -142,6 +142,12 @@ pub fn apply_rescan(tx: &Transaction, model_id: i64, r: &Rescan) -> std::result:
         None => (year, month),
     };
     let pick = |new: &Option<String>, old: Option<String>| new.clone().filter(|s| !s.is_empty()).or(old);
+    // Images beside the archive count as its images.
+    let warning = if super::maintenance::has_folder_images(tx, model_id).map_err(db)? {
+        super::maintenance::without_warning(r.warning.as_deref(), crate::rules::WARNING_NO_IMAGES)
+    } else {
+        r.warning.clone()
+    };
     tx.execute(
         "UPDATE models SET archive_hash = ?2, archive_size = ?3, archive_mtime_ns = ?4, compression_rate = ?5, \
          title = ?6, creator = ?7, source = ?8, release_year = ?9, release_month = ?10, url = ?11, description = ?12, \
@@ -163,7 +169,7 @@ pub fn apply_rescan(tx: &Transaction, model_id: i64, r: &Rescan) -> std::result:
             pick(&r.url, url),
             pick(&r.description, description),
             r.presupports,
-            r.warning.as_deref().filter(|w| !w.is_empty()),
+            warning.as_deref().filter(|w| !w.is_empty()),
             utc_now_text()
         ],
     )
