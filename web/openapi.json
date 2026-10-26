@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.44.3"
+    "version": "2026.44.4"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -400,6 +400,53 @@
                   "items": {
                     "$ref": "#/components/schemas/BackupFile"
                   }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/backups/upload": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Upload a library package: the body is a backup `.7z` (from this server, another\none or the desktop app). It joins the backups list (`…_upload.7z`), ready to import.",
+        "operationId": "post_backups_upload",
+        "requestBody": {
+          "description": "The package (.7z)",
+          "content": {
+            "application/octet-stream": {}
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupFile"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             }
@@ -863,7 +910,7 @@
         "tags": [
           "jobs"
         ],
-        "summary": "Queue a job. Jobs run one at a time, in order. Needs the editor role\n(compacting the database and backups: admin).",
+        "summary": "Queue a job. Jobs run one at a time, in order. Needs the editor role\n(compacting the database, backups and imports: admin).",
         "operationId": "post_jobs",
         "requestBody": {
           "content": {
@@ -4731,6 +4778,111 @@
           }
         }
       },
+      "ImportFolder": {
+        "type": "object",
+        "description": "One of a package's outermost folders.",
+        "required": [
+          "uuid",
+          "name",
+          "library",
+          "root",
+          "new_root",
+          "root_exists",
+          "models",
+          "inner",
+          "found",
+          "case_only",
+          "missing",
+          "missing_examples"
+        ],
+        "properties": {
+          "case_only": {
+            "type": "integer",
+            "description": "Found only with another letter case.",
+            "minimum": 0
+          },
+          "found": {
+            "type": "integer",
+            "description": "Archives found under `new_root`.",
+            "minimum": 0
+          },
+          "inner": {
+            "type": "integer",
+            "description": "Folders inside it, moved along.",
+            "minimum": 0
+          },
+          "library": {
+            "type": "string",
+            "description": "The library it is a folder of."
+          },
+          "missing": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "missing_examples": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Some relative paths not found."
+          },
+          "models": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Records in it and the folders inside it."
+          },
+          "name": {
+            "type": "string"
+          },
+          "new_root": {
+            "type": "string",
+            "description": "Its root here: the one given, else the old one (kept when nothing maps it)."
+          },
+          "root": {
+            "type": "string",
+            "description": "Its root where the package was made."
+          },
+          "root_exists": {
+            "type": "boolean",
+            "description": "`new_root` is a folder on this server."
+          },
+          "uuid": {
+            "type": "string"
+          }
+        }
+      },
+      "ImportPreview": {
+        "type": "object",
+        "description": "A library package checked (and imported) by `import_library`.",
+        "required": [
+          "name",
+          "folders",
+          "models",
+          "applied"
+        ],
+        "properties": {
+          "applied": {
+            "type": "boolean",
+            "description": "It replaced this server's library (else it was only checked)."
+          },
+          "folders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportFolder"
+            },
+            "description": "Its outermost folders; the folders inside them move along."
+          },
+          "models": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Records in the package."
+          },
+          "name": {
+            "type": "string",
+            "description": "The package (a name in the backups list)."
+          }
+        }
+      },
       "JobDetail": {
         "type": "object",
         "required": [
@@ -5131,6 +5283,40 @@
                 "enum": [
                   "backup"
                 ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Import a library package (a backup, from this server or another one)\nfrom the backups list (administrators). Lists its folders and checks\ntheir archives under `roots` (folder uuid → root here; a folder not\ngiven keeps its root when that is a folder here). With `apply` (and\n`confirm: \"REPLACE\"`), backs this library up (`…_pre_import.7z`) and\nreplaces it with the package, the folders at their new roots; user\naccounts stay.",
+            "required": [
+              "name",
+              "kind"
+            ],
+            "properties": {
+              "apply": {
+                "type": "boolean"
+              },
+              "confirm": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "import_library"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "roots": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "propertyNames": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -5640,6 +5826,29 @@
               }
             ],
             "description": "What moving a library to a new root found (`relocate_library`)."
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImportPreview",
+                "description": "A package's folders and where their archives are here (`import_library`)."
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "import"
+                    ]
+                  }
+                }
+              }
+            ],
+            "description": "A package's folders and where their archives are here (`import_library`)."
           }
         ],
         "description": "What a finder or maintenance job found (`JobDetail.result`)."

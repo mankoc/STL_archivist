@@ -54,7 +54,7 @@ export function SettingsPage() {
         <Tabs.Tab value="library">Library</Tabs.Tab>
         <Tabs.Tab value="maintenance">Maintenance</Tabs.Tab>
         <Tabs.Tab value="sidecars">Sidecars</Tabs.Tab>
-        {admin && <Tabs.Tab value="backups">Backups</Tabs.Tab>}
+        {admin && <Tabs.Tab value="backups">Backups &amp; transfer</Tabs.Tab>}
         <Tabs.Tab value="workers">Workers</Tabs.Tab>
         {components && <Tabs.Tab value="components">Components</Tabs.Tab>}
         {admin && <Tabs.Tab value="users">Users</Tabs.Tab>}

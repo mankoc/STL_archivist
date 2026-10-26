@@ -254,7 +254,7 @@ pub fn warning_records(conn: &Connection) -> Result<Vec<WarningRow>> {
 /// SQL: the image file name `col` is a file beside the archive, which the
 /// crawler stores by absolute path (`/…`, `\\…`, `X:/…`, `X:\…`); images from
 /// inside the archive and images added by hand have relative names.
-fn folder_image_sql(col: &str) -> String {
+pub(crate) fn folder_image_sql(col: &str) -> String {
     format!("({col} LIKE '/%' OR {col} LIKE '\\%' OR (substr({col}, 2, 1) = ':' AND substr({col}, 3, 1) IN ('/', '\\')))")
 }
 

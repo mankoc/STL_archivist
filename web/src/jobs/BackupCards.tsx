@@ -1,14 +1,17 @@
-// Settings cards for METADATA.7z sidecars (their settings and jobs) and library backups.
+// Settings cards for METADATA.7z sidecars (their settings and jobs) and library
+// backups, which also export and import a library.
 import { ActionIcon, Anchor, Button, Card, Checkbox, Code, Group, Modal, Stack, Table, Text, TextInput, Title, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { IconDownload, IconTrash } from "@tabler/icons-react";
+import { IconDownload, IconFileExport, IconFileImport, IconTrash } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { api, unwrap } from "../api/client";
 import { formatSize } from "../format";
 import { type LibrarySettings, SETTINGS_QUERY } from "../settings/librarySettings";
+import { ImportDialog } from "./ImportDialog";
 import type { Job, JobRequest } from "./jobs";
+import { backupName } from "./transfer";
 
 /**
  * Sidecars: whether the server writes them and with thumbnails (administrators;
@@ -75,30 +78,55 @@ export function SidecarCard({ editor, admin, start }: { editor: boolean; admin: 
   );
 }
 
-/** Backups (administrators): create, download, delete; restoring is offline. */
+/**
+ * Backups (administrators): create, download, delete; a backup is also the
+ * package that moves the library to another server (Export, Import).
+ */
 export function BackupCard({ jobs, start }: { jobs: Job[] | undefined; start: (r: JobRequest) => Promise<void> }) {
   const queryClient = useQueryClient();
-  // Refetch when the newest backup job changes state.
-  const last = (jobs ?? []).filter((j) => j.kind === "backup").reduce<Job | undefined>((a, j) => (!a || j.id > a.id ? j : a), undefined);
+  // Refetch when the newest backup or import job changes state.
+  const newest = (kind: string) => (jobs ?? []).filter((j) => j.kind === kind).reduce<Job | undefined>((a, j) => (!a || j.id > a.id ? j : a), undefined);
+  const last = newest("backup");
+  const lastImport = newest("import_library");
   const backups = useQuery({
-    queryKey: ["backups", last?.id, last?.state],
+    queryKey: ["backups", last?.id, last?.state, lastImport?.state],
     queryFn: async () => unwrap(await api.GET("/api/backups")),
   });
   const remove = async (name: string) => {
     await api.DELETE("/api/backups/{name}", { params: { path: { name } } });
     await queryClient.invalidateQueries({ queryKey: ["backups"] });
   };
+  // Export: a backup, downloaded once written (the newest backup job before it started).
+  const [exportAfter, setExportAfter] = useState<number | null>(null);
+  useEffect(() => {
+    if (exportAfter === null || !last || last.id <= exportAfter || last.state === "queued" || last.state === "running") return;
+    const name = last.state === "done" ? backupName(last.message) : null;
+    if (name) window.location.href = `/api/backups/${encodeURIComponent(name)}`;
+    setExportAfter(null);
+  }, [exportAfter, last]);
+  const [importing, setImporting] = useState<string | null | undefined>(undefined);
   return (
     <Card withBorder>
       <Group justify="space-between" mb="xs">
-        <Title order={5}>Backups</Title>
-        <Button size="xs" variant="default" onClick={() => start({ kind: "backup" })} data-testid="backup">
-          Back up now
-        </Button>
+        <Title order={5}>Backups, export and import</Title>
+        <Group gap="xs">
+          <Button size="xs" variant="default" onClick={() => start({ kind: "backup" })} data-testid="backup">
+            Back up now
+          </Button>
+          <Button size="xs" variant="default" leftSection={<IconFileExport size={14} />} loading={exportAfter !== null}
+            onClick={() => { setExportAfter(last?.id ?? 0); void start({ kind: "backup" }); }} data-testid="export">
+            Export library
+          </Button>
+          <Button size="xs" variant="default" leftSection={<IconFileImport size={14} />} onClick={() => setImporting(null)} data-testid="import">
+            Import library…
+          </Button>
+        </Group>
       </Group>
       <Text size="xs" c="dimmed" mb="xs">
-        The database, thumbnails and library settings in one .7z, readable by the desktop app's Backup / Restore. To restore,
-        stop the server and run <Code>stl-server restore FILE.7z --data-dir DIR</Code>.
+        The database, thumbnails and library settings in one .7z, readable by the desktop app's Backup / Restore. It also
+        moves the library to another server: <b>Export library</b> downloads one; <b>Import library</b> on the other server
+        replaces its library with it, each folder at its place there. To restore offline, stop the server and
+        run <Code>stl-server restore FILE.7z --data-dir DIR</Code>.
       </Text>
       {backups.data?.length ? (
         <Table fz="sm" verticalSpacing={4}>
@@ -111,8 +139,13 @@ export function BackupCard({ jobs, start }: { jobs: Job[] | undefined; start: (r
                   </Anchor>
                 </Table.Td>
                 <Table.Td w={90} ta="right">{formatSize(b.size)}</Table.Td>
-                <Table.Td w={70}>
+                <Table.Td w={100}>
                   <Group gap={4} wrap="nowrap">
+                    <Tooltip label="Import: replace this library with it">
+                      <ActionIcon variant="subtle" onClick={() => setImporting(b.name)} data-testid="import-row">
+                        <IconFileImport size={16} />
+                      </ActionIcon>
+                    </Tooltip>
                     <Tooltip label="Download">
                       <ActionIcon variant="subtle" component="a" href={`/api/backups/${encodeURIComponent(b.name)}`} download>
                         <IconDownload size={16} />
@@ -131,6 +164,9 @@ export function BackupCard({ jobs, start }: { jobs: Job[] | undefined; start: (r
         </Table>
       ) : (
         <Text size="sm" c="dimmed">No backups on the server yet.</Text>
+      )}
+      {importing !== undefined && (
+        <ImportDialog initial={importing} packages={backups.data ?? []} start={start} onClose={() => setImporting(undefined)} />
       )}
     </Card>
   );

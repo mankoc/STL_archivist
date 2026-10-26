@@ -37,6 +37,9 @@ use tauri::{AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder}
 use tauri_plugin_dialog::DialogExt;
 
 const MAIN: &str = "main";
+const ABOUT: &str = "about";
+/// The shell's name and version: the window's title until a page names it.
+const TITLE: &str = concat!("StlArchivist ", env!("CARGO_PKG_VERSION"));
 const SERVERS_FILE: &str = "servers.json";
 /// How long a local server that is still running may take to answer. A first
 /// start can be slow (backing a large library up and moving it to libraries),
@@ -724,10 +727,33 @@ fn reload(app: &AppHandle) {
     }
 }
 
+/// The About window (`ui/about.html`: the splash picture, the version, the creator),
+/// in front of the main window and closed with it. Windows' own About box shows only
+/// text.
+fn show_about(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window(ABOUT) {
+        let _ = w.set_focus();
+        return;
+    }
+    let Some(main) = app.get_webview_window(MAIN) else { return };
+    // Built off the menu's thread: building a window in an event handler deadlocks
+    // WebView2.
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let _ = WebviewWindowBuilder::new(&app, ABOUT, WebviewUrl::App("about.html".into()))
+            .title("About StlArchivist")
+            .inner_size(560.0, 640.0)
+            .resizable(false)
+            .parent(&main)
+            .and_then(|b| b.build());
+    });
+}
+
 fn on_menu(app: &AppHandle, id: &str) {
     match id {
         "launcher" => show_launcher(app),
         "reload" => reload(app),
+        "about" => show_about(app),
         "show" => {
             if let Some(w) = app.get_webview_window(MAIN) {
                 let _ = w.show();
@@ -759,10 +785,20 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .item(&PredefinedMenuItem::paste(handle, None)?)
         .item(&PredefinedMenuItem::select_all(handle, None)?)
         .build()?;
-    let menu = MenuBuilder::new(handle).items(&[&file, &edit, &view]).build()?;
+    let about = MenuItemBuilder::with_id("about", "About StlArchivist").build(handle)?;
+    let help = SubmenuBuilder::new(handle, "Help").item(&about).build()?;
+    let menu = MenuBuilder::new(handle).items(&[&file, &edit, &view, &help]).build()?;
 
     let window = WebviewWindowBuilder::new(handle, MAIN, WebviewUrl::App("index.html".into()))
-        .title("StlArchivist")
+        .title(TITLE)
+        // Pages name their version in their title (the launcher the shell's, a server's
+        // web client the server's).
+        .on_document_title_changed(|w, title| {
+            let _ = w.set_title(&title);
+        })
+        // WebView2's own drag and drop: Tauri's handler would refuse every HTML drag
+        // (moving columns, dropping images).
+        .disable_drag_drop_handler()
         .inner_size(1400.0, 900.0)
         .min_inner_size(800.0, 500.0)
         .menu(menu)

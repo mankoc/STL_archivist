@@ -61,8 +61,10 @@ how many wait behind it; click it for the Jobs page), and how many archives all 
 hold.
 
 The **?** button opens the built-in help: every topic of this guide in more depth, with a
-search box; the **?** beside some cards' titles opens the topic about that card. The menu at
-the top right (your name) has **Help**, **About**, **Change password** and **Sign out**.
+search box; the **?** beside some cards' titles opens the topic about that card. The **ⓘ**
+beside it opens **About**: the server's version and who made StlArchivist (the browser tab
+and the desktop window show the version too). The menu at the top right (your name) has
+**Help**, **About**, **Change password** and **Sign out**.
 
 ## Adding archives: crawling
 
@@ -147,9 +149,13 @@ selected model's details on the right.
 - **Columns** chooses which columns are shown (saved with your account). The standard
   columns are on until you hide them; *More columns* lists further fields, off until you turn
   them on: Warning, Sequence, Images, Compression, To print, Missing, Added, Updated, URL,
-  Description, Folder and Archive hash. Drag a column's header onto another to move it there
-  (the order is saved with your account too); **Reset column order** in the menu goes back to
-  the default order.
+  Description, Folder and Archive hash.
+- **Moving a column:** point at its header in the table; a grip (⋮⋮) shows at the left of
+  its name. Press the grip, drag it onto the header of the column whose place it should take
+  (that header is outlined while you are over it) and let go: the column moves there and the
+  ones in between shift over. Clicking a header still sorts and its right edge still resizes.
+  The order is saved with your account; **Columns → Reset column order** puts the columns
+  back in their default order.
 - **Table / Images** switches between the table and a grid of thumbnails of the same models.
 - Click a row to select it; **Ctrl**-click adds or removes rows; **Shift**-click selects a range.
   The count of selected models shows above the table.
@@ -362,9 +368,23 @@ Maintenance is in **Settings**: the **Maintenance** tab (editors run its jobs) h
   copy). An interrupted download resumes where it stopped. **Remove selected** deletes
   downloaded ones. After installing the CLIP encoder and ONNX Runtime, run *Compute missing
   embeddings*.
-- **Backups** (administrators) — **Back up now** saves the database, thumbnails and library
-  settings in one file; download or delete backups from the list. Restoring is done on the
-  server (see [deployment.md](deployment.md#backups-restore-and-upgrades)).
+- **Backups & transfer** (administrators):
+  - **Back up now** saves the database, thumbnails and library settings in one file;
+    download or delete backups from the list. Restoring offline is done on the server (see
+    [deployment.md](deployment.md#backups-restore-and-upgrades)).
+  - **Export library** makes a backup and downloads it: the package that copies this
+    library to another server.
+  - **Import library…** (or the import button of a backup in the list) replaces this
+    server's library with a package, in these steps:
+    1. Choose a package on the server, or **Upload a package…**.
+    2. The package's folders are listed, each checked at its place here. Give each folder
+       where its archives are on this server: type it, **Browse…**, or set one rule for
+       all (*Replace the path start* `D:\Minis` *with* `/library`, then **Apply to all**).
+    3. **Check again** counts the archives found.
+    4. Type `REPLACE` and click **Import and replace this library**.
+
+    The library here is backed up first (`…_pre_import.7z`). User accounts and the trash
+    folder setting stay; while the import runs, edits wait.
 - **Delete all records** (administrators) — empties the library after you type `DELETE`.
   Archive files are not touched. Back up first.
 

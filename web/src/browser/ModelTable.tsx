@@ -1,9 +1,9 @@
 // The browser table: every matching id in display order (one request), rows
 // fetched in blocks as they scroll into view, virtualised rendering. Sorting
 // runs on the server (`/api/models/ids`), ties ordered by id.
-import { Box, Center, Group, Loader, Text, UnstyledButton } from "@mantine/core";
+import { Box, Center, Group, Loader, Text, Tooltip, UnstyledButton } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { IconChevronDown, IconChevronUp } from "@tabler/icons-react";
+import { IconChevronDown, IconChevronUp, IconGripVertical } from "@tabler/icons-react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type ColumnDef,
@@ -13,7 +13,7 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { type KeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useMemo, useRef, useState } from "react";
 
 import { api, type Schemas, unwrap } from "../api/client";
 import { baseName, formatDate, formatSize } from "../format";
@@ -151,16 +151,9 @@ export function ModelTable({ query, onSort, selection, onRowClick, onRowContextM
   const [sizing, setSizing] = useState<ColumnSizingState>({});
 
   const shown = useMemo(() => visible(COLUMNS, choice ?? { hidden: [], shown: [], order: [] }), [choice]);
-  // Moving a column: the one dragged, and the one it would take the place of.
+  // Moving a column (dragged by its grip): the one dragged, and the one it would take the place of.
   const dragged = useRef<string | null>(null);
   const [dropOn, setDropOn] = useState<string | null>(null);
-  // A press on a resize edge resizes; it must not start dragging its column.
-  const resizing = useRef(false);
-  useEffect(() => {
-    const up = () => (resizing.current = false);
-    window.addEventListener("mouseup", up);
-    return () => window.removeEventListener("mouseup", up);
-  }, []);
   const columns = useMemo<ColumnDef<number>[]>(
     () => shown.map((c) => ({ id: c.id, header: c.header, size: c.size, minSize: 50, enableResizing: true })),
     [shown],
@@ -232,13 +225,6 @@ export function ModelTable({ query, onSort, selection, onRowClick, onRowContextM
               className={classes.headerCell}
               style={{ width: h.getSize() }}
               data-drop={dropOn === c.id || undefined}
-              draggable={Boolean(onMoveColumn)}
-              onDragStart={(e) => {
-                if (resizing.current) return e.preventDefault();
-                dragged.current = c.id;
-                e.dataTransfer.effectAllowed = "move";
-                e.dataTransfer.setData("text/plain", c.header);
-              }}
               onDragOver={(e) => {
                 if (!dragged.current || dragged.current === c.id) return;
                 e.preventDefault();
@@ -257,6 +243,26 @@ export function ModelTable({ query, onSort, selection, onRowClick, onRowContextM
                 setDropOn(null);
               }}
             >
+              {onMoveColumn && (
+                <Tooltip label="Drag onto another column to move this one there" openDelay={400}>
+                  <span
+                    className={classes.grip}
+                    draggable
+                    aria-label={`Move the ${c.header} column`}
+                    data-testid="column-grip"
+                    onDragStart={(e) => {
+                      dragged.current = c.id;
+                      e.dataTransfer.effectAllowed = "move";
+                      e.dataTransfer.setData("text/plain", c.header);
+                      // The whole header follows the pointer, not just the grip.
+                      const cell = e.currentTarget.parentElement;
+                      if (cell) e.dataTransfer.setDragImage(cell, 12, 12);
+                    }}
+                  >
+                    <IconGripVertical size={14} />
+                  </span>
+                </Tooltip>
+              )}
               <UnstyledButton className={classes.headerButton} onClick={() => clickHeader(c)} disabled={!c.sortKey}>
                 <Group gap={4} wrap="nowrap">
                   <Text size="xs" fw={600} tt="uppercase" truncate>
@@ -266,10 +272,7 @@ export function ModelTable({ query, onSort, selection, onRowClick, onRowContextM
                 </Group>
               </UnstyledButton>
               <div
-                onMouseDown={(e) => {
-                  resizing.current = true;
-                  h.getResizeHandler()(e);
-                }}
+                onMouseDown={h.getResizeHandler()}
                 onTouchStart={h.getResizeHandler()}
                 className={classes.resizer}
                 data-resizing={h.column.getIsResizing() || undefined}

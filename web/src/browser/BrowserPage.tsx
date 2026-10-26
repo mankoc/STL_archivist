@@ -187,7 +187,10 @@ export function BrowserPage() {
                 <Menu.Label>More columns</Menu.Label>
                 {COLUMNS.filter((c) => c.optional).map(columnItem)}
                 <Menu.Divider />
-                <Menu.Label>Drag a column's header to move it</Menu.Label>
+                <Text size="xs" c="dimmed" px="sm" py={4} maw={250}>
+                  To move a column, drag the ⋮⋮ grip left of its name in the table header and drop it on the
+                  column whose place it should take.
+                </Text>
                 <Menu.Item disabled={!choice.order.length} onClick={resetOrder} data-testid="reset-column-order">
                   Reset column order
                 </Menu.Item>

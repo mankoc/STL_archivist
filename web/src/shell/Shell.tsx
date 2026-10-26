@@ -1,6 +1,6 @@
 // The signed-in application frame: header with the user menu, the pages, and
 // the status bar at the bottom.
-import { ActionIcon, AppShell, Avatar, Button, Group, Menu, Modal, PasswordInput, Stack, Text, Title, Tooltip, UnstyledButton, useMantineColorScheme } from "@mantine/core";
+import { ActionIcon, Anchor, AppShell, Avatar, Button, Group, Image, Menu, Modal, PasswordInput, Stack, Text, Title, Tooltip, UnstyledButton, useMantineColorScheme } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import {
@@ -28,6 +28,7 @@ import { useServerEvents } from "../api/events";
 import { UserContext } from "../auth/user";
 import { BrowserPage } from "../browser/BrowserPage";
 import { HelpPage } from "../help/HelpPage";
+import splash from "../help/splash.jpg";
 import { JobsPage } from "../jobs/JobsPage";
 import { LibrariesPage } from "../jobs/LibrariesPage";
 import { LookupsPage } from "../lookups/LookupsPage";
@@ -107,6 +108,11 @@ export function Shell({ user }: { user: Schemas["User"] }) {
             <Tooltip label="Help">
               <ActionIcon variant={page === "help" ? "light" : "subtle"} size="lg" aria-label="Help" onClick={() => setPage("help")} data-testid="help-button">
                 <IconHelp size={20} />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label="About StlArchivist">
+              <ActionIcon variant="subtle" size="lg" aria-label="About" onClick={about.open} data-testid="about-button">
+                <IconInfoCircle size={20} />
               </ActionIcon>
             </Tooltip>
             <Menu position="bottom-end">
@@ -209,15 +215,22 @@ function PasswordModal({ opened, onClose }: { opened: boolean; onClose: () => vo
 function AboutModal({ opened, onClose }: { opened: boolean; onClose: () => void }) {
   const info = useQuery({ queryKey: ["system-info"], queryFn: async () => unwrap(await api.GET("/api/system/info")), enabled: opened });
   return (
-    <Modal opened={opened} onClose={onClose} title="About StlArchivist">
+    <Modal opened={opened} onClose={onClose} title="About StlArchivist" size="lg">
       <Stack gap="xs">
+        <Image src={splash} alt="The archivist with a model in his hand" radius="md" />
         <Text size="sm">
           StlArchivist catalogues collections of 3D-printable model archives (.zip, .7z, .rar): metadata, thumbnails,
           tags, duplicates and AI tagging, in a server that this web client and the desktop app share.
         </Text>
-        <Text size="sm">Server version: {info.data?.version ?? "…"}</Text>
+        <Text size="sm">Version: {info.data?.version ?? "…"} (this server)</Text>
+        <Text size="sm">
+          Created by MrIxolite ·{" "}
+          <Anchor href="https://github.com/mankoc/STL_archivist" target="_blank" rel="noreferrer">
+            github.com/mankoc/STL_archivist
+          </Anchor>
+        </Text>
         <Text size="sm">Models in this library: {info.data?.models.toLocaleString() ?? "…"}</Text>
-        <Text size="xs" c="dimmed">Licensed CC BY-NC-SA 4.0.</Text>
+        <Text size="xs" c="dimmed">Copyright © 2026 MrIxolite. Licensed CC BY-NC-SA 4.0.</Text>
       </Stack>
     </Modal>
   );

@@ -114,6 +114,22 @@ pub enum JobRequest {
     /// Back up the database, thumbnails and settings to
     /// `<data dir>/backups/stlLibrary_backup_<stamp>.7z` (administrators).
     Backup,
+    /// Import a library package (a backup, from this server or another one)
+    /// from the backups list (administrators). Lists its folders and checks
+    /// their archives under `roots` (folder uuid → root here; a folder not
+    /// given keeps its root when that is a folder here). With `apply` (and
+    /// `confirm: "REPLACE"`), backs this library up (`…_pre_import.7z`) and
+    /// replaces it with the package, the folders at their new roots; user
+    /// accounts stay.
+    ImportLibrary {
+        name: String,
+        #[serde(default)]
+        roots: BTreeMap<String, String>,
+        #[serde(default)]
+        apply: bool,
+        #[serde(default)]
+        confirm: String,
+    },
     /// Download optional components into the data directory (administrators):
     /// `ai_runtime`, `ai_model`, `clip_model`, `onnxruntime`, `pdfium`.
     /// `variants` picks a variant per component (`ai_runtime`: `cpu`, or `cuda`
@@ -246,6 +262,7 @@ impl JobRequest {
             JobRequest::RemoveSidecars => "remove_sidecars",
             JobRequest::CleanSidecars => "clean_sidecars",
             JobRequest::Backup => "backup",
+            JobRequest::ImportLibrary { .. } => "import_library",
             JobRequest::FindDuplicateEntries => "find_duplicate_entries",
             JobRequest::FindMoved { .. } => "find_moved",
             JobRequest::SearchFolder { .. } => "search_folder",
@@ -267,6 +284,7 @@ impl JobRequest {
                 | JobRequest::RemoveSidecars
                 | JobRequest::CleanSidecars
                 | JobRequest::Backup
+                | JobRequest::ImportLibrary { apply: false, .. }
                 | JobRequest::FindMoved { .. }
                 | JobRequest::FindContentDuplicates { .. }
                 | JobRequest::FindImageDuplicates { .. }
@@ -281,6 +299,8 @@ impl JobRequest {
                 Err("threshold must be above 0 and at most 1".into())
             }
             JobRequest::ClearLibrary { confirm } if confirm != "DELETE" => Err("confirm with \"DELETE\"".into()),
+            JobRequest::ImportLibrary { apply: true, confirm, .. } if confirm != "REPLACE" => Err("confirm with \"REPLACE\"".into()),
+            JobRequest::ImportLibrary { name, .. } if !crate::api::backups::valid(name) => Err(format!("{name:?} is not a package name")),
             JobRequest::InstallComponents { components, variants } if bad_components(components, variants) => {
                 Err(components_hint())
             }
@@ -361,7 +381,7 @@ pub struct JobInfo {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerEvent {
     /// A job was queued, started, progressed or finished.
-    Job { job: JobInfo },
+    Job { job: Box<JobInfo> },
     /// One log line of a running job.
     JobLog { id: u64, line: String },
     /// The library changed (`models`, `lookups`, `crawl`, …): reload what is shown.
@@ -441,7 +461,7 @@ impl Jobs {
     }
 
     fn publish(&self, job: &Job) {
-        self.send(ServerEvent::Job { job: job.info() });
+        self.send(ServerEvent::Job { job: Box::new(job.info()) });
     }
 
     fn next_queued(&self) -> Option<Arc<Job>> {
@@ -645,6 +665,7 @@ fn run(lib: &Library, job: &Job) -> Result<String, String> {
         JobRequest::RemoveSidecars => remove_sidecars(lib, job),
         JobRequest::CleanSidecars => clean_sidecars(lib, job),
         JobRequest::Backup => backup(lib, job),
+        JobRequest::ImportLibrary { name, roots, apply, .. } => import_library(lib, job, &name, &roots, apply),
         JobRequest::FindDuplicateEntries => duplicate_entries(lib, job),
         JobRequest::FindMoved { ids } => find_moved(lib, job, &ids),
         JobRequest::SearchFolder { folder, ids } => search_folder(lib, job, &folder, &ids),
@@ -1020,6 +1041,189 @@ fn backup(lib: &Library, job: &Job) -> Result<String, String> {
         .map_err(db_err)?
         .map_err(|e| e.to_string())?;
     Ok(format!("{name}: {:.1} MB", size as f64 / (1024.0 * 1024.0)))
+}
+
+// ── importing a library ──────────────────────────────────────────────────────
+
+/// Where packages are taken apart (`<data dir>/import/<name>/`).
+const IMPORT_DIR: &str = "import";
+/// Marks a package taken apart, its database brought to this version.
+const STAGED: &str = "staged";
+/// The thumbnails a package from before libraries leaves behind (JSON ids).
+const DROPPED: &str = "dropped_thumbnails.json";
+
+/// Clears [`Library::importing`] when the import ends, however it ends.
+struct Importing<'a>(&'a Library);
+
+impl Drop for Importing<'_> {
+    fn drop(&mut self) {
+        self.0.importing.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Take package `name` apart (once; another package's leftovers go) and bring
+/// its database to this version. Returns its folder.
+fn stage_package(lib: &Library, job: &Job, src: &std::path::Path, name: &str) -> Result<std::path::PathBuf, String> {
+    use stl_core::backup::{self, Parts};
+    let staging = lib.config.data_dir.join(IMPORT_DIR);
+    let dir = staging.join(name);
+    if dir.join(STAGED).is_file() {
+        return Ok(dir);
+    }
+    let _ = std::fs::remove_dir_all(&staging);
+    lib.job_log(job, format!("Reading {name}…"));
+    backup::extract(src, &dir, Parts::Database).map_err(|e| e.to_string())?;
+    let report = storage::migrate(&dir.join(backup::DB_FILE), &storage::Vectors::default()).map_err(|e| format!("the package's database: {e}"))?;
+    if let Some(p) = report.paths {
+        lib.job_log(job, format!("The package is from before libraries: its archive paths were moved to {} librar(ies).", p.libraries));
+        let ids: Vec<u64> = p.thumbnail_refs.iter().filter_map(|r| r.trim().parse().ok()).collect();
+        std::fs::write(dir.join(DROPPED), serde_json::to_string(&ids).expect("ids serialise")).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(dir.join(STAGED), b"").map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+/// Check package `name`'s folders at their roots here (`roots`: folder uuid →
+/// root) and, with `apply`, replace this library with it.
+fn import_library(lib: &Library, job: &Job, name: &str, roots: &BTreeMap<String, String>, apply: bool) -> Result<String, String> {
+    use stl_core::backup;
+    use storage::libraries::{self, Folder};
+    let src = crate::api::backups::package(&lib.config.data_dir, name).map_err(|e| e.message)?;
+    let dir = stage_package(lib, job, &src, name)?;
+    let db = dir.join(backup::DB_FILE);
+    let mut conn = storage::open(&db).map_err(db_err)?;
+    let folders = libraries::list(&conn).map_err(db_err)?;
+    let groups = libraries::groups(&conn).map_err(db_err)?;
+    if let Some(uuid) = roots.keys().find(|u| !folders.iter().any(|f| &f.uuid == *u)) {
+        return Err(format!("the package has no folder {uuid}"));
+    }
+    // The outermost folders: the folders inside them move along.
+    let inside = |outer: &Folder, f: &Folder| f.id != outer.id && libraries::foreign_rel(&outer.root, &f.root).is_some();
+    let outer: Vec<&Folder> = folders.iter().filter(|f| !folders.iter().any(|o| inside(o, f))).collect();
+    // A folder not given keeps its root when that is a folder here.
+    let map: Vec<(i64, String)> = outer
+        .iter()
+        .filter_map(|f| {
+            let given = roots.get(&f.uuid).map(|r| r.trim()).filter(|r| !r.is_empty()).map(str::to_string);
+            given.or_else(|| std::path::Path::new(&f.root).is_dir().then(|| f.root.clone())).map(|r| (f.id, r))
+        })
+        .collect();
+    let plan = libraries::import_plan(&conn, &map)?;
+
+    let models: i64 = folders.iter().map(|f| f.models).sum();
+    job.ctl.set_total(models.max(0) as u64);
+    let mut rows = Vec::new();
+    for f in &outer {
+        let new_root = plan.iter().find(|p| p.id == f.id).map_or_else(|| f.root.clone(), |p| p.new.clone());
+        let mut row = crate::dupes::ImportFolder {
+            uuid: f.uuid.clone(),
+            name: f.name.clone(),
+            library: groups.iter().find(|g| Some(g.id) == f.group_id).map(|g| g.name.clone()).unwrap_or_default(),
+            root: f.root.clone(),
+            root_exists: std::path::Path::new(&new_root).is_dir(),
+            new_root,
+            models: 0,
+            inner: 0,
+            found: 0,
+            case_only: 0,
+            missing: 0,
+            missing_examples: Vec::new(),
+        };
+        for p in &plan {
+            let Some(rel) = libraries::foreign_rel(&f.root, &p.old) else { continue };
+            let check = libraries::count_found(&conn, p.id, &p.new, None)?;
+            row.models += check.total as i64;
+            row.inner += usize::from(p.id != f.id);
+            row.found += check.found;
+            row.case_only += check.case_only.len();
+            row.missing += check.missing;
+            let room = 20usize.saturating_sub(row.missing_examples.len());
+            row.missing_examples.extend(check.missing_examples.into_iter().take(room).map(|m| if rel.is_empty() { m } else { format!("{rel}/{m}") }));
+            job.ctl.advance(check.total as u64);
+            if job.stopped() {
+                return Err("stopped".into());
+            }
+        }
+        lib.job_log(job, format!("{}: {} of {} archive(s) found under {}", f.name, row.found + row.case_only, row.models, row.new_root));
+        rows.push(row);
+    }
+    let found: usize = rows.iter().map(|r| r.found + r.case_only).sum();
+    let summary = format!("{} folder(s), {found} of {models} archive(s) found", rows.len());
+    let mut preview = crate::dupes::ImportPreview { name: name.to_string(), folders: rows, models, applied: false };
+    if !apply || job.stopped() {
+        job.set_result(crate::dupes::JobResult::Import(preview));
+        return Ok(format!("{summary} (checked only)"));
+    }
+
+    lib.importing.store(true, Ordering::SeqCst);
+    let _importing = Importing(lib);
+    let pre = crate::api::backups::new_name().replace(".7z", "_pre_import.7z");
+    lib.job_log(job, format!("Backing up this library to {pre}…"));
+    let settings = lib.config.data_dir.join(backup::SETTINGS_FILE);
+    let dest = crate::api::backups::dir(&lib.config.data_dir).join(&pre);
+    lib.db
+        .with(|c| Ok::<_, rusqlite::Error>(backup::write(c, &lib.thumbs, Some(&settings), &dest, &job.ctl)))
+        .map_err(db_err)?
+        .map_err(|e| format!("could not back this library up ({e}); nothing was changed"))?;
+    lib.job_log(job, "Reading the thumbnails…".into());
+    backup::extract(&src, &dir, backup::Parts::Thumbnails).map_err(|e| e.to_string())?;
+    {
+        // Opening it makes an empty store for a package without thumbnails.
+        let staged = stl_core::thumbstore::ThumbStore::open(&dir.join(backup::THUMB_DIR)).map_err(|e| format!("the package's thumbnails: {e}"))?;
+        if let Some(ids) = std::fs::read_to_string(dir.join(DROPPED)).ok().and_then(|t| serde_json::from_str::<Vec<u64>>(&t).ok()) {
+            staged.delete_many(&ids).map_err(|e| format!("the package's thumbnails: {e}"))?;
+        }
+        staged.close();
+    }
+    {
+        let tx = conn.transaction().map_err(db_err)?;
+        libraries::import_roots(&tx, &map)?;
+        tx.commit().map_err(db_err)?;
+    }
+    drop(conn);
+    if job.stopped() {
+        return Err("stopped".into());
+    }
+
+    lib.job_log(job, "Replacing the library…".into());
+    let replaced = (|| {
+        let mut live = lib.db.get().map_err(db_err)?;
+        backup::replace_live(&mut live, &db, &job.ctl).map_err(|e| e.to_string())
+    })();
+    replaced.map_err(|e| format!("{e}; nothing was changed"))?;
+    lib.db.close();
+    let rest = (|| {
+        lib.thumbs.replace_data(&dir.join(backup::THUMB_DIR).join("data.mdb")).map_err(|e| format!("thumbnail store: {e}"))?;
+        import_settings(&lib.config.data_dir, &dir)
+    })();
+    lib.sidecars.clear();
+    lib.jobs.send(ServerEvent::Resync);
+    rest.map_err(|e| format!("{e}; the library before the import is in {pre}"))?;
+    let _ = std::fs::remove_dir_all(lib.config.data_dir.join(IMPORT_DIR));
+    preview.applied = true;
+    job.set_result(crate::dupes::JobResult::Import(preview));
+    lib.job_log(job, format!("Imported. The library before the import is in {pre}."));
+    Ok(format!("{summary}; imported"))
+}
+
+/// The package's library settings (when it has them), keeping this server's
+/// trash folder, a path here.
+fn import_settings(data_dir: &std::path::Path, staged: &std::path::Path) -> Result<(), String> {
+    use serde_json::{Map, Value};
+    const TRASH: &str = "trash_folder_path";
+    let file = stl_core::backup::SETTINGS_FILE;
+    let Ok(text) = std::fs::read_to_string(staged.join(file)) else { return Ok(()) };
+    let mut doc: Map<String, Value> = serde_json::from_str(&text).map_err(|e| format!("the package's settings: {e}"))?;
+    let path = data_dir.join(file);
+    let here = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str::<Map<String, Value>>(&t).ok());
+    match here.and_then(|mut h| h.remove(TRASH)) {
+        Some(trash) => doc.insert(TRASH.into(), trash),
+        None => doc.remove(TRASH),
+    };
+    // Write beside, then replace: a crash never leaves half a file.
+    let tmp = path.with_extension("json.tmp");
+    let text = serde_json::to_string_pretty(&doc).expect("json serialises");
+    std::fs::write(&tmp, text).and_then(|_| std::fs::rename(&tmp, &path)).map_err(|e| e.to_string())
 }
 
 // ── maintenance lists ────────────────────────────────────────────────────────

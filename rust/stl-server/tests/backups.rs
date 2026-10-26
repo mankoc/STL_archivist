@@ -141,3 +141,118 @@ async fn backups_and_restore() {
 async fn r_body(lib: &TestLib, token: &str, name: &str) -> Vec<u8> {
     call(&lib.state, "GET", &format!("/api/backups/{name}"), Some(token), None).await.body
 }
+
+fn png(rgb: [u8; 3]) -> Vec<u8> {
+    let img = image::RgbImage::from_pixel(40, 30, image::Rgb(rgb));
+    let mut out = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut out, image::ImageFormat::Png).unwrap();
+    out.into_inner()
+}
+
+/// The archives of the exported library, wherever they are put.
+fn archives(root: &Path) {
+    write_zip(&root.join("Studio").join("Dragon.zip"), &[("dragon.stl", b"solid d\nendsolid\n"), ("dragon.png", &png([200, 30, 30]))]);
+    write_zip(&root.join("Other").join("Knight.zip"), &[("knight.stl", b"solid k\nendsolid\n")]);
+}
+
+async fn upload(lib: &TestLib, token: &str, bytes: Vec<u8>) -> common::Reply {
+    let req = axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/backups/upload")
+        .header(axum::http::header::AUTHORIZATION, format!("Bearer {token}"))
+        .header(axum::http::header::CONTENT_TYPE, "application/octet-stream")
+        .body(axum::body::Body::from(bytes))
+        .unwrap();
+    common::send_from(&lib.state, common::LOCAL, req).await
+}
+
+async fn count(lib: &TestLib, sql: &str) -> i64 {
+    lib.state.db.with(|c| c.query_row(sql, [], |r| r.get(0))).unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn export_and_import_with_new_roots() {
+    // Library A: two archives, one with an image; exported as a package.
+    let a = empty_library();
+    let a_admin = a.user("admin", Role::Admin);
+    let a_root = a.dir.path().join("archives");
+    archives(&a_root);
+    run(&a, &a_admin, json!({"kind": "crawl", "folder": a_root.to_string_lossy(), "pattern": "{sculptor}/{title}"})).await;
+    run(&a, &a_admin, json!({"kind": "backup"})).await;
+    let name = call(&a.state, "GET", "/api/backups", Some(&a_admin), None).await.json()[0]["name"].as_str().unwrap().to_string();
+    let package = r_body(&a, &a_admin, &name).await;
+
+    // Library B, elsewhere: its own users and records; A's archives under another root.
+    let b = empty_library();
+    let admin = b.user("boss", Role::Admin);
+    let ed = b.user("ed", Role::Editor);
+    let mine = b.dir.path().join("mine");
+    write_zip(&mine.join("Orc.zip"), &[("orc.stl", b"solid o\nendsolid\n")]);
+    run(&b, &ed, json!({"kind": "crawl", "folder": mine.to_string_lossy(), "pattern": "{title}"})).await;
+    let moved = b.dir.path().join("moved");
+    archives(&moved);
+
+    assert_eq!(upload(&b, &ed, package.clone()).await.status, StatusCode::FORBIDDEN);
+    assert_eq!(upload(&b, &admin, b"not a package".to_vec()).await.status, StatusCode::BAD_REQUEST);
+    // Packages are large: no body limit (refused for what it is, not for its size).
+    assert_eq!(upload(&b, &admin, vec![7; 3 << 20]).await.status, StatusCode::BAD_REQUEST);
+    let r = upload(&b, &admin, package).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    let pkg = r.json()["name"].as_str().unwrap().to_string();
+    assert!(pkg.ends_with("_upload.7z"), "{pkg}");
+    let listed = call(&b.state, "GET", "/api/backups", Some(&admin), None).await.json();
+    assert_eq!(listed.as_array().unwrap().len(), 1, "only the package: {listed}");
+
+    // Checking: the folder keeps its root while that exists here, or takes the one given.
+    let v = run(&b, &admin, json!({"kind": "import_library", "name": pkg})).await;
+    let folder = &v["result"]["folders"][0];
+    assert_eq!(v["result"]["type"], "import", "{v}");
+    assert_eq!(folder["root"], a_root.to_string_lossy().as_ref());
+    assert_eq!((folder["models"].as_i64(), folder["found"].as_u64()), (Some(2), Some(2)), "{folder}");
+    let uuid = folder["uuid"].as_str().unwrap().to_string();
+    let nowhere = b.dir.path().join("nowhere").to_string_lossy().into_owned();
+    let v = run(&b, &admin, json!({"kind": "import_library", "name": pkg, "roots": {&uuid: nowhere}})).await;
+    let folder = &v["result"]["folders"][0];
+    assert_eq!((folder["missing"].as_u64(), folder["root_exists"].as_bool()), (Some(2), Some(false)), "{folder}");
+    assert_eq!(count(&b, "SELECT count(*) FROM models").await, 1, "checking changes nothing");
+
+    // Applying needs an administrator and the confirmation.
+    let apply = json!({"kind": "import_library", "name": pkg, "roots": {&uuid: moved.to_string_lossy()}, "apply": true});
+    assert_eq!(call(&b.state, "POST", "/api/jobs", Some(&admin), Some(apply.clone())).await.status, StatusCode::BAD_REQUEST);
+    let mut confirmed = apply.clone();
+    confirmed["confirm"] = json!("REPLACE");
+    assert_eq!(call(&b.state, "POST", "/api/jobs", Some(&ed), Some(confirmed.clone())).await.status, StatusCode::FORBIDDEN);
+    let v = run(&b, &admin, confirmed).await;
+    assert!(v["job"]["message"].as_str().unwrap().ends_with("imported"), "{v}");
+    assert_eq!(v["result"]["applied"], true);
+
+    // B is now A's library at its new root; B's users stay.
+    let libs = call(&b.state, "GET", "/api/libraries", Some(&ed), None).await.json();
+    assert_eq!(libs.to_string().matches("\"root\"").count(), 1, "{libs}");
+    assert!(libs.to_string().contains(&serde_json::to_string(&moved.to_string_lossy()).unwrap()), "{libs}");
+    assert_eq!(count(&b, "SELECT count(*) FROM models").await, 2);
+    assert_eq!(count(&b, "SELECT count(*) FROM models WHERE title = 'Orc'").await, 0);
+    let image = count(&b, "SELECT min(id) FROM images").await;
+    let r = call(&b.state, "GET", &format!("/api/images/{image}/thumbnail"), Some(&ed), None).await;
+    let location = r.headers.get("location").and_then(|l| l.to_str().ok()).unwrap_or_default().to_string();
+    let r = call(&b.state, "GET", &location, Some(&ed), None).await;
+    assert_eq!(r.status, StatusCode::OK, "the thumbnails came along ({location})");
+    assert!(!r.body.is_empty());
+    let names: Vec<String> = call(&b.state, "GET", "/api/backups", Some(&admin), None)
+        .await
+        .json()
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["name"].as_str().unwrap().to_string())
+        .collect();
+    assert!(names.iter().any(|n| n.ends_with("_pre_import.7z")), "{names:?}");
+    assert!(!b.dir.path().join("import").exists(), "the staging folder is gone");
+
+    // While a library is being imported, writes are refused; reads go on.
+    b.state.importing.store(true, std::sync::atomic::Ordering::SeqCst);
+    let r = call(&b.state, "POST", "/api/models/delete", Some(&ed), Some(json!({"ids": [1]}))).await;
+    assert_eq!(r.status, StatusCode::CONFLICT);
+    assert_eq!(call(&b.state, "GET", "/api/libraries", Some(&ed), None).await.status, StatusCode::OK);
+    b.state.importing.store(false, std::sync::atomic::Ordering::SeqCst);
+}

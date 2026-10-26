@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026.44.4 — 2026-10-26
+
+- **Columns move by a grip:** pointing at a column's header shows a grip (⋮⋮) left of its
+  name; drag it onto another column's header (outlined while you are over it) to move the
+  column there. The whole header follows the pointer, and the grip has a tooltip. (The
+  headers themselves were the drag handle, which some browsers do not start a drag from.)
+  The Columns menu and the guides explain the steps.
+- **Fixed: nothing could be dragged in the desktop app** (only a "no" cursor everywhere): its
+  window left drag and drop to Tauri's handler, which refuses every drag inside the page on
+  Windows. Columns now move there, and images dropped onto a model are taken.
+- **Column separators:** thin vertical lines between the library table's columns, just off the
+  background colour.
+- **About:** an ⓘ button beside **?** in the header opens *About StlArchivist*, which now
+  shows the archivist picture of the help's start page and names the creator (MrIxolite), the
+  server's version and the project's page. The desktop app has **Help → About StlArchivist**:
+  a window with the same picture, the creator and the app's own version. The copyright
+  (`LICENSE` too) is MrIxolite's.
+- **The version is in the title:** the browser tab and the desktop window read
+  `StlArchivist <version>` (the server's in the web client, the desktop app's on its start
+  page).
+- **Export and import a library** (*Settings → Backups & transfer*, administrators), to copy
+  a library exactly to another server, for example from the desktop app to the Docker
+  server:
+  - **Export library** writes a backup and downloads it; that file is the package.
+  - **Import library…** takes a package from the backups list, or one you upload (with
+    progress). It lists the package's folders and checks each one at its place here: by
+    hand, with **Browse…**, or with one rule for all (*replace the path start*
+    `D:\Minis` with `/library`; Windows and Linux paths both work).
+  - Typing `REPLACE` then replaces this server's library with the package while the server
+    runs. Models, libraries, tags, thumbnails and library settings come along, with each
+    folder at its new root; nothing is re-read.
+  - User accounts and this server's trash folder stay. The library here is backed up first
+    (`…_pre_import.7z`).
+  - Any backup can be imported, including older ones and the earlier desktop app's.
+  - Sync between servers is designed in the migration plan, to come later.
+- **Moving a folder** (*Libraries → Move*, and the import) now also moves the images taken
+  from beside its archives, which kept their old paths.
+
 ## 2026.44.3 — 2026-10-26
 
 - **The Docker files are in `docker/`:** `Dockerfile` and `.dockerignore` moved there

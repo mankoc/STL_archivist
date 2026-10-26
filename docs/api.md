@@ -1,6 +1,6 @@
 # StlArchivist API
 
-Version 2026.44.3. Generated from `web/openapi.json` by `tools/api_doc.py`; the
+Version 2026.44.4. Generated from `web/openapi.json` by `tools/api_doc.py`; the
 running server serves the same document at `GET /api/openapi.json`. Do not edit by hand:
 run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after changing routes.
 
@@ -18,7 +18,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
   or `GET /api/jobs/{id}`.
 - Writes that change the library are announced on `/api/events` as `library_changed`.
 
-## Endpoints (82)
+## Endpoints (83)
 
 - [Sign-in and sessions](#sign-in-and-sessions) (5)
 - [Users and preferences](#users-and-preferences) (7)
@@ -31,7 +31,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 - [Libraries and their folders](#libraries-and-their-folders) (6)
 - [Jobs and events](#jobs-and-events) (5)
 - [Maintenance](#maintenance) (3)
-- [Backups](#backups) (3)
+- [Backups](#backups) (4)
 - [Search](#search) (1)
 - [Statistics](#statistics) (2)
 - [Library settings](#library-settings) (2)
@@ -151,7 +151,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 |---|---|---|---|---|
 | `GET /api/events` | The event stream: `ServerEvent` JSON text frames (job progress and logs, library changes). Authenticates like any route (the session cookie works for browsers, which cannot set headers on a WebSocket). |  | 101 [ServerEvent](#serverevent) |  |
 | `GET /api/jobs` | Queued, running and recently finished jobs, oldest first. |  | 200 [JobInfo](#jobinfo)[] |  |
-| `POST /api/jobs` | Queue a job. Jobs run one at a time, in order. Needs the editor role (compacting the database and backups: admin). | body: [JobRequest](#jobrequest) | 202 [JobInfo](#jobinfo) | 403 |
+| `POST /api/jobs` | Queue a job. Jobs run one at a time, in order. Needs the editor role (compacting the database, backups and imports: admin). | body: [JobRequest](#jobrequest) | 202 [JobInfo](#jobinfo) | 403 |
 | `GET /api/jobs/{id}` | One job with its log. | path `id`: integer | 200 [JobDetail](#jobdetail) | 404 |
 | `DELETE /api/jobs/{id}` | Cancel a job: a queued one at once, a running one at its next checkpoint (what it finished so far stays). 409 when it has already finished. | path `id`: integer | 202 | 404, 409 |
 
@@ -168,6 +168,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 | Endpoint | Description | Request | Response | Errors |
 |---|---|---|---|---|
 | `GET /api/backups` | The backups on the server, newest first. |  | 200 [BackupFile](#backupfile)[] | 403 |
+| `POST /api/backups/upload` | Upload a library package: the body is a backup `.7z` (from this server, another one or the desktop app). It joins the backups list (`…_upload.7z`), ready to import. | body: `application/octet-stream` | 201 [BackupFile](#backupfile) | 400, 403 |
 | `GET /api/backups/{name}` | Download a backup. | path `name`: string | 200 `application/x-7z-compressed` | 404 |
 | `DELETE /api/backups/{name}` | Delete a backup. | path `name`: string | 204 | 404 |
 
@@ -652,6 +653,36 @@ Two archives with matching images.
 | `shared_skipped` | integer | Distinct images left out as shared by too many models. |
 | `truncated` | boolean | More pairs matched than are kept. |
 
+### ImportFolder
+
+One of a package's outermost folders.
+
+| Field | Type | Description |
+|---|---|---|
+| `case_only` | integer | Found only with another letter case. |
+| `found` | integer | Archives found under `new_root`. |
+| `inner` | integer | Folders inside it, moved along. |
+| `library` | string | The library it is a folder of. |
+| `missing` | integer |  |
+| `missing_examples` | string[] | Some relative paths not found. |
+| `models` | integer | Records in it and the folders inside it. |
+| `name` | string |  |
+| `new_root` | string | Its root here: the one given, else the old one (kept when nothing maps it). |
+| `root` | string | Its root where the package was made. |
+| `root_exists` | boolean | `new_root` is a folder on this server. |
+| `uuid` | string |  |
+
+### ImportPreview
+
+A library package checked (and imported) by `import_library`.
+
+| Field | Type | Description |
+|---|---|---|
+| `applied` | boolean | It replaced this server's library (else it was only checked). |
+| `folders` | [ImportFolder](#importfolder)[] | Its outermost folders; the folders inside them move along. |
+| `models` | integer | Records in the package. |
+| `name` | string | The package (a name in the backups list). |
+
 ### JobDetail
 
 | Field | Type | Description |
@@ -698,6 +729,7 @@ One of:
 - `kind: "remove_sidecars"`: Delete `METADATA.7z` from every folder holding catalogued archives.
 - `kind: "clean_sidecars"`: Tidy the `METADATA.7z` files under the crawled folders: rewrite those listing archives that are gone, delete those whose archives are all gone, and delete leftover `METADATA.7z.tmp` files.
 - `kind: "backup"`: Back up the database, thumbnails and settings to `<data dir>/backups/stlLibrary_backup_<stamp>.7z` (administrators).
+- `kind: "import_library"` — `apply`, `confirm`, `name`, `roots`: Import a library package (a backup, from this server or another one) from the backups list (administrators). Lists its folders and checks their archives under `roots` (folder uuid → root here; a folder not given keeps its root when that is a folder here). With `apply` (and `confirm: "REPLACE"`), backs this library up (`…_pre_import.7z`) and replaces it with the package, the folders at their new roots; user accounts stay.
 - `kind: "install_components"` — `components`, `variants`: Download optional components into the data directory (administrators): `ai_runtime`, `ai_model`, `clip_model`, `onnxruntime`, `pdfium`. `variants` picks a variant per component (`ai_runtime`: `cpu`, or `cuda` on Windows; `onnxruntime`: `cpu`, `directml` on Windows, `cuda` on Linux); the others get the default for the GPUs found.
 - `kind: "remove_components"` — `components`: Delete downloaded components (administrators).
 - `kind: "rescan"` — `ids`: Re-read the models' archives: metadata, presupports, warnings, scales, hash (Rescan).
@@ -725,6 +757,7 @@ One of:
 - `type: "records"` — `rows`: Records of a maintenance list (Verify, duplicate entries, moved, found).
 - variant: The AI tagger's suggestion for one model (`ai_suggest`).
 - variant: What moving a library to a new root found (`relocate_library`).
+- variant: A package's folders and where their archives are here (`import_library`).
 
 ### JobState
 
