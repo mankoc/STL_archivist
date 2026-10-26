@@ -1,14 +1,15 @@
 // The archive browser: the folders holding catalogued archives as a tree
 // (folderTree.ts), and the archives of the chosen one as thumbnails. Clicking
 // a folder shows its archives and opens it; its chevron opens or closes it.
-import { Box, Checkbox, getTreeExpandedState, Group, Modal, ScrollArea, Stack, Text, TextInput, Tree, useTree } from "@mantine/core";
-import { IconChevronRight, IconFolder } from "@tabler/icons-react";
+import { Box, Checkbox, getTreeExpandedState, Group, Modal, ScrollArea, Slider, Stack, Text, TextInput, Tree, useTree } from "@mantine/core";
+import { IconChevronRight, IconFolder, IconPhoto } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
 import { api, unwrap } from "../api/client";
 import { CellGrid } from "../browser/CellGrid";
 import { DetailPane } from "../browser/DetailPane";
+import { CARD_MAX, CARD_MIN, loadCardWidth, saveCardWidth } from "../browser/grid";
 import { folderTree, nodesTo } from "./folderTree";
 
 export function FoldersPage() {
@@ -17,6 +18,8 @@ export function FoldersPage() {
   const [folder, setFolder] = useState<string | null>(null);
   const [subfolders, setSubfolders] = useState(false);
   const [open, setOpen] = useState<number | null>(null);
+  // The thumbnails' size (the slider above them), remembered in this browser.
+  const [cardWidth, setCardWidth] = useState(loadCardWidth);
   const shown = useMemo(
     () => (folders.data ?? []).filter((f) => f.toLowerCase().includes(filter.toLowerCase())),
     [folders.data, filter],
@@ -100,12 +103,18 @@ export function FoldersPage() {
           <Text c="dimmed" p="md">Choose a folder.</Text>
         ) : (
           <Stack gap={0} style={{ height: "100%" }}>
-            <Text size="xs" c="dimmed" px="sm" pt="xs">{folder} · {cells.data?.length ?? "…"} archive(s)</Text>
+            <Group px="sm" pt="xs" gap="sm" wrap="nowrap">
+              <Text size="xs" c="dimmed" truncate style={{ flex: 1 }}>{folder} · {cells.data?.length ?? "…"} archive(s)</Text>
+              <IconPhoto size={12} color="var(--mantine-color-dimmed)" style={{ flexShrink: 0 }} />
+              <Slider size="xs" w={140} min={CARD_MIN} max={CARD_MAX} step={20} value={cardWidth} label={(v) => `${v} px`}
+                onChange={setCardWidth} onChangeEnd={saveCardWidth} aria-label="Thumbnail size" data-testid="thumb-size" />
+              <IconPhoto size={18} color="var(--mantine-color-dimmed)" style={{ flexShrink: 0 }} />
+            </Group>
             {cells.data?.length === 0 && !subfolders && !tree.archives.has(folder) && (
               <Text size="sm" c="dimmed" px="sm" pt="xs">No archives are directly in this folder: tick Include subfolders to see those below it.</Text>
             )}
             <Box style={{ flex: 1, minHeight: 0 }}>
-              <CellGrid count={cells.data?.length ?? 0} cell={(i) => cells.data?.[i]} selected={open} onOpen={setOpen} />
+              <CellGrid count={cells.data?.length ?? 0} cell={(i) => cells.data?.[i]} cardWidth={cardWidth} selected={open} onOpen={setOpen} />
             </Box>
           </Stack>
         )}

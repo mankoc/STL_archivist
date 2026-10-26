@@ -206,7 +206,8 @@ Shows the folders that hold catalogued archives as a tree (the first level open;
 above it filters, showing every match open). A folder with nothing but one folder in it
 shares its row (`F: / STL`); folders without archives of their own are dimmed. Click a
 folder (or press **Enter** on it) to see its archives as thumbnails and open it; its arrow
-opens or closes it. **Include subfolders** adds the archives below it. Click a thumbnail for
+opens or closes it. **Include subfolders** adds the archives below it. The slider above the
+thumbnails changes their size (remembered in this browser). Click a thumbnail for
 the model's details.
 
 ### Statistics

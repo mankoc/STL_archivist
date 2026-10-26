@@ -271,7 +271,7 @@ export const TOPICS: Topic[] = [
         "Click an image for the full-resolution original read from the archive; **←**/**→** step through the images.",
       ] },
       { h: "Folders and Statistics" },
-      { p: "**Folders** shows the folders holding catalogued archives as a tree (the box above filters it; folders without archives of their own are dimmed); click one to see its archives as thumbnails (**Include subfolders** adds those below). **Statistics** shows totals, the most frequent values per field and the distribution of any column." },
+      { p: "**Folders** shows the folders holding catalogued archives as a tree (the box above filters it; folders without archives of their own are dimmed); click one to see its archives as thumbnails (**Include subfolders** adds those below; the slider above them changes their size). **Statistics** shows totals, the most frequent values per field and the distribution of any column." },
     ],
   },
   {

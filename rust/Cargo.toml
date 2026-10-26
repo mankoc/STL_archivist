@@ -4,7 +4,7 @@ resolver = "2"
 members = ["stl-core", "stl-server", "stl-desktop", "stl-proc", "meshpeek-core", "meshpeek-render", "stl-viewer"]
 
 [workspace.package]
-version = "2026.43.21"
+version = "2026.44.0"
 edition = "2024"
 license = "CC-BY-NC-SA-4.0"
 

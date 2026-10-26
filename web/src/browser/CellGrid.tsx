@@ -6,13 +6,14 @@ import { useEffect, useRef, useState } from "react";
 
 import type { Schemas } from "../api/client";
 import { baseName } from "../format";
-import { CARD_GAP, CARD_WIDTH, columnsFor } from "./grid";
+import { CARD_GAP, CARD_WIDTH, cardLayout, columnsFor } from "./grid";
 
 export type Cell = Schemas["Cell"];
-const ROW_HEIGHT = 220;
 
-export function CellGrid({ count, cell, selected, onOpen, onContextMenu, onRange }: {
+export function CellGrid({ count, cell, cardWidth = CARD_WIDTH, selected, onOpen, onContextMenu, onRange }: {
   count: number;
+  /** Card width in pixels (images and rows scale with it). */
+  cardWidth?: number;
   cell: (index: number) => Cell | undefined;
   selected?: number | null;
   onOpen: (id: number) => void;
@@ -30,9 +31,12 @@ export function CellGrid({ count, cell, selected, onOpen, onContextMenu, onRange
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  const cols = columnsFor(width);
+  const cols = columnsFor(width, cardWidth);
   const rows = Math.ceil(count / cols);
-  const virtualizer = useVirtualizer({ count: rows, getScrollElement: () => scrollRef.current, estimateSize: () => ROW_HEIGHT, overscan: 3 });
+  const layout = cardLayout(cardWidth);
+  const virtualizer = useVirtualizer({ count: rows, getScrollElement: () => scrollRef.current, estimateSize: () => layout.row, overscan: 3 });
+  // A new card size changes every row's height.
+  useEffect(() => virtualizer.measure(), [virtualizer, layout.row]);
   const items = virtualizer.getVirtualItems();
   const first = items[0]?.index ?? 0;
   const last = items[items.length - 1]?.index ?? -1;
@@ -48,7 +52,7 @@ export function CellGrid({ count, cell, selected, onOpen, onContextMenu, onRange
               .map((i) => {
                 const m = cell(i);
                 return (
-                  <Box key={i} w={CARD_WIDTH}>
+                  <Box key={i} w={cardWidth}>
                     {m ? (
                       <UnstyledButton
                         onClick={() => onOpen(m.id)}
@@ -61,16 +65,16 @@ export function CellGrid({ count, cell, selected, onOpen, onContextMenu, onRange
                       >
                         <Card withBorder p={6} style={selected === m.id ? { outline: "2px solid var(--mantine-primary-color-filled)" } : undefined}>
                           {m.thumbnail ? (
-                            <Image src={m.thumbnail} h={150} fit="contain" radius="md" alt="" loading="lazy" />
+                            <Image src={m.thumbnail} h={layout.image} fit="contain" radius="md" alt="" loading="lazy" />
                           ) : (
-                            <Box h={150} bg="var(--mantine-color-default-hover)" style={{ borderRadius: 4 }} />
+                            <Box h={layout.image} bg="var(--mantine-color-default-hover)" style={{ borderRadius: 4 }} />
                           )}
                           <Text size="sm" truncate mt={4}>{m.title || baseName(m.archive_path)}</Text>
                           <Text size="xs" c="dimmed" truncate>{m.creator || " "}</Text>
                         </Card>
                       </UnstyledButton>
                     ) : (
-                      <Skeleton h={ROW_HEIGHT - 16} radius="md" />
+                      <Skeleton h={layout.row - 16} radius="md" />
                     )}
                   </Box>
                 );

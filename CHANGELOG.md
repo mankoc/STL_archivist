@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026.44.0 — 2026-10-26
+
+- **Thumbnail size on the Folders page:** a slider above the thumbnails makes them bigger or
+  smaller (cards 120 to 480 px wide; images and rows follow), remembered in this browser.
+
 ## 2026.43.21 — 2026-10-25
 
 - **Fixed: every crawl read the catalog of every archive without an STL list.** A record
