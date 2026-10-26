@@ -399,7 +399,10 @@ Maintenance is in **Settings**: the **Maintenance** tab (editors run its jobs) h
       receiving side, and whether it exists there. Type `REPLACE` to start.
 
     A sync replaces the whole receiving library, so edit on one side at a time and sync
-    before switching. Only the thumbnails the receiving side lacks are sent. Both servers
+    before switching. Only the thumbnails the receiving side lacks are sent, and once both
+    sides hold the same library (after the first sync) only the database rows that changed
+    (a *smart* sync; the job's log says "only the changes"). The sync dialog has a tick box
+    for backing up the receiving side first; the import dialog has one too. Both servers
     must run the same version, or the receiving side a newer one.
 - **Delete all records** (administrators) — empties the library after you type `DELETE`.
   Archive files are not touched. Back up first.

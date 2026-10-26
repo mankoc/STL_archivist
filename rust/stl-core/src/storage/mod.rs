@@ -19,6 +19,7 @@
 //! `posix_join(root, rel)` (see [`crate::relpath`]): queries build absolute
 //! paths from a library's root with them.
 
+pub mod delta;
 pub mod admin;
 pub mod browser;
 pub mod crawl;

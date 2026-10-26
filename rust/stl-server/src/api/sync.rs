@@ -98,6 +98,41 @@ pub async fn have(State(lib): State<AppState>, me: CurrentUser, body: Bytes) -> 
     Ok(resp)
 }
 
+/// This server's database fingerprints (`storage::delta`): a pushing server
+/// sends only the rows that differ. 409 when the database cannot be fingerprinted.
+#[utoipa::path(get, path = "/api/sync/blocks", tag = "sync",
+    responses((status = 200, content_type = "application/octet-stream", body = Vec<u8>), (status = 403, body = crate::error::ErrorBody),
+              (status = 409, body = crate::error::ErrorBody)))]
+pub async fn blocks(State(lib): State<AppState>, me: CurrentUser) -> Result<Response, ApiError> {
+    me.require(Role::Admin)?;
+    let state = lib
+        .run(|lib| {
+            let fingerprints = lib.db.with(|c| {
+                let tx = c.unchecked_transaction()?;
+                Ok::<_, rusqlite::Error>(stl_core::storage::delta::state(&tx))
+            })?;
+            fingerprints.map_err(|e| ApiError::new(StatusCode::CONFLICT, e.to_string()))
+        })
+        .await?;
+    let mut resp = Body::from(stl_core::storage::delta::encode(&state)).into_response();
+    resp.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static("application/octet-stream"));
+    instance_header(&lib, &mut resp);
+    Ok(resp)
+}
+
+/// Hand over a pulling server's database fingerprints (the body, as `GET`
+/// gives them) for a `sync_export` job; kept for a day.
+#[utoipa::path(post, path = "/api/sync/blocks", tag = "sync",
+    request_body(content_type = "application/octet-stream", description = "Database fingerprints"),
+    responses((status = 200, body = HaveId), (status = 400, body = crate::error::ErrorBody), (status = 403, body = crate::error::ErrorBody)))]
+pub async fn post_blocks(State(lib): State<AppState>, me: CurrentUser, body: Bytes) -> Result<Response, ApiError> {
+    me.require(Role::Admin)?;
+    let id = lib.run(move |lib| sync::store_blocks(&lib.config.data_dir, &body).map_err(ApiError::bad_request)).await?;
+    let mut resp = Json(HaveId { id }).into_response();
+    instance_header(&lib, &mut resp);
+    Ok(resp)
+}
+
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Paths {

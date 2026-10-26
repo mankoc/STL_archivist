@@ -1,6 +1,6 @@
 # StlArchivist API
 
-Version 2026.44.5. Generated from `web/openapi.json` by `tools/api_doc.py`; the
+Version 2026.44.6. Generated from `web/openapi.json` by `tools/api_doc.py`; the
 running server serves the same document at `GET /api/openapi.json`. Do not edit by hand:
 run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after changing routes.
 
@@ -18,7 +18,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
   or `GET /api/jobs/{id}`.
 - Writes that change the library are announced on `/api/events` as `library_changed`.
 
-## Endpoints (92)
+## Endpoints (94)
 
 - [Sign-in and sessions](#sign-in-and-sessions) (5)
 - [Users and preferences](#users-and-preferences) (7)
@@ -38,7 +38,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 - [AI tagger](#ai-tagger) (2)
 - [Compute workers](#compute-workers) (3)
 - [Optional components](#optional-components) (1)
-- [Sync](#sync) (9)
+- [Sync](#sync) (11)
 - [Types](#types)
 
 ### Sign-in and sessions
@@ -218,6 +218,8 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 
 | Endpoint | Description | Request | Response | Errors |
 |---|---|---|---|---|
+| `GET /api/sync/blocks` | This server's database fingerprints (`storage::delta`): a pushing server sends only the rows that differ. 409 when the database cannot be fingerprinted. |  | 200 `application/octet-stream` | 403, 409 |
+| `POST /api/sync/blocks` | Hand over a pulling server's database fingerprints (the body, as `GET` gives them) for a `sync_export` job; kept for a day. | body: `application/octet-stream` | 200 [HaveId](#haveid) | 400, 403 |
 | `POST /api/sync/exists` | Which of `paths` are folders on this server (a pushing server's preview). | body: [Paths](#paths) | 200 boolean[] | 403 |
 | `GET /api/sync/remotes` | The remote servers this server syncs with. |  | 200 [RemoteInfo](#remoteinfo)[] | 403 |
 | `POST /api/sync/remotes` | Add a remote server: this server signs in there as an administrator (the password is not kept). | body: [NewRemote](#newremote) | 201 [RemoteInfo](#remoteinfo) | 400, 409, 502 |
@@ -757,8 +759,8 @@ One of:
 - `kind: "clean_sidecars"`: Tidy the `METADATA.7z` files under the crawled folders: rewrite those listing archives that are gone, delete those whose archives are all gone, and delete leftover `METADATA.7z.tmp` files.
 - `kind: "backup"`: Back up the database, thumbnails and settings to `<data dir>/backups/stlLibrary_backup_<stamp>.7z` (administrators).
 - `kind: "import_library"` — `apply`, `backup_first`, `confirm`, `name`, `roots`, `rules`: Import a library package (a backup, from this server or another one) from the backups list (administrators). Lists its folders and checks their archives under `roots` (folder uuid → root here; a folder not given keeps its root when that is a folder here). With `apply` (and `confirm: "REPLACE"`), backs this library up (`…_pre_import.7z`) and replaces it with the package, the folders at their new roots; user accounts stay. `rules` (path starts) map the folders `roots` does not name; `backup_first: false` skips the backup (a sync's choice).
-- `kind: "sync"` — `confirm`, `direction`, `remote`: Sync with a remote server (administrators; `confirm: "REPLACE"`): `pull` replaces this library with the remote's, `push` the remote's with this one, each folder mapped by the remote's path rules. Only the thumbnails the receiving side lacks travel.
-- `kind: "sync_export"` — `have`: Pack this library for a sync that pulls it (administrators; another server asks for it): `backups/…_sync.7z` without the thumbnails in `have` (the receiver's list, `POST /api/sync/thumbnails`).
+- `kind: "sync"` — `backup_first`, `confirm`, `direction`, `remote`: Sync with a remote server (administrators; `confirm: "REPLACE"`): `pull` replaces this library with the remote's, `push` the remote's with this one, each folder mapped by the remote's path rules. Only the thumbnails the receiving side lacks travel.
+- `kind: "sync_export"` — `blocks`, `have`: Pack this library for a sync that pulls it (administrators; another server asks for it): `backups/…_sync.7z` without the thumbnails in `have` (the receiver's list, `POST /api/sync/thumbnails`), and with only the database's changes when `blocks` (its fingerprints, `POST /api/sync/blocks`) allow.
 - `kind: "install_components"` — `components`, `variants`: Download optional components into the data directory (administrators): `ai_runtime`, `ai_model`, `clip_model`, `onnxruntime`, `pdfium`. `variants` picks a variant per component (`ai_runtime`: `cpu`, or `cuda` on Windows; `onnxruntime`: `cpu`, `directml` on Windows, `cuda` on Linux); the others get the default for the GPUs found.
 - `kind: "remove_components"` — `components`: Delete downloaded components (administrators).
 - `kind: "rescan"` — `ids`: Re-read the models' archives: metadata, presupports, warnings, scales, hash (Rescan).

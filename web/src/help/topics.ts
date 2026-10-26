@@ -555,7 +555,7 @@ export const TOPICS: Topic[] = [
         "**Folder rules** (folders button): pair a folder here with the same folder there (`D:\\Minis` ⇄ `/library`); the folders below follow, both ways.",
         "**Pull…** makes this library a copy of the other server's; **Push…** makes the other server's a copy of this one. Check where each folder goes, type `REPLACE` and start.",
       ] },
-      { tip: "A sync replaces the whole receiving library (backed up first unless you turned that off): edit on one side at a time. Only the thumbnails the receiving side lacks are sent. When the session there ends, use **Sign in again** (key button)." },
+      { tip: "A sync replaces the whole receiving library (backed up first unless you turned that off): edit on one side at a time. Only the thumbnails the receiving side lacks are sent, and after the first sync only the database rows that changed. The backup before a sync is a tick box in its dialog (the import has one too). When the session there ends, use **Sign in again** (key button)." },
       { h: "Restoring offline" },
       { p: "Restoring is done on the server with the library closed (stop the server or close the desktop app):" },
       { p: "`stl-server restore <backup>.7z --data-dir <data dir>`" },

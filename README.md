@@ -13,7 +13,7 @@ can open a library on your computer without setting up a server.
 [the HTTP API](docs/api.md) ·
 and in the interface, the **?** button: searchable in-depth help on every feature
 
-Version: 2026.44.5
+Version: 2026.44.6
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). This version opens its data directory and, since 2026.43.7, converts it once
@@ -69,7 +69,8 @@ Version: 2026.44.5
   on another server (or this one) from *Settings*, each library folder mapped to its place
   there; restore offline with `stl-server restore`
 - **Sync** — pull another server's library into this one, or push this one to it, with
-  folder rules for both sides; only new thumbnails travel
+  folder rules for both sides; after the first sync only the changed rows and new
+  thumbnails travel
 - **Users** — viewer, editor and administrator roles; per-user preferences
 - **Statistics** — totals, rankings and the distribution of any column
 - **Model viewer** — the 3D models inside an archive (STL, OBJ, PLY, 3MF, Lychee, CHITUBOX)

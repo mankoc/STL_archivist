@@ -145,11 +145,20 @@ pub enum JobRequest {
         direction: crate::sync::Direction,
         #[serde(default)]
         confirm: String,
+        /// Whether the receiving side backs up first; default: the remote's setting.
+        #[serde(default)]
+        backup_first: Option<bool>,
     },
     /// Pack this library for a sync that pulls it (administrators; another
     /// server asks for it): `backups/…_sync.7z` without the thumbnails in
-    /// `have` (the receiver's list, `POST /api/sync/thumbnails`).
-    SyncExport { have: String },
+    /// `have` (the receiver's list, `POST /api/sync/thumbnails`), and with only
+    /// the database's changes when `blocks` (its fingerprints, `POST
+    /// /api/sync/blocks`) allow.
+    SyncExport {
+        have: String,
+        #[serde(default)]
+        blocks: Option<String>,
+    },
     /// Download optional components into the data directory (administrators):
     /// `ai_runtime`, `ai_model`, `clip_model`, `onnxruntime`, `pdfium`.
     /// `variants` picks a variant per component (`ai_runtime`: `cpu`, or `cuda`
@@ -326,7 +335,11 @@ impl JobRequest {
             JobRequest::ImportLibrary { apply: true, confirm, .. } if confirm != "REPLACE" => Err("confirm with \"REPLACE\"".into()),
             JobRequest::ImportLibrary { name, .. } if !crate::api::backups::valid(name) => Err(format!("{name:?} is not a package name")),
             JobRequest::Sync { confirm, .. } if confirm != "REPLACE" => Err("confirm with \"REPLACE\"".into()),
-            JobRequest::SyncExport { have } if have.is_empty() || !have.bytes().all(|b| b.is_ascii_digit()) => Err(format!("{have:?} is not a thumbnail list")),
+            JobRequest::SyncExport { have, blocks }
+                if [Some(have), blocks.as_ref()].into_iter().flatten().any(|id| id.is_empty() || !id.bytes().all(|b| b.is_ascii_digit())) =>
+            {
+                Err(format!("{have:?} is not a list from another server"))
+            }
             JobRequest::InstallComponents { components, variants } if bad_components(components, variants) => {
                 Err(components_hint())
             }
@@ -694,8 +707,8 @@ fn run(lib: &Library, job: &Job) -> Result<String, String> {
         JobRequest::ImportLibrary { name, roots, rules, apply, backup_first, .. } => {
             import_library(lib, job, &name, &roots, &rules, apply, backup_first)
         }
-        JobRequest::Sync { remote, direction, .. } => sync(lib, job, remote, direction),
-        JobRequest::SyncExport { have } => sync_export(lib, job, &have),
+        JobRequest::Sync { remote, direction, backup_first, .. } => sync(lib, job, remote, direction, backup_first),
+        JobRequest::SyncExport { have, blocks } => sync_export(lib, job, &have, blocks.as_deref()),
         JobRequest::FindDuplicateEntries => duplicate_entries(lib, job),
         JobRequest::FindMoved { ids } => find_moved(lib, job, &ids),
         JobRequest::SearchFolder { folder, ids } => search_folder(lib, job, &folder, &ids),
@@ -1103,6 +1116,20 @@ fn stage_package(lib: &Library, job: &Job, src: &std::path::Path, name: &str) ->
     let _ = std::fs::remove_dir_all(&staging);
     lib.job_log(job, format!("Reading {name}…"));
     backup::extract(src, &dir, Parts::Database).map_err(|e| e.to_string())?;
+    let delta = dir.join(backup::DELTA_FILE);
+    if delta.is_file() && !dir.join(backup::DB_FILE).is_file() {
+        // A smart sync's package: this library with the changes it carries.
+        let built = (|| {
+            let base = dir.join(backup::DB_FILE);
+            lib.db.with(|c| c.backup(rusqlite::MAIN_DB, &base, None)).map_err(db_err)?;
+            storage::delta::apply_delta(&base, &delta).map_err(|e| e.to_string())
+        })();
+        let _ = std::fs::remove_file(&delta);
+        let built = built.inspect_err(|_| {
+            let _ = std::fs::remove_dir_all(&staging);
+        })?;
+        lib.job_log(job, format!("Applied the changes: {} row(s) in {} block(s).", built.rows, built.blocks));
+    }
     let report = storage::migrate(&dir.join(backup::DB_FILE), &storage::Vectors::default()).map_err(|e| format!("the package's database: {e}"))?;
     if let Some(p) = report.paths {
         lib.job_log(job, format!("The package is from before libraries: its archive paths were moved to {} librar(ies).", p.libraries));
@@ -1271,9 +1298,12 @@ fn import_library(
 // ── sync ─────────────────────────────────────────────────────────────────────
 
 /// Pull from or push to remote `remote`; the outcome is noted on the remote.
-fn sync(lib: &Library, job: &Job, remote: i64, direction: crate::sync::Direction) -> Result<String, String> {
+fn sync(lib: &Library, job: &Job, remote: i64, direction: crate::sync::Direction, backup_first: Option<bool>) -> Result<String, String> {
     use crate::sync::{Direction, Remote};
-    let stored = lib.accounts.with(|c| crate::sync::get(c, remote)).map_err(db_err)?.ok_or_else(|| format!("no remote server {remote}"))?;
+    let mut stored = lib.accounts.with(|c| crate::sync::get(c, remote)).map_err(db_err)?.ok_or_else(|| format!("no remote server {remote}"))?;
+    if let Some(b) = backup_first {
+        stored.backup_first = b;
+    }
     let client = Remote::new(&stored.name, &stored.url, Some(&stored.token)).not_this_server(&lib.instance);
     let result = (|| {
         let (version,) = client.status()?;
@@ -1293,11 +1323,39 @@ fn sync(lib: &Library, job: &Job, remote: i64, direction: crate::sync::Direction
 
 /// This library becomes a copy of the remote's.
 fn sync_pull(lib: &Library, job: &Job, r: &crate::sync::Stored, client: &crate::sync::Remote) -> Result<String, String> {
-    use crate::api::backups;
     lib.job_log(job, format!("Pulling the library of {} ({})…", r.name, r.url));
+    // Only the changed rows when this library can be fingerprinted and the
+    // remote can make a delta; else (or when the changes do not fit) all of it.
+    let fingerprints = lib.db.with(|c| {
+        let tx = c.unchecked_transaction()?;
+        Ok::<_, rusqlite::Error>(storage::delta::state(&tx))
+    });
+    let blocks = match fingerprints.map_err(db_err)? {
+        Ok(state) => client.send_blocks(&state)?,
+        Err(e) => {
+            lib.job_log(job, format!("Sending the whole library: {e}."));
+            None
+        }
+    };
+    match pull_once(lib, job, r, client, blocks.as_deref()) {
+        Err(e) if blocks.is_some() && e.contains(crate::sync::DIVERGED) => {
+            lib.job_log(job, format!("{e}: pulling the whole library instead."));
+            pull_once(lib, job, r, client, None)
+        }
+        other => other,
+    }
+}
+
+/// One pull: with `blocks` (the fingerprints' id there), only the changes.
+fn pull_once(lib: &Library, job: &Job, r: &crate::sync::Stored, client: &crate::sync::Remote, blocks: Option<&str>) -> Result<String, String> {
+    use crate::api::backups;
     let keys = lib.thumbs.blob_keys().map_err(|e| format!("thumbnail store: {e}"))?;
     let have = client.send_keys(&keys)?;
-    let detail = client.run_job(&serde_json::json!({"kind": "sync_export", "have": have}), &|l| lib.job_log(job, l), &|| job.stopped())?;
+    let mut request = serde_json::json!({"kind": "sync_export", "have": have});
+    if let Some(b) = blocks {
+        request["blocks"] = b.into();
+    }
+    let detail = client.run_job(&request, &|l| lib.job_log(job, l), &|| job.stopped())?;
     let message = detail["job"]["message"].as_str().unwrap_or_default();
     let name = message.split(": ").next().filter(|n| backups::valid(n)).ok_or_else(|| format!("{}: no package in {message:?}", r.name))?.to_string();
     let local = backups::new_name().replace(".7z", "_pull.7z");
@@ -1315,8 +1373,23 @@ fn sync_pull(lib: &Library, job: &Job, r: &crate::sync::Stored, client: &crate::
 
 /// The remote's library becomes a copy of this one.
 fn sync_push(lib: &Library, job: &Job, r: &crate::sync::Stored, client: &crate::sync::Remote) -> Result<String, String> {
-    use crate::api::backups;
     lib.job_log(job, format!("Pushing this library to {} ({})…", r.name, r.url));
+    let theirs = client.blocks()?;
+    if theirs.is_none() {
+        lib.job_log(job, format!("{} cannot take only the changes: sending the whole library.", r.name));
+    }
+    match push_once(lib, job, r, client, theirs.as_ref()) {
+        Err(e) if theirs.is_some() && e.contains(crate::sync::DIVERGED) => {
+            lib.job_log(job, format!("{e}: pushing the whole library instead."));
+            push_once(lib, job, r, client, None)
+        }
+        other => other,
+    }
+}
+
+/// One push: with `theirs` (the remote's fingerprints), only the changes.
+fn push_once(lib: &Library, job: &Job, r: &crate::sync::Stored, client: &crate::sync::Remote, theirs: Option<&storage::delta::State>) -> Result<String, String> {
+    use crate::api::backups;
     let have = client.blob_keys()?;
     let name = backups::new_name().replace(".7z", "_push.7z");
     let src = backups::dir(&lib.config.data_dir).join(&name);
@@ -1324,11 +1397,11 @@ fn sync_push(lib: &Library, job: &Job, r: &crate::sync::Stored, client: &crate::
     let settings = lib.config.data_dir.join(stl_core::backup::SETTINGS_FILE);
     let packed = lib
         .db
-        .with(|c| Ok::<_, rusqlite::Error>(stl_core::backup::write_sync(c, &lib.thumbs, Some(&settings), &src, &have, &job.ctl)))
+        .with(|c| Ok::<_, rusqlite::Error>(stl_core::backup::write_sync(c, &lib.thumbs, Some(&settings), &src, &have, theirs, &job.ctl)))
         .map_err(db_err)?
         .map_err(|e| e.to_string());
-    let (size, (sent, skipped)) = packed?;
-    lib.job_log(job, format!("{:.1} MB with {sent} of {} thumbnail image(s). Uploading…", size as f64 / (1024.0 * 1024.0), sent + skipped));
+    let p = packed?;
+    lib.job_log(job, format!("{}. Uploading…", package_text(&p)));
     let uploaded = client.upload("/api/backups/upload", &src, &job.ctl);
     let _ = std::fs::remove_file(&src);
     let uploaded = uploaded?;
@@ -1344,21 +1417,39 @@ fn sync_push(lib: &Library, job: &Job, r: &crate::sync::Stored, client: &crate::
 }
 
 /// Pack this library for a pulling server: everything but the thumbnails it has.
-fn sync_export(lib: &Library, job: &Job, have: &str) -> Result<String, String> {
-    let path = crate::sync::have_path(&lib.config.data_dir, have)?;
+fn sync_export(lib: &Library, job: &Job, have: &str, blocks: Option<&str>) -> Result<String, String> {
+    use crate::sync::{Upload, sent_path};
+    let path = sent_path(&lib.config.data_dir, Upload::Have, have)?;
     let keys = crate::sync::decode_keys(&std::fs::read(&path).map_err(|e| e.to_string())?)?;
+    let theirs = match blocks {
+        Some(id) => {
+            let p = sent_path(&lib.config.data_dir, Upload::Blocks, id)?;
+            let state = storage::delta::decode(&std::fs::read(&p).map_err(|e| e.to_string())?);
+            let _ = std::fs::remove_file(&p);
+            Some(state?)
+        }
+        None => None,
+    };
     let name = crate::api::backups::new_name().replace(".7z", "_sync.7z");
     let dest = crate::api::backups::dir(&lib.config.data_dir).join(&name);
     lib.job_log(job, format!("Packing the library for a sync ({} thumbnail image(s) are there already)…", keys.len()));
     let settings = lib.config.data_dir.join(stl_core::backup::SETTINGS_FILE);
     let packed = lib
         .db
-        .with(|c| Ok::<_, rusqlite::Error>(stl_core::backup::write_sync(c, &lib.thumbs, Some(&settings), &dest, &keys, &job.ctl)))
+        .with(|c| Ok::<_, rusqlite::Error>(stl_core::backup::write_sync(c, &lib.thumbs, Some(&settings), &dest, &keys, theirs.as_ref(), &job.ctl)))
         .map_err(db_err)?
         .map_err(|e| e.to_string());
     let _ = std::fs::remove_file(&path);
-    let (size, (sent, skipped)) = packed?;
-    Ok(format!("{name}: {:.1} MB, {sent} of {} thumbnail image(s) sent", size as f64 / (1024.0 * 1024.0), sent + skipped))
+    Ok(format!("{name}: {}", package_text(&packed?)))
+}
+
+/// What a sync's package holds, for the log.
+fn package_text(p: &stl_core::backup::SyncPackage) -> String {
+    let database = match p.delta {
+        Some(d) => format!("only the changes ({} of {} row(s))", d.rows, d.total),
+        None => "the whole database".into(),
+    };
+    format!("{:.1} MB, {database}, {} of {} thumbnail image(s) sent", p.size as f64 / (1024.0 * 1024.0), p.sent, p.sent + p.skipped)
 }
 
 /// Keep the newest [`KEEP_PRE_IMPORT`] pre-import backups (a sync makes one each time).

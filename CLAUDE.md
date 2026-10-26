@@ -141,7 +141,10 @@ stl_database/
   sessions, never sent to clients; passwords are never stored. The receiver must not be
   older than the sender (`check_versions`); raise `sync::MIN_VERSION` when the sync wire
   format changes. Only thumbnails the receiver lacks travel (`backup::write_sync`, filled by
-  `ThumbStore::fill_missing_blobs` in the import).
+  `ThumbStore::fill_missing_blobs` in the import), and the database as a delta when it can
+  (`storage::delta`: block fingerprints, `delta.db` in the package, applied to a copy of the
+  live database and verified against the sender's fingerprints; a mismatch retries with
+  the whole database). A delta covers every ordinary table, so new tables need nothing.
 - Spawned helpers (`llama-server`, the desktop's local server) call
   `stl_proc::end_with_parent`.
 

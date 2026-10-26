@@ -21,6 +21,8 @@ use crate::thumbstore::ThumbStore;
 /// The model database in the data directory (and in backups). Before 2026.43.10 it was
 /// `stlLibrary.db`; older data directories are not read (their libraries are recreated).
 pub const DB_FILE: &str = "models.db";
+/// A sync's database changes, in place of `models.db` (see `storage::delta`).
+pub const DELTA_FILE: &str = "delta.db";
 pub const THUMB_DIR: &str = "thumbnails.lmdb";
 pub const SETTINGS_FILE: &str = "settings.json";
 const LMDB_DATA: &str = "data.mdb";
@@ -90,23 +92,61 @@ fn push_file(w: &mut ArchiveWriter<File>, name: &str, path: &Path) -> Result<()>
 /// library's `settings.json`, when there is one. Progress counts the three
 /// steps (database, thumbnails, archive). Returns the backup's size in bytes.
 pub fn write(conn: &Connection, store: &ThumbStore, settings: Option<&Path>, dest: &Path, ctl: &Control) -> Result<u64> {
-    write_with(conn, settings, dest, ctl, |path| store.copy_compacted(path).map_err(|e| BackupError::Store(e.to_string())))
+    write_with(dest, settings, ctl, |path| snapshot(conn, path), |path| store.copy_compacted(path).map_err(|e| BackupError::Store(e.to_string())))
+}
+
+/// A consistent copy of the open database at `path` (`VACUUM INTO`).
+fn snapshot(conn: &Connection, path: &Path) -> Result<&'static str> {
+    conn.execute("VACUUM INTO ?1", [path.to_string_lossy()])?;
+    Ok(DB_FILE)
+}
+
+/// What [`write_sync`] packed.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct SyncPackage {
+    /// Its size in bytes.
+    pub size: u64,
+    /// Thumbnail blobs sent, and left out (the receiver has them).
+    pub sent: u64,
+    pub skipped: u64,
+    /// The database's changes only (`delta.db`), when they were few enough;
+    /// else the whole database.
+    pub delta: Option<crate::storage::delta::Built>,
 }
 
 /// A sync's package (`.7z`, the backup layout): like [`write`], but its
 /// thumbnail store holds every image's reference and only the blobs not in
 /// `have` (the receiver has those; the import completes the store from its
-/// own). Not a backup to keep. Returns its size and `(blobs sent, blobs skipped)`.
+/// own). With the receiver's fingerprints (`theirs`), the database travels as
+/// a delta (`delta.db`, see `storage::delta`) when the schemas match and it
+/// holds at most a third of the rows. Not a backup to keep.
 pub fn write_sync(
     conn: &Connection,
     store: &ThumbStore,
     settings: Option<&Path>,
     dest: &Path,
     have: &HashSet<Vec<u8>>,
+    theirs: Option<&crate::storage::delta::State>,
     ctl: &Control,
-) -> Result<(u64, (u64, u64))> {
+) -> Result<SyncPackage> {
     let mut counts = (0, 0);
-    let size = write_with(conn, settings, dest, ctl, |path| {
+    let mut delta = None;
+    let database = |path: &Path| -> Result<&'static str> {
+        if let Some(theirs) = theirs {
+            let tx = conn.unchecked_transaction()?;
+            match crate::storage::delta::write_delta(&tx, theirs, path) {
+                Ok(Some(built)) if built.rows.saturating_mul(3) <= built.total => {
+                    delta = Some(built);
+                    return Ok(DELTA_FILE);
+                }
+                _ => {
+                    let _ = fs::remove_file(path);
+                }
+            }
+        }
+        snapshot(conn, path)
+    };
+    let size = write_with(dest, settings, ctl, database, |path| {
         let dir = Scratch(path.with_extension("store"));
         let _ = fs::remove_dir_all(&dir.0);
         let partial = ThumbStore::open(&dir.0).map_err(|e| BackupError::Store(e.to_string()))?;
@@ -116,11 +156,18 @@ pub fn write_sync(
         fs::rename(dir.0.join(LMDB_DATA), path)?;
         Ok(())
     })?;
-    Ok((size, counts))
+    Ok(SyncPackage { size, sent: counts.0, skipped: counts.1, delta })
 }
 
-/// [`write`] with the thumbnail store's file written by `thumbnails` (to the path given).
-fn write_with(conn: &Connection, settings: Option<&Path>, dest: &Path, ctl: &Control, thumbnails: impl FnOnce(&Path) -> Result<()>) -> Result<u64> {
+/// [`write`] with the database file written by `database` (which names its
+/// entry) and the thumbnail store's by `thumbnails`, each to the path given.
+fn write_with(
+    dest: &Path,
+    settings: Option<&Path>,
+    ctl: &Control,
+    database: impl FnOnce(&Path) -> Result<&'static str>,
+    thumbnails: impl FnOnce(&Path) -> Result<()>,
+) -> Result<u64> {
     let dir = dest.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
     fs::create_dir_all(dir)?;
     let stem = dest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "backup".into());
@@ -128,7 +175,7 @@ fn write_with(conn: &Connection, settings: Option<&Path>, dest: &Path, ctl: &Con
 
     let db = Scratch(dir.join(format!(".{stem}.db.tmp")));
     let _ = fs::remove_file(&db.0);
-    conn.execute("VACUUM INTO ?1", [db.0.to_string_lossy()])?;
+    let db_entry = database(&db.0)?;
     ctl.advance(1);
     if ctl.is_stopped() {
         return Err(BackupError::Stopped);
@@ -145,7 +192,7 @@ fn write_with(conn: &Connection, settings: Option<&Path>, dest: &Path, ctl: &Con
     let tmp = Scratch(dir.join(format!(".{stem}.tmp")));
     {
         let mut w = ArchiveWriter::create(&tmp.0)?;
-        push_file(&mut w, DB_FILE, &db.0)?;
+        push_file(&mut w, db_entry, &db.0)?;
         if let Some(s) = settings.filter(|s| s.is_file()) {
             push_file(&mut w, SETTINGS_FILE, s)?;
         }
@@ -166,14 +213,14 @@ fn wanted(name: &str) -> bool {
     if name.starts_with('/') || name.contains(':') || name.split('/').any(|c| c == "..") {
         return false;
     }
-    name == DB_FILE || name == SETTINGS_FILE || name.starts_with(&format!("{THUMB_DIR}/"))
+    name == DB_FILE || name == DELTA_FILE || name == SETTINGS_FILE || name.starts_with(&format!("{THUMB_DIR}/"))
 }
 
 /// Whether `src` is a library backup: a `.7z` with a database inside (its
 /// header is read, nothing is unpacked).
 pub fn check_package(src: &Path) -> Result<()> {
     let archive = sevenz_rust2::Archive::open(src)?;
-    if archive.files.iter().any(|f| f.name() == DB_FILE) {
+    if archive.files.iter().any(|f| f.name() == DB_FILE || f.name() == DELTA_FILE) {
         Ok(())
     } else {
         Err(BackupError::Invalid(format!("it holds no {DB_FILE}")))
@@ -217,10 +264,11 @@ pub fn extract(src: &Path, dir: &Path, parts: Parts) -> Result<()> {
     })?;
     if parts != Parts::Thumbnails {
         let db = dir.join(DB_FILE);
-        if !db.is_file() {
+        if db.is_file() {
+            check_database(&db)?;
+        } else if !dir.join(DELTA_FILE).is_file() {
             return Err(BackupError::Invalid(format!("{} holds no {DB_FILE}", src.display())));
         }
-        check_database(&db)?;
     }
     Ok(())
 }
@@ -285,6 +333,9 @@ pub fn restore(src: &Path, data_dir: &Path, stamp: &str) -> Result<Restored> {
     let staging = Scratch(data_dir.join(format!(".restore-{stamp}")));
     let _ = fs::remove_dir_all(&staging.0);
     extract(src, &staging.0, Parts::All)?;
+    if !staging.0.join(DB_FILE).is_file() {
+        return Err(BackupError::Invalid("a sync's package of changes cannot be restored: it holds no whole database".into()));
+    }
 
     let previous = data_dir.join(format!("pre-restore-{stamp}"));
     fs::create_dir_all(&previous)?;
@@ -412,9 +463,9 @@ mod tests {
         let have: HashSet<Vec<u8>> = receiver.blob_keys().unwrap().into_iter().collect();
 
         let src = dir.path().join("sync.7z");
-        let (size, counts) = write_sync(&conn, &store, None, &src, &have, &Control::new()).unwrap();
-        assert!(size > 0);
-        assert_eq!(counts, (1, 1), "one blob sent, one skipped");
+        let p = write_sync(&conn, &store, None, &src, &have, None, &Control::new()).unwrap();
+        assert!(p.size > 0 && p.delta.is_none());
+        assert_eq!((p.sent, p.skipped), (1, 1), "one blob sent, one skipped");
         let leftovers: Vec<_> = fs::read_dir(dir.path()).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
         assert!(!leftovers.iter().any(|n| n.ends_with(".tmp") || n.ends_with(".store")), "{leftovers:?}");
 
@@ -423,6 +474,35 @@ mod tests {
         let partial = ThumbStore::open(&staged.join(THUMB_DIR)).unwrap();
         assert_eq!(partial.fill_missing_blobs(&receiver).unwrap(), (1, 0));
         assert_eq!(partial.get_many(&[1, 2]).unwrap(), vec![(1, b"known".to_vec()), (2, b"new".to_vec())]);
+    }
+
+    #[test]
+    fn a_sync_package_can_carry_only_the_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = Connection::open(dir.path().join("live.db")).unwrap();
+        conn.execute_batch("CREATE TABLE models (id INTEGER PRIMARY KEY, title TEXT)").unwrap();
+        for i in 1..=600 {
+            conn.execute("INSERT INTO models (id, title) VALUES (?1, 'x')", [i]).unwrap();
+        }
+        let theirs = crate::storage::delta::state(&conn).unwrap();
+        conn.execute("UPDATE models SET title = 'changed' WHERE id = 3", []).unwrap();
+        let store = ThumbStore::open(&dir.path().join("thumbs")).unwrap();
+        let src = dir.path().join("sync.7z");
+        let p = write_sync(&conn, &store, None, &src, &HashSet::new(), Some(&theirs), &Control::new()).unwrap();
+        let built = p.delta.expect("a delta");
+        assert_eq!((built.rows, built.total, built.blocks), (127, 600, 1), "one block of 127 rows (rowids 1 to 127)");
+        check_package(&src).unwrap();
+        let staged = dir.path().join("staged");
+        extract(&src, &staged, Parts::Database).unwrap();
+        assert!(staged.join(DELTA_FILE).is_file() && !staged.join(DB_FILE).exists());
+        let data = dir.path().join("data");
+        fs::create_dir_all(&data).unwrap();
+        assert!(matches!(restore(&src, &data, "3"), Err(BackupError::Invalid(_))), "changes alone cannot be restored");
+
+        // Most rows changed: the whole database travels instead.
+        conn.execute("UPDATE models SET title = 'all'", []).unwrap();
+        let p = write_sync(&conn, &store, None, &dir.path().join("full.7z"), &HashSet::new(), Some(&theirs), &Control::new()).unwrap();
+        assert!(p.delta.is_none());
     }
 
     #[test]

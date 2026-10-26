@@ -1344,6 +1344,28 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.44.6: **smart sync**, by `storage::delta`:
+  - **Fingerprints:** `state` hashes every ordinary table's rows (rowid and values, xxh3)
+    in blocks of `BLOCK` = 128 rowids, plus a schema hash. Virtual tables are skipped;
+    `image_vec`'s shadow tables are ordinary.
+  - **`write_delta`** writes `delta.db`: the differing blocks' rows (`__rid` plus the
+    columns), `_blocks`, `_target` (the sender's fingerprints) and `_meta`.
+  - **`apply_delta`** works on a copy, with foreign keys off. It drops and re-creates the
+    triggers, deletes the blocks' rowid ranges, then inserts (an `INTEGER PRIMARY KEY`
+    alias carries the rowid). It then requires the result's fingerprints to equal
+    `_target`, else `Diverged`.
+  - **`backup::write_sync`** takes the receiver's state and packs `delta.db` instead of
+    `models.db` when the schemas match and the delta holds at most a third of the rows.
+    The result is `SyncPackage`. `check_package` and `extract` accept `delta.db`;
+    `restore` refuses it.
+  - **Import:** `stage_package` builds `models.db` from the live database
+    (`Connection::backup`) plus the delta.
+  - **Routes:** `GET /api/sync/blocks` (409 when a table has no rowids) and
+    `POST /api/sync/blocks`. `sync_export` takes `blocks`.
+  - **Fallbacks:** an older remote answers 404, which means a full sync; an error with
+    `sync::DIVERGED` retries the pull or push in full.
+  - **Backups:** `sync` takes `backup_first` per run, and the sync and import dialogs
+    have the tick box.
 - 2026.44.5: **sync**, pull and push, both started on this server (`stl-server/src/sync.rs`;
   the job bodies `sync`, `sync_pull`, `sync_push` and `sync_export` are in `jobs.rs`).
   - **Remotes** live in `sync_remotes` in `server.db` (an import replaces `settings.json`).

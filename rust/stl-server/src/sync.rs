@@ -287,10 +287,41 @@ fn have_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("sync")
 }
 
+/// What a failed import of a delta says (`storage::delta::DeltaError::Diverged`):
+/// the sync then sends the whole library.
+pub const DIVERGED: &str = "do not fit this library";
+
+/// What a receiving server sends for a pull: its thumbnail keys (`have`) or
+/// its database's fingerprints (`blocks`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Upload {
+    Have,
+    Blocks,
+}
+
+impl Upload {
+    fn prefix(self) -> &'static str {
+        match self {
+            Upload::Have => "have",
+            Upload::Blocks => "blocks",
+        }
+    }
+}
+
 /// Keep a receiver's key set (`POST /api/sync/thumbnails`) for a `sync_export`
 /// job; sets older than a day go. Returns its id.
 pub fn store_have(data_dir: &Path, bytes: &[u8]) -> Result<String, String> {
     decode_keys(bytes)?;
+    store_sent(data_dir, Upload::Have, bytes)
+}
+
+/// Keep a receiver's database fingerprints (`POST /api/sync/blocks`). Returns their id.
+pub fn store_blocks(data_dir: &Path, bytes: &[u8]) -> Result<String, String> {
+    stl_core::storage::delta::decode(bytes)?;
+    store_sent(data_dir, Upload::Blocks, bytes)
+}
+
+fn store_sent(data_dir: &Path, kind: Upload, bytes: &[u8]) -> Result<String, String> {
     let dir = have_dir(data_dir);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     if let Ok(rd) = std::fs::read_dir(&dir) {
@@ -302,17 +333,17 @@ pub fn store_have(data_dir: &Path, bytes: &[u8]) -> Result<String, String> {
         }
     }
     let id = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos()).to_string();
-    std::fs::write(dir.join(format!("have-{id}.bin")), bytes).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join(format!("{}-{id}.bin", kind.prefix())), bytes).map_err(|e| e.to_string())?;
     Ok(id)
 }
 
-/// The key set stored under `id`.
-pub fn have_path(data_dir: &Path, id: &str) -> Result<PathBuf, String> {
+/// What a receiver sent, stored under `id`.
+pub fn sent_path(data_dir: &Path, kind: Upload, id: &str) -> Result<PathBuf, String> {
     if id.is_empty() || !id.bytes().all(|b| b.is_ascii_digit()) {
-        return Err(format!("{id:?} is not a thumbnail list"));
+        return Err(format!("{id:?} is not a list from another server"));
     }
-    let path = have_dir(data_dir).join(format!("have-{id}.bin"));
-    if path.is_file() { Ok(path) } else { Err(format!("no thumbnail list {id} (it is kept for a day)")) }
+    let path = have_dir(data_dir).join(format!("{}-{id}.bin", kind.prefix()));
+    if path.is_file() { Ok(path) } else { Err(format!("no list {id} from another server (kept for a day)")) }
 }
 
 // ── the remote's API ─────────────────────────────────────────────────────────
@@ -472,6 +503,35 @@ impl Remote {
         self.check_not_self(&resp)?;
         let bytes = self.ok(resp)?.body_mut().with_config().limit(u64::MAX).read_to_vec().map_err(|e| format!("{}: {e}", self.name))?;
         decode_keys(&bytes)
+    }
+
+    /// The remote's database fingerprints (`GET /api/sync/blocks`); `None` when
+    /// it cannot take a smart sync (an older version, or a database it cannot
+    /// fingerprint).
+    pub fn blocks(&self) -> Result<Option<stl_core::storage::delta::State>, String> {
+        let resp = self.agent.get(self.url("/api/sync/blocks")).header("Authorization", self.auth()).call().map_err(|e| self.unreachable(e))?;
+        if matches!(resp.status().as_u16(), 404 | 405 | 409) {
+            return Ok(None);
+        }
+        let bytes = self.ok(resp)?.body_mut().with_config().limit(u64::MAX).read_to_vec().map_err(|e| format!("{}: {e}", self.name))?;
+        stl_core::storage::delta::decode(&bytes).map(Some)
+    }
+
+    /// Hand the remote this server's database fingerprints; their id there, or
+    /// `None` when it cannot make a smart sync (an older version).
+    pub fn send_blocks(&self, state: &stl_core::storage::delta::State) -> Result<Option<String>, String> {
+        let resp = self
+            .agent
+            .post(self.url("/api/sync/blocks"))
+            .header("Authorization", self.auth())
+            .header("Content-Type", "application/octet-stream")
+            .send(&stl_core::storage::delta::encode(state)[..])
+            .map_err(|e| self.unreachable(e))?;
+        if matches!(resp.status().as_u16(), 404 | 405) {
+            return Ok(None);
+        }
+        let v = self.json_of(self.ok(resp)?)?;
+        Ok(v["id"].as_str().map(str::to_string))
     }
 
     /// Hand the remote this server's thumbnail keys; returns their id there.

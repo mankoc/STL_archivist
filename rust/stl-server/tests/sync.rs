@@ -149,7 +149,7 @@ async fn pull_and_push_mirror_the_library() {
     let p = call(&local.state, "GET", &format!("/api/sync/remotes/{id}/preview?direction=push"), Some(&me), None).await.json();
     assert_eq!((p["folders"][0]["target"].as_str(), p["folders"][0]["exists"].as_bool()), (Some(remote_root.to_string_lossy().as_ref()), Some(true)), "{p}");
     let v = done(&local, &me, json!({"kind": "sync", "remote": id, "direction": "push", "confirm": "REPLACE"})).await;
-    assert!(log(&v).contains("with 0 of 2 thumbnail image(s)"), "the remote has them all:\n{}", log(&v));
+    assert!(log(&v).contains("0 of 2 thumbnail image(s) sent"), "the remote has them all:\n{}", log(&v));
     assert!(log(&v).contains("nas: "), "the remote's log is copied here");
     assert_eq!(titles(&remote).await, ["Dragon", "Knight (painted)"]);
     let libs = call(&remote.state, "GET", "/api/libraries", Some(&boss), None).await.json();
@@ -164,6 +164,33 @@ async fn pull_and_push_mirror_the_library() {
         .map(|b| b["name"].as_str().unwrap().to_string())
         .collect();
     assert!(names.len() == 1 && names[0].ends_with("_pre_import.7z"), "only the remote's own backup stays: {names:?}");
+
+    // Smart: both sides now hold the same rows, so an edit travels alone;
+    // and this time the receiving side does not back up first.
+    let backups = |lib: &TestLib| std::fs::read_dir(lib.dir.path().join("backups")).map(|d| d.count()).unwrap_or(0);
+    let (local_backups, remote_backups) = (backups(&local), backups(&remote));
+    let dragon = remote.state.db.with(|c| c.query_row("SELECT id FROM models WHERE title = 'Dragon'", [], |r| r.get::<_, i64>(0))).unwrap();
+    let edit = json!({"edits": [{"id": dragon, "field": "title", "value": "Dragon (remote edit)"}]});
+    assert_eq!(call(&remote.state, "PATCH", "/api/models/cells", Some(&boss), Some(edit)).await.status, StatusCode::OK);
+    let v = done(&local, &me, json!({"kind": "sync", "remote": id, "direction": "pull", "confirm": "REPLACE", "backup_first": false})).await;
+    assert!(log(&v).contains("only the changes"), "{}", log(&v));
+    assert!(log(&v).contains("Applied the changes"), "{}", log(&v));
+    assert_eq!(titles(&local).await, ["Dragon (remote edit)", "Knight (painted)"]);
+    let libs = call(&local.state, "GET", "/api/libraries", Some(&me), None).await.json();
+    assert_eq!(libs[0]["folders"][0]["root"], mirror.to_string_lossy().as_ref(), "the folder rule still applies");
+    thumbnails_resolve(&local, &me).await;
+    assert_eq!(backups(&local), local_backups, "no backup this time");
+
+    let knight = local.state.db.with(|c| c.query_row("SELECT id FROM models WHERE title = 'Knight (painted)'", [], |r| r.get::<_, i64>(0))).unwrap();
+    let edit = json!({"edits": [{"id": knight, "field": "title", "value": "Knight (varnished)"}]});
+    assert_eq!(call(&local.state, "PATCH", "/api/models/cells", Some(&me), Some(edit)).await.status, StatusCode::OK);
+    let v = done(&local, &me, json!({"kind": "sync", "remote": id, "direction": "push", "confirm": "REPLACE", "backup_first": false})).await;
+    assert!(log(&v).contains("only the changes"), "{}", log(&v));
+    assert_eq!(titles(&remote).await, ["Dragon (remote edit)", "Knight (varnished)"]);
+    let libs = call(&remote.state, "GET", "/api/libraries", Some(&boss), None).await.json();
+    assert_eq!(libs[0]["folders"][0]["root"], remote_root.to_string_lossy().as_ref());
+    thumbnails_resolve(&remote, &boss).await;
+    assert_eq!(backups(&remote), remote_backups);
 
     // A revoked sign-in fails the sync and asks to sign in again.
     local.state.accounts.with(|c| c.execute("UPDATE sync_remotes SET token = 'revoked'", [])).unwrap();

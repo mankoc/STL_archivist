@@ -2,7 +2,7 @@
 // package on the server or upload one, check its folders at their roots here
 // (a rule moves every root below a path start), then replace this library
 // with it. Checking changes nothing; importing backs this library up first.
-import { Alert, Button, FileButton, Group, Modal, Progress, Select, Stack, Table, Text, TextInput } from "@mantine/core";
+import { Alert, Button, Checkbox, FileButton, Group, Modal, Progress, Select, Stack, Table, Text, TextInput } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
@@ -29,6 +29,7 @@ export function ImportDialog({ initial, packages, onClose, start }: {
   const [picker, setPicker] = useState<string | null>(null);
   const [checkJob, setCheckJob] = useState<number | null>(null);
   const [typed, setTyped] = useState("");
+  const [backup, setBackup] = useState(true);
 
   const job = useQuery({
     queryKey: ["import-check", checkJob],
@@ -79,8 +80,8 @@ export function ImportDialog({ initial, packages, onClose, start }: {
   };
   const apply = async () => {
     if (!name) return;
-    await start({ kind: "import_library", name, roots: rootsToSend(folders, roots), apply: true, confirm: "REPLACE" });
-    notifications.show({ message: "Importing: follow the job below. The library before it is backed up first." });
+    await start({ kind: "import_library", name, roots: rootsToSend(folders, roots), apply: true, confirm: "REPLACE", backup_first: backup });
+    notifications.show({ message: `Importing: follow the job below.${backup ? " The library before it is backed up first." : ""}` });
     onClose();
   };
 
@@ -91,7 +92,7 @@ export function ImportDialog({ initial, packages, onClose, start }: {
       <Stack>
         <Text size="sm">
           Replaces this server's library (models, libraries, tags, thumbnails and library settings) with a package exported
-          by another server or by this one. User accounts stay. The library here is backed up first (…_pre_import.7z).
+          by another server or by this one. User accounts stay.
         </Text>
         <Group align="flex-end" gap="xs">
           <Select label="Package" data={choices} value={name} onChange={choose} placeholder="Choose a package on the server"
@@ -143,6 +144,7 @@ export function ImportDialog({ initial, packages, onClose, start }: {
               </Table.Tbody>
             </Table>
             {!checked && <Text size="xs" c="orange">The folders changed since the last check: check again before importing.</Text>}
+            <Checkbox label="Back up this library first (…_pre_import.7z)" checked={backup} onChange={(e) => setBackup(e.currentTarget.checked)} data-testid="import-backup" />
             <Group justify="space-between" align="flex-end">
               <Button variant="light" loading={running} onClick={() => void check(name, rootsToSend(folders, roots))} data-testid="import-check">
                 Check again
