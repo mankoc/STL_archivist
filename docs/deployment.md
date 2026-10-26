@@ -145,11 +145,11 @@ keeps everything it stores in `/data`, and reads the archives where you mount th
 ### Install with Docker Compose
 
 1. On the machine with the archives (Docker Engine with the Compose plugin), make a folder
-   for StlArchivist and download the sample [`compose.yml`](compose.yml) into it:
+   for StlArchivist and download the sample [`compose.yml`](../docker/compose.yml) into it:
 
    ```bash
    mkdir -p ~/stlarchivist && cd ~/stlarchivist
-   curl -fsSLO https://raw.githubusercontent.com/mankoc/STL_archivist/main/docs/compose.yml
+   curl -fsSLO https://raw.githubusercontent.com/mankoc/STL_archivist/main/docker/compose.yml
    mkdir -p data && sudo chown 1000:1000 data
    ```
 
@@ -190,7 +190,8 @@ docker run -d --name stlarchivist --restart unless-stopped \
 docker exec -it stlarchivist stl-server create-admin admin
 ```
 
-To build the image yourself instead: `docker build -t stlarchivist .` in the repository.
+To build the image yourself instead: `docker build -f docker/Dockerfile -t stlarchivist .` at
+the root of the repository (then `STLARCHIVIST_IMAGE=stlarchivist docker compose up -d`).
 
 **Publishing (maintainers).** `.github/workflows/docker.yml` builds the image whenever a
 version tag (`v<version>`) is pushed — the same tags that publish the installer release — and

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026.44.3 — 2026-10-26
+
+- **The Docker files are in `docker/`:** `Dockerfile` and `.dockerignore` moved there
+  (`docker/Dockerfile`, `docker/Dockerfile.dockerignore`), and `docs/compose.yml` is now
+  `docker/compose.yml` (download it from there). Build the image from the repository root
+  with `docker build -f docker/Dockerfile -t stlarchivist .`.
+
 ## 2026.44.2 — 2026-10-26
 
 - **Sidecars as a start:** a folder copied to another machine with its `METADATA.7z`

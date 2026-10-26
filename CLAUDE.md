@@ -51,6 +51,7 @@ stl_database/
 │   ├── meshpeek-render/ # MeshPeek's wgpu renderer, vendored
 │   └── stl-viewer/    # the web client's model viewer: meshpeek-render in WebAssembly
 ├── web/               # React 19 + Mantine 8 + TanStack client
+├── docker/            # Server image (Dockerfile, built from the repository root), compose.yml
 ├── resources/         # Application icon (copies in rust/stl-desktop/icons)
 └── docs/              # rust-migration-plan.md (history and per-step notes)
 ```

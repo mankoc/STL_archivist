@@ -1,8 +1,7 @@
 # SQL embedded in Rust raw strings: SQLite keeps the exact statement text, so
 # line endings must not change on checkout (the schema's source of truth).
 rust/stl-core/src/storage/schema_sql.rs text eol=lf
-Dockerfile text eol=lf
-.dockerignore text eol=lf
+docker/* text eol=lf
 # Shell scripts run on Linux / macOS.
 *.sh text eol=lf
 # Batch files run in cmd, which needs CRLF (labels and goto break with LF).

@@ -1344,6 +1344,9 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.44.3: the Docker files are in `docker/`: `Dockerfile`, its `Dockerfile.dockerignore`
+  (BuildKit's per-Dockerfile ignore file; the context stays the repository root and
+  `docker.yml` passes `file:`) and the sample `compose.yml` (from `docs/`).
 - 2026.44.2: sidecars export `archive_size` (imported into `models.archive_size`); the crawl
   keeps the archives `sidecar::import` returned (`Run::from_sidecar`) and phase 1 takes them
   without reading (unless the recorded size differs); `crawl::diff` stores their size and

@@ -13,7 +13,7 @@ can open a library on your computer without setting up a server.
 [the HTTP API](docs/api.md) ·
 and in the interface, the **?** button: searchable in-depth help on every feature
 
-Version: 2026.44.2
+Version: 2026.44.3
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). This version opens its data directory and, since 2026.43.7, converts it once
@@ -122,12 +122,14 @@ server finds the web client in `web/` beside it, or in `web/dist` of the checkou
 
 ### Docker
 
-The `Dockerfile` builds the server and the web client with pdfium and ONNX Runtime; see the
-comments at its top.
+The Docker files are in `docker/`: `docker/Dockerfile` builds the server and the web client
+with pdfium and ONNX Runtime (see the comments at its top), and `docker/compose.yml` runs
+the Docker Hub image (see *Option C: Docker* in `docs/deployment.md`). Build from the
+repository root:
 
 ```bash
-docker build -t stllibrary-server .
-docker run -d --name stl -p 8770:8770 -v /srv/stl-data:/data -v /srv/STL:/library:ro stllibrary-server
+docker build -f docker/Dockerfile -t stlarchivist .
+docker run -d --name stl -p 8770:8770 -v /srv/stl-data:/data -v /srv/STL:/library:ro stlarchivist
 docker exec -it stl stl-server create-admin admin
 ```
 
@@ -287,7 +289,7 @@ placeholders.
 stl_database/
 ├── build.ps1, build.sh      # Build the web client, the server and the desktop app
 ├── build-installer.bat      # Builds the Windows installer unattended (wraps build.ps1)
-├── Dockerfile               # Server image
+├── docker/                  # Server image (Dockerfile) and a sample compose.yml
 ├── rust/
 │   ├── stl-core/            # The library: archives, metadata, rules, thumbnails, storage, crawler
 │   ├── stl-server/          # HTTP + WebSocket API (axum), jobs, accounts, AI, backups

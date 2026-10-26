@@ -1,0 +1,8 @@
+# Docker builds need the Rust workspace and the web client's sources. The context is
+# the repository root; BuildKit reads this file because it sits beside docker/Dockerfile.
+*
+!rust/
+!web/
+rust/target/
+web/node_modules/
+web/dist/
