@@ -1068,6 +1068,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sync/blocks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * This server's database fingerprints (`storage::delta`): a pushing server
+         *     sends only the rows that differ. 409 when the database cannot be fingerprinted.
+         */
+        get: operations["get_sync_blocks"];
+        put?: never;
+        /**
+         * Hand over a pulling server's database fingerprints (the body, as `GET`
+         *     gives them) for a `sync_export` job; kept for a day.
+         */
+        post: operations["post_sync_blocks"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sync/exists": {
         parameters: {
             query?: never;
@@ -2047,6 +2071,8 @@ export interface components {
             };
             rules?: components["schemas"]["RootRule"][];
         } | {
+            /** @description Whether the receiving side backs up first; default: the remote's setting. */
+            backup_first?: boolean | null;
             confirm?: string;
             direction: components["schemas"]["Direction"];
             /** @enum {string} */
@@ -2057,6 +2083,7 @@ export interface components {
              */
             remote: number;
         } | {
+            blocks?: string | null;
             have: string;
             /** @enum {string} */
             kind: "sync_export";
@@ -5018,6 +5045,81 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LibraryStats"];
+                };
+            };
+        };
+    };
+    get_sync_blocks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": number[];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    post_sync_blocks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Database fingerprints */
+        requestBody?: {
+            content: {
+                "application/octet-stream": unknown;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HaveId"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
         };

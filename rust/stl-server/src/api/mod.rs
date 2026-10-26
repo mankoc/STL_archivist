@@ -126,6 +126,8 @@ use crate::AppState;
         workers::connect,
         sync::thumbnails,
         sync::have,
+        sync::blocks,
+        sync::post_blocks,
         sync::exists,
         sync::list,
         sync::add,
@@ -242,6 +244,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/workers/token", post(workers::token))
         .route("/api/workers/connect", get(workers::connect))
         .route("/api/sync/thumbnails", get(sync::thumbnails).post(sync::have).layer(DefaultBodyLimit::disable()))
+        .route("/api/sync/blocks", get(sync::blocks).post(sync::post_blocks).layer(DefaultBodyLimit::disable()))
         .route("/api/sync/exists", post(sync::exists))
         .route("/api/sync/remotes", get(sync::list).post(sync::add))
         .route("/api/sync/remotes/{id}", patch(sync::change).delete(sync::delete))

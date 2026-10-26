@@ -490,8 +490,11 @@ alike: a desktop app's local library and a NAS, say.
 - **Pull** replaces this library with the other's; **Push** replaces the other's with this
   one. The receiving side backs up first unless the remote's rules say not to, and keeps
   its 3 newest `…_pre_import.7z`.
-- **What travels:** the database, the settings and only the thumbnail images the
-  receiving side lacks; nothing is re-read.
+- **What travels:** the settings, only the thumbnail images the receiving side lacks, and
+  the database: after a first sync only the rows that changed (both sides compare row
+  fingerprints in blocks of 128 rows), the whole database the first time, when the two
+  databases' layouts differ, or when more than a third of the rows changed. Nothing is
+  re-read. Backing the receiving side up first is a choice made for each sync.
 - **Versions:** the receiving side must run the same version as the sending side, or a
   newer one.
 - **Reverse proxies:** a push uploads the package to the other server, so a reverse

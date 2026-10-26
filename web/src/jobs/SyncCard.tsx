@@ -51,7 +51,8 @@ export function SyncCard({ jobs, start }: { jobs: Job[] | undefined; start: (r: 
       <Text size="xs" c="dimmed" mb="xs">
         <b>Pull</b> makes this library a copy of another server's; <b>Push</b> makes the other server's a copy of this one. Folder
         rules map each folder to its place on the other side (<i>D:\Minis</i> here is <i>/library</i> there). Only the
-        thumbnails the receiving side lacks are sent. Edit on one side at a time: a sync replaces the receiving library.
+        thumbnails the receiving side lacks are sent, and after a first sync only the rows that changed. Edit on one side at a
+        time: a sync replaces the receiving library.
       </Text>
       {remotes.data?.length ? (
         <Table fz="sm" verticalSpacing={4}>
@@ -209,7 +210,7 @@ function Rules({ remote, onClose }: { remote: RemoteInfo; onClose: () => void })
           <Button size="xs" variant="subtle" leftSection={<IconPlus size={14} />} onClick={() => setRows([...rows, { local: "", remote: "" }])}>
             Add a rule
           </Button>
-          <Checkbox label="The receiving side backs its library up before a sync" checked={backupFirst} onChange={(e) => setBackupFirst(e.currentTarget.checked)} />
+          <Checkbox label="Back up the receiving library first (the default for each sync)" checked={backupFirst} onChange={(e) => setBackupFirst(e.currentTarget.checked)} />
         </Group>
         {error && <Text size="sm" c="red">{error}</Text>}
         <Group justify="flex-end">
@@ -224,6 +225,7 @@ function Rules({ remote, onClose }: { remote: RemoteInfo; onClose: () => void })
 
 function SyncDialog({ remote, direction, start, onClose }: { remote: RemoteInfo; direction: Direction; start: (r: JobRequest) => Promise<void>; onClose: () => void }) {
   const [typed, setTyped] = useState("");
+  const [backup, setBackup] = useState(remote.backup_first);
   const preview = useQuery({
     queryKey: ["sync-preview", remote.id, direction],
     queryFn: async () => unwrap(await api.GET("/api/sync/remotes/{id}/preview", { params: { path: { id: remote.id }, query: { direction } } })),
@@ -232,7 +234,7 @@ function SyncDialog({ remote, direction, start, onClose }: { remote: RemoteInfo;
   const p = preview.data;
   const [from, to] = direction === "pull" ? [remote.name, "this server"] : ["this server", remote.name];
   const go = async () => {
-    await start({ kind: "sync", remote: remote.id, direction, confirm: "REPLACE" });
+    await start({ kind: "sync", remote: remote.id, direction, confirm: "REPLACE", backup_first: backup });
     notifications.show({ message: `${direction === "pull" ? "Pulling from" : "Pushing to"} ${remote.name}: follow the job below.` });
     onClose();
   };
@@ -265,10 +267,13 @@ function SyncDialog({ remote, direction, start, onClose }: { remote: RemoteInfo;
                 ))}
               </Table.Tbody>
             </Table>
-            <Alert color="orange" p="xs">
-              {syncWarning(direction, remote.name)}
-              {remote.backup_first ? ` ${to === "this server" ? "This server" : remote.name} backs its library up first.` : ""}
-            </Alert>
+            <Alert color="orange" p="xs">{syncWarning(direction, remote.name)}</Alert>
+            <Checkbox
+              label={`Back up ${to === "this server" ? "this server's" : `${remote.name}'s`} library first (…_pre_import.7z, the 3 newest are kept)`}
+              checked={backup}
+              onChange={(e) => setBackup(e.currentTarget.checked)}
+              data-testid="sync-backup"
+            />
             <Group justify="flex-end" align="flex-end">
               <TextInput size="sm" label="Type REPLACE to sync" value={typed} onChange={(e) => setTyped(e.currentTarget.value)} w={180} data-testid="sync-confirm" />
               <Button color="red" disabled={!!p.problem || typed !== "REPLACE"} onClick={() => void go()} data-testid="sync-start">

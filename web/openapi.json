@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.44.5"
+    "version": "2026.44.6"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -2841,6 +2841,97 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/LibraryStats"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sync/blocks": {
+      "get": {
+        "tags": [
+          "sync"
+        ],
+        "summary": "This server's database fingerprints (`storage::delta`): a pushing server\nsends only the rows that differ. 409 when the database cannot be fingerprinted.",
+        "operationId": "get_sync_blocks",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "format": "int32",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "sync"
+        ],
+        "summary": "Hand over a pulling server's database fingerprints (the body, as `GET`\ngives them) for a `sync_export` job; kept for a day.",
+        "operationId": "post_sync_blocks",
+        "requestBody": {
+          "description": "Database fingerprints",
+          "content": {
+            "application/octet-stream": {}
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HaveId"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             }
@@ -5794,6 +5885,13 @@
               "kind"
             ],
             "properties": {
+              "backup_first": {
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "description": "Whether the receiving side backs up first; default: the remote's setting."
+              },
               "confirm": {
                 "type": "string"
               },
@@ -5815,12 +5913,18 @@
           },
           {
             "type": "object",
-            "description": "Pack this library for a sync that pulls it (administrators; another\nserver asks for it): `backups/…_sync.7z` without the thumbnails in\n`have` (the receiver's list, `POST /api/sync/thumbnails`).",
+            "description": "Pack this library for a sync that pulls it (administrators; another\nserver asks for it): `backups/…_sync.7z` without the thumbnails in\n`have` (the receiver's list, `POST /api/sync/thumbnails`), and with only\nthe database's changes when `blocks` (its fingerprints, `POST\n/api/sync/blocks`) allow.",
             "required": [
               "have",
               "kind"
             ],
             "properties": {
+              "blocks": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "have": {
                 "type": "string"
               },

@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026.44.6 — 2026-10-26
+
+- **Smart sync: only what changed travels.** Once both servers hold the same library (after
+  a first sync), a pull or push sends only the database rows that changed, beside the
+  thumbnails the other side lacks. The job's log says "only the changes (N of M rows)".
+  - **How:** both sides fingerprint their rows in blocks of 128; the receiving side sends
+    its fingerprints, and the sending side packs the rows of the blocks that differ.
+  - **Checks:** the receiving side applies them to a copy of its library and checks the
+    result matches the sender's before swapping it in. If anything changed there
+    meanwhile, the sync sends the whole library instead, by itself.
+  - **The whole database is sent** the first time, between servers whose databases differ
+    in layout, when more than a third of the rows changed, and to or from servers before
+    2026.44.6.
+- **Backups before a sync or an import are a choice each time:** a tick box in the sync
+  dialog (its default is the remote's setting) and in the import dialog.
+
 ## 2026.44.5 — 2026-10-26
 
 - **Sync with other servers: pull and push** (*Settings → Backups & transfer → Sync with
