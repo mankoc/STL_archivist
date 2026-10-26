@@ -1,7 +1,7 @@
 name: Docker image
 
-# Builds the server image (Dockerfile: the server, the web client, pdfium and
-# ONNX Runtime) when a version tag is pushed (the same tags that publish the
+# Builds the server image (docker/Dockerfile: the server, the web client, pdfium
+# and ONNX Runtime) when a version tag is pushed (the same tags that publish the
 # release in release.yml) and pushes it to Docker Hub as <image>:<version> and
 # <image>:latest. Started by hand (Actions → Docker image → Run workflow) it
 # only builds, to check the image without publishing it.
@@ -81,6 +81,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
+          file: docker/Dockerfile
           platforms: linux/amd64
           push: ${{ env.PUBLISH == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}

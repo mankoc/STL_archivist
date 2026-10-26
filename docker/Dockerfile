@@ -1,8 +1,10 @@
 # StlArchivist server (rust/stl-server) and web client (web/), with pdfium (PDF
 # previews) and ONNX Runtime (AI embeddings). See docs/deployment.md → "Option C: Docker".
 # Each release is built and pushed to Docker Hub by .github/workflows/docker.yml.
+# The build context is the repository root (Dockerfile.dockerignore beside this file
+# applies to it), so build from there:
 #
-#   docker build -t stlarchivist .
+#   docker build -f docker/Dockerfile -t stlarchivist .
 #   docker run -d --name stl -p 8770:8770 -v /srv/stl-data:/data -v /srv/STL:/library:ro stlarchivist
 #   docker exec -it stl stl-server create-admin admin
 #

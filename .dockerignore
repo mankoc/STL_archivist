@@ -1,7 +1,0 @@
-# Docker builds need the Rust workspace and the web client's sources.
-*
-!rust/
-!web/
-rust/target/
-web/node_modules/
-web/dist/
