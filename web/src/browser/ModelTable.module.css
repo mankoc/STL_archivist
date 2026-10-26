@@ -24,6 +24,12 @@
   width: 100%;
 }
 
+/* The column a dragged header would take the place of. */
+.headerCell[data-drop] {
+  box-shadow: inset 0 0 0 2px var(--mantine-primary-color-filled);
+  border-radius: 4px;
+}
+
 .resizer {
   position: absolute;
   right: 0;

@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.44.1"
+    "version": "2026.44.2"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -4929,6 +4929,21 @@
                 "type": "string",
                 "enum": [
                   "verify_archives"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Read the catalog of every archive whose file list or STL list was never\nread (crawls open only new and changed archives).",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "read_file_lists"
                 ]
               }
             }

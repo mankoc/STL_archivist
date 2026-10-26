@@ -245,6 +245,9 @@ fn hash_one(path: &str, host: &dyn Host) -> (String, Option<Vec<archive::Archive
 /// An archive's file list, as `store_files` takes it.
 type FileList = (String, Vec<archive::ArchiveMember>);
 
+/// Phase 1's fingerprints, the file lists it read, and the archives taken from sidecars.
+type Phase1 = (Vec<String>, Vec<FileList>, Vec<String>);
+
 // ── phase 3 ──────────────────────────────────────────────────────────────────
 
 fn is_wanted(name: &str) -> bool {
@@ -303,6 +306,11 @@ pub(crate) fn extract_native(path: &str, unrar: &str) -> Option<Extracted> {
 
 /// `{name: size}` for the printable members, as a Python dict builds it:
 /// a repeated name keeps its first position and its last size.
+/// The STL file list (printable files: name, size) of an archive's catalog.
+pub fn stl_list(members: &[archive::ArchiveMember]) -> Vec<(String, Option<i64>)> {
+    stl_dict(members.iter().map(|m| (m.name.clone(), m.size.map(|s| s as i64))))
+}
+
 fn stl_dict(members: impl Iterator<Item = (String, Option<i64>)>) -> Vec<(String, Option<i64>)> {
     let mut out: Vec<(String, Option<i64>)> = Vec::new();
     let mut index: HashMap<String, usize> = HashMap::new();
@@ -515,6 +523,8 @@ struct Run<'a> {
     inner_roots: Vec<String>,
     /// `(size, mtime_ns)` of the archives, from the folder listing.
     listed: HashMap<String, (i64, i64)>,
+    /// The archives (`relpath::path_key`s) whose records this crawl imported from sidecars.
+    from_sidecar: HashSet<String>,
 }
 
 fn tx(conn: &mut rusqlite::Connection) -> rusqlite::Result<rusqlite::Transaction<'_>> {
@@ -526,9 +536,10 @@ impl Run<'_> {
         self.host.emit(Event::Log(s.into()));
     }
 
-    /// The batch's fingerprints, and the file lists of the archives whose
-    /// catalog was read for them (not those whose stored hash was kept).
-    fn phase1(&mut self, batch: &[String]) -> Result<(Vec<String>, Vec<FileList>), CrawlError> {
+    /// The batch's fingerprints, the file lists of the archives whose catalog
+    /// was read for them (not those whose stored hash was kept), and the
+    /// archives taken as their sidecar describes them (not opened).
+    fn phase1(&mut self, batch: &[String]) -> Result<Phase1, CrawlError> {
         let stats: Vec<Option<(i64, i64)>> =
             self.pool.install(|| batch.par_iter().map(|p| self.listed.get(p).copied().or_else(|| db::stat(p))).collect());
         let existing: HashMap<String, (String, Option<i64>, Option<i64>)> =
@@ -539,62 +550,72 @@ impl Run<'_> {
         let host = self.host;
         let force = self.cfg.force_rescan;
         let size_only = self.cfg.size_only;
-        let hashed: Vec<(String, Option<Vec<archive::ArchiveMember>>)> = self.pool.install(|| {
+        let from_sidecar = &self.from_sidecar;
+        let hashed: Vec<(String, Option<Vec<archive::ArchiveMember>>, bool)> = self.pool.install(|| {
             batch
                 .par_iter()
                 .zip(stats.par_iter())
                 .map(|(p, st)| {
-                    // An unchanged archive keeps its fingerprint, unless the readers failed on it
-                    // last time (they may read it now).
                     if !force
                         && let (Some((h, size, mtime)), Some(now)) = (existing.get(p), st)
-                        && db::unchanged(*size, *mtime, *now, size_only)
+                        && !h.is_empty()
                         && !h.starts_with("fallback:")
                     {
-                        return (h.clone(), None);
+                        // An unchanged archive keeps its fingerprint (one the readers failed on
+                        // is read again: they may read it now).
+                        if db::unchanged(*size, *mtime, *now, size_only) {
+                            return (h.clone(), None, false);
+                        }
+                        // Just imported from a sidecar: taken as the sidecar describes it, without
+                        // opening it, unless the size the sidecar recorded differs (it changed).
+                        if from_sidecar.contains(&crate::relpath::path_key(p)) && size.is_none_or(|s| s == now.0) {
+                            return (h.clone(), None, true);
+                        }
                     }
-                    hash_one(p, host)
+                    let (h, members) = hash_one(p, host);
+                    (h, members, false)
                 })
                 .collect()
         });
         let mut hashes = Vec::with_capacity(hashed.len());
         let mut lists = Vec::new();
-        for (p, (h, members)) in batch.iter().zip(hashed) {
+        let mut trusted = Vec::new();
+        for (p, (h, members, from_sidecar)) in batch.iter().zip(hashed) {
             hashes.push(h);
             if let Some(m) = members {
                 lists.push((p.clone(), m));
             }
+            if from_sidecar {
+                trusted.push(p.clone());
+            }
         }
-        Ok((hashes, lists))
+        Ok((hashes, lists, trusted))
     }
 
-    /// Store the batch's file lists: those read for the fingerprints, and for
-    /// records still without one (crawled before lists were kept) a fresh read
-    /// of their catalog. Nothing is decompressed.
-    fn store_files(&mut self, batch: &[String], lists: Vec<FileList>) -> Result<(), CrawlError> {
-        let read: HashSet<&String> = lists.iter().map(|(p, _)| p).collect();
-        let rest: Vec<String> = batch.iter().filter(|p| !read.contains(p)).cloned().collect();
-        let lacking = db::lacking_files(&self.conn, &rest)?;
-        let backfill: Vec<FileList> = self
-            .pool
-            .install(|| lacking.par_iter().filter_map(|p| archive::list_members(Path::new(p)).ok().map(|m| (p.clone(), m))).collect());
+    /// Store the file lists of the archives whose catalog this batch read. A
+    /// crawl opens only new and changed archives: those without a list keep
+    /// none until they are read (*Read missing file lists*, Rescan).
+    fn store_files(&mut self, lists: Vec<FileList>) -> Result<(), CrawlError> {
+        if lists.is_empty() {
+            return Ok(());
+        }
         let t = tx(&mut self.conn)?;
         db::store_files(&t, &lists)?;
-        db::store_files(&t, &backfill)?;
         t.commit()?;
         Ok(())
     }
 
     fn batch(&mut self, batch: &[String], start: usize, modified: &mut HashSet<String>) -> Result<bool, CrawlError> {
-        let (hashes, mut lists) = self.phase1(batch)?;
+        let (hashes, lists, trusted) = self.phase1(batch)?;
         if start == 0 {
             self.host.emit(Event::Phase("Checking database for changes…".into()));
         }
         let pairs: Vec<(String, String)> = batch.iter().cloned().zip(hashes.iter().cloned()).collect();
         let read: HashSet<String> = lists.iter().map(|(p, _)| p.clone()).collect();
+        let trusted: HashSet<String> = trusted.into_iter().collect();
         let diff = {
             let t = tx(&mut self.conn)?;
-            let d = db::diff(&t, &pairs, self.cfg.force_rescan, &read, &self.candidates)?;
+            let d = db::diff(&t, &pairs, self.cfg.force_rescan, &read, &trusted, &self.candidates)?;
             t.commit()?;
             d
         };
@@ -618,22 +639,18 @@ impl Run<'_> {
         let (cfg, host) = (self.cfg, self.host);
         let prepared: HashMap<String, Prepared> =
             self.pool.install(|| diff.to_extract.par_iter().map(|p| (p.clone(), prepare(p, cfg, host))).collect());
-        // Records without an STL list (crawled before it was always kept): each catalog is read
-        // once, its STL list stored and the record marked, and the same read gives the
-        // archive's file list (Python read these lists and dropped them, so every crawl read
-        // the archives again).
-        let backfill: Vec<FileList> = self.pool.install(|| {
-            diff.stl_backfill.par_iter().filter_map(|p| archive::list_members(Path::new(p)).ok().map(|m| (p.clone(), m))).collect()
-        });
+        // Records without an STL list whose catalog was read anyway get it from that catalog
+        // (no archive is opened for it).
         let hash_of: HashMap<&str, &str> = pairs.iter().map(|(p, h)| (p.as_str(), h.as_str())).collect();
-        let stl_lists: Vec<db::StlList> = backfill
+        let members_of: HashMap<&str, &Vec<archive::ArchiveMember>> = lists.iter().map(|(p, m)| (p.as_str(), m)).collect();
+        let stl_lists: Vec<db::StlList> = diff
+            .stl_backfill
             .iter()
-            .map(|(p, m)| {
-                let stl = stl_dict(m.iter().map(|m| (m.name.clone(), m.size.map(|s| s as i64))));
-                (p.clone(), hash_of.get(p.as_str()).copied().unwrap_or_default().to_string(), stl)
+            .filter_map(|p| {
+                let m = members_of.get(p.as_str())?;
+                Some((p.clone(), hash_of.get(p.as_str()).copied().unwrap_or_default().to_string(), stl_list(m)))
             })
             .collect();
-        lists.extend(backfill);
         let existing: HashMap<String, i64> = diff.existing.into_iter().collect();
         let total = self.summary.total;
         let mut inputs = Vec::new();
@@ -698,7 +715,7 @@ impl Run<'_> {
             }
             self.host.emit(Event::Progress(idx, total));
         }
-        self.store_files(batch, lists)?;
+        self.store_files(lists)?;
         self.host.emit(Event::Counts(self.summary.new, self.summary.updated, self.summary.unchanged));
         Ok(host.should_stop())
     }
@@ -766,6 +783,7 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
         existing_hashes: HashMap::new(),
         inner_roots: Vec::new(),
         listed: HashMap::new(),
+        from_sidecar: HashSet::new(),
     };
     // The crawled folder is a library (made now when it is none yet); the
     // libraries inside it are crawled on their own.
@@ -849,6 +867,7 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
                 match sidecar::import(&t, st, &folder) {
                     Ok(v) => {
                         t.commit()?;
+                        run.from_sidecar.extend(v.iter().map(|p| crate::relpath::path_key(p)));
                         v.len()
                     }
                     Err(_) => {

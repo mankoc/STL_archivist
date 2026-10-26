@@ -1,6 +1,7 @@
 //! Database Maintenance jobs beyond the simple ones in `jobs.rs`: the record
 //! lists of Verify and Find Duplicate Entries, Find Moved in DB, Search in
-//! Folder and the warning re-checks (the desktop's `db_maintenance_dialog.py`).
+//! Folder and the warning re-checks (the desktop's `db_maintenance_dialog.py`),
+//! and Read missing file lists.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -355,4 +356,53 @@ mod tests {
         assert_eq!(file_name("/a/b.zip"), "b.zip");
         assert_eq!(file_name("b.zip"), "b.zip");
     }
+}
+
+/// What Read missing file lists did.
+#[derive(Debug, Default)]
+pub struct ReadLists {
+    pub read: usize,
+    pub failed: usize,
+    /// Archive paths of the records changed (their sidecars list the STL files).
+    pub touched: Vec<String>,
+}
+
+/// Read missing file lists: the catalog of every archive whose record has no
+/// file list or no STL list (crawls open only new and changed archives, and a
+/// sidecar carries neither), stored as a crawl stores them. Nothing is
+/// decompressed; an archive that cannot be read is counted and left alone.
+pub fn read_file_lists(lib: &Library, ctl: &Control, log: &dyn Fn(String)) -> Result<ReadLists, String> {
+    let records = lib.db.with(crawl_db::lacking_lists).map_err(db)?;
+    let mut out = ReadLists::default();
+    if records.is_empty() {
+        log("Every record has its file lists.".into());
+        return Ok(out);
+    }
+    log(format!("Reading the file lists of {} archive(s)…", records.len()));
+    ctl.set_total(records.len() as u64);
+    for chunk in records.chunks(WARNING_BATCH) {
+        if ctl.is_stopped() {
+            log("Stopped by user.".into());
+            break;
+        }
+        let catalogs: Vec<(&String, &String, Vec<stl_core::archive::ArchiveMember>)> = chunk
+            .par_iter()
+            .filter_map(|(p, h)| stl_core::archive::list_members(Path::new(p)).ok().map(|m| (p, h, m)))
+            .collect();
+        out.failed += chunk.len() - catalogs.len();
+        out.read += catalogs.len();
+        let lists: Vec<(String, Vec<stl_core::archive::ArchiveMember>)> = catalogs.iter().map(|(p, _, m)| ((*p).clone(), m.clone())).collect();
+        let stl: Vec<crawl_db::StlList> =
+            catalogs.iter().map(|(p, h, m)| ((*p).clone(), (*h).clone(), stl_core::crawler::stl_list(m))).collect();
+        lib.db
+            .with_tx(|tx| {
+                crawl_db::store_files(tx, &lists)?;
+                crawl_db::store_stl_lists(tx, &stl)
+            })
+            .map_err(db)?;
+        out.touched.extend(catalogs.iter().map(|(p, ..)| (*p).clone()));
+        ctl.advance(chunk.len() as u64);
+    }
+    log(format!("Done: {} read, {} unreadable or missing.", out.read, out.failed));
+    Ok(out)
 }

@@ -82,8 +82,12 @@ Jobs page, and you can leave the page, close the browser or use the app meanwhil
 one at a time; new ones wait their turn. The stop button stops a job at its next safe point,
 keeping the work already done.
 
-Later crawls are quick: an archive whose fingerprint has not changed is skipped. Moved
-archives are recognised by their content and keep their record, edits and images.
+Later crawls are quick: a crawl opens only new and changed archives (an archive whose size
+and modification time match its record is skipped without being opened). Moved archives are
+recognised by their content and keep their record, edits and images. A folder copied with
+its `METADATA.7z` sidecars to another machine starts from them: a new library takes each
+archive as its sidecar describes it, without opening it (unless its size differs from the
+one the sidecar recorded).
 
 - **Update all** re-crawls every folder in the list with its saved pattern, matches archives
   moved from one folder to another, and removes the records of archives that are gone.
@@ -143,7 +147,9 @@ selected model's details on the right.
 - **Columns** chooses which columns are shown (saved with your account). The standard
   columns are on until you hide them; *More columns* lists further fields, off until you turn
   them on: Warning, Sequence, Images, Compression, To print, Missing, Added, Updated, URL,
-  Description, Folder and Archive hash.
+  Description, Folder and Archive hash. Drag a column's header onto another to move it there
+  (the order is saved with your account too); **Reset column order** in the menu goes back to
+  the default order.
 - **Table / Images** switches between the table and a grid of thumbnails of the same models.
 - Click a row to select it; **Ctrl**-click adds or removes rows; **Shift**-click selects a range.
   The count of selected models shows above the table.
@@ -158,8 +164,9 @@ in this browser.
   computer); **Open folder** in the desktop app shows the archive in the file manager.
 - **Files** shows the archive's folders and files as a tree (a chain of single folders is one
   row), with each file's size and CRC-32 and each folder's file count, as the last crawl or
-  rescan read the archive's catalog. The cube beside a model file opens it in the model
-  viewer.
+  rescan read the archive's catalog (a crawl reads only new and changed archives: a record
+  without a list gets it from *Rescan* or *Settings → Maintenance → Read missing file
+  lists*). The cube beside a model file opens it in the model viewer.
 - **View model** opens the model viewer: the archive's 3D model files (STL, OBJ, PLY, 3MF,
   Lychee `.lys`, CHITUBOX `.chitubox`, `.ctp` and `.ctb`) on the left, the chosen one drawn
   with MeshPeek's renderer (WebGPU, or WebGL2 in browsers without it). The server unpacks the

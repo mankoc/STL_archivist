@@ -1344,6 +1344,15 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.44.2: sidecars export `archive_size` (imported into `models.archive_size`); the crawl
+  keeps the archives `sidecar::import` returned (`Run::from_sidecar`) and phase 1 takes them
+  without reading (unless the recorded size differs); `crawl::diff` stores their size and
+  time (`trusted`) and backfills STL lists only from catalogs already read; `store_files` no
+  longer reads records lacking a list (`lacking_files` is gone). The `read_file_lists` job
+  (`maint::read_file_lists`, `crawl::lacking_lists`, `crawler::stl_list`) reads them on
+  demand. `SidecarCard` holds the sidecar settings (`settings/librarySettings.ts`). The
+  table's column order is the per-user setting `table_column_order` (`columns.ts`:
+  `ordered`, `moveColumn`; dragged headers in `ModelTable`).
 - 2026.44.1: `.github/workflows/docker.yml` builds the `Dockerfile` (linux/amd64, GitHub
   Actions layer cache) on `v*` tags, checks the tag against the version, and pushes
   `<image>:<version>` and `:latest` to Docker Hub; `SidecarSettings` (Settings → Sidecars) writes `metadata_sidecar_enabled` /

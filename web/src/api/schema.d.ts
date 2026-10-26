@@ -1796,6 +1796,9 @@ export interface components {
             /** @enum {string} */
             kind: "verify_archives";
         } | {
+            /** @enum {string} */
+            kind: "read_file_lists";
+        } | {
             all?: boolean;
             /** @enum {string} */
             kind: "recompute_dhashes";

@@ -18,7 +18,7 @@ import { SortModal } from "./SortModal";
 import { AiTaggerDrawer } from "./AiTaggerDrawer";
 import { MassEditDrawer } from "./MassEditDrawer";
 import { EMPTY, type FilterSpec, isEmpty } from "./filters";
-import { ALWAYS_SHOWN, choiceFrom, HIDDEN_COLUMNS_KEY, isShown, SHOWN_COLUMNS_KEY, toggle } from "./columns";
+import { ALWAYS_SHOWN, choiceFrom, COLUMN_ORDER_KEY, HIDDEN_COLUMNS_KEY, isShown, moveColumn, SHOWN_COLUMNS_KEY, toggle } from "./columns";
 import { COLUMNS, ModelTable, type Sort, useModelIds } from "./ModelTable";
 import { NONE, click, contextClick, prune, type Selection } from "./selection";
 import classes from "./BrowserPage.module.css";
@@ -70,6 +70,20 @@ export function BrowserPage() {
     const [key, value] = c.optional ? [SHOWN_COLUMNS_KEY, next.shown] : [HIDDEN_COLUMNS_KEY, next.hidden];
     queryClient.setQueryData<Record<string, unknown>>(["me-settings"], (old) => ({ ...old, [key]: value }));
     await api.PUT("/api/me/settings/{key}", { params: { path: { key } }, body: value as never });
+  };
+  // The column order: dragged headers, and back to the default.
+  const moveCol = async (from: string, to: string) => {
+    const order = moveColumn(COLUMNS, choice.order, from, to);
+    queryClient.setQueryData<Record<string, unknown>>(["me-settings"], (old) => ({ ...old, [COLUMN_ORDER_KEY]: order }));
+    await api.PUT("/api/me/settings/{key}", { params: { path: { key: COLUMN_ORDER_KEY } }, body: order as never });
+  };
+  const resetOrder = async () => {
+    queryClient.setQueryData<Record<string, unknown>>(["me-settings"], (old) => {
+      const next = { ...old };
+      delete next[COLUMN_ORDER_KEY];
+      return next;
+    });
+    await api.DELETE("/api/me/settings/{key}", { params: { path: { key: COLUMN_ORDER_KEY } } });
   };
   const columnItem = (c: (typeof COLUMNS)[number]) => (
     <Menu.Item key={c.id} disabled={c.id === ALWAYS_SHOWN} onClick={() => toggleColumn(c)}
@@ -172,6 +186,11 @@ export function BrowserPage() {
                 {COLUMNS.filter((c) => !c.optional).map(columnItem)}
                 <Menu.Label>More columns</Menu.Label>
                 {COLUMNS.filter((c) => c.optional).map(columnItem)}
+                <Menu.Divider />
+                <Menu.Label>Drag a column's header to move it</Menu.Label>
+                <Menu.Item disabled={!choice.order.length} onClick={resetOrder} data-testid="reset-column-order">
+                  Reset column order
+                </Menu.Item>
               </Menu.Dropdown>
             </Menu>
           )}
@@ -220,6 +239,7 @@ export function BrowserPage() {
               onRowContextMenu={openMenu}
               editable={editor}
               choice={choice}
+              onMoveColumn={moveCol}
             />
           )}
         </Box>

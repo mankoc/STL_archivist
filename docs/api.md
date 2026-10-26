@@ -1,6 +1,6 @@
 # StlArchivist API
 
-Version 2026.44.1. Generated from `web/openapi.json` by `tools/api_doc.py`; the
+Version 2026.44.2. Generated from `web/openapi.json` by `tools/api_doc.py`; the
 running server serves the same document at `GET /api/openapi.json`. Do not edit by hand:
 run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after changing routes.
 
@@ -687,6 +687,7 @@ One of:
 - `kind: "update_folders"` — `folders`: Re-crawl crawled folders (all of them, or `folders`) with their stored patterns, matching archives moved from one folder to another before deleting the records of archives that are gone (Update Folders).
 - `kind: "clear_library"` — `confirm`: Delete every record, lookup and thumbnail of the library (Delete Database; administrators). `confirm` must be `"DELETE"`.
 - `kind: "verify_archives"`: Check that every archive is still on disk, unchanged in size.
+- `kind: "read_file_lists"`: Read the catalog of every archive whose file list or STL list was never read (crawls open only new and changed archives).
 - `kind: "recompute_dhashes"` — `all`: Compute perceptual hashes from stored thumbnails (all, or only missing / outdated).
 - `kind: "prune_images"` — `keep`: Keep at most `keep` images per model (the oldest).
 - `kind: "compact_database"`: `VACUUM` the database and truncate its write-ahead log; drop unused thumbnails and rewrite the thumbnail store without its free pages.

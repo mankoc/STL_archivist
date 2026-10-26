@@ -64,6 +64,9 @@ pub enum JobRequest {
     ClearLibrary { confirm: String },
     /// Check that every archive is still on disk, unchanged in size.
     VerifyArchives,
+    /// Read the catalog of every archive whose file list or STL list was never
+    /// read (crawls open only new and changed archives).
+    ReadFileLists,
     /// Compute perceptual hashes from stored thumbnails (all, or only missing / outdated).
     RecomputeDhashes {
         #[serde(default)]
@@ -225,6 +228,7 @@ impl JobRequest {
             JobRequest::UpdateFolders { .. } => "update_folders",
             JobRequest::ClearLibrary { .. } => "clear_library",
             JobRequest::VerifyArchives => "verify_archives",
+            JobRequest::ReadFileLists => "read_file_lists",
             JobRequest::RecomputeDhashes { .. } => "recompute_dhashes",
             JobRequest::PruneImages { .. } => "prune_images",
             JobRequest::CompactDatabase => "compact_database",
@@ -619,6 +623,7 @@ fn run(lib: &Library, job: &Job) -> Result<String, String> {
         JobRequest::UpdateFolders { folders } => update_folders(lib, job, folders),
         JobRequest::ClearLibrary { .. } => clear_library(lib, job),
         JobRequest::VerifyArchives => verify(lib, job),
+        JobRequest::ReadFileLists => read_file_lists(lib, job),
         JobRequest::RecomputeDhashes { all } => recompute_dhashes(lib, job, all),
         JobRequest::PruneImages { keep } => prune_images(lib, job, keep),
         JobRequest::CompactDatabase => compact(lib, job),
@@ -1043,6 +1048,13 @@ fn search_folder(lib: &Library, job: &Job, folder: &str, ids: &[i64]) -> Result<
     let (rows, touched) = crate::maint::search_folder(lib, &job.ctl, &log, folder, ids)?;
     job.touch_sidecars(touched);
     Ok(finder_done(job, records(rows), "archive(s) found and relocated"))
+}
+
+fn read_file_lists(lib: &Library, job: &Job) -> Result<String, String> {
+    let log = |line: String| lib.job_log(job, line);
+    let r = crate::maint::read_file_lists(lib, &job.ctl, &log)?;
+    job.touch_sidecars(r.touched);
+    Ok(format!("{} read, {} unreadable or missing", r.read, r.failed))
 }
 
 fn recheck_warnings(lib: &Library, job: &Job, warning: &str) -> Result<String, String> {

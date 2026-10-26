@@ -94,7 +94,7 @@ fn snapshot(conn: &Connection, folder: &str, include_thumbnails: bool) -> SResul
     let mut st = conn.prepare(&format!(
         "SELECT m.id, {}, m.archive_hash, m.title, m.creator, m.source, m.release_year, m.release_month, \
          m.url, m.description, m.sequence, m.presupports, m.warning, m.compression_rate, \
-         scu.name, col.name, sub.name, cat.name, rel.name FROM models m \
+         scu.name, col.name, sub.name, cat.name, rel.name, m.archive_size FROM models m \
          LEFT JOIN sculptors scu ON m.sculptor_id = scu.id \
          LEFT JOIN collections col ON m.collection_id = col.id \
          LEFT JOIN subcollections sub ON m.subcollection_id = sub.id \
@@ -105,7 +105,7 @@ fn snapshot(conn: &Connection, folder: &str, include_thumbnails: bool) -> SResul
     ))?;
     let want = normcase(folder);
     let rows: Vec<Vec<Value>> = st
-        .query_map(params![library, rel_folder], |r| (0..19).map(|k| r.get::<_, Value>(k)).collect())?
+        .query_map(params![library, rel_folder], |r| (0..20).map(|k| r.get::<_, Value>(k)).collect())?
         .collect::<rusqlite::Result<_>>()?;
     let mut entries = Vec::new();
     let mut thumbs = Vec::new();
@@ -145,6 +145,9 @@ fn snapshot(conn: &Connection, folder: &str, include_thumbnails: bool) -> SResul
         for key in ["sculptor", "collection", "subcollection", "category", "release"] {
             fields.push((key.into(), value_json(next())?));
         }
+        // The archive's size, so a library reading the sidecar elsewhere can trust it
+        // without opening the archive while the size still matches.
+        fields.push(("archive_size".into(), value_json(next())?));
         fields.push((
             "scales".into(),
             J::Arr(names(
@@ -309,6 +312,8 @@ struct Planned {
     archive_path: String,
     columns: [Option<String>; 7], // title creator source url description presupports warning
     archive_hash: String,
+    /// The archive's size when the sidecar was written (none in older sidecars).
+    archive_size: Option<i64>,
     release_year: Option<i64>,
     release_month: Option<i64>,
     sequence: Option<i64>,
@@ -411,6 +416,7 @@ fn plan_model(m: &serde_json::Map<String, Json>, path: String, thumbs: &HashMap<
             text("warning")?,
         ],
         archive_hash,
+        archive_size: opt_int(m.get("archive_size"), "archive_size")?,
         release_year: opt_int(m.get("release_year"), "release_year")?,
         release_month: opt_int(m.get("release_month"), "release_month")?,
         sequence: opt_int(m.get("sequence"), "sequence")?,
@@ -569,12 +575,12 @@ pub fn import(tx: &Transaction, store: &ThumbStore, folder: &str) -> SResult<Vec
         tx.execute(
             "INSERT INTO models (title, creator, source, release_year, release_month, url, description, library_id, rel_path, \
              rel_folder, archive_hash, sequence, presupports, warning, compression_rate, is_missing, to_print, \
-             created_at, updated_at, sculptor_id, collection_id, subcollection_id, category_id, release_id) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, 0, 0, ?16, ?16, ?17, ?18, ?19, ?20, ?21)",
+             created_at, updated_at, sculptor_id, collection_id, subcollection_id, category_id, release_id, archive_size) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, 0, 0, ?16, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
             params![
                 title, creator, source, p.release_year, p.release_month, url, description, library, rel.as_str(),
                 rel.folder(), p.archive_hash, p.sequence, presupports, warning, rate, now,
-                sculptor, collection, sub, category, release
+                sculptor, collection, sub, category, release, p.archive_size
             ],
         )?;
         let model_id = tx.last_insert_rowid();
