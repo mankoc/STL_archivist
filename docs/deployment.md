@@ -253,7 +253,7 @@ server {
     listen 443 ssl;
     server_name stl.example.org;
     # ssl_certificate / ssl_certificate_key ...
-    client_max_body_size 100m;          # image uploads
+    client_max_body_size 0;             # image uploads, library packages (import, sync)
     location / {
         proxy_pass http://127.0.0.1:8770;
         proxy_http_version 1.1;
@@ -477,6 +477,26 @@ transfer*.
   folder setting stay.
 - The import needs free space for the unpacked package beside the data directory
   (`import/`, removed afterwards). The steps below do the same by hand.
+
+**Sync** (*Settings → Backups & transfer → Sync with other servers*) keeps two servers
+alike: a desktop app's local library and a NAS, say.
+
+- The server where you click starts every request: the other one must be reachable from
+  it, not the other way round.
+- **Signing in.** It signs in to the other server once as one of its administrators and
+  keeps only the session (in `server.db`; it lasts while it is used at least every 30
+  days).
+- **Folder rules** pair the two sides' folders (`D:\Minis` ⇄ `/library`).
+- **Pull** replaces this library with the other's; **Push** replaces the other's with this
+  one. The receiving side backs up first unless the remote's rules say not to, and keeps
+  its 3 newest `…_pre_import.7z`.
+- **What travels:** the database, the settings and only the thumbnail images the
+  receiving side lacks; nothing is re-read.
+- **Versions:** the receiving side must run the same version as the sending side, or a
+  newer one.
+- **Reverse proxies:** a push uploads the package to the other server, so a reverse
+  proxy in front of it needs no body limit (`client_max_body_size 0` in nginx) and long
+  timeouts.
 
 **Same paths** (same machine, or the archives at the same paths): start the server on the
 copied data directory. Done.

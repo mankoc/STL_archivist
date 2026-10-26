@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.44.4"
+    "version": "2026.44.5"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -910,7 +910,7 @@
         "tags": [
           "jobs"
         ],
-        "summary": "Queue a job. Jobs run one at a time, in order. Needs the editor role\n(compacting the database, backups and imports: admin).",
+        "summary": "Queue a job. Jobs run one at a time, in order. Needs the editor role\n(compacting the database, backups, imports and syncs: admin).",
         "operationId": "post_jobs",
         "requestBody": {
           "content": {
@@ -2848,6 +2848,442 @@
         }
       }
     },
+    "/api/sync/exists": {
+      "post": {
+        "tags": [
+          "sync"
+        ],
+        "summary": "Which of `paths` are folders on this server (a pushing server's preview).",
+        "operationId": "post_sync_exists",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Paths"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sync/remotes": {
+      "get": {
+        "tags": [
+          "sync"
+        ],
+        "summary": "The remote servers this server syncs with.",
+        "operationId": "get_sync_remotes",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RemoteInfo"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "sync"
+        ],
+        "summary": "Add a remote server: this server signs in there as an administrator (the\npassword is not kept).",
+        "operationId": "post_sync_remotes",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewRemote"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoteInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sync/remotes/{id}": {
+      "delete": {
+        "tags": [
+          "sync"
+        ],
+        "summary": "Forget a remote (its session there stays until it expires).",
+        "operationId": "delete_sync_remotes_by_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "sync"
+        ],
+        "summary": "Rename a remote, set its folder rules, or whether the receiving side backs up first.",
+        "operationId": "patch_sync_remotes_by_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoteChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoteInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sync/remotes/{id}/login": {
+      "post": {
+        "tags": [
+          "sync"
+        ],
+        "summary": "Sign in to a remote again (its session expired or was revoked).",
+        "operationId": "post_sync_remotes_by_id_login",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoteInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sync/remotes/{id}/preview": {
+      "get": {
+        "tags": [
+          "sync"
+        ],
+        "summary": "What a sync with a remote would do: the versions, and where each of the\nsending side's folders would go on the receiving side. Nothing is sent.",
+        "operationId": "get_sync_remotes_by_id_preview",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "description": "`pull` or `push`.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Direction"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncPreview"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sync/thumbnails": {
+      "get": {
+        "tags": [
+          "sync"
+        ],
+        "summary": "This server's thumbnail keys (each a length byte and the key): a pushing\nserver leaves those images out.",
+        "operationId": "get_sync_thumbnails",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "format": "int32",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "sync"
+        ],
+        "summary": "Hand over a pulling server's thumbnail keys (the body, as `GET` gives them)\nfor a `sync_export` job; kept for a day.",
+        "operationId": "post_sync_thumbnails",
+        "requestBody": {
+          "description": "Thumbnail keys",
+          "content": {
+            "application/octet-stream": {}
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HaveId"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/system/info": {
       "get": {
         "tags": [
@@ -4009,6 +4445,14 @@
           }
         }
       },
+      "Direction": {
+        "type": "string",
+        "description": "Which way a sync goes: `pull` makes this library a copy of the remote's,\n`push` makes the remote's a copy of this one.",
+        "enum": [
+          "pull",
+          "push"
+        ]
+      },
       "EditorModel": {
         "type": "object",
         "required": [
@@ -4609,6 +5053,18 @@
           }
         },
         "additionalProperties": false
+      },
+      "HaveId": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "For the `sync_export` job's `have`."
+          }
+        }
       },
       "IdList": {
         "type": "object",
@@ -5288,13 +5744,16 @@
           },
           {
             "type": "object",
-            "description": "Import a library package (a backup, from this server or another one)\nfrom the backups list (administrators). Lists its folders and checks\ntheir archives under `roots` (folder uuid → root here; a folder not\ngiven keeps its root when that is a folder here). With `apply` (and\n`confirm: \"REPLACE\"`), backs this library up (`…_pre_import.7z`) and\nreplaces it with the package, the folders at their new roots; user\naccounts stay.",
+            "description": "Import a library package (a backup, from this server or another one)\nfrom the backups list (administrators). Lists its folders and checks\ntheir archives under `roots` (folder uuid → root here; a folder not\ngiven keeps its root when that is a folder here). With `apply` (and\n`confirm: \"REPLACE\"`), backs this library up (`…_pre_import.7z`) and\nreplaces it with the package, the folders at their new roots; user\naccounts stay. `rules` (path starts) map the folders `roots` does not\nname; `backup_first: false` skips the backup (a sync's choice).",
             "required": [
               "name",
               "kind"
             ],
             "properties": {
               "apply": {
+                "type": "boolean"
+              },
+              "backup_first": {
                 "type": "boolean"
               },
               "confirm": {
@@ -5317,6 +5776,59 @@
                 "propertyNames": {
                   "type": "string"
                 }
+              },
+              "rules": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RootRule"
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Sync with a remote server (administrators; `confirm: \"REPLACE\"`): `pull`\nreplaces this library with the remote's, `push` the remote's with this\none, each folder mapped by the remote's path rules. Only the thumbnails\nthe receiving side lacks travel.",
+            "required": [
+              "remote",
+              "direction",
+              "kind"
+            ],
+            "properties": {
+              "confirm": {
+                "type": "string"
+              },
+              "direction": {
+                "$ref": "#/components/schemas/Direction"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "sync"
+                ]
+              },
+              "remote": {
+                "type": "integer",
+                "format": "int64",
+                "description": "The remote (`RemoteInfo.id`)."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Pack this library for a sync that pulls it (administrators; another\nserver asks for it): `backups/…_sync.7z` without the thumbnails in\n`have` (the receiver's list, `POST /api/sync/thumbnails`).",
+            "required": [
+              "have",
+              "kind"
+            ],
+            "properties": {
+              "have": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "sync_export"
+                ]
               }
             }
           },
@@ -6512,6 +7024,38 @@
         },
         "additionalProperties": false
       },
+      "NewRemote": {
+        "type": "object",
+        "required": [
+          "name",
+          "url",
+          "user",
+          "password"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PathRule"
+            }
+          },
+          "url": {
+            "type": "string",
+            "description": "`http(s)://host:port` of the other server."
+          },
+          "user": {
+            "type": "string",
+            "description": "An administrator there; this server signs in once and keeps only the session."
+          }
+        },
+        "additionalProperties": false
+      },
       "NewUser": {
         "type": "object",
         "required": [
@@ -6600,6 +7144,82 @@
           }
         },
         "additionalProperties": false
+      },
+      "PathRule": {
+        "type": "object",
+        "description": "A folder here and the same folder on the remote: a path-start rule, used\nboth ways (`D:\\Minis` here is `/library` there).",
+        "required": [
+          "local",
+          "remote"
+        ],
+        "properties": {
+          "local": {
+            "type": "string"
+          },
+          "remote": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "Paths": {
+        "type": "object",
+        "required": [
+          "paths"
+        ],
+        "properties": {
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "PreviewFolder": {
+        "type": "object",
+        "description": "One outermost folder of the sending side, and where a sync puts it.",
+        "required": [
+          "uuid",
+          "name",
+          "library",
+          "root",
+          "exists",
+          "models"
+        ],
+        "properties": {
+          "exists": {
+            "type": "boolean",
+            "description": "`target` is a folder on the receiving side."
+          },
+          "library": {
+            "type": "string",
+            "description": "The library it is a folder of."
+          },
+          "models": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Records in it and the folders inside it."
+          },
+          "name": {
+            "type": "string"
+          },
+          "root": {
+            "type": "string",
+            "description": "Its root on the sending side."
+          },
+          "target": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its root on the receiving side (a rule's, else the same when that exists\nthere); `None`: no rule maps it, and its records would show as missing."
+          },
+          "uuid": {
+            "type": "string"
+          }
+        }
       },
       "Profile": {
         "type": "object",
@@ -6759,6 +7379,91 @@
           }
         }
       },
+      "RemoteChange": {
+        "type": "object",
+        "properties": {
+          "backup_first": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rules": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/PathRule"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "RemoteInfo": {
+        "type": "object",
+        "description": "A remote as the API shows it (without its token).",
+        "required": [
+          "id",
+          "name",
+          "url",
+          "user",
+          "rules",
+          "backup_first"
+        ],
+        "properties": {
+          "backup_first": {
+            "type": "boolean",
+            "description": "The receiving side backs its library up before a sync replaces it."
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "last_direction": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_result": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_sync_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Unix seconds."
+          },
+          "name": {
+            "type": "string"
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PathRule"
+            }
+          },
+          "url": {
+            "type": "string"
+          },
+          "user": {
+            "type": "string",
+            "description": "The remote's administrator this server signed in as."
+          }
+        }
+      },
       "RemoveRecords": {
         "type": "object",
         "required": [
@@ -6819,6 +7524,23 @@
           "editor",
           "admin"
         ]
+      },
+      "RootRule": {
+        "type": "object",
+        "description": "A path-start rule as the import applies it: roots below `from` go below `to`.",
+        "required": [
+          "from",
+          "to"
+        ],
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "Row": {
         "type": "object",
@@ -7319,6 +8041,22 @@
         },
         "additionalProperties": false
       },
+      "SignIn": {
+        "type": "object",
+        "required": [
+          "user",
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string"
+          },
+          "user": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "Sort": {
         "type": "object",
         "required": [
@@ -7408,6 +8146,40 @@
               "null"
             ],
             "format": "int64"
+          }
+        }
+      },
+      "SyncPreview": {
+        "type": "object",
+        "description": "What a sync would do, before it runs.",
+        "required": [
+          "direction",
+          "local_version",
+          "remote_version",
+          "folders"
+        ],
+        "properties": {
+          "direction": {
+            "$ref": "#/components/schemas/Direction"
+          },
+          "folders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PreviewFolder"
+            }
+          },
+          "local_version": {
+            "type": "string"
+          },
+          "problem": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the sync would be refused (versions), if it would."
+          },
+          "remote_version": {
+            "type": "string"
           }
         }
       },

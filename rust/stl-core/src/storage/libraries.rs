@@ -579,6 +579,26 @@ pub fn foreign_rel(root: &str, path: &str) -> Option<String> {
     (p.len() > prefix.len() && same(head, &prefix)).then(|| p[prefix.len()..].to_string())
 }
 
+/// `root` with its start `from` replaced by `to` (a path-start rule between
+/// two machines, `D:\Minis` → `/library`), or `None` when `root` is not
+/// `from` or below it. `from` and `root` compare as their machine does
+/// ([`foreign_rel`]); what follows takes `to`'s separators.
+pub fn rebase(root: &str, from: &str, to: &str) -> Option<String> {
+    let (from, to) = (from.trim(), to.trim());
+    if from.is_empty() || to.is_empty() {
+        return None;
+    }
+    let rel = foreign_rel(from, root)?;
+    let base = to.trim_end_matches(['/', '\\']);
+    if rel.is_empty() {
+        // A drive's or the file system's root keeps its separator.
+        let bare_root = base.is_empty() || (base.len() == 2 && base.ends_with(':'));
+        return Some(if bare_root { to.to_string() } else { base.to_string() });
+    }
+    let sep = if to.contains('\\') || to.as_bytes().get(1) == Some(&b':') { "\\" } else { "/" };
+    Some(format!("{base}{sep}{}", rel.replace('/', sep)))
+}
+
 /// One folder's root in [`import_plan`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Rooted {
@@ -1181,6 +1201,17 @@ mod tests {
         assert_eq!(foreign_rel("/srv/STL", "/srv/stl/a.zip"), None, "POSIX paths keep their case");
         assert_eq!(foreign_rel("/", "/x/y").as_deref(), Some("x/y"));
         assert_eq!(foreign_rel("/srv/STL", "relative.png"), None);
+    }
+
+    #[test]
+    fn path_rules_rebase_between_systems() {
+        assert_eq!(rebase(r"D:\Minis\Studio", r"d:\minis", "/library").as_deref(), Some("/library/Studio"));
+        assert_eq!(rebase(r"D:\Minis", r"D:\Minis\", "/library/").as_deref(), Some("/library"));
+        assert_eq!(rebase("/srv/STL/a/b", "/srv/STL", r"E:\Archive").as_deref(), Some(r"E:\Archive\a\b"));
+        assert_eq!(rebase("/srv/STL", "/srv/STL", r"E:\").as_deref(), Some(r"E:\"));
+        assert_eq!(rebase("/srv/stl/a", "/srv/STL", "/x"), None, "POSIX paths keep their case");
+        assert_eq!(rebase(r"D:\Minis2", r"D:\Minis", "/x"), None);
+        assert_eq!(rebase("/srv/STL", "", "/x"), None);
     }
 
     fn folder(conn: &Connection, name: &str, root: &str) -> i64 {

@@ -1,6 +1,6 @@
 # StlArchivist API
 
-Version 2026.44.4. Generated from `web/openapi.json` by `tools/api_doc.py`; the
+Version 2026.44.5. Generated from `web/openapi.json` by `tools/api_doc.py`; the
 running server serves the same document at `GET /api/openapi.json`. Do not edit by hand:
 run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after changing routes.
 
@@ -18,7 +18,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
   or `GET /api/jobs/{id}`.
 - Writes that change the library are announced on `/api/events` as `library_changed`.
 
-## Endpoints (83)
+## Endpoints (92)
 
 - [Sign-in and sessions](#sign-in-and-sessions) (5)
 - [Users and preferences](#users-and-preferences) (7)
@@ -38,6 +38,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 - [AI tagger](#ai-tagger) (2)
 - [Compute workers](#compute-workers) (3)
 - [Optional components](#optional-components) (1)
+- [Sync](#sync) (9)
 - [Types](#types)
 
 ### Sign-in and sessions
@@ -151,7 +152,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 |---|---|---|---|---|
 | `GET /api/events` | The event stream: `ServerEvent` JSON text frames (job progress and logs, library changes). Authenticates like any route (the session cookie works for browsers, which cannot set headers on a WebSocket). |  | 101 [ServerEvent](#serverevent) |  |
 | `GET /api/jobs` | Queued, running and recently finished jobs, oldest first. |  | 200 [JobInfo](#jobinfo)[] |  |
-| `POST /api/jobs` | Queue a job. Jobs run one at a time, in order. Needs the editor role (compacting the database, backups and imports: admin). | body: [JobRequest](#jobrequest) | 202 [JobInfo](#jobinfo) | 403 |
+| `POST /api/jobs` | Queue a job. Jobs run one at a time, in order. Needs the editor role (compacting the database, backups, imports and syncs: admin). | body: [JobRequest](#jobrequest) | 202 [JobInfo](#jobinfo) | 403 |
 | `GET /api/jobs/{id}` | One job with its log. | path `id`: integer | 200 [JobDetail](#jobdetail) | 404 |
 | `DELETE /api/jobs/{id}` | Cancel a job: a queued one at once, a running one at its next checkpoint (what it finished so far stays). 409 when it has already finished. | path `id`: integer | 202 | 404, 409 |
 
@@ -212,6 +213,20 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 | Endpoint | Description | Request | Response | Errors |
 |---|---|---|---|---|
 | `GET /api/components` | The downloadable components and whether each is installed. |  | 200 [ComponentsInfo](#componentsinfo) | 403 |
+
+### Sync
+
+| Endpoint | Description | Request | Response | Errors |
+|---|---|---|---|---|
+| `POST /api/sync/exists` | Which of `paths` are folders on this server (a pushing server's preview). | body: [Paths](#paths) | 200 boolean[] | 403 |
+| `GET /api/sync/remotes` | The remote servers this server syncs with. |  | 200 [RemoteInfo](#remoteinfo)[] | 403 |
+| `POST /api/sync/remotes` | Add a remote server: this server signs in there as an administrator (the password is not kept). | body: [NewRemote](#newremote) | 201 [RemoteInfo](#remoteinfo) | 400, 409, 502 |
+| `PATCH /api/sync/remotes/{id}` | Rename a remote, set its folder rules, or whether the receiving side backs up first. | path `id`: integer<br>body: [RemoteChange](#remotechange) | 200 [RemoteInfo](#remoteinfo) | 404, 409 |
+| `DELETE /api/sync/remotes/{id}` | Forget a remote (its session there stays until it expires). | path `id`: integer | 204 | 404 |
+| `POST /api/sync/remotes/{id}/login` | Sign in to a remote again (its session expired or was revoked). | path `id`: integer<br>body: [SignIn](#signin) | 200 [RemoteInfo](#remoteinfo) | 404, 502 |
+| `GET /api/sync/remotes/{id}/preview` | What a sync with a remote would do: the versions, and where each of the sending side's folders would go on the receiving side. Nothing is sent. | path `id`: integer<br>query `direction`: [Direction](#direction) | 200 [SyncPreview](#syncpreview) | 404, 502 |
+| `GET /api/sync/thumbnails` | This server's thumbnail keys (each a length byte and the key): a pushing server leaves those images out. |  | 200 `application/octet-stream` | 403 |
+| `POST /api/sync/thumbnails` | Hand over a pulling server's thumbnail keys (the body, as `GET` gives them) for a `sync_export` job; kept for a day. | body: `application/octet-stream` | 200 [HaveId](#haveid) | 400, 403 |
 
 ## Types
 
@@ -452,6 +467,12 @@ Two archives sharing STL files (name and size).
 | `name` | string |  |
 | `subcollections` | integer | Subcollections deleted with a collection. |
 
+### Direction
+
+Which way a sync goes: `pull` makes this library a copy of the remote's, `push` makes the remote's a copy of this one.
+
+Type: `"pull"` \| `"push"`
+
 ### EditorModel
 
 | Field | Type | Description |
@@ -603,6 +624,12 @@ One of:
 |---|---|---|
 | `ids` | integer[] | The models, in the order wanted (at most 500). |
 
+### HaveId
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | For the `sync_export` job's `have`. |
+
 ### IdList
 
 | Field | Type | Description |
@@ -729,7 +756,9 @@ One of:
 - `kind: "remove_sidecars"`: Delete `METADATA.7z` from every folder holding catalogued archives.
 - `kind: "clean_sidecars"`: Tidy the `METADATA.7z` files under the crawled folders: rewrite those listing archives that are gone, delete those whose archives are all gone, and delete leftover `METADATA.7z.tmp` files.
 - `kind: "backup"`: Back up the database, thumbnails and settings to `<data dir>/backups/stlLibrary_backup_<stamp>.7z` (administrators).
-- `kind: "import_library"` — `apply`, `confirm`, `name`, `roots`: Import a library package (a backup, from this server or another one) from the backups list (administrators). Lists its folders and checks their archives under `roots` (folder uuid → root here; a folder not given keeps its root when that is a folder here). With `apply` (and `confirm: "REPLACE"`), backs this library up (`…_pre_import.7z`) and replaces it with the package, the folders at their new roots; user accounts stay.
+- `kind: "import_library"` — `apply`, `backup_first`, `confirm`, `name`, `roots`, `rules`: Import a library package (a backup, from this server or another one) from the backups list (administrators). Lists its folders and checks their archives under `roots` (folder uuid → root here; a folder not given keeps its root when that is a folder here). With `apply` (and `confirm: "REPLACE"`), backs this library up (`…_pre_import.7z`) and replaces it with the package, the folders at their new roots; user accounts stay. `rules` (path starts) map the folders `roots` does not name; `backup_first: false` skips the backup (a sync's choice).
+- `kind: "sync"` — `confirm`, `direction`, `remote`: Sync with a remote server (administrators; `confirm: "REPLACE"`): `pull` replaces this library with the remote's, `push` the remote's with this one, each folder mapped by the remote's path rules. Only the thumbnails the receiving side lacks travel.
+- `kind: "sync_export"` — `have`: Pack this library for a sync that pulls it (administrators; another server asks for it): `backups/…_sync.7z` without the thumbnails in `have` (the receiver's list, `POST /api/sync/thumbnails`).
 - `kind: "install_components"` — `components`, `variants`: Download optional components into the data directory (administrators): `ai_runtime`, `ai_model`, `clip_model`, `onnxruntime`, `pdfium`. `variants` picks a variant per component (`ai_runtime`: `cpu`, or `cuda` on Windows; `onnxruntime`: `cpu`, `directml` on Windows, `cuda` on Linux); the others get the default for the GPUs found.
 - `kind: "remove_components"` — `components`: Delete downloaded components (administrators).
 - `kind: "rescan"` — `ids`: Re-read the models' archives: metadata, presupports, warnings, scales, hash (Rescan).
@@ -953,6 +982,16 @@ Models with equal or similar values in one column.
 | `collection` (optional) | string \| null | The parent collection's name (subcollections only). |
 | `name` | string |  |
 
+### NewRemote
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string |  |
+| `password` | string |  |
+| `rules` (optional) | [PathRule](#pathrule)[] |  |
+| `url` | string | `http(s)://host:port` of the other server. |
+| `user` | string | An administrator there; this server signs in once and keeps only the session. |
+
 ### NewUser
 
 | Field | Type | Description |
@@ -982,6 +1021,35 @@ Models with equal or similar values in one column.
 |---|---|---|
 | `current` | string |  |
 | `new` | string |  |
+
+### PathRule
+
+A folder here and the same folder on the remote: a path-start rule, used both ways (`D:\Minis` here is `/library` there).
+
+| Field | Type | Description |
+|---|---|---|
+| `local` | string |  |
+| `remote` | string |  |
+
+### Paths
+
+| Field | Type | Description |
+|---|---|---|
+| `paths` | string[] |  |
+
+### PreviewFolder
+
+One outermost folder of the sending side, and where a sync puts it.
+
+| Field | Type | Description |
+|---|---|---|
+| `exists` | boolean | `target` is a folder on the receiving side. |
+| `library` | string | The library it is a folder of. |
+| `models` | integer | Records in it and the folders inside it. |
+| `name` | string |  |
+| `root` | string | Its root on the sending side. |
+| `target` (optional) | string \| null | Its root on the receiving side (a rule's, else the same when that exists there); `None`: no rule maps it, and its records would show as missing. |
+| `uuid` | string |  |
 
 ### Profile
 
@@ -1032,6 +1100,30 @@ The check (and move) of a library to a new root.
 | `root` | string |  |
 | `total` | integer |  |
 
+### RemoteChange
+
+| Field | Type | Description |
+|---|---|---|
+| `backup_first` (optional) | boolean \| null |  |
+| `name` (optional) | string \| null |  |
+| `rules` (optional) | [PathRule](#pathrule)[] \| null |  |
+
+### RemoteInfo
+
+A remote as the API shows it (without its token).
+
+| Field | Type | Description |
+|---|---|---|
+| `backup_first` | boolean | The receiving side backs its library up before a sync replaces it. |
+| `id` | integer |  |
+| `last_direction` (optional) | string \| null |  |
+| `last_result` (optional) | string \| null |  |
+| `last_sync_at` (optional) | integer \| null | Unix seconds. |
+| `name` | string |  |
+| `rules` | [PathRule](#pathrule)[] |  |
+| `url` | string |  |
+| `user` | string | The remote's administrator this server signed in as. |
+
 ### RemoveRecords
 
 | Field | Type | Description |
@@ -1056,6 +1148,15 @@ The check (and move) of a library to a new root.
 What a user may do. Ordered: each role includes the ones before it.
 
 Type: `"viewer"` \| `"editor"` \| `"admin"`
+
+### RootRule
+
+A path-start rule as the import applies it: roots below `from` go below `to`.
+
+| Field | Type | Description |
+|---|---|---|
+| `from` | string |  |
+| `to` | string |  |
 
 ### Row
 
@@ -1172,6 +1273,13 @@ The settings, with their effective values (defaults filled in).
 | `warn_no_printable` | boolean |  |
 | `warn_presupported_stl` | boolean |  |
 
+### SignIn
+
+| Field | Type | Description |
+|---|---|---|
+| `password` | string |  |
+| `user` | string |  |
+
 ### Sort
 
 | Field | Type | Description |
@@ -1203,6 +1311,18 @@ The settings, with their effective values (defaults filled in).
 | `filename` | string |  |
 | `hash` (optional) | string \| null | The file's content hash, when the crawl stored one. |
 | `size` (optional) | integer \| null |  |
+
+### SyncPreview
+
+What a sync would do, before it runs.
+
+| Field | Type | Description |
+|---|---|---|
+| `direction` | [Direction](#direction) |  |
+| `folders` | [PreviewFolder](#previewfolder)[] |  |
+| `local_version` | string |  |
+| `problem` (optional) | string \| null | Why the sync would be refused (versions), if it would. |
+| `remote_version` | string |  |
 
 ### TagMerge
 

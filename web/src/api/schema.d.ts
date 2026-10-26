@@ -410,7 +410,7 @@ export interface paths {
         put?: never;
         /**
          * Queue a job. Jobs run one at a time, in order. Needs the editor role
-         *     (compacting the database, backups and imports: admin).
+         *     (compacting the database, backups, imports and syncs: admin).
          */
         post: operations["post_jobs"];
         delete?: never;
@@ -1068,6 +1068,123 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sync/exists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Which of `paths` are folders on this server (a pushing server's preview). */
+        post: operations["post_sync_exists"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sync/remotes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The remote servers this server syncs with. */
+        get: operations["get_sync_remotes"];
+        put?: never;
+        /**
+         * Add a remote server: this server signs in there as an administrator (the
+         *     password is not kept).
+         */
+        post: operations["post_sync_remotes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sync/remotes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Forget a remote (its session there stays until it expires). */
+        delete: operations["delete_sync_remotes_by_id"];
+        options?: never;
+        head?: never;
+        /** Rename a remote, set its folder rules, or whether the receiving side backs up first. */
+        patch: operations["patch_sync_remotes_by_id"];
+        trace?: never;
+    };
+    "/api/sync/remotes/{id}/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sign in to a remote again (its session expired or was revoked). */
+        post: operations["post_sync_remotes_by_id_login"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sync/remotes/{id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What a sync with a remote would do: the versions, and where each of the
+         *     sending side's folders would go on the receiving side. Nothing is sent.
+         */
+        get: operations["get_sync_remotes_by_id_preview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sync/thumbnails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * This server's thumbnail keys (each a length byte and the key): a pushing
+         *     server leaves those images out.
+         */
+        get: operations["get_sync_thumbnails"];
+        put?: never;
+        /**
+         * Hand over a pulling server's thumbnail keys (the body, as `GET` gives them)
+         *     for a `sync_export` job; kept for a day.
+         */
+        post: operations["post_sync_thumbnails"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/system/info": {
         parameters: {
             query?: never;
@@ -1519,6 +1636,12 @@ export interface components {
              */
             subcollections: number;
         };
+        /**
+         * @description Which way a sync goes: `pull` makes this library a copy of the remote's,
+         *     `push` makes the remote's a copy of this one.
+         * @enum {string}
+         */
+        Direction: "pull" | "push";
         EditorModel: {
             archive_path?: string | null;
             category?: string | null;
@@ -1694,6 +1817,10 @@ export interface components {
         GridRequest: {
             /** @description The models, in the order wanted (at most 500). */
             ids: number[];
+        };
+        HaveId: {
+            /** @description For the `sync_export` job's `have`. */
+            id: string;
         };
         IdList: {
             ids: number[];
@@ -1910,6 +2037,7 @@ export interface components {
             kind: "backup";
         } | {
             apply?: boolean;
+            backup_first?: boolean;
             confirm?: string;
             /** @enum {string} */
             kind: "import_library";
@@ -1917,6 +2045,21 @@ export interface components {
             roots?: {
                 [key: string]: string;
             };
+            rules?: components["schemas"]["RootRule"][];
+        } | {
+            confirm?: string;
+            direction: components["schemas"]["Direction"];
+            /** @enum {string} */
+            kind: "sync";
+            /**
+             * Format: int64
+             * @description The remote (`RemoteInfo.id`).
+             */
+            remote: number;
+        } | {
+            have: string;
+            /** @enum {string} */
+            kind: "sync_export";
         } | {
             components: string[];
             /** @enum {string} */
@@ -2306,6 +2449,15 @@ export interface components {
             collection?: string | null;
             name: string;
         };
+        NewRemote: {
+            name: string;
+            password: string;
+            rules?: components["schemas"]["PathRule"][];
+            /** @description `http(s)://host:port` of the other server. */
+            url: string;
+            /** @description An administrator there; this server signs in once and keeps only the session. */
+            user: string;
+        };
         NewUser: {
             name: string;
             password: string;
@@ -2331,6 +2483,38 @@ export interface components {
         PasswordChange: {
             current: string;
             new: string;
+        };
+        /**
+         * @description A folder here and the same folder on the remote: a path-start rule, used
+         *     both ways (`D:\Minis` here is `/library` there).
+         */
+        PathRule: {
+            local: string;
+            remote: string;
+        };
+        Paths: {
+            paths: string[];
+        };
+        /** @description One outermost folder of the sending side, and where a sync puts it. */
+        PreviewFolder: {
+            /** @description `target` is a folder on the receiving side. */
+            exists: boolean;
+            /** @description The library it is a folder of. */
+            library: string;
+            /**
+             * Format: int64
+             * @description Records in it and the folders inside it.
+             */
+            models: number;
+            name: string;
+            /** @description Its root on the sending side. */
+            root: string;
+            /**
+             * @description Its root on the receiving side (a rule's, else the same when that exists
+             *     there); `None`: no rule maps it, and its records would show as missing.
+             */
+            target?: string | null;
+            uuid: string;
         };
         /** @description A creator's profile links; each may be null. */
         Profile: {
@@ -2382,6 +2566,30 @@ export interface components {
             root: string;
             total: number;
         };
+        RemoteChange: {
+            backup_first?: boolean | null;
+            name?: string | null;
+            rules?: components["schemas"]["PathRule"][] | null;
+        };
+        /** @description A remote as the API shows it (without its token). */
+        RemoteInfo: {
+            /** @description The receiving side backs its library up before a sync replaces it. */
+            backup_first: boolean;
+            /** Format: int64 */
+            id: number;
+            last_direction?: string | null;
+            last_result?: string | null;
+            /**
+             * Format: int64
+             * @description Unix seconds.
+             */
+            last_sync_at?: number | null;
+            name: string;
+            rules: components["schemas"]["PathRule"][];
+            url: string;
+            /** @description The remote's administrator this server signed in as. */
+            user: string;
+        };
         RemoveRecords: {
             ids: number[];
         };
@@ -2400,6 +2608,11 @@ export interface components {
          * @enum {string}
          */
         Role: "viewer" | "editor" | "admin";
+        /** @description A path-start rule as the import applies it: roots below `from` go below `to`. */
+        RootRule: {
+            from: string;
+            to: string;
+        };
         /** @description One table row. */
         Row: {
             /** @description The archive's folder (forward slashes). */
@@ -2557,6 +2770,10 @@ export interface components {
             warn_no_printable: boolean;
             warn_presupported_stl: boolean;
         };
+        SignIn: {
+            password: string;
+            user: string;
+        };
         Sort: {
             /**
              * @description One of `title`, `creator`, `source`, `sculptor_name`, `collection_name`,
@@ -2587,6 +2804,15 @@ export interface components {
             hash?: string | null;
             /** Format: int64 */
             size?: number | null;
+        };
+        /** @description What a sync would do, before it runs. */
+        SyncPreview: {
+            direction: components["schemas"]["Direction"];
+            folders: components["schemas"]["PreviewFolder"][];
+            local_version: string;
+            /** @description Why the sync would be refused (versions), if it would. */
+            problem?: string | null;
+            remote_version: string;
         };
         TagMerge: {
             ids: number[];
@@ -4792,6 +5018,327 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LibraryStats"];
+                };
+            };
+        };
+    };
+    post_sync_exists: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Paths"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": boolean[];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_sync_remotes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemoteInfo"][];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    post_sync_remotes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewRemote"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemoteInfo"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_sync_remotes_by_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    patch_sync_remotes_by_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RemoteChange"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemoteInfo"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    post_sync_remotes_by_id_login: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SignIn"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemoteInfo"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_sync_remotes_by_id_preview: {
+        parameters: {
+            query: {
+                /** @description `pull` or `push`. */
+                direction: components["schemas"]["Direction"];
+            };
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyncPreview"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_sync_thumbnails: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": number[];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    post_sync_thumbnails: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Thumbnail keys */
+        requestBody?: {
+            content: {
+                "application/octet-stream": unknown;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HaveId"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
         };
