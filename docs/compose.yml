@@ -1,0 +1,40 @@
+# StlArchivist server from Docker Hub — a sample for `docker compose`.
+# Instructions: docs/deployment.md → "Option C: Docker".
+#
+#   mkdir -p data && sudo chown 1000:1000 data     # the container runs as uid 1000
+#   docker compose up -d
+#   docker compose exec stlarchivist stl-server create-admin admin
+#   # then open http://<this machine>:8770 and sign in
+#
+# Updating: docker compose pull && docker compose up -d
+
+services:
+  stlarchivist:
+    # The image a release publishes (<image>:<version> and <image>:latest). Pin a
+    # version (…:2026.44.1) to update only when you choose to.
+    image: ${STLARCHIVIST_IMAGE:-mankoc/stlarchivist:latest}
+    container_name: stlarchivist
+    restart: unless-stopped
+    ports:
+      - "8770:8770"
+    volumes:
+      # The data directory: the model database, thumbnails, library settings, user
+      # accounts, server.json and backups. Back this folder up.
+      - ./data:/data
+      # Your archives. The library records paths as the container sees them
+      # (/library/...): crawl /library in the web client. Writable, so the server can
+      # keep METADATA.7z sidecars beside the archives and Sort / Delete files work;
+      # add :ro to forbid any write (then turn sidecars off in Settings → Sidecars).
+      - /srv/STL:/library
+      # More archive folders: mount each one (and add it to a library in the client).
+      # - /mnt/disk2/Minis:/library2
+    environment:
+      STL_LOG: info
+      # UnRAR for .rar archives is not in the image (it is not free software):
+      # Settings → Components downloads it into /data, where it is found by itself;
+      # or mount your own copy and name it here.
+      # STL_UNRAR_PATH: /opt/unrar/unrar
+      # The AI tagger's model server, when it runs elsewhere (llama-server compatible):
+      # STL_AI_URL: http://192.168.0.20:8080
+      # Let compute workers (other PCs) do the embeddings instead of this server:
+      # STL_COMPUTE: workers

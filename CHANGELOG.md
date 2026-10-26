@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026.44.2 — 2026-10-26
+
+- **Sidecars as a start:** a folder copied to another machine with its `METADATA.7z`
+  sidecars is taken as they describe it: the records the crawl imports from a sidecar keep
+  its fingerprints and their archives are not opened (unless an archive's size differs from
+  the one the sidecar recorded: it changed). Their size and time are kept, so later crawls
+  skip them too. Sidecars now record each archive's size.
+- **A crawl opens only new and changed archives.** It no longer reads unchanged archives to
+  fill in file lists or STL lists that a record lacks (records crawled before those were kept,
+  or imported from a sidecar): **Settings → Maintenance → Read missing file lists** reads
+  them when you choose, and *Rescan* does for its archives. (2026.43.21 had every crawl
+  fill them.)
+- **The Sidecars tab is one card:** the sidecar settings sit with the sidecar jobs, and
+  *Generate sidecars* is now **Rebuild all sidecars** (it rewrites every `METADATA.7z` with
+  the settings above it; off while sidecars are off).
+- **Column order:** drag a column's header in the library table onto another to move it
+  there; the order is saved with your account (`table_column_order`), and *Columns → Reset
+  column order* goes back to the default. Columns added by later versions appear in their
+  default place.
+- **Fixed: a release's installer was not published when the account's Actions storage was
+  full:** the release workflow kept every tag's installer as a run artifact too, and that
+  upload failed first; a tag now only publishes the release (a run started by hand keeps the
+  artifact, for 7 days).
+- **Install with Docker Compose:** `docs/compose.yml` is a sample that runs the Docker Hub
+  image, and *Option C: Docker* in `docs/deployment.md` walks through installing, updating,
+  backing up and moving an existing library into the container.
+
 ## 2026.44.1 — 2026-10-26
 
 - **Docker image on Docker Hub:** a release tag (`v<version>`) now also builds the server image

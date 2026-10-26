@@ -114,7 +114,10 @@ async fn crawl_job_catalogues_a_folder() {
     lib.state.db.with(|c| c.execute("DELETE FROM archive_files", [])).unwrap();
     let id = submit(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy()})).await;
     assert_eq!(wait(&lib, &ed, id).await["job"]["message"], "0 new, 0 updated, 2 unchanged");
-    assert_eq!(count(&lib, "SELECT count(*) FROM archive_files"), files, "unchanged archives without a list get one");
+    assert_eq!(count(&lib, "SELECT count(*) FROM archive_files"), 0, "a crawl does not open unchanged archives");
+    let id = submit(&lib, &ed, json!({"kind": "read_file_lists"})).await;
+    wait(&lib, &ed, id).await;
+    assert_eq!(count(&lib, "SELECT count(*) FROM archive_files"), files, "Read missing file lists gives them back");
 
     // Another spelling of the same folder is crawled under the stored one,
     // and so is a folder inside it, rather than duplicating every record.
@@ -182,7 +185,7 @@ async fn recrawls_keep_unchanged_archives_and_skip_known_sidecars() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn records_without_stl_lists_are_filled_once() {
+async fn missing_file_lists_are_read_by_their_job_not_by_crawls() {
     let lib = empty_library();
     let ed = lib.user("ed", Role::Editor);
     let root = archives(&lib);
@@ -197,11 +200,48 @@ async fn records_without_stl_lists_are_filled_once() {
         .db
         .with(|c| c.execute_batch("DELETE FROM stl_files; DELETE FROM archive_files; UPDATE models SET stl_list_hash = NULL;"))
         .unwrap();
+    // A crawl opens only new and changed archives: these keep no lists.
     crawl().await;
+    assert_eq!(count(&lib, "SELECT count(*) FROM archive_files"), 0);
+    // Read missing file lists reads them, once.
+    let id = submit(&lib, &ed, json!({"kind": "read_file_lists"})).await;
+    let v = wait(&lib, &ed, id).await;
+    assert_eq!(v["job"]["message"], "2 read, 0 unreadable or missing", "{v}");
     assert_eq!(count(&lib, "SELECT count(*) FROM stl_files"), 2, "one .stl in each archive");
-    assert_eq!(count(&lib, "SELECT count(DISTINCT model_id) FROM archive_files"), 2, "the same read gives the file lists");
-    // Marked as read: the next crawls leave these archives alone.
+    assert_eq!(count(&lib, "SELECT count(DISTINCT model_id) FROM archive_files"), 2);
     assert_eq!(count(&lib, "SELECT count(*) FROM models WHERE stl_list_hash IS NOT archive_hash"), 0);
+    let id = submit(&lib, &ed, json!({"kind": "read_file_lists"})).await;
+    assert_eq!(wait(&lib, &ed, id).await["job"]["message"], "0 read, 0 unreadable or missing");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_new_library_takes_archives_as_their_sidecars_describe_them() {
+    // The first library crawls the folder and writes its sidecars (with each archive's size).
+    let first = empty_library();
+    let ed = first.user("ed", Role::Editor);
+    let root = archives(&first);
+    let id = submit(&first, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy()})).await;
+    wait(&first, &ed, id).await;
+    assert!(root.join("Studio").join("METADATA.7z").is_file());
+
+    // Another library (another machine) crawls the same folder: its records come from the
+    // sidecar. Dragon is spoiled at its size: were it opened, it would be unreadable; Knight
+    // has another size than the sidecar says: it changed, so it is read.
+    let dragon = root.join("Studio").join("Dragon.zip");
+    let size = std::fs::metadata(&dragon).unwrap().len() as usize;
+    std::fs::write(&dragon, vec![0u8; size]).unwrap();
+    std::fs::write(root.join("Studio").join("Knight.zip"), b"not a zip any more").unwrap();
+    let second = empty_library();
+    let admin = second.user("admin", Role::Admin);
+    let id = submit(&second, &admin, json!({"kind": "crawl", "folder": root.to_string_lossy()})).await;
+    let v = wait(&second, &admin, id).await;
+    assert!(v["log"].to_string().contains("Imported 2 record(s) from METADATA.7z"), "{v}");
+    let unreadable = |name: &str| {
+        count(&second, &format!("SELECT count(*) FROM models WHERE rel_path LIKE '%{name}' AND warning LIKE '%Unreadable archive%'"))
+    };
+    assert_eq!((unreadable("Dragon.zip"), unreadable("Knight.zip")), (0, 1), "Dragon not opened, Knight read");
+    // Its size and time are kept: the next crawl leaves it alone too.
+    assert_eq!(count(&second, "SELECT count(*) FROM models WHERE rel_path LIKE '%Dragon.zip' AND archive_mtime_ns IS NOT NULL"), 1);
 }
 
 #[tokio::test(flavor = "multi_thread")]

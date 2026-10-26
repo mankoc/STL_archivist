@@ -104,7 +104,11 @@ function FileList({ id, onView }: { id: number; onView: (file: string) => void }
   if (q.isPending) return <Loader size="sm" />;
   if (q.isError) return <Alert color="red">{q.error.message}</Alert>;
   if (!q.data.length) {
-    return <Text size="sm" c="dimmed">No file list yet: the next crawl or rescan of this archive stores it.</Text>;
+    return (
+      <Text size="sm" c="dimmed">
+        No file list yet: Rescan reads it, or Settings → Maintenance → Read missing file lists for every archive without one.
+      </Text>
+    );
   }
   return <FileTreeView files={q.data} viewable={viewable} onView={onView} />;
 }

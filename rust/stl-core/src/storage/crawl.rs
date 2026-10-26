@@ -108,12 +108,14 @@ fn set_stat(tx: &Transaction, id: i64, path: &str) -> Result<()> {
 
 /// Phase 2 for one batch: `batch` is `(path, hash)` in crawl order; `read`: the
 /// paths whose catalog phase 1 read (their stored hash was not reused);
+/// `trusted`: those taken as their sidecar describes them (not opened);
 /// `candidates` maps content hashes to missing record ids (`moves.index_by_hash`).
 pub fn diff(
     tx: &Transaction,
     batch: &[(String, String)],
     force: bool,
     read: &HashSet<String>,
+    trusted: &HashSet<String>,
     candidates: &HashMap<String, i64>,
 ) -> Result<Diff> {
     let paths: Vec<String> = batch.iter().map(|(p, _)| p.clone()).collect();
@@ -180,13 +182,13 @@ pub fn diff(
             out.to_extract.push(p.clone());
             set_stat(tx, id, p)?;
         } else {
-            // Read again (its size or time differed) and unchanged: keep its size and time,
-            // so the next crawl does not read it again.
-            if read.contains(p) {
+            // Read again (its size or time differed) and unchanged, or just taken from a
+            // sidecar: keep its size and time, so the next crawl does not read it.
+            if read.contains(p) || trusted.contains(p) {
                 set_stat(tx, id, p)?;
             }
-            // An archive the readers fail on is retried by phase 1, not here.
-            if !has_stl && stl_list_hash.as_deref() != Some(h.as_str()) && !h.starts_with("fallback:") {
+            // Without an STL list: from the catalog read for this crawl, if one was.
+            if read.contains(p) && !has_stl && stl_list_hash.as_deref() != Some(h.as_str()) {
                 out.stl_backfill.push(p.clone());
             }
         }
@@ -854,14 +856,19 @@ pub fn record_folder(
 
 // ── archive files ────────────────────────────────────────────────────────────
 
-/// Of `paths`, the archives whose record has no stored file list
-/// (`archive_files`): records crawled before it was kept.
-pub fn lacking_files(conn: &Connection, paths: &[String]) -> Result<Vec<String>> {
-    let sql = format!(
-        "SELECT j.value->>2 FROM {LOCATED} WHERE NOT EXISTS (SELECT 1 FROM archive_files f WHERE f.model_id = models.id)"
-    );
-    let mut st = conn.prepare(&sql)?;
-    st.query_map([located_json(conn, paths)?], |r| r.get(0))?.collect()
+/// `(archive path, archive hash)` of the records whose file list or STL list
+/// was never read (crawled before they were kept, imported from a sidecar),
+/// for *Read missing file lists*. Missing archives and those the readers
+/// failed on (retried by every crawl) are left out.
+pub fn lacking_lists(conn: &Connection) -> Result<Vec<(String, String)>> {
+    let mut st = conn.prepare(&format!(
+        "SELECT {}, archive_hash FROM models m WHERE NOT coalesce(m.is_missing, 0) \
+         AND coalesce(m.archive_hash, '') != '' AND m.archive_hash NOT LIKE 'fallback:%' \
+         AND (m.stl_list_hash IS NOT m.archive_hash OR NOT EXISTS (SELECT 1 FROM archive_files f WHERE f.model_id = m.id)) \
+         ORDER BY 1",
+        schema_sql::archive_path_sql("m")
+    ))?;
+    st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()
 }
 
 /// Store the file lists (every member's name, size and CRC, as the archive's

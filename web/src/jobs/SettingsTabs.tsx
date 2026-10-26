@@ -8,11 +8,11 @@ import { JobLog } from "./JobsPage";
 import { useStartJob } from "./useStartJob";
 import { WorkersCard } from "./WorkersCard";
 
-export function SidecarsTab({ editor }: { editor: boolean }) {
+export function SidecarsTab({ editor, admin }: { editor: boolean; admin: boolean }) {
   const { start, current } = useStartJob();
   return (
     <Stack gap="md" maw={980}>
-      <SidecarCard editor={editor} start={start} />
+      <SidecarCard editor={editor} admin={admin} start={start} />
       {current && <JobLog id={current.id} job={current} />}
     </Stack>
   );

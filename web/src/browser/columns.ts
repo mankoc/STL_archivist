@@ -1,9 +1,11 @@
-// Which table columns are shown, from two per-user settings: the standard
-// columns the user hid, and the optional (off by default) columns the user
-// turned on. The title is always shown.
+// Which table columns are shown, and in what order, from three per-user
+// settings: the standard columns the user hid, the optional (off by default)
+// columns the user turned on, and the order the user dragged them into. The
+// title is always shown.
 
 export const HIDDEN_COLUMNS_KEY = "table_hidden_columns";
 export const SHOWN_COLUMNS_KEY = "table_shown_columns";
+export const COLUMN_ORDER_KEY = "table_column_order";
 export const ALWAYS_SHOWN = "title";
 
 export interface ColumnChoice {
@@ -11,6 +13,8 @@ export interface ColumnChoice {
   hidden: string[];
   /** Optional columns the user turned on. */
   shown: string[];
+  /** Column ids in the user's order (none: the default order). */
+  order: string[];
 }
 
 interface Col {
@@ -24,7 +28,36 @@ export function idsFrom(value: unknown): string[] {
 }
 
 export function choiceFrom(settings: Record<string, unknown> | undefined): ColumnChoice {
-  return { hidden: idsFrom(settings?.[HIDDEN_COLUMNS_KEY]), shown: idsFrom(settings?.[SHOWN_COLUMNS_KEY]) };
+  const order = settings?.[COLUMN_ORDER_KEY];
+  return {
+    hidden: idsFrom(settings?.[HIDDEN_COLUMNS_KEY]),
+    shown: idsFrom(settings?.[SHOWN_COLUMNS_KEY]),
+    order: Array.isArray(order) ? order.filter((v): v is string => typeof v === "string") : [],
+  };
+}
+
+/**
+ * `columns` in the user's `order`: those it names first, in its order, then the
+ * others (columns added since) in their default order.
+ */
+export function ordered<T extends Col>(columns: T[], order: string[]): T[] {
+  const byId = new Map(columns.map((c) => [c.id, c]));
+  const first = [...new Set(order)].flatMap((id) => byId.get(id) ?? []);
+  const named = new Set(first.map((c) => c.id));
+  return [...first, ...columns.filter((c) => !named.has(c.id))];
+}
+
+/**
+ * The whole order (every column id) after the column `from` was dragged onto
+ * `to`: it takes `to`'s place, and `to` moves aside toward where `from` was.
+ */
+export function moveColumn(columns: Col[], order: string[], from: string, to: string): string[] {
+  const ids = ordered(columns, order).map((c) => c.id);
+  const [a, b] = [ids.indexOf(from), ids.indexOf(to)];
+  if (a < 0 || b < 0 || a === b) return ids;
+  ids.splice(a, 1);
+  ids.splice(b, 0, from);
+  return ids;
 }
 
 export function isShown(c: Col, choice: ColumnChoice): boolean {
@@ -32,9 +65,9 @@ export function isShown(c: Col, choice: ColumnChoice): boolean {
   return c.optional ? choice.shown.includes(c.id) : !choice.hidden.includes(c.id);
 }
 
-/** `columns` that are shown, in their order. */
+/** `columns` that are shown, in the user's order. */
 export function visible<T extends Col>(columns: T[], choice: ColumnChoice): T[] {
-  return columns.filter((c) => isShown(c, choice));
+  return ordered(columns, choice.order).filter((c) => isShown(c, choice));
 }
 
 function flip(list: string[], id: string): string[] {

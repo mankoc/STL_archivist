@@ -64,6 +64,11 @@ export function MaintenanceTab() {
                 Find duplicate entries
               </Button>
             </Tooltip>
+            <Tooltip label="Read the file list and STL list of the archives that have none (crawls open only new and changed archives; sidecars carry neither)" multiline w={320}>
+              <Button size="xs" variant="default" disabled={!editor} onClick={() => start({ kind: "read_file_lists" })} data-testid="read-file-lists">
+                Read missing file lists
+              </Button>
+            </Tooltip>
           </Group>
         </Card>
         <Card withBorder>

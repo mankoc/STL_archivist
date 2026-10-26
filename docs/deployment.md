@@ -137,20 +137,60 @@ UnRAR: *Settings → Components* downloads it (RARLab's 7.23), or `sudo apt inst
 
 ## Option C: Docker
 
-The `Dockerfile` in the repository builds the server and the web client and includes pdfium
-(PDF previews) and ONNX Runtime (AI embeddings). Every release is also published on Docker
-Hub as `<image>:<version>` and `<image>:latest` (linux/amd64), so you can pull it instead of
-building it:
+Every release is published on Docker Hub as `mankoc/stlarchivist:<version>` and
+`mankoc/stlarchivist:latest` (linux/amd64): the server, its web client, pdfium (PDF previews)
+and ONNX Runtime (AI embeddings). The container runs as uid 1000, listens on port 8770,
+keeps everything it stores in `/data`, and reads the archives where you mount them.
+
+### Install with Docker Compose
+
+1. On the machine with the archives (Docker Engine with the Compose plugin), make a folder
+   for StlArchivist and download the sample [`compose.yml`](compose.yml) into it:
+
+   ```bash
+   mkdir -p ~/stlarchivist && cd ~/stlarchivist
+   curl -fsSLO https://raw.githubusercontent.com/mankoc/STL_archivist/main/docs/compose.yml
+   mkdir -p data && sudo chown 1000:1000 data
+   ```
+
+2. Edit `compose.yml`: replace `/srv/STL` with the folder that holds your archives (mount
+   more folders the same way). Keep the mount writable if you want `METADATA.7z` sidecars,
+   *Sort files* or *Delete files*; with `:ro`, turn sidecars off in *Settings → Sidecars*.
+3. Start it, and create the first administrator (it asks for a password):
+
+   ```bash
+   docker compose up -d
+   docker compose exec stlarchivist stl-server create-admin admin
+   ```
+
+4. Open `http://<machine>:8770`, sign in, and in **Libraries** add `/library` (the path inside
+   the container) and crawl it. Administrators can crawl any folder; for editors, list the
+   folders they may use in `data/server.json` (`{"roots": ["/library"]}`) and run
+   `docker compose restart`.
+5. Optional: *Settings → Components* downloads UnRAR (for `.rar` archives) and the AI model
+   files into `data/`.
+
+**Updating:** `docker compose pull && docker compose up -d` (pin a version in `image:` to
+update only when you choose to). **Backing up:** *Settings → Backups*, or copy the `data`
+folder while the container is stopped.
+
+**Moving an existing library into Docker:** stop the old server, copy its data directory into
+`data/` (then `sudo chown -R 1000:1000 data`), start the container, and in **Libraries** click
+**Move** on each folder and choose its path under `/library` (*Check*, then *Move*): records,
+edits and thumbnails stay and nothing is re-read. Moved by copying the archive folders with
+their `METADATA.7z` sidecars instead, a new library takes the sidecars' records as they are
+and does not open the archives (see [sidecars](user-guide.md)).
+
+Without Compose, the same container:
 
 ```bash
-docker pull <image>:latest            # or build it: docker build -t stlarchivist .
-docker run -d --name stl --restart unless-stopped \
-  -p 8770:8770 \
-  -v /srv/stl-data:/data \
-  -v /srv/STL:/library \
-  <image>:latest
-docker exec -it stl stl-server create-admin admin
+docker run -d --name stlarchivist --restart unless-stopped \
+  -p 8770:8770 -v "$PWD/data":/data -v /srv/STL:/library \
+  mankoc/stlarchivist:latest
+docker exec -it stlarchivist stl-server create-admin admin
 ```
+
+To build the image yourself instead: `docker build -t stlarchivist .` in the repository.
 
 **Publishing (maintainers).** `.github/workflows/docker.yml` builds the image whenever a
 version tag (`v<version>`) is pushed — the same tags that publish the installer release — and
@@ -160,10 +200,8 @@ Hub access token with *Read & Write*), and optionally the variable `DOCKERHUB_IM
 `<DOCKERHUB_USERNAME>/stlarchivist`). *Actions → Docker image → Run workflow* builds the image
 without pushing it, to check it.
 
-Mount the archives read-only (`:ro`) if you do not want sidecars, sorting or deletion. Paths
-inside the container are what the library records: crawl `/library/...`. UnRAR is not
-included (it is not free software): download it in *Settings → Components* (it lands in the
-data volume), or add it in a derived image and set `STL_UNRAR_PATH`.
+UnRAR is not included (it is not free software): download it in *Settings → Components* (it
+lands in the data volume and is found by itself), or mount a copy and set `STL_UNRAR_PATH`.
 The image's ONNX Runtime is the CPU build; for CLIP on an NVIDIA GPU, derive an image with
 CUDA 12, cuDNN 9 and the `onnxruntime-linux-x64-gpu` build (`ORT_DYLIB_PATH` pointing at it),
 and run it with `--gpus all` (NVIDIA Container Toolkit).

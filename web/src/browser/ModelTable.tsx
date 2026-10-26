@@ -13,7 +13,7 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { type KeyboardEvent, type ReactNode, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, type Schemas, unwrap } from "../api/client";
 import { baseName, formatDate, formatSize } from "../format";
@@ -105,8 +105,10 @@ interface Props {
   onRowContextMenu?: (id: number, e: React.MouseEvent) => void;
   /** Cells can be edited (double-click). */
   editable: boolean;
-  /** Which columns to show. */
+  /** Which columns to show, in which order. */
   choice?: ColumnChoice;
+  /** A column's header was dragged onto another's (none: headers do not move). */
+  onMoveColumn?: (from: string, to: string) => void;
 }
 
 /** Save one cell (`PATCH /api/models/cells`). */
@@ -140,7 +142,7 @@ function CellEditor(props: { initial: string; onDone: (value: string | null) => 
   );
 }
 
-export function ModelTable({ query, onSort, selection, onRowClick, onRowContextMenu, editable, choice }: Props) {
+export function ModelTable({ query, onSort, selection, onRowClick, onRowContextMenu, editable, choice, onMoveColumn }: Props) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<{ id: number; column: number } | null>(null);
   const ids = useModelIds(query);
@@ -148,7 +150,17 @@ export function ModelTable({ query, onSort, selection, onRowClick, onRowContextM
   const scrollRef = useRef<HTMLDivElement>(null);
   const [sizing, setSizing] = useState<ColumnSizingState>({});
 
-  const shown = useMemo(() => visible(COLUMNS, choice ?? { hidden: [], shown: [] }), [choice]);
+  const shown = useMemo(() => visible(COLUMNS, choice ?? { hidden: [], shown: [], order: [] }), [choice]);
+  // Moving a column: the one dragged, and the one it would take the place of.
+  const dragged = useRef<string | null>(null);
+  const [dropOn, setDropOn] = useState<string | null>(null);
+  // A press on a resize edge resizes; it must not start dragging its column.
+  const resizing = useRef(false);
+  useEffect(() => {
+    const up = () => (resizing.current = false);
+    window.addEventListener("mouseup", up);
+    return () => window.removeEventListener("mouseup", up);
+  }, []);
   const columns = useMemo<ColumnDef<number>[]>(
     () => shown.map((c) => ({ id: c.id, header: c.header, size: c.size, minSize: 50, enableResizing: true })),
     [shown],
@@ -215,7 +227,36 @@ export function ModelTable({ query, onSort, selection, onRowClick, onRowContextM
           const c = shown[i];
           const sort = sortOf(c);
           return (
-            <div key={h.id} className={classes.headerCell} style={{ width: h.getSize() }}>
+            <div
+              key={h.id}
+              className={classes.headerCell}
+              style={{ width: h.getSize() }}
+              data-drop={dropOn === c.id || undefined}
+              draggable={Boolean(onMoveColumn)}
+              onDragStart={(e) => {
+                if (resizing.current) return e.preventDefault();
+                dragged.current = c.id;
+                e.dataTransfer.effectAllowed = "move";
+                e.dataTransfer.setData("text/plain", c.header);
+              }}
+              onDragOver={(e) => {
+                if (!dragged.current || dragged.current === c.id) return;
+                e.preventDefault();
+                setDropOn(c.id);
+              }}
+              onDragLeave={() => setDropOn((d) => (d === c.id ? null : d))}
+              onDrop={(e) => {
+                e.preventDefault();
+                const from = dragged.current;
+                dragged.current = null;
+                setDropOn(null);
+                if (from && from !== c.id) onMoveColumn?.(from, c.id);
+              }}
+              onDragEnd={() => {
+                dragged.current = null;
+                setDropOn(null);
+              }}
+            >
               <UnstyledButton className={classes.headerButton} onClick={() => clickHeader(c)} disabled={!c.sortKey}>
                 <Group gap={4} wrap="nowrap">
                   <Text size="xs" fw={600} tt="uppercase" truncate>
@@ -225,7 +266,10 @@ export function ModelTable({ query, onSort, selection, onRowClick, onRowContextM
                 </Group>
               </UnstyledButton>
               <div
-                onMouseDown={h.getResizeHandler()}
+                onMouseDown={(e) => {
+                  resizing.current = true;
+                  h.getResizeHandler()(e);
+                }}
                 onTouchStart={h.getResizeHandler()}
                 className={classes.resizer}
                 data-resizing={h.column.getIsResizing() || undefined}
