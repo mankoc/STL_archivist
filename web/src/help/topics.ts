@@ -429,7 +429,7 @@ export const TOPICS: Topic[] = [
       ] },
       { h: "Other cards" },
       { list: [
-        "**Metadata sidecars** — see [sidecars](sidecars).",
+        "**Metadata sidecars** (the **Sidecars** tab: whether sidecars are written, with or without thumbnails, and their jobs) — see [sidecars](sidecars).",
         "**Compute workers** — see [compute workers](compute-workers).",
         "Downloads of components are in **Settings → Components** — see [components](components).",
         "**Backups** (administrators) — see [backups](backups).",
@@ -444,7 +444,7 @@ export const TOPICS: Topic[] = [
     title: "Metadata sidecars",
     summary: "A METADATA.7z per folder that carries your edits with the archives.",
     blocks: [
-      { p: "With sidecars on (**Settings → Library → Metadata sidecars**), the server keeps a `METADATA.7z` in every archive folder with the records of its archives (and their thumbnails, if chosen). Copy the folder to another disk or computer and a new library restores titles, tags and edits when it crawls it — without reading the archives again." },
+      { p: "With sidecars on (**Settings → Sidecars → Metadata sidecars**), the server keeps a `METADATA.7z` in every archive folder with the records of its archives (and their thumbnails, if chosen). Copy the folder to another disk or computer and a new library restores titles, tags and edits when it crawls it — without reading the archives again." },
       { list: [
         "Edits update the folder's sidecar shortly afterwards.",
         "**Generate sidecars** writes them in every folder now.",
@@ -502,7 +502,6 @@ export const TOPICS: Topic[] = [
       { table: { head: ["Section", "Settings"], rows: [
         ["Crawler", "Thumbnails per archive, thumbnail size, the size of model viewer captures (the thumbnail size unless set), parallel workers, detect changed archives by size only, check monitored folders every N minutes, crawl subfolders, AI image embeddings, compute embeddings during crawls (the list of STL files is always stored)"],
         ["Warnings", "Which warnings crawls raise, the low-compression threshold, presupport file-name patterns"],
-        ["Metadata sidecars", "Write METADATA.7z into archive folders, with or without thumbnails"],
         ["Archive files", "Allow Sort files, allow Delete files, the trash folder"],
         ["AI tagger", "Temperature"],
       ] } },

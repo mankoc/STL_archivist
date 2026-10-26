@@ -1,8 +1,8 @@
 // Settings: this user's preferences (and, in the desktop app, this computer's
-// MeshPeek), the library's crawler and sidecar
-// settings (administrators change them), maintenance, sidecars, backups, compute
-// workers, the downloadable components, and user administration. A tab is
-// addressed as `#/settings/<tab>`.
+// MeshPeek), the library's settings (administrators change them), maintenance,
+// sidecars (their settings and jobs), backups, compute workers, the
+// downloadable components, and user administration. A tab is addressed as
+// `#/settings/<tab>`.
 import {
   ActionIcon, Badge, Button, Card, Checkbox, ColorSwatch, Group, Modal, NumberInput, PasswordInput, SegmentedControl, Select, SimpleGrid,
   Stack, Switch, Table, Tabs, Text, Textarea, TextInput, Title, Tooltip, useMantineColorScheme,
@@ -28,6 +28,9 @@ const ROLES: { value: Role; label: string }[] = [
   { value: "editor", label: "Editor" },
   { value: "admin", label: "Administrator" },
 ];
+
+/** The library settings, shared by the Library tab and the sidecar settings. */
+const SETTINGS_QUERY = { queryKey: ["settings"], queryFn: async () => unwrap(await api.GET("/api/settings/library")) };
 
 function fail(err: unknown) {
   notifications.show({ color: "red", message: (err as Error).message });
@@ -72,7 +75,10 @@ export function SettingsPage() {
         <MaintenanceTab />
       </Tabs.Panel>
       <Tabs.Panel value="sidecars">
-        <SidecarsTab editor={editor} />
+        <Stack gap="md" maw={980}>
+          <SidecarSettings editable={admin} />
+          <SidecarsTab editor={editor} />
+        </Stack>
       </Tabs.Panel>
       {admin && (
         <Tabs.Panel value="backups">
@@ -196,9 +202,45 @@ function MeshPeekSettings() {
   );
 }
 
+/** Whether the server writes `METADATA.7z` sidecars, and with thumbnails: saved as soon as they are ticked. */
+function SidecarSettings({ editable }: { editable: boolean }) {
+  const queryClient = useQueryClient();
+  const settings = useQuery(SETTINGS_QUERY);
+  const s = settings.data;
+  if (!s) return null;
+  // The other settings as saved: a change here never touches them.
+  const change = async (patch: Partial<LibrarySettings>) => {
+    try {
+      const saved = unwrap(await api.PUT("/api/settings/library", { body: { ...s, ...patch } }));
+      queryClient.setQueryData(["settings"], saved);
+      notifications.show({ message: "Sidecar settings saved." });
+    } catch (err) {
+      fail(err);
+    }
+  };
+  return (
+    <Card withBorder>
+      <Title order={5} mb="sm">
+        Metadata sidecars
+      </Title>
+      {!editable && (
+        <Text size="sm" c="dimmed" mb="xs">
+          Only administrators can change these settings.
+        </Text>
+      )}
+      <Stack gap="xs">
+        <Checkbox label="Write METADATA.7z into archive folders" checked={s.metadata_sidecar_enabled} disabled={!editable}
+          onChange={(e) => change({ metadata_sidecar_enabled: e.currentTarget.checked })} data-testid="sidecars-enabled" />
+        <Checkbox label="Include thumbnails in sidecars" checked={s.metadata_thumbnails} disabled={!editable}
+          onChange={(e) => change({ metadata_thumbnails: e.currentTarget.checked })} />
+      </Stack>
+    </Card>
+  );
+}
+
 function LibrarySettingsForm({ editable }: { editable: boolean }) {
   const queryClient = useQueryClient();
-  const settings = useQuery({ queryKey: ["settings"], queryFn: async () => unwrap(await api.GET("/api/settings/library")) });
+  const settings = useQuery(SETTINGS_QUERY);
   const [form, setForm] = useState<LibrarySettings | null>(null);
   const [patterns, setPatterns] = useState("");
   useEffect(() => {
@@ -294,15 +336,6 @@ function LibrarySettingsForm({ editable }: { editable: boolean }) {
             disabled={!editable}
             onChange={(e) => setPatterns(e.currentTarget.value)}
           />
-        </Stack>
-      </Card>
-      <Card withBorder>
-        <Title order={5} mb="sm">
-          Metadata sidecars
-        </Title>
-        <Stack gap="xs">
-          {check("metadata_sidecar_enabled", "Write METADATA.7z into archive folders")}
-          {check("metadata_thumbnails", "Include thumbnails in sidecars")}
         </Stack>
       </Card>
       <Card withBorder>

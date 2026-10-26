@@ -1,0 +1,89 @@
+name: Docker image
+
+# Builds the server image (Dockerfile: the server, the web client, pdfium and
+# ONNX Runtime) when a version tag is pushed (the same tags that publish the
+# release in release.yml) and pushes it to Docker Hub as <image>:<version> and
+# <image>:latest. Started by hand (Actions → Docker image → Run workflow) it
+# only builds, to check the image without publishing it.
+#
+# A release made in the GitHub interface or with `gh release create` pushes its
+# tag too, so it runs this as well. A release published by another workflow
+# would not (GitHub starts no workflow from the workflow token's events), which
+# is why this listens to tags rather than to releases.
+#
+# Setup (Settings → Secrets and variables → Actions):
+#   variable DOCKERHUB_USERNAME  the Docker Hub account
+#   secret   DOCKERHUB_TOKEN     a Docker Hub access token with Read & Write
+#   variable DOCKERHUB_IMAGE     optional; default <DOCKERHUB_USERNAME>/stlarchivist
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ${{ vars.DOCKERHUB_IMAGE || (vars.DOCKERHUB_USERNAME && format('{0}/stlarchivist', vars.DOCKERHUB_USERNAME)) || 'stlarchivist' }}
+  PUBLISH: ${{ startsWith(github.ref, 'refs/tags/v') }}
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Version
+        id: version
+        run: |
+          v=$(jq -r .version rust/stl-desktop/tauri.bundle.json)
+          echo "value=$v" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/v* && "$GITHUB_REF_NAME" != "v$v" ]]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match the version $v in tauri.bundle.json"
+            exit 1
+          fi
+
+      - name: Docker Hub settings
+        if: env.PUBLISH == 'true'
+        env:
+          USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          HAS_TOKEN: ${{ secrets.DOCKERHUB_TOKEN != '' }}
+        run: |
+          if [[ -z "$USERNAME" || "$HAS_TOKEN" != "true" ]]; then
+            echo "::error::set the variable DOCKERHUB_USERNAME and the secret DOCKERHUB_TOKEN (Settings → Secrets and variables → Actions)"
+            exit 1
+          fi
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        if: env.PUBLISH == 'true'
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.value }}
+            type=raw,value=latest
+          labels: |
+            org.opencontainers.image.title=StlArchivist server
+            org.opencontainers.image.description=Catalogue of 3D-printable model archives: the server and its web client
+            org.opencontainers.image.version=${{ steps.version.outputs.value }}
+
+      # The image downloads x86-64 builds of pdfium and ONNX Runtime: amd64 only.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: ${{ env.PUBLISH == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

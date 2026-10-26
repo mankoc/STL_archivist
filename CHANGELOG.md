@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026.44.1 — 2026-10-26
+
+- **Docker image on Docker Hub:** a release tag (`v<version>`) now also builds the server image
+  (`Dockerfile`) and pushes it to Docker Hub as `<image>:<version>` and `<image>:latest`
+  (`.github/workflows/docker.yml`; set the variable `DOCKERHUB_USERNAME` and the secret
+  `DOCKERHUB_TOKEN` in the repository's Actions settings). Started by hand, it only builds.
+- **The sidecar settings moved to the Sidecars tab:** *Settings → Sidecars* now holds whether
+  `METADATA.7z` sidecars are written (and with thumbnails) above its jobs, instead of
+  *Settings → Library*. They are saved as soon as they are ticked, leaving the other library
+  settings as saved.
+
 ## 2026.44.0 — 2026-10-26
 
 - **Thumbnail size on the Folders page:** a slider above the thumbnails makes them bigger or

@@ -334,7 +334,9 @@ Maintenance is in **Settings**: the **Maintenance** tab (editors run its jobs) h
   thumbnails no image uses any more, and rewrites the thumbnail store (`thumbnails.lmdb`)
   the same way. Thumbnails wait while the store is rewritten; both files need room for a
   copy on their drive while the job runs.
-- **Metadata sidecars** — **Generate sidecars** writes `METADATA.7z` in every archive folder;
+- **Metadata sidecars** (*Settings → Sidecars*) — whether the server writes `METADATA.7z`
+  into archive folders, with or without thumbnails (administrators; saved as soon as
+  ticked); **Generate sidecars** writes `METADATA.7z` in every archive folder;
   **Clean sidecars** tidies the `METADATA.7z` files under the libraries: one that lists
   other archives than the folder's records is rewritten, one in a folder without records
   whose archives are all gone is deleted (one whose archives still exist is kept: crawling
@@ -378,8 +380,6 @@ at the bottom of the page.
     AI image embeddings, compute embeddings during crawls (the list of STL files is always stored);
   - *Warnings* — which warnings crawls raise, the low-compression threshold, and the file
     name patterns that mark presupported STLs;
-  - *Metadata sidecars* — write `METADATA.7z` into archive folders, with or without
-    thumbnails;
   - *Archive files* — allow *Sort files*, allow *Delete files*, and the trash folder deleted
     archives go to;
   - *AI tagger* — the temperature (lower keeps suggestions literal).
