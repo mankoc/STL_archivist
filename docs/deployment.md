@@ -137,20 +137,28 @@ UnRAR: *Settings → Components* downloads it (RARLab's 7.23), or `sudo apt inst
 
 ## Option C: Docker
 
-> The image has not been test-built yet.
-
 The `Dockerfile` in the repository builds the server and the web client and includes pdfium
-(PDF previews) and ONNX Runtime (AI embeddings).
+(PDF previews) and ONNX Runtime (AI embeddings). Every release is also published on Docker
+Hub as `<image>:<version>` and `<image>:latest` (linux/amd64), so you can pull it instead of
+building it:
 
 ```bash
-docker build -t stllibrary-server .
+docker pull <image>:latest            # or build it: docker build -t stlarchivist .
 docker run -d --name stl --restart unless-stopped \
   -p 8770:8770 \
   -v /srv/stl-data:/data \
   -v /srv/STL:/library \
-  stllibrary-server
+  <image>:latest
 docker exec -it stl stl-server create-admin admin
 ```
+
+**Publishing (maintainers).** `.github/workflows/docker.yml` builds the image whenever a
+version tag (`v<version>`) is pushed — the same tags that publish the installer release — and
+pushes it to Docker Hub. It needs, under *Settings → Secrets and variables → Actions* of the
+GitHub repository, the variable `DOCKERHUB_USERNAME`, the secret `DOCKERHUB_TOKEN` (a Docker
+Hub access token with *Read & Write*), and optionally the variable `DOCKERHUB_IMAGE` (default
+`<DOCKERHUB_USERNAME>/stlarchivist`). *Actions → Docker image → Run workflow* builds the image
+without pushing it, to check it.
 
 Mount the archives read-only (`:ro`) if you do not want sidecars, sorting or deletion. Paths
 inside the container are what the library records: crawl `/library/...`. UnRAR is not
