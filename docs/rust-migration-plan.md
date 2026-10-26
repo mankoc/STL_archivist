@@ -1344,6 +1344,8 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.44.0: `CellGrid` takes a `cardWidth` (images and rows from `grid.ts`'s `cardLayout`);
+  the Folders page's slider sets it (`loadCardWidth` / `saveCardWidth`, this browser).
 - 2026.43.21: the STL backfill (`Diff::stl_backfill`) is stored (`crawl::store_stl_lists`,
   marking `stl_list_hash`) and its catalogs go to `store_files`; `Request::ListStl` is gone.
   `crawler::list_archives_stat` returns each archive's size and time from the directory
