@@ -1344,6 +1344,44 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.44.5: **sync**, pull and push, both started on this server (`stl-server/src/sync.rs`;
+  the job bodies `sync`, `sync_pull`, `sync_push` and `sync_export` are in `jobs.rs`).
+  - **Remotes** live in `sync_remotes` in `server.db` (an import replaces `settings.json`).
+    A row holds the url, the remote admin's name, its session token (never sent to
+    clients), `PathRule {local, remote}` rules (`toward(direction)` gives the import's
+    `RootRule {from, to}`) and `backup_first`.
+  - **Signing in**: `Remote::sign_in` posts `/api/auth/login` there and requires the admin
+    role.
+  - **`Remote`** is blocking `ureq` with `http_status_as_error(false)`: a 401 asks to sign
+    in again, other errors carry the remote's message. `run_job` polls the remote's job,
+    copies its new log lines and final message here, and cancels it when this job stops.
+  - **Thumbnail deltas**:
+    - `ThumbStore::blob_keys` lists the blob keys;
+    - `copy_partial` copies every `R` and legacy entry plus the `D` blobs not in `skip`;
+    - `fill_missing_blobs` completes a store from another;
+    - `backup::write_sync` is `write` with a partial store, through `write_with`.
+    - On the wire the keys are length-prefixed: `GET /api/sync/thumbnails` for a push;
+      `POST /api/sync/thumbnails` stores them in `<data>/sync/have-<id>.bin` for a day,
+      for the `sync_export` job of a pull.
+  - **Import changes**: `import_library` takes `rules` (`sync::apply_rules`, the longest
+    `from` wins, via `libraries::rebase`) and `backup_first`. It always calls
+    `fill_missing_blobs` from the live store before swapping, and `prune_pre_import` keeps
+    3 pre-import backups.
+  - **The steps**:
+    - **Pull**: post the keys, `sync_export` there, download to `…_pull.7z`, delete
+      there, import here.
+    - **Push**: fetch their keys, `write_sync` to `…_push.7z`, upload, their
+      `import_library` with `confirm: "REPLACE"`, delete there.
+  - **Safety checks**:
+    - `check_versions`: the receiver is not older than the sender, and the remote is at
+      least `MIN_VERSION`.
+    - `Library::instance`, a random id per run sent as `x-stl-instance` by
+      `/api/sync/thumbnails`, refuses a remote that is this server; it would wait for its
+      own job forever.
+  - **Other routes**: `/api/sync/remotes` (CRUD, `login`, `preview`, which uses the
+    remote's `/api/libraries` or `/api/sync/exists`; nothing is sent) and
+    `/api/sync/exists`. `ServerEvent::Job` is boxed (clippy).
+  - **Web**: `jobs/SyncCard.tsx`, `jobs/sync.ts`.
 - 2026.44.4: the desktop window is built with `disable_drag_drop_handler` (WebView2's HTML5
   drag and drop; the shell used no `DragDropEvent`s) and copies each page's title to itself
   (`on_document_title_changed`); the launcher titles itself with `app.getVersion()` (in
@@ -1386,7 +1424,7 @@ the path is visible. No business logic and no Tauri commands for data.
   - Web: `jobs/ImportDialog.tsx`; `jobs/transfer.ts` (`applyPrefix`, `withRule`,
     `rootsToSend`, `upToDate`, `backupName`); `uploadPackage` in `api/client.ts` (XHR,
     for the progress).
-  **Sync (designed, not built):** a one-way mirror on top of the import.
+  **Sync (designed here, built in 2026.44.5, see there):** a one-way mirror on top of the import.
   - The source issues a sync token (stored like worker tokens).
   - The replica keeps the source URL, the token and path-start rules (overridable per
     folder uuid) in `server.json`.

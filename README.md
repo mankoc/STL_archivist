@@ -13,7 +13,7 @@ can open a library on your computer without setting up a server.
 [the HTTP API](docs/api.md) ·
 and in the interface, the **?** button: searchable in-depth help on every feature
 
-Version: 2026.44.4
+Version: 2026.44.5
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). This version opens its data directory and, since 2026.43.7, converts it once
@@ -68,6 +68,8 @@ Version: 2026.44.4
 - **Backups, export and import** — database, thumbnails and settings in one `.7z`; import one
   on another server (or this one) from *Settings*, each library folder mapped to its place
   there; restore offline with `stl-server restore`
+- **Sync** — pull another server's library into this one, or push this one to it, with
+  folder rules for both sides; only new thumbnails travel
 - **Users** — viewer, editor and administrator roles; per-user preferences
 - **Statistics** — totals, rankings and the distribution of any column
 - **Model viewer** — the 3D models inside an archive (STL, OBJ, PLY, 3MF, Lychee, CHITUBOX)
@@ -257,6 +259,14 @@ To copy a library to another server (from the desktop app to a Docker server, sa
 transfer*). The import shows the package's folders and checks each at the root you give it
 on that server. It then replaces that server's library while it runs, after backing it up;
 user accounts stay.
+
+To keep two servers alike, use *Sync with other servers* on the same tab instead.
+
+- Add the other server once: its address, and one of its administrators, to sign in.
+- Give it folder rules (`D:\Minis` here is `/library` there).
+- **Pull** makes this library a copy of the other's; **Push** does the reverse.
+- Each sync shows where the folders go and asks you to type `REPLACE`. Only the thumbnails
+  the receiving side lacks are sent.
 
 ### Known limitations
 

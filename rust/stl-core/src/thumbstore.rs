@@ -21,12 +21,15 @@
 //! transaction holds a shared lock and growing takes it exclusively, as does
 //! compacting (which closes the environment, swaps the file and reopens it).
 
+use std::collections::HashSet;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::{RwLock, RwLockReadGuard};
 
 use heed::types::Bytes;
 use heed::{CompactionOption, Database, Env, EnvOpenOptions, MdbError, RwTxn};
+
+use crate::control::Control;
 
 /// Initial map size (address space, not disk: the file is sparse).
 pub const MAP_SIZE: usize = 10 * 1024 * 1024 * 1024;
@@ -348,6 +351,91 @@ impl ThumbStore {
         })
     }
 
+    /// Every blob's key without its prefix (the digest, plus a slot byte after
+    /// a collision): what a sync's receiver already holds.
+    pub fn blob_keys(&self) -> Result<Vec<Vec<u8>>> {
+        let s = self.shared()?;
+        let txn = s.env.read_txn()?;
+        let mut out = Vec::new();
+        for item in s.db.prefix_iter(&txn, &[BLOB_PREFIX])? {
+            out.push(item?.0[1..].to_vec());
+        }
+        Ok(out)
+    }
+
+    /// Copy into `dest` every image reference and legacy entry, and the blobs
+    /// whose key ([`Self::blob_keys`]) is not in `skip`: a sync's store, whose
+    /// missing blobs the receiver has. Stops when `ctl` is stopped. Returns
+    /// `(blobs copied, blobs skipped)`.
+    pub fn copy_partial(&self, dest: &ThumbStore, skip: &HashSet<Vec<u8>>, ctl: &Control) -> Result<(u64, u64)> {
+        const CHUNK_BYTES: usize = 32 << 20;
+        let s = self.shared()?;
+        let txn = s.env.read_txn()?;
+        let (mut copied, mut skipped) = (0, 0);
+        let (mut chunk, mut bytes) = (Vec::new(), 0);
+        for item in s.db.iter(&txn)? {
+            let (k, v) = item?;
+            if k.first() == Some(&BLOB_PREFIX) {
+                if skip.contains(&k[1..]) {
+                    skipped += 1;
+                    continue;
+                }
+                copied += 1;
+            }
+            bytes += k.len() + v.len();
+            chunk.push((k.to_vec(), v.to_vec()));
+            if bytes >= CHUNK_BYTES {
+                dest.put_raw(&std::mem::take(&mut chunk))?;
+                bytes = 0;
+                if ctl.is_stopped() {
+                    return Err(heed::Error::Io(std::io::Error::other("stopped")));
+                }
+            }
+        }
+        if !chunk.is_empty() {
+            dest.put_raw(&chunk)?;
+        }
+        Ok((copied, skipped))
+    }
+
+    /// Copy from `from` the blobs this store's references point at but it
+    /// lacks (a sync's store, completed from the receiver's own). Returns
+    /// `(blobs filled, blobs still missing)`.
+    pub fn fill_missing_blobs(&self, from: &ThumbStore) -> Result<(u64, u64)> {
+        let missing: Vec<Vec<u8>> = {
+            let s = self.shared()?;
+            let txn = s.env.read_txn()?;
+            let mut keys = HashSet::new();
+            for item in s.db.prefix_iter(&txn, &[REF_PREFIX])? {
+                let (_, blob) = item?;
+                if s.db.get(&txn, blob)?.is_none() {
+                    keys.insert(blob.to_vec());
+                }
+            }
+            keys.into_iter().collect()
+        };
+        let (mut filled, mut lost) = (0, 0);
+        for keys in missing.chunks(1000) {
+            let found = {
+                let s = from.shared()?;
+                let txn = s.env.read_txn()?;
+                let mut found = Vec::with_capacity(keys.len());
+                for k in keys {
+                    if let Some(v) = s.db.get(&txn, k)? {
+                        found.push((k.clone(), v.to_vec()));
+                    }
+                }
+                found
+            };
+            filled += found.len() as u64;
+            lost += (keys.len() - found.len()) as u64;
+            if !found.is_empty() {
+                self.put_raw(&found)?;
+            }
+        }
+        Ok((filled, lost))
+    }
+
     /// Write raw key/value pairs (tests and tools: e.g. a legacy-layout entry).
     pub fn put_raw(&self, items: &[(Vec<u8>, Vec<u8>)]) -> Result<()> {
         self.write(|txn, db| {
@@ -420,6 +508,33 @@ mod tests {
         // xxhash.xxh3_128_digest(b"abc").hex() in Python.
         let hex: String = xxh3_digest(b"abc").iter().map(|b| format!("{b:02x}")).collect();
         assert_eq!(hex, "06b05ab6733a618578af5f94892f3950");
+    }
+
+    #[test]
+    fn partial_copies_complete_from_another_store() {
+        let (dir, s) = store();
+        s.put_many(&[(1, b"shared"), (2, b"only here"), (3, b"shared")]).unwrap();
+        s.put_raw(&[(legacy_key(9).to_vec(), b"legacy".to_vec())]).unwrap();
+        assert_eq!(s.blob_keys().unwrap().len(), 2);
+
+        // The receiver already has "shared": only "only here" travels.
+        let theirs = ThumbStore::open(&dir.path().join("theirs.lmdb")).unwrap();
+        theirs.put_many(&[(50, b"shared")]).unwrap();
+        let have: HashSet<Vec<u8>> = theirs.blob_keys().unwrap().into_iter().collect();
+        let partial = ThumbStore::open(&dir.path().join("partial.lmdb")).unwrap();
+        assert_eq!(s.copy_partial(&partial, &have, &Control::new()).unwrap(), (1, 1));
+        assert_eq!(get(&partial, 2).as_deref(), Some(&b"only here"[..]));
+        assert_eq!(get(&partial, 1), None, "its blob stayed behind");
+        assert_eq!(get(&partial, 9).as_deref(), Some(&b"legacy"[..]), "legacy entries always travel");
+
+        assert_eq!(partial.fill_missing_blobs(&theirs).unwrap(), (1, 0));
+        assert_eq!(get(&partial, 1).as_deref(), Some(&b"shared"[..]));
+        assert_eq!(get(&partial, 3).as_deref(), Some(&b"shared"[..]));
+        let empty = ThumbStore::open(&dir.path().join("empty.lmdb")).unwrap();
+        partial.delete_many(&[1]).unwrap();
+        let lone = ThumbStore::open(&dir.path().join("lone.lmdb")).unwrap();
+        s.copy_partial(&lone, &have, &Control::new()).unwrap();
+        assert_eq!(lone.fill_missing_blobs(&empty).unwrap(), (0, 1), "a blob neither side has stays missing");
     }
 
     #[test]

@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026.44.5 — 2026-10-26
+
+- **Sync with other servers: pull and push** (*Settings → Backups & transfer → Sync with
+  other servers*, administrators). This server starts every sync, so the other one only
+  needs to be reachable from here; this one can be behind a router.
+  - **Add a server…** signs in there once as one of its administrators. Only the session
+    is kept, never the password; **Sign in again** renews it.
+  - **Folder rules** map its folders to this server's, both ways: `D:\Minis` here is
+    `/library` there, and the folders below follow.
+  - **Pull** makes this library a copy of the other server's. **Push** makes the other
+    server's a copy of this one.
+  - Each sync shows first where every folder will go and whether it exists there, then
+    asks you to type `REPLACE`.
+  - The receiving side backs its library up first (on by default; the 3 newest
+    `…_pre_import.7z` are kept), and its user accounts stay.
+  - **Only the thumbnails the receiving side lacks are sent**: a repeat sync carries the
+    database and the new images.
+  - The receiving side must run the same version or a newer one. A server whose address
+    leads back to this one is refused.
+- **Import:** the import fills in thumbnails the package leaves out from this server's own
+  store; a sync's packages do this, a backup has them all.
+
 ## 2026.44.4 — 2026-10-26
 
 - **Columns move by a grip:** pointing at a column's header shows a grip (⋮⋮) left of its

@@ -17,6 +17,7 @@ pub mod components;
 pub mod maintenance;
 pub mod sort;
 pub mod stats;
+pub mod sync;
 pub mod views;
 pub mod system;
 pub mod thumbs;
@@ -123,6 +124,15 @@ use crate::AppState;
         maintenance::remove_missing,
         workers::token,
         workers::connect,
+        sync::thumbnails,
+        sync::have,
+        sync::exists,
+        sync::list,
+        sync::add,
+        sync::change,
+        sync::delete,
+        sync::login,
+        sync::preview,
     ),
     components(schemas(crate::error::ErrorBody)),
     modifiers(&OperationIds)
@@ -231,6 +241,12 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/workers", get(workers::list))
         .route("/api/workers/token", post(workers::token))
         .route("/api/workers/connect", get(workers::connect))
+        .route("/api/sync/thumbnails", get(sync::thumbnails).post(sync::have).layer(DefaultBodyLimit::disable()))
+        .route("/api/sync/exists", post(sync::exists))
+        .route("/api/sync/remotes", get(sync::list).post(sync::add))
+        .route("/api/sync/remotes/{id}", patch(sync::change).delete(sync::delete))
+        .route("/api/sync/remotes/{id}/login", post(sync::login))
+        .route("/api/sync/remotes/{id}/preview", get(sync::preview))
         .route("/api/openapi.json", get(openapi))
         .layer(middleware::from_fn_with_state(state, announce_changes))
 }

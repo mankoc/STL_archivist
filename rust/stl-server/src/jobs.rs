@@ -120,16 +120,36 @@ pub enum JobRequest {
     /// given keeps its root when that is a folder here). With `apply` (and
     /// `confirm: "REPLACE"`), backs this library up (`…_pre_import.7z`) and
     /// replaces it with the package, the folders at their new roots; user
-    /// accounts stay.
+    /// accounts stay. `rules` (path starts) map the folders `roots` does not
+    /// name; `backup_first: false` skips the backup (a sync's choice).
     ImportLibrary {
         name: String,
         #[serde(default)]
         roots: BTreeMap<String, String>,
         #[serde(default)]
+        rules: Vec<crate::sync::RootRule>,
+        #[serde(default)]
         apply: bool,
         #[serde(default)]
         confirm: String,
+        #[serde(default = "yes")]
+        backup_first: bool,
     },
+    /// Sync with a remote server (administrators; `confirm: "REPLACE"`): `pull`
+    /// replaces this library with the remote's, `push` the remote's with this
+    /// one, each folder mapped by the remote's path rules. Only the thumbnails
+    /// the receiving side lacks travel.
+    Sync {
+        /// The remote (`RemoteInfo.id`).
+        remote: i64,
+        direction: crate::sync::Direction,
+        #[serde(default)]
+        confirm: String,
+    },
+    /// Pack this library for a sync that pulls it (administrators; another
+    /// server asks for it): `backups/…_sync.7z` without the thumbnails in
+    /// `have` (the receiver's list, `POST /api/sync/thumbnails`).
+    SyncExport { have: String },
     /// Download optional components into the data directory (administrators):
     /// `ai_runtime`, `ai_model`, `clip_model`, `onnxruntime`, `pdfium`.
     /// `variants` picks a variant per component (`ai_runtime`: `cpu`, or `cuda`
@@ -263,6 +283,8 @@ impl JobRequest {
             JobRequest::CleanSidecars => "clean_sidecars",
             JobRequest::Backup => "backup",
             JobRequest::ImportLibrary { .. } => "import_library",
+            JobRequest::Sync { .. } => "sync",
+            JobRequest::SyncExport { .. } => "sync_export",
             JobRequest::FindDuplicateEntries => "find_duplicate_entries",
             JobRequest::FindMoved { .. } => "find_moved",
             JobRequest::SearchFolder { .. } => "search_folder",
@@ -285,6 +307,8 @@ impl JobRequest {
                 | JobRequest::CleanSidecars
                 | JobRequest::Backup
                 | JobRequest::ImportLibrary { apply: false, .. }
+                | JobRequest::Sync { direction: crate::sync::Direction::Push, .. }
+                | JobRequest::SyncExport { .. }
                 | JobRequest::FindMoved { .. }
                 | JobRequest::FindContentDuplicates { .. }
                 | JobRequest::FindImageDuplicates { .. }
@@ -301,6 +325,8 @@ impl JobRequest {
             JobRequest::ClearLibrary { confirm } if confirm != "DELETE" => Err("confirm with \"DELETE\"".into()),
             JobRequest::ImportLibrary { apply: true, confirm, .. } if confirm != "REPLACE" => Err("confirm with \"REPLACE\"".into()),
             JobRequest::ImportLibrary { name, .. } if !crate::api::backups::valid(name) => Err(format!("{name:?} is not a package name")),
+            JobRequest::Sync { confirm, .. } if confirm != "REPLACE" => Err("confirm with \"REPLACE\"".into()),
+            JobRequest::SyncExport { have } if have.is_empty() || !have.bytes().all(|b| b.is_ascii_digit()) => Err(format!("{have:?} is not a thumbnail list")),
             JobRequest::InstallComponents { components, variants } if bad_components(components, variants) => {
                 Err(components_hint())
             }
@@ -665,7 +691,11 @@ fn run(lib: &Library, job: &Job) -> Result<String, String> {
         JobRequest::RemoveSidecars => remove_sidecars(lib, job),
         JobRequest::CleanSidecars => clean_sidecars(lib, job),
         JobRequest::Backup => backup(lib, job),
-        JobRequest::ImportLibrary { name, roots, apply, .. } => import_library(lib, job, &name, &roots, apply),
+        JobRequest::ImportLibrary { name, roots, rules, apply, backup_first, .. } => {
+            import_library(lib, job, &name, &roots, &rules, apply, backup_first)
+        }
+        JobRequest::Sync { remote, direction, .. } => sync(lib, job, remote, direction),
+        JobRequest::SyncExport { have } => sync_export(lib, job, &have),
         JobRequest::FindDuplicateEntries => duplicate_entries(lib, job),
         JobRequest::FindMoved { ids } => find_moved(lib, job, &ids),
         JobRequest::SearchFolder { folder, ids } => search_folder(lib, job, &folder, &ids),
@@ -1083,9 +1113,25 @@ fn stage_package(lib: &Library, job: &Job, src: &std::path::Path, name: &str) ->
     Ok(dir)
 }
 
+/// Pre-import backups kept: older ones go after each import.
+const KEEP_PRE_IMPORT: usize = 3;
+
+fn yes() -> bool {
+    true
+}
+
 /// Check package `name`'s folders at their roots here (`roots`: folder uuid →
-/// root) and, with `apply`, replace this library with it.
-fn import_library(lib: &Library, job: &Job, name: &str, roots: &BTreeMap<String, String>, apply: bool) -> Result<String, String> {
+/// root, else the first of `rules` that matches) and, with `apply`, replace
+/// this library with it (backed up first with `backup_first`).
+fn import_library(
+    lib: &Library,
+    job: &Job,
+    name: &str,
+    roots: &BTreeMap<String, String>,
+    rules: &[crate::sync::RootRule],
+    apply: bool,
+    backup_first: bool,
+) -> Result<String, String> {
     use stl_core::backup;
     use storage::libraries::{self, Folder};
     let src = crate::api::backups::package(&lib.config.data_dir, name).map_err(|e| e.message)?;
@@ -1100,12 +1146,15 @@ fn import_library(lib: &Library, job: &Job, name: &str, roots: &BTreeMap<String,
     // The outermost folders: the folders inside them move along.
     let inside = |outer: &Folder, f: &Folder| f.id != outer.id && libraries::foreign_rel(&outer.root, &f.root).is_some();
     let outer: Vec<&Folder> = folders.iter().filter(|f| !folders.iter().any(|o| inside(o, f))).collect();
-    // A folder not given keeps its root when that is a folder here.
+    // A folder neither given nor matched by a rule keeps its root when that is a folder here.
     let map: Vec<(i64, String)> = outer
         .iter()
         .filter_map(|f| {
             let given = roots.get(&f.uuid).map(|r| r.trim()).filter(|r| !r.is_empty()).map(str::to_string);
-            given.or_else(|| std::path::Path::new(&f.root).is_dir().then(|| f.root.clone())).map(|r| (f.id, r))
+            given
+                .or_else(|| crate::sync::apply_rules(rules, &f.root))
+                .or_else(|| std::path::Path::new(&f.root).is_dir().then(|| f.root.clone()))
+                .map(|r| (f.id, r))
         })
         .collect();
     let plan = libraries::import_plan(&conn, &map)?;
@@ -1157,14 +1206,16 @@ fn import_library(lib: &Library, job: &Job, name: &str, roots: &BTreeMap<String,
 
     lib.importing.store(true, Ordering::SeqCst);
     let _importing = Importing(lib);
-    let pre = crate::api::backups::new_name().replace(".7z", "_pre_import.7z");
-    lib.job_log(job, format!("Backing up this library to {pre}…"));
-    let settings = lib.config.data_dir.join(backup::SETTINGS_FILE);
-    let dest = crate::api::backups::dir(&lib.config.data_dir).join(&pre);
-    lib.db
-        .with(|c| Ok::<_, rusqlite::Error>(backup::write(c, &lib.thumbs, Some(&settings), &dest, &job.ctl)))
-        .map_err(db_err)?
-        .map_err(|e| format!("could not back this library up ({e}); nothing was changed"))?;
+    let pre = backup_first.then(|| crate::api::backups::new_name().replace(".7z", "_pre_import.7z"));
+    if let Some(pre) = &pre {
+        lib.job_log(job, format!("Backing up this library to {pre}…"));
+        let settings = lib.config.data_dir.join(backup::SETTINGS_FILE);
+        let dest = crate::api::backups::dir(&lib.config.data_dir).join(pre);
+        lib.db
+            .with(|c| Ok::<_, rusqlite::Error>(backup::write(c, &lib.thumbs, Some(&settings), &dest, &job.ctl)))
+            .map_err(db_err)?
+            .map_err(|e| format!("could not back this library up ({e}); nothing was changed"))?;
+    }
     lib.job_log(job, "Reading the thumbnails…".into());
     backup::extract(&src, &dir, backup::Parts::Thumbnails).map_err(|e| e.to_string())?;
     {
@@ -1173,7 +1224,16 @@ fn import_library(lib: &Library, job: &Job, name: &str, roots: &BTreeMap<String,
         if let Some(ids) = std::fs::read_to_string(dir.join(DROPPED)).ok().and_then(|t| serde_json::from_str::<Vec<u64>>(&t).ok()) {
             staged.delete_many(&ids).map_err(|e| format!("the package's thumbnails: {e}"))?;
         }
+        // A sync's package leaves out the images this server has: take them from here.
+        let filled = staged.fill_missing_blobs(&lib.thumbs);
         staged.close();
+        let (filled, lost) = filled.map_err(|e| format!("the package's thumbnails: {e}"))?;
+        if filled > 0 {
+            lib.job_log(job, format!("{filled} thumbnail image(s) taken from this server's store."));
+        }
+        if lost > 0 {
+            lib.job_log(job, format!("{lost} thumbnail image(s) are in neither (Generate thumbnails makes them again)."));
+        }
     }
     {
         let tx = conn.transaction().map_err(db_err)?;
@@ -1198,12 +1258,119 @@ fn import_library(lib: &Library, job: &Job, name: &str, roots: &BTreeMap<String,
     })();
     lib.sidecars.clear();
     lib.jobs.send(ServerEvent::Resync);
-    rest.map_err(|e| format!("{e}; the library before the import is in {pre}"))?;
+    let before = pre.as_deref().map_or_else(String::new, |p| format!("; the library before the import is in {p}"));
+    rest.map_err(|e| format!("{e}{before}"))?;
     let _ = std::fs::remove_dir_all(lib.config.data_dir.join(IMPORT_DIR));
+    prune_pre_import(&lib.config.data_dir);
     preview.applied = true;
     job.set_result(crate::dupes::JobResult::Import(preview));
-    lib.job_log(job, format!("Imported. The library before the import is in {pre}."));
+    lib.job_log(job, format!("Imported{before}."));
     Ok(format!("{summary}; imported"))
+}
+
+// ── sync ─────────────────────────────────────────────────────────────────────
+
+/// Pull from or push to remote `remote`; the outcome is noted on the remote.
+fn sync(lib: &Library, job: &Job, remote: i64, direction: crate::sync::Direction) -> Result<String, String> {
+    use crate::sync::{Direction, Remote};
+    let stored = lib.accounts.with(|c| crate::sync::get(c, remote)).map_err(db_err)?.ok_or_else(|| format!("no remote server {remote}"))?;
+    let client = Remote::new(&stored.name, &stored.url, Some(&stored.token)).not_this_server(&lib.instance);
+    let result = (|| {
+        let (version,) = client.status()?;
+        crate::sync::check_versions(direction, &stored.name, &version)?;
+        match direction {
+            Direction::Pull => sync_pull(lib, job, &stored, &client),
+            Direction::Push => sync_push(lib, job, &stored, &client),
+        }
+    })();
+    let note = match &result {
+        Ok(m) => m.clone(),
+        Err(e) => format!("failed: {e}"),
+    };
+    let _ = lib.accounts.with(|c| crate::sync::record(c, remote, direction, &note));
+    result
+}
+
+/// This library becomes a copy of the remote's.
+fn sync_pull(lib: &Library, job: &Job, r: &crate::sync::Stored, client: &crate::sync::Remote) -> Result<String, String> {
+    use crate::api::backups;
+    lib.job_log(job, format!("Pulling the library of {} ({})…", r.name, r.url));
+    let keys = lib.thumbs.blob_keys().map_err(|e| format!("thumbnail store: {e}"))?;
+    let have = client.send_keys(&keys)?;
+    let detail = client.run_job(&serde_json::json!({"kind": "sync_export", "have": have}), &|l| lib.job_log(job, l), &|| job.stopped())?;
+    let message = detail["job"]["message"].as_str().unwrap_or_default();
+    let name = message.split(": ").next().filter(|n| backups::valid(n)).ok_or_else(|| format!("{}: no package in {message:?}", r.name))?.to_string();
+    let local = backups::new_name().replace(".7z", "_pull.7z");
+    let dest = backups::dir(&lib.config.data_dir).join(&local);
+    lib.job_log(job, format!("Downloading {name}…"));
+    let got = client.download(&format!("/api/backups/{name}"), &dest, &job.ctl);
+    let _ = client.delete(&format!("/api/backups/{name}"));
+    let size = got?;
+    lib.job_log(job, format!("Downloaded {:.1} MB.", size as f64 / (1024.0 * 1024.0)));
+    let rules: Vec<_> = r.rules.iter().map(|p| p.toward(crate::sync::Direction::Pull)).collect();
+    let imported = import_library(lib, job, &local, &BTreeMap::new(), &rules, true, r.backup_first);
+    let _ = std::fs::remove_file(&dest);
+    Ok(format!("pulled from {}: {}", r.name, imported?))
+}
+
+/// The remote's library becomes a copy of this one.
+fn sync_push(lib: &Library, job: &Job, r: &crate::sync::Stored, client: &crate::sync::Remote) -> Result<String, String> {
+    use crate::api::backups;
+    lib.job_log(job, format!("Pushing this library to {} ({})…", r.name, r.url));
+    let have = client.blob_keys()?;
+    let name = backups::new_name().replace(".7z", "_push.7z");
+    let src = backups::dir(&lib.config.data_dir).join(&name);
+    lib.job_log(job, format!("Packing the library ({} thumbnail image(s) are there already)…", have.len()));
+    let settings = lib.config.data_dir.join(stl_core::backup::SETTINGS_FILE);
+    let packed = lib
+        .db
+        .with(|c| Ok::<_, rusqlite::Error>(stl_core::backup::write_sync(c, &lib.thumbs, Some(&settings), &src, &have, &job.ctl)))
+        .map_err(db_err)?
+        .map_err(|e| e.to_string());
+    let (size, (sent, skipped)) = packed?;
+    lib.job_log(job, format!("{:.1} MB with {sent} of {} thumbnail image(s). Uploading…", size as f64 / (1024.0 * 1024.0), sent + skipped));
+    let uploaded = client.upload("/api/backups/upload", &src, &job.ctl);
+    let _ = std::fs::remove_file(&src);
+    let uploaded = uploaded?;
+    let there = uploaded["name"].as_str().ok_or_else(|| format!("{}: no package name in the answer", r.name))?.to_string();
+    let rules: Vec<_> = r.rules.iter().map(|p| p.toward(crate::sync::Direction::Push)).collect();
+    let request = serde_json::json!({
+        "kind": "import_library", "name": there, "rules": rules, "apply": true, "confirm": "REPLACE", "backup_first": r.backup_first,
+    });
+    let detail = client.run_job(&request, &|l| lib.job_log(job, l), &|| job.stopped());
+    let _ = client.delete(&format!("/api/backups/{there}"));
+    let detail = detail?;
+    Ok(format!("pushed to {}: {}", r.name, detail["job"]["message"].as_str().unwrap_or("imported")))
+}
+
+/// Pack this library for a pulling server: everything but the thumbnails it has.
+fn sync_export(lib: &Library, job: &Job, have: &str) -> Result<String, String> {
+    let path = crate::sync::have_path(&lib.config.data_dir, have)?;
+    let keys = crate::sync::decode_keys(&std::fs::read(&path).map_err(|e| e.to_string())?)?;
+    let name = crate::api::backups::new_name().replace(".7z", "_sync.7z");
+    let dest = crate::api::backups::dir(&lib.config.data_dir).join(&name);
+    lib.job_log(job, format!("Packing the library for a sync ({} thumbnail image(s) are there already)…", keys.len()));
+    let settings = lib.config.data_dir.join(stl_core::backup::SETTINGS_FILE);
+    let packed = lib
+        .db
+        .with(|c| Ok::<_, rusqlite::Error>(stl_core::backup::write_sync(c, &lib.thumbs, Some(&settings), &dest, &keys, &job.ctl)))
+        .map_err(db_err)?
+        .map_err(|e| e.to_string());
+    let _ = std::fs::remove_file(&path);
+    let (size, (sent, skipped)) = packed?;
+    Ok(format!("{name}: {:.1} MB, {sent} of {} thumbnail image(s) sent", size as f64 / (1024.0 * 1024.0), sent + skipped))
+}
+
+/// Keep the newest [`KEEP_PRE_IMPORT`] pre-import backups (a sync makes one each time).
+fn prune_pre_import(data_dir: &std::path::Path) {
+    let folder = crate::api::backups::dir(data_dir);
+    let mut names: Vec<String> = std::fs::read_dir(&folder)
+        .map(|rd| rd.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| crate::api::backups::valid(n) && n.ends_with("_pre_import.7z")).collect())
+        .unwrap_or_default();
+    names.sort_by(|a, b| b.cmp(a));
+    for old in names.iter().skip(KEEP_PRE_IMPORT) {
+        let _ = std::fs::remove_file(folder.join(old));
+    }
 }
 
 /// The package's library settings (when it has them), keeping this server's

@@ -385,6 +385,22 @@ Maintenance is in **Settings**: the **Maintenance** tab (editors run its jobs) h
 
     The library here is backed up first (`…_pre_import.7z`). User accounts and the trash
     folder setting stay; while the import runs, edits wait.
+  - **Sync with other servers** keeps this server and another one alike; this server does
+    all the talking, so the other one only has to be reachable from here.
+    - **Add a server…** takes its name, address (`http://nas:8770`) and one of its
+      administrators. This server signs in there once and keeps only the session, not the
+      password. When that session ends (unused for 30 days, or the password changed
+      there), use **Sign in again** (the key button).
+    - **Folder rules** (the folders button) pair a folder here with the same folder there
+      (`D:\Minis` ⇄ `/library`); the folders below follow, both ways. You can also choose
+      whether the receiving side backs up first (on by default).
+    - **Pull…** makes this library a copy of the other server's; **Push…** makes the other
+      server's a copy of this one. The dialog shows each folder, where it goes on the
+      receiving side, and whether it exists there. Type `REPLACE` to start.
+
+    A sync replaces the whole receiving library, so edit on one side at a time and sync
+    before switching. Only the thumbnails the receiving side lacks are sent. Both servers
+    must run the same version, or the receiving side a newer one.
 - **Delete all records** (administrators) — empties the library after you type `DELETE`.
   Archive files are not touched. Back up first.
 

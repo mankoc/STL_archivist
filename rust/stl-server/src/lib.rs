@@ -20,6 +20,7 @@ pub mod library_settings;
 pub mod maint;
 pub mod monitor;
 pub mod sidecars;
+pub mod sync;
 pub mod tools;
 pub mod worker;
 pub mod workers;
@@ -53,6 +54,8 @@ pub struct Library {
     pub view_loads: tokio::sync::Semaphore,
     /// An imported library is replacing this one (`import_library`): writes wait.
     pub importing: std::sync::atomic::AtomicBool,
+    /// Random, for this run: a sync refuses a "remote" that is this server.
+    pub instance: String,
     _lock: LibraryLock,
 }
 
@@ -108,7 +111,7 @@ impl Library {
         let accounts_path = config.data_dir.join(accounts::DB_FILE);
         let accounts = Pool::new(&accounts_path);
         accounts
-            .with(accounts::ensure_schema)
+            .with(|c| accounts::ensure_schema(c).and_then(|_| sync::ensure_schema(c)))
             .map_err(|e| format!("accounts {}: {e}", accounts_path.display()))?;
         Ok(Library {
             db: Pool::new(&config.db_path()),
@@ -123,6 +126,7 @@ impl Library {
             monitor: monitor::Monitor::default(),
             view_loads: tokio::sync::Semaphore::new(2),
             importing: Default::default(),
+            instance: sync::new_instance(),
             config,
             _lock: lock,
         })

@@ -135,6 +135,13 @@ stl_database/
   remapped by `libraries::import_roots`) replaces the open library's content through
   `backup::replace_live` (SQLite's online backup) and `ThumbStore::replace_data`, with
   `Library.importing` refusing writes meanwhile.
+- **Sync:** `sync.rs` (remotes in `server.db`'s `sync_remotes`, never `settings.json`; the
+  blocking `Remote` client) and the `sync` / `sync_export` jobs. The server where a sync is
+  started makes every request; the receiving side runs the import. Tokens are remote
+  sessions, never sent to clients; passwords are never stored. The receiver must not be
+  older than the sender (`check_versions`); raise `sync::MIN_VERSION` when the sync wire
+  format changes. Only thumbnails the receiver lacks travel (`backup::write_sync`, filled by
+  `ThumbStore::fill_missing_blobs` in the import).
 - Spawned helpers (`llama-server`, the desktop's local server) call
   `stl_proc::end_with_parent`.
 

@@ -7,6 +7,7 @@
 //! library is in use. Restoring replaces those files and must run with the
 //! library closed (the caller holds the library lock).
 
+use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::{self, BufReader};
 use std::path::{Path, PathBuf};
@@ -89,6 +90,37 @@ fn push_file(w: &mut ArchiveWriter<File>, name: &str, path: &Path) -> Result<()>
 /// library's `settings.json`, when there is one. Progress counts the three
 /// steps (database, thumbnails, archive). Returns the backup's size in bytes.
 pub fn write(conn: &Connection, store: &ThumbStore, settings: Option<&Path>, dest: &Path, ctl: &Control) -> Result<u64> {
+    write_with(conn, settings, dest, ctl, |path| store.copy_compacted(path).map_err(|e| BackupError::Store(e.to_string())))
+}
+
+/// A sync's package (`.7z`, the backup layout): like [`write`], but its
+/// thumbnail store holds every image's reference and only the blobs not in
+/// `have` (the receiver has those; the import completes the store from its
+/// own). Not a backup to keep. Returns its size and `(blobs sent, blobs skipped)`.
+pub fn write_sync(
+    conn: &Connection,
+    store: &ThumbStore,
+    settings: Option<&Path>,
+    dest: &Path,
+    have: &HashSet<Vec<u8>>,
+    ctl: &Control,
+) -> Result<(u64, (u64, u64))> {
+    let mut counts = (0, 0);
+    let size = write_with(conn, settings, dest, ctl, |path| {
+        let dir = Scratch(path.with_extension("store"));
+        let _ = fs::remove_dir_all(&dir.0);
+        let partial = ThumbStore::open(&dir.0).map_err(|e| BackupError::Store(e.to_string()))?;
+        let copied = store.copy_partial(&partial, have, ctl);
+        partial.close();
+        counts = copied.map_err(|e| if ctl.is_stopped() { BackupError::Stopped } else { BackupError::Store(e.to_string()) })?;
+        fs::rename(dir.0.join(LMDB_DATA), path)?;
+        Ok(())
+    })?;
+    Ok((size, counts))
+}
+
+/// [`write`] with the thumbnail store's file written by `thumbnails` (to the path given).
+fn write_with(conn: &Connection, settings: Option<&Path>, dest: &Path, ctl: &Control, thumbnails: impl FnOnce(&Path) -> Result<()>) -> Result<u64> {
     let dir = dest.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
     fs::create_dir_all(dir)?;
     let stem = dest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "backup".into());
@@ -104,7 +136,7 @@ pub fn write(conn: &Connection, store: &ThumbStore, settings: Option<&Path>, des
 
     let lmdb = Scratch(dir.join(format!(".{stem}.lmdb.tmp")));
     let _ = fs::remove_file(&lmdb.0);
-    store.copy_compacted(&lmdb.0).map_err(|e| BackupError::Store(e.to_string()))?;
+    thumbnails(&lmdb.0)?;
     ctl.advance(1);
     if ctl.is_stopped() {
         return Err(BackupError::Stopped);
@@ -366,6 +398,31 @@ mod tests {
         assert!(staged.join(DB_FILE).is_file() && !staged.join(THUMB_DIR).exists());
         extract(&src, &staged, Parts::Thumbnails).unwrap();
         assert!(staged.join(THUMB_DIR).join(LMDB_DATA).is_file());
+    }
+
+    #[test]
+    fn a_sync_package_sends_only_missing_thumbnails() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = Connection::open(dir.path().join("live.db")).unwrap();
+        conn.execute_batch("CREATE TABLE models (id INTEGER PRIMARY KEY)").unwrap();
+        let store = ThumbStore::open(&dir.path().join("thumbs")).unwrap();
+        store.put_many(&[(1, b"known".as_slice()), (2, b"new".as_slice())]).unwrap();
+        let receiver = ThumbStore::open(&dir.path().join("receiver")).unwrap();
+        receiver.put_many(&[(7, b"known".as_slice())]).unwrap();
+        let have: HashSet<Vec<u8>> = receiver.blob_keys().unwrap().into_iter().collect();
+
+        let src = dir.path().join("sync.7z");
+        let (size, counts) = write_sync(&conn, &store, None, &src, &have, &Control::new()).unwrap();
+        assert!(size > 0);
+        assert_eq!(counts, (1, 1), "one blob sent, one skipped");
+        let leftovers: Vec<_> = fs::read_dir(dir.path()).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert!(!leftovers.iter().any(|n| n.ends_with(".tmp") || n.ends_with(".store")), "{leftovers:?}");
+
+        let staged = dir.path().join("staged");
+        extract(&src, &staged, Parts::All).unwrap();
+        let partial = ThumbStore::open(&staged.join(THUMB_DIR)).unwrap();
+        assert_eq!(partial.fill_missing_blobs(&receiver).unwrap(), (1, 0));
+        assert_eq!(partial.get_many(&[1, 2]).unwrap(), vec![(1, b"known".to_vec()), (2, b"new".to_vec())]);
     }
 
     #[test]
