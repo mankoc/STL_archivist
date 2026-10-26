@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "about",
+  "description": "The bundled About page: only reads the app's version.",
+  "windows": ["about"],
+  "local": true,
+  "permissions": ["core:app:allow-version"]
+}

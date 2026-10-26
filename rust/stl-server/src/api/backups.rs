@@ -1,6 +1,9 @@
 //! Library backups (administrators): the `backup` job writes them to
-//! `<data dir>/backups`; these routes list, download and delete them. Restoring
-//! replaces the open database, so it is the offline `stl-server restore` command.
+//! `<data dir>/backups`; these routes list, download, upload and delete them.
+//! A backup is also the package that moves a library to another server: the
+//! `import_library` job replaces this library with one from the list (an
+//! upload, or a file copied into the folder); restoring offline is
+//! `stl-server restore`.
 
 use std::path::{Path, PathBuf};
 
@@ -9,7 +12,9 @@ use axum::body::Body;
 use axum::extract::{Path as UrlPath, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use futures_util::StreamExt;
 use serde::Serialize;
+use tokio::io::AsyncWriteExt;
 use utoipa::ToSchema;
 
 use crate::accounts::Role;
@@ -31,7 +36,7 @@ pub fn new_name() -> String {
 }
 
 /// A name this server could have written: no separators, no way out of the folder.
-fn valid(name: &str) -> bool {
+pub fn valid(name: &str) -> bool {
     name.starts_with(PREFIX)
         && name.ends_with(".7z")
         && name.len() < 100
@@ -39,15 +44,20 @@ fn valid(name: &str) -> bool {
         && !name.contains("..")
 }
 
-fn path_of(lib: &AppState, name: &str) -> Result<PathBuf, ApiError> {
+/// The backup `name` in `data_dir`, when the name is valid and the file is there.
+pub fn package(data_dir: &Path, name: &str) -> Result<PathBuf, ApiError> {
     if !valid(name) {
         return Err(ApiError::bad_request(format!("{name:?} is not a backup name")));
     }
-    let path = dir(&lib.config.data_dir).join(name);
+    let path = dir(data_dir).join(name);
     if !path.is_file() {
         return Err(ApiError::not_found(format!("no backup {name}")));
     }
     Ok(path)
+}
+
+fn path_of(lib: &AppState, name: &str) -> Result<PathBuf, ApiError> {
+    package(&lib.config.data_dir, name)
 }
 
 #[derive(Serialize, ToSchema)]
@@ -102,6 +112,46 @@ pub async fn download(State(lib): State<AppState>, me: CurrentUser, UrlPath(name
         h.insert(header::CONTENT_LENGTH, HeaderValue::from(len));
     }
     Ok(resp)
+}
+
+/// An upload being written: removed unless it was kept.
+struct Partial(PathBuf);
+
+impl Drop for Partial {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// Upload a library package: the body is a backup `.7z` (from this server, another
+/// one or the desktop app). It joins the backups list (`…_upload.7z`), ready to import.
+#[utoipa::path(post, path = "/api/backups/upload", tag = "backups",
+    request_body(content_type = "application/octet-stream", description = "The package (.7z)"),
+    responses((status = 201, body = BackupFile), (status = 400, body = crate::error::ErrorBody), (status = 403, body = crate::error::ErrorBody)))]
+pub async fn upload(State(lib): State<AppState>, me: CurrentUser, body: Body) -> Result<(StatusCode, Json<BackupFile>), ApiError> {
+    me.require(Role::Admin)?;
+    let folder = dir(&lib.config.data_dir);
+    tokio::fs::create_dir_all(&folder).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let partial = Partial(folder.join(format!(".upload-{nanos}.tmp")));
+    let mut file = tokio::fs::File::create(&partial.0).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    let mut stream = body.into_data_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| ApiError::bad_request(format!("the upload broke off: {e}")))?;
+        file.write_all(&chunk).await.map_err(|e| ApiError::internal(e.to_string()))?;
+    }
+    file.flush().await.map_err(|e| ApiError::internal(e.to_string()))?;
+    drop(file);
+    let tmp = partial.0.clone();
+    lib.run(move |_| stl_core::backup::check_package(&tmp).map_err(|e| ApiError::bad_request(format!("not a library package: {e}"))))
+        .await?;
+    let stem = new_name().replace(".7z", "_upload");
+    let name = (1..).map(|n| if n == 1 { format!("{stem}.7z") } else { format!("{stem}{n}.7z") }).find(|n| !folder.join(n).exists()).unwrap_or_default();
+    std::fs::rename(&partial.0, folder.join(&name)).map_err(|e| ApiError::internal(e.to_string()))?;
+    std::mem::forget(partial);
+    let md = std::fs::metadata(folder.join(&name)).map_err(|e| ApiError::internal(e.to_string()))?;
+    let modified = md.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs() as i64);
+    Ok((StatusCode::CREATED, Json(BackupFile { name, size: md.len(), modified })))
 }
 
 /// Delete a backup.

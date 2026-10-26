@@ -31,6 +31,11 @@ impl SidecarQueue {
     fn take(&self) -> Vec<String> {
         std::mem::take(&mut *self.pending.lock().unwrap_or_else(|e| e.into_inner())).into_iter().collect()
     }
+
+    /// Forget the waiting folders (the library they came from was replaced).
+    pub fn clear(&self) {
+        self.take();
+    }
 }
 
 /// The folder an archive lies in, as the exporter expects it (`str(Path(p).parent)`).

@@ -174,12 +174,20 @@ keeps everything it stores in `/data`, and reads the archives where you mount th
 update only when you choose to). **Backing up:** *Settings → Backups*, or copy the `data`
 folder while the container is stopped.
 
-**Moving an existing library into Docker:** stop the old server, copy its data directory into
-`data/` (then `sudo chown -R 1000:1000 data`), start the container, and in **Libraries** click
-**Move** on each folder and choose its path under `/library` (*Check*, then *Move*): records,
-edits and thumbnails stay and nothing is re-read. Moved by copying the archive folders with
-their `METADATA.7z` sidecars instead, a new library takes the sidecars' records as they are
-and does not open the archives (see [sidecars](user-guide.md)).
+**Moving an existing library into Docker:**
+
+1. On the old server (or the desktop app), click *Settings → Backups & transfer → Export
+   library*.
+2. In the container's web client, click **Import library…** and upload that file.
+3. Give each folder its path under `/library`. One rule does it for all: *Replace the path
+   start* `D:\Minis` *with* `/library`.
+4. **Check again**, type `REPLACE`, and import.
+
+Records, edits, tags and thumbnails come along and nothing is re-read
+([Moving an existing library](#moving-an-existing-library) has the other ways). Moved by
+copying the archive folders with their `METADATA.7z` sidecars instead, a new library takes
+the sidecars' records as they are and does not open the archives (see
+[sidecars](user-guide.md)).
 
 Without Compose, the same container:
 
@@ -456,6 +464,20 @@ Records store their archive paths relative to their **library folder** (a librar
 and one or more folders, each with a root and a permanent id), in a form that is the same on
 every operating system; the only machine-specific part is each folder's root.
 
+**Export and import** (both servers running, no command line): *Settings → Backups &
+transfer*.
+
+- *Export library* on the old server downloads a package (a backup).
+- *Import library…* on the new one uploads it, or takes a backup already in its
+  `backups/` folder. It lists the package's folders and checks each at the root you give
+  it: by hand, *Browse…*, or one rule for all (*replace the path start* `D:\Minis` with
+  `/library`).
+- Typing `REPLACE` then replaces the new server's library while it runs. That library is
+  backed up first (`…_pre_import.7z`), and user accounts (`server.db`) and its trash
+  folder setting stay.
+- The import needs free space for the unpacked package beside the data directory
+  (`import/`, removed afterwards). The steps below do the same by hand.
+
 **Same paths** (same machine, or the archives at the same paths): start the server on the
 copied data directory. Done.
 
@@ -503,7 +525,9 @@ stl-server restore /path/to/stlLibrary_backup_<time>.7z --data-dir /var/lib/stll
 ```
 
 The files it replaces are moved to `pre-restore-<time>` in the data directory. Backups from
-the earlier desktop application's *Backup / Restore* work too.
+the earlier desktop application's *Backup / Restore* work too. While the server runs,
+*Settings → Backups & transfer → Import library…* does the same from the web client (with
+each folder mapped to its place, see [Moving an existing library](#moving-an-existing-library)).
 
 **Upgrades.** Stop the server, replace `stl-server` and the `web` folder (or run the new
 installer), start it again. The database is upgraded automatically on start; make a backup

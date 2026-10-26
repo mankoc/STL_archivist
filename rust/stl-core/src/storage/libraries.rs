@@ -484,10 +484,16 @@ pub fn check_relocate(conn: &Connection, id: i64, new_root: &str, ctl: Option<&c
             return Err(format!("{new_root} overlaps the library {name} ({root})"));
         }
     }
-    let mut out = RelocateCheck {
-        inner: inner.iter().filter_map(|(i, r)| RelPath::from_abs(&lib.root, r).map(|rel| (*i, rel.resolve(&new_root)))).collect(),
-        ..Default::default()
-    };
+    let mut out = count_found(conn, id, &new_root, ctl)?;
+    out.inner = inner.iter().filter_map(|(i, r)| RelPath::from_abs(&lib.root, r).map(|rel| (*i, rel.resolve(&new_root)))).collect();
+    Ok(out)
+}
+
+/// Which of folder `id`'s archives (its own records, not those of folders
+/// inside it) are under `root`; `inner` stays empty.
+pub fn count_found(conn: &Connection, id: i64, root: &str, ctl: Option<&crate::control::Control>) -> std::result::Result<RelocateCheck, String> {
+    let new_root = clean_root(root);
+    let mut out = RelocateCheck::default();
     let mut st = conn.prepare("SELECT id, rel_path FROM models WHERE library_id = ?1 ORDER BY id").map_err(|e| e.to_string())?;
     let rows: Vec<(i64, String)> =
         st.query_map([id], |r| Ok((r.get(0)?, r.get(1)?))).map_err(|e| e.to_string())?.collect::<Result<_>>().map_err(|e| e.to_string())?;
@@ -520,9 +526,11 @@ pub fn check_relocate(conn: &Connection, id: i64, new_root: &str, ctl: Option<&c
 /// passed back in): the new root, the roots of the libraries inside it, and
 /// with `fix_case` the spelling of paths found only with another case.
 pub fn relocate(tx: &Transaction, id: i64, new_root: &str, check: &RelocateCheck, fix_case: bool) -> Result<()> {
-    tx.execute("UPDATE libraries SET root = ?2 WHERE id = ?1", params![id, clean_root(new_root)])?;
-    for (inner, root) in &check.inner {
-        tx.execute("UPDATE libraries SET root = ?2 WHERE id = ?1", params![inner, root])?;
+    let moves = std::iter::once((id, clean_root(new_root))).chain(check.inner.iter().cloned());
+    for (lib, root) in moves {
+        let old: String = tx.query_row("SELECT root FROM libraries WHERE id = ?1", [lib], |r| r.get(0))?;
+        tx.execute("UPDATE libraries SET root = ?2 WHERE id = ?1", params![lib, root])?;
+        move_folder_images(tx, lib, &old, &root)?;
     }
     if fix_case {
         let mut up = tx.prepare("UPDATE OR IGNORE models SET rel_path = ?2, rel_folder = ?3 WHERE id = ?1")?;
@@ -531,6 +539,101 @@ pub fn relocate(tx: &Transaction, id: i64, new_root: &str, check: &RelocateCheck
         }
     }
     Ok(())
+}
+
+/// Point folder `id`'s images from beside its archives (the crawler stores
+/// them by absolute path) at `new_root` where they lay under `old_root`.
+fn move_folder_images(tx: &Transaction, id: i64, old_root: &str, new_root: &str) -> Result<usize> {
+    let sql = format!(
+        "SELECT i.id, i.filename FROM images i JOIN models m ON m.id = i.model_id WHERE m.library_id = ?1 AND {}",
+        super::maintenance::folder_image_sql("i.filename")
+    );
+    let rows: Vec<(i64, String)> = tx.prepare(&sql)?.query_map([id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_>>()?;
+    let mut up = tx.prepare("UPDATE images SET filename = ?2 WHERE id = ?1")?;
+    let mut moved = 0;
+    for (image, name) in rows {
+        if let Some(rel) = foreign_rel(old_root, &name).filter(|r| !r.is_empty()) {
+            up.execute(params![image, relpath::join(new_root, &rel)])?;
+            moved += 1;
+        }
+    }
+    Ok(moved)
+}
+
+// ── importing a library from another machine ────────────────────────────────
+
+/// `path` relative to `root` (`""` for the root itself, `/` separators) as the
+/// machine that stored them sees it, whatever this one is: `\` and `/` both
+/// separate, and Windows paths (a drive, or `\`) ignore letter case. For roots
+/// and image paths copied from another machine.
+pub fn foreign_rel(root: &str, path: &str) -> Option<String> {
+    let norm = |p: &str| p.replace('\\', "/").trim_end_matches('/').to_string();
+    let (r, p) = (norm(root), norm(path));
+    let windows = root.contains('\\') || root.as_bytes().get(1) == Some(&b':');
+    let same = |a: &str, b: &str| if windows { a.to_lowercase() == b.to_lowercase() } else { a == b };
+    if same(&r, &p) {
+        return Some(String::new());
+    }
+    let prefix = format!("{r}/");
+    let head = p.get(..prefix.len())?;
+    (p.len() > prefix.len() && same(head, &prefix)).then(|| p[prefix.len()..].to_string())
+}
+
+/// One folder's root in [`import_plan`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct Rooted {
+    pub id: i64,
+    pub name: String,
+    pub old: String,
+    pub new: String,
+}
+
+/// The folders' roots once `map` (folder id → its root on this machine)
+/// applies to a library copied from another machine: a folder inside a mapped
+/// one moves with it (the deepest mapped folder around it decides), the others
+/// keep their roots. Refuses new roots that overlap where the old ones did not.
+pub fn import_plan(conn: &Connection, map: &[(i64, String)]) -> std::result::Result<Vec<Rooted>, String> {
+    let mut st = conn.prepare("SELECT id, name, root FROM libraries ORDER BY id").map_err(|e| e.to_string())?;
+    let folders: Vec<(i64, String, String)> =
+        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).map_err(|e| e.to_string())?.collect::<Result<_>>().map_err(|e| e.to_string())?;
+    let old_root = |id: i64| folders.iter().find(|(i, ..)| *i == id).map(|(.., r)| r.as_str());
+    if let Some((id, _)) = map.iter().find(|(id, _)| old_root(*id).is_none()) {
+        return Err(format!("no library folder {id}"));
+    }
+    let plan: Vec<Rooted> = folders
+        .iter()
+        .map(|(id, name, root)| {
+            let around = map
+                .iter()
+                .filter_map(|(m, new)| {
+                    let old = old_root(*m)?;
+                    foreign_rel(old, root).map(|rel| (old.len(), new, rel))
+                })
+                .max_by_key(|(len, ..)| *len);
+            let new = around.map_or_else(|| root.clone(), |(_, new, rel)| clean_root(&relpath::join(&clean_root(new), &rel)));
+            Rooted { id: *id, name: name.clone(), old: root.clone(), new }
+        })
+        .collect();
+    for a in &plan {
+        for b in plan.iter().filter(|b| b.id != a.id) {
+            let same = path_key(&a.new) == path_key(&b.new);
+            if same || (contains(&a.new, &b.new) && foreign_rel(&a.old, &b.old).is_none()) {
+                return Err(format!("{} ({}) would overlap {} ({})", b.new, b.name, a.new, a.name));
+            }
+        }
+    }
+    Ok(plan)
+}
+
+/// Give the folders of a library copied from another machine their roots
+/// here ([`import_plan`]); their folder images follow. Returns the plan.
+pub fn import_roots(tx: &Transaction, map: &[(i64, String)]) -> std::result::Result<Vec<Rooted>, String> {
+    let plan = import_plan(tx, map)?;
+    for m in plan.iter().filter(|m| m.new != m.old) {
+        tx.execute("UPDATE libraries SET root = ?2 WHERE id = ?1", params![m.id, m.new]).map_err(|e| e.to_string())?;
+        move_folder_images(tx, m.id, &m.old, &m.new).map_err(|e| e.to_string())?;
+    }
+    Ok(plan)
 }
 
 // ── the one-way migration from absolute paths ───────────────────────────────
@@ -1066,5 +1169,58 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("other").join("in")).unwrap();
         let err = check_relocate(&conn, lib, &dir.path().join("other").join("in").to_string_lossy(), None).unwrap_err();
         assert!(err.contains("overlaps"), "{err} {other}");
+    }
+
+    #[test]
+    fn foreign_paths_compare_as_their_machine_did() {
+        assert_eq!(foreign_rel(r"D:\Minis", r"d:\MINIS\Studio\x.zip").as_deref(), Some("Studio/x.zip"));
+        assert_eq!(foreign_rel(r"D:\Minis\", r"D:\Minis").as_deref(), Some(""));
+        assert_eq!(foreign_rel(r"D:\", r"D:\Minis\x.zip").as_deref(), Some("Minis/x.zip"));
+        assert_eq!(foreign_rel(r"D:\Minis", r"D:\Minis2\x.zip"), None);
+        assert_eq!(foreign_rel("/srv/STL", "/srv/STL/a/b.zip").as_deref(), Some("a/b.zip"));
+        assert_eq!(foreign_rel("/srv/STL", "/srv/stl/a.zip"), None, "POSIX paths keep their case");
+        assert_eq!(foreign_rel("/", "/x/y").as_deref(), Some("x/y"));
+        assert_eq!(foreign_rel("/srv/STL", "relative.png"), None);
+    }
+
+    fn folder(conn: &Connection, name: &str, root: &str) -> i64 {
+        conn.execute("INSERT INTO libraries (uuid, name, root, monitored) VALUES (?1, ?1, ?2, 0)", params![name, root]).unwrap();
+        conn.last_insert_rowid()
+    }
+
+    #[test]
+    fn imported_folders_take_their_new_roots() {
+        let (dir, mut conn) = db();
+        // A library catalogued on Windows, opened anywhere.
+        let minis = folder(&conn, "Minis", r"D:\Minis");
+        let studio = folder(&conn, "Studio", r"D:\Minis\Studio");
+        let other = folder(&conn, "Other", r"D:\Other");
+        let kept = folder(&conn, "Kept", r"E:\Kept");
+        let dragon = insert(&conn, studio, "Dragon/Dragon.zip");
+        conn.execute("INSERT INTO images (model_id, filename) VALUES (?1, ?2)", params![dragon, r"D:\Minis\Studio\Dragon\cover.jpg"]).unwrap();
+        conn.execute("INSERT INTO images (model_id, filename) VALUES (?1, 'inside/render.png')", [dragon]).unwrap();
+        let new_minis = dir.path().join("library").to_string_lossy().into_owned();
+        let new_other = dir.path().join("other").to_string_lossy().into_owned();
+
+        let tx = conn.transaction().unwrap();
+        let plan = import_roots(&tx, &[(minis, new_minis.clone()), (other, new_other.clone())]).unwrap();
+        tx.commit().unwrap();
+        let root = |id| plan.iter().find(|r| r.id == id).unwrap().new.clone();
+        assert_eq!(root(minis), new_minis);
+        assert_eq!(root(studio), relpath::join(&new_minis, "Studio"), "an inner folder moves along");
+        assert_eq!(root(other), new_other);
+        assert_eq!(root(kept), r"E:\Kept", "unmapped folders keep their roots");
+        assert_eq!(get(&conn, studio).unwrap().unwrap().root, relpath::join(&new_minis, "Studio"));
+        let images: Vec<String> =
+            conn.prepare("SELECT filename FROM images ORDER BY id").unwrap().query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect();
+        assert_eq!(images, [relpath::join(&new_minis, "Studio/Dragon/cover.jpg"), "inside/render.png".to_string()]);
+
+        // Two folders may trade places; two may not share a root or nest anew.
+        assert!(import_plan(&conn, &[(minis, new_other.clone()), (other, new_minis.clone())]).is_ok());
+        let err = import_plan(&conn, &[(other, new_minis.clone())]).unwrap_err();
+        assert!(err.contains("overlap"), "{err}");
+        let err = import_plan(&conn, &[(other, relpath::join(&new_minis, "Inside"))]).unwrap_err();
+        assert!(err.contains("overlap"), "{err}");
+        assert!(import_plan(&conn, &[(999, new_minis)]).is_err());
     }
 }

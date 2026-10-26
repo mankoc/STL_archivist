@@ -18,10 +18,34 @@
   position: relative;
   flex: none;
   padding: 6px 8px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Thin column separators, just off the background. */
+.headerCell,
+.cell {
+  border-right: 1px solid light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-6));
 }
 
 .headerButton {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
+}
+
+/* The handle a column is dragged by: faint until its header is pointed at. */
+.grip {
+  display: flex;
+  flex: none;
+  margin-left: -4px;
+  cursor: grab;
+  color: var(--mantine-color-dimmed);
+  opacity: 0.35;
+}
+
+.headerCell:hover .grip {
+  opacity: 1;
 }
 
 /* The column a dragged header would take the place of. */

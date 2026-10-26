@@ -386,6 +386,19 @@ impl ThumbStore {
         swapped?;
         Ok((before, size(&data)))
     }
+
+    /// Replace every thumbnail with those of `data`, another store's
+    /// `data.mdb` (a backup's, for one), moved into place while the
+    /// environment is closed. Every other use of the store waits meanwhile.
+    pub fn replace_data(&self, data: &Path) -> Result<()> {
+        let mut exclusive = self.inner.write().unwrap_or_else(|e| e.into_inner());
+        let inner = exclusive.take().ok_or_else(closed)?;
+        inner.env.prepare_for_closing().wait();
+        let moved = std::fs::rename(data, self.dir.join("data.mdb"));
+        // The store reopens either way (on the old data when the move failed).
+        *exclusive = Some(open_env(&self.dir)?);
+        Ok(moved?)
+    }
 }
 
 #[cfg(test)]
@@ -407,6 +420,20 @@ mod tests {
         // xxhash.xxh3_128_digest(b"abc").hex() in Python.
         let hex: String = xxh3_digest(b"abc").iter().map(|b| format!("{b:02x}")).collect();
         assert_eq!(hex, "06b05ab6733a618578af5f94892f3950");
+    }
+
+    #[test]
+    fn replaced_data_brings_its_thumbnails() {
+        let (dir, s) = store();
+        s.put_many(&[(1, b"mine")]).unwrap();
+        let theirs = ThumbStore::open(&dir.path().join("theirs.lmdb")).unwrap();
+        theirs.put_many(&[(2, b"theirs")]).unwrap();
+        theirs.close();
+        s.replace_data(&dir.path().join("theirs.lmdb").join("data.mdb")).unwrap();
+        assert_eq!(get(&s, 1), None);
+        assert_eq!(get(&s, 2).as_deref(), Some(&b"theirs"[..]));
+        s.put_many(&[(3, b"after")]).unwrap();
+        assert_eq!(get(&s, 3).as_deref(), Some(&b"after"[..]), "the store is writable again");
     }
 
     #[test]

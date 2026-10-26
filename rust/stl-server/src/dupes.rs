@@ -28,6 +28,47 @@ pub enum JobResult {
     AiSuggestion(Box<crate::ai::AiSuggestion>),
     /// What moving a library to a new root found (`relocate_library`).
     Relocation(Relocation),
+    /// A package's folders and where their archives are here (`import_library`).
+    Import(ImportPreview),
+}
+
+/// A library package checked (and imported) by `import_library`.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ImportPreview {
+    /// The package (a name in the backups list).
+    pub name: String,
+    /// Its outermost folders; the folders inside them move along.
+    pub folders: Vec<ImportFolder>,
+    /// Records in the package.
+    pub models: i64,
+    /// It replaced this server's library (else it was only checked).
+    pub applied: bool,
+}
+
+/// One of a package's outermost folders.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ImportFolder {
+    pub uuid: String,
+    pub name: String,
+    /// The library it is a folder of.
+    pub library: String,
+    /// Its root where the package was made.
+    pub root: String,
+    /// Its root here: the one given, else the old one (kept when nothing maps it).
+    pub new_root: String,
+    /// `new_root` is a folder on this server.
+    pub root_exists: bool,
+    /// Records in it and the folders inside it.
+    pub models: i64,
+    /// Folders inside it, moved along.
+    pub inner: usize,
+    /// Archives found under `new_root`.
+    pub found: usize,
+    /// Found only with another letter case.
+    pub case_only: usize,
+    pub missing: usize,
+    /// Some relative paths not found.
+    pub missing_examples: Vec<String>,
 }
 
 /// The check (and move) of a library to a new root.
@@ -58,6 +99,7 @@ impl JobResult {
             JobResult::Records { rows } => rows.len(),
             JobResult::AiSuggestion(_) => 1,
             JobResult::Relocation(r) => r.total,
+            JobResult::Import(r) => r.folders.len(),
         }
     }
 

@@ -26,9 +26,9 @@ pub mod workers;
 use axum::Json;
 use axum::Router;
 use axum::extract::{DefaultBodyLimit, Request, State};
-use axum::http::Method;
+use axum::http::{Method, StatusCode};
 use axum::middleware::{self, Next};
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post, put};
 use utoipa::{Modify, OpenApi};
 
@@ -112,6 +112,7 @@ use crate::AppState;
         backups::list,
         components::status,
         backups::download,
+        backups::upload,
         backups::delete,
         maintenance::merge_moved,
         maintenance::remove,
@@ -219,6 +220,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/ai/commit/{id}", post(ai::commit))
         .route("/api/backups", get(backups::list))
         .route("/api/components", get(components::status))
+        .route("/api/backups/upload", post(backups::upload).layer(DefaultBodyLimit::disable()))
         .route("/api/backups/{name}", get(backups::download).delete(backups::delete))
         .route("/api/maintenance/merge-moved", post(maintenance::merge_moved))
         .route("/api/maintenance/remove", post(maintenance::remove))
@@ -233,23 +235,33 @@ pub fn router(state: AppState) -> Router<AppState> {
         .layer(middleware::from_fn_with_state(state, announce_changes))
 }
 
+/// The kind of library data a request changes (`None`: it changes none).
+fn changes(method: &Method, path: &str) -> Option<&'static str> {
+    if method == Method::GET {
+        return None;
+    }
+    match path {
+        // POSTs that only read.
+        "/api/models/ids" | "/api/models/rows" | "/api/models/parse-paths" | "/api/filter-tree" => None,
+        p if p.starts_with("/api/models/") && p.ends_with("/view") => None,
+        p if p.starts_with("/api/models") || p.starts_with("/api/images") => Some("models"),
+        p if p.starts_with("/api/maintenance") || p.starts_with("/api/ai/commit") || p.starts_with("/api/libraries") => Some("models"),
+        p if p.starts_with("/api/lookups") || p.starts_with("/api/tags") || p.starts_with("/api/authors") => Some("lookups"),
+        _ => None,
+    }
+}
+
 /// After a successful write, tell event-stream clients what kind of data changed.
+/// While an imported library replaces this one, writes are refused: they would
+/// land on other records in the new database.
 async fn announce_changes(State(lib): State<AppState>, req: Request, next: Next) -> Response {
-    let (method, path) = (req.method().clone(), req.uri().path().to_string());
+    let what = changes(req.method(), req.uri().path());
+    if what.is_some() && lib.importing.load(std::sync::atomic::Ordering::SeqCst) {
+        return crate::ApiError::new(StatusCode::CONFLICT, "a library is being imported; try again when it is done").into_response();
+    }
     let resp = next.run(req).await;
-    if method != Method::GET && resp.status().is_success() {
-        let what = match path.as_str() {
-            // POSTs that only read.
-            "/api/models/ids" | "/api/models/rows" | "/api/models/parse-paths" | "/api/filter-tree" => None,
-            p if p.starts_with("/api/models/") && p.ends_with("/view") => None,
-            p if p.starts_with("/api/models") || p.starts_with("/api/images") => Some("models"),
-            p if p.starts_with("/api/maintenance") || p.starts_with("/api/ai/commit") || p.starts_with("/api/libraries") => Some("models"),
-            p if p.starts_with("/api/lookups") || p.starts_with("/api/tags") || p.starts_with("/api/authors") => Some("lookups"),
-            _ => None,
-        };
-        if let Some(what) = what {
-            lib.changed(what);
-        }
+    if let Some(what) = what.filter(|_| resp.status().is_success()) {
+        lib.changed(what);
     }
     resp
 }

@@ -62,6 +62,8 @@ function render() {
 }
 
 async function init() {
+  // The shell copies the title to its window.
+  document.title = `StlArchivist ${await window.__TAURI__.app.getVersion()}`;
   servers = await invoke("list_servers");
   render();
   const local = await invoke("local_state");

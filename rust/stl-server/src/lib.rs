@@ -51,6 +51,8 @@ pub struct Library {
     pub monitor: monitor::Monitor,
     /// Model viewer loads running at once (`POST /api/models/{id}/view`).
     pub view_loads: tokio::sync::Semaphore,
+    /// An imported library is replacing this one (`import_library`): writes wait.
+    pub importing: std::sync::atomic::AtomicBool,
     _lock: LibraryLock,
 }
 
@@ -120,6 +122,7 @@ impl Library {
             workers: workers::Workers::default(),
             monitor: monitor::Monitor::default(),
             view_loads: tokio::sync::Semaphore::new(2),
+            importing: Default::default(),
             config,
             _lock: lock,
         })

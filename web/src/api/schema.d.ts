@@ -179,6 +179,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backups/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload a library package: the body is a backup `.7z` (from this server, another
+         *     one or the desktop app). It joins the backups list (`…_upload.7z`), ready to import.
+         */
+        post: operations["post_backups_upload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backups/{name}": {
         parameters: {
             query?: never;
@@ -390,7 +410,7 @@ export interface paths {
         put?: never;
         /**
          * Queue a job. Jobs run one at a time, in order. Needs the editor role
-         *     (compacting the database and backups: admin).
+         *     (compacting the database, backups and imports: admin).
          */
         post: operations["post_jobs"];
         delete?: never;
@@ -1733,6 +1753,47 @@ export interface components {
             /** @description More pairs matched than are kept. */
             truncated: boolean;
         };
+        /** @description One of a package's outermost folders. */
+        ImportFolder: {
+            /** @description Found only with another letter case. */
+            case_only: number;
+            /** @description Archives found under `new_root`. */
+            found: number;
+            /** @description Folders inside it, moved along. */
+            inner: number;
+            /** @description The library it is a folder of. */
+            library: string;
+            missing: number;
+            /** @description Some relative paths not found. */
+            missing_examples: string[];
+            /**
+             * Format: int64
+             * @description Records in it and the folders inside it.
+             */
+            models: number;
+            name: string;
+            /** @description Its root here: the one given, else the old one (kept when nothing maps it). */
+            new_root: string;
+            /** @description Its root where the package was made. */
+            root: string;
+            /** @description `new_root` is a folder on this server. */
+            root_exists: boolean;
+            uuid: string;
+        };
+        /** @description A library package checked (and imported) by `import_library`. */
+        ImportPreview: {
+            /** @description It replaced this server's library (else it was only checked). */
+            applied: boolean;
+            /** @description Its outermost folders; the folders inside them move along. */
+            folders: components["schemas"]["ImportFolder"][];
+            /**
+             * Format: int64
+             * @description Records in the package.
+             */
+            models: number;
+            /** @description The package (a name in the backups list). */
+            name: string;
+        };
         JobDetail: {
             job: components["schemas"]["JobInfo"];
             /** @description The job's log, oldest line first (at most the last 2,000 lines). */
@@ -1848,6 +1909,15 @@ export interface components {
             /** @enum {string} */
             kind: "backup";
         } | {
+            apply?: boolean;
+            confirm?: string;
+            /** @enum {string} */
+            kind: "import_library";
+            name: string;
+            roots?: {
+                [key: string]: string;
+            };
+        } | {
             components: string[];
             /** @enum {string} */
             kind: "install_components";
@@ -1958,6 +2028,9 @@ export interface components {
         }) | (components["schemas"]["Relocation"] & {
             /** @enum {string} */
             type: "relocation";
+        }) | (components["schemas"]["ImportPreview"] & {
+            /** @enum {string} */
+            type: "import";
         });
         /** @enum {string} */
         JobState: "queued" | "running" | "done" | "failed" | "cancelled";
@@ -2935,6 +3008,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BackupFile"][];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    post_backups_upload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The package (.7z) */
+        requestBody?: {
+            content: {
+                "application/octet-stream": unknown;
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupFile"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
             403: {

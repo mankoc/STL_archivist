@@ -22,7 +22,7 @@ pub async fn list(State(lib): State<AppState>, _me: CurrentUser) -> Json<Vec<Job
 }
 
 /// Queue a job. Jobs run one at a time, in order. Needs the editor role
-/// (compacting the database and backups: admin).
+/// (compacting the database, backups and imports: admin).
 #[utoipa::path(post, path = "/api/jobs", tag = "jobs", request_body = JobRequest,
     responses((status = 202, body = JobInfo), (status = 403, body = crate::error::ErrorBody)))]
 pub async fn submit(
@@ -34,6 +34,7 @@ pub async fn submit(
         request,
         JobRequest::CompactDatabase
             | JobRequest::Backup
+            | JobRequest::ImportLibrary { .. }
             | JobRequest::ClearLibrary { .. }
             | JobRequest::InstallComponents { .. }
             | JobRequest::RemoveComponents { .. }

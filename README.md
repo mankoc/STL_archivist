@@ -13,7 +13,7 @@ can open a library on your computer without setting up a server.
 [the HTTP API](docs/api.md) ·
 and in the interface, the **?** button: searchable in-depth help on every feature
 
-Version: 2026.44.3
+Version: 2026.44.4
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). This version opens its data directory and, since 2026.43.7, converts it once
@@ -65,8 +65,9 @@ Version: 2026.44.3
   folder, sort files into a folder tree by pattern
 - **Metadata sidecars** — a `METADATA.7z` per archive folder lets a new library restore its
   records without re-crawling; *Clean sidecars* rewrites stale ones and deletes orphans
-- **Backups** — database, thumbnails and settings in one `.7z`; restore with
-  `stl-server restore`
+- **Backups, export and import** — database, thumbnails and settings in one `.7z`; import one
+  on another server (or this one) from *Settings*, each library folder mapped to its place
+  there; restore offline with `stl-server restore`
 - **Users** — viewer, editor and administrator roles; per-user preferences
 - **Statistics** — totals, rankings and the distribution of any column
 - **Model viewer** — the 3D models inside an archive (STL, OBJ, PLY, 3MF, Lychee, CHITUBOX)
@@ -146,8 +147,10 @@ Start `stl-desktop` (or *StlArchivist* from the Start menu). Its start page offe
   remembered.
 
 The first time a library is opened you create its administrator account. *File → Switch
-server…* (Ctrl+L) returns to the start page; Ctrl+R reloads. Inside the app, the detail pane
-can show an archive's folder in the file manager.
+server…* (Ctrl+L) returns to the start page; Ctrl+R reloads; *Help → About StlArchivist*
+shows the app's version and creator (the window's title shows the version too: the app's on
+the start page, the server's once connected). Inside the app, the detail pane can show an
+archive's folder in the file manager.
 
 ### Server
 
@@ -248,6 +251,12 @@ stl-server restore D:\STL_DB\backups\stlLibrary_backup_<time>.7z --data-dir D:\S
 ```
 
 The files it replaces are moved to `pre-restore-<time>` in the data directory.
+
+To copy a library to another server (from the desktop app to a Docker server, say), click
+*Export library* there and *Import library…* on the other server (*Settings → Backups &
+transfer*). The import shows the package's folders and checks each at the root you give it
+on that server. It then replaces that server's library while it runs, after backing it up;
+user accounts stay.
 
 ### Known limitations
 

@@ -1344,6 +1344,57 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.44.4: the desktop window is built with `disable_drag_drop_handler` (WebView2's HTML5
+  drag and drop; the shell used no `DragDropEvent`s) and copies each page's title to itself
+  (`on_document_title_changed`); the launcher titles itself with `app.getVersion()` (in
+  `core:default`), the web client (`App.tsx`) with `AuthStatus.version`. **Help → About**
+  opens the `about` window (`show_about`, built off the menu's thread, a child of `main`) on
+  the bundled `ui/about.html` (a copy of `web/src/help/splash.jpg` as `ui/splash.jpg`; the
+  version from `app.getVersion()`, the only permission of `capabilities/about.json`): the
+  native About box (`PredefinedMenuItem::about`) is text only on Windows. The web client's
+  About shows the splash too. `ModelTable.module.css` draws a right border on header and
+  body cells (`light-dark(gray-2, dark-6)`).
+  **Export / import:**
+  - A package is a backup. `POST /api/backups/upload` (admin, `DefaultBodyLimit::disable`)
+    streams the body to `backups/.upload-*.tmp`, checks the 7z header
+    (`backup::check_package`) and names the file `…_upload.7z`.
+  - The `import_library` job (admin; `confirm: "REPLACE"` to apply; read-only when only
+    checking) works as follows:
+    - It takes the package apart once into `<data dir>/import/<name>/`
+      (`backup::extract`, `Parts::Database`) and migrates it. A package from before
+      libraries keeps the thumbnail ids that migration drops.
+    - It maps the outermost folders (`roots`: uuid → root; an unmapped one keeps an old
+      root that exists here) with `libraries::import_plan`.
+    - It counts the found archives with `count_found` (split out of `check_relocate`) and
+      returns `JobResult::Import(ImportPreview)`.
+  - Applying runs these steps:
+    1. A `…_pre_import.7z` backup.
+    2. `Parts::Thumbnails`.
+    3. `import_roots` on the staged database. Folder images (absolute
+       `images.filename`) follow through `move_folder_images`, which `relocate` now
+       calls too.
+    4. `backup::replace_live`: SQLite's online backup into the open database, one
+       transaction for every connection, then a WAL checkpoint (rusqlite `backup`
+       feature).
+    5. `ThumbStore::replace_data`: an exclusive lock, close, rename `data.mdb`, reopen.
+    6. The package's `settings.json` with this server's `trash_folder_path`.
+    7. `SidecarQueue::clear` and `ServerEvent::Resync`.
+  - `libraries::foreign_rel` compares the package's roots as their machine did: `\` and
+    `/`, and Windows roots without letter case.
+  - `Library.importing` makes `announce_changes` refuse writes (409) while an apply runs.
+    `ServerEvent::Job` boxes its `JobInfo`.
+  - Web: `jobs/ImportDialog.tsx`; `jobs/transfer.ts` (`applyPrefix`, `withRule`,
+    `rootsToSend`, `upToDate`, `backupName`); `uploadPackage` in `api/client.ts` (XHR,
+    for the progress).
+  **Sync (designed, not built):** a one-way mirror on top of the import.
+  - The source issues a sync token (stored like worker tokens).
+  - The replica keeps the source URL, the token and path-start rules (overridable per
+    folder uuid) in `server.json`.
+  - "Sync now", or every N hours, fetches a fresh database snapshot plus only the
+    thumbnails the replica lacks (by content digest), then runs `import_library` with the
+    rules' mapping.
+  - The replica's library data is read-only. Two-way sync would need per-table change
+    tracking, delete tombstones and matching models by folder uuid + `rel_path`.
 - 2026.44.3: the Docker files are in `docker/`: `Dockerfile`, its `Dockerfile.dockerignore`
   (BuildKit's per-Dockerfile ignore file; the context stays the repository root and
   `docker.yml` passes `file:`) and the sample `compose.yml` (from `docs/`).
@@ -1355,7 +1406,8 @@ the path is visible. No business logic and no Tauri commands for data.
   (`maint::read_file_lists`, `crawl::lacking_lists`, `crawler::stl_list`) reads them on
   demand. `SidecarCard` holds the sidecar settings (`settings/librarySettings.ts`). The
   table's column order is the per-user setting `table_column_order` (`columns.ts`:
-  `ordered`, `moveColumn`; dragged headers in `ModelTable`).
+  `ordered`, `moveColumn`; in 2026.44.4 a grip in each header is the drag source and the
+  header cell the drop target, in `ModelTable`).
 - 2026.44.1: `.github/workflows/docker.yml` builds the `Dockerfile` (linux/amd64, GitHub
   Actions layer cache) on `v*` tags, checks the tag against the version, and pushes
   `<image>:<version>` and `:latest` to Docker Hub; `SidecarSettings` (Settings → Sidecars) writes `metadata_sidecar_enabled` /

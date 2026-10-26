@@ -23,7 +23,7 @@ jpeg-encoder = { version = "0.7.1", features = ["simd"] }
 meshpeek-core = { path = "../meshpeek-core" }
 rayon = "1.12.0"
 regex = "1.13.1"
-rusqlite = { version = "0.40.2", features = ["bundled", "functions"] }
+rusqlite = { version = "0.40.2", features = ["backup", "bundled", "functions"] }
 serde_json = "1.0.140"
 sevenz-rust2 = "0.24.0"
 sqlite-vec = "=0.1.9"

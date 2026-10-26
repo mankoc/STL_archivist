@@ -137,6 +137,104 @@ fn wanted(name: &str) -> bool {
     name == DB_FILE || name == SETTINGS_FILE || name.starts_with(&format!("{THUMB_DIR}/"))
 }
 
+/// Whether `src` is a library backup: a `.7z` with a database inside (its
+/// header is read, nothing is unpacked).
+pub fn check_package(src: &Path) -> Result<()> {
+    let archive = sevenz_rust2::Archive::open(src)?;
+    if archive.files.iter().any(|f| f.name() == DB_FILE) {
+        Ok(())
+    } else {
+        Err(BackupError::Invalid(format!("it holds no {DB_FILE}")))
+    }
+}
+
+/// What [`extract`] takes from a backup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Parts {
+    /// The database, the settings and the thumbnails.
+    All,
+    /// The database and the settings.
+    Database,
+    /// The thumbnail store.
+    Thumbnails,
+}
+
+impl Parts {
+    fn takes(self, name: &str) -> bool {
+        let thumbnail = name.replace('\\', "/").starts_with(&format!("{THUMB_DIR}/"));
+        wanted(name)
+            && match self {
+                Parts::All => true,
+                Parts::Database => !thumbnail,
+                Parts::Thumbnails => thumbnail,
+            }
+    }
+}
+
+/// Extract `parts` of a backup (`.7z`) into the folder `dir`, created when
+/// needed. A database taken out must open and hold a `models` table.
+pub fn extract(src: &Path, dir: &Path, parts: Parts) -> Result<()> {
+    fs::create_dir_all(dir)?;
+    sevenz_rust2::decompress_file_with_extract_fn(src, dir, |entry, reader, dest| {
+        if parts.takes(entry.name()) {
+            sevenz_rust2::default_entry_extract_fn(entry, reader, dest)
+        } else {
+            io::copy(reader, &mut io::sink()).map_err(sevenz_rust2::Error::from)?;
+            Ok(true)
+        }
+    })?;
+    if parts != Parts::Thumbnails {
+        let db = dir.join(DB_FILE);
+        if !db.is_file() {
+            return Err(BackupError::Invalid(format!("{} holds no {DB_FILE}", src.display())));
+        }
+        check_database(&db)?;
+    }
+    Ok(())
+}
+
+/// Pages [`replace_live`] copies per step.
+const PAGES_PER_STEP: std::ffi::c_int = 1024;
+
+/// Replace the content of the open database `live` with the database file
+/// `staged` (SQLite's online backup), for every connection at once: the others
+/// see the old library until the copy is complete, then the new one; stopping
+/// rolls it back. Both must use the same page size. Progress counts pages.
+pub fn replace_live(live: &mut Connection, staged: &Path, ctl: &Control) -> Result<()> {
+    let src = Connection::open_with_flags(staged, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let page_size = |c: &Connection| c.query_row("PRAGMA page_size", [], |r| r.get::<_, i64>(0));
+    let (from, to) = (page_size(&src)?, page_size(live)?);
+    if from != to {
+        return Err(BackupError::Invalid(format!("its database pages are {from} bytes, this library's {to}")));
+    }
+    {
+        let backup = rusqlite::backup::Backup::new(&src, live)?;
+        let mut copied = 0;
+        loop {
+            let step = backup.step(PAGES_PER_STEP)?;
+            let p = backup.progress();
+            if copied == 0 {
+                ctl.set_total(p.pagecount.max(0) as u64);
+            }
+            let now = (p.pagecount - p.remaining).max(0) as u64;
+            ctl.advance(now.saturating_sub(copied));
+            copied = copied.max(now);
+            match step {
+                rusqlite::backup::StepResult::Done => break,
+                rusqlite::backup::StepResult::More => {}
+                // Busy or locked: another connection is writing; try again.
+                _ => std::thread::sleep(std::time::Duration::from_millis(50)),
+            }
+            if ctl.is_stopped() {
+                return Err(BackupError::Stopped);
+            }
+        }
+    }
+    // The whole database went through the write-ahead log.
+    live.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+    Ok(())
+}
+
 /// What a restore did.
 #[derive(Debug)]
 pub struct Restored {
@@ -154,20 +252,7 @@ pub struct Restored {
 pub fn restore(src: &Path, data_dir: &Path, stamp: &str) -> Result<Restored> {
     let staging = Scratch(data_dir.join(format!(".restore-{stamp}")));
     let _ = fs::remove_dir_all(&staging.0);
-    fs::create_dir_all(&staging.0)?;
-    sevenz_rust2::decompress_file_with_extract_fn(src, &staging.0, |entry, reader, dest| {
-        if wanted(entry.name()) {
-            sevenz_rust2::default_entry_extract_fn(entry, reader, dest)
-        } else {
-            io::copy(reader, &mut io::sink()).map_err(sevenz_rust2::Error::from)?;
-            Ok(true)
-        }
-    })?;
-    let new_db = staging.0.join(DB_FILE);
-    if !new_db.is_file() {
-        return Err(BackupError::Invalid(format!("{} holds no {DB_FILE}", src.display())));
-    }
-    check_database(&new_db)?;
+    extract(src, &staging.0, Parts::All)?;
 
     let previous = data_dir.join(format!("pre-restore-{stamp}"));
     fs::create_dir_all(&previous)?;
@@ -266,6 +351,50 @@ mod tests {
     }
 
     #[test]
+    fn parts_extract_separately() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = Connection::open(dir.path().join("live.db")).unwrap();
+        conn.execute_batch("CREATE TABLE models (id INTEGER PRIMARY KEY)").unwrap();
+        let store = ThumbStore::open(&dir.path().join("thumbs")).unwrap();
+        store.put_many(&[(1, b"jpeg".as_slice())]).unwrap();
+        let src = dir.path().join("b.7z");
+        write(&conn, &store, None, &src, &Control::new()).unwrap();
+
+        check_package(&src).unwrap();
+        let staged = dir.path().join("staged");
+        extract(&src, &staged, Parts::Database).unwrap();
+        assert!(staged.join(DB_FILE).is_file() && !staged.join(THUMB_DIR).exists());
+        extract(&src, &staged, Parts::Thumbnails).unwrap();
+        assert!(staged.join(THUMB_DIR).join(LMDB_DATA).is_file());
+    }
+
+    #[test]
+    fn a_staged_database_replaces_the_open_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let live_path = dir.path().join("live.db");
+        let mut live = Connection::open(&live_path).unwrap();
+        live.execute_batch("PRAGMA journal_mode = WAL; CREATE TABLE models (title TEXT); INSERT INTO models VALUES ('old');").unwrap();
+        let other = Connection::open(&live_path).unwrap();
+        let staged = dir.path().join("staged.db");
+        Connection::open(&staged)
+            .unwrap()
+            .execute_batch("CREATE TABLE models (title TEXT); CREATE TABLE extra (x); INSERT INTO models VALUES ('new'), ('newer');")
+            .unwrap();
+
+        let ctl = Control::new();
+        replace_live(&mut live, &staged, &ctl).unwrap();
+        let titles: Vec<String> =
+            other.prepare("SELECT title FROM models ORDER BY title").unwrap().query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect();
+        assert_eq!(titles, ["new", "newer"], "another connection sees the new content");
+        let (done, total) = ctl.progress();
+        assert!(total > 0 && done == total);
+
+        let odd = dir.path().join("odd.db");
+        Connection::open(&odd).unwrap().execute_batch("PRAGMA page_size = 8192; CREATE TABLE models (title TEXT); VACUUM;").unwrap();
+        assert!(matches!(replace_live(&mut live, &odd, &ctl), Err(BackupError::Invalid(_))));
+    }
+
+    #[test]
     fn a_backup_without_a_database_is_refused() {
         let dir = tempfile::tempdir().unwrap();
         let src = dir.path().join("x.7z");
@@ -277,5 +406,7 @@ mod tests {
         let data = dir.path().join("data");
         fs::create_dir_all(&data).unwrap();
         assert!(matches!(restore(&src, &data, "2"), Err(BackupError::Invalid(_))));
+        assert!(matches!(check_package(&src), Err(BackupError::Invalid(_))));
+        assert!(check_package(&other).is_err(), "not a .7z at all");
     }
 }

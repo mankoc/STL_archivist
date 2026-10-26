@@ -130,8 +130,11 @@ stl_database/
   tagger's model through `workers.chat` then `ai.ask`; never call `tools.embedder` directly
   for library work. `compute: workers` (`Config::compute`) means jobs wait, crawls skip.
 - **Backups:** `stl_core::backup` (the old desktop layout); restoring is the offline
-  `stl-server restore` command (it takes the library lock). Never replace the database of an
-  open library.
+  `stl-server restore` command (it takes the library lock). Never replace the database
+  *file* of an open library. The `import_library` job (a backup from another server, folders
+  remapped by `libraries::import_roots`) replaces the open library's content through
+  `backup::replace_live` (SQLite's online backup) and `ThumbStore::replace_data`, with
+  `Library.importing` refusing writes meanwhile.
 - Spawned helpers (`llama-server`, the desktop's local server) call
   `stl_proc::end_with_parent`.
 
@@ -149,7 +152,8 @@ conveniences (wrap it in try/catch). Pages are hash routes (`shell/route.ts`).
 ## Desktop shell (`rust/stl-desktop`)
 
 No library logic and no data commands. New commands go into `build.rs`'s app manifest; the
-launcher capability (`capabilities/launcher.json`) lists what the bundled page may call, and
+launcher capability (`capabilities/launcher.json`) lists what the bundled page may call (the
+About window, `capabilities/about.json`, only reads the version), and
 server origins get only `SERVER_PERMISSIONS` (`open_folder`, the MeshPeek commands
 (`meshpeek_state`, `pick_meshpeek` / `clear_meshpeek` — its program is chosen only in a
 file dialog, never named by a page — and `open_in_meshpeek` on a local archive) and the compute worker's

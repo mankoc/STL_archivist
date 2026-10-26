@@ -87,3 +87,7 @@ li .url { color: var(--muted); flex: 1; overflow-wrap: anywhere; }
 
 #status { min-height: 1.5em; white-space: pre-wrap; }
 #status.error { color: var(--danger); }
+
+/* The About window (about.html). */
+main.about { padding: 16px; }
+.splash { display: block; width: 100%; border-radius: 12px; margin-bottom: 12px; }
