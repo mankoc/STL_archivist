@@ -1,6 +1,6 @@
 # StlArchivist API
 
-Version 2026.44.6. Generated from `web/openapi.json` by `tools/api_doc.py`; the
+Version 2026.44.7. Generated from `web/openapi.json` by `tools/api_doc.py`; the
 running server serves the same document at `GET /api/openapi.json`. Do not edit by hand:
 run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after changing routes.
 
@@ -712,6 +712,14 @@ A library package checked (and imported) by `import_library`.
 | `models` | integer | Records in the package. |
 | `name` | string | The package (a name in the backups list). |
 
+### JobCounts
+
+| Field | Type | Description |
+|---|---|---|
+| `deleted` | integer |  |
+| `new` | integer |  |
+| `updated` | integer |  |
+
 ### JobDetail
 
 | Field | Type | Description |
@@ -724,6 +732,7 @@ A library package checked (and imported) by `import_library`.
 
 | Field | Type | Description |
 |---|---|---|
+| `counts` (optional) | null \| [JobCounts](#jobcounts) |  |
 | `created_at` | integer |  |
 | `done` | integer |  |
 | `finished_at` (optional) | integer \| null |  |

@@ -98,6 +98,13 @@ export function progressText(job: Job, now: number): string | null {
   return left == null ? count : `${count} · about ${duration(left)} left`;
 }
 
+/** A crawl's archives added, deleted and updated so far ("New: 3 · Deleted: 0 · Updated: 12"). */
+export function countsText(job: Job): string | null {
+  const c = job.counts;
+  if (!c) return null;
+  return `New: ${c.new.toLocaleString()} · Deleted: ${c.deleted.toLocaleString()} · Updated: ${c.updated.toLocaleString()}`;
+}
+
 /** Newest first, with active jobs on top. */
 export function sortJobs(jobs: Job[]): Job[] {
   return [...jobs].sort((a, b) => Number(isActive(b)) - Number(isActive(a)) || b.id - a.id);

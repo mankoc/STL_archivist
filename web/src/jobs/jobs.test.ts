@@ -1,4 +1,4 @@
-import { addJob, describe as label, duration, elapsed, percent, progressText, remaining, sortJobs, type Job } from "./jobs";
+import { addJob, countsText, describe as label, duration, elapsed, percent, progressText, remaining, sortJobs, type Job } from "./jobs";
 
 const job = (over: Partial<Job>): Job =>
   ({
@@ -31,6 +31,11 @@ describe("jobs", () => {
     expect(remaining(running({ done: 1000, total: 8000 }), 200)).toBe(700);
     expect(progressText(running({ done: 1000, total: 8000 }), 200)).toBe(`${(1000).toLocaleString()} / ${(8000).toLocaleString()} (13%) · about 11 min 40 s left`);
     expect(progressText(job({ state: "done", done: 5, total: 5, started_at: 100 }), 200)).toBeNull();
+  });
+
+  it("shows a crawl's counts", () => {
+    expect(countsText(job({}))).toBeNull();
+    expect(countsText(job({ counts: { new: 3, updated: 12, deleted: 0 } }))).toBe("New: 3 · Deleted: 0 · Updated: 12");
   });
 
   it("formats durations", () => {

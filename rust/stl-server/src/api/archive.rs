@@ -77,7 +77,7 @@ pub struct ViewableFile {
 /// The archive's path on the server, when the model exists and the file is there.
 fn archive_on_disk(lib: &crate::Library, id: i64) -> Result<std::path::PathBuf, ApiError> {
     let path = lib.db.with(|c| model_edit::archive_paths(c, &[id]))?.remove(&id).ok_or_else(|| ApiError::not_found(format!("no model {id}")))?;
-    let path = std::path::PathBuf::from(path);
+    let path = std::path::PathBuf::from(stl_core::relpath::on_disk(&path));
     if !path.is_file() {
         return Err(ApiError::not_found("the archive is not on disk"));
     }

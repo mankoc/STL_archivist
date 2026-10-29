@@ -1945,6 +1945,14 @@ export interface components {
             /** @description The package (a name in the backups list). */
             name: string;
         };
+        JobCounts: {
+            /** Format: int64 */
+            deleted: number;
+            /** Format: int64 */
+            new: number;
+            /** Format: int64 */
+            updated: number;
+        };
         JobDetail: {
             job: components["schemas"]["JobInfo"];
             /** @description The job's log, oldest line first (at most the last 2,000 lines). */
@@ -1952,6 +1960,7 @@ export interface components {
             result?: null | components["schemas"]["JobResult"];
         };
         JobInfo: {
+            counts?: null | components["schemas"]["JobCounts"];
             /** Format: int64 */
             created_at: number;
             /** Format: int64 */

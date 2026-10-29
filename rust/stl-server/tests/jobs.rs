@@ -420,6 +420,7 @@ async fn update_folders_keeps_records_moved_between_folders() {
     let v = wait(&lib, &ed, id).await;
     assert_eq!(v["job"]["state"], "done", "{v}");
     assert!(v["job"]["message"].as_str().unwrap().starts_with("2 folder(s)"), "{v}");
+    assert_eq!(v["job"]["counts"], json!({"new": 0, "updated": 0, "deleted": 1}), "{v}");
     assert_eq!(count(&lib, "SELECT count(*) FROM models"), 2, "Gone is deleted, Dragon kept once");
     let (title, path): (String, String) = lib
         .state

@@ -33,6 +33,7 @@ fn patterns(list: &[String]) -> Result<PresupportPatterns, String> {
 /// `old_mtime` and `old_hash`. The hash is recomputed only when the size or
 /// modification time changed; the file list (`files`) is always read again.
 pub fn rescan(path: &str, old_size: Option<i64>, old_mtime: Option<i64>, old_hash: &str, opts: &Options) -> Result<Rescan, String> {
+    let path = &crate::relpath::on_disk(path);
     let p = std::path::Path::new(path);
     if !p.exists() {
         return Err("Archive not found".into());
@@ -110,6 +111,7 @@ pub struct Thumbnails {
 /// and the warnings (the desktop checks printable files here regardless of the
 /// setting).
 pub fn thumbnails(path: &str, max_thumbnails: usize, max_size: u32, opts: &Options) -> Result<Thumbnails, String> {
+    let path = &crate::relpath::on_disk(path);
     if !std::path::Path::new(path).exists() {
         return Err("archive not found".into());
     }

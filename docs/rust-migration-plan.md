@@ -1344,6 +1344,14 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.44.7: **decomposed names and job counts.** `relpath::path_key` compares in NFC, and
+  `relpath::on_disk` finds a stored (NFC) path's spelling on disk part by part, for names
+  written decomposed (NTFS and ext4 do not normalise). It is used wherever a stored path
+  reaches the file system: `collect_missing`, `monitor`, `rescan`, `maintenance::verify`,
+  the download and viewer routes, and the search for missing records. The crawler's
+  `Event::Marked` reports records it flags missing (kept), apart from `Event::Deleted`.
+  `Summary` gained `moved`, `deleted` and `marked`. `JobInfo.counts` (`JobCounts`: new,
+  updated, deleted) is filled from the crawl's events and published by the ticker.
 - 2026.44.6: **smart sync**, by `storage::delta`:
   - **Fingerprints:** `state` hashes every ordinary table's rows (rowid and values, xxh3)
     in blocks of `BLOCK` = 128 rowids, plus a schema hash. Virtual tables are skipped;

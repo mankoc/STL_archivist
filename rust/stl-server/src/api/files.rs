@@ -186,7 +186,7 @@ pub async fn browse(State(lib): State<AppState>, me: CurrentUser, Query(q): Quer
               (status = 404, body = crate::error::ErrorBody)))]
 pub async fn download(State(lib): State<AppState>, _me: CurrentUser, UrlPath(id): UrlPath<i64>) -> Result<Response, ApiError> {
     let path = lib.run(move |lib| Ok(lib.db.with(|c| model_edit::archive_paths(c, &[id]))?.remove(&id))).await?;
-    let path = path.ok_or_else(|| ApiError::not_found(format!("no model {id}")))?;
+    let path = stl_core::relpath::on_disk(&path.ok_or_else(|| ApiError::not_found(format!("no model {id}")))?);
     let file = tokio::fs::File::open(&path).await.map_err(|_| ApiError::not_found("the archive is not on disk"))?;
     let len = file.metadata().await.map(|m| m.len()).ok();
     let name = Path::new(&path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "archive".into());

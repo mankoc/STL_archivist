@@ -25,10 +25,39 @@ fn slashed(path: &str) -> String {
     if t.is_empty() && s.starts_with('/') { "/".into() } else { t.to_string() }
 }
 
-/// How two absolute paths compare here (case folded on Windows).
+/// How two absolute paths compare here (NFC, case folded on Windows).
 pub fn path_key(path: &str) -> String {
-    let s = slashed(path);
+    let s: String = slashed(path).nfc().collect();
     if CASE_INSENSITIVE { s.to_lowercase() } else { s }
+}
+
+/// `path` as it is spelled on disk. Stored paths are NFC, but Windows and Linux
+/// keep a name as it was written, so an archive named in decomposed form (NFD)
+/// is only found part by part, comparing names in NFC. `path` itself when it
+/// exists as given or is not found.
+pub fn on_disk(path: &str) -> String {
+    use std::path::{Component, Path, PathBuf};
+    if path.is_ascii() || Path::new(path).exists() {
+        return path.to_string();
+    }
+    let fold = |s: &str| -> String {
+        let n: String = s.nfc().collect();
+        if CASE_INSENSITIVE { n.to_lowercase() } else { n }
+    };
+    let mut found = PathBuf::new();
+    for c in Path::new(path).components() {
+        let next = found.join(c);
+        if !matches!(c, Component::Normal(_)) || next.exists() {
+            found = next;
+            continue;
+        }
+        let want = fold(&c.as_os_str().to_string_lossy());
+        let Some(name) = std::fs::read_dir(&found).ok().and_then(|d| d.flatten().map(|e| e.file_name()).find(|n| fold(&n.to_string_lossy()) == want)) else {
+            return path.to_string();
+        };
+        found.push(name);
+    }
+    found.to_string_lossy().into_owned()
 }
 
 impl RelPath {
@@ -144,6 +173,20 @@ mod tests {
             assert!(RelPath::from_abs("/Library", "/library/x.zip").is_none(), "case matters on Linux");
             assert_eq!(RelPath::parse("a/b.zip").unwrap().resolve("/mnt/stl/"), "/mnt/stl/a/b.zip");
         }
+    }
+
+    #[test]
+    fn finds_decomposed_names_on_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("Hu\u{0308}per");
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::write(folder.join("Hu\u{0308}per3D - Thor.7z"), b"x").unwrap();
+        let stored = dir.path().join("H\u{00fc}per").join("H\u{00fc}per3D - Thor.7z").to_string_lossy().into_owned();
+        let found = on_disk(&stored);
+        assert!(std::path::Path::new(&found).is_file(), "{found}");
+        assert_eq!(path_key(&found), path_key(&stored));
+        let gone = dir.path().join("H\u{00fc}per").join("Gone.7z").to_string_lossy().into_owned();
+        assert_eq!(on_disk(&gone), gone);
     }
 
     #[test]

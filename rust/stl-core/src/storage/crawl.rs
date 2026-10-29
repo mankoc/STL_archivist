@@ -684,7 +684,7 @@ pub fn collect_missing(conn: &Connection, listed: Option<(i64, &HashSet<String>)
         .collect::<Result<_>>()?;
     let gone = |library: Option<i64>, path: &str| match listed {
         Some((id, keys)) if library == Some(id) => !keys.contains(&crate::relpath::path_key(path)),
-        _ => !Path::new(path).exists(),
+        _ => !Path::new(&crate::relpath::on_disk(path)).exists(),
     };
     let absent: HashSet<i64> = rows
         .par_iter()
