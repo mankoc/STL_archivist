@@ -408,11 +408,20 @@ pub struct JobInfo {
     pub phase: Option<String>,
     pub done: u64,
     pub total: u64,
+    /// Archives added, updated and deleted so far (crawls and Update libraries).
+    pub counts: Option<JobCounts>,
     /// The outcome (a summary, or the error).
     pub message: Option<String>,
     pub created_at: i64,
     pub started_at: Option<i64>,
     pub finished_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, ToSchema)]
+pub struct JobCounts {
+    pub new: u64,
+    pub updated: u64,
+    pub deleted: u64,
 }
 
 /// What WebSocket clients receive (`/api/events`), as JSON text frames.
@@ -551,6 +560,10 @@ fn update(job: &Job, f: impl FnOnce(&mut JobInfo)) {
     f(&mut job.info.lock().unwrap_or_else(|e| e.into_inner()));
 }
 
+fn count(job: &Job, f: impl FnOnce(&mut JobCounts)) {
+    update(job, |i| f(i.counts.get_or_insert_with(JobCounts::default)));
+}
+
 fn finish(job: &Job, state: JobState, message: Option<String>) {
     update(job, |i| {
         i.state = state;
@@ -574,6 +587,7 @@ impl Library {
                 phase: None,
                 done: 0,
                 total: 0,
+                counts: None,
                 message: None,
                 created_at: accounts::now(),
                 started_at: None,
@@ -636,14 +650,19 @@ async fn worker(lib: Weak<Library>, wake: Arc<Notify>) {
         let ticker = {
             let (l, job) = (Arc::clone(&l), Arc::clone(&job));
             tokio::spawn(async move {
-                let mut last = (u64::MAX, u64::MAX);
+                let (mut last, mut last_counts) = ((u64::MAX, u64::MAX), None);
                 loop {
                     tokio::time::sleep(TICK).await;
                     let (done, total) = job.ctl.progress();
-                    if (done, total) != last && total > 0 {
-                        update(&job, |i| (i.done, i.total) = (done, total));
+                    let counts = job.info().counts;
+                    let moved = (done, total) != last && total > 0;
+                    if moved || counts != last_counts {
+                        if moved {
+                            update(&job, |i| (i.done, i.total) = (done, total));
+                            last = (done, total);
+                        }
                         l.jobs.publish(&job);
-                        last = (done, total);
+                        last_counts = counts;
                     }
                 }
             })
@@ -1616,11 +1635,14 @@ impl Host for ServerHost<'_> {
                 self.job.ctl.advance(done as u64);
             }
             Event::Result(path, status) if status == "new" => {
+                count(self.job, |c| c.new += 1);
                 if let Some(paths) = self.new_paths {
                     paths.lock().unwrap_or_else(|e| e.into_inner()).push(path);
                 }
             }
-            Event::Counts(..) | Event::Result(..) | Event::Moved(..) | Event::Deleted(..) => {}
+            Event::Result(..) => count(self.job, |c| c.updated += 1),
+            Event::Deleted(_) => count(self.job, |c| c.deleted += 1),
+            Event::Counts(..) | Event::Moved(..) | Event::Marked(..) => {}
         }
     }
 
@@ -1686,6 +1708,8 @@ fn update_folders(lib: &Library, job: &Job, folders: Vec<String>) -> Result<Stri
         for p in &deleted {
             lib.job_log(job, format!("Deleted: {p}"));
         }
+        // An archive moved between folders is neither new nor deleted.
+        count(job, |c| (c.new, c.deleted) = (c.new.saturating_sub(moved.len() as u64), c.deleted + deleted.len() as u64));
         (moved_n, deleted_n) = (moved.len(), deleted.len());
         job.touch_sidecars(moved.into_iter().flat_map(|(a, b)| [a, b]).chain(deleted));
     }

@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.44.6"
+    "version": "2026.44.7"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -5430,6 +5430,31 @@
           }
         }
       },
+      "JobCounts": {
+        "type": "object",
+        "required": [
+          "new",
+          "updated",
+          "deleted"
+        ],
+        "properties": {
+          "deleted": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "new": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "updated": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
       "JobDetail": {
         "type": "object",
         "required": [
@@ -5473,6 +5498,17 @@
           "created_at"
         ],
         "properties": {
+          "counts": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/JobCounts",
+                "description": "Archives added, updated and deleted so far (crawls and Update libraries)."
+              }
+            ]
+          },
           "created_at": {
             "type": "integer",
             "format": "int64"

@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026.44.7 — 2026-10-29
+
+- **Archives with accented names are no longer reported missing.** Names like
+  "Hüper3D - Thor.7z" can be stored on disk in decomposed form ("u" plus a separate
+  accent), which the library did not match with its own spelling. Crawls and
+  *Update libraries* then marked such archives missing although they were there. Downloads,
+  the viewer, rescans, thumbnails, *Verify archives* and monitored folders also find them now.
+- **Jobs show their counts:** a crawl or *Update libraries* shows a line
+  "New: … · Deleted: … · Updated: …" under its status, updated as it runs. An archive moved
+  from one folder to another counts as neither new nor deleted.
+- **Clearer crawl logs:** the "N relevant file(s) extracted" line is gone (each archive's
+  result line already says what was stored). The crawl ends with a summary
+  ("Crawl complete: 3 new, 12 updated, 950 unchanged, 1 deleted"). Records that are kept
+  but not found read "Not found on disk (record kept, marked missing): …".
+
 ## 2026.44.6 — 2026-10-26
 
 - **Smart sync: only what changed travels.** Once both servers hold the same library (after

@@ -2,7 +2,6 @@
 //! (`verify_archives`, `find_duplicate_entries`, the queries of `prune_images`).
 
 use std::collections::HashMap;
-use std::path::Path;
 
 use rayon::prelude::*;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
@@ -69,7 +68,7 @@ pub fn verify(conn: &Connection, ctl: &Control) -> Result<Verified> {
         let checked: Vec<(ResultRow, bool)> = chunk
             .par_iter()
             .map(|(id, title, path, hash, size, missing)| {
-                let meta = path.as_deref().filter(|p| !p.is_empty()).and_then(|p| std::fs::metadata(Path::new(p)).ok());
+                let meta = path.as_deref().filter(|p| !p.is_empty()).and_then(|p| std::fs::metadata(crate::relpath::on_disk(p)).ok());
                 let is_file = meta.as_ref().is_some_and(|m| m.is_file());
                 let (status, back) = if *missing && !is_file {
                     (STATUS_FLAGGED, false)

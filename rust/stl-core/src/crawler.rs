@@ -107,6 +107,8 @@ pub enum Event {
     Result(String, String),
     Moved(String, String),
     Deleted(String),
+    /// A record outside the crawled folder flagged missing (kept).
+    Marked(String),
 }
 
 pub trait Host: Sync {
@@ -149,6 +151,11 @@ pub struct Summary {
     pub new: usize,
     pub updated: usize,
     pub unchanged: usize,
+    /// Records matched to an archive that moved.
+    pub moved: usize,
+    /// Records deleted, and records flagged missing (kept).
+    pub deleted: usize,
+    pub marked: usize,
     pub new_paths: Vec<String>,
 }
 
@@ -727,8 +734,6 @@ impl Run<'_> {
         let archive_name = WinPath::new(path).name().to_string();
         let (presupports, warnings, scales) = rules_for(cfg, &archive_name, &x.names, host);
         let (year, month) = parse_date(meta.release_date.as_deref().unwrap_or(""), host);
-        let images = x.contents.iter().filter(|(n, _)| is_image_or_pdf(n)).count();
-        self.log(format!("  {} relevant file(s) extracted ({images} image(s))", x.contents.len()));
         let mut thumbs: Vec<db::Thumb> =
             prep.precomp.iter().map(|(n, j, d)| (n.clone(), j.clone(), if j.is_some() { d.clone() } else { None }, None)).collect();
         if cfg.embed {
@@ -805,7 +810,7 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
     let keys: HashSet<String> = archives.iter().map(|p| crate::relpath::path_key(p)).collect();
     let missing = db::collect_missing(&run.conn, cfg.recurse.then_some((library, &keys)))?;
     if !missing.is_empty() {
-        run.log(format!("Found {} missing archive(s) — will check for moved files after crawl.", missing.len()));
+        run.log(format!("{} recorded archive(s) not found on disk — checked for moves after the crawl.", missing.len()));
     }
     // moves.index_by_hash
     let mut shared = HashSet::new();
@@ -922,7 +927,7 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
     }
     let missing: Vec<db::Missing> = missing.into_iter().filter(|m| !run.early_moved.contains(&m.0)).collect();
     if !missing.is_empty() {
-        host.emit(Event::Phase(format!("Finding moved files ({} candidate(s))…", missing.len())));
+        host.emit(Event::Phase(format!("Looking for {} archive(s) not found on disk among the new ones…", missing.len())));
         reconcile(&mut run, missing)?;
     }
 
@@ -953,7 +958,15 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
             run.log(format!("Pruned unused lookups: {}", summary.join(", ")));
         }
     }
-    run.log("Crawl complete.");
+    run.summary.moved += run.early_moved.len();
+    let s = &run.summary;
+    let mut done = format!("Crawl complete: {} new, {} updated, {} unchanged", s.new, s.updated, s.unchanged);
+    for (n, what) in [(s.moved, "moved"), (s.deleted, "deleted"), (s.marked, "marked missing")] {
+        if n > 0 {
+            done.push_str(&format!(", {n} {what}"));
+        }
+    }
+    run.log(format!("{done}."));
     Ok(run.summary)
 }
 
@@ -998,6 +1011,7 @@ fn reconcile(run: &mut Run<'_>, missing: Vec<db::Missing>) -> Result<(), CrawlEr
         if !matched.is_empty() {
             run.log(format!("Matched {} moved file(s).", matched.len()));
         }
+        run.summary.moved += matched.len();
     }
     let unmatched: Vec<db::Missing> = missing.into_iter().filter(|m| !matched.contains(&m.0)).collect();
     if unmatched.is_empty() {
@@ -1014,9 +1028,10 @@ fn reconcile(run: &mut Run<'_>, missing: Vec<db::Missing>) -> Result<(), CrawlEr
         run.host.emit(Event::Deleted(p.clone()));
     }
     for p in &marked {
-        run.log(format!("Marked missing: {p}"));
-        run.host.emit(Event::Deleted(p.clone()));
+        run.log(format!("Not found on disk (record kept, marked missing): {p}"));
+        run.host.emit(Event::Marked(p.clone()));
     }
+    (run.summary.deleted, run.summary.marked) = (deleted.len(), marked.len());
     delete_refs(run.store, &refs);
     if !deleted.is_empty() {
         run.log(format!("Deleted {} record(s) removed from the crawled folder.", deleted.len()));

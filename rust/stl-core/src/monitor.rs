@@ -69,7 +69,7 @@ pub fn changes(conn: &Connection, folder: &str, recurse: bool, size_only: bool) 
     out.gone = if recurse {
         recorded.iter().filter(|p| !listed.contains(&crate::relpath::path_key(p))).count()
     } else {
-        recorded.iter().filter(|p| !Path::new(p).exists()).count()
+        recorded.iter().filter(|p| !Path::new(&crate::relpath::on_disk(p)).exists()).count()
     };
     Ok(out)
 }

@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, unwrap } from "../api/client";
 import { type ServerEvent, useServerEvent } from "../api/events";
 import { hasRole, useUser } from "../auth/user";
-import { describe, elapsed, isActive, type Job, percent, progressText, sortJobs, STATE_COLOR } from "./jobs";
+import { countsText, describe, elapsed, isActive, type Job, percent, progressText, sortJobs, STATE_COLOR } from "./jobs";
 import classes from "./JobsPage.module.css";
 
 function useNow(active: boolean) {
@@ -74,6 +74,11 @@ export function JobsPage() {
                   <Text size="xs" c="dimmed" truncate>
                     {[job.phase && job.state === "running" ? job.phase : job.message, progressText(job, now), elapsed(job, now), job.user].filter(Boolean).join(" · ")}
                   </Text>
+                  {countsText(job) && (
+                    <Text size="xs" c="dimmed" truncate>
+                      {countsText(job)}
+                    </Text>
+                  )}
                 </UnstyledButton>
               );
             })}

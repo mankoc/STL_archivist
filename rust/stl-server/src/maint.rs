@@ -91,7 +91,7 @@ pub fn find_moved(lib: &Library, ctl: &Control, ids: &[i64]) -> Result<Vec<Recor
         {
             candidates = by_name_size.get(&(file_name(p), *s)).map_or(&[], Vec::as_slice);
         }
-        if let Some((m, _)) = candidates.iter().find(|(m, mid)| mid != id && Path::new(m).exists()) {
+        if let Some((m, _)) = candidates.iter().find(|(m, mid)| mid != id && Path::new(&stl_core::relpath::on_disk(m)).exists()) {
             out.push(RecordRow {
                 id: *id,
                 title: titles.get(id).cloned().unwrap_or_default(),
