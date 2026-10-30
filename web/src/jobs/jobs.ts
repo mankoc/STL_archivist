@@ -105,6 +105,26 @@ export function countsText(job: Job): string | null {
   return `New: ${c.new.toLocaleString()} · Deleted: ${c.deleted.toLocaleString()} · Updated: ${c.updated.toLocaleString()}`;
 }
 
+export type JobChanges = Schemas["JobChanges"];
+
+/** The changes view's text: each non-empty list under its heading, with what the server left out. */
+export function changesText(counts: Job["counts"], changes: JobChanges | null | undefined): string {
+  if (!counts || !changes) return "";
+  const sections = (
+    [
+      ["New", counts.new, changes.new],
+      ["Deleted", counts.deleted, changes.deleted],
+      ["Updated", counts.updated, changes.updated],
+    ] as const
+  )
+    .filter(([, n]) => n > 0)
+    .map(([title, n, paths]) => {
+      const more = n > paths.length ? [`… and ${(n - paths.length).toLocaleString()} more`] : [];
+      return [`${title} (${n.toLocaleString()})`, ...paths.map((p) => `  ${p}`), ...more].join("\n");
+    });
+  return sections.length ? sections.join("\n\n") : "No archives added, deleted or updated.";
+}
+
 /** Newest first, with active jobs on top. */
 export function sortJobs(jobs: Job[]): Job[] {
   return [...jobs].sort((a, b) => Number(isActive(b)) - Number(isActive(a)) || b.id - a.id);

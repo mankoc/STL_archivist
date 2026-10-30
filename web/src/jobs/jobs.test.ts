@@ -1,4 +1,4 @@
-import { addJob, countsText, describe as label, duration, elapsed, percent, progressText, remaining, sortJobs, type Job } from "./jobs";
+import { addJob, changesText, countsText, describe as label, duration, elapsed, percent, progressText, remaining, sortJobs, type Job } from "./jobs";
 
 const job = (over: Partial<Job>): Job =>
   ({
@@ -36,6 +36,14 @@ describe("jobs", () => {
   it("shows a crawl's counts", () => {
     expect(countsText(job({}))).toBeNull();
     expect(countsText(job({ counts: { new: 3, updated: 12, deleted: 0 } }))).toBe("New: 3 · Deleted: 0 · Updated: 12");
+  });
+
+  it("lists a crawl's changes", () => {
+    expect(changesText(undefined, undefined)).toBe("");
+    expect(changesText({ new: 0, updated: 0, deleted: 0 }, { new: [], updated: [], deleted: [] })).toBe("No archives added, deleted or updated.");
+    expect(changesText({ new: 1, updated: 3, deleted: 0 }, { new: ["D:/a.zip"], updated: ["D:/b.zip"], deleted: [] })).toBe(
+      "New (1)\n  D:/a.zip\n\nUpdated (3)\n  D:/b.zip\n… and 2 more",
+    );
   });
 
   it("formats durations", () => {

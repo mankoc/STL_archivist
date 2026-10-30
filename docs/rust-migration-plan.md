@@ -1344,6 +1344,10 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.44.8: **job changes.** `Job` keeps the paths behind `JobInfo.counts` (`JobChanges`,
+  `KEEP_CHANGES` = 10,000 per list; `Job::record`, and `unrecord_moved` for cross-folder
+  moves), returned as `JobDetail.changes` for jobs with counts. `JobLog` switches between
+  *Changes* (`changesText`, refetched when the counts change) and *Log*.
 - 2026.44.7: **decomposed names and job counts.** `relpath::path_key` compares in NFC, and
   `relpath::on_disk` finds a stored (NFC) path's spelling on disk part by part, for names
   written decomposed (NTFS and ext4 do not normalise). It is used wherever a stored path

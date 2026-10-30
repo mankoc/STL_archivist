@@ -1,14 +1,14 @@
 // Jobs: the job queue and a live log. Libraries (crawls) and Database
 // Maintenance have their own places (LibrariesPage, Settings → Maintenance).
-import { ActionIcon, Badge, Box, Card, Group, Progress, ScrollArea, Stack, Text, Title, UnstyledButton } from "@mantine/core";
+import { ActionIcon, Badge, Box, Card, Group, Progress, ScrollArea, SegmentedControl, Stack, Text, Title, UnstyledButton } from "@mantine/core";
 import { IconPlayerStop } from "@tabler/icons-react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api, unwrap } from "../api/client";
 import { type ServerEvent, useServerEvent } from "../api/events";
 import { hasRole, useUser } from "../auth/user";
-import { countsText, describe, elapsed, isActive, type Job, percent, progressText, sortJobs, STATE_COLOR } from "./jobs";
+import { changesText, countsText, describe, elapsed, isActive, type Job, percent, progressText, sortJobs, STATE_COLOR } from "./jobs";
 import classes from "./JobsPage.module.css";
 
 function useNow(active: boolean) {
@@ -117,13 +117,36 @@ export function JobLog({ id, job }: { id: number; job: Job | undefined }) {
   );
   useServerEvent(onEvent);
   const lines = [...(detail.data ?? []), ...extra];
+  // A crawl opens on the archives it changed; its log is one click away.
+  const counts = job?.counts;
+  const [view, setView] = useState<"log" | "changes" | null>(null);
+  useEffect(() => setView(null), [id]);
+  const showChanges = !!counts && (view ?? "changes") === "changes";
+  const changes = useQuery({
+    queryKey: ["job-changes", id, counts?.new, counts?.updated, counts?.deleted],
+    queryFn: async () => unwrap(await api.GET("/api/jobs/{id}", { params: { path: { id } } })).changes,
+    enabled: showChanges,
+    placeholderData: keepPreviousData,
+  });
   useEffect(() => {
-    viewport.current?.scrollTo({ top: viewport.current.scrollHeight });
-  }, [lines.length]);
+    if (!showChanges) viewport.current?.scrollTo({ top: viewport.current.scrollHeight });
+  }, [lines.length, showChanges]);
   return (
     <Card withBorder className={classes.logCard}>
-      <Group justify="space-between" mb="xs">
-        <Title order={5}>Log</Title>
+      <Group justify="space-between" mb="xs" wrap="nowrap">
+        {counts ? (
+          <SegmentedControl
+            size="xs"
+            value={showChanges ? "changes" : "log"}
+            onChange={(v) => setView(v as "log" | "changes")}
+            data={[
+              { value: "changes", label: "Changes" },
+              { value: "log", label: "Log" },
+            ]}
+          />
+        ) : (
+          <Title order={5}>Log</Title>
+        )}
         {job && (
           <Text size="xs" c="dimmed" truncate maw="70%">
             {describe(job)}
@@ -132,8 +155,14 @@ export function JobLog({ id, job }: { id: number; job: Job | undefined }) {
       </Group>
       <ScrollArea viewportRef={viewport} className={classes.log} data-testid="job-log">
         <Box component="pre" m={0} fz="xs" ff="monospace">
-          {lines.join("\n")}
-          {job?.message && !isActive(job) ? `\n\n${job.message}` : ""}
+          {showChanges ? (
+            changesText(counts, changes.data)
+          ) : (
+            <>
+              {lines.join("\n")}
+              {job?.message && !isActive(job) ? `\n\n${job.message}` : ""}
+            </>
+          )}
         </Box>
       </ScrollArea>
     </Card>
