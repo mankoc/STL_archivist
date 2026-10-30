@@ -3,7 +3,7 @@
 //! lines go to the job's record and to every WebSocket client
 //! ([`ServerEvent`]); a job stops at its next checkpoint when cancelled.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;
@@ -23,6 +23,8 @@ use crate::library_settings::LibrarySettings;
 const KEEP_FINISHED: usize = 50;
 /// Log lines kept per job.
 const KEEP_LOG: usize = 2000;
+/// Archive paths kept per list of a job's changes (the counts go on).
+const KEEP_CHANGES: usize = 10_000;
 /// How often a running job's progress is published.
 const TICK: Duration = Duration::from_millis(500);
 const DHASH_BATCH: usize = 500;
@@ -424,6 +426,21 @@ pub struct JobCounts {
     pub deleted: u64,
 }
 
+/// The archives behind a job's [`JobCounts`] (at most 10,000 in each list).
+#[derive(Debug, Clone, Default, Serialize, ToSchema)]
+pub struct JobChanges {
+    pub new: Vec<String>,
+    pub updated: Vec<String>,
+    pub deleted: Vec<String>,
+}
+
+#[derive(Clone, Copy)]
+enum Change {
+    New,
+    Updated,
+    Deleted,
+}
+
 /// What WebSocket clients receive (`/api/events`), as JSON text frames.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -446,6 +463,7 @@ pub struct Job {
     result: Mutex<Option<crate::dupes::JobResult>>,
     /// Archive paths whose folders' sidecars need a refresh once the job ends.
     sidecars: Mutex<Vec<String>>,
+    changes: Mutex<JobChanges>,
 }
 
 impl Job {
@@ -456,6 +474,46 @@ impl Job {
 
     fn set_result(&self, v: crate::dupes::JobResult) {
         *self.result.lock().unwrap_or_else(|e| e.into_inner()) = Some(v);
+    }
+
+    /// The archives a crawl added, updated and deleted (`None` for jobs without counts).
+    pub fn changes(&self) -> Option<JobChanges> {
+        self.info().counts.map(|_| self.changes.lock().unwrap_or_else(|e| e.into_inner()).clone())
+    }
+
+    fn record(&self, change: Change, paths: impl IntoIterator<Item = String>) {
+        let mut ch = self.changes.lock().unwrap_or_else(|e| e.into_inner());
+        let list = match change {
+            Change::New => &mut ch.new,
+            Change::Updated => &mut ch.updated,
+            Change::Deleted => &mut ch.deleted,
+        };
+        let mut n = 0;
+        for p in paths {
+            n += 1;
+            if list.len() < KEEP_CHANGES {
+                list.push(p);
+            }
+        }
+        update(self, |i| {
+            let c = i.counts.get_or_insert_with(JobCounts::default);
+            match change {
+                Change::New => c.new += n,
+                Change::Updated => c.updated += n,
+                Change::Deleted => c.deleted += n,
+            }
+        });
+    }
+
+    /// Archives recorded as new that were moved from another folder: neither new nor deleted.
+    fn unrecord_moved(&self, new_paths: &[&str]) {
+        let keys: HashSet<String> = new_paths.iter().map(|p| stl_core::relpath::path_key(p)).collect();
+        let mut ch = self.changes.lock().unwrap_or_else(|e| e.into_inner());
+        ch.new.retain(|p| !keys.contains(&stl_core::relpath::path_key(p)));
+        update(self, |i| {
+            let c = i.counts.get_or_insert_with(JobCounts::default);
+            c.new = c.new.saturating_sub(keys.len() as u64);
+        });
     }
 
     fn touch_sidecars(&self, paths: impl IntoIterator<Item = String>) {
@@ -560,10 +618,6 @@ fn update(job: &Job, f: impl FnOnce(&mut JobInfo)) {
     f(&mut job.info.lock().unwrap_or_else(|e| e.into_inner()));
 }
 
-fn count(job: &Job, f: impl FnOnce(&mut JobCounts)) {
-    update(job, |i| f(i.counts.get_or_insert_with(JobCounts::default)));
-}
-
 fn finish(job: &Job, state: JobState, message: Option<String>) {
     update(job, |i| {
         i.state = state;
@@ -598,6 +652,7 @@ impl Library {
             ctl: Control::new(),
             result: Mutex::new(None),
             sidecars: Mutex::new(Vec::new()),
+            changes: Mutex::new(JobChanges::default()),
         });
         jobs.list.lock().unwrap_or_else(|e| e.into_inner()).push(Arc::clone(&job));
         jobs.trim();
@@ -1635,13 +1690,13 @@ impl Host for ServerHost<'_> {
                 self.job.ctl.advance(done as u64);
             }
             Event::Result(path, status) if status == "new" => {
-                count(self.job, |c| c.new += 1);
+                self.job.record(Change::New, [path.clone()]);
                 if let Some(paths) = self.new_paths {
                     paths.lock().unwrap_or_else(|e| e.into_inner()).push(path);
                 }
             }
-            Event::Result(..) => count(self.job, |c| c.updated += 1),
-            Event::Deleted(_) => count(self.job, |c| c.deleted += 1),
+            Event::Result(path, _) => self.job.record(Change::Updated, [path]),
+            Event::Deleted(path) => self.job.record(Change::Deleted, [path]),
             Event::Counts(..) | Event::Moved(..) | Event::Marked(..) => {}
         }
     }
@@ -1708,8 +1763,8 @@ fn update_folders(lib: &Library, job: &Job, folders: Vec<String>) -> Result<Stri
         for p in &deleted {
             lib.job_log(job, format!("Deleted: {p}"));
         }
-        // An archive moved between folders is neither new nor deleted.
-        count(job, |c| (c.new, c.deleted) = (c.new.saturating_sub(moved.len() as u64), c.deleted + deleted.len() as u64));
+        job.unrecord_moved(&moved.iter().map(|(_, new)| new.as_str()).collect::<Vec<_>>());
+        job.record(Change::Deleted, deleted.iter().cloned());
         (moved_n, deleted_n) = (moved.len(), deleted.len());
         job.touch_sidecars(moved.into_iter().flat_map(|(a, b)| [a, b]).chain(deleted));
     }

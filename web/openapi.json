@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.44.7"
+    "version": "2026.44.8"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -5430,6 +5430,35 @@
           }
         }
       },
+      "JobChanges": {
+        "type": "object",
+        "description": "The archives behind a job's [`JobCounts`] (at most 10,000 in each list).",
+        "required": [
+          "new",
+          "updated",
+          "deleted"
+        ],
+        "properties": {
+          "deleted": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "new": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "updated": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "JobCounts": {
         "type": "object",
         "required": [
@@ -5462,6 +5491,17 @@
           "log"
         ],
         "properties": {
+          "changes": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/JobChanges",
+                "description": "The archives a crawl added, updated and deleted (for jobs with `counts`)."
+              }
+            ]
+          },
           "job": {
             "$ref": "#/components/schemas/JobInfo"
           },

@@ -1945,6 +1945,12 @@ export interface components {
             /** @description The package (a name in the backups list). */
             name: string;
         };
+        /** @description The archives behind a job's [`JobCounts`] (at most 10,000 in each list). */
+        JobChanges: {
+            deleted: string[];
+            new: string[];
+            updated: string[];
+        };
         JobCounts: {
             /** Format: int64 */
             deleted: number;
@@ -1954,6 +1960,7 @@ export interface components {
             updated: number;
         };
         JobDetail: {
+            changes?: null | components["schemas"]["JobChanges"];
             job: components["schemas"]["JobInfo"];
             /** @description The job's log, oldest line first (at most the last 2,000 lines). */
             log: string[];

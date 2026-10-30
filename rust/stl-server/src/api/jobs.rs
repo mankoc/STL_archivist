@@ -82,6 +82,8 @@ pub struct JobDetail {
     pub log: Vec<String>,
     /// What a duplicate finder found, once it is done (`pairs` or `groups`).
     pub result: Option<crate::dupes::JobResult>,
+    /// The archives a crawl added, updated and deleted (for jobs with `counts`).
+    pub changes: Option<crate::jobs::JobChanges>,
 }
 
 /// One job with its log.
@@ -89,7 +91,7 @@ pub struct JobDetail {
     responses((status = 200, body = JobDetail), (status = 404, body = crate::error::ErrorBody)))]
 pub async fn detail(State(lib): State<AppState>, _me: CurrentUser, Path(id): Path<u64>) -> Result<Json<JobDetail>, ApiError> {
     let job = lib.jobs.get(id).ok_or_else(|| ApiError::not_found(format!("no job {id}")))?;
-    Ok(Json(JobDetail { job: job.info(), log: job.log(), result: job.result() }))
+    Ok(Json(JobDetail { job: job.info(), log: job.log(), result: job.result(), changes: job.changes() }))
 }
 
 /// Cancel a job: a queued one at once, a running one at its next checkpoint

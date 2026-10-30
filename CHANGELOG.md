@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026.44.8 — 2026-10-30
+
+- **A crawl's changed archives, listed:** clicking a crawl or *Update libraries* job opens
+  its **Changes**: the archives it added, deleted and updated, under "New (n)",
+  "Deleted (n)" and "Updated (n)". It follows the job while it runs. **Log** beside it shows
+  the log as before. Up to 10,000 archives are listed per group; the rest are counted.
+
 ## 2026.44.7 — 2026-10-29
 
 - **Archives with accented names are no longer reported missing.** Names like

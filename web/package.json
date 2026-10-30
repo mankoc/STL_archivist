@@ -1,7 +1,7 @@
 {
   "name": "stllibrary-web",
   "private": true,
-  "version": "2026.44.7",
+  "version": "2026.44.8",
   "type": "module",
   "description": "StlArchivist web client (Phase 6 of docs/rust-migration-plan.md)",
   "scripts": {
