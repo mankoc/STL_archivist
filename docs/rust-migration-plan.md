@@ -1344,6 +1344,14 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.44.11: **parallel filter tree.** `library::filter_tree` is a list of `SECTIONS`, each
+  doing its counts and its value list on one connection. The scoped tree runs them in turn
+  (the path scope's temp table is per connection). `filter_tree_parallel` runs them on
+  rayon, each with a `Pool` connection, and merges with `FilterTree::absorb` (every field
+  named). The server's `unfiltered_tree` uses it. A test checks it equals `filter_tree`; it
+  was also checked on a 60,726-model library (10,904 counts, 6,706 folders). Cold on a
+  hard disk: tree ready 5.8 s after start (7.4 s before). After `VACUUM` (*Compact
+  database*): 1.6 s, the indexes then being contiguous.
 - 2026.44.10: **select all; filter pane cache.** `selection.ts` gained `selectAll` and
   `coverage`. `ModelTable` takes `checkboxes` (a column shown while rows are selected; a
   row's box is a Ctrl+click), and `BrowserPage` has *Select all* and `mod+A`. The server

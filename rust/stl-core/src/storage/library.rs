@@ -573,7 +573,7 @@ pub enum Key {
 pub type Collection = (String, i64, Vec<(String, i64)>);
 
 /// What `filter_tree_data` returns.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct FilterTree {
     pub counts: HashMap<Key, i64>,
     pub path_counts: Option<HashMap<String, i64>>,
@@ -644,97 +644,401 @@ fn add_ancestors(out: &mut HashMap<String, i64>, direct: &HashMap<String, i64>) 
     }
 }
 
-/// `filter_tree_data(spec, show, show_counts)`.
+/// `filter_tree_data(spec, show, show_counts)`: every section in turn on `conn`.
 pub fn filter_tree(conn: &Connection, spec: Option<&FilterSpec>, show: &Show, show_counts: bool) -> Result<FilterTree> {
     let mut ft = FilterTree::default();
     let spec = spec.filter(|s| !s.is_empty());
-
-    // Scopes: per section, the ids matching every other filter (`facet_scopes`).
-    let mut scopes = Scopes::default();
-    if let Some(spec) = spec {
-        let mut path_table = None;
-        if spec.facet_active("path") {
-            let (p_inc, p_exc) = spec.pruned_paths();
-            conn.execute_batch(&format!("CREATE TEMP TABLE IF NOT EXISTS {PATH_TEMP} (id INTEGER PRIMARY KEY)"))?;
-            conn.execute(&format!("DELETE FROM {PATH_TEMP}"), [])?;
-            let mut parts = Vec::new();
-            if let Some(s) = path_matches("models", &p_inc) {
-                parts.push(s);
-            }
-            if let Some(s) = path_matches("models", &p_exc) {
-                parts.push(Sql::with(format!("NOT ({})", s.text), s.params));
-            }
-            let mut sql = format!("INSERT INTO {PATH_TEMP} (id) SELECT models.id FROM models");
-            let mut params = Vec::new();
-            if let Some(w) = Sql::and(parts) {
-                sql.push_str(&format!(" WHERE {}", w.text));
-                params = w.params;
-            }
-            conn.execute(&sql, params_from_iter(params))?;
-            path_table = Some(PATH_TEMP);
+    let scopes = match spec {
+        Some(spec) => {
+            ft.scoped = true;
+            scopes_of(conn, spec)?
         }
-        for &facet in FACETS {
-            let conds = conditions(spec, "models", Some(facet), path_table);
-            scopes.0.insert(
-                facet,
-                Sql::and(conds).map(|w| Sql::with(format!("SELECT models.id FROM models WHERE {}", w.text), w.params)),
-            );
-        }
-        ft.scoped = true;
+        None => Scopes::default(),
+    };
+    for section in SECTIONS {
+        section(conn, &scopes, show, show_counts, &mut ft)?;
     }
-    let scope = |section: &str| scopes.get(section);
+    if show_counts && spec.is_some() {
+        scoped_counts(conn, &scopes, &mut ft)?;
+    }
+    Ok(ft)
+}
 
-    if show_counts {
-        let mut grp: HashMap<String, i64> = HashMap::new();
-        for (col, kind) in [
-            (LIBRARY, "library_id"),
-            ("creator", "creator"),
-            ("source", "source"),
-            ("sculptor_id", "sculptor_id"),
-            ("collection_id", "collection_id"),
-            ("subcollection_id", "subcollection_id"),
-            ("category_id", "category_id"),
-            ("release_id", "release_id"),
-            ("presupports", "presupports"),
-        ] {
-            let mut total = 0;
-            let col = column_of("models", col);
-            for (v, c) in rows_i64_text(conn, &format!("SELECT {col}, count(models.id) FROM models WHERE {col} IS NOT NULL GROUP BY {col}"), &[])? {
-                if let Some(k) = key_for(kind, v) {
-                    ft.counts.insert(k, c);
-                }
-                total += c;
+/// The unfiltered tree with its sections read at once, each on a connection of
+/// `pool`: on a hard disk the reads of several indexes queue together instead of
+/// one after the other. The same tree as [`filter_tree`] without a filter.
+pub fn filter_tree_parallel(pool: &super::pool::Pool, show: &Show, show_counts: bool) -> Result<FilterTree> {
+    use rayon::prelude::*;
+    let none = Scopes::default();
+    let parts = SECTIONS
+        .par_iter()
+        .map(|section| {
+            let conn = pool.get()?;
+            let mut ft = FilterTree::default();
+            section(&conn, &none, show, show_counts, &mut ft)?;
+            Ok(ft)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let mut ft = FilterTree::default();
+    for part in parts {
+        ft.absorb(part);
+    }
+    Ok(ft)
+}
+
+impl FilterTree {
+    /// Take what a section filled in.
+    fn absorb(&mut self, part: FilterTree) {
+        fn take<T>(into: &mut Option<T>, v: Option<T>) {
+            if v.is_some() {
+                *into = v;
             }
-            grp.insert(kind.into(), total);
         }
+        fn take_vec<T>(into: &mut Vec<T>, v: Vec<T>) {
+            if !v.is_empty() {
+                *into = v;
+            }
+        }
+        // Every field named: a new one cannot be forgotten here.
+        let FilterTree {
+            counts,
+            path_counts,
+            scoped_counts,
+            sc_path_counts,
+            creators,
+            tags,
+            sources,
+            dates,
+            libraries,
+            sculptors,
+            collections,
+            sub_by_col,
+            categories,
+            releases,
+            scales,
+            presupports,
+            filetypes,
+            sorted_dirs,
+            scoped_dirs,
+            new_dirs,
+            scoped,
+        } = part;
+        self.counts.extend(counts);
+        self.scoped_counts.extend(scoped_counts);
+        take(&mut self.path_counts, path_counts);
+        take(&mut self.sc_path_counts, sc_path_counts);
+        take(&mut self.scoped_dirs, scoped_dirs);
+        take(&mut self.new_dirs, new_dirs);
+        take_vec(&mut self.creators, creators);
+        take_vec(&mut self.tags, tags);
+        take_vec(&mut self.sources, sources);
+        take_vec(&mut self.dates, dates);
+        take_vec(&mut self.libraries, libraries);
+        take_vec(&mut self.sculptors, sculptors);
+        take_vec(&mut self.collections, collections);
+        take_vec(&mut self.sub_by_col, sub_by_col);
+        take_vec(&mut self.categories, categories);
+        take_vec(&mut self.releases, releases);
+        take_vec(&mut self.scales, scales);
+        take_vec(&mut self.presupports, presupports);
+        take_vec(&mut self.filetypes, filetypes);
+        take_vec(&mut self.sorted_dirs, sorted_dirs);
+        self.scoped |= scoped;
+    }
+}
 
+/// One part of the tree: its counts (when asked) and its value list (when shown),
+/// so each index is read once.
+type Section = fn(&Connection, &Scopes, &Show, bool, &mut FilterTree) -> Result<()>;
+
+const SECTIONS: &[Section] = &[
+    library_section,
+    creator_section,
+    source_section,
+    sculptor_section,
+    collection_section,
+    subcollection_section,
+    category_section,
+    release_section,
+    presupports_section,
+    date_section,
+    warning_section,
+    filetype_section,
+    path_section,
+    tag_section,
+    scale_section,
+];
+
+/// Per section, the SELECT of ids matching every other filter (`facet_scopes`).
+fn scopes_of(conn: &Connection, spec: &FilterSpec) -> Result<Scopes> {
+    let mut scopes = Scopes::default();
+    let mut path_table = None;
+    if spec.facet_active("path") {
+        let (p_inc, p_exc) = spec.pruned_paths();
+        conn.execute_batch(&format!("CREATE TEMP TABLE IF NOT EXISTS {PATH_TEMP} (id INTEGER PRIMARY KEY)"))?;
+        conn.execute(&format!("DELETE FROM {PATH_TEMP}"), [])?;
+        let mut parts = Vec::new();
+        if let Some(s) = path_matches("models", &p_inc) {
+            parts.push(s);
+        }
+        if let Some(s) = path_matches("models", &p_exc) {
+            parts.push(Sql::with(format!("NOT ({})", s.text), s.params));
+        }
+        let mut sql = format!("INSERT INTO {PATH_TEMP} (id) SELECT models.id FROM models");
+        let mut params = Vec::new();
+        if let Some(w) = Sql::and(parts) {
+            sql.push_str(&format!(" WHERE {}", w.text));
+            params = w.params;
+        }
+        conn.execute(&sql, params_from_iter(params))?;
+        path_table = Some(PATH_TEMP);
+    }
+    for &facet in FACETS {
+        let conds = conditions(spec, "models", Some(facet), path_table);
+        scopes
+            .0
+            .insert(facet, Sql::and(conds).map(|w| Sql::with(format!("SELECT models.id FROM models WHERE {}", w.text), w.params)));
+    }
+    Ok(scopes)
+}
+
+/// Models per value of a `models` column, and the group's total.
+fn column_counts(conn: &Connection, col: &str, kind: &str, ft: &mut FilterTree) -> Result<()> {
+    let mut total = 0;
+    let col = column_of("models", col);
+    for (v, c) in rows_i64_text(conn, &format!("SELECT {col}, count(models.id) FROM models WHERE {col} IS NOT NULL GROUP BY {col}"), &[])? {
+        if let Some(k) = key_for(kind, v) {
+            ft.counts.insert(k, c);
+        }
+        total += c;
+    }
+    ft.counts.insert(Key::Group(kind.into()), total);
+    Ok(())
+}
+
+fn library_section(conn: &Connection, scopes: &Scopes, show: &Show, counts: bool, ft: &mut FilterTree) -> Result<()> {
+    if counts {
+        column_counts(conn, LIBRARY, "library_id", ft)?;
+    }
+    if show.get("library") {
+        ft.libraries = lookup_list(conn, "library_groups", LIBRARY, scopes.get("library"))?;
+    }
+    Ok(())
+}
+
+fn creator_section(conn: &Connection, scopes: &Scopes, show: &Show, counts: bool, ft: &mut FilterTree) -> Result<()> {
+    if counts {
+        column_counts(conn, "creator", "creator", ft)?;
+    }
+    if show.get("author") {
+        ft.creators = distinct_texts(conn, "creator", scopes.get("creator"))?;
+    }
+    Ok(())
+}
+
+fn source_section(conn: &Connection, scopes: &Scopes, show: &Show, counts: bool, ft: &mut FilterTree) -> Result<()> {
+    if counts {
+        column_counts(conn, "source", "source", ft)?;
+    }
+    if show.get("source") {
+        ft.sources = distinct_texts(conn, "source", scopes.get("source"))?;
+    }
+    Ok(())
+}
+
+fn sculptor_section(conn: &Connection, scopes: &Scopes, show: &Show, counts: bool, ft: &mut FilterTree) -> Result<()> {
+    if counts {
+        column_counts(conn, "sculptor_id", "sculptor_id", ft)?;
+    }
+    if show.get("sculptor") {
+        ft.sculptors = lookup_list(conn, "sculptors", "sculptor_id", scopes.get("sculptor"))?;
+    }
+    Ok(())
+}
+
+fn collection_section(conn: &Connection, scopes: &Scopes, show: &Show, counts: bool, ft: &mut FilterTree) -> Result<()> {
+    if counts {
+        column_counts(conn, "collection_id", "collection_id", ft)?;
+    }
+    if show.get("collection") {
+        ft.collections = lookup_list(conn, "collections", "collection_id", scopes.get("collection"))?;
+    }
+    Ok(())
+}
+
+fn subcollection_section(conn: &Connection, scopes: &Scopes, show: &Show, counts: bool, ft: &mut FilterTree) -> Result<()> {
+    if counts {
+        column_counts(conn, "subcollection_id", "subcollection_id", ft)?;
+    }
+    if !show.get("subcollection") {
+        return Ok(());
+    }
+    let scoped_ids: Option<HashSet<i64>> = match scopes.get("subcollection") {
+        None => None,
+        Some(sc) => Some(
+            column_ints(
+                conn,
+                &format!(
+                    "SELECT DISTINCT models.subcollection_id FROM models WHERE models.id IN ({}) \
+                     AND models.subcollection_id IS NOT NULL",
+                    sc.text
+                ),
+                &sc.params,
+            )?
+            .into_iter()
+            .collect(),
+        ),
+    };
+    let mut st = conn.prepare(
+        "SELECT collections.name, collections.id, subcollections.name, subcollections.id FROM collections \
+         JOIN subcollections ON subcollections.collection_id = collections.id \
+         ORDER BY collections.name, subcollections.name",
+    )?;
+    let mut order: Vec<i64> = Vec::new();
+    let mut by_col: HashMap<i64, (String, Vec<(String, i64)>)> = HashMap::new();
+    let mut rows = st.query([])?;
+    while let Some(r) = rows.next()? {
+        let (cn, cid, sn, sid): (String, i64, String, i64) = (r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?);
+        if scoped_ids.as_ref().is_some_and(|s| !s.contains(&sid)) {
+            continue;
+        }
+        by_col.entry(cid).or_insert_with(|| {
+            order.push(cid);
+            (cn, Vec::new())
+        });
+        by_col.get_mut(&cid).unwrap().1.push((sn, sid));
+    }
+    ft.sub_by_col = order
+        .into_iter()
+        .map(|cid| {
+            let (name, subs) = by_col.remove(&cid).unwrap();
+            (name, cid, subs)
+        })
+        .collect();
+    Ok(())
+}
+
+fn category_section(conn: &Connection, scopes: &Scopes, show: &Show, counts: bool, ft: &mut FilterTree) -> Result<()> {
+    if counts {
+        column_counts(conn, "category_id", "category_id", ft)?;
+    }
+    if show.get("category") {
+        ft.categories = lookup_list(conn, "categories", "category_id", scopes.get("category"))?;
+    }
+    Ok(())
+}
+
+fn release_section(conn: &Connection, scopes: &Scopes, show: &Show, counts: bool, ft: &mut FilterTree) -> Result<()> {
+    if counts {
+        column_counts(conn, "release_id", "release_id", ft)?;
+    }
+    if show.get("release") {
+        ft.releases = lookup_list(conn, "releases", "release_id", scopes.get("release"))?;
+    }
+    Ok(())
+}
+
+fn presupports_section(conn: &Connection, scopes: &Scopes, show: &Show, counts: bool, ft: &mut FilterTree) -> Result<()> {
+    if counts {
+        column_counts(conn, "presupports", "presupports", ft)?;
+    }
+    if show.get("presupports") {
+        ft.presupports = distinct_texts(conn, "presupports", scopes.get("presupports"))?;
+    }
+    Ok(())
+}
+
+fn date_section(conn: &Connection, scopes: &Scopes, show: &Show, counts: bool, ft: &mut FilterTree) -> Result<()> {
+    if counts {
         let (year_cnt, date_total) = date_counts(conn, None, &mut ft.counts)?;
         for (y, c) in year_cnt {
             ft.counts.insert(Key::Year(y), c);
         }
-        grp.insert("date".into(), date_total);
+        ft.counts.insert(Key::Group("date".into()), date_total);
+    }
+    if show.get("date") {
+        let mut sql =
+            String::from("SELECT DISTINCT models.release_year, models.release_month FROM models WHERE models.release_year IS NOT NULL");
+        let mut params = Vec::new();
+        if let Some(sc) = scopes.get("date") {
+            sql.push_str(&format!(" AND models.id IN ({})", sc.text));
+            params = sc.params.clone();
+        }
+        sql.push_str(" ORDER BY models.release_year DESC, models.release_month");
+        let mut st = conn.prepare(&sql)?;
+        ft.dates = st.query_map(params_from_iter(params), |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_>>()?;
+    }
+    Ok(())
+}
 
+fn warning_section(conn: &Connection, _: &Scopes, _: &Show, counts: bool, ft: &mut FilterTree) -> Result<()> {
+    if counts {
         let warnings = column_texts(conn, "SELECT models.warning FROM models WHERE models.warning IS NOT NULL", &[])?;
         for wt in WARNINGS_ALL {
             ft.counts.insert(Key::Text("warning".into(), wt.to_string()), warnings.iter().filter(|w| w.contains(wt)).count() as i64);
         }
-        grp.insert("warning".into(), warnings.iter().filter(|w| !w.is_empty()).count() as i64);
+        ft.counts.insert(Key::Group("warning".into()), warnings.iter().filter(|w| !w.is_empty()).count() as i64);
+    }
+    Ok(())
+}
 
-        let suffixes = filetype_suffixes(conn, None, true)?;
+/// File types: counted over every model, listed in the scope (one read without one).
+fn filetype_section(conn: &Connection, scopes: &Scopes, _: &Show, counts: bool, ft: &mut FilterTree) -> Result<()> {
+    let scope = scopes.get("filetype");
+    let all = if counts || scope.is_none() { Some(filetype_suffixes(conn, None, true)?) } else { None };
+    if counts && let Some(suffixes) = &all {
         let mut ft_counts: HashMap<String, i64> = HashMap::new();
-        for s in &suffixes {
+        for s in suffixes {
             *ft_counts.entry(s.clone()).or_default() += 1;
         }
         for (s, c) in ft_counts {
             ft.counts.insert(Key::Text("filetype".into(), s), c);
         }
-        grp.insert("filetype".into(), suffixes.len() as i64);
+        ft.counts.insert(Key::Group("filetype".into()), suffixes.len() as i64);
+    }
+    let listed = match (scope, all) {
+        (None, Some(all)) => all,
+        (sc, _) => filetype_suffixes(conn, sc, true)?,
+    };
+    let mut fts: Vec<String> = listed.into_iter().filter(|s| !s.is_empty()).collect();
+    fts.sort();
+    fts.dedup();
+    ft.filetypes = fts;
+    Ok(())
+}
 
-        let direct = direct_folders(conn, None)?;
-        for (k, v) in &grp {
-            ft.counts.insert(Key::Group(k.clone()), *v);
+/// Folders: counts with their ancestors, and the folder list (one read without a scope).
+fn path_section(conn: &Connection, scopes: &Scopes, show: &Show, counts: bool, ft: &mut FilterTree) -> Result<()> {
+    let scope = scopes.get("path");
+    let direct = if counts || (show.get("path") && scope.is_none()) { Some(direct_folders(conn, None)?) } else { None };
+    if counts && let Some(direct) = &direct {
+        let mut path_counts = HashMap::new();
+        add_ancestors(&mut path_counts, direct);
+        ft.counts.insert(Key::Group("path".into()), direct.values().sum());
+        ft.path_counts = Some(path_counts);
+    }
+    if !show.get("path") {
+        return Ok(());
+    }
+    match scope {
+        Some(sc) => {
+            let scope = format!("models.id IN ({})", sc.text);
+            let dirs: BTreeSet<String> =
+                rows_i64_text(conn, &folder_counts_sql(Some(&scope)), &sc.params)?.into_iter().filter_map(|(v, _)| text_of(v)).collect();
+            ft.scoped_dirs = Some(dirs.into_iter().collect());
         }
+        None => {
+            let dirs: BTreeSet<String> = direct.unwrap_or_default().into_keys().collect();
+            let sorted: Vec<String> = dirs.into_iter().collect();
+            ft.new_dirs = Some(sorted.clone());
+            ft.sorted_dirs = sorted;
+        }
+    }
+    Ok(())
+}
 
+fn tag_section(conn: &Connection, scopes: &Scopes, show: &Show, counts: bool, ft: &mut FilterTree) -> Result<()> {
+    if counts {
         for (v, c) in rows_i64_text(
             conn,
             "SELECT tags.name, count(model_tags.model_id) FROM tags JOIN model_tags ON tags.id = model_tags.tag_id GROUP BY tags.name",
@@ -745,6 +1049,18 @@ pub fn filter_tree(conn: &Connection, spec: Option<&FilterSpec>, show: &Show, sh
             }
         }
         ft.counts.insert(Key::Group("tag".into()), scalar(conn, "SELECT count(DISTINCT model_tags.model_id) FROM model_tags", &[])?);
+    }
+    if show.get("tags") {
+        ft.tags = match scopes.get("tag") {
+            None => column_texts(conn, "SELECT tags.name FROM tags ORDER BY tags.name", &[])?,
+            Some(sc) => scoped_tag_names(conn, sc)?,
+        };
+    }
+    Ok(())
+}
+
+fn scale_section(conn: &Connection, scopes: &Scopes, show: &Show, counts: bool, ft: &mut FilterTree) -> Result<()> {
+    if counts {
         for (v, c) in rows_i64_text(
             conn,
             "SELECT model_scales.scale_id, count(model_scales.model_id) FROM model_scales GROUP BY model_scales.scale_id",
@@ -756,109 +1072,11 @@ pub fn filter_tree(conn: &Connection, spec: Option<&FilterSpec>, show: &Show, sh
         }
         ft.counts
             .insert(Key::Group("scale".into()), scalar(conn, "SELECT count(DISTINCT model_scales.model_id) FROM model_scales", &[])?);
-
-        let mut path_counts = HashMap::new();
-        add_ancestors(&mut path_counts, &direct);
-        ft.counts.insert(Key::Group("path".into()), direct.values().sum());
-        ft.path_counts = Some(path_counts);
-
-        if spec.is_some() {
-            scoped_counts(conn, &scopes, &mut ft)?;
-        }
-    }
-
-    // ── Distinct value lists ──────────────────────────────────────────────────
-    if show.get("author") {
-        ft.creators = distinct_texts(conn, "creator", scope("creator"))?;
-    }
-    if show.get("tags") {
-        ft.tags = match scope("tag") {
-            None => column_texts(conn, "SELECT tags.name FROM tags ORDER BY tags.name", &[])?,
-            Some(sc) => scoped_tag_names(conn, sc)?,
-        };
-    }
-    if show.get("source") {
-        ft.sources = distinct_texts(conn, "source", scope("source"))?;
-    }
-    if show.get("date") {
-        let mut sql = String::from(
-            "SELECT DISTINCT models.release_year, models.release_month FROM models WHERE models.release_year IS NOT NULL",
-        );
-        let mut params = Vec::new();
-        if let Some(sc) = scope("date") {
-            sql.push_str(&format!(" AND models.id IN ({})", sc.text));
-            params = sc.params.clone();
-        }
-        sql.push_str(" ORDER BY models.release_year DESC, models.release_month");
-        let mut st = conn.prepare(&sql)?;
-        ft.dates = st.query_map(params_from_iter(params), |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_>>()?;
-    }
-    for (flag, table, col, target) in [
-        ("library", "library_groups", LIBRARY, 4usize),
-        ("sculptor", "sculptors", "sculptor_id", 0),
-        ("collection", "collections", "collection_id", 1),
-        ("category", "categories", "category_id", 2),
-        ("release", "releases", "release_id", 3),
-    ] {
-        if show.get(flag) {
-            let list = lookup_list(conn, table, col, scope(flag))?;
-            match target {
-                0 => ft.sculptors = list,
-                1 => ft.collections = list,
-                2 => ft.categories = list,
-                4 => ft.libraries = list,
-                _ => ft.releases = list,
-            }
-        }
-    }
-    if show.get("subcollection") {
-        let scoped_ids: Option<HashSet<i64>> = match scope("subcollection") {
-            None => None,
-            Some(sc) => Some(
-                column_ints(
-                    conn,
-                    &format!(
-                        "SELECT DISTINCT models.subcollection_id FROM models WHERE models.id IN ({}) \
-                         AND models.subcollection_id IS NOT NULL",
-                        sc.text
-                    ),
-                    &sc.params,
-                )?
-                .into_iter()
-                .collect(),
-            ),
-        };
-        let mut st = conn.prepare(
-            "SELECT collections.name, collections.id, subcollections.name, subcollections.id FROM collections \
-             JOIN subcollections ON subcollections.collection_id = collections.id \
-             ORDER BY collections.name, subcollections.name",
-        )?;
-        let mut order: Vec<i64> = Vec::new();
-        let mut by_col: HashMap<i64, (String, Vec<(String, i64)>)> = HashMap::new();
-        let mut rows = st.query([])?;
-        while let Some(r) = rows.next()? {
-            let (cn, cid, sn, sid): (String, i64, String, i64) = (r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?);
-            if scoped_ids.as_ref().is_some_and(|s| !s.contains(&sid)) {
-                continue;
-            }
-            by_col.entry(cid).or_insert_with(|| {
-                order.push(cid);
-                (cn, Vec::new())
-            });
-            by_col.get_mut(&cid).unwrap().1.push((sn, sid));
-        }
-        ft.sub_by_col = order
-            .into_iter()
-            .map(|cid| {
-                let (name, subs) = by_col.remove(&cid).unwrap();
-                (name, cid, subs)
-            })
-            .collect();
     }
     if show.get("scale") {
         let mut sql = String::from("SELECT scales.name, scales.id FROM scales");
         let mut params = Vec::new();
-        if let Some(sc) = scope("scale") {
+        if let Some(sc) = scopes.get("scale") {
             sql.push_str(&format!(
                 " WHERE scales.id IN (SELECT DISTINCT model_scales.scale_id FROM model_scales \
                  WHERE model_scales.model_id IN ({}))",
@@ -870,33 +1088,7 @@ pub fn filter_tree(conn: &Connection, spec: Option<&FilterSpec>, show: &Show, sh
         let mut st = conn.prepare(&sql)?;
         ft.scales = st.query_map(params_from_iter(params), |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_>>()?;
     }
-    if show.get("presupports") {
-        ft.presupports = distinct_texts(conn, "presupports", scope("presupports"))?;
-    }
-    let mut fts: Vec<String> =
-        filetype_suffixes(conn, scope("filetype"), true)?.into_iter().filter(|s| !s.is_empty()).collect();
-    fts.sort();
-    fts.dedup();
-    ft.filetypes = fts;
-
-    if show.get("path") {
-        match scope("path") {
-            Some(sc) => {
-                let scope = format!("models.id IN ({})", sc.text);
-                let dirs: BTreeSet<String> =
-                    rows_i64_text(conn, &folder_counts_sql(Some(&scope)), &sc.params)?.into_iter().filter_map(|(v, _)| text_of(v)).collect();
-                ft.scoped_dirs = Some(dirs.into_iter().collect());
-            }
-            None => {
-                let dirs: BTreeSet<String> =
-                    rows_i64_text(conn, &folder_counts_sql(None), &[])?.into_iter().filter_map(|(v, _)| text_of(v)).collect();
-                let sorted: Vec<String> = dirs.into_iter().collect();
-                ft.new_dirs = Some(sorted.clone());
-                ft.sorted_dirs = sorted;
-            }
-        }
-    }
-    Ok(ft)
+    Ok(())
 }
 
 fn scoped_tag_names(conn: &Connection, sc: &Sql) -> Result<Vec<String>> {
@@ -1158,6 +1350,55 @@ fn column_ints(conn: &Connection, sql: &str, params: &[Value]) -> Result<Vec<i64
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parallel_tree_is_the_sequential_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("models.db");
+        crate::storage::migrate(&path, &crate::storage::Vectors::default()).unwrap();
+        let pool = crate::storage::pool::Pool::new(&path);
+        pool.with_tx(|tx| {
+            let lib = crate::storage::libraries::create(tx, "F:/lib", crate::storage::libraries::Target::Around, None, None)?;
+            tx.execute_batch(
+                "INSERT INTO sculptors (name) VALUES ('Alice'), ('Bob');
+                 INSERT INTO tags (name) VALUES ('dragon'), ('knight');
+                 INSERT INTO scales (name) VALUES ('32mm');",
+            )?;
+            for (i, (title, creator, rel, sculptor, warning, year)) in [
+                ("Red", "Ann", "A/red.7z", Some(1), Some("Nested archives"), Some(2024)),
+                ("Blue", "Ann", "A/sub/blue.zip", Some(1), None, Some(2023)),
+                ("Knight", "Ben", "B/knight.rar", Some(2), Some("Archive without images\nNested archives"), None),
+                ("Loose", "", "loose.7z", None, None, None),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let folder = rel.rsplit_once('/').map_or("", |(f, _)| f);
+                tx.execute(
+                    "INSERT INTO models (title, creator, library_id, rel_path, rel_folder, archive_hash, sculptor_id, warning, \
+                     release_year, release_month, presupports, is_missing, to_print) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?1, ?6, ?7, ?8, 3, ?9, 0, 0)",
+                    rusqlite::params![title, creator, lib, rel, folder, sculptor, warning, year, (i % 2 == 0).then_some("Yes")],
+                )?;
+                let id = tx.last_insert_rowid();
+                tx.execute("INSERT INTO model_tags (model_id, tag_id) VALUES (?1, ?2)", [id, 1 + (i as i64 % 2)])?;
+                if i < 2 {
+                    tx.execute("INSERT INTO model_scales (model_id, scale_id) VALUES (?1, 1)", [id])?;
+                }
+            }
+            Ok::<_, rusqlite::Error>(())
+        })
+        .unwrap();
+        let all = Show(SHOW.iter().map(|s| s.to_string()).collect());
+        for (show, counts) in [(&all, true), (&all, false), (&Show::default(), true)] {
+            let sequential = pool.with(|c| filter_tree(c, None, show, counts)).unwrap();
+            assert_eq!(filter_tree_parallel(&pool, show, counts).unwrap(), sequential, "counts: {counts}");
+        }
+        let tree = filter_tree_parallel(&pool, &all, true).unwrap();
+        assert_eq!(tree.counts[&Key::Text("warning".into(), "Nested archives".into())], 2);
+        assert!(tree.creators.contains(&"Ann".to_string()) && tree.creators.contains(&"Ben".to_string()), "{:?}", tree.creators);
+        assert_eq!(tree.path_counts.as_ref().unwrap()["F:/lib/A"], 2);
+    }
 
     #[test]
     fn prune_and_rstrip() {
