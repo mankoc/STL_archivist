@@ -69,7 +69,21 @@ async function init() {
   const local = await invoke("local_state");
   $("data-dir").value = local.running || local.last || (await invoke("default_data_dir"));
   if (local.running) $("local-note").textContent = `A local server is running on ${local.running}.`;
+  $("open-last").checked = local.open_last;
+  // The app's first launcher page opens the last library (not after Switch server…).
+  const last = await invoke("startup_target");
+  if (last?.kind === "local") {
+    $("data-dir").value = last.data_dir;
+    $("open-local").click();
+  } else if (last?.kind === "server") {
+    status(`Connecting to ${last.url}…`);
+    await invoke("connect", { url: last.url });
+  }
 }
+
+$("open-last").addEventListener("change", (e) => {
+  invoke("set_open_last", { on: e.currentTarget.checked }).catch((err) => status(String(err), true));
+});
 
 $("browse").addEventListener("click", async () => {
   const dir = await invoke("pick_folder");
@@ -77,7 +91,7 @@ $("browse").addEventListener("click", async () => {
 });
 
 $("open-local").addEventListener("click", (e) => busy(e.currentTarget, "Starting…", async () => {
-  status("Starting the local library… (the first start of an older library backs it up and converts it, which can take several minutes)");
+  status(`Starting the local library in ${$("data-dir").value}… (the first start of an older library backs it up and converts it, which can take several minutes)`);
   await invoke("start_local", { dataDir: $("data-dir").value });
 }));
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026.44.9 — 2026-10-31
+
+- **The desktop app opens the last library by itself:** the local library, or the server,
+  opened last. *File → Switch server…* still shows the start page, which has a tick box to
+  turn this off.
+- **A local library starts in about a second instead of minutes.** Every start used to
+  re-read the whole database to refresh its statistics. A 1.1 GB library on a hard disk took
+  2–3 minutes after a reboot (27 s in a test copy; 0.6 s now). Statistics are now refreshed
+  only where they are out of date, and a full refresh samples each index. A one-time check
+  for the old "Archive inside archive" wording now runs only on libraries from the old
+  desktop app.
+
 ## 2026.44.8 — 2026-10-30
 
 - **A crawl's changed archives, listed:** clicking a crawl or *Update libraries* job opens

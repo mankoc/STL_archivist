@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-startup-target"
+description = "Enables the startup_target command without any pre-configured scope."
+commands.allow = ["startup_target"]
+
+[[permission]]
+identifier = "deny-startup-target"
+description = "Denies the startup_target command without any pre-configured scope."
+commands.deny = ["startup_target"]
