@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026.44.11 — 2026-10-31
+
+- **The filter pane is read in parallel.** Its sections (creators, sources, dates, warnings,
+  folders, tags, …) are read at once, each on its own connection, and each section reads
+  its index once for both its counts and its list. On a 1.1 GB library on a hard disk
+  after a restart, the pane is ready 5.8 s after the server starts instead of about
+  7.4 s. With the database cached in memory it takes 71 ms instead of 0.5 s.
+- **Tip for hard disks: run *Compact database*** (*Settings → Maintenance*, administrators)
+  on an older library. Years of additions scatter each index across the file, and the disk
+  spends its time seeking. On that library, compacting took 11 s, and the pane was then
+  ready 1.6 s after a cold start instead of 5.8 s.
+
 ## 2026.44.10 — 2026-10-31
 
 - **Select all in the library table:** a *Select all* button in the toolbar (and Ctrl+A

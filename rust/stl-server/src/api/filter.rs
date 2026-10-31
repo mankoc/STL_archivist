@@ -245,7 +245,7 @@ pub fn unfiltered_tree(lib: &crate::Library, show: library::Show, counts: bool) 
     if let Some(c) = slot.as_ref().filter(|c| c.generation == generation && c.show == key && c.counts == counts) {
         return Ok(Arc::clone(&c.tree));
     }
-    let tree: Arc<FilterTree> = Arc::new(lib.db.with(|c| library::filter_tree(c, None, &show, counts))?.into());
+    let tree: Arc<FilterTree> = Arc::new(library::filter_tree_parallel(&lib.db, &show, counts)?.into());
     // Computed from what the database held at `generation` (a change since makes it stale).
     *slot = Some(CachedTree { generation, show: key, counts, tree: Arc::clone(&tree) });
     Ok(tree)
