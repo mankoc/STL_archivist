@@ -32,6 +32,18 @@ export function click(sel: Selection, order: number[], id: number, mods: { ctrl:
   return { ids: new Set([id]), anchor: id, current: id };
 }
 
+/** Every row selected; the detail pane keeps its row (else shows the first). */
+export function selectAll(sel: Selection, order: number[]): Selection {
+  const current = sel.current ?? order[0] ?? null;
+  return { ids: new Set(order), anchor: sel.anchor ?? current, current };
+}
+
+/** How much of the table is selected (the select-all checkbox). */
+export function coverage(sel: Selection, order: number[]): "none" | "some" | "all" {
+  if (sel.ids.size === 0) return "none";
+  return order.length > 0 && order.every((i) => sel.ids.has(i)) ? "all" : "some";
+}
+
 /** Keep only ids still in the table (after a filter or a delete). */
 export function prune(sel: Selection, order: number[]): Selection {
   const present = new Set(order);

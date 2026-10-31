@@ -1,8 +1,8 @@
 // The browser: filter pane, table and detail pane (the desktop's main window).
 import { Box, Button, Center, Checkbox, Group, Loader, Menu, Modal, SegmentedControl, Text, TextInput } from "@mantine/core";
-import { useDebouncedValue } from "@mantine/hooks";
+import { useDebouncedValue, useHotkeys } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconArchive, IconColumns, IconEdit, IconFilterOff, IconRefresh, IconSearch, IconSparkles, IconTrash } from "@tabler/icons-react";
+import { IconArchive, IconColumns, IconEdit, IconFilterOff, IconRefresh, IconSearch, IconSparkles, IconSquare, IconSquareCheck, IconTrash } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type CSSProperties, type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
 
@@ -20,7 +20,7 @@ import { MassEditDrawer } from "./MassEditDrawer";
 import { EMPTY, type FilterSpec, isEmpty } from "./filters";
 import { ALWAYS_SHOWN, choiceFrom, COLUMN_ORDER_KEY, HIDDEN_COLUMNS_KEY, isShown, moveColumn, SHOWN_COLUMNS_KEY, toggle } from "./columns";
 import { COLUMNS, ModelTable, type Sort, useModelIds } from "./ModelTable";
-import { NONE, click, contextClick, prune, type Selection } from "./selection";
+import { NONE, click, contextClick, coverage, prune, selectAll, type Selection } from "./selection";
 import classes from "./BrowserPage.module.css";
 
 const SHOW = ["library", "author", "tags", "source", "date", "sculptor", "collection", "subcollection", "category", "release", "scale", "presupports", "path"];
@@ -111,6 +111,9 @@ export function BrowserPage() {
   const ids = useModelIds(query);
   const order = ids.data ?? [];
   useEffect(() => setSelection((s) => prune(s, order)), [order]);
+  const covered = coverage(selection, order);
+  const selectEvery = (all: boolean) => setSelection((s) => (all ? selectAll(s, order) : NONE));
+  useHotkeys([["mod+A", () => selectEvery(true)]]);
   // Editors get a menu on a right-clicked row (viewers keep the browser's own).
   const openMenu = editor
     ? (id: number, e: React.MouseEvent) => {
@@ -173,8 +176,14 @@ export function BrowserPage() {
           />
           <Text size="xs" c="dimmed">
             {ids.data ? `${ids.data.length.toLocaleString()} model${ids.data.length === 1 ? "" : "s"}` : ""}
-            {selection.ids.size > 1 ? ` · ${selection.ids.size} selected` : ""}
+            {selection.ids.size > 1 ? ` · ${selection.ids.size.toLocaleString()} selected` : ""}
           </Text>
+          {order.length > 0 && (
+            <Button size="compact-xs" variant="subtle" leftSection={covered === "all" ? <IconSquare size={14} /> : <IconSquareCheck size={14} />}
+              onClick={() => selectEvery(covered !== "all")} title="Ctrl+A selects all" data-testid="select-all">
+              {covered === "all" ? "Select none" : "Select all"}
+            </Button>
+          )}
           {view === "table" && (
             <Menu closeOnItemClick={false} position="bottom-start">
               <Menu.Target>
@@ -243,6 +252,7 @@ export function BrowserPage() {
               editable={editor}
               choice={choice}
               onMoveColumn={moveCol}
+              checkboxes={covered === "none" ? undefined : { coverage: covered, onAll: selectEvery }}
             />
           )}
         </Box>

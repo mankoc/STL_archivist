@@ -56,6 +56,10 @@ pub struct Library {
     pub importing: std::sync::atomic::AtomicBool,
     /// Random, for this run: a sync refuses a "remote" that is this server.
     pub instance: String,
+    /// Raised by every library change ([`Library::changed`]): cached answers go stale.
+    pub generation: std::sync::atomic::AtomicU64,
+    /// The unfiltered filter pane (see `api::filter`).
+    pub tree_cache: api::filter::TreeCache,
     _lock: LibraryLock,
 }
 
@@ -127,6 +131,8 @@ impl Library {
             view_loads: tokio::sync::Semaphore::new(2),
             importing: Default::default(),
             instance: sync::new_instance(),
+            generation: Default::default(),
+            tree_cache: Default::default(),
             config,
             _lock: lock,
         })

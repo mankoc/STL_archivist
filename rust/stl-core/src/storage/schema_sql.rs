@@ -411,6 +411,8 @@ pub const ENSURE_INDEXES: &[&str] = &[
     r#"CREATE INDEX IF NOT EXISTS ix_models_is_missing ON models (is_missing) WHERE is_missing = 1"#,
     r#"CREATE INDEX IF NOT EXISTS ix_images_dhash ON images (dhash) WHERE dhash IS NOT NULL"#,
     r#"CREATE INDEX IF NOT EXISTS ix_models_presupports ON models (presupports) WHERE presupports IS NOT NULL"#,
+    // The filter pane's warning counts read this instead of every row of `models`.
+    r#"CREATE INDEX IF NOT EXISTS ix_models_warning ON models (warning) WHERE warning IS NOT NULL"#,
 ];
 
 /// `db.MODELS_VIEW_SQL`, recreated on every start.

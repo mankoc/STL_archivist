@@ -1,6 +1,7 @@
 //! The browser filter (`FilterSpec`) as JSON, and the filter pane's data.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::State;
@@ -96,13 +97,13 @@ fn yes() -> bool {
     true
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct NamedId {
     pub id: i64,
     pub name: String,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct CollectionNode {
     pub id: i64,
     pub name: String,
@@ -115,7 +116,7 @@ pub struct CollectionNode {
 /// (models with a value, per group name).
 pub type Counts = BTreeMap<String, BTreeMap<String, i64>>;
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct FilterTree {
     pub counts: Counts,
     pub scoped_counts: Counts,
@@ -214,6 +215,46 @@ pub async fn tree(State(lib): State<AppState>, _me: CurrentUser, Json(req): Json
         }
     }
     let show = library::Show(req.show.iter().cloned().collect());
+    if spec.as_ref().is_none_or(|s| s.is_empty()) {
+        let tree = lib.run(move |lib| Ok(unfiltered_tree(lib, show, req.counts)?)).await?;
+        return Ok(Json((*tree).clone()));
+    }
     let tree = lib.run(move |lib| Ok(lib.db.with(|c| library::filter_tree(c, spec.as_ref(), &show, req.counts))?)).await?;
     Ok(Json(tree.into()))
+}
+
+/// The unfiltered tree, kept until the library changes: it reads most of the
+/// database, which on a hard disk takes seconds after the server starts.
+#[derive(Default)]
+pub struct TreeCache(std::sync::Mutex<Option<CachedTree>>);
+
+struct CachedTree {
+    generation: u64,
+    show: BTreeSet<String>,
+    counts: bool,
+    tree: Arc<FilterTree>,
+}
+
+/// [`TreeCache`]'s answer, computed when missing or stale. Held while computing,
+/// so a request arriving meanwhile (the start-up warm-up and the first page) waits
+/// for it instead of reading the disk a second time.
+pub fn unfiltered_tree(lib: &crate::Library, show: library::Show, counts: bool) -> rusqlite::Result<Arc<FilterTree>> {
+    let mut slot = lib.tree_cache.0.lock().unwrap_or_else(|e| e.into_inner());
+    let generation = lib.generation.load(std::sync::atomic::Ordering::SeqCst);
+    let key: BTreeSet<String> = show.0.iter().cloned().collect();
+    if let Some(c) = slot.as_ref().filter(|c| c.generation == generation && c.show == key && c.counts == counts) {
+        return Ok(Arc::clone(&c.tree));
+    }
+    let tree: Arc<FilterTree> = Arc::new(lib.db.with(|c| library::filter_tree(c, None, &show, counts))?.into());
+    // Computed from what the database held at `generation` (a change since makes it stale).
+    *slot = Some(CachedTree { generation, show: key, counts, tree: Arc::clone(&tree) });
+    Ok(tree)
+}
+
+/// Fill [`TreeCache`] with what the web client's filter pane asks for first.
+pub fn warm_tree(lib: &crate::Library) {
+    let show = library::Show(library::SHOW.iter().map(|s| s.to_string()).collect());
+    if let Err(e) = unfiltered_tree(lib, show, true) {
+        tracing::warn!("filter pane warm-up: {e}");
+    }
 }

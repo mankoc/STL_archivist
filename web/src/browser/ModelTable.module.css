@@ -104,6 +104,14 @@
   outline: none;
 }
 
+/* The selection checkboxes' column. */
+.check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
 .cell {
   flex: none;
   padding: 0 8px;
