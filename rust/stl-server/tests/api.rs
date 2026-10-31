@@ -167,6 +167,24 @@ async fn filter_tree_counts() {
 }
 
 #[tokio::test]
+async fn unfiltered_tree_is_kept_until_the_library_changes() {
+    let f = fixture();
+    let ed = f.lib.user("ed", Role::Editor);
+    let tree = || f.post("/api/filter-tree", json!({"filter": {}, "show": ["author"], "counts": true}));
+    let (_, v) = tree().await;
+    assert_eq!(v["creators"], json!(["Alice", "Bob"]));
+    // Written behind the server's back: the kept tree is served.
+    f.lib.state.db.with(|c| c.execute("UPDATE models SET creator = 'Carol' WHERE title = 'Knight'", [])).unwrap();
+    assert_eq!(tree().await.1["creators"], json!(["Alice", "Bob"]));
+    // An edit through the API is a library change: the tree is read again.
+    let edit = json!({"edits": [{"id": f.ids[0], "field": "creator", "value": "Dora"}]});
+    assert_eq!(call(&f.lib.state, "PATCH", "/api/models/cells", Some(&ed), Some(edit)).await.status, StatusCode::OK);
+    let (_, v) = tree().await;
+    assert_eq!(v["creators"], json!(["Alice", "Carol", "Dora"]));
+    assert_eq!(v["counts"]["creator"]["Dora"], 1);
+}
+
+#[tokio::test]
 async fn model_detail_and_thumbnails() {
     let f = fixture();
     let r = f.get(&format!("/api/models/{}", f.ids[0])).await;

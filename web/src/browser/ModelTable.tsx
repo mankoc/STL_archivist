@@ -1,7 +1,7 @@
 // The browser table: every matching id in display order (one request), rows
 // fetched in blocks as they scroll into view, virtualised rendering. Sorting
 // runs on the server (`/api/models/ids`), ties ordered by id.
-import { Box, Center, Group, Loader, Text, Tooltip, UnstyledButton } from "@mantine/core";
+import { Box, Center, Checkbox, Group, Loader, Text, Tooltip, UnstyledButton } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { IconChevronDown, IconChevronUp, IconGripVertical } from "@tabler/icons-react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -109,7 +109,11 @@ interface Props {
   choice?: ColumnChoice;
   /** A column's header was dragged onto another's (none: headers do not move). */
   onMoveColumn?: (from: string, to: string) => void;
+  /** A checkbox column (shown while rows are selected): how much is selected, and select all or none. */
+  checkboxes?: { coverage: "none" | "some" | "all"; onAll: (all: boolean) => void };
 }
+
+const CHECK_WIDTH = 34;
 
 /** Save one cell (`PATCH /api/models/cells`). */
 async function saveCell(id: number, field: string, value: string) {
@@ -142,7 +146,7 @@ function CellEditor(props: { initial: string; onDone: (value: string | null) => 
   );
 }
 
-export function ModelTable({ query, onSort, selection, onRowClick, onRowContextMenu, editable, choice, onMoveColumn }: Props) {
+export function ModelTable({ query, onSort, selection, onRowClick, onRowContextMenu, editable, choice, onMoveColumn, checkboxes }: Props) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<{ id: number; column: number } | null>(null);
   const ids = useModelIds(query);
@@ -189,7 +193,7 @@ export function ModelTable({ query, onSort, selection, onRowClick, onRowContextM
   const rows = new Map<number, Row>();
   for (const q of rowQueries) for (const r of q.data ?? []) rows.set(r.id, r);
 
-  const width = table.getTotalSize();
+  const width = table.getTotalSize() + (checkboxes ? CHECK_WIDTH : 0);
   const sortOf = (c: Column) => (query.sort?.column === c.sortKey ? query.sort : null);
   const clickHeader = (c: Column) => {
     if (!c.sortKey) return;
@@ -216,6 +220,18 @@ export function ModelTable({ query, onSort, selection, onRowClick, onRowContextM
   return (
     <div ref={scrollRef} className={classes.scroll} data-testid="model-table">
       <div className={classes.header} style={{ width }}>
+        {checkboxes && (
+          <div className={`${classes.headerCell} ${classes.check}`} style={{ width: CHECK_WIDTH }}>
+            <Checkbox
+              size="xs"
+              aria-label={checkboxes.coverage === "all" ? "Select none" : "Select all"}
+              checked={checkboxes.coverage === "all"}
+              indeterminate={checkboxes.coverage === "some"}
+              onChange={() => checkboxes.onAll(checkboxes.coverage !== "all")}
+              data-testid="select-all-checkbox"
+            />
+          </div>
+        )}
         {table.getHeaderGroups()[0].headers.map((h, i) => {
           const c = shown[i];
           const sort = sortOf(c);
@@ -299,6 +315,19 @@ export function ModelTable({ query, onSort, selection, onRowClick, onRowContextM
                 onRowContextMenu(id, e);
               })}
             >
+              {checkboxes && (
+                <div
+                  className={`${classes.cell} ${classes.check}`}
+                  style={{ width: CHECK_WIDTH }}
+                  // The checkbox adds or takes out its row (Shift: the range), as Ctrl+click does.
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRowClick(id, { ctrl: true, shift: e.shiftKey });
+                  }}
+                >
+                  <Checkbox size="xs" readOnly checked={selection.ids.has(id)} tabIndex={-1} aria-label="Select" data-testid="row-checkbox" />
+                </div>
+              )}
               {table.getHeaderGroups()[0].headers.map((h, i) => {
                 const c = shown[i];
                 const isEditing = editing?.id === id && editing.column === i && row;

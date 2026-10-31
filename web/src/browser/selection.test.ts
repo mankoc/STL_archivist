@@ -1,4 +1,4 @@
-import { NONE, click, contextClick, prune } from "./selection";
+import { NONE, click, contextClick, coverage, prune, selectAll } from "./selection";
 
 const order = [10, 20, 30, 40, 50];
 const plain = { ctrl: false, shift: false };
@@ -8,6 +8,17 @@ describe("selection", () => {
     const s = click(click(NONE, order, 20, plain), order, 40, plain);
     expect([...s.ids]).toEqual([40]);
     expect(s.current).toBe(40);
+  });
+
+  it("selects all and tells how much is selected", () => {
+    expect(coverage(NONE, order)).toBe("none");
+    const one = click(NONE, order, 30, plain);
+    expect(coverage(one, order)).toBe("some");
+    const all = selectAll(one, order);
+    expect(coverage(all, order)).toBe("all");
+    expect(all.current).toBe(30);
+    expect(selectAll(NONE, order).current).toBe(10);
+    expect(coverage(NONE, [])).toBe("none");
   });
 
   it("toggles with Ctrl", () => {

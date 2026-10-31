@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026.44.10 — 2026-10-31
+
+- **Select all in the library table:** a *Select all* button in the toolbar (and Ctrl+A
+  outside text fields). It becomes *Select none* once everything is selected. While models are
+  selected, the table shows a checkbox column: a row's checkbox adds or removes it
+  (Shift: the range), and the header's checkbox selects all or none.
+- **The filter pane loads faster after a restart.** The server reads the unfiltered pane as
+  soon as it starts, while the window loads, and keeps it until the library changes. Opening
+  the page again or reloading is then instant. With a 1.1 GB library on a hard disk, the pane
+  took 9.8 s after a restart and now takes 5 s. The warning counts read a new small index
+  (`ix_models_warning`) instead of every model. The first start after updating builds that
+  index once (about 20 s on that library).
+
 ## 2026.44.9 — 2026-10-31
 
 - **The desktop app opens the last library by itself:** the local library, or the server,

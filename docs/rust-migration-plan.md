@@ -1344,6 +1344,15 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.44.10: **select all; filter pane cache.** `selection.ts` gained `selectAll` and
+  `coverage`. `ModelTable` takes `checkboxes` (a column shown while rows are selected; a
+  row's box is a Ctrl+click), and `BrowserPage` has *Select all* and `mod+A`. The server
+  keeps the unfiltered `/api/filter-tree` answer in `Library.tree_cache` (`api::filter::
+  unfiltered_tree`), valid while `Library.generation` is unchanged; `Library::changed`
+  raises it. The lock is held while computing, so concurrent requests wait for one read.
+  `main` warms it after binding (`warm_tree`, every `SHOW` section with counts).
+  `ENSURE_INDEXES` gained `ix_models_warning` (partial, `warning IS NOT NULL`). Cold timings
+  on a 1.1 GB library on a hard disk: warnings 3.1 s → index; tree 9.8 s → 5.0 s.
 - 2026.44.9: **faster start, last library.** `storage::migrate` ran a full `ANALYZE` on
   every start, reading every table and index (2–3 minutes for a 1.1 GB database on a hard
   disk after a reboot). It now runs `ANALYZE` (with `analysis_limit` = 1000) only when

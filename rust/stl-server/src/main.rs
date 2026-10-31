@@ -63,6 +63,9 @@ async fn run(args: &[String]) -> Result<(), String> {
     tracing::info!("listening on http://{bind}");
     let library = Arc::new(library);
     stl_server::monitor::start(&library);
+    // Read the filter pane while the web client loads (seconds on a cold hard disk).
+    let warm = Arc::clone(&library);
+    tokio::task::spawn_blocking(move || stl_server::api::filter::warm_tree(&warm));
     axum::serve(listener, app(Arc::clone(&library)).into_make_service_with_connect_info::<std::net::SocketAddr>())
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
