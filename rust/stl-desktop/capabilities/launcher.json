@@ -12,6 +12,8 @@
     "allow-start-local",
     "allow-pick-folder",
     "allow-default-data-dir",
-    "allow-local-state"
+    "allow-local-state",
+    "allow-startup-target",
+    "allow-set-open-last"
   ]
 }

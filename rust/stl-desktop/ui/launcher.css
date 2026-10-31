@@ -85,6 +85,9 @@ li:last-child { border-bottom: none; }
 li .name { font-weight: 600; }
 li .url { color: var(--muted); flex: 1; overflow-wrap: anywhere; }
 
+.check { display: flex; gap: 8px; align-items: center; margin: 0 4px 12px; color: var(--muted); }
+.check input { margin: 0; }
+
 #status { min-height: 1.5em; white-space: pre-wrap; }
 #status.error { color: var(--danger); }
 

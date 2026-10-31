@@ -9,6 +9,8 @@ fn main() {
         "pick_folder",
         "default_data_dir",
         "local_state",
+        "startup_target",
+        "set_open_last",
         "open_folder",
         "meshpeek_state",
         "pick_meshpeek",

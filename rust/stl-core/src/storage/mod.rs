@@ -219,10 +219,22 @@ pub fn migrate(path: &Path, vectors: &Vectors) -> Result<MigrateReport> {
     tx.commit()?;
 
     let tx = conn.transaction()?;
+    let index_count = |tx: &Transaction| tx.query_row("SELECT count(*) FROM sqlite_master WHERE type = 'index'", [], |r| r.get::<_, i64>(0));
+    let indexes_before = index_count(&tx)?;
     for ddl in schema_sql::ENSURE_INDEXES {
         tx.execute_batch(ddl)?;
     }
-    let _ = tx.execute_batch("ANALYZE"); // as Python: a failed ANALYZE is ignored
+    // ANALYZE reads every table and index: minutes on a hard disk, on every start. It
+    // runs (on a sample of each index) when there are no statistics yet or the schema
+    // changed; otherwise `PRAGMA optimize` refreshes only the statistics gone stale.
+    // As Python, a failed ANALYZE is ignored.
+    let has_stats = tx.prepare("SELECT 1 FROM sqlite_master WHERE name = 'sqlite_stat1'")?.exists([])?;
+    let changed = !report.tables_created.is_empty()
+        || !report.columns_added.is_empty()
+        || report.dhash_rebuilt.is_some()
+        || report.paths.is_some()
+        || index_count(&tx)? != indexes_before;
+    let _ = tx.execute_batch(if has_stats && !changed { "PRAGMA analysis_limit = 1000; PRAGMA optimize" } else { "PRAGMA analysis_limit = 1000; ANALYZE" });
     // The bundled SQLite is built with STAT4 and Python's is not; drop the extra
     // statistics table so the file is the same whichever side migrated.
     tx.execute_batch("DROP TABLE IF EXISTS sqlite_stat4")?;
@@ -283,11 +295,15 @@ fn rename_old_schema(tx: &Transaction, report: &mut MigrateReport) -> Result<()>
                 run(&format!("ALTER TABLE models RENAME COLUMN {old} TO {new}"), report)?;
             }
         }
-        tx.execute(
-            "UPDATE models SET warning = REPLACE(warning, 'Archive inside archive', 'Nested archives') \
-             WHERE warning LIKE '%Archive inside archive%'",
-            [],
-        )?;
+        // Only the PyQt app wrote the old wording, and its databases still have
+        // `archive_path`: a library moved to libraries is not scanned again on every start.
+        if libraries::needs_migration(tx)? {
+            tx.execute(
+                "UPDATE models SET warning = REPLACE(warning, 'Archive inside archive', 'Nested archives') \
+                 WHERE warning LIKE '%Archive inside archive%'",
+                [],
+            )?;
+        }
     }
     Ok(())
 }

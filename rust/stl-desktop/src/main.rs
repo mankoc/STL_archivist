@@ -70,6 +70,29 @@ struct Saved {
     /// MeshPeek's program, when chosen (else it is looked for).
     #[serde(default)]
     meshpeek_path: Option<String>,
+    /// What was opened last: opened again when the app starts.
+    #[serde(default)]
+    last_opened: Option<Opened>,
+    /// Open [`Saved::last_opened`] at start (`None`: yes).
+    #[serde(default)]
+    open_last_at_start: Option<bool>,
+}
+
+/// A library opened from the launcher.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum Opened {
+    Local { data_dir: String },
+    Server { url: String },
+}
+
+fn remember_opened(app: &AppHandle, opened: Opened) -> Result<(), String> {
+    let mut saved = load_saved(app);
+    if let Opened::Local { data_dir } = &opened {
+        saved.local_data_dir = Some(data_dir.clone());
+    }
+    saved.last_opened = Some(opened);
+    store_saved(app, &saved)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -138,6 +161,8 @@ struct Shell {
     installing: Mutex<Option<Installing>>,
     launcher: Mutex<Option<Url>>,
     granted: Mutex<HashSet<String>>,
+    /// The launcher asked what to open at start (it asks once per run).
+    started: std::sync::atomic::AtomicBool,
 }
 
 fn saved_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -237,6 +262,7 @@ async fn connect(app: AppHandle, url: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || reachable(&probe, Duration::from_secs(5))).await.map_err(|e| e.to_string())??;
     grant(&app, &app.state::<Shell>(), &base)?;
     navigate(&app, base.clone())?;
+    remember_opened(&app, Opened::Server { url: base.to_string() })?;
     // This computer works for this server: start its worker again.
     if let Some(w) = load_saved(&app).worker.filter(|w| w.server == base.as_str()) {
         let app2 = app.clone();
@@ -560,9 +586,6 @@ async fn start_local(app: AppHandle, data_dir: String) -> Result<String, String>
         let started = spawn_local(&app2, &dir)?;
         let url = started.url.clone();
         *local = Some(started);
-        let mut saved = load_saved(&app2);
-        saved.local_data_dir = Some(dir);
-        store_saved(&app2, &saved)?;
         Ok(url)
     })
     .await
@@ -570,7 +593,31 @@ async fn start_local(app: AppHandle, data_dir: String) -> Result<String, String>
     let base = Url::parse(&url).map_err(|e| e.to_string())?;
     grant(&app, &app.state::<Shell>(), &base)?;
     navigate(&app, base)?;
+    remember_opened(&app, Opened::Local { data_dir: data_dir.trim().to_string() })?;
     Ok(url)
+}
+
+/// What the launcher opens by itself: the last library, on the app's first
+/// launcher page only (not after *Switch server…*), unless that is turned off.
+#[tauri::command]
+fn startup_target(app: AppHandle) -> Option<Opened> {
+    if app.state::<Shell>().started.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        return None;
+    }
+    let saved = load_saved(&app);
+    if saved.open_last_at_start == Some(false) {
+        return None;
+    }
+    // Before 2026.44.9 only the local library was remembered.
+    saved.last_opened.or(saved.local_data_dir.map(|data_dir| Opened::Local { data_dir }))
+}
+
+/// Turn opening the last library at start on or off.
+#[tauri::command]
+fn set_open_last(app: AppHandle, on: bool) -> Result<(), String> {
+    let mut saved = load_saved(&app);
+    saved.open_last_at_start = Some(on);
+    store_saved(&app, &saved)
 }
 
 #[derive(Serialize)]
@@ -579,13 +626,16 @@ struct LocalState {
     running: Option<String>,
     /// The one opened last.
     last: Option<String>,
+    /// The last library is opened when the app starts.
+    open_last: bool,
 }
 
 #[tauri::command]
 fn local_state(app: AppHandle) -> LocalState {
     let shell = app.state::<Shell>();
     let running = shell.local.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|l| l.data_dir.clone());
-    LocalState { running, last: load_saved(&app).local_data_dir }
+    let saved = load_saved(&app);
+    LocalState { running, last: saved.local_data_dir, open_last: saved.open_last_at_start != Some(false) }
 }
 
 /// The desktop app's default data directory.
@@ -832,6 +882,8 @@ fn main() {
             pick_folder,
             default_data_dir,
             local_state,
+            startup_target,
+            set_open_last,
             open_folder,
             meshpeek_state,
             pick_meshpeek,
@@ -870,6 +922,14 @@ mod tests {
         assert!(normalize_url("file:///C:/x").is_err());
         assert!(normalize_url("http://user:pw@nas").is_err());
         assert!(normalize_url("nas:8770").is_err());
+    }
+
+    #[test]
+    fn older_settings_files_still_read() {
+        let old: Saved = serde_json::from_str(r#"{"servers": [], "local_data_dir": "D:\\STL"}"#).unwrap();
+        assert_eq!((old.last_opened, old.open_last_at_start), (None, None));
+        let new: Saved = serde_json::from_str(r#"{"last_opened": {"kind": "server", "url": "http://nas:8770/"}}"#).unwrap();
+        assert_eq!(new.last_opened, Some(Opened::Server { url: "http://nas:8770/".into() }));
     }
 
     #[test]

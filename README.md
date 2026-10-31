@@ -13,7 +13,7 @@ can open a library on your computer without setting up a server.
 [the HTTP API](docs/api.md) ·
 and in the interface, the **?** button: searchable in-depth help on every feature
 
-Version: 2026.44.8
+Version: 2026.44.9
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). This version opens its data directory and, since 2026.43.7, converts it once
@@ -148,6 +148,9 @@ Start `stl-desktop` (or *StlArchivist* from the Start menu). Its start page offe
   stops it when the window closes.
 - **Servers** — add `http://host:8770` to connect to a server elsewhere; the list is
   remembered.
+
+When the app starts it opens the library opened last, local or on a server. Untick **Open
+the last library when the app starts** on the start page to choose each time.
 
 The first time a library is opened you create its administrator account. *File → Switch
 server…* (Ctrl+L) returns to the start page; Ctrl+R reloads; *Help → About StlArchivist*

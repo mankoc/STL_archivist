@@ -1344,6 +1344,15 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.44.9: **faster start, last library.** `storage::migrate` ran a full `ANALYZE` on
+  every start, reading every table and index (2–3 minutes for a 1.1 GB database on a hard
+  disk after a reboot). It now runs `ANALYZE` (with `analysis_limit` = 1000) only when
+  `sqlite_stat1` is missing, the migration changed the schema, or an `ENSURE_INDEXES` index
+  was created. Otherwise it runs `PRAGMA optimize`. The "Archive inside archive" rewording
+  scans `models` only while `libraries::needs_migration` (PyQt databases). The desktop
+  shell remembers `last_opened` (`Opened::Local` / `Opened::Server`) and
+  `open_last_at_start` in `servers.json`. The launcher asks `startup_target` (answered once
+  per run) and opens it; `set_open_last` sets the tick box.
 - 2026.44.8: **job changes.** `Job` keeps the paths behind `JobInfo.counts` (`JobChanges`,
   `KEEP_CHANGES` = 10,000 per list; `Job::record`, and `unrecord_moved` for cross-folder
   moves), returned as `JobDetail.changes` for jobs with counts. `JobLog` switches between
