@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026.44.12 — 2026-11-01
+
+- **Search options:** a *Search* button beside the library's search box chooses the
+  fields to search: title, creator, source, sculptor, collection, subcollection, category,
+  release, path, tags, description and URL. By default it searches title, creator,
+  sculptor, collection, path and tags. It also turns on **fuzzy search**: every word must
+  appear in one of the chosen fields, in any order, ignoring accents and case, and longer
+  words may have a typo (one from four letters, two from seven). The choice is kept in the
+  browser. `POST /api/models/ids` takes `search_fields` and `fuzzy`.
+- **The Jobs button is always in the header**, not only while jobs wait or run.
+
 ## 2026.44.11 — 2026-10-31
 
 - **The filter pane is read in parallel.** Its sections (creators, sources, dates, warnings,

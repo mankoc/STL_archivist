@@ -15,6 +15,7 @@ pub mod crawler;
 pub mod dhash;
 pub mod embedding;
 pub mod fingerprint;
+pub mod fuzzy;
 pub mod hamming;
 pub mod image_pairs;
 pub mod lock;

@@ -2453,10 +2453,23 @@ export interface components {
              */
             filter: components["schemas"]["FilterSpecDto"];
             /**
-             * @description Matched against title, creator, path and tags (case-insensitive).
+             * @description Match each word of `search` anywhere in the fields, ignoring accents and
+             *     allowing a typo or two in longer words, instead of the text as a substring.
+             * @default false
+             */
+            fuzzy: boolean;
+            /**
+             * @description Searched for in `search_fields` (case-insensitive).
              * @default
              */
             search: string;
+            /**
+             * @description Where to search: `title`, `creator`, `source`, `sculptor`, `collection`,
+             *     `subcollection`, `category`, `release`, `path`, `tags`, `description`,
+             *     `url`. Empty: title, creator, sculptor, collection, path and tags.
+             * @default []
+             */
+            search_fields: string[];
             /** @default null */
             sort: null | components["schemas"]["Sort"];
         };

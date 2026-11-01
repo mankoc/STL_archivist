@@ -35,8 +35,15 @@ pub struct Sort {
 #[serde(default, deny_unknown_fields)]
 pub struct ModelQuery {
     pub filter: FilterSpecDto,
-    /// Matched against title, creator, path and tags (case-insensitive).
+    /// Searched for in `search_fields` (case-insensitive).
     pub search: String,
+    /// Where to search: `title`, `creator`, `source`, `sculptor`, `collection`,
+    /// `subcollection`, `category`, `release`, `path`, `tags`, `description`,
+    /// `url`. Empty: title, creator, sculptor, collection, path and tags.
+    pub search_fields: Vec<String>,
+    /// Match each word of `search` anywhere in the fields, ignoring accents and
+    /// allowing a typo or two in longer words, instead of the text as a substring.
+    pub fuzzy: bool,
     /// Display order; ties and no sort are ordered by id.
     pub sort: Option<Sort>,
 }
@@ -56,10 +63,14 @@ pub async fn ids(State(lib): State<AppState>, _me: CurrentUser, Json(q): Json<Mo
     {
         return Err(ApiError::bad_request(format!("cannot sort by {:?}", s.column)));
     }
+    if let Some(f) = q.search_fields.iter().find(|f| !library::SEARCH_FIELDS.contains(&f.as_str())) {
+        return Err(ApiError::bad_request(format!("cannot search in {f:?}")));
+    }
+    let search = library::Search { text: q.search, fields: q.search_fields, fuzzy: q.fuzzy };
     let ids = lib
         .run(move |lib| {
             let sort = q.sort.as_ref().map(|s| (s.column.as_str(), s.descending));
-            Ok(lib.db.with(|c| library::table_ids(c, &spec, &q.search, sort))?)
+            Ok(lib.db.with(|c| library::table_ids(c, &spec, &search, sort))?)
         })
         .await?;
     Ok(Json(IdList { ids }))

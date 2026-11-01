@@ -1,6 +1,6 @@
 # StlArchivist API
 
-Version 2026.44.11. Generated from `web/openapi.json` by `tools/api_doc.py`; the
+Version 2026.44.12. Generated from `web/openapi.json` by `tools/api_doc.py`; the
 running server serves the same document at `GET /api/openapi.json`. Do not edit by hand:
 run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after changing routes.
 
@@ -971,7 +971,9 @@ Models with equal or similar values in one column.
 | Field | Type | Description |
 |---|---|---|
 | `filter` (optional) | [FilterSpecDto](#filterspecdto) |  |
-| `search` (optional) | string | Matched against title, creator, path and tags (case-insensitive). |
+| `fuzzy` (optional) | boolean | Match each word of `search` anywhere in the fields, ignoring accents and allowing a typo or two in longer words, instead of the text as a substring. |
+| `search` (optional) | string | Searched for in `search_fields` (case-insensitive). |
+| `search_fields` (optional) | string[] | Where to search: `title`, `creator`, `source`, `sculptor`, `collection`, `subcollection`, `category`, `release`, `path`, `tags`, `description`, `url`. Empty: title, creator, sculptor, collection, path and tags. |
 | `sort` (optional) | null \| [Sort](#sort) |  |
 
 ### MovedRecord

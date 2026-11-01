@@ -84,6 +84,7 @@ pub fn open(path: &Path) -> Result<Connection> {
 
 /// `path_join(root, rel)`: an absolute path in this system's spelling;
 /// `posix_join(root, rel)`: the same in `/` form. NULL in, NULL out.
+/// Also `fuzzy_match(text, query)` ([`crate::fuzzy::matches`]; NULL text: 0).
 pub fn add_path_functions(conn: &Connection) -> Result<()> {
     use rusqlite::functions::FunctionFlags;
     let flags = FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC;
@@ -96,6 +97,11 @@ pub fn add_path_functions(conn: &Connection) -> Result<()> {
         let root: Option<String> = ctx.get(0)?;
         let rel: Option<String> = ctx.get(1)?;
         Ok(root.zip(rel).map(|(root, rel)| crate::relpath::posix_join(&root, &rel)))
+    })?;
+    conn.create_scalar_function("fuzzy_match", 2, flags, |ctx| {
+        let text: Option<String> = ctx.get(0)?;
+        let query: String = ctx.get(1)?;
+        Ok(text.is_some_and(|t| crate::fuzzy::matches(&t, &query)))
     })?;
     Ok(())
 }
