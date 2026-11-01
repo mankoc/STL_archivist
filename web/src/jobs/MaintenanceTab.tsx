@@ -22,6 +22,7 @@ export function MaintenanceTab() {
   const admin = hasRole(user, "admin");
   const { jobs, start, current } = useStartJob();
   const [keep, setKeep] = useState<number>(5);
+  const [replaceLinks, setReplaceLinks] = useState(false);
   const [confirmMissing, setConfirmMissing] = useState(false);
   const removeMissing = async () => {
     setConfirmMissing(false);
@@ -85,6 +86,23 @@ export function MaintenanceTab() {
             <Button size="xs" variant="default" disabled={!editor} onClick={() => start({ kind: "recheck_warnings", warning: "presupported" })}>
               Check presupport warning
             </Button>
+          </Group>
+        </Card>
+        <Card withBorder>
+          <Title order={5} mb="xs">
+            Links and info.json
+          </Title>
+          <Text size="xs" c="dimmed" mb="xs">
+            Read every archive's .url link and info.json again, as a crawl does (inside the archive, beside it, or in the folder
+            above), without a rescan: URL, title, creator, type, description and release, and their tags are added.
+          </Text>
+          <Group gap="md">
+            <Button size="xs" variant="default" disabled={!editor} onClick={() => start({ kind: "reread_links", overwrite: replaceLinks })}
+              data-testid="reread-links">
+              Re-read links and info.json
+            </Button>
+            <Checkbox size="xs" label="Replace stored values (otherwise only empty fields are filled)" checked={replaceLinks}
+              onChange={(e) => setReplaceLinks(e.currentTarget.checked)} />
           </Group>
         </Card>
         <Card withBorder>

@@ -1,7 +1,7 @@
 //! Database Maintenance jobs beyond the simple ones in `jobs.rs`: the record
 //! lists of Verify and Find Duplicate Entries, Find Moved in DB, Search in
 //! Folder and the warning re-checks (the desktop's `db_maintenance_dialog.py`),
-//! and Read missing file lists.
+//! Read missing file lists, and Re-read links and info.json.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -404,5 +404,77 @@ pub fn read_file_lists(lib: &Library, ctl: &Control, log: &dyn Fn(String)) -> Re
         ctl.advance(chunk.len() as u64);
     }
     log(format!("Done: {} read, {} unreadable or missing.", out.read, out.failed));
+    Ok(out)
+}
+
+/// What Re-read links and info.json did.
+#[derive(Debug, Default)]
+pub struct RereadLinks {
+    pub updated: usize,
+    pub unchanged: usize,
+    pub failed: usize,
+    /// Archive paths of the records changed (their sidecars).
+    pub touched: Vec<String>,
+}
+
+/// Re-read links and info.json: every catalogued archive on disk is opened for
+/// its `.url` and `info.json` members (and those beside it, as a crawl looks),
+/// and what they say fills the record's empty fields (all of them with
+/// `overwrite`); tags are added.
+pub fn reread_links(lib: &Library, ctl: &Control, log: &dyn Fn(String), overwrite: bool) -> Result<RereadLinks, String> {
+    let records: Vec<(i64, String)> = lib
+        .db
+        .with(|c| {
+            let mut st = c.prepare("SELECT id, archive_path FROM models_view WHERE NOT coalesce(is_missing, 0) ORDER BY id")?;
+            st.query_map([], |r| Ok((r.get(0)?, r.get::<_, Option<String>>(1)?.unwrap_or_default())))?.collect()
+        })
+        .map_err(db)?;
+    let mut out = RereadLinks::default();
+    log(format!(
+        "Reading the links and info.json of {} archive(s); {}…",
+        records.len(),
+        if overwrite { "their values replace the stored ones" } else { "their values fill empty fields" }
+    ));
+    ctl.set_total(records.len() as u64);
+    let unrar = lib.config.unrar_tool();
+    for chunk in records.chunks(WARNING_BATCH) {
+        if ctl.is_stopped() {
+            log("Stopped by user.".into());
+            break;
+        }
+        let found: Vec<(i64, &String, Option<stl_core::metadata::Metadata>)> = chunk
+            .par_iter()
+            .map(|(id, path)| {
+                let disk = stl_core::relpath::on_disk(path);
+                let files = stl_core::crawler::link_files(&disk, &unrar);
+                (*id, path, files.map(|f| stl_core::metadata::from_files(&disk, &f)))
+            })
+            .collect();
+        let changed: Vec<String> = lib
+            .db
+            .with_tx(|tx| {
+                let mut changed = Vec::new();
+                for (id, path, meta) in &found {
+                    let Some(meta) = meta else { continue };
+                    if stl_core::storage::model_edit::links_commit(tx, *id, meta, overwrite).map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.to_string().into()))? {
+                        changed.push((*path).clone());
+                    }
+                }
+                Ok::<_, rusqlite::Error>(changed)
+            })
+            .map_err(db)?;
+        for (_, path, meta) in &found {
+            if meta.is_none() {
+                log(format!("Cannot read: {path}"));
+            }
+        }
+        let failed = found.iter().filter(|(_, _, m)| m.is_none()).count();
+        out.failed += failed;
+        out.updated += changed.len();
+        out.unchanged += found.len() - failed - changed.len();
+        out.touched.extend(changed);
+        ctl.advance(chunk.len() as u64);
+    }
+    log(format!("Done: {} updated, {} unchanged, {} unreadable.", out.updated, out.unchanged, out.failed));
     Ok(out)
 }

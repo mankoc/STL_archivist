@@ -13,7 +13,7 @@ can open a library on your computer without setting up a server.
 [the HTTP API](docs/api.md) ·
 and in the interface, the **?** button: searchable in-depth help on every feature
 
-Version: 2026.44.16
+Version: 2026.44.17
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). This version opens its data directory and, since 2026.43.7, converts it once
@@ -59,7 +59,7 @@ Version: 2026.44.16
   one job
 - **Monitored folders** — crawled automatically when their archives change (checked by size
   and date at an interval); archives that vanish are marked missing
-- **Maintenance** (*Settings* tabs) — verify archives, find moved and duplicate records, search a folder for
+- **Maintenance** (*Settings* tabs) — verify archives, re-read links and `info.json`, find moved and duplicate records, search a folder for
   missing archives, remove the records of missing archives, re-check warnings, recompute image hashes and embeddings, prune images,
   compact the database, rescan archives, regenerate thumbnails, delete files to a trash
   folder, sort files into a folder tree by pattern

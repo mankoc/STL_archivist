@@ -69,6 +69,12 @@ pub enum JobRequest {
     /// Read the catalog of every archive whose file list or STL list was never
     /// read (crawls open only new and changed archives).
     ReadFileLists,
+    /// Read every archive's `.url` and `info.json` again (as a crawl does) into
+    /// empty fields, or over them with `overwrite`; tags are added.
+    RereadLinks {
+        #[serde(default)]
+        overwrite: bool,
+    },
     /// Compute perceptual hashes from stored thumbnails (all, or only missing / outdated).
     RecomputeDhashes {
         #[serde(default)]
@@ -276,6 +282,7 @@ impl JobRequest {
             JobRequest::ClearLibrary { .. } => "clear_library",
             JobRequest::VerifyArchives => "verify_archives",
             JobRequest::ReadFileLists => "read_file_lists",
+            JobRequest::RereadLinks { .. } => "reread_links",
             JobRequest::RecomputeDhashes { .. } => "recompute_dhashes",
             JobRequest::PruneImages { .. } => "prune_images",
             JobRequest::CompactDatabase => "compact_database",
@@ -758,6 +765,7 @@ fn run(lib: &Library, job: &Job) -> Result<String, String> {
         JobRequest::ClearLibrary { .. } => clear_library(lib, job),
         JobRequest::VerifyArchives => verify(lib, job),
         JobRequest::ReadFileLists => read_file_lists(lib, job),
+        JobRequest::RereadLinks { overwrite } => reread_links(lib, job, overwrite),
         JobRequest::RecomputeDhashes { all } => recompute_dhashes(lib, job, all),
         JobRequest::PruneImages { keep } => prune_images(lib, job, keep),
         JobRequest::CompactDatabase => compact(lib, job),
@@ -1597,6 +1605,13 @@ fn read_file_lists(lib: &Library, job: &Job) -> Result<String, String> {
     let r = crate::maint::read_file_lists(lib, &job.ctl, &log)?;
     job.touch_sidecars(r.touched);
     Ok(format!("{} read, {} unreadable or missing", r.read, r.failed))
+}
+
+fn reread_links(lib: &Library, job: &Job, overwrite: bool) -> Result<String, String> {
+    let log = |line: String| lib.job_log(job, line);
+    let r = crate::maint::reread_links(lib, &job.ctl, &log, overwrite)?;
+    job.touch_sidecars(r.touched);
+    Ok(format!("{} updated, {} unchanged, {} unreadable", r.updated, r.unchanged, r.failed))
 }
 
 fn recheck_warnings(lib: &Library, job: &Job, warning: &str) -> Result<String, String> {

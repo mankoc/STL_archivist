@@ -2051,6 +2051,10 @@ export interface components {
             /** @enum {string} */
             kind: "read_file_lists";
         } | {
+            /** @enum {string} */
+            kind: "reread_links";
+            overwrite?: boolean;
+        } | {
             all?: boolean;
             /** @enum {string} */
             kind: "recompute_dhashes";

@@ -322,6 +322,37 @@ pub fn ai_commit(tx: &Transaction, model_id: i64, f: &AiFields, tags: &[String],
     Ok(true)
 }
 
+/// Write what a model's link and `info.json` say ([`crate::metadata::from_files`]):
+/// URL, title, creator, type, description and release fill empty fields, or replace
+/// them with `overwrite`; tags are added. Whether anything changed (`false` too
+/// when the model is gone).
+pub fn links_commit(tx: &Transaction, model_id: i64, m: &crate::metadata::Metadata, overwrite: bool) -> EResult<bool> {
+    let Some((old, _)) = load_row(tx, model_id)? else { return Ok(false) };
+    let mut new = old.clone();
+    let put = |value: &Option<String>, field: &mut Option<String>| {
+        if let Some(v) = value.as_deref().map(str::trim).filter(|v| !v.is_empty())
+            && (overwrite || empty(field))
+        {
+            *field = Some(v.to_string());
+        }
+    };
+    put(&m.url, &mut new.url);
+    put(&m.title, &mut new.title);
+    put(&m.creator, &mut new.creator);
+    put(&m.distributor, &mut new.source);
+    put(&m.description, &mut new.description);
+    if let Some(r) = m.release.as_deref().map(str::trim).filter(|r| !r.is_empty())
+        && (overwrite || new.release_id.is_none())
+    {
+        new.release_id = set_named(tx, "releases", r)?;
+    }
+    let tags_before: i64 = tx.query_row("SELECT count(*) FROM model_tags WHERE model_id = ?1", [model_id], |r| r.get(0))?;
+    assign_tags_ext(tx, model_id, &m.tags, false)?;
+    let tags_after: i64 = tx.query_row("SELECT count(*) FROM model_tags WHERE model_id = ?1", [model_id], |r| r.get(0))?;
+    store_row(tx, model_id, &old, &new)?;
+    Ok(old != new || tags_after != tags_before)
+}
+
 /// `archive_paths`: `{model_id: archive_path}` for the models that exist.
 pub fn archive_paths(conn: &Connection, ids: &[i64]) -> Result<HashMap<i64, String>> {
     let json = format!("[{}]", ids.iter().map(i64::to_string).collect::<Vec<_>>().join(","));

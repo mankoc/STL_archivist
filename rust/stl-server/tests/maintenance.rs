@@ -196,3 +196,31 @@ async fn warning_rechecks() {
         assert_eq!(r.status, StatusCode::BAD_REQUEST, "{bad}");
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reread_links_and_info_json() {
+    let (lib, ed, root) = library().await;
+    // The archive gained its link and info.json since the crawl; its title was edited.
+    let info = br#"{"name": "Red Dragon", "author": "Sanix", "distributor": "patreon", "tags": ["dragon", "bust"]}"#;
+    write_zip(
+        &root.join("Studio").join("Dragon.zip"),
+        &[("dragon.stl", b"solid d\nendsolid\n"), ("Dragon.url", b"[InternetShortcut]\r\nURL=https://shop.example/dragon\r\n"), ("info.json", info)],
+    );
+    lib.state.db.with(|c| c.execute("UPDATE models SET title = 'My dragon' WHERE title = 'Dragon'", [])).unwrap();
+
+    let v = run(&lib, &ed, json!({"kind": "reread_links"})).await;
+    assert_eq!(v["job"]["message"], "1 updated, 1 unchanged, 0 unreadable");
+    let row: (String, String, String, String) = lib
+        .state
+        .db
+        .with(|c| c.query_row("SELECT title, creator, source, url FROM models WHERE url IS NOT NULL", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))))
+        .unwrap();
+    assert_eq!(row, ("My dragon".into(), "Sanix".into(), "Patreon".into(), "https://shop.example/dragon".into()), "empty fields filled, the edit kept");
+    assert_eq!(scalar::<i64>(&lib, "SELECT count(*) FROM model_tags JOIN tags ON tags.id = model_tags.tag_id WHERE tags.name IN ('dragon', 'bust')"), 2);
+
+    let v = run(&lib, &ed, json!({"kind": "reread_links", "overwrite": true})).await;
+    assert_eq!(v["job"]["message"], "1 updated, 1 unchanged, 0 unreadable");
+    assert_eq!(scalar::<String>(&lib, "SELECT title FROM models WHERE url IS NOT NULL"), "Red Dragon");
+    let v = run(&lib, &ed, json!({"kind": "reread_links", "overwrite": true})).await;
+    assert_eq!(v["job"]["message"], "0 updated, 2 unchanged, 0 unreadable");
+}
