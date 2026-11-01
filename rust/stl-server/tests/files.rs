@@ -54,6 +54,31 @@ async fn editors_browse_inside_roots_admins_anywhere() {
     assert_eq!(call(s, "POST", "/api/jobs", Some(&ed), Some(body)).await.status, StatusCode::FORBIDDEN);
 }
 
+#[tokio::test]
+async fn editors_create_folders_inside_roots() {
+    let lib = empty_library();
+    let s = &lib.state;
+    let ed = lib.user("ed", Role::Editor);
+    let viewer = lib.user("vi", Role::Viewer);
+    let root = lib.dir.path();
+    std::fs::create_dir_all(root.join("STL")).unwrap();
+    let parent = root.join("STL").to_string_lossy().into_owned();
+    let post = |who, body| call(s, "POST", "/api/files/folder", Some(who), Some(body));
+
+    let r = post(&ed, json!({"parent": parent, "name": " Sorted "})).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert!(root.join("STL").join("Sorted").is_dir());
+    assert_eq!(r.json()["path"], root.join("STL").join("Sorted").to_string_lossy().as_ref());
+    assert_eq!(post(&ed, json!({"parent": parent, "name": "Sorted"})).await.status, StatusCode::CONFLICT);
+    for bad in ["", "..", "a/b", r"a\b", "x:y"] {
+        assert_eq!(post(&ed, json!({"parent": parent, "name": bad})).await.status, StatusCode::BAD_REQUEST, "{bad:?}");
+    }
+    let outside = root.parent().unwrap().to_string_lossy().into_owned();
+    assert_eq!(post(&ed, json!({"parent": outside, "name": "x"})).await.status, StatusCode::FORBIDDEN);
+    assert_eq!(post(&viewer, json!({"parent": parent, "name": "y"})).await.status, StatusCode::FORBIDDEN);
+    assert!(!root.join("STL").join("y").exists());
+}
+
 fn urlencode(s: &str) -> String {
     s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~/".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
 }

@@ -27,7 +27,8 @@ export function MassEditDrawer({ ids, opened, onClose }: { ids: number[]; opened
     queryFn: async () => unwrap(await api.GET("/api/editor/choices")) as Record<string, string[]>,
     enabled: opened,
   });
-  const list = (k: string) => choices.data?.[k] ?? [];
+  // Subcollection names repeat across collections, and an Autocomplete throws on duplicate options.
+  const list = (k: string) => [...new Set(choices.data?.[k] ?? [])];
   const set = <K extends keyof MassForm>(k: K, v: MassForm[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   const showParsed = async () => {

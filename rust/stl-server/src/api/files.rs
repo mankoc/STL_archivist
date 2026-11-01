@@ -179,6 +179,64 @@ pub async fn browse(State(lib): State<AppState>, me: CurrentUser, Query(q): Quer
     Ok(Json(listing))
 }
 
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NewFolder {
+    /// An existing folder the user may browse.
+    pub parent: String,
+    /// The new folder's name: one level, no `\ / : * ? " < > |`.
+    pub name: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct CreatedFolder {
+    /// The new folder, spelled like the listing's entries.
+    pub path: String,
+}
+
+/// The folder name `name` without surrounding spaces (Windows also drops trailing
+/// dots), or why it cannot be one.
+fn folder_name(name: &str) -> Result<&str, String> {
+    let name = name.trim();
+    let name = if cfg!(windows) { name.trim_end_matches(['.', ' ']) } else { name };
+    if name.is_empty() || name == "." || name == ".." {
+        return Err("give the folder a name".into());
+    }
+    if let Some(c) = name.chars().find(|c| r#"\/:*?"<>|"#.contains(*c) || c.is_control()) {
+        return Err(format!("a folder name cannot contain {c:?}"));
+    }
+    Ok(name)
+}
+
+/// Create a folder inside `parent` (editor role, inside the library's roots
+/// unless an administrator), for a target such as *Sort files*' folder.
+#[utoipa::path(post, path = "/api/files/folder", tag = "files", request_body = NewFolder,
+    responses((status = 200, body = CreatedFolder), (status = 400, body = crate::error::ErrorBody),
+              (status = 403, body = crate::error::ErrorBody), (status = 404, body = crate::error::ErrorBody),
+              (status = 409, body = crate::error::ErrorBody)))]
+pub async fn create_folder(State(lib): State<AppState>, me: CurrentUser, Json(req): Json<NewFolder>) -> Result<Json<CreatedFolder>, ApiError> {
+    me.require(Role::Editor)?;
+    let name = folder_name(&req.name).map_err(ApiError::bad_request)?.to_string();
+    let created = lib
+        .run(move |lib| {
+            let parent = PathBuf::from(req.parent.trim());
+            check_access(lib, &me, &parent)?;
+            if !parent.is_dir() {
+                return Err(ApiError::bad_request(format!("{} is not a folder", parent.display())));
+            }
+            let path = parent.join(&name);
+            match std::fs::create_dir(&path) {
+                Ok(()) => Ok(CreatedFolder { path: path.to_string_lossy().into_owned() }),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    Err(ApiError::new(StatusCode::CONFLICT, format!("{name} already exists")))
+                }
+                Err(e) => Err(ApiError::bad_request(format!("{}: {e}", path.display()))),
+            }
+        })
+        .await?;
+    Ok(Json(created))
+}
+
 /// Download a model's archive file.
 #[utoipa::path(get, path = "/api/models/{id}/archive", tag = "files",
     params(("id" = i64, Path, description = "Model id")),

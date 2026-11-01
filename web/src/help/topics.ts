@@ -309,7 +309,7 @@ export const TOPICS: Topic[] = [
       { list: [
         "**Rescan** re-reads the archives (metadata, file list, presupports, warnings, scales) — after replacing an archive's contents in place. Right-clicking a row or image offers it too: for the selection when the row is part of it, else for that model.",
         "**Generate thumbnails** replaces the models' images with new ones from their archives, up to *Thumbnails per archive*.",
-        "**Sort files…** moves the archives into a folder tree built from a [pattern](path-patterns) under a target folder. **Preview** shows every move first (*COLLISION*: a file of that name exists and a numbered name is used; *MISS*: the archive is not on disk). **Move** moves all or none: if one move fails, the others are put back. Needs *Allow file sorting* in the settings.",
+        "**Sort files…** moves the archives into a folder tree built from a [pattern](path-patterns) under a target folder (*Browse…* can make a new folder there with **New folder**). **Preview** shows every move first (*COLLISION*: a file of that name exists and a numbered name is used; *MISS*: the archive is not on disk). **Move** moves all or none: if one move fails, the others are put back. Needs *Allow file sorting* in the settings.",
         "**Delete files…** deletes the archive files and their records. With a trash folder set, files go there with a small `.json` note for recovery. Needs *Allow file delete* in the settings.",
       ] },
       { warn: "Sort files and Delete files change your disk. Preview first, and keep backups of archives you cannot download again." },
