@@ -1,6 +1,6 @@
 # StlArchivist API
 
-Version 2026.44.12. Generated from `web/openapi.json` by `tools/api_doc.py`; the
+Version 2026.44.13. Generated from `web/openapi.json` by `tools/api_doc.py`; the
 running server serves the same document at `GET /api/openapi.json`. Do not edit by hand:
 run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after changing routes.
 
@@ -18,7 +18,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
   or `GET /api/jobs/{id}`.
 - Writes that change the library are announced on `/api/events` as `library_changed`.
 
-## Endpoints (94)
+## Endpoints (95)
 
 - [Sign-in and sessions](#sign-in-and-sessions) (5)
 - [Users and preferences](#users-and-preferences) (7)
@@ -27,7 +27,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 - [Editing models](#editing-models) (11)
 - [Lookups (sculptors, collections, tags…)](#lookups-sculptors-collections-tags) (13)
 - [Thumbnails and images](#thumbnails-and-images) (3)
-- [Files and folders](#files-and-folders) (2)
+- [Files and folders](#files-and-folders) (3)
 - [Libraries and their folders](#libraries-and-their-folders) (6)
 - [Jobs and events](#jobs-and-events) (5)
 - [Maintenance](#maintenance) (3)
@@ -133,6 +133,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 | Endpoint | Description | Request | Response | Errors |
 |---|---|---|---|---|
 | `GET /api/files/browse` | List a folder on the server (editor role): subfolders and archives. | query `path`?: string | 200 [Listing](#listing) | 403, 404 |
+| `POST /api/files/folder` | Create a folder inside `parent` (editor role, inside the library's roots unless an administrator), for a target such as *Sort files*' folder. | body: [NewFolder](#newfolder) | 200 [CreatedFolder](#createdfolder) | 400, 403, 404, 409 |
 | `GET /api/models/{id}/archive` | Download a model's archive file. | path `id`: integer | 200 `application/octet-stream` | 404 |
 
 ### Libraries and their folders
@@ -446,6 +447,12 @@ Two archives sharing STL files (name and size).
 | Field | Type | Description |
 |---|---|---|
 | `count` | integer |  |
+
+### CreatedFolder
+
+| Field | Type | Description |
+|---|---|---|
+| `path` | string | The new folder, spelled like the listing's entries. |
 
 ### Credentials
 
@@ -989,6 +996,13 @@ Models with equal or similar values in one column.
 |---|---|---|
 | `id` | integer |  |
 | `name` | string |  |
+
+### NewFolder
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | The new folder's name: one level, no `\ / : * ? " < > \|`. |
+| `parent` | string | An existing folder the user may browse. |
 
 ### NewLibrary
 

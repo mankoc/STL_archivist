@@ -87,7 +87,7 @@ export function SortModal({ ids, opened, onClose }: { ids: number[]; opened: boo
           Every file is moved, or none: if one move fails the others go back. Needs “file sorting” in the library settings.
         </Text>
       </Stack>
-      <FolderPicker opened={picker} onClose={() => setPicker(false)} onPick={(p) => { setTarget(p); setPicker(false); setRows(null); }} />
+      <FolderPicker canCreate opened={picker} onClose={() => setPicker(false)} onPick={(p) => { setTarget(p); setPicker(false); setRows(null); }} />
     </Modal>
   );
 }

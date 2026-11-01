@@ -1344,6 +1344,12 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.44.13: **new folder in the folder picker.** `POST /api/files/folder` (`files::
+  create_folder`, editor role, `check_access` on the parent) makes one level, refusing
+  names with separators or reserved characters (409 when it exists). `FolderPicker` takes
+  `canCreate`; *Sort files* sets it. Fix: `MassEditDrawer` de-duplicates the editor choices
+  (`editor_choices` keeps repeated subcollection names; Mantine's Combobox throws on
+  duplicate options, which blanked the page).
 - 2026.44.12: **search fields, fuzzy search; Jobs button always shown.** `library::table_ids`
   takes a `Search` (text, `fields` from `SEARCH_FIELDS`, none meaning `DEFAULT_SEARCH`, and
   `fuzzy`). A plain search ORs `LIKE` per field as before (tags through the tag index). A

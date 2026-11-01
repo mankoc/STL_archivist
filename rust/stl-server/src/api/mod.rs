@@ -96,6 +96,7 @@ use crate::AppState;
         libraries::change_folder,
         libraries::remove_folder,
         files::browse,
+        files::create_folder,
         files::download,
         settings::get,
         settings::put,
@@ -217,6 +218,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/libraries/folders/{id}", patch(libraries::change_folder))
         .route("/api/libraries/folders/{id}/remove", post(libraries::remove_folder))
         .route("/api/files/browse", get(files::browse))
+        .route("/api/files/folder", post(files::create_folder))
         .route("/api/models/{id}/archive", get(files::download))
         .route("/api/settings/library", get(settings::get).put(settings::put))
         .route("/api/models/{id}/files", get(archive::files))

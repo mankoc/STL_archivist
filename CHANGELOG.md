@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026.44.13 — 2026-11-01
+
+- **Fix: *Mass edit* no longer opens a blank window** when a subcollection name exists in
+  more than one collection (for example *Marvel* in two collections). The subcollection
+  suggestions repeated those names, and the suggestion box refused the duplicates, which
+  stopped the whole page.
+- **New folder when choosing Sort files' target:** the *Browse…* window has a *New folder*
+  button that makes a folder inside the one shown and opens it. Editors can make folders
+  inside the library's folders; administrators anywhere. New route: `POST /api/files/folder`.
+
 ## 2026.44.12 — 2026-11-01
 
 - **Search options:** a *Search* button beside the library's search box chooses the

@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.44.12"
+    "version": "2026.44.13"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -689,6 +689,77 @@
             }
           },
           "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/files/folder": {
+      "post": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Create a folder inside `parent` (editor role, inside the library's roots\nunless an administrator), for a target such as *Sort files*' folder.",
+        "operationId": "post_files_folder",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewFolder"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedFolder"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
             "description": "",
             "content": {
               "application/json": {
@@ -4477,6 +4548,18 @@
           }
         }
       },
+      "CreatedFolder": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "The new folder, spelled like the listing's entries."
+          }
+        }
+      },
       "Credentials": {
         "type": "object",
         "required": [
@@ -7162,6 +7245,24 @@
             "type": "string"
           }
         }
+      },
+      "NewFolder": {
+        "type": "object",
+        "required": [
+          "parent",
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The new folder's name: one level, no `\\ / : * ? \" < > |`."
+          },
+          "parent": {
+            "type": "string",
+            "description": "An existing folder the user may browse."
+          }
+        },
+        "additionalProperties": false
       },
       "NewLibrary": {
         "type": "object",

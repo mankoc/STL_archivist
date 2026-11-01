@@ -309,6 +309,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/files/folder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a folder inside `parent` (editor role, inside the library's roots
+         *     unless an administrator), for a target such as *Sort files*' folder.
+         */
+        post: operations["post_files_folder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/filter-tree": {
         parameters: {
             query?: never;
@@ -1634,6 +1654,10 @@ export interface components {
             /** Format: int64 */
             count: number;
         };
+        CreatedFolder: {
+            /** @description The new folder, spelled like the listing's entries. */
+            path: string;
+        };
         Credentials: {
             name: string;
             password: string;
@@ -2486,6 +2510,12 @@ export interface components {
             /** Format: int64 */
             id: number;
             name: string;
+        };
+        NewFolder: {
+            /** @description The new folder's name: one level, no `\ / : * ? " < > |`. */
+            name: string;
+            /** @description An existing folder the user may browse. */
+            parent: string;
         };
         NewLibrary: {
             /**
@@ -3514,6 +3544,61 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    post_files_folder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewFolder"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedFolder"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
