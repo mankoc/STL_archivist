@@ -233,7 +233,8 @@ fn text_field(info: &serde_json::Map<String, serde_json::Value>, key: &str) -> O
 }
 
 /// `archive.find_url_file`: a `.url` inside the archive, then beside it, then in
-/// a `*-links` / `*_links` sibling folder.
+/// a `*-links` / `*_links` sibling folder, then in the folder above when that one
+/// has at most [`MAX_MODEL_SUBFOLDERS`] subfolders (and is not a drive's root).
 pub fn find_url_file(archive_path: &Path) -> Option<String> {
     if let Some(u) = read_url_file(archive_path).filter(|u| !u.is_empty()) {
         return Some(u);
@@ -268,8 +269,18 @@ pub fn find_url_file(archive_path: &Path) -> Option<String> {
             }
         }
     }
-    None
+    // A model's folder holding a few part folders (`Supported/`, `Unsupported/`, …)
+    // keeps its link above them; a folder of many models is not one model's.
+    let grand = parent.parent().filter(|g| !g.as_os_str().is_empty() && g.parent().is_some())?;
+    let folders = std::fs::read_dir(grand).ok()?.flatten().filter(|e| e.file_type().is_ok_and(|t| t.is_dir())).count();
+    if folders > MAX_MODEL_SUBFOLDERS {
+        return None;
+    }
+    glob_sorted(grand, |n| ends_ci(n, ".url")).iter().find_map(|f| parse_url_shortcut(f).filter(|u| !u.is_empty()))
 }
+
+/// Most subfolders a model's folder has for [`find_url_file`] to take its link.
+const MAX_MODEL_SUBFOLDERS: usize = 6;
 
 fn ends_ci(name: &str, tail: &str) -> bool {
     name.to_lowercase().ends_with(tail)
@@ -468,5 +479,30 @@ mod tests {
         let m = extract(&path, &[], None);
         assert_eq!(m.title.as_deref(), Some("oola"));
         assert_eq!(m.url.as_deref(), Some("https://example.com/oola"), "the .url beside it still counts");
+    }
+
+    #[test]
+    fn url_from_a_model_folder_above_its_part_folders() {
+        let dir = tempfile::tempdir().unwrap();
+        let model = dir.path().join("Library").join("Dragon");
+        for part in ["Supported", "Unsupported"] {
+            std::fs::create_dir_all(model.join(part)).unwrap();
+            std::fs::write(model.join(part).join("dragon.zip"), b"x").unwrap();
+        }
+        std::fs::write(model.join("Dragon.url"), b"[InternetShortcut]\r\nURL=https://shop.example/dragon\r\n").unwrap();
+        let archive = model.join("Supported").join("dragon.zip");
+        assert_eq!(find_url_file(&archive).as_deref(), Some("https://shop.example/dragon"));
+
+        // Above more than six subfolders it is a library folder, not a model's.
+        for i in 0..5 {
+            std::fs::create_dir_all(model.join(format!("extra{i}"))).unwrap();
+        }
+        assert_eq!(find_url_file(&archive), None);
+        // Nor is the link taken from two levels up.
+        let deeper = model.join("Supported").join("v2");
+        std::fs::create_dir_all(&deeper).unwrap();
+        std::fs::write(deeper.join("dragon.zip"), b"x").unwrap();
+        std::fs::remove_dir_all(model.join("extra0")).unwrap();
+        assert_eq!(find_url_file(&deeper.join("dragon.zip")), None);
     }
 }
