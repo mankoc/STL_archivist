@@ -237,6 +237,8 @@ pub struct Changed {
     pub release_year: Option<i64>,
     pub release_month: Option<i64>,
     pub description: Option<String>,
+    /// From a `.url` or `info.json`; `None` keeps the stored one.
+    pub url: Option<String>,
     pub release: Option<String>,
     pub tags: Vec<String>,
     pub presupports: String,
@@ -538,6 +540,9 @@ fn upsert<'a>(
     row.release_year = ch.release_year;
     row.release_month = ch.release_month;
     row.description = ch.description.clone();
+    if let Some(u) = ch.url.as_deref().filter(|u| !u.trim().is_empty()) {
+        row.url = Some(u.to_string());
+    }
     if let Some(rel) = ch.release.as_deref().filter(|r| !r.is_empty()) {
         row.release_id = Some(lookup(tx, "releases", rel)?);
     }

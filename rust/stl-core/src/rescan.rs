@@ -61,7 +61,7 @@ pub fn rescan(path: &str, old_size: Option<i64>, old_mtime: Option<i64>, old_has
         .cloned()
         .collect();
     let parent = crate::winpath::native(&WinPath::new(path).parent().as_posix());
-    let meta = metadata::extract(path, &files, Some(&parent)).map_err(|_| "the server cannot read this archive's metadata; left unchanged")?;
+    let meta = metadata::extract(path, &files, Some(&parent));
     let release = meta.release_date.as_deref().map(path_pattern::parse_release_date).and_then(|(y, m)| y.map(|y| (y, m)));
     let names = &extracted.names;
     let warnings = rules::detect_warnings(names, opts.warn, &pats).map_err(|e| e.to_string())?;

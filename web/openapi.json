@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.44.14"
+    "version": "2026.44.15"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -8411,7 +8411,7 @@
           },
           "status": {
             "type": "string",
-            "description": "`OK`, `COLLISION` (a free name is used), `MISS`, `SKIP` or `ERROR`."
+            "description": "`OK`, `COLLISION` (a free name is used), `MISS`, `SKIP`, `ERROR`, or `FILE`:\nanother file of a folder whose archives all go to one folder, moved with them."
           },
           "to": {
             "type": "string"

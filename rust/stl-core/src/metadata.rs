@@ -4,11 +4,9 @@
 //! Python's `re` semantics are reproduced explicitly: `\b` is a boundary
 //! between `[\p{L}\p{N}_]` (`str.isalnum()` or `_`) and anything else, `\d` is
 //! `\p{Nd}`, `\s` is `str.isspace()`. Paths follow Windows `pathlib`
-//! (`parts`, case-insensitive `relative_to`). Input the port does not reproduce
-//! exactly returns [`Unsupported`], and the caller uses Python: `info.json`
-//! that `serde_json` rejects (Python also reads `NaN`) or whose fields are not
-//! strings, and a `.url` search that would have to open a RAR archive or an
-//! archive the native reader cannot list.
+//! (`parts`, case-insensitive `relative_to`). What cannot be read (an
+//! `info.json` that is not JSON, a value that is neither text nor a number, an
+//! archive that cannot be listed) is skipped: the rest is still used.
 
 use std::path::Path;
 use std::sync::LazyLock;
@@ -17,18 +15,6 @@ use fancy_regex::{Regex, RegexBuilder};
 
 use crate::archive;
 use crate::rules::MemberPath;
-
-/// Input the native port does not reproduce exactly.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Unsupported(pub String);
-
-impl std::fmt::Display for Unsupported {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "unsupported: {}", self.0)
-    }
-}
-
-impl std::error::Error for Unsupported {}
 
 /// `ModelMetadata`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -227,44 +213,38 @@ fn truthy(v: &serde_json::Value) -> bool {
     }
 }
 
-/// `str(v)` for the JSON values whose Python form is simple.
-fn py_str(v: &serde_json::Value) -> Result<String, Unsupported> {
+/// `str(v)` for a JSON scalar (`None` for a list or an object).
+fn py_str(v: &serde_json::Value) -> Option<String> {
     use serde_json::Value;
     match v {
-        Value::String(s) => Ok(s.clone()),
-        Value::Bool(true) => Ok("True".into()),
-        Value::Bool(false) => Ok("False".into()),
-        Value::Null => Ok("None".into()),
-        Value::Number(n) if n.is_i64() || n.is_u64() => Ok(n.to_string()),
-        _ => Err(Unsupported("info.json value without a simple str()".into())),
+        Value::String(s) => Some(s.clone()),
+        Value::Bool(true) => Some("True".into()),
+        Value::Bool(false) => Some("False".into()),
+        Value::Null => Some("None".into()),
+        Value::Number(n) if n.is_i64() || n.is_u64() => Some(n.to_string()),
+        Value::Number(n) => n.as_f64().map(crate::pyjson::float_repr),
+        Value::Array(_) | Value::Object(_) => None,
     }
 }
 
-fn text_field(info: &serde_json::Map<String, serde_json::Value>, key: &str) -> Result<Option<String>, Unsupported> {
-    match info.get(key) {
-        Some(v) if truthy(v) => match v {
-            serde_json::Value::String(s) => Ok(Some(s.clone())),
-            _ => Err(Unsupported(format!("info.json {key} is not a string"))),
-        },
-        _ => Ok(None),
-    }
+/// A truthy `info.json` value as text (lists and objects skipped).
+fn text_field(info: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<String> {
+    info.get(key).filter(|v| truthy(v)).and_then(py_str)
 }
 
 /// `archive.find_url_file`: a `.url` inside the archive, then beside it, then in
 /// a `*-links` / `*_links` sibling folder.
-pub fn find_url_file(archive_path: &Path) -> Result<Option<String>, Unsupported> {
-    if let Some(u) = read_url_file(archive_path)?
-        && !u.is_empty()
-    {
-        return Ok(Some(u));
+pub fn find_url_file(archive_path: &Path) -> Option<String> {
+    if let Some(u) = read_url_file(archive_path).filter(|u| !u.is_empty()) {
+        return Some(u);
     }
-    let Some(parent) = archive_path.parent() else { return Ok(None) };
+    let parent = archive_path.parent()?;
     let parent = if parent.as_os_str().is_empty() { Path::new(".") } else { parent };
     for f in glob_sorted(parent, |n| ends_ci(n, ".url")) {
         if let Some(u) = parse_url_shortcut(&f)
             && !u.is_empty()
         {
-            return Ok(Some(u));
+            return Some(u);
         }
     }
     for sep in ["-links", "_links"] {
@@ -284,11 +264,11 @@ pub fn find_url_file(archive_path: &Path) -> Result<Option<String>, Unsupported>
             if let Some(u) = parse_url_shortcut(&f)
                 && !u.is_empty()
             {
-                return Ok(Some(u));
+                return Some(u);
             }
         }
     }
-    Ok(None)
+    None
 }
 
 fn ends_ci(name: &str, tail: &str) -> bool {
@@ -315,97 +295,107 @@ fn parse_url_shortcut(path: &Path) -> Option<String> {
     url_line(&decode_ignore(&data))
 }
 
-/// `archive.read_url_file`: the `URL=` value of the first `.url` member that has one.
-fn read_url_file(archive_path: &Path) -> Result<Option<String>, Unsupported> {
+/// `archive.read_url_file`: the `URL=` value of the first `.url` member that
+/// has one (zip and 7z; the crawler reads RAR members itself).
+fn read_url_file(archive_path: &Path) -> Option<String> {
     let ext = archive_path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
     if ext != "zip" && ext != "7z" {
-        return Err(Unsupported(format!("reading .url members of a .{ext} archive")));
+        return None;
     }
-    let members = match archive::list_members(archive_path) {
-        Ok(m) => m,
-        Err(_) if !archive_path.exists() => return Ok(None),
-        Err(e) => return Err(Unsupported(format!("listing the archive: {e}"))),
-    };
-    for m in members {
+    for m in archive::list_members(archive_path).ok()? {
         if MemberPath::new(&m.name).suffix().to_lowercase() != ".url" {
             continue;
         }
-        let data = archive::read_members(archive_path, std::slice::from_ref(&m.name))
-            .map_err(|e| Unsupported(format!("reading {}: {e}", m.name)))?;
+        let Ok(data) = archive::read_members(archive_path, std::slice::from_ref(&m.name)) else { continue };
         if let Some((_, bytes)) = data.into_iter().next()
-            && !bytes.is_empty()
             && let Some(u) = url_line(&decode_ignore(&bytes))
         {
-            return Ok(Some(u));
+            return Some(u);
         }
     }
-    Ok(None)
+    None
 }
 
-/// `extract_metadata`: path inference, then the `.url`, then `info.json`.
-/// `contents` is `extract_archive_contents`' result in member order.
-pub fn extract(archive_path: &str, contents: &[(String, Vec<u8>)], source_dir: Option<&str>) -> Result<Metadata, Unsupported> {
+/// `info.json` beside the archive when it is the only archive in its folder (a
+/// downloaded model's folder: the archive, its pictures, its link and its info).
+fn info_beside(archive_path: &Path) -> Option<Vec<u8>> {
+    let parent = archive_path.parent().filter(|p| !p.as_os_str().is_empty())?;
+    let is_archive = |n: &str| {
+        let n = n.to_lowercase();
+        [".zip", ".7z", ".rar"].iter().any(|e| n.ends_with(e)) && n != "metadata.7z"
+    };
+    if glob_sorted(parent, is_archive).len() != 1 {
+        return None;
+    }
+    let file = glob_sorted(parent, |n| n.eq_ignore_ascii_case("info.json")).into_iter().next()?;
+    std::fs::read(file).ok()
+}
+
+/// A distributor's usual spelling (`cults3d` → `Cults3D`), else as given.
+fn distributor_name(d: &str) -> String {
+    let d = py_strip(d);
+    DISTRIBUTORS
+        .iter()
+        .find(|(re, _)| re.find(d).ok().flatten().is_some_and(|m| m.as_str().len() == d.len()))
+        .map_or_else(|| d.to_string(), |(_, name)| (*name).to_string())
+}
+
+/// `extract_metadata`: path inference, then the `.url`, then `info.json` (in
+/// the archive, else beside it when it is alone in its folder). `contents` is
+/// `extract_archive_contents`' result in member order.
+pub fn extract(archive_path: &str, contents: &[(String, Vec<u8>)], source_dir: Option<&str>) -> Metadata {
     let mut meta = infer_from_path(archive_path, source_dir);
 
-    let mut url_from_archive: Option<String> = None;
-    for (name, data) in contents {
-        if MemberPath::new(&name.replace('\\', "/")).suffix().to_lowercase() == ".url" {
-            url_from_archive = url_line(&decode_ignore(data));
-            if url_from_archive.as_deref().is_some_and(|u| !u.is_empty()) {
-                break;
-            }
-        }
-    }
-    let url = match url_from_archive.filter(|u| !u.is_empty()) {
-        Some(u) => Some(u),
-        None => find_url_file(Path::new(archive_path))?,
-    };
-    if let Some(u) = url.filter(|u| !u.is_empty()) {
+    let url_from_archive = contents
+        .iter()
+        .filter(|(name, _)| MemberPath::new(&name.replace('\\', "/")).suffix().to_lowercase() == ".url")
+        .find_map(|(_, data)| url_line(&decode_ignore(data)).filter(|u| !u.is_empty()));
+    if let Some(u) = url_from_archive.or_else(|| find_url_file(Path::new(archive_path))) {
         meta.url = Some(u);
     }
 
-    let raw = contents.iter().find(|(name, _)| {
+    let inside = contents.iter().find(|(name, _)| {
         let n = MemberPath::new(&name.replace('\\', "/")).name;
         n.is_ascii() && n.eq_ignore_ascii_case("info.json")
     });
-    if let Some((_, raw)) = raw
-        && !raw.is_empty()
-    {
-        let text = String::from_utf8_lossy(raw);
-        let value: serde_json::Value =
-            serde_json::from_str(&text).map_err(|e| Unsupported(format!("info.json: {e}")))?;
-        let serde_json::Value::Object(info) = value else {
-            return Err(Unsupported("info.json is not an object".into()));
-        };
-        if let Some(t) = text_field(&info, "name")? {
+    let raw = match inside {
+        Some((_, raw)) => Some(raw.clone()),
+        None => info_beside(Path::new(archive_path)),
+    };
+    let info = raw.filter(|r| !r.is_empty()).and_then(|r| {
+        // A byte order mark is common in files saved on Windows.
+        let text = String::from_utf8_lossy(&r);
+        match serde_json::from_str(text.trim_start_matches('\u{feff}')) {
+            Ok(serde_json::Value::Object(info)) => Some(info),
+            _ => None,
+        }
+    });
+    if let Some(info) = info {
+        if let Some(t) = text_field(&info, "name") {
             meta.title = Some(t);
         }
-        if let Some(c) = text_field(&info, "creator")? {
+        if let Some(c) = text_field(&info, "creator").or_else(|| text_field(&info, "author")) {
             meta.creator = Some(c);
-        } else if let Some(a) = text_field(&info, "author")? {
-            meta.creator = Some(a);
         }
-        if let Some(d) = text_field(&info, "distributor")? {
-            meta.distributor = Some(d);
+        if let Some(d) = text_field(&info, "distributor") {
+            meta.distributor = Some(distributor_name(&d));
         }
-        if let Some(u) = text_field(&info, "url")? {
+        if let Some(u) = text_field(&info, "url") {
             meta.url = Some(u);
         }
-        if let Some(d) = text_field(&info, "description")? {
+        if let Some(d) = text_field(&info, "description") {
             meta.description = Some(d);
         }
         if let Some(serde_json::Value::Array(tags)) = info.get("tags")
             && !tags.is_empty()
         {
-            meta.tags = tags.iter().map(py_str).collect::<Result<_, _>>()?;
+            meta.tags = tags.iter().filter_map(py_str).collect();
         }
-        if let Some(r) = info.get("release")
-            && truthy(r)
-        {
-            meta.release = Some(py_str(r)?);
+        if let Some(r) = text_field(&info, "release") {
+            meta.release = Some(r);
         }
     }
-    Ok(meta)
+    meta
 }
 
 #[cfg(test)]
@@ -439,10 +429,44 @@ mod tests {
     #[test]
     fn info_json() {
         let c = vec![("info.json".to_string(), br#"{"name": "N", "author": "A", "tags": ["x", 1, true], "release": 5}"#.to_vec())];
-        let m = extract("missing/x.zip", &c, None).unwrap();
+        let m = extract("missing/x.zip", &c, None);
         assert_eq!((m.title.as_deref(), m.creator.as_deref(), m.release.as_deref()), (Some("N"), Some("A"), Some("5")));
         assert_eq!(m.tags, ["x", "1", "True"]);
-        let bad = vec![("info.json".to_string(), br#"{"name": 1}"#.to_vec())];
-        assert!(extract("missing/x.zip", &bad, None).is_err());
+        // What cannot be read is skipped, the rest kept.
+        let odd = vec![(
+            "info.json".to_string(),
+            br#"{"name": 1.5, "author": ["x"], "distributor": "cults3d", "tags": ["a", {}]}"#.to_vec(),
+        )];
+        let m = extract(r"F:\STL\Patreon\Sanix\x.zip", &odd, Some("F:/STL"));
+        assert_eq!((m.title.as_deref(), m.creator.as_deref(), m.distributor.as_deref()), (Some("1.5"), Some("Sanix"), Some("Cults3D")));
+        assert_eq!(m.tags, ["a"]);
+        let bad = vec![("info.json".to_string(), b"not json".to_vec())];
+        assert_eq!(extract("missing/x.zip", &bad, None).title.as_deref(), Some("x"));
+    }
+
+    #[test]
+    fn info_json_and_url_beside_a_lone_archive() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("Oola");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("oola.zip"), b"not really a zip").unwrap();
+        std::fs::write(folder.join("model.url"), b"[InternetShortcut]\r\nURL=https://example.com/oola\r\n").unwrap();
+        let info = "\u{feff}{\"name\": \"Oola slave crouching\", \"author\": \"Tchelos\", \"distributor\": \"cults3d\", \
+                    \"url\": \"https://cults3d.com/oola\", \"description\": \"Star Wars\", \"tags\": [\"oola\", \"jedi\"]}";
+        std::fs::write(folder.join("info.json"), info).unwrap();
+        let path = folder.join("oola.zip").to_string_lossy().into_owned();
+        let m = extract(&path, &[], None);
+        assert_eq!(m.title.as_deref(), Some("Oola slave crouching"));
+        assert_eq!(m.creator.as_deref(), Some("Tchelos"));
+        assert_eq!(m.distributor.as_deref(), Some("Cults3D"));
+        assert_eq!(m.url.as_deref(), Some("https://cults3d.com/oola"), "info.json's url wins over the .url");
+        assert_eq!(m.description.as_deref(), Some("Star Wars"));
+        assert_eq!(m.tags, ["oola", "jedi"]);
+
+        // With a second archive in the folder, the info is not this archive's.
+        std::fs::write(folder.join("other.7z"), b"x").unwrap();
+        let m = extract(&path, &[], None);
+        assert_eq!(m.title.as_deref(), Some("oola"));
+        assert_eq!(m.url.as_deref(), Some("https://example.com/oola"), "the .url beside it still counts");
     }
 }

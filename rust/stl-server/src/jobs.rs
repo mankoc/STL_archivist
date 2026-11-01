@@ -900,7 +900,12 @@ fn sort_files(lib: &Library, job: &Job, ids: &[i64], target_dir: &str, pattern: 
         lib.job_log(job, format!("Moved: {} → {}", r.from, r.to));
     }
     job.touch_sidecars(rows.iter().filter(|r| r.moves()).map(|r| r.from.clone()).chain(moved.iter().map(|(_, p)| p.clone())));
-    Ok(format!("moved {} archive(s)", moved.len()))
+    let others = rows.iter().filter(|r| r.status == "FILE").count();
+    Ok(if others > 0 {
+        format!("moved {} archive(s) and {others} other file(s)", moved.len())
+    } else {
+        format!("moved {} archive(s)", moved.len())
+    })
 }
 
 // ── AI tagger ────────────────────────────────────────────────────────────────

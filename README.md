@@ -13,7 +13,7 @@ can open a library on your computer without setting up a server.
 [the HTTP API](docs/api.md) ·
 and in the interface, the **?** button: searchable in-depth help on every feature
 
-Version: 2026.44.14
+Version: 2026.44.15
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). This version opens its data directory and, since 2026.43.7, converts it once
@@ -35,7 +35,7 @@ Version: 2026.44.14
   and macOS, so a folder moves to another disk, mount point or machine (and from Windows to
   Linux) by pointing it at its new place — no re-crawl, nothing lost; folders can sit inside
   one another
-- **Metadata extraction** — from embedded `info.json`, `.url` files and the folder structure
+- **Metadata extraction** — from `info.json` (in the archive, or beside a lone archive), `.url` files and the folder structure
   through [path patterns](#path-patterns)
 - **Thumbnails** — up to N images per archive (JPEG; animated GIFs stay animated), stored
   once even when many archives share them; PDF previews with pdfium

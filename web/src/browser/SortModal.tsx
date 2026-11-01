@@ -11,7 +11,7 @@ import { FolderPicker } from "../jobs/FolderPicker";
 import { SAVED_PATTERNS, savedPatterns, TOKENS, withoutPattern, withPattern } from "./patterns";
 
 const PATTERN_KEY = "stl.sort.pattern";
-const STATUS_COLOR: Record<string, string> = { OK: "green", COLLISION: "yellow", MISS: "red", SKIP: "gray", ERROR: "red" };
+const STATUS_COLOR: Record<string, string> = { OK: "green", COLLISION: "yellow", MISS: "red", SKIP: "gray", ERROR: "red", FILE: "blue" };
 
 function stored(): string {
   try {
@@ -27,7 +27,7 @@ export function SortModal({ ids, opened, onClose }: { ids: number[]; opened: boo
   const [picker, setPicker] = useState(false);
   const [rows, setRows] = useState<Schemas["SortRow"][] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const moving = (rows ?? []).filter((r) => r.status === "OK" || r.status === "COLLISION").length;
+  const moving = (rows ?? []).filter((r) => r.status === "OK" || r.status === "COLLISION" || r.status === "FILE").length;
   const queryClient = useQueryClient();
   const prefs = useQuery({ queryKey: ["me-settings"], queryFn: async () => unwrap(await api.GET("/api/me/settings")) as Record<string, unknown> });
   const saved = savedPatterns(prefs.data?.[SAVED_PATTERNS]);
@@ -155,7 +155,7 @@ export function SortModal({ ids, opened, onClose }: { ids: number[]; opened: boo
             <Table fz="xs" striped data-testid="sort-rows">
               <Table.Tbody>
                 {rows.map((r) => (
-                  <Table.Tr key={r.id}>
+                  <Table.Tr key={`${r.id} ${r.from}`}>
                     <Table.Td w={100}><Badge size="xs" color={STATUS_COLOR[r.status] ?? "gray"}>{r.status}</Badge></Table.Td>
                     <Table.Td style={{ wordBreak: "break-all" }}>{r.from}</Table.Td>
                     <Table.Td style={{ wordBreak: "break-all" }}>{r.to}</Table.Td>
@@ -166,7 +166,9 @@ export function SortModal({ ids, opened, onClose }: { ids: number[]; opened: boo
           </ScrollArea.Autosize>
         )}
         <Text size="xs" c="dimmed">
-          Every file is moved, or none: if one move fails the others go back. Needs “file sorting” in the library settings.
+          When every archive of a folder goes to one folder, the folder’s other files (pictures, links, info.json) go with
+          them (FILE). Every file is moved, or none: if one move fails the others go back. Needs “file sorting” in the library
+          settings.
         </Text>
       </Stack>
       <FolderPicker canCreate opened={picker} onClose={() => setPicker(false)} onPick={(p) => { setTarget(p); setPicker(false); setRows(null); }} />

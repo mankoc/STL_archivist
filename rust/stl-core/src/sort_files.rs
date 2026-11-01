@@ -1,7 +1,9 @@
 //! Sort files: move archives into a folder tree built from a path pattern
 //! (`{collection}/{creator}/{title}`), a port of `app/ui/sort_dialog.py`.
 //! Every move is planned first; if one fails, the files already moved go back
-//! and the caller leaves the database unchanged.
+//! and the caller leaves the database unchanged. When every archive of a folder
+//! goes to one folder, the folder's other files (pictures, links, `info.json`)
+//! go with them.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -10,6 +12,7 @@ use rusqlite::types::Value;
 
 use crate::path_pattern;
 use crate::storage::browser::SortSource;
+use crate::storage::sidecar::METADATA_FILENAME;
 
 /// `str(v).strip()`, or `_unknown` for nothing (`_safe`).
 fn safe(v: Option<String>) -> String {
@@ -94,9 +97,11 @@ pub fn target(base: &Path, pattern: &str, source: &SortSource) -> PathBuf {
 /// One line of the move plan.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlanRow {
+    /// The model (0 for a file that goes with its folder's archives).
     pub id: i64,
     /// `OK`, `COLLISION` (the target exists: a free name is used), `MISS`
-    /// (the archive is not on disk), `SKIP` (no path) or `ERROR` (no model).
+    /// (the archive is not on disk), `SKIP` (no path), `ERROR` (no model) or
+    /// `FILE` (another file of a folder whose archives all go to one folder).
     pub status: &'static str,
     pub from: String,
     pub to: String,
@@ -105,14 +110,73 @@ pub struct PlanRow {
 impl PlanRow {
     /// Whether the row is moved.
     pub fn moves(&self) -> bool {
-        matches!(self.status, "OK" | "COLLISION")
+        matches!(self.status, "OK" | "COLLISION" | "FILE")
     }
 }
 
-/// `_refresh_preview`: the plan for `ids`, in that order.
+fn is_archive(name: &str) -> bool {
+    let n = name.to_lowercase();
+    [".zip", ".7z", ".rar"].iter().any(|e| n.ends_with(e))
+}
+
+/// `FILE` rows: for each source folder whose archives (on disk, directly in it)
+/// all move, and all to one other folder, its other files go there too.
+/// Subfolders and the sidecar stay (the sidecar is rewritten where the archives go).
+fn companions(rows: &[PlanRow]) -> Vec<PlanRow> {
+    let mut by_dir: HashMap<PathBuf, (Vec<String>, Vec<PathBuf>)> = HashMap::new();
+    for r in rows.iter().filter(|r| r.moves()) {
+        let from = Path::new(&r.from);
+        let (Some(dir), Some(name)) = (from.parent(), from.file_name()) else { continue };
+        let entry = by_dir.entry(dir.to_path_buf()).or_default();
+        entry.0.push(name.to_string_lossy().to_lowercase());
+        entry.1.extend(Path::new(&r.to).parent().map(Path::to_path_buf));
+    }
+    let mut out = Vec::new();
+    let mut dirs: Vec<_> = by_dir.into_iter().collect();
+    dirs.sort_by(|a, b| a.0.cmp(&b.0));
+    for (dir, (moving, mut targets)) in dirs {
+        targets.sort();
+        targets.dedup();
+        let [target] = targets.as_slice() else { continue };
+        if *target == dir {
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        let mut files = Vec::new();
+        let mut all_moving = true;
+        for e in entries.flatten() {
+            if !e.file_type().is_ok_and(|t| t.is_file()) {
+                continue;
+            }
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.eq_ignore_ascii_case(METADATA_FILENAME) {
+                continue;
+            }
+            if is_archive(&name) {
+                all_moving &= moving.contains(&name.to_lowercase());
+            } else {
+                files.push(name);
+            }
+        }
+        if !all_moving {
+            continue;
+        }
+        files.sort_by_key(|n| n.to_lowercase());
+        out.extend(files.into_iter().map(|name| PlanRow {
+            id: 0,
+            status: "FILE",
+            from: dir.join(&name).to_string_lossy().into_owned(),
+            to: target.join(&name).to_string_lossy().into_owned(),
+        }));
+    }
+    out
+}
+
+/// `_refresh_preview`: the plan for `ids`, in that order, then the [`companions`].
 pub fn preview(sources: &[SortSource], ids: &[i64], base: &Path, pattern: &str) -> Vec<PlanRow> {
     let by_id: HashMap<i64, &SortSource> = sources.iter().map(|s| (s.id, s)).collect();
-    ids.iter()
+    let mut rows: Vec<PlanRow> = ids
+        .iter()
         .map(|&id| {
             let Some(s) = by_id.get(&id) else {
                 return PlanRow { id, status: "ERROR", from: format!("model id={id}"), to: "not found in database".into() };
@@ -127,7 +191,9 @@ pub fn preview(sources: &[SortSource], ids: &[i64], base: &Path, pattern: &str) 
             let collision = to.exists() && to != Path::new(&src);
             PlanRow { id, status: if collision { "COLLISION" } else { "OK" }, from: src, to: to.to_string_lossy().into_owned() }
         })
-        .collect()
+        .collect();
+    rows.extend(companions(&rows));
+    rows
 }
 
 /// `_unique_target`: `path`, or the first free `<stem>_<n><ext>` beside it.
@@ -150,9 +216,9 @@ fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// `_do_move`: move every planned archive (to a free name), or none. Returns
-/// `(model id, new path)` for the database, then removes source folders left
-/// empty. On a failure the moved files go back and the error says what
+/// `_do_move`: move every planned file (to a free name), or none. Returns
+/// `(model id, new path)` of the archives for the database, then removes source
+/// folders left empty (or holding only their sidecar, whose models all left). On a failure the moved files go back and the error says what
 /// happened (including any file that could not be moved back).
 pub fn execute(rows: &[PlanRow]) -> Result<Vec<(i64, String)>, String> {
     let mut plan = Vec::new();
@@ -196,11 +262,20 @@ pub fn execute(rows: &[PlanRow]) -> Result<Vec<(i64, String)>, String> {
     dirs.sort_by_key(|d| std::cmp::Reverse(d.components().count()));
     dirs.dedup();
     for d in dirs {
-        if std::fs::read_dir(&d).is_ok_and(|mut it| it.next().is_none()) {
-            let _ = std::fs::remove_dir(&d);
+        let names: Vec<String> = match std::fs::read_dir(&d) {
+            Ok(it) => it.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect(),
+            Err(_) => continue,
+        };
+        if let [only] = names.as_slice()
+            && only.eq_ignore_ascii_case(METADATA_FILENAME)
+        {
+            let _ = std::fs::remove_file(d.join(only));
+        } else if !names.is_empty() {
+            continue;
         }
+        let _ = std::fs::remove_dir(&d);
     }
-    Ok(plan.into_iter().map(|(_, dst, id)| (id, dst.to_string_lossy().into_owned())).collect())
+    Ok(plan.into_iter().filter(|(_, _, id)| *id > 0).map(|(_, dst, id)| (id, dst.to_string_lossy().into_owned())).collect())
 }
 
 #[cfg(test)]
@@ -268,5 +343,50 @@ mod tests {
         ];
         assert!(execute(&rows).unwrap_err().contains("no files were moved"));
         assert!(old.join("c.zip").is_file());
+    }
+
+    #[test]
+    fn a_folders_other_files_go_with_its_archives() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = dir.path().join("Oola");
+        std::fs::create_dir_all(old.join("extra")).unwrap();
+        for n in ["oola.zip", "cover.jpg", "oola.url", "info.json", "METADATA.7z", "extra/notes.txt"] {
+            std::fs::write(old.join(n), n).unwrap();
+        }
+        let mixed = dir.path().join("Mixed");
+        std::fs::create_dir_all(&mixed).unwrap();
+        for n in ["a.zip", "b.zip", "cover.jpg"] {
+            std::fs::write(mixed.join(n), n).unwrap();
+        }
+        let new = dir.path().join("new");
+        let sources = vec![
+            source(1, &old.join("oola.zip").to_string_lossy(), Some("Oola"), None),
+            source(2, &mixed.join("a.zip").to_string_lossy(), Some("A"), None),
+        ];
+        let rows = preview(&sources, &[1, 2], &new, "{collection}/{title}");
+        let files: Vec<(&str, String)> = rows.iter().filter(|r| r.status == "FILE").map(|r| (r.status, r.to.clone())).collect();
+        let target = new.join("Fantasy");
+        assert_eq!(
+            files.iter().map(|(_, to)| to.clone()).collect::<Vec<_>>(),
+            ["cover.jpg", "info.json", "oola.url"].map(|n| target.join(n).to_string_lossy().into_owned()),
+            "Mixed keeps its cover: b.zip stays there; the sidecar and subfolders stay"
+        );
+        let done = execute(&rows).unwrap();
+        assert_eq!(done.iter().map(|(id, _)| *id).collect::<Vec<_>>(), [1, 2], "only archives reach the database");
+        assert_eq!(std::fs::read_to_string(target.join("info.json")).unwrap(), "info.json");
+        assert!(!old.join("cover.jpg").exists() && old.join("extra").join("notes.txt").is_file());
+        assert!(mixed.join("cover.jpg").is_file());
+
+        // A folder left with only its sidecar is removed.
+        std::fs::remove_dir_all(old.join("extra")).unwrap();
+        let both = [source(3, &target.join("Oola.zip").to_string_lossy(), Some("Oola"), None), source(5, &target.join("A.zip").to_string_lossy(), Some("A"), None)];
+        let rows = preview(&both, &[3, 5], &dir.path().join("again"), "{title}");
+        execute(&rows).unwrap();
+        assert!(dir.path().join("again").join("info.json").is_file());
+        assert!(!target.exists(), "emptied");
+        std::fs::write(old.join("x.zip"), "x").unwrap();
+        let rows = preview(&[source(4, &old.join("x.zip").to_string_lossy(), Some("X"), None)], &[4], &dir.path().join("third"), "{title}");
+        execute(&rows).unwrap();
+        assert!(!old.exists(), "a folder holding only its sidecar goes too");
     }
 }

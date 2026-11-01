@@ -1344,6 +1344,17 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.44.15: **crawl URLs and lenient metadata; Sort files moves companions.**
+  `storage::crawl::Changed` gained `url` (set when found, else kept): the native crawler
+  had dropped `Metadata.url`. `metadata::extract` returns `Metadata` (no `Unsupported`:
+  the Python fallback is gone, and `Request::Metadata` with it). It skips what it cannot
+  read (bad JSON, a list where text was expected, unlistable archives; floats go through
+  `pyjson::float_repr`). It also reads `info.json` beside an archive alone in its folder
+  (`info_beside`), and spells distributors through `DISTRIBUTORS`. `sort_files::preview`
+  appends `FILE` rows (id 0) from `companions`: the plain files of a source folder whose
+  archives all move to one other folder. `execute` moves them with the archives (rollback
+  included), returns only archives, and removes a source folder left empty or with only
+  `METADATA.7z`.
 - 2026.44.14: **`{type}` token; Sort files token help and saved patterns.**
   `path_pattern::token_field` and `sort_files::values` accept `type` for `source`.
   `web/src/browser/patterns.ts` lists the tokens for the help popover and keeps saved

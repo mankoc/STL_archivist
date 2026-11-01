@@ -67,8 +67,6 @@ pub enum Request {
     Thumbnail { data: Vec<u8>, pdf: bool },
     /// CLIP vectors (float32 blobs) of JPEGs.
     Embed(Vec<Vec<u8>>),
-    /// `extract_metadata(path, contents (.url / info.json), source_dir)`.
-    Metadata { path: String, files: Vec<(String, Vec<u8>)> },
     /// `detect_presupport`, `detect_warnings`, `detect_scale([name] + names)`.
     Rules { archive_name: String, names: Vec<String> },
     SidecarImport(String),
@@ -90,7 +88,6 @@ pub enum Response {
     Extracted(Extracted),
     Thumbnail(Option<Vec<u8>>),
     Vectors(Vec<Option<Vec<u8>>>),
-    Metadata(Metadata),
     Rules { presupports: String, warnings: String, scales: Vec<String> },
     Imported(usize),
 }
@@ -496,19 +493,13 @@ fn folder_images(path: &str, cfg: &CrawlConfig, host: &dyn Host) -> Vec<(String,
     out
 }
 
-fn metadata_for(path: &str, contents: &[(String, Vec<u8>)], cfg: &CrawlConfig, host: &dyn Host) -> Metadata {
+fn metadata_for(path: &str, contents: &[(String, Vec<u8>)], cfg: &CrawlConfig) -> Metadata {
     let files: Vec<(String, Vec<u8>)> = contents
         .iter()
         .filter(|(n, _)| n.to_lowercase().ends_with(".url") || n.to_lowercase().ends_with("info.json"))
         .cloned()
         .collect();
-    match metadata::extract(path, &files, Some(&cfg.source_dir)) {
-        Ok(m) => m,
-        Err(_) => match host.call(Request::Metadata { path: path.to_string(), files }) {
-            Response::Metadata(m) => m,
-            _ => Metadata::default(),
-        },
-    }
+    metadata::extract(path, &files, Some(&cfg.source_dir))
 }
 
 // ── the run ──────────────────────────────────────────────────────────────────
@@ -730,7 +721,7 @@ impl Run<'_> {
     fn changed(&self, path: &str, hash: &str, existing_id: Option<i64>, prep: &Prepared) -> db::Changed {
         let (cfg, host) = (self.cfg, self.host);
         let x = &prep.extracted;
-        let meta = metadata_for(path, &x.contents, cfg, host);
+        let meta = metadata_for(path, &x.contents, cfg);
         let archive_name = WinPath::new(path).name().to_string();
         let (presupports, warnings, scales) = rules_for(cfg, &archive_name, &x.names, host);
         let (year, month) = parse_date(meta.release_date.as_deref().unwrap_or(""), host);
@@ -753,6 +744,7 @@ impl Run<'_> {
             release_year: year,
             release_month: month,
             description: meta.description,
+            url: meta.url,
             release: meta.release,
             tags: meta.tags,
             presupports,
