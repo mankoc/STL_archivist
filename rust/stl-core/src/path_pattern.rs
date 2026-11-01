@@ -17,7 +17,7 @@ use regex::Regex;
 /// Token name (lowercase) -> field key, as `TOKEN_MAP`.
 pub fn token_field(token: &str) -> Option<&'static str> {
     Some(match token {
-        "source" => "source",
+        "source" | "type" => "source",
         "creator" | "author" => "creator",
         "title" | "name" => "title",
         "date" | "month" => "release_date",
@@ -279,6 +279,7 @@ mod tests {
         assert_eq!(parse_path("{creator}/{date} - {name}", "F:\\STL\\Sanix\\2024-03 - Dragon.zip"),
                    map(&[("creator", "Sanix"), ("release_date", "2024-03"), ("title", "Dragon")]));
         assert_eq!(parse_path("no placeholders", "a/b.zip"), Fields::new());
+        assert_eq!(parse_path("{type}/{title}", "Patreon/Dragon.zip"), map(&[("source", "Patreon"), ("title", "Dragon")]));
     }
 
     #[test]
