@@ -105,7 +105,7 @@ export const TOPICS: Topic[] = [
     summary: "How archives get into the library, and how re-crawls stay fast.",
     blocks: [
       { p: "A **crawl** reads a folder of archives (and its subfolders, unless *Crawl subfolders* is off in the settings) and catalogues every archive: its file list, preview images, `info.json` and `.url` files, scales and presupports, and the fields a [path pattern](path-patterns) takes from the folder names." },
-      { p: "`info.json` gives the title (`name`), creator (`creator` or `author`), type (`distributor`, spelled as usual: *cults3d* → *Cults3D*), `url`, `description`, `tags` and `release`. It is read inside the archive, or beside it when the archive is the only one in its folder (a downloaded model's folder). A `.url` link is read inside the archive, beside it, or in a `…-links` folder; `info.json`'s `url` wins. A crawl that finds no link keeps the URL already stored." },
+      { p: "`info.json` gives the title (`name`), creator (`creator` or `author`), type (`distributor`, spelled as usual: *cults3d* → *Cults3D*), `url`, `description`, `tags` and `release`. It is read inside the archive, or beside it when the archive is the only one in its folder (a downloaded model's folder). A `.url` link is read inside the archive, beside it, in a `…-links` folder, or in the folder above when that one has at most 6 subfolders (a model folder with `Supported/`, `Unsupported/`, … parts); `info.json`'s `url` wins. A crawl that finds no link keeps the URL already stored." },
       { h: "Crawling a folder" },
       { steps: [
         "**Libraries → Add library**, browse to the folder, **Use this folder** (or crawl an existing [library](libraries) with its ▶ button).",

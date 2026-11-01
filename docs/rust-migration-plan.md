@@ -1344,6 +1344,9 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.44.16: **`.url` one folder up.** `metadata::find_url_file` ends with the archive
+  folder's parent when it has at most `MAX_MODEL_SUBFOLDERS` (6) subfolders and is not a
+  drive's root.
 - 2026.44.15: **crawl URLs and lenient metadata; Sort files moves companions.**
   `storage::crawl::Changed` gained `url` (set when found, else kept): the native crawler
   had dropped `Metadata.url`. `metadata::extract` returns `Metadata` (no `Unsupported`:

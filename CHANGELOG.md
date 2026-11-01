@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.44.16 — 2026-11-01
+
+- **A model's link is also found one folder up**, when that folder has at most 6 subfolders:
+  a model folder with its `.url` next to part folders such as `Supported/` and
+  `Unsupported/`. A folder with more subfolders holds many models, and its links are not
+  used. The lookup order is: inside the archive, beside it, a `…-links` folder, then the
+  folder above.
+
 ## 2026.44.15 — 2026-11-01
 
 - **Fix: crawls store the model's URL.** The link from a `.url` file or `info.json` was
