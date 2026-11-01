@@ -40,6 +40,7 @@ const KIND_LABEL: Record<string, string> = {
   recheck_warnings: "Re-check warnings",
   generate_sidecars: "Rebuild sidecars",
   read_file_lists: "Read missing file lists",
+  reread_links: "Re-read links and info.json",
   remove_sidecars: "Remove sidecars",
   clean_sidecars: "Clean sidecars",
   backup: "Backup",

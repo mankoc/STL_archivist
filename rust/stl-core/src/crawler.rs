@@ -308,6 +308,23 @@ pub(crate) fn extract_native(path: &str, unrar: &str) -> Option<Extracted> {
     Some(Extracted { contents, names, stl_info, uncompressed })
 }
 
+/// An archive's `.url` and `info.json` members (name, bytes; each at most 1 MB),
+/// or `None` when it cannot be read.
+pub fn link_files(path: &str, unrar: &str) -> Option<Vec<(String, Vec<u8>)>> {
+    let p = Path::new(path);
+    let wanted: Vec<String> = archive::list_members(p)
+        .ok()?
+        .into_iter()
+        .filter(|m| (metadata::is_url_file(&m.name) || metadata::is_info_json(&m.name)) && m.size.is_none_or(|s| s <= SIZE_LIMIT_META))
+        .map(|m| m.name)
+        .collect();
+    if wanted.is_empty() {
+        return Some(Vec::new());
+    }
+    let read = archive::read_members_with(p, &wanted, unrar).ok()?;
+    Some(read.into_iter().filter(|(_, b)| b.len() as u64 <= SIZE_LIMIT_META).collect())
+}
+
 /// `{name: size}` for the printable members, as a Python dict builds it:
 /// a repeated name keeps its first position and its last size.
 /// The STL file list (printable files: name, size) of an archive's catalog.

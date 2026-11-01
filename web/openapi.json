@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.44.16"
+    "version": "2026.44.17"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -5803,6 +5803,24 @@
                 "enum": [
                   "read_file_lists"
                 ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Read every archive's `.url` and `info.json` again (as a crawl does) into\nempty fields, or over them with `overwrite`; tags are added.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "reread_links"
+                ]
+              },
+              "overwrite": {
+                "type": "boolean"
               }
             }
           },

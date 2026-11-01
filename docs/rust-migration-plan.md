@@ -1344,6 +1344,11 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.44.17: **Re-read links and info.json.** The `reread_links` job (`overwrite`) runs
+  `maint::reread_links`. For each record on disk, `crawler::link_files` reads only the
+  `.url` / `info.json` members, `metadata::from_files` (split out of `extract`: what the
+  files say, nothing from the path) interprets them, and `model_edit::links_commit`
+  writes them (fill empty, or replace; tags added; reports whether anything changed).
 - 2026.44.16: **`.url` one folder up.** `metadata::find_url_file` ends with the archive
   folder's parent when it has at most `MAX_MODEL_SUBFOLDERS` (6) subfolders and is not a
   drive's root.

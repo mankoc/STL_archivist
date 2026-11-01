@@ -351,25 +351,42 @@ fn distributor_name(d: &str) -> String {
         .map_or_else(|| d.to_string(), |(_, name)| (*name).to_string())
 }
 
-/// `extract_metadata`: path inference, then the `.url`, then `info.json` (in
-/// the archive, else beside it when it is alone in its folder). `contents` is
-/// `extract_archive_contents`' result in member order.
+/// `extract_metadata`: path inference, then what the `.url` and `info.json`
+/// say ([`from_files`]). `contents` is `extract_archive_contents`' result in
+/// member order.
 pub fn extract(archive_path: &str, contents: &[(String, Vec<u8>)], source_dir: Option<&str>) -> Metadata {
     let mut meta = infer_from_path(archive_path, source_dir);
+    let found = from_files(archive_path, contents);
+    let keep = |new: Option<String>, old: &mut Option<String>| {
+        if new.is_some() {
+            *old = new;
+        }
+    };
+    keep(found.url, &mut meta.url);
+    keep(found.title, &mut meta.title);
+    keep(found.creator, &mut meta.creator);
+    keep(found.distributor, &mut meta.distributor);
+    keep(found.description, &mut meta.description);
+    keep(found.release, &mut meta.release);
+    if !found.tags.is_empty() {
+        meta.tags = found.tags;
+    }
+    meta
+}
 
+/// What an archive's link and `info.json` say, nothing inferred from its path:
+/// the `.url` (members in `contents` first, then [`find_url_file`]), then
+/// `info.json` (in `contents`, else beside an archive alone in its folder),
+/// whose `url` wins.
+pub fn from_files(archive_path: &str, contents: &[(String, Vec<u8>)]) -> Metadata {
+    let mut meta = Metadata::default();
     let url_from_archive = contents
         .iter()
-        .filter(|(name, _)| MemberPath::new(&name.replace('\\', "/")).suffix().to_lowercase() == ".url")
+        .filter(|(name, _)| is_url_file(name))
         .find_map(|(_, data)| url_line(&decode_ignore(data)).filter(|u| !u.is_empty()));
-    if let Some(u) = url_from_archive.or_else(|| find_url_file(Path::new(archive_path))) {
-        meta.url = Some(u);
-    }
+    meta.url = url_from_archive.or_else(|| find_url_file(Path::new(archive_path)));
 
-    let inside = contents.iter().find(|(name, _)| {
-        let n = MemberPath::new(&name.replace('\\', "/")).name;
-        n.is_ascii() && n.eq_ignore_ascii_case("info.json")
-    });
-    let raw = match inside {
+    let raw = match contents.iter().find(|(name, _)| is_info_json(name)) {
         Some((_, raw)) => Some(raw.clone()),
         None => info_beside(Path::new(archive_path)),
     };
@@ -382,31 +399,30 @@ pub fn extract(archive_path: &str, contents: &[(String, Vec<u8>)], source_dir: O
         }
     });
     if let Some(info) = info {
-        if let Some(t) = text_field(&info, "name") {
-            meta.title = Some(t);
-        }
-        if let Some(c) = text_field(&info, "creator").or_else(|| text_field(&info, "author")) {
-            meta.creator = Some(c);
-        }
-        if let Some(d) = text_field(&info, "distributor") {
-            meta.distributor = Some(distributor_name(&d));
-        }
+        meta.title = text_field(&info, "name");
+        meta.creator = text_field(&info, "creator").or_else(|| text_field(&info, "author"));
+        meta.distributor = text_field(&info, "distributor").map(|d| distributor_name(&d));
         if let Some(u) = text_field(&info, "url") {
             meta.url = Some(u);
         }
-        if let Some(d) = text_field(&info, "description") {
-            meta.description = Some(d);
-        }
-        if let Some(serde_json::Value::Array(tags)) = info.get("tags")
-            && !tags.is_empty()
-        {
+        meta.description = text_field(&info, "description");
+        if let Some(serde_json::Value::Array(tags)) = info.get("tags") {
             meta.tags = tags.iter().filter_map(py_str).collect();
         }
-        if let Some(r) = text_field(&info, "release") {
-            meta.release = Some(r);
-        }
+        meta.release = text_field(&info, "release");
     }
     meta
+}
+
+/// Whether an archive member is `info.json` (in any folder of the archive).
+pub fn is_info_json(member: &str) -> bool {
+    let n = MemberPath::new(&member.replace('\\', "/")).name;
+    n.is_ascii() && n.eq_ignore_ascii_case("info.json")
+}
+
+/// Whether an archive member is a `.url` link.
+pub fn is_url_file(member: &str) -> bool {
+    MemberPath::new(&member.replace('\\', "/")).suffix().to_lowercase() == ".url"
 }
 
 #[cfg(test)]

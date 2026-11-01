@@ -419,6 +419,7 @@ export const TOPICS: Topic[] = [
       { h: "Records" },
       { list: [
         "**Verify archives** checks that every archive is still on disk and unchanged in size, and lists the problems (*Missing*, *Flagged Missing*, *Modified*).",
+        "**Re-read links and info.json** opens every archive for its `.url` link and `info.json` again (and looks beside it and in the folder above, as a crawl does), without a rescan. URL, title, creator, type, description and release fill empty fields, or replace the stored ones with *Replace stored values*; tags are added.",
         "**Find duplicate entries** lists records that catalogue the same archive twice.",
         "On that list: **Find moved in DB** looks for each missing record's archive among the other records; **Merge moved** moves its metadata there. **Search in folder…** looks for missing archives in a folder you pick and points the records at them. **Remove selected** / **Remove all missing** delete records. Actions apply to ticked rows, or to all when none is ticked.",
         "**Remove missing archives** deletes the records of every archive marked missing — for example those [monitored folders](monitored-folders) marked. Files are not touched.",

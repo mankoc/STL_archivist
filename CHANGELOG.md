@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026.44.17 — 2026-11-01
+
+- **Maintenance: *Re-read links and info.json*** (*Settings → Maintenance*, editors). It
+  opens every catalogued archive again for its `.url` link and `info.json`, and also looks
+  beside the archive and in the folder above, as a crawl does. It does this without a
+  rescan. URL, title, creator, type, description and release fill empty fields, or replace
+  the stored ones with *Replace stored values*. Tags are added. This fills the URLs of
+  records crawled before 2026.44.15.
+
 ## 2026.44.16 — 2026-11-01
 
 - **A model's link is also found one folder up**, when that folder has at most 6 subfolders:
