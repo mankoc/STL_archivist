@@ -424,6 +424,9 @@ pub struct JobInfo {
     pub created_at: i64,
     pub started_at: Option<i64>,
     pub finished_at: Option<i64>,
+    /// Paused: a running job waits at its next checkpoint, a queued one is
+    /// passed over, until it is resumed.
+    pub paused: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, ToSchema)]
@@ -535,8 +538,9 @@ impl Job {
         self.log.lock().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect()
     }
 
+    /// A checkpoint: whether to stop; while paused, it waits until resumed or cancelled.
     fn stopped(&self) -> bool {
-        self.stop.load(Ordering::Relaxed)
+        self.ctl.is_stopped() || self.stop.load(Ordering::Relaxed)
     }
 }
 
@@ -582,7 +586,10 @@ impl Jobs {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .iter()
-            .find(|j| j.info().state == JobState::Queued)
+            .find(|j| {
+                let i = j.info();
+                i.state == JobState::Queued && !i.paused
+            })
             .cloned()
     }
 
@@ -619,6 +626,20 @@ impl Jobs {
             _ => false,
         }
     }
+
+    /// Pause or resume a queued or running job. `false` when it has already finished.
+    pub fn pause(&self, job: &Job, paused: bool) -> bool {
+        if !matches!(job.info().state, JobState::Queued | JobState::Running) {
+            return false;
+        }
+        update(job, |i| i.paused = paused);
+        job.ctl.set_paused(paused);
+        self.publish(job);
+        if !paused {
+            self.wake.notify_one();
+        }
+        true
+    }
 }
 
 fn update(job: &Job, f: impl FnOnce(&mut JobInfo)) {
@@ -628,6 +649,7 @@ fn update(job: &Job, f: impl FnOnce(&mut JobInfo)) {
 fn finish(job: &Job, state: JobState, message: Option<String>) {
     update(job, |i| {
         i.state = state;
+        i.paused = false;
         i.message = message;
         i.finished_at = Some(accounts::now());
     });
@@ -653,6 +675,7 @@ impl Library {
                 created_at: accounts::now(),
                 started_at: None,
                 finished_at: None,
+                paused: false,
             }),
             log: Mutex::new(VecDeque::new()),
             stop: AtomicBool::new(false),
@@ -738,7 +761,7 @@ async fn worker(lib: Weak<Library>, wake: Arc<Notify>) {
         let (done, total) = job.ctl.progress();
         update(&job, |i| (i.done, i.total) = (done, total.max(done)));
         match outcome {
-            Ok(summary) if job.stopped() => finish(&job, JobState::Cancelled, Some(format!("stopped: {summary}"))),
+            Ok(summary) if job.stop.load(Ordering::Relaxed) => finish(&job, JobState::Cancelled, Some(format!("stopped: {summary}"))),
             Ok(summary) => finish(&job, JobState::Done, Some(summary)),
             Err(e) => {
                 tracing::error!(job = job.info().id, "job failed: {e}");

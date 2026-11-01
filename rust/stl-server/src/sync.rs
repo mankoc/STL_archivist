@@ -372,7 +372,8 @@ struct Counting<'a, R> {
 
 impl<R: Read> Read for Counting<'_, R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if self.ctl.is_stopped() {
+        // Not a checkpoint: pausing an upload would let the other side time out.
+        if self.ctl.stop_requested() {
             return Err(io::Error::other("stopped"));
         }
         let n = self.inner.read(buf)?;

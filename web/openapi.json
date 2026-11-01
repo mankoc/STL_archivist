@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.44.17"
+    "version": "2026.44.18"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -1066,6 +1066,100 @@
         ],
         "summary": "Cancel a job: a queued one at once, a running one at its next checkpoint\n(what it finished so far stays). 409 when it has already finished.",
         "operationId": "delete_jobs_by_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Job id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/{id}/pause": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Pause a job: a running one waits at its next checkpoint, a queued one is\npassed over, until it is resumed. 409 when it has already finished.",
+        "operationId": "post_jobs_by_id_pause",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Job id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/jobs/{id}/resume": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Resume a paused job. 409 when it has already finished.",
+        "operationId": "post_jobs_by_id_resume",
         "parameters": [
           {
             "name": "id",
@@ -5618,7 +5712,8 @@
           "user",
           "done",
           "total",
-          "created_at"
+          "created_at",
+          "paused"
         ],
         "properties": {
           "counts": {
@@ -5662,6 +5757,10 @@
               "null"
             ],
             "description": "The outcome (a summary, or the error)."
+          },
+          "paused": {
+            "type": "boolean",
+            "description": "Paused: a running job waits at its next checkpoint, a queued one is\npassed over, until it is resumed."
           },
           "phase": {
             "type": [

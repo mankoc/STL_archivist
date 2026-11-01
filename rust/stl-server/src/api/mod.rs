@@ -88,6 +88,8 @@ use crate::AppState;
         jobs::submit,
         jobs::detail,
         jobs::cancel,
+        jobs::pause,
+        jobs::resume,
         jobs::events,
         libraries::list,
         libraries::add,
@@ -211,6 +213,8 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/thumb/{digest}", get(thumbs::thumb))
         .route("/api/jobs", get(jobs::list).post(jobs::submit))
         .route("/api/jobs/{id}", get(jobs::detail).delete(jobs::cancel))
+        .route("/api/jobs/{id}/pause", post(jobs::pause))
+        .route("/api/jobs/{id}/resume", post(jobs::resume))
         .route("/api/events", get(jobs::events))
         .route("/api/libraries", get(libraries::list).post(libraries::add))
         .route("/api/libraries/{id}", patch(libraries::change))

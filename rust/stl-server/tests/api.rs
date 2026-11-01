@@ -240,7 +240,7 @@ async fn openapi_lists_every_route() {
         "/api/models/{id}/images", "/api/images/{id}", "/api/editor/choices", "/api/editor/subcollections",
         "/api/lookups/{kind}", "/api/lookups/{kind}/merge", "/api/lookups/{kind}/{id}", "/api/tags/merge",
         "/api/tags/unused", "/api/authors", "/api/authors/profile",
-        "/api/jobs", "/api/jobs/{id}", "/api/events", "/api/libraries", "/api/libraries/{id}", "/api/libraries/{id}/remove",
+        "/api/jobs", "/api/jobs/{id}", "/api/jobs/{id}/pause", "/api/jobs/{id}/resume", "/api/events", "/api/libraries", "/api/libraries/{id}", "/api/libraries/{id}/remove",
         "/api/files/browse", "/api/files/folder", "/api/models/{id}/archive", "/api/settings/library", "/api/models/parse-paths",
         "/api/stats/library", "/api/stats/column", "/api/search/image",
     ] {

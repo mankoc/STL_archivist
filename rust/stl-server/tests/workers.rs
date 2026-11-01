@@ -1,6 +1,7 @@
 //! Compute workers over a real connection: a scripted worker (no ONNX Runtime
 //! or model needed) embeds during a crawl, answers the AI tagger, is refused
-//! for a different CLIP model, and with `compute: workers` a job waits for it.
+//! for a different CLIP model, and with `compute: workers` a job waits for it
+//! (and, waiting, gives a job to pause).
 
 mod common;
 
@@ -235,4 +236,50 @@ async fn a_refused_token_ends_the_worker() {
         Err(stl_server::worker::Ended::Refused(e)) => assert!(e.contains("401"), "{e}"),
         _ => panic!("the token should be refused"),
     }
+}
+
+async fn job_action(lib: &TestLib, token: &str, id: u64, action: &str) -> StatusCode {
+    call(&lib.state, "POST", &format!("/api/jobs/{id}/{action}"), Some(token), None).await.status
+}
+
+async fn job_info(lib: &TestLib, token: &str, id: u64) -> Value {
+    call(&lib.state, "GET", &format!("/api/jobs/{id}"), Some(token), None).await.json()["job"].clone()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn jobs_pause_and_resume() {
+    let lib = library(Compute::Workers);
+    let base = serve(&lib).await;
+    let ed = lib.user("ed", Role::Editor);
+    let viewer = lib.user("vi", Role::Viewer);
+    run(&lib, &ed, crawl(&lib)).await;
+
+    // The first job waits for a compute worker, so the second stays queued.
+    let first = submit(&lib, &ed, json!({"kind": "compute_embeddings"})).await;
+    let second = submit(&lib, &ed, json!({"kind": "verify_archives"})).await;
+    assert_eq!(job_action(&lib, &viewer, first, "pause").await, StatusCode::FORBIDDEN);
+    assert_eq!(job_action(&lib, &ed, second, "pause").await, StatusCode::ACCEPTED);
+    assert_eq!(job_action(&lib, &ed, first, "pause").await, StatusCode::ACCEPTED);
+    let v = job_info(&lib, &ed, first).await;
+    assert_eq!((v["state"].clone(), v["paused"].clone()), (json!("running"), json!(true)));
+
+    // With a worker there, the paused job waits at its next checkpoint.
+    let (_task, _, _) = fake_worker(&base, &ed, stl_server::components::CLIP_SHA256).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(job_info(&lib, &ed, first).await["state"], "running");
+    assert_eq!(vectors(&lib), 0, "nothing computed while paused");
+    assert_eq!(job_action(&lib, &ed, first, "resume").await, StatusCode::ACCEPTED);
+    let v = wait_job(&lib, &ed, first).await;
+    assert_eq!((v["job"]["state"].clone(), v["job"]["paused"].clone()), (json!("done"), json!(false)), "{v}");
+    assert_eq!(vectors(&lib), 3);
+
+    // A paused queued job is passed over until it is resumed.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let v = job_info(&lib, &ed, second).await;
+    assert_eq!((v["state"].clone(), v["paused"].clone()), (json!("queued"), json!(true)));
+    assert_eq!(job_action(&lib, &ed, second, "resume").await, StatusCode::ACCEPTED);
+    assert_eq!(wait_job(&lib, &ed, second).await["job"]["state"], "done");
+
+    assert_eq!(job_action(&lib, &ed, second, "pause").await, StatusCode::CONFLICT);
+    assert_eq!(job_action(&lib, &ed, 999, "resume").await, StatusCode::NOT_FOUND);
 }

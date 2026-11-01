@@ -1,6 +1,6 @@
 # StlArchivist API
 
-Version 2026.44.17. Generated from `web/openapi.json` by `tools/api_doc.py`; the
+Version 2026.44.18. Generated from `web/openapi.json` by `tools/api_doc.py`; the
 running server serves the same document at `GET /api/openapi.json`. Do not edit by hand:
 run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after changing routes.
 
@@ -18,7 +18,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
   or `GET /api/jobs/{id}`.
 - Writes that change the library are announced on `/api/events` as `library_changed`.
 
-## Endpoints (95)
+## Endpoints (97)
 
 - [Sign-in and sessions](#sign-in-and-sessions) (5)
 - [Users and preferences](#users-and-preferences) (7)
@@ -29,7 +29,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 - [Thumbnails and images](#thumbnails-and-images) (3)
 - [Files and folders](#files-and-folders) (3)
 - [Libraries and their folders](#libraries-and-their-folders) (6)
-- [Jobs and events](#jobs-and-events) (5)
+- [Jobs and events](#jobs-and-events) (7)
 - [Maintenance](#maintenance) (3)
 - [Backups](#backups) (4)
 - [Search](#search) (1)
@@ -156,6 +156,8 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 | `POST /api/jobs` | Queue a job. Jobs run one at a time, in order. Needs the editor role (compacting the database, backups, imports and syncs: admin). | body: [JobRequest](#jobrequest) | 202 [JobInfo](#jobinfo) | 403 |
 | `GET /api/jobs/{id}` | One job with its log. | path `id`: integer | 200 [JobDetail](#jobdetail) | 404 |
 | `DELETE /api/jobs/{id}` | Cancel a job: a queued one at once, a running one at its next checkpoint (what it finished so far stays). 409 when it has already finished. | path `id`: integer | 202 | 404, 409 |
+| `POST /api/jobs/{id}/pause` | Pause a job: a running one waits at its next checkpoint, a queued one is passed over, until it is resumed. 409 when it has already finished. | path `id`: integer | 202 | 404, 409 |
+| `POST /api/jobs/{id}/resume` | Resume a paused job. 409 when it has already finished. | path `id`: integer | 202 | 404, 409 |
 
 ### Maintenance
 
@@ -757,6 +759,7 @@ The archives behind a job's [`JobCounts`] (at most 10,000 in each list).
 | `id` | integer |  |
 | `kind` | string |  |
 | `message` (optional) | string \| null | The outcome (a summary, or the error). |
+| `paused` | boolean | Paused: a running job waits at its next checkpoint, a queued one is passed over, until it is resumed. |
 | `phase` (optional) | string \| null |  |
 | `request` | [JobRequest](#jobrequest) |  |
 | `started_at` (optional) | integer \| null |  |

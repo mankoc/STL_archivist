@@ -1,9 +1,9 @@
-import { addJob, changesText, countsText, describe as label, duration, elapsed, percent, progressText, remaining, sortJobs, type Job } from "./jobs";
+import { addJob, changesText, countsText, describe as label, duration, elapsed, percent, progressText, remaining, sortJobs, stateColor, stateLabel, type Job } from "./jobs";
 
 const job = (over: Partial<Job>): Job =>
   ({
     id: 1, kind: "crawl", request: { kind: "crawl", folder: "D:/STL" }, state: "running", user: "ed",
-    done: 0, total: 0, created_at: 100, ...over,
+    done: 0, total: 0, created_at: 100, paused: false, ...over,
   }) as Job;
 
 describe("jobs", () => {
@@ -31,6 +31,15 @@ describe("jobs", () => {
     expect(remaining(running({ done: 1000, total: 8000 }), 200)).toBe(700);
     expect(progressText(running({ done: 1000, total: 8000 }), 200)).toBe(`${(1000).toLocaleString()} / ${(8000).toLocaleString()} (13%) · about 11 min 40 s left`);
     expect(progressText(job({ state: "done", done: 5, total: 5, started_at: 100 }), 200)).toBeNull();
+  });
+
+  it("shows a paused job", () => {
+    expect([stateLabel(job({})), stateColor(job({}))]).toEqual(["running", "blue"]);
+    expect([stateLabel(job({ paused: true })), stateColor(job({ paused: true }))]).toEqual(["paused", "yellow"]);
+    expect(stateLabel(job({ state: "queued", paused: true }))).toBe("paused");
+    expect(stateLabel(job({ state: "done", paused: true }))).toBe("done");
+    // No time left while it waits.
+    expect(remaining(job({ paused: true, started_at: 100, done: 1000, total: 8000 }), 200)).toBeNull();
   });
 
   it("shows a crawl's counts", () => {

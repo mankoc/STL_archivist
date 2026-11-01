@@ -24,6 +24,20 @@ export const STATE_COLOR: Record<Job["state"], string> = {
   cancelled: "orange",
 };
 
+/** Paused: a queued or running job that waits until it is resumed. */
+export function isPaused(job: Job): boolean {
+  return job.paused && isActive(job);
+}
+
+/** The badge: the state, or "paused". */
+export function stateLabel(job: Job): string {
+  return isPaused(job) ? "paused" : job.state;
+}
+
+export function stateColor(job: Job): string {
+  return isPaused(job) ? "yellow" : STATE_COLOR[job.state];
+}
+
 const KIND_LABEL: Record<string, string> = {
   crawl: "Crawl",
   verify_archives: "Verify archives",
@@ -85,7 +99,7 @@ export function elapsed(job: Job, now: number): string | null {
 
 /** Seconds left at the rate so far, once there is enough to go by (5 s and one item). */
 export function remaining(job: Job, now: number): number | null {
-  if (job.state !== "running" || job.started_at == null || job.total <= 0 || job.done <= 0) return null;
+  if (job.state !== "running" || job.paused || job.started_at == null || job.total <= 0 || job.done <= 0) return null;
   const spent = now - job.started_at;
   if (spent < 5) return null;
   return (spent / job.done) * Math.max(0, job.total - job.done);

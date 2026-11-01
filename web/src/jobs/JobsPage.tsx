@@ -1,14 +1,14 @@
 // Jobs: the job queue and a live log. Libraries (crawls) and Database
 // Maintenance have their own places (LibrariesPage, Settings → Maintenance).
 import { ActionIcon, Badge, Box, Card, Group, Progress, ScrollArea, SegmentedControl, Stack, Text, Title, UnstyledButton } from "@mantine/core";
-import { IconPlayerStop } from "@tabler/icons-react";
+import { IconPlayerPause, IconPlayerPlay, IconPlayerStop } from "@tabler/icons-react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api, unwrap } from "../api/client";
 import { type ServerEvent, useServerEvent } from "../api/events";
 import { hasRole, useUser } from "../auth/user";
-import { changesText, countsText, describe, elapsed, isActive, type Job, percent, progressText, sortJobs, STATE_COLOR } from "./jobs";
+import { changesText, countsText, describe, elapsed, isActive, type Job, percent, progressText, sortJobs, stateColor, stateLabel } from "./jobs";
 import classes from "./JobsPage.module.css";
 
 function useNow(active: boolean) {
@@ -52,9 +52,25 @@ export function JobsPage() {
                     <Text size="sm" truncate flex={1}>
                       {describe(job)}
                     </Text>
-                    <Badge color={STATE_COLOR[job.state]} variant="light" size="sm">
-                      {job.state}
+                    <Badge color={stateColor(job)} variant="light" size="sm">
+                      {stateLabel(job)}
                     </Badge>
+                    {editor && isActive(job) && (
+                      <ActionIcon
+                        size="sm"
+                        variant="subtle"
+                        aria-label={job.paused ? "Continue" : "Pause"}
+                        title={job.paused ? "Continue" : "Pause (at the job's next checkpoint)"}
+                        data-testid="job-pause"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          const path = job.paused ? "/api/jobs/{id}/resume" : "/api/jobs/{id}/pause";
+                          await api.POST(path, { params: { path: { id: job.id } } });
+                        }}
+                      >
+                        {job.paused ? <IconPlayerPlay size={14} /> : <IconPlayerPause size={14} />}
+                      </ActionIcon>
+                    )}
                     {editor && isActive(job) && (
                       <ActionIcon
                         size="sm"
@@ -70,7 +86,7 @@ export function JobsPage() {
                       </ActionIcon>
                     )}
                   </Group>
-                  {job.state === "running" && <Progress value={p ?? 100} striped={p === null} animated={p === null} size="sm" mt={4} />}
+                  {job.state === "running" && <Progress value={p ?? 100} striped={p === null} animated={p === null && !job.paused} color={job.paused ? "yellow" : undefined} size="sm" mt={4} />}
                   <Text size="xs" c="dimmed" truncate>
                     {[job.phase && job.state === "running" ? job.phase : job.message, progressText(job, now), elapsed(job, now), job.user].filter(Boolean).join(" · ")}
                   </Text>

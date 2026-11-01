@@ -13,7 +13,7 @@ can open a library on your computer without setting up a server.
 [the HTTP API](docs/api.md) ·
 and in the interface, the **?** button: searchable in-depth help on every feature
 
-Version: 2026.44.17
+Version: 2026.44.18
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). This version opens its data directory and, since 2026.43.7, converts it once
@@ -175,7 +175,8 @@ server) on the same data directory is refused.
 ### First steps
 
 1. **Libraries → Add library**: browse to your archive folder, set a path pattern if your folders
-   follow one, and **Crawl**. Jobs run in the server, one at a time; the page can be closed.
+   follow one, and **Crawl**. Jobs run in the server, one at a time; the page can be closed. *Jobs* pauses,
+   continues and stops them.
 2. **Library**: filter, search, edit; *Columns* chooses the table's columns, *Images* shows a
    grid. Select models for *Mass edit*, the *AI tagger* or *Archives* (rescan, thumbnails,
    sort files, delete files): click, Ctrl+click, Shift+click, or *Select all* (Ctrl+A). While
