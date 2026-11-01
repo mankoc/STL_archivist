@@ -1344,6 +1344,10 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.44.14: **`{type}` token; Sort files token help and saved patterns.**
+  `path_pattern::token_field` and `sort_files::values` accept `type` for `source`.
+  `web/src/browser/patterns.ts` lists the tokens for the help popover and keeps saved
+  patterns in the user setting `sort_patterns` (a list of strings, newest first).
 - 2026.44.13: **new folder in the folder picker.** `POST /api/files/folder` (`files::
   create_folder`, editor role, `check_access` on the parent) makes one level, refusing
   names with separators or reserved characters (409 when it exists). `FolderPicker` takes

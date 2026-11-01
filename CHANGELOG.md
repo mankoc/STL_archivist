@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026.44.14 — 2026-11-01
+
+- **`{type}` token:** another name for `{source}` (the field the editor calls *Type*), in
+  Sort files, crawls and Mass edit.
+- **Sort files: token help and saved patterns.** A **?** button beside the pattern lists the
+  tokens and their aliases (click one to add it to the pattern). **Saved** keeps patterns
+  with your account: *Save this pattern* adds the current one, clicking a saved one uses it,
+  and its × forgets it.
+
 ## 2026.44.13 — 2026-11-01
 
 - **Fix: *Mass edit* no longer opens a blank window** when a subcollection name exists in

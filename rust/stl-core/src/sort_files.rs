@@ -39,6 +39,7 @@ pub fn values(s: &SortSource) -> HashMap<String, String> {
     let date = path_pattern::format_release_date(int(&s.release_year), int(&s.release_month));
     let pairs = [
         ("source", s.source.clone()),
+        ("type", s.source.clone()),
         ("creator", s.creator.clone()),
         ("author", s.creator.clone()),
         ("title", s.title.clone()),
@@ -231,6 +232,9 @@ mod tests {
         let s = source(1, "D:/old/Dragon.zip", Some("Red: Dragon"), None);
         let t = target(Path::new("D:/new"), "/{collection}/{creator}/{title} {date}/", &s);
         assert_eq!(t, Path::new("D:/new").join("Fantasy").join("unknown").join("Red_ Dragon 2024.zip"), "as Python: \"_unknown\".strip(\"_\")");
+        let s = SortSource { source: Some("Patreon".into()), ..source(1, "D:/old/Dragon.zip", Some("Dragon"), Some("Sanix")) };
+        let t = target(Path::new("D:/new"), "{creator}/{Type}/{date} - {title}", &s);
+        assert_eq!(t, Path::new("D:/new").join("Sanix").join("Patreon").join("2024 - Dragon.zip"), "{{type}} is {{source}}, any case");
     }
 
     #[test]
