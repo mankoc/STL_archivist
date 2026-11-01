@@ -31,6 +31,9 @@ export interface Sort {
 export interface Query {
   filter: FilterSpec;
   search: string;
+  /** The search's fields and matching (`search.ts`). */
+  searchFields: string[];
+  fuzzy: boolean;
   sort: Sort | null;
 }
 
@@ -90,7 +93,9 @@ export function useModelIds(query: Query) {
   return useQuery({
     queryKey: ["ids", query],
     queryFn: async () =>
-      unwrap(await api.POST("/api/models/ids", { body: { filter: query.filter, search: query.search, sort: query.sort } }))
+      unwrap(await api.POST("/api/models/ids", {
+        body: { filter: query.filter, search: query.search, search_fields: query.searchFields, fuzzy: query.fuzzy, sort: query.sort },
+      }))
         .ids,
     placeholderData: (previous) => previous,
   });

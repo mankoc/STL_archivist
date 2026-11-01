@@ -105,6 +105,10 @@ async fn ids_filter_search_and_sort() {
     assert_eq!(v["ids"], json!([f.ids[1], f.ids[2], f.ids[0]]));
     let (_, v) = f.post("/api/models/ids", json!({"filter": {"include": {"tag": ["dragon"]}}, "search": "red"})).await;
     assert_eq!(v["ids"], json!([f.ids[0]]));
+    let (_, v) = f.post("/api/models/ids", json!({"search": "alice", "search_fields": ["title"]})).await;
+    assert_eq!(v["ids"], json!([]));
+    let (_, v) = f.post("/api/models/ids", json!({"search": "drgon alce", "search_fields": ["title", "creator"], "fuzzy": true})).await;
+    assert_eq!(v["ids"], json!([f.ids[0], f.ids[1]]));
     let (_, v) = f.post("/api/models/ids", json!({"filter": {"include": {"sculptor": [2]}}})).await;
     assert_eq!(v["ids"], json!([f.ids[2]]));
     let (_, v) = f.post("/api/models/ids", json!({"filter": {"include": {"date": [{"year": 2024, "month": 3}]}}})).await;
@@ -120,6 +124,7 @@ async fn bad_requests_are_refused() {
         json!({"filter": {"include": {"nope": ["x"]}}}),
         json!({"filter": {"has_value": ["nope"]}}),
         json!({"sort": {"column": "tags"}}),
+        json!({"search": "x", "search_fields": ["nope"]}),
         json!({"unknown": 1}),
     ] {
         let (s, v) = f.post("/api/models/ids", body.clone()).await;

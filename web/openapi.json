@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.44.11"
+    "version": "2026.44.12"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -7095,10 +7095,23 @@
               "no_value": []
             }
           },
+          "fuzzy": {
+            "type": "boolean",
+            "description": "Match each word of `search` anywhere in the fields, ignoring accents and\nallowing a typo or two in longer words, instead of the text as a substring.",
+            "default": false
+          },
           "search": {
             "type": "string",
-            "description": "Matched against title, creator, path and tags (case-insensitive).",
+            "description": "Searched for in `search_fields` (case-insensitive).",
             "default": ""
+          },
+          "search_fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Where to search: `title`, `creator`, `source`, `sculptor`, `collection`,\n`subcollection`, `category`, `release`, `path`, `tags`, `description`,\n`url`. Empty: title, creator, sculptor, collection, path and tags.",
+            "default": []
           },
           "sort": {
             "oneOf": [

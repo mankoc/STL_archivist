@@ -369,20 +369,72 @@ fn group_has_value(key: &str, t: &str) -> String {
     }
 }
 
-fn search_condition(text: &str) -> Sql {
-    let pat = format!("%{text}%");
-    let cols = ["title", "creator", "sculptor_name", "collection_name", "archive_path"];
-    let mut parts: Vec<String> = cols.iter().map(|c| format!("lower(models_view.{c}) LIKE lower(?)")).collect();
-    parts.push(format!("models_view.id IN ({TAGGED} WHERE lower(tags.name) LIKE lower(?))"));
+/// Fields the browser's search can look in.
+pub const SEARCH_FIELDS: &[&str] = &[
+    "title", "creator", "source", "sculptor", "collection", "subcollection", "category", "release", "path", "tags",
+    "description", "url",
+];
+
+/// The fields searched when none are named.
+pub const DEFAULT_SEARCH: &[&str] = &["title", "creator", "sculptor", "collection", "path", "tags"];
+
+/// The browser's search box: `text` in `fields` (none: [`DEFAULT_SEARCH`]),
+/// as a substring, or with [`fuzzy`](crate::fuzzy) word matching.
+#[derive(Debug, Clone, Default)]
+pub struct Search {
+    pub text: String,
+    pub fields: Vec<String>,
+    pub fuzzy: bool,
+}
+
+/// A search field's value in `models_view` (`tags`: the names joined by spaces).
+fn search_column(field: &str) -> Option<String> {
+    Some(match field {
+        "title" | "creator" | "source" => format!("models_view.{field}"),
+        "sculptor" | "collection" | "subcollection" | "category" | "release" => format!("models_view.{field}_name"),
+        "path" => "models_view.archive_path".into(),
+        "description" | "url" => format!("(SELECT m.{field} FROM models m WHERE m.id = models_view.id)"),
+        "tags" => "(SELECT group_concat(tags.name, ' ') FROM model_tags JOIN tags ON model_tags.tag_id = tags.id \
+                   WHERE model_tags.model_id = models_view.id)"
+            .into(),
+        _ => return None,
+    })
+}
+
+fn search_condition(search: &Search) -> Result<Sql> {
+    let fields: Vec<&str> = if search.fields.is_empty() {
+        DEFAULT_SEARCH.to_vec()
+    } else {
+        search.fields.iter().map(String::as_str).collect()
+    };
+    let mut cols = Vec::new();
+    for f in &fields {
+        cols.push(search_column(f).ok_or_else(|| rusqlite::Error::InvalidParameterName(format!("not a search field: {f}")))?);
+    }
+    if search.fuzzy {
+        // All the fields as one text, so the words may come from different fields.
+        let text = cols.iter().map(|c| format!("coalesce({c}, '')")).collect::<Vec<_>>().join(" || ' ' || ");
+        return Ok(Sql::with(format!("fuzzy_match({text}, ?)"), vec![Value::Text(search.text.clone())]));
+    }
+    let pat = format!("%{}%", search.text);
+    let parts: Vec<String> = fields
+        .iter()
+        .zip(&cols)
+        .map(|(f, c)| match *f {
+            // Through the index of tag names rather than joining them per model.
+            "tags" => format!("models_view.id IN ({TAGGED} WHERE lower(tags.name) LIKE lower(?))"),
+            _ => format!("lower({c}) LIKE lower(?)"),
+        })
+        .collect();
     let n = parts.len();
-    Sql::with(format!("({})", parts.join(" OR ")), vec![Value::Text(pat); n])
+    Ok(Sql::with(format!("({})", parts.join(" OR ")), vec![Value::Text(pat); n]))
 }
 
 /// `table_ids`: the ids the browser table shows, in display order (`None`: unordered).
-pub fn table_ids(conn: &Connection, spec: &FilterSpec, search: &str, sort: Option<(&str, bool)>) -> Result<Vec<i64>> {
+pub fn table_ids(conn: &Connection, spec: &FilterSpec, search: &Search, sort: Option<(&str, bool)>) -> Result<Vec<i64>> {
     let mut parts = conditions(spec, "models_view", None, None);
-    if !search.is_empty() {
-        parts.push(search_condition(search));
+    if !search.text.trim().is_empty() {
+        parts.push(search_condition(search)?);
     }
     let mut sql = String::from("SELECT models_view.id FROM models_view");
     let mut params = Vec::new();
@@ -1351,8 +1403,8 @@ fn column_ints(conn: &Connection, sql: &str, params: &[Value]) -> Result<Vec<i64
 mod tests {
     use super::*;
 
-    #[test]
-    fn parallel_tree_is_the_sequential_one() {
+    /// Four models in one library, with sculptors, tags and scales.
+    fn sample() -> (tempfile::TempDir, crate::storage::pool::Pool) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("models.db");
         crate::storage::migrate(&path, &crate::storage::Vectors::default()).unwrap();
@@ -1389,6 +1441,28 @@ mod tests {
             Ok::<_, rusqlite::Error>(())
         })
         .unwrap();
+        (dir, pool)
+    }
+
+    #[test]
+    fn search_by_field_and_fuzzy() {
+        let (_dir, pool) = sample();
+        let find = |text: &str, fields: &[&str], fuzzy: bool| {
+            let search = Search { text: text.into(), fields: fields.iter().map(|f| f.to_string()).collect(), fuzzy };
+            pool.with(|c| table_ids(c, &FilterSpec::default(), &search, Some(("title", false)))).unwrap()
+        };
+        assert_eq!(find("knight", &[], false), vec![2, 3, 4]); // Knight's title; Blue's and Loose's tag
+        assert_eq!(find("knight", &["title"], false), vec![3]);
+        assert_eq!(find("knigt", &[], false), Vec::<i64>::new());
+        assert_eq!(find("knigt", &["tags"], true), vec![2, 4]);
+        assert_eq!(find("ann drgon", &[], true), vec![1]); // creator and tag together
+        assert_eq!(find("ben", &["creator"], true), vec![3]);
+        assert!(pool.with(|c| table_ids(c, &FilterSpec::default(), &Search { text: "x".into(), fields: vec!["nope".into()], fuzzy: false }, None)).is_err());
+    }
+
+    #[test]
+    fn parallel_tree_is_the_sequential_one() {
+        let (_dir, pool) = sample();
         let all = Show(SHOW.iter().map(|s| s.to_string()).collect());
         for (show, counts) in [(&all, true), (&all, false), (&Show::default(), true)] {
             let sequential = pool.with(|c| filter_tree(c, None, show, counts)).unwrap();

@@ -1344,6 +1344,15 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.44.12: **search fields, fuzzy search; Jobs button always shown.** `library::table_ids`
+  takes a `Search` (text, `fields` from `SEARCH_FIELDS`, none meaning `DEFAULT_SEARCH`, and
+  `fuzzy`). A plain search ORs `LIKE` per field as before (tags through the tag index). A
+  fuzzy search joins the fields into one text (tags by a `group_concat` per model) and calls
+  `fuzzy_match(text, query)`, a SQL function registered with the path functions over
+  `stl_core::fuzzy::matches`. It folds both sides (NFD, combining marks dropped, lowercase,
+  non-alphanumerics as spaces) and requires each query word as a substring, or within 1
+  edit (4–6 letters) or 2 (7+) of some substring (Sellers' algorithm). The web client keeps
+  the options in localStorage (`browser/search.ts`). `status.showJobsButton` is gone.
 - 2026.44.11: **parallel filter tree.** `library::filter_tree` is a list of `SECTIONS`, each
   doing its counts and its value list on one connection. The scoped tree runs them in turn
   (the path scope's temp table is per connection). `filter_tree_parallel` runs them on

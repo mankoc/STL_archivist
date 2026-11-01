@@ -1,8 +1,8 @@
 // The browser: filter pane, table and detail pane (the desktop's main window).
-import { Box, Button, Center, Checkbox, Group, Loader, Menu, Modal, SegmentedControl, Text, TextInput } from "@mantine/core";
+import { Anchor, Box, Button, Center, Checkbox, Group, Loader, Menu, Modal, Popover, SegmentedControl, SimpleGrid, Stack, Switch, Text, TextInput } from "@mantine/core";
 import { useDebouncedValue, useHotkeys } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconArchive, IconColumns, IconEdit, IconFilterOff, IconRefresh, IconSearch, IconSparkles, IconSquare, IconSquareCheck, IconTrash } from "@tabler/icons-react";
+import { IconAdjustmentsHorizontal, IconArchive, IconColumns, IconEdit, IconFilterOff, IconRefresh, IconSearch, IconSparkles, IconSquare, IconSquareCheck, IconTrash } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type CSSProperties, type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
 
@@ -20,6 +20,7 @@ import { MassEditDrawer } from "./MassEditDrawer";
 import { EMPTY, type FilterSpec, isEmpty } from "./filters";
 import { ALWAYS_SHOWN, choiceFrom, COLUMN_ORDER_KEY, HIDDEN_COLUMNS_KEY, isShown, moveColumn, SHOWN_COLUMNS_KEY, toggle } from "./columns";
 import { COLUMNS, ModelTable, type Sort, useModelIds } from "./ModelTable";
+import { customised, DEFAULT_OPTIONS, loadOptions, placeholder, saveOptions, SEARCH_FIELDS, type SearchOptions } from "./search";
 import { NONE, click, contextClick, coverage, prune, selectAll, type Selection } from "./selection";
 import classes from "./BrowserPage.module.css";
 
@@ -29,6 +30,11 @@ export function BrowserPage() {
   const [filter, setFilter] = useState<FilterSpec>(EMPTY);
   const [searchText, setSearchText] = useState("");
   const [search] = useDebouncedValue(searchText, 250);
+  const [searchOptions, setSearchOptionsState] = useState<SearchOptions>(loadOptions);
+  const setSearchOptions = (o: SearchOptions) => {
+    setSearchOptionsState(o);
+    saveOptions(o);
+  };
   const [sort, setSort] = useState<Sort | null>(null);
   const [selection, setSelection] = useState<Selection>(NONE);
   const [editing, setEditing] = useState<number | null>(null);
@@ -107,7 +113,7 @@ export function BrowserPage() {
   const user = useUser();
   const editor = hasRole(user, "editor");
   const queryClient = useQueryClient();
-  const query = { filter, search, sort };
+  const query = { filter, search, searchFields: searchOptions.fields, fuzzy: searchOptions.fuzzy, sort };
   const ids = useModelIds(query);
   const order = ids.data ?? [];
   useEffect(() => setSelection((s) => prune(s, order)), [order]);
@@ -168,12 +174,48 @@ export function BrowserPage() {
         <Group px="xs" py={6} className={classes.toolbar}>
           <TextInput
             size="xs"
-            placeholder="Search title, creator, path, tags"
+            placeholder={placeholder(searchOptions)}
             leftSection={<IconSearch size={14} />}
             value={searchText}
             onChange={(e) => setSearchText(e.currentTarget.value)}
             w={320}
           />
+          <Popover position="bottom-start" shadow="md" withArrow>
+            <Popover.Target>
+              <Button size="compact-xs" variant={customised(searchOptions) ? "light" : "subtle"}
+                leftSection={<IconAdjustmentsHorizontal size={14} />} data-testid="search-options">
+                Search
+              </Button>
+            </Popover.Target>
+            <Popover.Dropdown>
+              <Stack gap="xs">
+                <Text size="xs" fw={600}>Search in</Text>
+                <SimpleGrid cols={2} spacing="xs" verticalSpacing={6}>
+                  {SEARCH_FIELDS.map((f) => {
+                    const on = searchOptions.fields.includes(f.value);
+                    return (
+                      <Checkbox key={f.value} size="xs" label={f.label} checked={on}
+                        disabled={on && searchOptions.fields.length === 1}
+                        onChange={() => setSearchOptions({
+                          ...searchOptions,
+                          fields: SEARCH_FIELDS.map((x) => x.value).filter((v) => (v === f.value ? !on : searchOptions.fields.includes(v))),
+                        })} />
+                    );
+                  })}
+                </SimpleGrid>
+                <Switch size="xs" label="Fuzzy: ignore accents, allow typos" checked={searchOptions.fuzzy}
+                  onChange={(e) => setSearchOptions({ ...searchOptions, fuzzy: e.currentTarget.checked })} />
+                <Text size="xs" c="dimmed" maw={260}>
+                  {searchOptions.fuzzy
+                    ? "Every word must appear in one of the fields; words of four letters or more may have a typo (two from seven letters)."
+                    : "Finds the text as typed inside any of the fields."}
+                </Text>
+                {customised(searchOptions) && (
+                  <Anchor size="xs" component="button" onClick={() => setSearchOptions(DEFAULT_OPTIONS)}>Reset</Anchor>
+                )}
+              </Stack>
+            </Popover.Dropdown>
+          </Popover>
           <Text size="xs" c="dimmed">
             {ids.data ? `${ids.data.length.toLocaleString()} model${ids.data.length === 1 ? "" : "s"}` : ""}
             {selection.ids.size > 1 ? ` · ${selection.ids.size.toLocaleString()} selected` : ""}

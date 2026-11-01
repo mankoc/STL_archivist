@@ -249,7 +249,7 @@ export const TOPICS: Topic[] = [
       { p: "**Library** has the filter pane on the left, the models in the middle and the selected model's details on the right." },
       { h: "Search and filters" },
       { list: [
-        "**Search** matches titles, creators, paths and tags.",
+        "**Search** matches titles, creators, sculptors, collections, paths and tags. The **Search** button beside the box chooses the fields (also source, subcollection, category, release, description and URL) and turns on **fuzzy** matching: every word must appear somewhere in the chosen fields, accents and case are ignored, and words of four letters or more may have a typo (two from seven letters), so *drgon alce* finds Alice's Red Dragon. The choice is kept in this browser.",
         "**Filter pane** — one section per field. Click a value to cycle it: **+** (green) only models with it, **−** (red) hide them, a third click clears it. Several values combine.",
         "The **circle** on a section's header cycles *has a value* / *has no value* / off — for example models without tags.",
         "Counts beside values show how many models each would match together with the other active filters. Long sections have their own search box. **Clear** removes every filter.",
