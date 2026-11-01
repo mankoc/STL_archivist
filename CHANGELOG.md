@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026.44.15 — 2026-11-01
+
+- **Fix: crawls store the model's URL.** The link from a `.url` file or `info.json` was
+  read but never saved. A crawl that finds no link keeps the URL already stored. To fill
+  existing records, rescan them (*Archives → Rescan*) or crawl their folder again.
+- **Fix: one unreadable detail no longer loses an archive's metadata.** An `info.json`
+  that is not valid JSON or has a list where text was expected, or a RAR archive's link
+  lookup, made the crawl drop everything it had read (title, creator, tags, …). Now only
+  that detail is skipped.
+- **`info.json` beside the archive:** read when the archive is the only one in its folder,
+  as in a downloaded model's folder (archive, pictures, link, `info.json`). Inside the
+  archive it still comes first. A byte order mark at the start is accepted, and the
+  distributor gets its usual spelling (*cults3d* → *Cults3D*).
+- **Sort files moves a folder's other files with its archives.** When every archive of a
+  folder goes to the same folder, the pictures, links, `info.json` and other files in it go
+  too (*FILE* rows in the preview). Subfolders stay. A folder left empty, or holding only
+  its old `METADATA.7z`, is removed.
+
 ## 2026.44.14 — 2026-11-01
 
 - **`{type}` token:** another name for `{source}` (the field the editor calls *Type*), in

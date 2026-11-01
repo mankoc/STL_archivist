@@ -1,6 +1,6 @@
 # StlArchivist API
 
-Version 2026.44.14. Generated from `web/openapi.json` by `tools/api_doc.py`; the
+Version 2026.44.15. Generated from `web/openapi.json` by `tools/api_doc.py`; the
 running server serves the same document at `GET /api/openapi.json`. Do not edit by hand:
 run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after changing routes.
 
@@ -1339,7 +1339,7 @@ The settings, with their effective values (defaults filled in).
 |---|---|---|
 | `from` | string |  |
 | `id` | integer |  |
-| `status` | string | `OK`, `COLLISION` (a free name is used), `MISS`, `SKIP` or `ERROR`. |
+| `status` | string | `OK`, `COLLISION` (a free name is used), `MISS`, `SKIP`, `ERROR`, or `FILE`: another file of a folder whose archives all go to one folder, moved with them. |
 | `to` | string |  |
 
 ### StlFile

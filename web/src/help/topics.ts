@@ -105,6 +105,7 @@ export const TOPICS: Topic[] = [
     summary: "How archives get into the library, and how re-crawls stay fast.",
     blocks: [
       { p: "A **crawl** reads a folder of archives (and its subfolders, unless *Crawl subfolders* is off in the settings) and catalogues every archive: its file list, preview images, `info.json` and `.url` files, scales and presupports, and the fields a [path pattern](path-patterns) takes from the folder names." },
+      { p: "`info.json` gives the title (`name`), creator (`creator` or `author`), type (`distributor`, spelled as usual: *cults3d* → *Cults3D*), `url`, `description`, `tags` and `release`. It is read inside the archive, or beside it when the archive is the only one in its folder (a downloaded model's folder). A `.url` link is read inside the archive, beside it, or in a `…-links` folder; `info.json`'s `url` wins. A crawl that finds no link keeps the URL already stored." },
       { h: "Crawling a folder" },
       { steps: [
         "**Libraries → Add library**, browse to the folder, **Use this folder** (or crawl an existing [library](libraries) with its ▶ button).",
@@ -309,7 +310,7 @@ export const TOPICS: Topic[] = [
       { list: [
         "**Rescan** re-reads the archives (metadata, file list, presupports, warnings, scales) — after replacing an archive's contents in place. Right-clicking a row or image offers it too: for the selection when the row is part of it, else for that model.",
         "**Generate thumbnails** replaces the models' images with new ones from their archives, up to *Thumbnails per archive*.",
-        "**Sort files…** moves the archives into a folder tree built from a [pattern](path-patterns) under a target folder (*Browse…* can make a new folder there with **New folder**). The **?** beside the pattern lists the tokens (click one to add it), and **Saved** keeps patterns with your account to pick again later. **Preview** shows every move first (*COLLISION*: a file of that name exists and a numbered name is used; *MISS*: the archive is not on disk). **Move** moves all or none: if one move fails, the others are put back. Needs *Allow file sorting* in the settings.",
+        "**Sort files…** moves the archives into a folder tree built from a [pattern](path-patterns) under a target folder (*Browse…* can make a new folder there with **New folder**). When every archive of a folder goes to one folder, the folder's other files (pictures, links, `info.json`) go with them (*FILE* in the preview); subfolders stay, and a folder left empty is removed. The **?** beside the pattern lists the tokens (click one to add it), and **Saved** keeps patterns with your account to pick again later. **Preview** shows every move first (*COLLISION*: a file of that name exists and a numbered name is used; *MISS*: the archive is not on disk). **Move** moves all or none: if one move fails, the others are put back. Needs *Allow file sorting* in the settings.",
         "**Delete files…** deletes the archive files and their records. With a trash folder set, files go there with a small `.json` note for recovery. Needs *Allow file delete* in the settings.",
       ] },
       { warn: "Sort files and Delete files change your disk. Preview first, and keep backups of archives you cannot download again." },

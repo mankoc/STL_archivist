@@ -27,7 +27,8 @@ pub struct SortRequest {
 #[derive(Serialize, ToSchema)]
 pub struct SortRow {
     pub id: i64,
-    /// `OK`, `COLLISION` (a free name is used), `MISS`, `SKIP` or `ERROR`.
+    /// `OK`, `COLLISION` (a free name is used), `MISS`, `SKIP`, `ERROR`, or `FILE`:
+    /// another file of a folder whose archives all go to one folder, moved with them.
     pub status: String,
     pub from: String,
     pub to: String,

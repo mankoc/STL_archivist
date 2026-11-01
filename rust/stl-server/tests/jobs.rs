@@ -134,6 +134,35 @@ async fn crawl_job_catalogues_a_folder() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn crawls_read_urls_and_info_json() {
+    let lib = empty_library();
+    let ed = lib.user("ed", Role::Editor);
+    let root = lib.dir.path().join("archives");
+    // A link inside the archive.
+    write_zip(
+        &root.join("Shop").join("Golem.zip"),
+        &[("golem.stl", b"solid g\nendsolid\n"), ("Golem.url", b"[InternetShortcut]\r\nURL=https://shop.example/golem\r\n")],
+    );
+    // A downloaded model's folder: the archive alone, with its info.json beside it.
+    write_zip(&root.join("Oola").join("oola_v2.zip"), &[("oola.stl", b"solid o\nendsolid\n")]);
+    std::fs::write(
+        root.join("Oola").join("info.json"),
+        r#"{"name": "Oola slave crouching", "author": "Tchelos", "distributor": "cults3d",
+            "url": "https://cults3d.com/en/3d-model/art/oola-slave-crouching", "description": "Star Wars", "tags": ["oola", "jedi"]}"#,
+    )
+    .unwrap();
+    let id = submit(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy()})).await;
+    assert_eq!(wait(&lib, &ed, id).await["job"]["state"], "done");
+    let row = |sql: &str| lib.state.db.with(|c| c.query_row(sql, [], |r| r.get::<_, Option<String>>(0))).unwrap();
+    assert_eq!(row("SELECT url FROM models WHERE title = 'Golem'").as_deref(), Some("https://shop.example/golem"));
+    assert_eq!(
+        row("SELECT creator || ' / ' || source || ' / ' || url FROM models WHERE title = 'Oola slave crouching'").as_deref(),
+        Some("Tchelos / Cults3D / https://cults3d.com/en/3d-model/art/oola-slave-crouching")
+    );
+    assert_eq!(count(&lib, "SELECT count(*) FROM model_tags JOIN tags ON tags.id = model_tags.tag_id WHERE tags.name IN ('oola', 'jedi')"), 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn images_beside_an_archive_count_as_its_images() {
     let lib = empty_library();
     let ed = lib.user("ed", Role::Editor);

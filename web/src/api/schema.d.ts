@@ -2880,7 +2880,10 @@ export interface components {
             from: string;
             /** Format: int64 */
             id: number;
-            /** @description `OK`, `COLLISION` (a free name is used), `MISS`, `SKIP` or `ERROR`. */
+            /**
+             * @description `OK`, `COLLISION` (a free name is used), `MISS`, `SKIP`, `ERROR`, or `FILE`:
+             *     another file of a folder whose archives all go to one folder, moved with them.
+             */
             status: string;
             to: string;
         };

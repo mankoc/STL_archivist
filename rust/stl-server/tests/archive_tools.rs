@@ -182,10 +182,14 @@ async fn sort_files_by_pattern() {
     let target = root.join("Sorted");
     std::fs::create_dir_all(&target).unwrap();
     let body = json!({"ids": [dragon], "target_dir": target.to_string_lossy(), "pattern": "{sculptor}/{title}"});
+    // The folder's picture goes with its only archive.
+    std::fs::write(root.join("In").join("cover.jpg"), b"jpeg").unwrap();
 
     let rows = call(&lib.state, "POST", "/api/sort/preview", Some(&ed), Some(body.clone())).await.json();
     assert_eq!(rows[0]["status"], "OK", "{rows}");
     assert_eq!(rows[0]["to"], json!(target.join("In").join("Dragon.zip").to_string_lossy()));
+    assert_eq!((rows[1]["status"].as_str(), rows[1]["id"].as_i64()), (Some("FILE"), Some(0)));
+    assert_eq!(rows[1]["to"], json!(target.join("In").join("cover.jpg").to_string_lossy()));
 
     // Off by default.
     let mut job = body.clone();
@@ -193,9 +197,11 @@ async fn sort_files_by_pattern() {
     assert_eq!(finish(&lib, &ed, job.clone()).await["job"]["state"], "failed");
     std::fs::write(lib.dir.path().join("settings.json"), r#"{"file_sorting_enabled": true}"#).unwrap();
     let v = run(&lib, &ed, job).await;
-    assert_eq!(v["job"]["message"], "moved 1 archive(s)");
+    assert_eq!(v["job"]["message"], "moved 1 archive(s) and 1 other file(s)");
     let path: String = scalar(&lib, "SELECT archive_path FROM models_view");
     assert_eq!(path, target.join("In").join("Dragon.zip").to_string_lossy());
     assert!(std::path::Path::new(&path).is_file());
     assert!(!root.join("In").join("Dragon.zip").exists());
+    assert!(target.join("In").join("cover.jpg").is_file());
+    assert!(!root.join("In").exists(), "the emptied folder (its sidecar left alone) is removed");
 }
