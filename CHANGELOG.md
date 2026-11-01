@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.44.18 — 2026-11-01
+
+- **Jobs can be paused and continued** (*Jobs*, editors). A running job stops at its next
+  safe point and waits; a queued one waits, and the jobs behind it run first. The badge
+  says *paused*, and the status bar shows it too. Stop still works on a paused job.
+
 ## 2026.44.17 — 2026-11-01
 
 - **Maintenance: *Re-read links and info.json*** (*Settings → Maintenance*, editors). It

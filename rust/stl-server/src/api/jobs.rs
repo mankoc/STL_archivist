@@ -108,6 +108,31 @@ pub async fn cancel(State(lib): State<AppState>, me: CurrentUser, Path(id): Path
     }
 }
 
+/// Pause a job: a running one waits at its next checkpoint, a queued one is
+/// passed over, until it is resumed. 409 when it has already finished.
+#[utoipa::path(post, path = "/api/jobs/{id}/pause", tag = "jobs", params(("id" = u64, Path, description = "Job id")),
+    responses((status = 202), (status = 404, body = crate::error::ErrorBody), (status = 409, body = crate::error::ErrorBody)))]
+pub async fn pause(State(lib): State<AppState>, me: CurrentUser, Path(id): Path<u64>) -> Result<StatusCode, ApiError> {
+    set_paused(&lib, &me, id, true)
+}
+
+/// Resume a paused job. 409 when it has already finished.
+#[utoipa::path(post, path = "/api/jobs/{id}/resume", tag = "jobs", params(("id" = u64, Path, description = "Job id")),
+    responses((status = 202), (status = 404, body = crate::error::ErrorBody), (status = 409, body = crate::error::ErrorBody)))]
+pub async fn resume(State(lib): State<AppState>, me: CurrentUser, Path(id): Path<u64>) -> Result<StatusCode, ApiError> {
+    set_paused(&lib, &me, id, false)
+}
+
+fn set_paused(lib: &AppState, me: &CurrentUser, id: u64, paused: bool) -> Result<StatusCode, ApiError> {
+    me.require(Role::Editor)?;
+    let job = lib.jobs.get(id).ok_or_else(|| ApiError::not_found(format!("no job {id}")))?;
+    if lib.jobs.pause(&job, paused) {
+        Ok(StatusCode::ACCEPTED)
+    } else {
+        Err(ApiError::new(StatusCode::CONFLICT, "the job has already finished"))
+    }
+}
+
 /// The event stream: [`ServerEvent`] JSON text frames (job progress and logs,
 /// library changes). Authenticates like any route (the session cookie works
 /// for browsers, which cannot set headers on a WebSocket).

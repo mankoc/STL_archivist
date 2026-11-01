@@ -18,7 +18,7 @@ export function status(jobs: Job[] | undefined, libraries: { models: number }[] 
   return {
     job: running
       ? {
-          label: describe(running),
+          label: describe(running) + (running.paused ? " (paused)" : ""),
           detail: [running.phase, progressText(running, now)].filter(Boolean).join(" · ") || null,
           percent: percent(running),
         }

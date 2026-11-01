@@ -90,7 +90,7 @@ export const TOPICS: Topic[] = [
         ["**Libraries**", "Libraries and their folders: add, crawl, monitor, rename, move, remove"],
         ["**Statistics**", "Totals, rankings and the distribution of any column"],
         ["**Settings**", "Your account, the library's settings, and tabs for maintenance, sidecars, backups, compute workers, components and users"],
-        ["**Jobs**", "Every background job with its log; the button appears at the end while jobs wait or run (the status bar opens it at any time)"],
+        ["**Jobs**", "Every background job with its log (the status bar opens it too)"],
       ] } },
       { p: "The menu under your name (top right) has **Help**, **About**, **Change password** and **Sign out**. The **?** button opens this help, and the **ⓘ** beside it **About**: the server's version (also in the window's title) and who made StlArchivist." },
       { p: "The **status bar** at the bottom of every page shows the running [job](jobs) with its progress and how many wait behind it (click it to open **Jobs**), and how many archives all [libraries](libraries) hold." },
@@ -461,12 +461,13 @@ export const TOPICS: Topic[] = [
     id: "jobs",
     group: "Maintenance",
     title: "Jobs",
-    summary: "Background work: the queue, progress, logs and stopping.",
+    summary: "Background work: the queue, progress, logs, pausing and stopping.",
     blocks: [
       { p: "Crawls, rescans, maintenance, duplicate searches, the AI tagger's batches and downloads run on the server as **jobs**. You can leave the page, close the browser or keep working." },
       { list: [
         "Jobs run **one at a time**; new ones wait their turn. Every open page sees their progress live.",
         "**Jobs** lists them with who started them (`monitor` for [monitored folders](monitored-folders)); click one for its log.",
+        "The **pause** button holds a job at its next safe point until you press **continue**; a paused job that has not started yet lets the jobs behind it go first.",
         "The **stop** button stops a job at its next safe point, keeping the work already done.",
         "Progress shows items done out of the total and, after a few seconds, an estimate of the time left.",
       ] },

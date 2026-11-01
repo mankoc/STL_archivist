@@ -615,7 +615,8 @@ fn download_checked(url: &str, dest: &Path, size: u64, sha256: &str, signer: Opt
         let mut reader = resp.body_mut().as_reader();
         let mut buf = vec![0u8; 1 << 20];
         loop {
-            if ctl.is_stopped() {
+            // Not a checkpoint: a paused download would time out.
+            if ctl.stop_requested() {
                 return Err("stopped".into());
             }
             let n = reader.read(&mut buf).map_err(|e| format!("download {url}: {e}"))?;

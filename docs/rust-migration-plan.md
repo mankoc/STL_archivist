@@ -1344,6 +1344,12 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.44.18: **Pausing jobs.** `Control` gained a pause flag: `is_stopped` / `check` are
+  checkpoints that wait while paused (until resumed or stopped), and `stop_requested`
+  is the check that never waits. It is used where a lock is held (`Workers::wait_for`
+  holds the hub) or a transfer would time out (sync uploads, component downloads).
+  `Job::stopped` waits the same way. `JobInfo.paused`; `Jobs::pause`; `POST
+  /api/jobs/{id}/pause` and `/resume`. The worker passes over paused queued jobs.
 - 2026.44.17: **Re-read links and info.json.** The `reread_links` job (`overwrite`) runs
   `maint::reread_links`. For each record on disk, `crawler::link_files` reads only the
   `.url` / `info.json` members, `metadata::from_files` (split out of `extract`: what the

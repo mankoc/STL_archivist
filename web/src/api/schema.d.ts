@@ -460,6 +460,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs/{id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pause a job: a running one waits at its next checkpoint, a queued one is
+         *     passed over, until it is resumed. 409 when it has already finished.
+         */
+        post: operations["post_jobs_by_id_pause"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/{id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume a paused job. 409 when it has already finished. */
+        post: operations["post_jobs_by_id_resume"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/libraries": {
         parameters: {
             query?: never;
@@ -2003,6 +2040,11 @@ export interface components {
             kind: string;
             /** @description The outcome (a summary, or the error). */
             message?: string | null;
+            /**
+             * @description Paused: a running job waits at its next checkpoint, a queued one is
+             *     passed over, until it is resumed.
+             */
+            paused: boolean;
             phase?: string | null;
             request: components["schemas"]["JobRequest"];
             /** Format: int64 */
@@ -3843,6 +3885,78 @@ export interface operations {
         };
     };
     delete_jobs_by_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Job id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    post_jobs_by_id_pause: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Job id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    post_jobs_by_id_resume: {
         parameters: {
             query?: never;
             header?: never;

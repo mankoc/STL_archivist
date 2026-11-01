@@ -265,7 +265,8 @@ impl Workers {
             if hub.workers.iter().any(|w| if need == Need::Clip { w.clip } else { w.chat }) {
                 return true;
             }
-            if ctl.is_stopped() {
+            // Not a checkpoint: a paused job must not hold the hub.
+            if ctl.stop_requested() {
                 return false;
             }
             hub = self.joined.wait_timeout(hub, Duration::from_secs(1)).unwrap_or_else(|e| e.into_inner()).0;
