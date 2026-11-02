@@ -20,6 +20,10 @@
 //! components of its folder, which the page can fill with
 //! `stl-server components` (the same downloads as a library's Maintenance). It
 //! is remembered and started again when the app connects to that server.
+//!
+//! Links that open a new window (`target="_blank"`, `window.open`): pages of
+//! a server the app connected to open in a window of their own (signed in, as
+//! the main one); other web pages in the default browser; nothing else opens.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::collections::{BTreeMap, HashSet};
@@ -34,6 +38,7 @@ use serde::{Deserialize, Serialize};
 use tauri::ipc::CapabilityBuilder;
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::tray::TrayIconBuilder;
+use tauri::webview::NewWindowResponse;
 use tauri::{AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 
@@ -252,6 +257,22 @@ fn grant(app: &AppHandle, shell: &Shell, origin: &Url) -> Result<(), String> {
     app.add_capability(cap).map_err(|e| e.to_string())?;
     granted.insert(key);
     Ok(())
+}
+
+/// Where a link opening a new window goes (see the module notes).
+#[derive(Debug, PartialEq)]
+enum NewWindow {
+    /// A page of a connected server (`servers`: [`Shell::granted`]'s origins).
+    App,
+    Browser,
+    Refused,
+}
+
+fn new_window_target(url: &Url, servers: &HashSet<String>) -> NewWindow {
+    if !matches!(url.scheme(), "http" | "https") {
+        return NewWindow::Refused;
+    }
+    if servers.contains(&url.origin().ascii_serialization()) { NewWindow::App } else { NewWindow::Browser }
 }
 
 fn navigate(app: &AppHandle, url: Url) -> Result<(), String> {
@@ -921,6 +942,22 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .on_document_title_changed(|w, title| {
             let _ = w.set_title(&title);
         })
+        .on_new_window({
+            let app = handle.clone();
+            move |url, _features| {
+                let servers = app.state::<Shell>().granted.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                match new_window_target(&url, &servers) {
+                    NewWindow::App => NewWindowResponse::Allow,
+                    NewWindow::Browser => {
+                        if let Err(e) = tauri_plugin_opener::open_url(url.as_str(), None::<&str>) {
+                            eprintln!("could not open {url}: {e}");
+                        }
+                        NewWindowResponse::Deny
+                    }
+                    NewWindow::Refused => NewWindowResponse::Deny,
+                }
+            }
+        })
         // WebView2's own drag and drop: Tauri's handler would refuse every HTML drag
         // (moving columns, dropping images).
         .disable_drag_drop_handler()
@@ -1009,6 +1046,17 @@ mod tests {
         assert_eq!((old.last_opened, old.open_last_at_start), (None, None));
         let new: Saved = serde_json::from_str(r#"{"last_opened": {"kind": "server", "url": "http://nas:8770/"}}"#).unwrap();
         assert_eq!(new.last_opened, Some(Opened::Server { url: "http://nas:8770/".into() }));
+    }
+
+    #[test]
+    fn new_windows_open_server_pages_here_and_the_web_in_the_browser() {
+        let servers: HashSet<String> = ["http://127.0.0.1:8770".to_string()].into();
+        let target = |u: &str| new_window_target(&Url::parse(u).unwrap(), &servers);
+        assert_eq!(target("http://127.0.0.1:8770/api/images/3/original"), NewWindow::App);
+        assert_eq!(target("https://www.kickstarter.com/projects/x"), NewWindow::Browser);
+        assert_eq!(target("http://127.0.0.1:9999/"), NewWindow::Browser);
+        assert_eq!(target("file:///C:/Windows/notepad.exe"), NewWindow::Refused);
+        assert_eq!(target("javascript:alert(1)"), NewWindow::Refused);
     }
 
     #[test]
