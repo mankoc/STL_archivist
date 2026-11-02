@@ -1,10 +1,13 @@
 // Find Duplicates: STL file lists, images (perceptual hash or AI embedding)
 // and metadata. Each search is a server job; its result stays with the job,
-// so the newest one is shown again when the page is reopened.
+// so the newest one is shown again when the page is reopened. The bin before
+// an archive deletes its file (a delete_files job of its own).
 import {
-  Alert, Anchor, Badge, Box, Button, Card, Checkbox, Group, Modal, NumberInput, Pagination, Progress, SegmentedControl,
-  SimpleGrid, Stack, Table, Tabs, Text, TextInput,
+  ActionIcon, Alert, Anchor, Badge, Box, Button, Card, Checkbox, Group, Modal, NumberInput, Pagination, Progress, SegmentedControl,
+  SimpleGrid, Stack, Table, Tabs, Text, TextInput, Tooltip,
 } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
+import { IconTrash } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useMemo, useState } from "react";
 
@@ -13,13 +16,33 @@ import { hasRole, useUser } from "../auth/user";
 import { DetailPane } from "../browser/DetailPane";
 import { formatSize } from "../format";
 import { addJob, type Job, type JobRequest, isActive, percent, progressText } from "../jobs/jobs";
-import { type Finder, latestJob, matches, METADATA_COLUMNS, pageCount, pageOf, percentLabel, scoreLabel } from "./duplicates";
+import { SETTINGS_QUERY } from "../settings/librarySettings";
+import {
+  type Deletion, deletion, deletionLabel, type Finder, latestJob, matches, METADATA_COLUMNS, pageCount, pageOf, percentLabel, scoreLabel,
+} from "./duplicates";
 
 type Compare = number[];
+
+const JOBS_QUERY = { queryKey: ["jobs"], queryFn: async () => unwrap(await api.GET("/api/jobs")) };
+
+/** An archive as a result list shows it. */
+type Target = { id: number; title: string | null | undefined; path?: string | null };
+
+/** Deleting archives from the result lists, for every finder. */
+type Remover = {
+  /** Editors get the delete buttons. */
+  shown: boolean;
+  /** Why the buttons do nothing (file deleting is off), or null. */
+  blocked: string | null;
+  /** The deletion of a model asked for on this page, or null. */
+  state: (id: number) => Deletion | null;
+  ask: (target: Target) => void;
+};
 
 export function DuplicatesPage() {
   const [tab, setTab] = useState<Finder>("content");
   const [compare, setCompare] = useState<Compare | null>(null);
+  const { remover, confirm } = useRemover();
   return (
     <Stack p="md" style={{ overflow: "auto", height: "100%" }}>
       <Tabs value={tab} onChange={(v) => v && setTab(v as Finder)} keepMounted={false}>
@@ -29,15 +52,16 @@ export function DuplicatesPage() {
           <Tabs.Tab value="metadata">Metadata</Tabs.Tab>
         </Tabs.List>
         <Tabs.Panel value="content" pt="md">
-          <ContentFinder onCompare={setCompare} />
+          <ContentFinder onCompare={setCompare} remover={remover} />
         </Tabs.Panel>
         <Tabs.Panel value="images" pt="md">
-          <ImageFinder onCompare={setCompare} />
+          <ImageFinder onCompare={setCompare} remover={remover} />
         </Tabs.Panel>
         <Tabs.Panel value="metadata" pt="md">
-          <MetadataFinder onCompare={setCompare} />
+          <MetadataFinder onCompare={setCompare} remover={remover} />
         </Tabs.Panel>
       </Tabs>
+      {confirm}
       <Modal opened={compare != null} onClose={() => setCompare(null)} size={compare && compare.length > 1 ? "90%" : "md"} title="Compare">
         <SimpleGrid cols={Math.min(compare?.length ?? 1, 3)}>
           {compare?.map((id) => (
@@ -51,10 +75,57 @@ export function DuplicatesPage() {
   );
 }
 
+/** The delete buttons' state and their confirmation dialog: each archive goes
+ *  in a delete_files job of its own, followed in the job list. */
+function useRemover(): { remover: Remover; confirm: ReactNode } {
+  const user = useUser();
+  const editor = hasRole(user, "editor");
+  const queryClient = useQueryClient();
+  const settings = useQuery({ ...SETTINGS_QUERY, enabled: editor });
+  const jobs = useQuery(JOBS_QUERY);
+  const [queued, setQueued] = useState<ReadonlyMap<number, number>>(new Map());
+  const [asking, setAsking] = useState<Target | null>(null);
+  const s = settings.data;
+  const trash = s?.use_trash_folder && s.trash_folder_path ? s.trash_folder_path : null;
+  const remover: Remover = {
+    shown: editor,
+    blocked: s && !s.allow_file_delete ? "Deleting files is off: turn on “Allow Delete files” in the library settings" : null,
+    state: (id) => {
+      const job = queued.get(id);
+      return job == null ? null : deletion(jobs.data?.find((j) => j.id === job));
+    },
+    ask: setAsking,
+  };
+  const remove = async (target: Target) => {
+    setAsking(null);
+    try {
+      const created = unwrap(await api.POST("/api/jobs", { body: { kind: "delete_files", ids: [target.id] } }));
+      queryClient.setQueryData<Job[]>(["jobs"], (old) => addJob(old, created));
+      setQueued((q) => new Map(q).set(target.id, created.id));
+    } catch (err) {
+      notifications.show({ color: "red", message: (err as Error).message });
+    }
+  };
+  const confirm = (
+    <Modal opened={asking != null} onClose={() => setAsking(null)} title="Delete archive file">
+      <Text size="sm">Delete the archive file of “{asking?.title || "(untitled)"}” and remove the model from the library?</Text>
+      {asking?.path && <Text size="xs" c="dimmed" mt={4} style={{ wordBreak: "break-all" }}>{asking.path}</Text>}
+      <Text size="sm" mt="sm">
+        {trash ? `The file is moved to the trash folder (${trash}).` : "The file is deleted for good: no trash folder is set in the library settings."}
+      </Text>
+      <Group justify="flex-end" mt="md">
+        <Button variant="default" onClick={() => setAsking(null)}>Cancel</Button>
+        <Button color="red" data-autofocus data-testid="confirm-delete" onClick={() => asking && void remove(asking)}>Delete file</Button>
+      </Group>
+    </Modal>
+  );
+  return { remover, confirm };
+}
+
 /** The newest job of a finder, its progress, and its result once done. */
 function useFinder(finder: Finder) {
   const queryClient = useQueryClient();
-  const jobs = useQuery({ queryKey: ["jobs"], queryFn: async () => unwrap(await api.GET("/api/jobs")) });
+  const jobs = useQuery(JOBS_QUERY);
   const job = latestJob(jobs.data, finder);
   const done = job?.state === "done" || job?.state === "cancelled";
   const detail = useQuery({
@@ -138,20 +209,52 @@ function SearchAndPages({ text, setText, page, setPage, total, summary }: {
   );
 }
 
-function Archive({ title, path, onOpen }: { title: string | null | undefined; path: string | null | undefined; onOpen: () => void }) {
+/** An archive of a result: its delete button (editors), title and path. */
+function Archive({ remover, onOpen, ...target }: Target & { remover: Remover; onOpen: () => void }) {
+  const { id, title, path } = target;
+  const d = remover.state(id);
+  const gone = d?.state === "deleted";
   return (
-    <Box>
-      <Anchor size="sm" onClick={onOpen} component="button">
-        {title || "(untitled)"}
-      </Anchor>
-      <Text size="xs" c="dimmed" style={{ wordBreak: "break-all" }}>
-        {path}
-      </Text>
-    </Box>
+    <Group gap={6} wrap="nowrap" align="flex-start">
+      {remover.shown && (
+        <Tooltip label={remover.blocked ?? "Delete the archive file…"} multiline maw={300}>
+          <ActionIcon
+            variant="subtle"
+            color="red"
+            size="sm"
+            aria-label="Delete the archive file"
+            data-testid="delete-archive"
+            loading={d?.state === "deleting"}
+            disabled={gone}
+            data-disabled={remover.blocked != null || undefined}
+            onClick={() => remover.blocked == null && remover.ask(target)}
+          >
+            <IconTrash size={14} />
+          </ActionIcon>
+        </Tooltip>
+      )}
+      <Box style={{ minWidth: 0 }}>
+        {gone ? (
+          <Text size="sm" c="dimmed" td="line-through">{title || "(untitled)"}</Text>
+        ) : (
+          <Anchor size="sm" onClick={onOpen} component="button">
+            {title || "(untitled)"}
+          </Anchor>
+        )}
+        {path && (
+          <Text size="xs" c="dimmed" td={gone ? "line-through" : undefined} style={{ wordBreak: "break-all" }}>
+            {path}
+          </Text>
+        )}
+        {d && <Text size="xs" c={d.state === "failed" ? "red" : "dimmed"}>{deletionLabel(d)}</Text>}
+      </Box>
+    </Group>
   );
 }
 
-function ContentFinder({ onCompare }: { onCompare: (c: Compare) => void }) {
+type FinderProps = { onCompare: (c: Compare) => void; remover: Remover };
+
+function ContentFinder({ onCompare, remover }: FinderProps) {
   const finder = useFinder("content");
   const [threshold, setThreshold] = useState<number>(80);
   const [text, setText] = useState("");
@@ -182,8 +285,8 @@ function ContentFinder({ onCompare }: { onCompare: (c: Compare) => void }) {
             <Table.Tbody>
               {pageOf(rows, page).map((p) => (
                 <Table.Tr key={`${p.id_a}-${p.id_b}`} data-testid="dupe-row">
-                  <Table.Td><Archive title={p.title_a} path={p.path_a} onOpen={() => onCompare([p.id_a])} /></Table.Td>
-                  <Table.Td><Archive title={p.title_b} path={p.path_b} onOpen={() => onCompare([p.id_b])} /></Table.Td>
+                  <Table.Td><Archive id={p.id_a} title={p.title_a} path={p.path_a} remover={remover} onOpen={() => onCompare([p.id_a])} /></Table.Td>
+                  <Table.Td><Archive id={p.id_b} title={p.title_b} path={p.path_b} remover={remover} onOpen={() => onCompare([p.id_b])} /></Table.Td>
                   <Table.Td>
                     <Text size="sm">{percentLabel(p.similarity)}</Text>
                     <Text size="xs" c="dimmed">{p.overlap} of {p.total_a} / {p.total_b}</Text>
@@ -199,7 +302,7 @@ function ContentFinder({ onCompare }: { onCompare: (c: Compare) => void }) {
   );
 }
 
-function ImageFinder({ onCompare }: { onCompare: (c: Compare) => void }) {
+function ImageFinder({ onCompare, remover }: FinderProps) {
   const finder = useFinder("images");
   const [method, setMethod] = useState("dhash");
   const [distance, setDistance] = useState<number>(10);
@@ -246,11 +349,11 @@ function ImageFinder({ onCompare }: { onCompare: (c: Compare) => void }) {
               {pageOf(rows, page).map((p) => (
                 <Table.Tr key={`${p.id_a}-${p.id_b}`} data-testid="dupe-row">
                   <Table.Td>
-                    <Archive title={p.title_a} path={p.path_a} onOpen={() => onCompare([p.id_a])} />
+                    <Archive id={p.id_a} title={p.title_a} path={p.path_a} remover={remover} onOpen={() => onCompare([p.id_a])} />
                     <Text size="xs" c="dimmed">{formatSize(p.size_a)} · {p.imgs_a} image(s)</Text>
                   </Table.Td>
                   <Table.Td>
-                    <Archive title={p.title_b} path={p.path_b} onOpen={() => onCompare([p.id_b])} />
+                    <Archive id={p.id_b} title={p.title_b} path={p.path_b} remover={remover} onOpen={() => onCompare([p.id_b])} />
                     <Text size="xs" c="dimmed">{formatSize(p.size_b)} · {p.imgs_b} image(s)</Text>
                   </Table.Td>
                   <Table.Td>
@@ -268,7 +371,7 @@ function ImageFinder({ onCompare }: { onCompare: (c: Compare) => void }) {
   );
 }
 
-function MetadataFinder({ onCompare }: { onCompare: (c: Compare) => void }) {
+function MetadataFinder({ onCompare, remover }: FinderProps) {
   const finder = useFinder("metadata");
   const [columns, setColumns] = useState<string[]>(["title"]);
   const [method, setMethod] = useState("exact");
@@ -321,7 +424,7 @@ function MetadataFinder({ onCompare }: { onCompare: (c: Compare) => void }) {
                       <Table.Tr key={m.id}>
                         <Table.Td w="45%">{m.value}</Table.Td>
                         <Table.Td>
-                          <Anchor size="sm" component="button" onClick={() => onCompare([m.id])}>{m.title || `#${m.id}`}</Anchor>
+                          <Archive id={m.id} title={m.title || `#${m.id}`} remover={remover} onOpen={() => onCompare([m.id])} />
                         </Table.Td>
                       </Table.Tr>
                     ))}

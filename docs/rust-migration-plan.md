@@ -1344,6 +1344,10 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.45.10: **Deleting from the duplicate lists.** `DuplicatesPage`'s `useRemover`: one
+  `delete_files` job per archive, followed through the `["jobs"]` cache (`duplicates.ts`
+  `deletion`); the buttons need the editor role and `allow_file_delete`. The `delete_files`
+  job fails when every archive failed (`archive_tools::delete_files` returns the errors).
 - 2026.45.9: **Links in the desktop app.** The main window's `on_new_window`
   (`new_window_target`): http(s) pages of an origin in `Shell.granted` open in a WebView2
   window (`NewWindowResponse::Allow`, signed in), other web pages in the default browser

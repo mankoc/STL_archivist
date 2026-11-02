@@ -13,7 +13,7 @@ can open a library on your computer without setting up a server.
 [the HTTP API](docs/api.md) ·
 and in the interface, the **?** button: searchable in-depth help on every feature
 
-Version: 2026.45.9
+Version: 2026.45.10
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). This version opens its data directory and, since 2026.43.7, converts it once
@@ -56,7 +56,8 @@ Version: 2026.45.9
   creators
 - **Duplicates** — archives sharing STL files, archives with similar images (perceptual hash
   or AI embedding, skipping banners shared by many archives), models with equal or similar
-  metadata (exact, Levenshtein, Soundex), with side-by-side comparison
+  metadata (exact, Levenshtein, Soundex), with side-by-side comparison and a button
+  before each archive that deletes its file (to the trash folder when one is set)
 - **Find by Image** — drop a picture to find models whose thumbnails look like it
 - **AI tagger** — Qwen2.5-VL through llama.cpp suggests tags, title, creator, sculptor,
   scale, source, year and description (never collection or subcollection); review one by one or tag a selection in

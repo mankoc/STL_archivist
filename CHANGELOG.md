@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026.45.10 — 2026-11-02
+
+- **Duplicates: delete an archive from the results.** A bin button before each archive (STL
+  files, Images and Metadata tabs) deletes its file after a confirmation, moving it to the
+  trash folder when one is set, and removes the model. The row then shows *Deleting…*,
+  *Deleted* (struck through) or why it could not be deleted. Editors only; the button is
+  inactive until *Allow Delete files* is on in the library settings.
+- A **Delete files** job that could not delete any of its archives now ends as failed, with the
+  first reason, instead of "0 archive(s) deleted, 1 failed".
+
 ## 2026.45.9 — 2026-11-02
 
 - **Fixed: links did nothing in the desktop app** (the URL column, the project link in

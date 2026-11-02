@@ -880,7 +880,14 @@ fn delete_files(lib: &Library, job: &Job, ids: &[i64]) -> Result<String, String>
     let (deleted, failed, paths) = crate::archive_tools::delete_files(lib, &log, ids)?;
     job.ctl.advance(ids.len() as u64);
     job.touch_sidecars(paths);
-    Ok(format!("{deleted} archive(s) deleted{}", if failed > 0 { format!(", {failed} failed") } else { String::new() }))
+    // Nothing deleted and something failed: the job failed, with the first reason.
+    if deleted == 0
+        && let Some(first) = failed.first()
+    {
+        let more = if failed.len() > 1 { format!(" (and {} more, see the log)", failed.len() - 1) } else { String::new() };
+        return Err(format!("could not delete {first}{more}"));
+    }
+    Ok(format!("{deleted} archive(s) deleted{}", if failed.is_empty() { String::new() } else { format!(", {} failed", failed.len()) }))
 }
 
 /// Sort Files: plan, move every archive or none, then point the records at
