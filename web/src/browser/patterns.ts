@@ -1,5 +1,6 @@
-// Sort files' path patterns: the tokens it fills, and the patterns a user saved
-// (the `/api/me/settings` key `SAVED_PATTERNS`).
+// Path patterns: the tokens Sort files fills and path parsing reads, and the
+// patterns a user saved (the `/api/me/settings` keys `SAVED_PATTERNS` and
+// `PARSE_PATTERNS`).
 
 /** Tokens and their aliases, as `path_pattern::token_field` and `sort_files::values` know them. */
 export const TOKENS: { token: string; aliases: string[]; field: string }[] = [
@@ -15,7 +16,10 @@ export const TOKENS: { token: string; aliases: string[]; field: string }[] = [
   { token: "url", aliases: [], field: "URL" },
 ];
 
+/** Sort files' patterns. */
 export const SAVED_PATTERNS = "sort_patterns";
+/** Patterns that parse values out of paths (mass edit). */
+export const PARSE_PATTERNS = "parse_patterns";
 
 /** The saved patterns in a settings value (anything else: none). */
 export function savedPatterns(value: unknown): string[] {

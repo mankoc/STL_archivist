@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.45.1 — 2026-11-02
+
+- **Mass edit's path pattern** has the token help (**?**) and **Saved** patterns of Sort
+  files (kept apart from Sort files' list). The values it reads from the first five paths
+  show as you type; **Show all parsed values** parses every selected model.
+
 ## 2026.45.0 — 2026-11-02
 
 - **Highlight models with warnings** (*Settings → Account*, saved for your account). In

@@ -215,7 +215,7 @@ export const TOPICS: Topic[] = [
         "`Fantasy/whatever/Knight.7z` → `{collection}/*/{title}`.",
       ] },
       { p: "In Sort files, `{token:n}` keeps the first n characters: `{creator:1}/{creator}/{title}` puts creator *Sanix* under `S/Sanix/`." },
-      { tip: "Use **Mass edit → Path pattern → Preview** to try a pattern on existing models before saving anything." },
+      { tip: "Type a pattern in **Mass edit → Path pattern** to see what it reads from the selected models' paths before saving anything." },
     ],
   },
   {
@@ -292,7 +292,7 @@ export const TOPICS: Topic[] = [
       { h: "Mass edit" },
       { p: "Select several models, then **Mass edit**:" },
       { list: [
-        "**Path pattern** takes values from each model's folders; **Preview** shows what it finds for every model before saving.",
+        "**Path pattern** takes values from each model's folders. As you type, the values it finds in the first five paths show below it; **Show all parsed values** shows them for every selected model. The **?** button lists the tokens, and **Saved** keeps patterns for your account (apart from Sort files' patterns).",
         "**Fields** sets values for all of them; **Clear** empties a field. With *replace* on, values replace existing ones; otherwise they only fill empty fields. Scales and tags are added.",
         "**Find & replace** changes text in the chosen fields (case-sensitive or regular expression if you want); **Trim** removes stray spaces.",
       ] },

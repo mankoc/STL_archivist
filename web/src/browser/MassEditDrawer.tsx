@@ -2,26 +2,39 @@
 import {
   Autocomplete, Button, Checkbox, Divider, Drawer, Group, ScrollArea, Select, SimpleGrid, Stack, Switch, Table, Text, TextInput,
 } from "@mantine/core";
+import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { api, unwrap } from "../api/client";
 import { CLEAR_PRESUPPORTS, emptyForm, FIND_FIELDS, MANUAL, type MassForm, toRequest } from "./massEdit";
+import { PatternTools } from "./PatternTools";
 
 const LIMIT = 50;
+/** Paths parsed as the pattern is typed; *Show all parsed values* parses every selected one. */
+const PREVIEW_ROWS = 5;
 
 export function MassEditDrawer({ ids, opened, onClose }: { ids: number[]; opened: boolean; onClose: () => void }) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<MassForm>(emptyForm);
   const [saving, setSaving] = useState(false);
-  const [preview, setPreview] = useState<{ archive_path: string; fields: [string, string][] }[] | null>(null);
+  const [all, setAll] = useState(false);
   useEffect(() => {
     if (opened) {
       setForm(emptyForm());
-      setPreview(null);
+      setAll(false);
     }
   }, [opened]);
+  const [pattern] = useDebouncedValue(form.pattern.trim(), 300);
+  const parsedIds = all ? ids : ids.slice(0, PREVIEW_ROWS);
+  const parsed = useQuery({
+    queryKey: ["parse-paths", parsedIds, pattern],
+    queryFn: async () => unwrap(await api.POST("/api/models/parse-paths", { body: { ids: parsedIds, pattern } })),
+    enabled: opened && pattern !== "",
+    placeholderData: keepPreviousData,
+  });
+  const preview = pattern && parsed.data ? parsed.data.map((r) => ({ archive_path: r.archive_path, fields: r.fields as [string, string][] })) : null;
   const choices = useQuery({
     queryKey: ["lookups", "choices"],
     queryFn: async () => unwrap(await api.GET("/api/editor/choices")) as Record<string, string[]>,
@@ -31,14 +44,6 @@ export function MassEditDrawer({ ids, opened, onClose }: { ids: number[]; opened
   const list = (k: string) => [...new Set(choices.data?.[k] ?? [])];
   const set = <K extends keyof MassForm>(k: K, v: MassForm[K]) => setForm((f) => ({ ...f, [k]: v }));
 
-  const showParsed = async () => {
-    try {
-      const rows = unwrap(await api.POST("/api/models/parse-paths", { body: { ids, pattern: form.pattern } }));
-      setPreview(rows.map((r) => ({ archive_path: r.archive_path, fields: r.fields as [string, string][] })));
-    } catch (err) {
-      notifications.show({ color: "red", message: (err as Error).message });
-    }
-  };
   const save = async () => {
     setSaving(true);
     try {
@@ -60,7 +65,7 @@ export function MassEditDrawer({ ids, opened, onClose }: { ids: number[]; opened
   return (
     <Drawer opened={opened} onClose={onClose} position="right" size="xl" title={<Text fw={600}>Mass edit {ids.length} model(s)</Text>}>
       <Stack gap="sm" data-testid="mass-editor">
-        <Group align="flex-end" wrap="nowrap">
+        <Group align="flex-end" gap="xs" wrap="nowrap">
           <TextInput
             label="Path pattern"
             description="Values parsed from each archive path, for example {sculptor}/{release} - {title}"
@@ -69,15 +74,27 @@ export function MassEditDrawer({ ids, opened, onClose }: { ids: number[]; opened
             flex={1}
             data-testid="mass-pattern"
           />
-          <Button variant="default" onClick={showParsed} disabled={!form.pattern.trim()}>
-            Show parsed values
-          </Button>
+          <PatternTools pattern={form.pattern} onChange={(p) => set("pattern", p)} mode="parse" />
         </Group>
+        {parsed.isError && pattern && (
+          <Text size="xs" c="red">
+            {parsed.error.message}
+          </Text>
+        )}
         {preview && (
           <>
-            <Text size="xs" c="dimmed">
-              {matched} of {preview.length} path(s) match.
-            </Text>
+            <Group justify="space-between">
+              <Text size="xs" c="dimmed">
+                {all || ids.length <= PREVIEW_ROWS
+                  ? `${matched} of ${preview.length} path(s) match.`
+                  : `The first ${preview.length} of ${ids.length} paths: ${matched} match.`}
+              </Text>
+              {!all && ids.length > PREVIEW_ROWS && (
+                <Button size="compact-xs" variant="default" onClick={() => setAll(true)} data-testid="mass-parse-all">
+                  Show all parsed values
+                </Button>
+              )}
+            </Group>
             <ScrollArea.Autosize mah={220}>
               <Table fz="xs" withTableBorder>
                 <Table.Thead>
