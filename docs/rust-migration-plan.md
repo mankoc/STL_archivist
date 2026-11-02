@@ -1344,6 +1344,11 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.45.6: **Suggestions while editing.** `web/src/browser/SuggestInput.tsx` (a Mantine
+  `Combobox` over `/api/editor/choices`) with the pure `suggest.ts` (`suggestions`: prefix
+  matches first, a comma list completes its last item without repeating items;
+  `applySuggestion`; `CELL_CHOICES`: each table field's list). Used by the table's
+  `CellEditor` and mass edit's typed, scale and tag fields.
 - 2026.45.5: **Open in packer.** The desktop shell's `packer_state`, `pick_packer`,
   `clear_packer` and `open_in_packer` (in `SERVER_PERMISSIONS`; the program is chosen only
   in a file dialog, `Saved.packer_path`, else `find_packer`: PeaZip, then 7-Zip's `7zFM`).

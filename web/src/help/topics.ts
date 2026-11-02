@@ -285,7 +285,7 @@ export const TOPICS: Topic[] = [
     blocks: [
       { p: "Editing needs the **editor** role. Edits reach everyone's open pages at once, and update the folder's [sidecar](sidecars) shortly after when sidecars are on." },
       { list: [
-        "**In the table** — double-click a cell, type, **Enter** saves, **Esc** cancels. Tags and scales are comma-separated.",
+        "**In the table** — double-click a cell, type, **Enter** saves, **Esc** cancels. Tags and scales are comma-separated. As you type, the values already in the library that match are listed: **↑**/**↓** choose one and **Enter** (or a click) takes it — in a single-value cell that also saves it; in tags and scales it completes the item after the last comma.",
         "**Model editor** — **Edit** in the details pane: every field, with suggestions from the library.",
         "**Images** — drop image files on the details pane to add them; the × on an image removes it.",
         "**Remove from library** — removes the selected records and their images from the catalogue; the archive files stay, and a crawl brings them back.",
@@ -294,7 +294,7 @@ export const TOPICS: Topic[] = [
       { p: "Select several models, then **Mass edit** (drag its left edge to make it wider or narrower; double-click the edge for the usual width):" },
       { list: [
         "**Path pattern** takes values from each model's folders. As you type, the values it finds in the first five paths show below it; **Show all parsed values** shows them for every selected model. The **?** button lists the tokens, and **Saved** keeps patterns for your account (apart from Sort files' patterns).",
-        "**Fields** sets values for all of them; **Clear** empties a field. With *replace* on, values replace existing ones; otherwise they only fill empty fields. Scales and tags are added.",
+        "**Fields** sets values for all of them; **Clear** empties a field. With *replace* on, values replace existing ones; otherwise they only fill empty fields. Scales and tags are added. The fields list the values already in the library that match what you type (**↑**/**↓** and **Enter** take one).",
         "**Find & replace** changes text in the chosen fields (case-sensitive or regular expression if you want); **Trim** removes stray spaces.",
       ] },
       { h: "Lookups" },

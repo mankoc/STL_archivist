@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.45.6 — 2026-11-02
+
+- **Suggestions while editing.** Editing a cell of the library table and the typed fields of
+  *Mass edit* (title, creator, type, date, scale, tags) list the values already in the
+  library that match what you type, the ones starting with it first. **↑**/**↓** choose one,
+  **Enter** or a click takes it. In tags and scales the suggestions are for the item after
+  the last comma. Picking a value in a single-value cell saves it.
+
 ## 2026.45.5 — 2026-11-02
 
 - **Open in packer** (desktop app): the detail pane opens the model's archive in an archive
