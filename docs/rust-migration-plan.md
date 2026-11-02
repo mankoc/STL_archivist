@@ -1344,6 +1344,10 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.45.1: **Mass edit's pattern tools.** `web/src/browser/PatternTools.tsx` (token
+  help and saved patterns, shared with Sort files; parse patterns under the per-user key
+  `parse_patterns`). Mass edit previews `parse-paths` of the first five models while
+  typing; *Show all parsed values* parses all.
 - 2026.45.0: **Highlighted warnings.** The per-user setting `highlight_warnings`;
   `web/src/browser/warnings.ts` (`rowTone`: `"Unreadable archive"`, the core's
   `WARNING_UNREADABLE`, is red, any other warning yellow) sets the row's `data-tone`.
