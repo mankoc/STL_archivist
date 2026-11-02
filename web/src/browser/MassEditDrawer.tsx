@@ -1,6 +1,6 @@
 // The mass editor (the desktop's Mass Edit dialog) for the selected models.
 import {
-  Autocomplete, Button, Checkbox, Divider, Drawer, Group, Portal, ScrollArea, Select, SimpleGrid, Stack, Switch, Table, Text, TextInput,
+  Button, Checkbox, Divider, Drawer, Group, Portal, ScrollArea, Select, SimpleGrid, Stack, Switch, Table, Text, TextInput,
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
@@ -14,7 +14,6 @@ import { PatternTools } from "./PatternTools";
 import { SuggestInput } from "./SuggestInput";
 import classes from "./MassEditDrawer.module.css";
 
-const LIMIT = 50;
 /** The `/api/editor/choices` list each typed field suggests from (none for the URL). */
 const MANUAL_CHOICES: Partial<Record<ManualField, string>> = { title: "titles", creator: "creators", source: "sources", release_date: "dates" };
 /** Paths parsed as the pattern is typed; *Show all parsed values* parses every selected one. */
@@ -71,8 +70,7 @@ export function MassEditDrawer({ ids, opened, onClose }: { ids: number[]; opened
     queryFn: async () => unwrap(await api.GET("/api/editor/choices")) as Record<string, string[]>,
     enabled: opened,
   });
-  // Subcollection names repeat across collections, and an Autocomplete throws on duplicate options.
-  const list = (k: string) => [...new Set(choices.data?.[k] ?? [])];
+  const list = (k: string) => choices.data?.[k] ?? [];
   const set = <K extends keyof MassForm>(k: K, v: MassForm[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   const save = async () => {
@@ -193,11 +191,11 @@ export function MassEditDrawer({ ids, opened, onClose }: { ids: number[]; opened
             ]}
             allowDeselect={false}
           />
-          <Autocomplete label="Sculptor" value={form.sculptor} onChange={(v) => set("sculptor", v)} data={list("sculptors")} limit={LIMIT} />
-          <Autocomplete label="Release" value={form.release} onChange={(v) => set("release", v)} data={list("releases")} limit={LIMIT} />
-          <Autocomplete label="Collection" value={form.collection} onChange={(v) => set("collection", v)} data={list("collections")} limit={LIMIT} />
-          <Autocomplete label="Subcollection" value={form.subcollection} onChange={(v) => set("subcollection", v)} data={list("subcollections")} limit={LIMIT} />
-          <Autocomplete label="Category" value={form.category} onChange={(v) => set("category", v)} data={list("categories")} limit={LIMIT} />
+          <SuggestInput label="Sculptor" value={form.sculptor} onChange={(v) => set("sculptor", v)} options={list("sculptors")} />
+          <SuggestInput label="Release" value={form.release} onChange={(v) => set("release", v)} options={list("releases")} />
+          <SuggestInput label="Collection" value={form.collection} onChange={(v) => set("collection", v)} options={list("collections")} />
+          <SuggestInput label="Subcollection" value={form.subcollection} onChange={(v) => set("subcollection", v)} options={list("subcollections")} />
+          <SuggestInput label="Category" value={form.category} onChange={(v) => set("category", v)} options={list("categories")} />
           <SuggestInput label="Scale" description="Comma-separated, added" value={form.scale} onChange={(v) => set("scale", v)} options={list("scales")} commaList />
           <SuggestInput label="Tags" description="Comma-separated, added" value={form.tags} onChange={(v) => set("tags", v)} options={list("tags")} commaList data-testid="mass-tags" />
         </SimpleGrid>
