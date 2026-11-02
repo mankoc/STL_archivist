@@ -40,6 +40,9 @@ pub struct Config {
     pub components_mirror: Option<String>,
     /// Where CLIP embeddings and the AI tagger run (see `workers`).
     pub compute: Compute,
+    /// Import from a web page may read pages on this computer and its network
+    /// (refused by default: editors name the addresses).
+    pub web_allow_private: bool,
 }
 
 /// `server.json` → `"compute"` (or `STL_COMPUTE`).
@@ -80,6 +83,8 @@ struct FileSettings {
     components_mirror: Option<String>,
     #[serde(default)]
     compute: Compute,
+    #[serde(default)]
+    web_allow_private: bool,
 }
 
 impl Config {
@@ -163,6 +168,7 @@ impl Config {
             ai,
             components_mirror: file.components_mirror,
             compute,
+            web_allow_private: file.web_allow_private,
         })
     }
 }

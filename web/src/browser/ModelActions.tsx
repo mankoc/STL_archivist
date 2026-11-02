@@ -18,6 +18,7 @@ import {
   IconRefresh,
   IconSparkles,
   IconTrash,
+  IconWorldDownload,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -30,6 +31,7 @@ export interface ModelActionHandlers {
   massEdit: () => void;
   aiTagger: () => void;
   clearWarnings: (ids: number[]) => void;
+  webImport: (id: number) => void;
   queueJob: (body: JobRequest, what: string) => void;
   sortFiles: () => void;
   deleteFiles: () => void;
@@ -58,6 +60,9 @@ export function ModelActionItems({ ids, where, editor, on }: { ids: number[]; wh
         <>
           <Menu.Label>Metadata</Menu.Label>
           <Menu.Item leftSection={<IconSparkles size={14} />} onClick={on.aiTagger}>AI tagger…</Menu.Item>
+          {one != null && (
+            <Menu.Item leftSection={<IconWorldDownload size={14} />} onClick={() => on.webImport(one)}>Import from web page…</Menu.Item>
+          )}
           <Menu.Item leftSection={<IconAlertTriangleOff size={14} />} onClick={() => on.clearWarnings(ids)}>Clear warnings</Menu.Item>
           <Menu.Label>Archive files</Menu.Label>
           <Menu.Item leftSection={<IconRefresh size={14} />} onClick={() => on.queueJob({ kind: "rescan", ids }, "Rescan")}>

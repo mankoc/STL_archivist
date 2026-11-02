@@ -39,7 +39,7 @@ pub fn library_with(adjust: impl FnOnce(&mut Config)) -> TestLib {
         roots: vec![dir.path().to_string_lossy().into_owned()],
         path_map: vec![],
         web_dir: None,
-        ai: Default::default(), components_mirror: None, compute: Default::default(),
+        ai: Default::default(), components_mirror: None, compute: Default::default(), web_allow_private: false,
     };
     adjust(&mut config);
     let state = Arc::new(Library::open(config).unwrap());
