@@ -2,7 +2,7 @@
 import { Anchor, Box, Button, Center, Checkbox, Group, Loader, Menu, Modal, Popover, SegmentedControl, SimpleGrid, Stack, Switch, Text, TextInput } from "@mantine/core";
 import { useDebouncedValue, useHotkeys } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconAdjustmentsHorizontal, IconArchive, IconColumns, IconEdit, IconFilterOff, IconRefresh, IconSearch, IconSparkles, IconSquare, IconSquareCheck, IconTrash } from "@tabler/icons-react";
+import { IconAdjustmentsHorizontal, IconAlertTriangleOff, IconArchive, IconColumns, IconEdit, IconFilterOff, IconRefresh, IconSearch, IconSparkles, IconSquare, IconSquareCheck, IconTrash } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type CSSProperties, type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
 
@@ -131,6 +131,15 @@ export function BrowserPage() {
         setMenu({ x: e.clientX, y: e.clientY, ids: r.ids });
       }
     : undefined;
+
+  const clearWarnings = async (ids: number[]) => {
+    try {
+      const r = unwrap(await api.POST("/api/models/clear-warnings", { body: { ids } }));
+      notifications.show({ message: `Cleared the warnings of ${r.models} model(s).` });
+    } catch (err) {
+      notifications.show({ color: "red", message: (err as Error).message });
+    }
+  };
 
   const remove = async () => {
     setConfirmRemove(false);
@@ -329,6 +338,9 @@ export function BrowserPage() {
         <Menu.Dropdown data-testid="row-menu">
           <Menu.Item leftSection={<IconRefresh size={14} />} onClick={() => menu && queueJob({ kind: "rescan", ids: menu.ids }, "Rescan")}>
             {menu && menu.ids.length > 1 ? `Rescan ${menu.ids.length} archives` : "Rescan"}
+          </Menu.Item>
+          <Menu.Item leftSection={<IconAlertTriangleOff size={14} />} onClick={() => menu && clearWarnings(menu.ids)}>
+            Clear warnings
           </Menu.Item>
         </Menu.Dropdown>
       </Menu>

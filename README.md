@@ -13,7 +13,7 @@ can open a library on your computer without setting up a server.
 [the HTTP API](docs/api.md) ·
 and in the interface, the **?** button: searchable in-depth help on every feature
 
-Version: 2026.45.3
+Version: 2026.45.4
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). This version opens its data directory and, since 2026.43.7, converts it once
@@ -42,7 +42,8 @@ Version: 2026.45.3
 - **Scale, presupport and warning detection** — scales such as `28mm`, `32mm`, `1/35` (a model
   can have several); Lychee / Chitubox / presupported STL detection; warnings for archives
   with presupported STLs, no images, no printable files or nested archives, with *Warning
-  details* showing which files trigger each
+  details* showing which files trigger each; *Clear warnings* (right-click a row) dismisses
+  false positives until the archive is rescanned
 - **Browser** — faceted filters (include / exclude per value, has-value groups, counts),
   search in chosen fields (optionally fuzzy: accents ignored, typos tolerated), a sortable virtualised table with in-place editing, selectable columns and
   (optionally) rows with warnings highlighted, folders of the filter tree crawled or
@@ -57,7 +58,7 @@ Version: 2026.45.3
   metadata (exact, Levenshtein, Soundex), with side-by-side comparison
 - **Find by Image** — drop a picture to find models whose thumbnails look like it
 - **AI tagger** — Qwen2.5-VL through llama.cpp suggests tags, title, creator, sculptor,
-  collection, scale, source, year and description; review one by one or tag a selection in
+  scale, source, year and description (never collection or subcollection); review one by one or tag a selection in
   one job
 - **Monitored folders** — crawled automatically when their archives change (checked by size
   and date at an interval); archives that vanish are marked missing

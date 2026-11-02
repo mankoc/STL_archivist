@@ -18,13 +18,13 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
   or `GET /api/jobs/{id}`.
 - Writes that change the library are announced on `/api/events` as `library_changed`.
 
-## Endpoints (97)
+## Endpoints (98)
 
 - [Sign-in and sessions](#sign-in-and-sessions) (5)
 - [Users and preferences](#users-and-preferences) (7)
 - [System](#system) (1)
 - [Browsing the library](#browsing-the-library) (12)
-- [Editing models](#editing-models) (11)
+- [Editing models](#editing-models) (12)
 - [Lookups (sculptors, collections, tags…)](#lookups-sculptors-collections-tags) (13)
 - [Thumbnails and images](#thumbnails-and-images) (3)
 - [Files and folders](#files-and-folders) (3)
@@ -94,6 +94,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 | `GET /api/editor/subcollections` | The subcollection names of one collection. | query `collection`: string | 200 string[] |  |
 | `DELETE /api/images/{id}` | Remove one image and its thumbnail. | path `id`: integer | 204 | 404 |
 | `PATCH /api/models/cells` | Apply browser-table cell edits in one transaction, in order. Tags are lowercased and de-duplicated; a subcollection belongs to its collection. | body: [CellEdits](#celledits) | 200 [Changed](#changed) | 400, 403 |
+| `POST /api/models/clear-warnings` | Clear the warnings of models (false positives); a rescan detects them again. | body: [IdsRequest](#idsrequest) | 200 [Changed](#changed) | 403 |
 | `POST /api/models/delete` | Remove models from the library (their images and thumbnails too). The archive files are not touched. | body: [IdsRequest](#idsrequest) | 200 [Changed](#changed) | 403 |
 | `POST /api/models/mass-edit` | Apply the mass editor's changes to the listed models in one transaction. | body: [MassEdit](#massedit) | 200 [MassResult](#massresult) | 400 |
 | `POST /api/models/parse-paths` | What a path pattern extracts from each model's archive path (the mass editor's "Show parsed values"); nothing is saved. | body: [ParseRequest](#parserequest) | 200 [Parsed](#parsed)[] |  |
@@ -258,13 +259,11 @@ The metadata fields the tagger fills (`normalize_meta`).
 
 | Field | Type | Description |
 |---|---|---|
-| `collection` (optional) | string |  |
 | `creator` (optional) | string |  |
 | `description` (optional) | string |  |
 | `scale` (optional) | string |  |
 | `sculptor` (optional) | string |  |
 | `source` (optional) | string | `patreon`, `kickstarter`, `myminifactory` or empty. |
-| `subcollection` (optional) | string |  |
 | `title` (optional) | string |  |
 | `year` (optional) | integer \| null |  |
 

@@ -316,10 +316,6 @@ pub struct AiFieldValues {
     #[serde(default)]
     pub sculptor: String,
     #[serde(default)]
-    pub collection: String,
-    #[serde(default)]
-    pub subcollection: String,
-    #[serde(default)]
     pub scale: String,
     #[serde(default)]
     pub description: String,
@@ -336,8 +332,6 @@ impl From<AiFields> for AiFieldValues {
             title: f.title,
             creator: f.creator,
             sculptor: f.sculptor,
-            collection: f.collection,
-            subcollection: f.subcollection,
             scale: f.scale,
             description: f.description,
             source: f.source,
@@ -352,8 +346,6 @@ impl From<AiFieldValues> for AiFields {
             title: f.title,
             creator: f.creator,
             sculptor: f.sculptor,
-            collection: f.collection,
-            subcollection: f.subcollection,
             scale: f.scale,
             description: f.description,
             source: f.source,

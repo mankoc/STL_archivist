@@ -7,15 +7,15 @@ export type Fields = Required<Omit<Schemas["AiFieldValues"], "year">> & { year: 
 export const SOURCES = ["patreon", "kickstarter", "myminifactory"];
 
 export const EMPTY_FIELDS: Fields = {
-  title: "", creator: "", sculptor: "", collection: "", subcollection: "", scale: "", description: "", source: "", year: null,
+  title: "", creator: "", sculptor: "", scale: "", description: "", source: "", year: null,
 };
 
 /** The suggestion's fields with every key present. */
 export function fieldsOf(s: Suggestion | null | undefined): Fields {
   const f = s?.fields ?? {};
   return {
-    title: f.title ?? "", creator: f.creator ?? "", sculptor: f.sculptor ?? "", collection: f.collection ?? "",
-    subcollection: f.subcollection ?? "", scale: f.scale ?? "", description: f.description ?? "", source: f.source ?? "",
+    title: f.title ?? "", creator: f.creator ?? "", sculptor: f.sculptor ?? "",
+    scale: f.scale ?? "", description: f.description ?? "", source: f.source ?? "",
     year: f.year ?? null,
   };
 }

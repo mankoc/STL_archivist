@@ -772,6 +772,23 @@ export interface paths {
         patch: operations["patch_models_cells"];
         trace?: never;
     };
+    "/api/models/clear-warnings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Clear the warnings of models (false positives); a rescan detects them again. */
+        post: operations["post_models_clear_warnings"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/models/delete": {
         parameters: {
             query?: never;
@@ -1482,14 +1499,12 @@ export interface components {
         };
         /** @description The metadata fields the tagger fills (`normalize_meta`). */
         AiFieldValues: {
-            collection?: string;
             creator?: string;
             description?: string;
             scale?: string;
             sculptor?: string;
             /** @description `patreon`, `kickstarter`, `myminifactory` or empty. */
             source?: string;
-            subcollection?: string;
             title?: string;
             /** Format: int64 */
             year?: number | null;
@@ -4596,6 +4611,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    post_models_clear_warnings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdsRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Changed"];
                 };
             };
             403: {

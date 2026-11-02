@@ -286,6 +286,20 @@ pub fn set_warnings(tx: &Transaction, items: &[(i64, Option<String>)]) -> Result
     Ok(())
 }
 
+/// Clear the warnings of the listed models (dismissed false positives); the
+/// ids of the models that had any. A rescan detects them again.
+pub fn clear_warnings(tx: &Transaction, ids: &[i64]) -> Result<Vec<i64>> {
+    let now = super::edit::utc_now_text();
+    let mut st = tx.prepare("UPDATE models SET warning = NULL, updated_at = ?2 WHERE id = ?1 AND warning IS NOT NULL")?;
+    let mut changed = Vec::new();
+    for &id in ids {
+        if st.execute(params![id, now])? > 0 {
+            changed.push(id);
+        }
+    }
+    Ok(changed)
+}
+
 pub type LocationRow = (i64, Option<String>, Option<String>, Option<i64>);
 
 /// `(id, archive_path, archive_hash, archive_size)` of every model, by id.
@@ -413,6 +427,7 @@ mod dialog_tests {
         .unwrap();
         let tx = conn.transaction().unwrap();
         set_warnings(&tx, &[(1, None), (3, Some("n".into()))]).unwrap();
+        assert_eq!(clear_warnings(&tx, &[2, 3, 99]).unwrap(), [3]);
         assert_eq!(merge_moved(&tx, &[(1, "G:/a.7z".into()), (1, "nope".into())]).unwrap(), (1, 1, vec![]));
         let (refs, pruned) = remove_records(&tx, &[3]).unwrap();
         tx.commit().unwrap();

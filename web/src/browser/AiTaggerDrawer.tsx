@@ -177,8 +177,6 @@ function Review({ ids, maxTags, ignoreMeta, overwrite, onDone }: { ids: number[]
               <TextInput size="xs" label="Title" value={fields.title} onChange={(e) => set("title")(e.currentTarget.value)} />
               <TextInput size="xs" label="Creator" value={fields.creator} onChange={(e) => set("creator")(e.currentTarget.value)} />
               <TextInput size="xs" label="Sculptor" value={fields.sculptor} onChange={(e) => set("sculptor")(e.currentTarget.value)} />
-              <TextInput size="xs" label="Collection" value={fields.collection} onChange={(e) => set("collection")(e.currentTarget.value)} />
-              <TextInput size="xs" label="Subcollection" value={fields.subcollection} onChange={(e) => set("subcollection")(e.currentTarget.value)} />
               <TextInput size="xs" label="Scale" value={fields.scale} onChange={(e) => set("scale")(e.currentTarget.value)} />
               <Select size="xs" label="Source" data={SOURCES} value={fields.source || null} clearable onChange={(v) => set("source")(v ?? "")} />
               <NumberInput size="xs" label="Year" min={1900} max={2100} value={fields.year ?? ""} onChange={(v) => setFields((f) => ({ ...f, year: v === "" ? null : Number(v) }))} />
