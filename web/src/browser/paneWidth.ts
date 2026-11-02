@@ -1,28 +1,32 @@
-// The detail pane's width: dragged by its left edge, kept within limits, and
-// remembered in this browser (it depends on the screen, not the account).
+// Pane widths: the detail pane's and the mass editor's, dragged by their left
+// edge, kept within limits, and remembered in this browser (they depend on the
+// screen, not the account).
 
 export const DEFAULT_WIDTH = 320;
 export const MIN_WIDTH = 240;
 const KEY = "stl.detailWidth";
 
-/** `width` kept between the minimum and `maxShare` of the page's width. */
-export function clampWidth(width: number, pageWidth: number, maxShare = 0.6): number {
-  const max = Math.max(MIN_WIDTH, Math.floor(pageWidth * maxShare));
-  return Math.round(Math.min(Math.max(width, MIN_WIDTH), max));
+/** The mass edit drawer (Mantine's `xl` drawer to begin with). */
+export const MASS_EDIT = { key: "stl.massEditWidth", fallback: 780, min: 440, maxShare: 0.95 };
+
+/** `width` kept between `min` and `maxShare` of the page's width. */
+export function clampWidth(width: number, pageWidth: number, maxShare = 0.6, min = MIN_WIDTH): number {
+  const max = Math.max(min, Math.floor(pageWidth * maxShare));
+  return Math.round(Math.min(Math.max(width, min), max));
 }
 
-export function loadWidth(): number {
+export function loadWidth(key = KEY, fallback = DEFAULT_WIDTH, min = MIN_WIDTH): number {
   try {
-    const v = Number(localStorage.getItem(KEY));
-    return Number.isFinite(v) && v >= MIN_WIDTH ? v : DEFAULT_WIDTH;
+    const v = Number(localStorage.getItem(key));
+    return Number.isFinite(v) && v >= min ? v : fallback;
   } catch {
-    return DEFAULT_WIDTH;
+    return fallback;
   }
 }
 
-export function saveWidth(width: number): void {
+export function saveWidth(width: number, key = KEY): void {
   try {
-    localStorage.setItem(KEY, String(width));
+    localStorage.setItem(key, String(width));
   } catch {
     /* a convenience only */
   }

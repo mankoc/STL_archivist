@@ -1,15 +1,17 @@
 // The mass editor (the desktop's Mass Edit dialog) for the selected models.
 import {
-  Autocomplete, Button, Checkbox, Divider, Drawer, Group, ScrollArea, Select, SimpleGrid, Stack, Switch, Table, Text, TextInput,
+  Autocomplete, Button, Checkbox, Divider, Drawer, Group, Portal, ScrollArea, Select, SimpleGrid, Stack, Switch, Table, Text, TextInput,
 } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { type PointerEvent as ReactPointerEvent, useEffect, useState } from "react";
 
 import { api, unwrap } from "../api/client";
 import { CLEAR_PRESUPPORTS, emptyForm, FIND_FIELDS, MANUAL, type MassForm, toRequest } from "./massEdit";
+import { clampWidth, loadWidth, MASS_EDIT, saveWidth } from "./paneWidth";
 import { PatternTools } from "./PatternTools";
+import classes from "./MassEditDrawer.module.css";
 
 const LIMIT = 50;
 /** Paths parsed as the pattern is typed; *Show all parsed values* parses every selected one. */
@@ -20,6 +22,32 @@ export function MassEditDrawer({ ids, opened, onClose }: { ids: number[]; opened
   const [form, setForm] = useState<MassForm>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [all, setAll] = useState(false);
+  // The drawer's width, dragged by its left edge.
+  const [width, setWidth] = useState(() => loadWidth(MASS_EDIT.key, MASS_EDIT.fallback, MASS_EDIT.min));
+  const [dragging, setDragging] = useState(false);
+  const startDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const target = e.currentTarget;
+    target.setPointerCapture(e.pointerId);
+    setDragging(true);
+    let w = width;
+    const move = (ev: PointerEvent) => {
+      w = clampWidth(window.innerWidth - ev.clientX, window.innerWidth, MASS_EDIT.maxShare, MASS_EDIT.min);
+      setWidth(w);
+    };
+    const up = () => {
+      target.removeEventListener("pointermove", move);
+      target.removeEventListener("pointerup", up);
+      setDragging(false);
+      saveWidth(w, MASS_EDIT.key);
+    };
+    target.addEventListener("pointermove", move);
+    target.addEventListener("pointerup", up);
+  };
+  const resetWidth = () => {
+    setWidth(MASS_EDIT.fallback);
+    saveWidth(MASS_EDIT.fallback, MASS_EDIT.key);
+  };
   useEffect(() => {
     if (opened) {
       setForm(emptyForm());
@@ -63,7 +91,19 @@ export function MassEditDrawer({ ids, opened, onClose }: { ids: number[]; opened
   const matched = preview?.filter((p) => p.fields.length).length ?? 0;
 
   return (
-    <Drawer opened={opened} onClose={onClose} position="right" size="xl" title={<Text fw={600}>Mass edit {ids.length} model(s)</Text>}>
+    <Drawer opened={opened} onClose={onClose} position="right" size={Math.min(width, window.innerWidth)} title={<Text fw={600}>Mass edit {ids.length} model(s)</Text>}>
+      {/* In a portal: the drawer's slide-in transform would move a fixed element inside it. */}
+      <Portal>
+        <div
+          className={classes.splitter}
+          style={{ right: Math.min(width, window.innerWidth) - 4 }}
+          data-dragging={dragging || undefined}
+          onPointerDown={startDrag}
+          onDoubleClick={resetWidth}
+          title="Drag to resize; double-click to reset"
+          data-testid="mass-edit-splitter"
+        />
+      </Portal>
       <Stack gap="sm" data-testid="mass-editor">
         <Group align="flex-end" gap="xs" wrap="nowrap">
           <TextInput

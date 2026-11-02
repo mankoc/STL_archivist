@@ -1344,6 +1344,9 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.45.2: **Resizable mass edit.** `paneWidth.ts` takes a key, fallback and minimum
+  (`MASS_EDIT`); the drawer's splitter is a fixed element in a `Portal` (the drawer's
+  transform would move it otherwise).
 - 2026.45.1: **Mass edit's pattern tools.** `web/src/browser/PatternTools.tsx` (token
   help and saved patterns, shared with Sort files; parse patterns under the per-user key
   `parse_patterns`). Mass edit previews `parse-paths` of the first five models while
