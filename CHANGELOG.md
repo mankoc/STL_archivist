@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.45.9 — 2026-11-02
+
+- **Fixed: links did nothing in the desktop app** (the URL column, the project link in
+  *About*, the licence links in the components list). Web pages now open in your default
+  browser; pages of the server, such as an image's original, open in a window of the app.
+
 ## 2026.45.8 — 2026-11-02
 
 - **A tidier library toolbar.** The search options are a button inside the search box; the
