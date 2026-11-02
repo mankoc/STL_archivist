@@ -290,7 +290,7 @@ export const TOPICS: Topic[] = [
         "**Remove from library** — removes the selected records and their images from the catalogue; the archive files stay, and a crawl brings them back.",
       ] },
       { h: "Mass edit" },
-      { p: "Select several models, then **Mass edit**:" },
+      { p: "Select several models, then **Mass edit** (drag its left edge to make it wider or narrower; double-click the edge for the usual width):" },
       { list: [
         "**Path pattern** takes values from each model's folders. As you type, the values it finds in the first five paths show below it; **Show all parsed values** shows them for every selected model. The **?** button lists the tokens, and **Saved** keeps patterns for your account (apart from Sort files' patterns).",
         "**Fields** sets values for all of them; **Clear** empties a field. With *replace* on, values replace existing ones; otherwise they only fill empty fields. Scales and tags are added.",

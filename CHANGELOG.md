@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026.45.2 — 2026-11-02
+
+- **Mass edit can be resized:** drag its left edge (double-click it for the usual width).
+  The width is remembered in this browser.
+
 ## 2026.45.1 — 2026-11-02
 
 - **Mass edit's path pattern** has the token help (**?**) and **Saved** patterns of Sort
