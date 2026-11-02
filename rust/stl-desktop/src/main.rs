@@ -4,8 +4,8 @@
 //! local library: the `stl-server` beside this program, on a free loopback
 //! port. Connecting navigates the window to the server, which serves the web
 //! client itself. The shell holds no library logic; a server's pages may call
-//! only `open_folder`, the MeshPeek and packer ones and the compute worker's
-//! commands (granted per server at connect).
+//! only `open_folder`, the MeshPeek and packer ones, `read_web_page` and the
+//! compute worker's commands (granted per server at connect).
 //!
 //! MeshPeek: when the MeshPeek viewer is installed, "Open in MeshPeek" starts
 //! it on a model's archive (or one model file inside it, MeshPeek's
@@ -24,6 +24,10 @@
 //! Links that open a new window (`target="_blank"`, `window.open`): pages of
 //! a server the app connected to open in a window of their own (signed in, as
 //! the main one); other web pages in the default browser; nothing else opens.
+//!
+//! Import from a web page: sites that answer only a browser (bot checks) or a
+//! signed-in one (Patreon) are read in a window of the shell's (`read_web_page`),
+//! which keeps the app's sign-ins; a bar on its pages hands the page over.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::collections::{BTreeMap, HashSet};
@@ -236,6 +240,7 @@ const SERVER_PERMISSIONS: &[&str] = &[
     "allow-pick-packer",
     "allow-clear-packer",
     "allow-open-in-packer",
+    "allow-read-web-page",
     "allow-start-worker",
     "allow-stop-worker",
     "allow-worker-state",
@@ -859,6 +864,131 @@ fn open_in_packer(app: AppHandle, path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// The reader window's bar ("Use this page", "Cancel"), added to each page it
+/// shows. Built with DOM calls only: pages may forbid inline styles and
+/// `innerHTML` (CSP, Trusted Types). A click sets `__stlArchivistRead`, which
+/// [`READER_COLLECT`] polls.
+const READER_BAR: &str = r##"(() => {
+  if (window.top !== window) return;
+  const add = () => {
+    if (!document.documentElement || document.getElementById("stl-archivist-reader")) return;
+    const bar = document.createElement("div");
+    bar.id = "stl-archivist-reader";
+    bar.style.cssText = "all:initial;position:fixed;z-index:2147483647;left:50%;bottom:16px;transform:translateX(-50%);" +
+      "display:flex;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;background:#1f2937;color:#f9fafb;" +
+      "font:14px system-ui,sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.35)";
+    const text = document.createElement("span");
+    text.textContent = "StlArchivist: sign in or pass any check, open the model's page, then";
+    const button = (label, color, value) => {
+      const b = document.createElement("button");
+      b.textContent = label;
+      b.style.cssText = "all:initial;font:14px system-ui,sans-serif;padding:6px 12px;border-radius:6px;cursor:pointer;color:#fff;background:" + color;
+      b.addEventListener("click", () => { window.__stlArchivistRead = value; b.textContent = value === "use" ? "Reading…" : "Closing…"; });
+      return b;
+    };
+    bar.append(text, button("Use this page", "#2563eb", "use"), button("Cancel", "#4b5563", "cancel"));
+    document.documentElement.appendChild(bar);
+  };
+  document.addEventListener("DOMContentLoaded", add);
+  setInterval(add, 1000);
+})();"##;
+
+/// Polled in the reader window: `null` until the bar is clicked, then the page
+/// (its address, HTML, and the images it shows at least 300 pixels wide and high).
+const READER_COLLECT: &str = r#"(() => { try {
+  const s = window.__stlArchivistRead;
+  if (!s) return null;
+  if (s === "cancel") return { cancel: true };
+  document.getElementById("stl-archivist-reader")?.remove();
+  const images = [...document.images].filter(i => i.naturalWidth >= 300 && i.naturalHeight >= 300).map(i => i.currentSrc || i.src);
+  return { url: location.href, html: document.documentElement.outerHTML, images };
+} catch (e) { return { error: String(e) }; } })()"#;
+
+const READER: &str = "reader";
+/// How long the reader window waits for its page (signing in can take a while).
+const READER_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+
+/// A page as the reader window had it, for the server's `/api/web/read-captured`.
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+struct CapturedPage {
+    url: String,
+    html: String,
+    images: Vec<String>,
+}
+
+/// What [`READER_COLLECT`] returned.
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(untagged)]
+enum Collected {
+    Page(CapturedPage),
+    Cancel { cancel: bool },
+    Error { error: String },
+}
+
+/// The collector's answer (JSON); `None` while the page is not handed over.
+fn parse_collected(json: &str) -> Option<Collected> {
+    serde_json::from_str::<Option<Collected>>(json).ok().flatten()
+}
+
+/// Read a model's page in a window of its own (Import from a web page, for sites
+/// that answer only a browser or a signed-in one): it keeps the app's sign-ins,
+/// and its bar hands the page over. `None` when cancelled or closed. Pages in
+/// that window get no shell commands.
+#[tauri::command]
+async fn read_web_page(app: AppHandle, url: String) -> Result<Option<CapturedPage>, String> {
+    let target = Url::parse(url.trim()).map_err(|e| format!("{url:?} is not a web address: {e}"))?;
+    if !matches!(target.scheme(), "http" | "https") {
+        return Err(format!("{url:?} is not an http(s) address"));
+    }
+    if let Some(w) = app.get_webview_window(READER) {
+        let _ = w.set_focus();
+        return Err("another page is open for reading: use it or close its window first".into());
+    }
+    let window = WebviewWindowBuilder::new(&app, READER, WebviewUrl::External(target))
+        .title("Read a model's page — StlArchivist")
+        .initialization_script(READER_BAR)
+        // Sign-in pop-ups (an account at Google, …).
+        .on_new_window(|_, _| NewWindowResponse::Allow)
+        .inner_size(1200.0, 900.0)
+        .build()
+        .map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let started = Instant::now();
+        loop {
+            std::thread::sleep(Duration::from_millis(500));
+            if app.get_webview_window(READER).is_none() {
+                return Ok(None);
+            }
+            if started.elapsed() > READER_TIMEOUT {
+                let _ = window.close();
+                return Err("the page was not handed over in time".into());
+            }
+            let (tx, rx) = std::sync::mpsc::channel();
+            if window.eval_with_callback(READER_COLLECT, move |r| drop(tx.send(r))).is_err() {
+                continue;
+            }
+            let Ok(answer) = rx.recv_timeout(Duration::from_secs(5)) else { continue };
+            match parse_collected(&answer) {
+                None => {}
+                Some(Collected::Page(page)) => {
+                    let _ = window.close();
+                    return Ok(Some(page));
+                }
+                Some(Collected::Cancel { .. }) => {
+                    let _ = window.close();
+                    return Ok(None);
+                }
+                Some(Collected::Error { error }) => {
+                    let _ = window.close();
+                    return Err(format!("the page could not be read: {error}"));
+                }
+            }
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Back to the launcher page.
 fn show_launcher(app: &AppHandle) {
     let url = app.state::<Shell>().launcher.lock().unwrap_or_else(|e| e.into_inner()).clone();
@@ -1005,6 +1135,7 @@ fn main() {
             pick_packer,
             clear_packer,
             open_in_packer,
+            read_web_page,
             start_worker,
             stop_worker,
             worker_state,
@@ -1057,6 +1188,23 @@ mod tests {
         assert_eq!(target("http://127.0.0.1:9999/"), NewWindow::Browser);
         assert_eq!(target("file:///C:/Windows/notepad.exe"), NewWindow::Refused);
         assert_eq!(target("javascript:alert(1)"), NewWindow::Refused);
+    }
+
+    #[test]
+    fn the_reader_window_hands_over_a_page_or_nothing() {
+        assert_eq!(parse_collected("null"), None);
+        assert_eq!(parse_collected("not json"), None);
+        assert_eq!(parse_collected(r#"{"cancel": true}"#), Some(Collected::Cancel { cancel: true }));
+        assert_eq!(parse_collected(r#"{"error": "TypeError"}"#), Some(Collected::Error { error: "TypeError".into() }));
+        let page = r#"{"url": "https://www.patreon.com/posts/1", "html": "<html></html>", "images": ["https://c10.patreonusercontent.com/a.png"]}"#;
+        assert_eq!(
+            parse_collected(page),
+            Some(Collected::Page(CapturedPage {
+                url: "https://www.patreon.com/posts/1".into(),
+                html: "<html></html>".into(),
+                images: vec!["https://c10.patreonusercontent.com/a.png".into()],
+            }))
+        );
     }
 
     #[test]

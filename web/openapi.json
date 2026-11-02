@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.45.10"
+    "version": "2026.45.11"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -2776,6 +2776,79 @@
         }
       }
     },
+    "/api/models/{id}/web-import": {
+      "post": {
+        "tags": [
+          "editing"
+        ],
+        "summary": "Apply a page's reviewed fields and images to a model.",
+        "operationId": "post_models_by_id_web_import",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Model id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebImport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebImported"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/search/image": {
       "post": {
         "tags": [
@@ -3962,6 +4035,128 @@
         }
       }
     },
+    "/api/web/read": {
+      "post": {
+        "tags": [
+          "editing"
+        ],
+        "summary": "Read a model's page. Addresses on this computer or its network are refused\n(unless `web_allow_private`); a site that answers only a browser is\nreported in `blocked`.",
+        "operationId": "post_web_read",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebReadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebRead"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/web/read-captured": {
+      "post": {
+        "tags": [
+          "editing"
+        ],
+        "summary": "Read a page the desktop app captured (nothing is fetched).",
+        "operationId": "post_web_read_captured",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CapturedPage"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebPageInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workers": {
       "get": {
         "tags": [
@@ -4326,6 +4521,32 @@
             "minimum": 0
           }
         }
+      },
+      "CapturedPage": {
+        "type": "object",
+        "description": "A page as the desktop app's window had it.",
+        "required": [
+          "url",
+          "html"
+        ],
+        "properties": {
+          "html": {
+            "type": "string",
+            "description": "Its HTML (the document as the browser built it)."
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Images the browser showed large on it."
+          },
+          "url": {
+            "type": "string",
+            "description": "The page's address when it was captured."
+          }
+        },
+        "additionalProperties": false
       },
       "Cell": {
         "type": "object",
@@ -8819,6 +9040,191 @@
             "type": "string"
           }
         }
+      },
+      "WebImport": {
+        "type": "object",
+        "description": "What the review kept: fields replace the model's (absent or empty ones are\nleft), tags are added, images downloaded and added.",
+        "properties": {
+          "creator": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Image addresses (http or https).",
+            "default": []
+          },
+          "skip_known": {
+            "type": "boolean",
+            "description": "Skip images that look like one the model has, or an earlier one of `images`.",
+            "default": false
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
+          }
+        },
+        "additionalProperties": false
+      },
+      "WebImported": {
+        "type": "object",
+        "required": [
+          "changed",
+          "added",
+          "skipped",
+          "failed"
+        ],
+        "properties": {
+          "added": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImageRef"
+            }
+          },
+          "changed": {
+            "type": "boolean",
+            "description": "Whether a field or tag changed."
+          },
+          "failed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Images that could not be downloaded or read: `address: why`."
+          },
+          "skipped": {
+            "type": "integer",
+            "description": "Images skipped as already there.",
+            "minimum": 0
+          }
+        }
+      },
+      "WebPageInfo": {
+        "type": "object",
+        "description": "What a model's page says.",
+        "required": [
+          "url",
+          "tags",
+          "images"
+        ],
+        "properties": {
+          "creator": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Image addresses, the page's own first."
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The site (`Cults3D`, `MyMiniFactory`, `Patreon`, …)."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Lowercase, de-duplicated."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "description": "The page's address (its canonical one on the same site)."
+          }
+        }
+      },
+      "WebRead": {
+        "type": "object",
+        "properties": {
+          "blocked": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it could not: the site answers only a browser (a bot check, a\nsign-in). The desktop app reads such pages in a window."
+          },
+          "page": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WebPageInfo",
+                "description": "What the page says, when the server could read it."
+              }
+            ]
+          }
+        }
+      },
+      "WebReadRequest": {
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The model's page (http or https)."
+          }
+        },
+        "additionalProperties": false
       },
       "WorkerInfo": {
         "type": "object",

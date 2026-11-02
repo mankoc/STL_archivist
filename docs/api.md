@@ -1,6 +1,6 @@
 # StlArchivist API
 
-Version 2026.45.10. Generated from `web/openapi.json` by `tools/api_doc.py`; the
+Version 2026.45.11. Generated from `web/openapi.json` by `tools/api_doc.py`; the
 running server serves the same document at `GET /api/openapi.json`. Do not edit by hand:
 run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after changing routes.
 
@@ -18,13 +18,13 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
   or `GET /api/jobs/{id}`.
 - Writes that change the library are announced on `/api/events` as `library_changed`.
 
-## Endpoints (98)
+## Endpoints (101)
 
 - [Sign-in and sessions](#sign-in-and-sessions) (5)
 - [Users and preferences](#users-and-preferences) (7)
 - [System](#system) (1)
 - [Browsing the library](#browsing-the-library) (12)
-- [Editing models](#editing-models) (12)
+- [Editing models](#editing-models) (15)
 - [Lookups (sculptors, collections, tags…)](#lookups-sculptors-collections-tags) (13)
 - [Thumbnails and images](#thumbnails-and-images) (3)
 - [Files and folders](#files-and-folders) (3)
@@ -101,7 +101,10 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 | `GET /api/models/{id}/editor` | A model as the editor shows it. | path `id`: integer | 200 [EditorModel](#editormodel) | 404 |
 | `PUT /api/models/{id}/editor` | Save the editor's form for one model. | path `id`: integer<br>body: [EditorSave](#editorsave) | 204 | 400, 404 |
 | `POST /api/models/{id}/images` | Add images to a model (multipart form, one file per part). Each becomes a thumbnail (resized to the library's thumbnail size, or its view capture size with `view`); the original is not kept. | path `id`: integer<br>query `view`?: boolean<br>body: `multipart/form-data` | 200 [AddedImages](#addedimages) | 404, 413 |
+| `POST /api/models/{id}/web-import` | Apply a page's reviewed fields and images to a model. | path `id`: integer<br>body: [WebImport](#webimport) | 200 [WebImported](#webimported) | 400, 403, 404 |
 | `POST /api/sort/preview` | Where the archives would go (nothing is moved). | body: [SortRequest](#sortrequest) | 200 [SortRow](#sortrow)[] | 403 |
+| `POST /api/web/read` | Read a model's page. Addresses on this computer or its network are refused (unless `web_allow_private`); a site that answers only a browser is reported in `blocked`. | body: [WebReadRequest](#webreadrequest) | 200 [WebRead](#webread) | 400, 403, 502 |
+| `POST /api/web/read-captured` | Read a page the desktop app captured (nothing is fetched). | body: [CapturedPage](#capturedpage) | 200 [WebPageInfo](#webpageinfo) | 400, 403, 413 |
 
 ### Lookups (sculptors, collections, tags…)
 
@@ -341,6 +344,16 @@ Type: map of map of integer
 | `modified` | integer | Unix seconds. |
 | `name` | string |  |
 | `size` | integer |  |
+
+### CapturedPage
+
+A page as the desktop app's window had it.
+
+| Field | Type | Description |
+|---|---|---|
+| `html` | string | Its HTML (the document as the browser built it). |
+| `images` (optional) | string[] | Images the browser showed large on it. |
+| `url` | string | The page's address when it was captured. |
 
 ### Cell
 
@@ -1431,6 +1444,57 @@ A model file inside an archive that the viewer can show.
 |---|---|---|
 | `members` | [WarningMember](#warningmember)[] | The members that trigger it now (empty for warnings raised by an absence, or ones that no longer reproduce). |
 | `warning` | string |  |
+
+### WebImport
+
+What the review kept: fields replace the model's (absent or empty ones are left), tags are added, images downloaded and added.
+
+| Field | Type | Description |
+|---|---|---|
+| `creator` (optional) | string \| null |  |
+| `description` (optional) | string \| null |  |
+| `images` (optional) | string[] | Image addresses (http or https). |
+| `skip_known` (optional) | boolean | Skip images that look like one the model has, or an earlier one of `images`. |
+| `source` (optional) | string \| null |  |
+| `tags` (optional) | string[] |  |
+| `title` (optional) | string \| null |  |
+| `url` (optional) | string \| null |  |
+
+### WebImported
+
+| Field | Type | Description |
+|---|---|---|
+| `added` | [ImageRef](#imageref)[] |  |
+| `changed` | boolean | Whether a field or tag changed. |
+| `failed` | string[] | Images that could not be downloaded or read: `address: why`. |
+| `skipped` | integer | Images skipped as already there. |
+
+### WebPageInfo
+
+What a model's page says.
+
+| Field | Type | Description |
+|---|---|---|
+| `creator` (optional) | string \| null |  |
+| `description` (optional) | string \| null |  |
+| `images` | string[] | Image addresses, the page's own first. |
+| `source` (optional) | string \| null | The site (`Cults3D`, `MyMiniFactory`, `Patreon`, …). |
+| `tags` | string[] | Lowercase, de-duplicated. |
+| `title` (optional) | string \| null |  |
+| `url` | string | The page's address (its canonical one on the same site). |
+
+### WebRead
+
+| Field | Type | Description |
+|---|---|---|
+| `blocked` (optional) | string \| null | Why it could not: the site answers only a browser (a bot check, a sign-in). The desktop app reads such pages in a window. |
+| `page` (optional) | null \| [WebPageInfo](#webpageinfo) |  |
+
+### WebReadRequest
+
+| Field | Type | Description |
+|---|---|---|
+| `url` | string | The model's page (http or https). |
 
 ### WorkerInfo
 

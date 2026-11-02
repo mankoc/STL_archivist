@@ -34,6 +34,7 @@ pub mod strings;
 pub mod thumbstore;
 pub mod thumbnail;
 pub mod view;
+pub mod web_page;
 pub mod winpath;
 
 /// Version of the core library.

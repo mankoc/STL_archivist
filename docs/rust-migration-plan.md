@@ -1344,6 +1344,19 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.45.11: **Import from a web page.** `stl_core::web_page::read` (url, HTML, images a
+  browser showed) reads JSON-LD (`Product`, `CreativeWork`, … in `@graph`s), OpenGraph and
+  Twitter tags, `rel="tag"` and tag links and the canonical link; sources named as the
+  crawler names them; titles lose store wording ("3D print model", "| Site"); Patreon's
+  "Title | Creator on Patreon". `stl-server/src/web.rs` fetches (ureq, redirects followed one
+  by one, every hop's addresses public unless `web_allow_private`; bot checks and sign-in
+  walls reported as `blocked`). `api::web::import` writes fields with
+  `model_edit::links_commit` (overwrite) and adds images through `edit::store_thumbnails`
+  (shared with uploads), skipping dHash matches within 10 bits. The desktop's
+  `read_web_page` opens a `reader` window (no capabilities) with a "Use this page" bar
+  (initialization script, DOM calls only) and polls it with `eval_with_callback`. Scrapers
+  of the old `stl_models_images_download` project were not ported: their selectors no longer
+  match (Gambody's are gone), and the markup above gives the same fields.
 - 2026.45.10: **Deleting from the duplicate lists.** `DuplicatesPage`'s `useRemover`: one
   `delete_files` job per archive, followed through the `["jobs"]` cache (`duplicates.ts`
   `deletion`); the buttons need the editor role and `allow_file_delete`. The `delete_files`

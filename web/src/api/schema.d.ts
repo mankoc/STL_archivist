@@ -1053,6 +1053,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/models/{id}/web-import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply a page's reviewed fields and images to a model. */
+        post: operations["post_models_by_id_web_import"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/search/image": {
         parameters: {
             query?: never;
@@ -1425,6 +1442,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/web/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read a model's page. Addresses on this computer or its network are refused
+         *     (unless `web_allow_private`); a site that answers only a browser is
+         *     reported in `blocked`.
+         */
+        post: operations["post_web_read"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/web/read-captured": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Read a page the desktop app captured (nothing is fetched). */
+        post: operations["post_web_read_captured"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workers": {
         parameters: {
             query?: never;
@@ -1581,6 +1636,15 @@ export interface components {
             name: string;
             /** Format: int64 */
             size: number;
+        };
+        /** @description A page as the desktop app's window had it. */
+        CapturedPage: {
+            /** @description Its HTML (the document as the browser built it). */
+            html: string;
+            /** @description Images the browser showed large on it. */
+            images?: string[];
+            /** @description The page's address when it was captured. */
+            url: string;
         };
         /** @description One model as a thumbnail cell. */
         Cell: {
@@ -3026,6 +3090,69 @@ export interface components {
              */
             members: components["schemas"]["WarningMember"][];
             warning: string;
+        };
+        /**
+         * @description What the review kept: fields replace the model's (absent or empty ones are
+         *     left), tags are added, images downloaded and added.
+         */
+        WebImport: {
+            /** @default null */
+            creator: string | null;
+            /** @default null */
+            description: string | null;
+            /**
+             * @description Image addresses (http or https).
+             * @default []
+             */
+            images: string[];
+            /**
+             * @description Skip images that look like one the model has, or an earlier one of `images`.
+             * @default false
+             */
+            skip_known: boolean;
+            /** @default null */
+            source: string | null;
+            /** @default [] */
+            tags: string[];
+            /** @default null */
+            title: string | null;
+            /** @default null */
+            url: string | null;
+        };
+        WebImported: {
+            added: components["schemas"]["ImageRef"][];
+            /** @description Whether a field or tag changed. */
+            changed: boolean;
+            /** @description Images that could not be downloaded or read: `address: why`. */
+            failed: string[];
+            /** @description Images skipped as already there. */
+            skipped: number;
+        };
+        /** @description What a model's page says. */
+        WebPageInfo: {
+            creator?: string | null;
+            description?: string | null;
+            /** @description Image addresses, the page's own first. */
+            images: string[];
+            /** @description The site (`Cults3D`, `MyMiniFactory`, `Patreon`, …). */
+            source?: string | null;
+            /** @description Lowercase, de-duplicated. */
+            tags: string[];
+            title?: string | null;
+            /** @description The page's address (its canonical one on the same site). */
+            url: string;
+        };
+        WebRead: {
+            /**
+             * @description Why it could not: the site answers only a browser (a bot check, a
+             *     sign-in). The desktop app reads such pages in a window.
+             */
+            blocked?: string | null;
+            page?: null | components["schemas"]["WebPageInfo"];
+        };
+        WebReadRequest: {
+            /** @description The model's page (http or https). */
+            url: string;
         };
         /** @description A connected worker as users see it. */
         WorkerInfo: {
@@ -5144,6 +5271,56 @@ export interface operations {
             };
         };
     };
+    post_models_by_id_web_import: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Model id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebImport"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebImported"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     post_search_image: {
         parameters: {
             query?: {
@@ -6021,6 +6198,100 @@ export interface operations {
                 };
             };
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    post_web_read: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebReadRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebRead"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    post_web_read_captured: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CapturedPage"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebPageInfo"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };
