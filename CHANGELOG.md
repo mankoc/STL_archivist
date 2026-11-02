@@ -1,21 +1,5 @@
 # Changelog
 
-## 2026.45.11 — 2026-11-02
-
-- **Import from a web page.** Right-click a model → *Import from web page…*, paste the address
-  of its page (the model's own link to start with), and review what the page says next to the
-  model: title, creator, source, address and description (ticked where the model's field is
-  empty, editable before applying), the tags the model lacks, and the page's images (with
-  *Skip images the model already has*). It reads the markup stores give search engines and
-  link previews (schema.org JSON-LD, OpenGraph, tag links), so it works on most sites without
-  knowing their layout: tested on Gambody and MyMiniFactory pages.
-- In the desktop app, sites that answer only a browser (Cults3D, Patreon, Thingiverse,
-  Printables, CGTrader) open in a window of their own that keeps your sign-ins: go to the
-  model's page and click *Use this page*.
-- Server: `POST /api/web/read`, `POST /api/web/read-captured` and
-  `POST /api/models/{id}/web-import` (editors). The server never fetches addresses on its own
-  computer or network unless `server.json` sets `web_allow_private`.
-
 ## 2026.45.10 — 2026-11-02
 
 - **Duplicates: delete an archive from the results.** A bin button before each archive (STL

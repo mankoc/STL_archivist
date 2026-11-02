@@ -129,10 +129,6 @@ stl_database/
   library). Embeddings go through `Library::embed` / `can_embed` / `wait_for_embedder`, the
   tagger's model through `workers.chat` then `ai.ask`; never call `tools.embedder` directly
   for library work. `compute: workers` (`Config::compute`) means jobs wait, crawls skip.
-- **Web pages:** Import from a web page reads pages with `stl_core::web_page` (markup, not site
-  layouts) and fetches them in `web.rs` only: http(s), every redirect hop checked, nothing on
-  the server's computer or network unless `web_allow_private`. Pages that answer only a
-  browser come from the desktop app's reader window (`/api/web/read-captured`).
 - **Backups:** `stl_core::backup` (the old desktop layout); restoring is the offline
   `stl-server restore` command (it takes the library lock). Never replace the database
   *file* of an open library. The `import_library` job (a backup from another server, folders
@@ -173,8 +169,7 @@ server origins get only `SERVER_PERMISSIONS` (`open_folder`, the MeshPeek comman
 file dialog, never named by a page — and `open_in_meshpeek` on a local archive), the archive
 program's (`packer_state`, `pick_packer`, `clear_packer`, `open_in_packer`, the same way) and the compute worker's
 commands: start/stop/state, its folder's components through `stl-server components`, and
-picking its folder, and `read_web_page`, which opens a `reader` window without capabilities;
-runtime capability in `grant`). The worker commands act for the calling
+picking its folder; runtime capability in `grant`). The worker commands act for the calling
 page's origin only; links opening a new window go through `new_window_target` (a granted
 server's pages in an app window, other web pages in the default browser, nothing else); component changes run the server binary, never code in the shell. Installer
 settings are in `tauri.bundle.json`, merged only by `cargo tauri build --config …`, so plain

@@ -22,7 +22,6 @@ pub mod views;
 pub mod system;
 pub mod thumbs;
 pub mod users;
-pub mod web;
 pub mod workers;
 
 use axum::Json;
@@ -72,9 +71,6 @@ use crate::AppState;
         edit::delete_models,
         edit::clear_warnings,
         edit::add_images,
-        web::read,
-        web::read_captured,
-        web::import,
         edit::delete_image,
         lookups::list,
         lookups::add,
@@ -204,9 +200,6 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/models/clear-warnings", post(edit::clear_warnings))
         .route("/api/models/{id}/images", post(edit::add_images).layer(DefaultBodyLimit::max(edit::MAX_IMAGES_REQUEST_BYTES)))
         .route("/api/images/{id}", delete(edit::delete_image))
-        .route("/api/models/{id}/web-import", post(web::import))
-        .route("/api/web/read", post(web::read))
-        .route("/api/web/read-captured", post(web::read_captured).layer(DefaultBodyLimit::max(web::MAX_CAPTURED_BYTES)))
         .route("/api/editor/choices", get(edit::choices))
         .route("/api/editor/subcollections", get(edit::subcollections))
         .route("/api/lookups/{kind}", get(lookups::list).post(lookups::add))

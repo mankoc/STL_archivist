@@ -28,7 +28,6 @@ import { NONE, click, contextClick, coverage, prune, selectAll, type Selection }
 import { HIGHLIGHT_WARNINGS } from "./warnings";
 import { RELATIVE_PATHS } from "./cells";
 import { type ModelActionHandlers, ModelActionItems } from "./ModelActions";
-import { WebImportModal } from "./WebImportModal";
 import classes from "./BrowserPage.module.css";
 
 const SHOW = ["library", "author", "tags", "source", "date", "sculptor", "collection", "subcollection", "category", "release", "scale", "presupports", "path"];
@@ -48,7 +47,6 @@ export function BrowserPage() {
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [massEdit, setMassEdit] = useState(false);
   const [aiTagger, setAiTagger] = useState(false);
-  const [webImport, setWebImport] = useState<number | null>(null);
   const [view, setView] = useState<"table" | "grid">("table");
   // The detail pane's width, dragged by its left edge.
   const layoutRef = useRef<HTMLDivElement>(null);
@@ -171,7 +169,6 @@ export function BrowserPage() {
     massEdit: () => setMassEdit(true),
     aiTagger: () => setAiTagger(true),
     clearWarnings: (ids) => void clearWarnings(ids),
-    webImport: setWebImport,
     queueJob: (body, what) => void queueJob(body, what),
     sortFiles: () => setSorting(true),
     deleteFiles: () => setConfirmDelete(true),
@@ -366,7 +363,6 @@ export function BrowserPage() {
       <EditorDrawer id={editing} onClose={() => setEditing(null)} />
       <MassEditDrawer ids={order.filter((i) => selection.ids.has(i))} opened={massEdit} onClose={() => setMassEdit(false)} />
       <AiTaggerDrawer ids={order.filter((i) => selection.ids.has(i))} opened={aiTagger} onClose={() => setAiTagger(false)} />
-      {webImport != null && <WebImportModal key={webImport} id={webImport} onClose={() => setWebImport(null)} />}
       <Menu opened={menu != null} onChange={(o) => !o && setMenu(null)} position="bottom-start" withinPortal>
         <Menu.Target>
           <div style={{ position: "fixed", left: menu?.x ?? 0, top: menu?.y ?? 0, width: 0, height: 0 }} />
