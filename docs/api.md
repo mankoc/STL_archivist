@@ -1,6 +1,6 @@
 # StlArchivist API
 
-Version 2026.44.18. Generated from `web/openapi.json` by `tools/api_doc.py`; the
+Version 2026.45.0. Generated from `web/openapi.json` by `tools/api_doc.py`; the
 running server serves the same document at `GET /api/openapi.json`. Do not edit by hand:
 run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after changing routes.
 
@@ -773,7 +773,7 @@ What to run. Crawl settings not given here come from the library's `settings.jso
 
 One of:
 
-- `kind: "crawl"` — `folder`, `force_rescan`, `keep_missing`, `pattern`, `recurse`: Crawl a folder of archives.
+- `kind: "crawl"` — `folder`, `force_rescan`, `in_library`, `keep_missing`, `pattern`, `recurse`: Crawl a folder of archives.
 - `kind: "update_folders"` — `folders`: Re-crawl crawled folders (all of them, or `folders`) with their stored patterns, matching archives moved from one folder to another before deleting the records of archives that are gone (Update Folders).
 - `kind: "clear_library"` — `confirm`: Delete every record, lookup and thumbnail of the library (Delete Database; administrators). `confirm` must be `"DELETE"`.
 - `kind: "verify_archives"`: Check that every archive is still on disk, unchanged in size.

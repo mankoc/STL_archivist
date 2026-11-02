@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.44.18"
+    "version": "2026.45.0"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -5808,6 +5808,10 @@
               "force_rescan": {
                 "type": "boolean",
                 "description": "Re-extract archives whose hash did not change."
+              },
+              "in_library": {
+                "type": "boolean",
+                "description": "A folder inside a library: crawl it as a part of that library (its\npattern, its records), without making it a library folder."
               },
               "keep_missing": {
                 "type": "boolean",

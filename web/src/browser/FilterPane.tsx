@@ -38,6 +38,8 @@ interface Props {
   tree: FilterTree;
   spec: FilterSpec;
   onChange: (spec: FilterSpec) => void;
+  /** A folder of the Path section was right-clicked (none: the browser's own menu). */
+  onFolderMenu?: (folder: string, e: MouseEvent) => void;
 }
 
 /** Sections with more values than this get their own search box. */
@@ -54,6 +56,7 @@ function ValueRow(props: {
   count: number | undefined;
   mark: ReturnType<typeof markOf>;
   onClick: () => void;
+  onContextMenu?: (e: MouseEvent) => void;
   depth?: number;
   toggle?: ReactNode;
 }) {
@@ -62,6 +65,10 @@ function ValueRow(props: {
       className={classes.value}
       data-mark={props.mark}
       onClick={props.onClick}
+      onContextMenu={props.onContextMenu && ((e: MouseEvent) => {
+        e.preventDefault();
+        props.onContextMenu?.(e);
+      })}
       style={{ paddingLeft: 8 + (props.depth ?? 0) * 14 }}
     >
       <Group gap={6} wrap="nowrap">
@@ -155,7 +162,7 @@ function matches(label: string, search: string) {
   return !search || label.toLowerCase().includes(search);
 }
 
-export function FilterPane({ tree, spec, onChange }: Props) {
+export function FilterPane({ tree, spec, onChange, onFolderMenu }: Props) {
   const value = (facet: string, v: FilterValue, label: string, kind: string, countKey: string, depth = 0, toggle?: ReactNode) => (
     <ValueRow
       key={`${facet}:${JSON.stringify(v)}`}
@@ -217,7 +224,7 @@ export function FilterPane({ tree, spec, onChange }: Props) {
         {(s) => texts("filetype", tree.filetypes, s)}
       </Section>
       <Section title="Path" group="path" {...common}>
-        {() => <PathTree tree={tree} spec={spec} onChange={onChange} />}
+        {() => <PathTree tree={tree} spec={spec} onChange={onChange} onFolderMenu={onFolderMenu} />}
       </Section>
     </div>
   );
@@ -317,20 +324,20 @@ function Collections({ tree, spec, onChange, search }: Props & { search: string 
 
 /** The Path section: each library, its folders' roots and the folders below
  * them; folders outside every library folder as a plain tree. */
-function PathTree({ tree, spec, onChange }: Props) {
+function PathTree({ tree, spec, onChange, onFolderMenu }: Props) {
   const libs = useQuery({ queryKey: ["libraries"], queryFn: async () => unwrap(await api.GET("/api/libraries")) });
-  if (!libs.data) return <>{folderTree(tree.folders).map((n) => <Folder key={n.path} node={n} depth={0} tree={tree} spec={spec} onChange={onChange} />)}</>;
+  if (!libs.data) return <>{folderTree(tree.folders).map((n) => <Folder key={n.path} node={n} depth={0} tree={tree} spec={spec} onChange={onChange} onFolderMenu={onFolderMenu} />)}</>;
   const t = libraryFolderTree(tree.folders, libs.data);
   return (
     <>
-      {t.libraries.map((l) => <LibraryFolders key={l.id} lib={l} tree={tree} spec={spec} onChange={onChange} />)}
-      {t.other.map((n) => <Folder key={n.path} node={n} depth={0} tree={tree} spec={spec} onChange={onChange} />)}
+      {t.libraries.map((l) => <LibraryFolders key={l.id} lib={l} tree={tree} spec={spec} onChange={onChange} onFolderMenu={onFolderMenu} />)}
+      {t.other.map((n) => <Folder key={n.path} node={n} depth={0} tree={tree} spec={spec} onChange={onChange} onFolderMenu={onFolderMenu} />)}
     </>
   );
 }
 
 /** A library in the Path section: a value of the Library facet, over its folders' roots. */
-function LibraryFolders({ lib, tree, spec, onChange }: { lib: LibraryNode } & Props) {
+function LibraryFolders({ lib, tree, spec, onChange, onFolderMenu }: { lib: LibraryNode } & Props) {
   const [open, setOpen] = useState(true);
   return (
     <Box>
@@ -341,12 +348,12 @@ function LibraryFolders({ lib, tree, spec, onChange }: { lib: LibraryNode } & Pr
         onClick={() => onChange(cycleValue(spec, "library", lib.id))}
         toggle={<Toggle open={open} onClick={() => setOpen(!open)} />}
       />
-      {open && lib.roots.map((n) => <Folder key={n.path} node={n} depth={1} tree={tree} spec={spec} onChange={onChange} />)}
+      {open && lib.roots.map((n) => <Folder key={n.path} node={n} depth={1} tree={tree} spec={spec} onChange={onChange} onFolderMenu={onFolderMenu} />)}
     </Box>
   );
 }
 
-function Folder({ node, depth, tree, spec, onChange }: { node: FolderNode; depth: number } & Props) {
+function Folder({ node, depth, tree, spec, onChange, onFolderMenu }: { node: FolderNode; depth: number } & Props) {
   const [open, setOpen] = useState(depth < 1);
   return (
     <Box>
@@ -355,10 +362,11 @@ function Folder({ node, depth, tree, spec, onChange }: { node: FolderNode; depth
         count={pathCount(tree, node.path)}
         mark={markOf(spec, "path", node.path)}
         onClick={() => onChange(cycleValue(spec, "path", node.path))}
+        onContextMenu={onFolderMenu && ((e) => onFolderMenu(node.path, e))}
         depth={depth}
         toggle={node.children.length ? <Toggle open={open} onClick={() => setOpen(!open)} /> : undefined}
       />
-      {open && node.children.map((c) => <Folder key={c.path} node={c} depth={depth + 1} tree={tree} spec={spec} onChange={onChange} />)}
+      {open && node.children.map((c) => <Folder key={c.path} node={c} depth={depth + 1} tree={tree} spec={spec} onChange={onChange} onFolderMenu={onFolderMenu} />)}
     </Box>
   );
 }
