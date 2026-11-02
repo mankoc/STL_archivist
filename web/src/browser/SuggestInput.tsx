@@ -1,5 +1,6 @@
 // A text box suggesting the database's values as it is typed in (suggest.ts):
-// ↑/↓ choose a suggestion, Enter or a click takes it, Escape closes the list.
+// ↑/↓ choose a suggestion, Enter or a click takes it, Escape closes the list
+// (and, with the list closed, goes to `onKey`).
 import { Combobox, TextInput, type TextInputProps, useCombobox } from "@mantine/core";
 import { type KeyboardEvent, useMemo } from "react";
 
@@ -13,7 +14,7 @@ type Props = Omit<TextInputProps, "value" | "onChange"> & {
   commaList?: boolean;
   /** A suggestion was taken (after `onChange`). */
   onPick?: (value: string) => void;
-  /** Enter pressed while no suggestion is chosen, or Escape. */
+  /** Enter pressed while no suggestion is chosen, or Escape while no suggestions show. */
   onKey?: (key: "Enter" | "Escape", value: string) => void;
 };
 
@@ -21,9 +22,10 @@ export function SuggestInput({ value, onChange, options, commaList = false, onPi
   const combobox = useCombobox({ onDropdownClose: () => combobox.resetSelectedOption() });
   const shown = useMemo(() => suggestions(options, value, commaList), [options, value, commaList]);
   const keyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    const choosing = combobox.dropdownOpened && combobox.getSelectedOptionIndex() !== -1;
+    const listed = combobox.dropdownOpened && shown.length > 0;
+    const choosing = listed && combobox.getSelectedOptionIndex() !== -1;
     if (e.key === "Enter" && !choosing) onKey?.("Enter", value);
-    if (e.key === "Escape") onKey?.("Escape", value);
+    if (e.key === "Escape" && !listed) onKey?.("Escape", value);
   };
   return (
     <Combobox

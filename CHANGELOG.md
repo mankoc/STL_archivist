@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.45.7 — 2026-11-02
+
+- **Mass edit's sculptor, release, collection, subcollection and category** suggest values
+  like its other fields (those starting with what you type first).
+- **Esc while suggestions show** closes the list; a second Esc cancels a table cell's edit.
+
 ## 2026.45.6 — 2026-11-02
 
 - **Suggestions while editing.** Editing a cell of the library table and the typed fields of

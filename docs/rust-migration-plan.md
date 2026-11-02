@@ -1344,6 +1344,9 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.45.7: Mass edit's remaining `Autocomplete`s are `SuggestInput`s; Escape with
+  suggestions showing only closes them (`onKey` gets it otherwise). `web/openapi.json`
+  regenerated (2026.45.5 and .6 left its version stale).
 - 2026.45.6: **Suggestions while editing.** `web/src/browser/SuggestInput.tsx` (a Mantine
   `Combobox` over `/api/editor/choices`) with the pure `suggest.ts` (`suggestions`: prefix
   matches first, a comma list completes its last item without repeating items;
