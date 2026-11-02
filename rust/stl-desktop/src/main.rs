@@ -4,14 +4,15 @@
 //! local library: the `stl-server` beside this program, on a free loopback
 //! port. Connecting navigates the window to the server, which serves the web
 //! client itself. The shell holds no library logic; a server's pages may call
-//! only `open_folder`, the MeshPeek ones and the compute worker's commands
-//! (granted per server at connect).
+//! only `open_folder`, the MeshPeek and packer ones and the compute worker's
+//! commands (granted per server at connect).
 //!
 //! MeshPeek: when the MeshPeek viewer is installed, "Open in MeshPeek" starts
 //! it on a model's archive (or one model file inside it, MeshPeek's
 //! `<archive>/<entry>` path). It runs on its own, not ended with the shell.
 //! Its program can be chosen (Settings → Account), only in a file dialog: a
-//! page never names a program for the shell to run.
+//! page never names a program for the shell to run. "Open in packer" starts an
+//! archive program (PeaZip, 7-Zip, …) on an archive the same way.
 //!
 //! The compute worker: on a server's Maintenance page, "Use this computer for
 //! AI" hands the shell a worker token, and the shell runs `stl-server worker`
@@ -70,6 +71,9 @@ struct Saved {
     /// MeshPeek's program, when chosen (else it is looked for).
     #[serde(default)]
     meshpeek_path: Option<String>,
+    /// The archive program ("Open in packer"), when chosen (else PeaZip or 7-Zip is looked for).
+    #[serde(default)]
+    packer_path: Option<String>,
     /// What was opened last: opened again when the app starts.
     #[serde(default)]
     last_opened: Option<Opened>,
@@ -223,6 +227,10 @@ const SERVER_PERMISSIONS: &[&str] = &[
     "allow-pick-meshpeek",
     "allow-clear-meshpeek",
     "allow-open-in-meshpeek",
+    "allow-packer-state",
+    "allow-pick-packer",
+    "allow-clear-packer",
+    "allow-open-in-packer",
     "allow-start-worker",
     "allow-stop-worker",
     "allow-worker-state",
@@ -673,59 +681,89 @@ fn open_folder(path: String) -> Result<(), String> {
     }
 }
 
+/// The first program found: one of `on_path` (names without `.exe`) on the
+/// `PATH`, else `(folder, name)` in Program Files, where Windows installers put them.
+fn find_program(on_path: &[&str], installed: &[(&str, &str)]) -> Option<PathBuf> {
+    let exe = |name: &str| if cfg!(windows) { format!("{name}.exe") } else { name.to_string() };
+    let path_dirs = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default();
+    let program_files: Vec<PathBuf> =
+        ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"].into_iter().filter_map(std::env::var_os).map(PathBuf::from).collect();
+    let in_path = on_path.iter().flat_map(|name| path_dirs.iter().map(move |d| d.join(exe(name))));
+    let in_program_files = installed.iter().flat_map(|(folder, name)| program_files.iter().map(move |d| d.join(folder).join(exe(name))));
+    in_path.chain(in_program_files).find(|p| p.is_file())
+}
+
 /// MeshPeek found without a chosen program: `meshpeek` on the `PATH`, else
 /// where its Windows installer puts it.
 fn find_meshpeek() -> Option<PathBuf> {
-    let exe = if cfg!(windows) { "meshpeek.exe" } else { "meshpeek" };
-    let on_path = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default();
-    let installed = ["ProgramFiles", "ProgramW6432"].into_iter().filter_map(std::env::var_os).map(|d| PathBuf::from(d).join("MeshPeek"));
-    on_path.into_iter().chain(installed).map(|d| d.join(exe)).find(|p| p.is_file())
+    find_program(&["meshpeek"], &[("MeshPeek", "meshpeek")])
 }
 
-/// MeshPeek's program: the chosen one (none while it is missing), else the one found.
-fn meshpeek_program(chosen: Option<&str>) -> Option<PathBuf> {
+/// The archive program found without a chosen one: PeaZip, else 7-Zip's file manager.
+fn find_packer() -> Option<PathBuf> {
+    find_program(&["peazip", "7zFM"], &[("PeaZip", "peazip"), ("7-Zip", "7zFM")])
+}
+
+/// A program: the chosen one (none while it is missing), else the one found.
+fn chosen_program(chosen: Option<&str>, find: fn() -> Option<PathBuf>) -> Option<PathBuf> {
     match chosen {
         Some(path) => Some(PathBuf::from(path)).filter(|p| p.is_file()),
-        None => find_meshpeek(),
+        None => find(),
     }
 }
 
-/// The MeshPeek program chosen in Settings, and the one "Open in MeshPeek" runs.
+fn meshpeek_program(chosen: Option<&str>) -> Option<PathBuf> {
+    chosen_program(chosen, find_meshpeek)
+}
+
+/// A program chosen in Settings (MeshPeek, the packer), and the one the shell runs.
 #[derive(Serialize)]
-struct MeshPeekState {
+struct ProgramState {
     chosen: Option<String>,
     program: Option<String>,
 }
 
-fn meshpeek_state_of(app: &AppHandle) -> MeshPeekState {
-    let chosen = load_saved(app).meshpeek_path;
-    let program = meshpeek_program(chosen.as_deref()).map(|p| p.to_string_lossy().into_owned());
-    MeshPeekState { chosen, program }
+fn program_state(chosen: Option<String>, find: fn() -> Option<PathBuf>) -> ProgramState {
+    let program = chosen_program(chosen.as_deref(), find).map(|p| p.to_string_lossy().into_owned());
+    ProgramState { chosen, program }
+}
+
+fn meshpeek_state_of(app: &AppHandle) -> ProgramState {
+    program_state(load_saved(app).meshpeek_path, find_meshpeek)
+}
+
+fn packer_state_of(app: &AppHandle) -> ProgramState {
+    program_state(load_saved(app).packer_path, find_packer)
+}
+
+/// A program chosen in a file dialog titled `title`; `None` when cancelled.
+fn pick_program(app: &AppHandle, title: &str) -> Result<Option<String>, String> {
+    let mut dialog = app.dialog().file().set_title(title);
+    if cfg!(windows) {
+        dialog = dialog.add_filter("Programs", &["exe"]);
+    }
+    let Some(picked) = dialog.blocking_pick_file() else { return Ok(None) };
+    Ok(Some(picked.into_path().map_err(|e| e.to_string())?.to_string_lossy().into_owned()))
 }
 
 #[tauri::command]
-fn meshpeek_state(app: AppHandle) -> MeshPeekState {
+fn meshpeek_state(app: AppHandle) -> ProgramState {
     meshpeek_state_of(&app)
 }
 
 /// Choose MeshPeek's program in a file dialog; `None` when cancelled.
 #[tauri::command]
-async fn pick_meshpeek(app: AppHandle) -> Result<Option<MeshPeekState>, String> {
-    let mut dialog = app.dialog().file().set_title("MeshPeek's program");
-    if cfg!(windows) {
-        dialog = dialog.add_filter("Programs", &["exe"]);
-    }
-    let Some(picked) = dialog.blocking_pick_file() else { return Ok(None) };
-    let path = picked.into_path().map_err(|e| e.to_string())?;
+async fn pick_meshpeek(app: AppHandle) -> Result<Option<ProgramState>, String> {
+    let Some(path) = pick_program(&app, "MeshPeek's program")? else { return Ok(None) };
     let mut saved = load_saved(&app);
-    saved.meshpeek_path = Some(path.to_string_lossy().into_owned());
+    saved.meshpeek_path = Some(path);
     store_saved(&app, &saved)?;
     Ok(Some(meshpeek_state_of(&app)))
 }
 
 /// Forget the chosen program: look for MeshPeek again.
 #[tauri::command]
-fn clear_meshpeek(app: AppHandle) -> Result<MeshPeekState, String> {
+fn clear_meshpeek(app: AppHandle) -> Result<ProgramState, String> {
     let mut saved = load_saved(&app);
     saved.meshpeek_path = None;
     store_saved(&app, &saved)?;
@@ -760,6 +798,43 @@ fn open_in_meshpeek(app: AppHandle, path: String, entry: Option<String>) -> Resu
         None => "MeshPeek is not installed (no meshpeek on the PATH or in Program Files)".to_string(),
     })?;
     Command::new(program).arg(target).spawn().map_err(|e| format!("MeshPeek could not start: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn packer_state(app: AppHandle) -> ProgramState {
+    packer_state_of(&app)
+}
+
+/// Choose the archive program in a file dialog; `None` when cancelled.
+#[tauri::command]
+async fn pick_packer(app: AppHandle) -> Result<Option<ProgramState>, String> {
+    let Some(path) = pick_program(&app, "Archive program (PeaZip, 7-Zip, …)")? else { return Ok(None) };
+    let mut saved = load_saved(&app);
+    saved.packer_path = Some(path);
+    store_saved(&app, &saved)?;
+    Ok(Some(packer_state_of(&app)))
+}
+
+/// Forget the chosen archive program: look for PeaZip or 7-Zip again.
+#[tauri::command]
+fn clear_packer(app: AppHandle) -> Result<ProgramState, String> {
+    let mut saved = load_saved(&app);
+    saved.packer_path = None;
+    store_saved(&app, &saved)?;
+    Ok(packer_state_of(&app))
+}
+
+/// Open an archive in the archive program. Like MeshPeek, it runs on its own.
+#[tauri::command]
+fn open_in_packer(app: AppHandle, path: String) -> Result<(), String> {
+    let target = meshpeek_target(&path, None)?;
+    let chosen = load_saved(&app).packer_path;
+    let program = chosen_program(chosen.as_deref(), find_packer).ok_or_else(|| match &chosen {
+        Some(p) => format!("The archive program is not at {p} (Settings → Account)"),
+        None => "No archive program found (PeaZip or 7-Zip); choose one in Settings → Account".to_string(),
+    })?;
+    Command::new(program).arg(target).spawn().map_err(|e| format!("The archive program could not start: {e}"))?;
     Ok(())
 }
 
@@ -889,6 +964,10 @@ fn main() {
             pick_meshpeek,
             clear_meshpeek,
             open_in_meshpeek,
+            packer_state,
+            pick_packer,
+            clear_packer,
+            open_in_packer,
             start_worker,
             stop_worker,
             worker_state,

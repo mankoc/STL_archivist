@@ -1,4 +1,4 @@
-import { changeWorkerComponents, inDesktopShell, clearMeshPeek, meshpeekState, openFolder, openInMeshPeek, pickMeshPeek, pickWorkerFolder, startWorker, stopWorker, workerState } from "./desktop";
+import { changeWorkerComponents, inDesktopShell, clearMeshPeek, clearPacker, meshpeekState, openFolder, openInMeshPeek, openInPacker, packerState, pickMeshPeek, pickPacker, pickWorkerFolder, startWorker, stopWorker, workerState } from "./desktop";
 
 describe("desktop shell bridge", () => {
   afterEach(() => {
@@ -44,6 +44,29 @@ describe("desktop shell bridge", () => {
       ["clear_meshpeek", undefined],
       ["open_in_meshpeek", { path: "D:/STL/a.zip", entry: "parts/b.stl" }],
       ["open_in_meshpeek", { path: "D:/STL/a.zip", entry: null }],
+    ]);
+  });
+
+  it("opens archives in the archive program through the shell", async () => {
+    expect(await packerState()).toBe(null);
+    await expect(openInPacker("C:/x.zip")).rejects.toThrow("desktop app");
+    const calls: unknown[] = [];
+    const state = { chosen: null, program: "C:/Program Files/PeaZip/peazip.exe" };
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {
+      invoke: async (cmd: string, args: unknown) => {
+        calls.push([cmd, args]);
+        return state;
+      },
+    };
+    expect(await packerState()).toEqual(state);
+    expect(await pickPacker()).toEqual(state);
+    await clearPacker();
+    await openInPacker("D:/STL/a.7z");
+    expect(calls).toEqual([
+      ["packer_state", undefined],
+      ["pick_packer", undefined],
+      ["clear_packer", undefined],
+      ["open_in_packer", { path: "D:/STL/a.7z" }],
     ]);
   });
 

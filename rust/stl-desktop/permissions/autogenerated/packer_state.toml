@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-packer-state"
+description = "Enables the packer_state command without any pre-configured scope."
+commands.allow = ["packer_state"]
+
+[[permission]]
+identifier = "deny-packer-state"
+description = "Denies the packer_state command without any pre-configured scope."
+commands.deny = ["packer_state"]
