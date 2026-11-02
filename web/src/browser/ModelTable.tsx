@@ -19,6 +19,7 @@ import { api, type Schemas, unwrap } from "../api/client";
 import { baseName, formatDate, formatSize } from "../format";
 import type { FilterSpec } from "./filters";
 import { type ColumnChoice, visible } from "./columns";
+import { rowTone } from "./warnings";
 import { blockIds, blocksFor } from "./rowBlocks";
 import type { Selection } from "./selection";
 import classes from "./ModelTable.module.css";
@@ -112,6 +113,8 @@ interface Props {
   editable: boolean;
   /** Which columns to show, in which order. */
   choice?: ColumnChoice;
+  /** Colour rows with warnings (`warnings.ts`). */
+  highlightWarnings?: boolean;
   /** A column's header was dragged onto another's (none: headers do not move). */
   onMoveColumn?: (from: string, to: string) => void;
   /** A checkbox column (shown while rows are selected): how much is selected, and select all or none. */
@@ -151,7 +154,7 @@ function CellEditor(props: { initial: string; onDone: (value: string | null) => 
   );
 }
 
-export function ModelTable({ query, onSort, selection, onRowClick, onRowContextMenu, editable, choice, onMoveColumn, checkboxes }: Props) {
+export function ModelTable({ query, onSort, selection, onRowClick, onRowContextMenu, editable, choice, highlightWarnings, onMoveColumn, checkboxes }: Props) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<{ id: number; column: number } | null>(null);
   const ids = useModelIds(query);
@@ -313,7 +316,10 @@ export function ModelTable({ query, onSort, selection, onRowClick, onRowContextM
               data-testid="row"
               data-selected={selection.ids.has(id) || undefined}
               data-current={selection.current === id || undefined}
+              data-tone={(highlightWarnings && rowTone(row?.warning)) || undefined}
               style={{ transform: `translateY(${item.start}px)`, height: ROW_HEIGHT, width }}
+              // Shift+click selects a range of rows, not the text between two clicks.
+              onMouseDown={(e) => e.shiftKey && e.preventDefault()}
               onClick={(e) => onRowClick(id, { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey })}
               onContextMenu={onRowContextMenu && ((e) => {
                 e.preventDefault();

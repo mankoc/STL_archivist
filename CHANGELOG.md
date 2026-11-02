@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026.45.0 — 2026-11-02
+
+- **Highlight models with warnings** (*Settings → Account*, saved for your account). In
+  the library table, rows of unreadable archives are red and rows with any other warning
+  yellow. Off by default.
+- **Crawl or rescan a folder from the filter tree.** Right-click a folder in the *Path*
+  section (editors): *Crawl this folder* takes new and changed archives, *Rescan this
+  folder* reads every archive again. The folder is crawled as a part of its library (the
+  library's pattern applies) and is not added as a library folder. Archives gone from it
+  are removed; records elsewhere are left alone.
+- **Shift+click in the table** selects a range of rows without highlighting the text between
+  the clicks.
+
 ## 2026.44.18 — 2026-11-01
 
 - **Jobs can be paused and continued** (*Jobs*, editors). A running job stops at its next

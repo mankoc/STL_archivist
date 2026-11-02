@@ -22,6 +22,7 @@ import { ALWAYS_SHOWN, choiceFrom, COLUMN_ORDER_KEY, HIDDEN_COLUMNS_KEY, isShown
 import { COLUMNS, ModelTable, type Sort, useModelIds } from "./ModelTable";
 import { customised, DEFAULT_OPTIONS, loadOptions, placeholder, saveOptions, SEARCH_FIELDS, type SearchOptions } from "./search";
 import { NONE, click, contextClick, coverage, prune, selectAll, type Selection } from "./selection";
+import { HIGHLIGHT_WARNINGS } from "./warnings";
 import classes from "./BrowserPage.module.css";
 
 const SHOW = ["library", "author", "tags", "source", "date", "sculptor", "collection", "subcollection", "category", "release", "scale", "presupports", "path"];
@@ -101,6 +102,8 @@ export function BrowserPage() {
   const [sorting, setSorting] = useState(false);
   // The right-click menu: where, and the models it acts on.
   const [menu, setMenu] = useState<{ x: number; y: number; ids: number[] } | null>(null);
+  // The Path section's right-click menu: where, and the folder.
+  const [folderMenu, setFolderMenu] = useState<{ x: number; y: number; folder: string } | null>(null);
   const selectedIds = () => order.filter((i) => selection.ids.has(i));
   const queueJob = async (body: JobRequest, what: string) => {
     try {
@@ -165,7 +168,12 @@ export function BrowserPage() {
           </Button>
         </Group>
         {tree.data ? (
-          <FilterPane tree={tree.data} spec={filter} onChange={setFilter} />
+          <FilterPane
+            tree={tree.data}
+            spec={filter}
+            onChange={setFilter}
+            onFolderMenu={editor ? (folder, e) => setFolderMenu({ x: e.clientX, y: e.clientY, folder }) : undefined}
+          />
         ) : (
           <Center p="md">{tree.isError ? <Text c="red">{tree.error.message}</Text> : <Loader size="sm" />}</Center>
         )}
@@ -293,6 +301,7 @@ export function BrowserPage() {
               onRowContextMenu={openMenu}
               editable={editor}
               choice={choice}
+              highlightWarnings={prefs.data?.[HIGHLIGHT_WARNINGS] === true}
               onMoveColumn={moveCol}
               checkboxes={covered === "none" ? undefined : { coverage: covered, onAll: selectEvery }}
             />
@@ -320,6 +329,26 @@ export function BrowserPage() {
         <Menu.Dropdown data-testid="row-menu">
           <Menu.Item leftSection={<IconRefresh size={14} />} onClick={() => menu && queueJob({ kind: "rescan", ids: menu.ids }, "Rescan")}>
             {menu && menu.ids.length > 1 ? `Rescan ${menu.ids.length} archives` : "Rescan"}
+          </Menu.Item>
+        </Menu.Dropdown>
+      </Menu>
+      <Menu opened={folderMenu != null} onChange={(o) => !o && setFolderMenu(null)} position="bottom-start" withinPortal>
+        <Menu.Target>
+          <div style={{ position: "fixed", left: folderMenu?.x ?? 0, top: folderMenu?.y ?? 0, width: 0, height: 0 }} />
+        </Menu.Target>
+        <Menu.Dropdown data-testid="folder-menu">
+          <Menu.Label maw={320} style={{ overflowWrap: "anywhere" }}>{folderMenu?.folder}</Menu.Label>
+          <Menu.Item
+            leftSection={<IconRefresh size={14} />}
+            onClick={() => folderMenu && queueJob({ kind: "crawl", folder: folderMenu.folder, in_library: true }, "Crawl")}
+          >
+            Crawl this folder (new and changed archives)
+          </Menu.Item>
+          <Menu.Item
+            leftSection={<IconRefresh size={14} />}
+            onClick={() => folderMenu && queueJob({ kind: "crawl", folder: folderMenu.folder, in_library: true, force_rescan: true }, "Rescan")}
+          >
+            Rescan this folder (read every archive again)
           </Menu.Item>
         </Menu.Dropdown>
       </Menu>

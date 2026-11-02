@@ -36,6 +36,10 @@ const SIZE_LIMIT_META: u64 = 1024 * 1024;
 #[derive(Debug, Clone, Default)]
 pub struct CrawlConfig {
     pub source_dir: String,
+    /// Crawl `source_dir` as a part of the library folder at this root: its
+    /// records stay that folder's (pattern and metadata read from its root),
+    /// and `source_dir` is not made a library folder.
+    pub library_root: Option<String>,
     pub pattern: String,
     pub recurse: bool,
     pub force_rescan: bool,
@@ -54,6 +58,13 @@ pub struct CrawlConfig {
     pub log_unchanged: bool,
     pub defer_missing_deletion: bool,
     pub upsert: db::UpsertConfig,
+}
+
+impl CrawlConfig {
+    /// The library folder's root: paths are read relative to it.
+    fn root(&self) -> &str {
+        self.library_root.as_deref().unwrap_or(&self.source_dir)
+    }
 }
 
 /// Work the host does for the crawl (see the module docs).
@@ -438,7 +449,7 @@ fn pattern_match(cfg: &CrawlConfig, path: &str, host: &dyn Host) -> Option<db::E
     if cfg.pattern.is_empty() {
         return None;
     }
-    let fields = path_pattern::parse_path(&cfg.pattern, &rel_path(path, &cfg.source_dir));
+    let fields = path_pattern::parse_path(&cfg.pattern, &rel_path(path, cfg.root()));
     if fields.is_empty() {
         return None;
     }
@@ -473,11 +484,11 @@ fn rules_for(cfg: &CrawlConfig, archive_name: &str, names: &[String], host: &dyn
 
 fn folder_images(path: &str, cfg: &CrawlConfig, host: &dyn Host) -> Vec<(String, Option<Vec<u8>>, Option<String>)> {
     let mut out = Vec::new();
-    let source = WinPath::new(&cfg.source_dir).as_posix().to_lowercase();
+    let source = WinPath::new(cfg.root()).as_posix().to_lowercase();
     let mut folder = WinPath::new(path).parent();
     loop {
         let posix = folder.as_posix();
-        if metadata::win_relative_parts(&posix, &cfg.source_dir).is_none() {
+        if metadata::win_relative_parts(&posix, cfg.root()).is_none() {
             break;
         }
         let dir = crate::winpath::native(&posix);
@@ -516,7 +527,7 @@ fn metadata_for(path: &str, contents: &[(String, Vec<u8>)], cfg: &CrawlConfig) -
         .filter(|(n, _)| n.to_lowercase().ends_with(".url") || n.to_lowercase().ends_with("info.json"))
         .cloned()
         .collect();
-    metadata::extract(path, &files, Some(&cfg.source_dir))
+    metadata::extract(path, &files, Some(cfg.root()))
 }
 
 // ── the run ──────────────────────────────────────────────────────────────────
@@ -799,13 +810,18 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
         listed: HashMap::new(),
         from_sidecar: HashSet::new(),
     };
-    // The crawled folder is a library (made now when it is none yet); the
-    // libraries inside it are crawled on their own.
-    let library = {
-        let t = tx(&mut run.conn)?;
-        let id = storage::libraries::create(&t, &cfg.source_dir, storage::libraries::Target::Around, None, None)?;
-        t.commit()?;
-        id
+    // The crawled folder is a library (made now when it is none yet), or a part of
+    // one (`library_root`); the libraries inside it are crawled on their own.
+    let library = match &cfg.library_root {
+        Some(root) => storage::libraries::Roots::load(&run.conn)?
+            .locate_root(root)
+            .ok_or_else(|| CrawlError::Io(std::io::Error::other(format!("{root} is not a library folder"))))?,
+        None => {
+            let t = tx(&mut run.conn)?;
+            let id = storage::libraries::create(&t, &cfg.source_dir, storage::libraries::Target::Around, None, None)?;
+            t.commit()?;
+            id
+        }
     };
     run.inner_roots = storage::libraries::Roots::load(&run.conn)?.inner(library).into_iter().map(|(_, r)| r).collect();
     // One listing of the folder gives the archives with their sizes and times: the
@@ -815,9 +831,11 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
     let archives: Vec<String> = listing.iter().map(|(p, _)| p.clone()).collect();
     run.listed = listing.into_iter().filter_map(|(p, s)| s.map(|s| (p, s))).collect();
     host.emit(Event::Phase("Scanning for deleted files…".into()));
-    // A full (recursive) listing covers every record of the crawled library.
+    // A full (recursive) listing of a whole library folder covers every one of its
+    // records; for a part of one, records are looked for on disk.
     let keys: HashSet<String> = archives.iter().map(|p| crate::relpath::path_key(p)).collect();
-    let missing = db::collect_missing(&run.conn, cfg.recurse.then_some((library, &keys)))?;
+    let whole = cfg.recurse && cfg.library_root.is_none();
+    let missing = db::collect_missing(&run.conn, whole.then_some((library, &keys)))?;
     if !missing.is_empty() {
         run.log(format!("{} recorded archive(s) not found on disk — checked for moves after the crawl.", missing.len()));
     }
@@ -860,7 +878,7 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
                 }
             }
         }
-        let root = WinPath::new(&cfg.source_dir).as_posix();
+        let root = WinPath::new(cfg.root()).as_posix();
         for (folder, paths) in &folders {
             if host.should_stop() {
                 break;
@@ -940,7 +958,7 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
         reconcile(&mut run, missing)?;
     }
 
-    {
+    if cfg.library_root.is_none() {
         let now = edit::utc_now_text();
         let t = tx(&mut run.conn)?;
         db::record_folder(

@@ -15,6 +15,7 @@ import { type FormEvent, useEffect, useState } from "react";
 import { type Accent, ACCENT_SETTING, ACCENTS, DEFAULT_ACCENT, isAccent, useSetAccent } from "../accent";
 import { api, type Schemas, unwrap } from "../api/client";
 import { hasRole, useUser } from "../auth/user";
+import { HIGHLIGHT_WARNINGS } from "../browser/warnings";
 import { clearMeshPeek, inDesktopShell, meshpeekState, pickMeshPeek } from "../desktop";
 import { ComponentsPanel } from "../jobs/ComponentsPanel";
 import { MaintenanceTab } from "../jobs/MaintenanceTab";
@@ -103,6 +104,15 @@ function AccountSettings() {
   const prefs = useQuery({ queryKey: ["me-settings"], queryFn: async () => unwrap(await api.GET("/api/me/settings")) as Record<string, unknown> });
   const stored = prefs.data?.[ACCENT_SETTING];
   const accent: Accent = isAccent(stored) ? stored : DEFAULT_ACCENT;
+  const highlight = prefs.data?.[HIGHLIGHT_WARNINGS] === true;
+  const chooseHighlight = async (on: boolean) => {
+    queryClient.setQueryData(["me-settings"], (d: Record<string, unknown> | undefined) => ({ ...d, [HIGHLIGHT_WARNINGS]: on }));
+    try {
+      unwrap(await api.PUT("/api/me/settings/{key}", { params: { path: { key: HIGHLIGHT_WARNINGS } }, body: on as never }));
+    } catch (err) {
+      fail(err);
+    }
+  };
   const chooseAccent = async (a: Accent) => {
     setAccent(a);
     queryClient.setQueryData(["me-settings"], (d: Record<string, unknown> | undefined) => ({ ...d, [ACCENT_SETTING]: a }));
@@ -154,6 +164,14 @@ function AccountSettings() {
       <Text size="xs" c="dimmed" mt="xs">
         Buttons, selections and highlights. Saved for your account; change your password from the menu at the top right.
       </Text>
+      <Switch
+        mt="md"
+        label="Highlight models with warnings"
+        description="In the library table: unreadable archives in red, other warnings in yellow."
+        checked={highlight}
+        onChange={(e) => chooseHighlight(e.currentTarget.checked)}
+        data-testid="highlight-warnings"
+      />
     </Card>
   );
 }

@@ -2064,6 +2064,11 @@ export interface components {
             /** @description Re-extract archives whose hash did not change. */
             force_rescan?: boolean;
             /**
+             * @description A folder inside a library: crawl it as a part of that library (its
+             *     pattern, its records), without making it a library folder.
+             */
+            in_library?: boolean;
+            /**
              * @description Mark the records of archives gone from the folder missing instead
              *     of deleting them (monitored folders; *Remove missing archives*
              *     deletes them later).

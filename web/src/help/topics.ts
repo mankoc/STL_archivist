@@ -309,6 +309,7 @@ export const TOPICS: Topic[] = [
       { p: "Select models, then open **Archives** above the table. These run as [jobs](jobs)." },
       { list: [
         "**Rescan** re-reads the archives (metadata, file list, presupports, warnings, scales) — after replacing an archive's contents in place. Right-clicking a row or image offers it too: for the selection when the row is part of it, else for that model.",
+        "Right-click a folder in the filter pane's **Path** section to **crawl** it (new and changed archives) or **rescan** it (every archive read again) as a part of its library: it keeps the library's path pattern, and is not added to *Libraries* as a folder of its own.",
         "**Generate thumbnails** replaces the models' images with new ones from their archives, up to *Thumbnails per archive*.",
         "**Sort files…** moves the archives into a folder tree built from a [pattern](path-patterns) under a target folder (*Browse…* can make a new folder there with **New folder**). When every archive of a folder goes to one folder, the folder's other files (pictures, links, `info.json`) go with them (*FILE* in the preview); subfolders stay, and a folder left empty is removed. The **?** beside the pattern lists the tokens (click one to add it), and **Saved** keeps patterns with your account to pick again later. **Preview** shows every move first (*COLLISION*: a file of that name exists and a numbered name is used; *MISS*: the archive is not on disk). **Move** moves all or none: if one move fails, the others are put back. Needs *Allow file sorting* in the settings.",
         "**Delete files…** deletes the archive files and their records. With a trash folder set, files go there with a small `.json` note for recovery. Needs *Allow file delete* in the settings.",
@@ -500,7 +501,7 @@ export const TOPICS: Topic[] = [
     summary: "Your account and the library's settings.",
     blocks: [
       { list: [
-        "**Account** — your colour scheme (light, dark, or follow the system) and accent colour (buttons, selections and highlights); in the desktop app also the MeshPeek program **Open in MeshPeek** runs.",
+        "**Account** — your colour scheme (light, dark, or follow the system) and accent colour (buttons, selections and highlights), and **Highlight models with warnings**: library table rows of unreadable archives turn red, rows with other warnings yellow; in the desktop app also the MeshPeek program **Open in MeshPeek** runs.",
         "**Library** (administrators change, everyone sees):",
       ] },
       { table: { head: ["Section", "Settings"], rows: [

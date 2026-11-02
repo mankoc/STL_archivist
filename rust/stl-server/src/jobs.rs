@@ -53,6 +53,10 @@ pub enum JobRequest {
         /// deletes them later).
         #[serde(default)]
         keep_missing: bool,
+        /// A folder inside a library: crawl it as a part of that library (its
+        /// pattern, its records), without making it a library folder.
+        #[serde(default)]
+        in_library: bool,
     },
     /// Re-crawl crawled folders (all of them, or `folders`) with their stored
     /// patterns, matching archives moved from one folder to another before
@@ -783,7 +787,9 @@ async fn worker(lib: Weak<Library>, wake: Arc<Notify>) {
 fn run(lib: &Library, job: &Job) -> Result<String, String> {
     let request = job.info().request;
     match request {
-        JobRequest::Crawl { folder, pattern, force_rescan, recurse, keep_missing } => crawl(lib, job, folder, pattern, force_rescan, recurse, keep_missing),
+        JobRequest::Crawl { folder, pattern, force_rescan, recurse, keep_missing, in_library } => {
+            crawl(lib, job, folder, pattern, force_rescan, recurse, keep_missing, in_library)
+        }
         JobRequest::UpdateFolders { folders } => update_folders(lib, job, folders),
         JobRequest::ClearLibrary { .. } => clear_library(lib, job),
         JobRequest::VerifyArchives => verify(lib, job),
@@ -1750,6 +1756,7 @@ impl Host for ServerHost<'_> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn crawl(
     lib: &Library,
     job: &Job,
@@ -1758,8 +1765,20 @@ fn crawl(
     force_rescan: bool,
     recurse: Option<bool>,
     keep_missing: bool,
+    in_library: bool,
 ) -> Result<String, String> {
-    let s = crawl_folder(lib, job, folder, pattern, force_rescan, recurse, keep_missing, None)?;
+    let library_root = if in_library {
+        let roots = lib.db.with(storage::libraries::Roots::load).map_err(db_err)?;
+        let (id, rel) = roots.locate_folder(&folder).ok_or_else(|| format!("{folder} is not inside a library"))?;
+        // A library folder's root is crawled as itself.
+        if rel.is_empty() { None } else { roots.root(id).map(str::to_string) }
+    } else {
+        None
+    };
+    if let Some(root) = &library_root {
+        lib.job_log(job, format!("Crawling {folder} as a part of the library folder {root}."));
+    }
+    let s = crawl_folder(lib, job, folder, pattern, force_rescan, recurse, keep_missing, None, library_root)?;
     Ok(format!("{} new, {} updated, {} unchanged", s.new, s.updated, s.unchanged))
 }
 
@@ -1784,7 +1803,7 @@ fn update_folders(lib: &Library, job: &Job, folders: Vec<String>) -> Result<Stri
             break;
         }
         lib.job_log(job, format!("[{}/{}] {folder}", k + 1, folders.len()));
-        match crawl_folder(lib, job, folder.clone(), None, false, None, several, Some(&new_paths)) {
+        match crawl_folder(lib, job, folder.clone(), None, false, None, several, Some(&new_paths), None) {
             Ok(s) => {
                 (new, updated, unchanged) = (new + s.new, updated + s.updated, unchanged + s.unchanged);
                 crawled.push(folder.clone());
@@ -1847,6 +1866,7 @@ fn crawl_folder(
     recurse: Option<bool>,
     defer_missing_deletion: bool,
     new_paths: Option<&Mutex<Vec<String>>>,
+    library_root: Option<String>,
 ) -> Result<crawler::Summary, String> {
     if !std::path::Path::new(&folder).is_dir() {
         return Err(format!("{folder} is not a folder the server can read"));
@@ -1859,7 +1879,7 @@ fn crawl_folder(
             .with(duplicates::crawled_folders)
             .map_err(|e| e.to_string())?
             .into_iter()
-            .find(|(p, _)| p == &folder)
+            .find(|(p, _)| p == library_root.as_ref().unwrap_or(&folder))
             .and_then(|(_, pat)| pat)
             .unwrap_or_default(),
     };
@@ -1872,6 +1892,7 @@ fn crawl_folder(
     let unrar = lib.config.unrar_tool();
     let cfg = CrawlConfig {
         source_dir: folder.clone(),
+        library_root,
         pattern,
         recurse: recurse.unwrap_or_else(|| settings.recurse_subdirs()),
         force_rescan,

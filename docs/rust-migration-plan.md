@@ -1344,6 +1344,16 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.45.0: **Highlighted warnings.** The per-user setting `highlight_warnings`;
+  `web/src/browser/warnings.ts` (`rowTone`: `"Unreadable archive"`, the core's
+  `WARNING_UNREADABLE`, is red, any other warning yellow) sets the row's `data-tone`.
+  **Crawling a part of a library:** `CrawlConfig.library_root` crawls `source_dir` as a
+  part of that library folder. `CrawlConfig::root` (pattern, path metadata, folder images,
+  sidecar root) reads paths from the library root. The folder gets no `libraries` row and no
+  `record_folder`, and records are checked on disk (`collect_missing(None)`): a listing of
+  a part covers only part of the library. The `crawl` job's `in_library` resolves the
+  library root with `Roots::locate_folder` (a library root is crawled as itself). The
+  filter pane's *Path* folders offer it on right-click.
 - 2026.44.18: **Pausing jobs.** `Control` gained a pause flag: `is_stopped` / `check` are
   checkpoints that wait while paused (until resumed or stopped), and `stop_requested`
   is the check that never waits. It is used where a lock is held (`Workers::wait_for`

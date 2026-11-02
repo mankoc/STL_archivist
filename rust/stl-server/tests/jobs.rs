@@ -134,6 +134,38 @@ async fn crawl_job_catalogues_a_folder() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_folder_inside_a_library_is_crawled_as_a_part_of_it() {
+    let lib = empty_library();
+    let ed = lib.user("ed", Role::Editor);
+    let root = archives(&lib);
+    write_zip(&root.join("Other").join("Loose.zip"), &[("loose.stl", b"solid l
+endsolid
+")]);
+    let id = submit(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy(), "pattern": "{sculptor}/{title}"})).await;
+    assert_eq!(wait(&lib, &ed, id).await["job"]["message"], "3 new, 0 updated, 0 unchanged");
+
+    // A new archive in Studio, and one gone from outside it.
+    write_zip(&root.join("Studio").join("Ogre.zip"), &[("ogre.stl", b"solid o
+endsolid
+")]);
+    std::fs::remove_file(root.join("Other").join("Loose.zip")).unwrap();
+    let studio = root.join("Studio");
+    let id = submit(&lib, &ed, json!({"kind": "crawl", "folder": studio.to_string_lossy(), "in_library": true})).await;
+    let v = wait(&lib, &ed, id).await;
+    assert_eq!(v["job"]["message"], "1 new, 0 updated, 2 unchanged", "{v}");
+    assert_eq!(count(&lib, "SELECT count(*) FROM libraries"), 1, "Studio is not made a library folder");
+    assert_eq!(count(&lib, "SELECT count(DISTINCT library_id) FROM models"), 1);
+    // The library's pattern reads the path from its root.
+    assert_eq!(count(&lib, "SELECT count(*) FROM models m JOIN sculptors s ON s.id = m.sculptor_id WHERE s.name = 'Studio'"), 3);
+    assert_eq!(count(&lib, "SELECT count(*) FROM models WHERE rel_path LIKE 'Other/%'"), 1, "records outside the folder are left alone");
+
+    // The library folder itself is crawled as usual.
+    let id = submit(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy(), "in_library": true})).await;
+    assert_eq!(wait(&lib, &ed, id).await["job"]["state"], "done");
+    assert_eq!(count(&lib, "SELECT count(*) FROM models WHERE rel_path LIKE 'Other/%'"), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn crawls_read_urls_and_info_json() {
     let lib = empty_library();
     let ed = lib.user("ed", Role::Editor);
