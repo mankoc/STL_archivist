@@ -10,8 +10,6 @@ use std::fmt;
 
 use unicode_normalization::UnicodeNormalization;
 
-use crate::winpath::SEP;
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RelPath(String);
 
@@ -119,13 +117,14 @@ impl fmt::Display for RelPath {
 }
 
 /// `root` joined with a `/`-separated relative path (or folder; `""` gives the
-/// root), spelled with this system's separator.
+/// root), spelled with this system's separator throughout (a root stored as
+/// `F:/STL` gives `F:\STL\…` on Windows, not `F:/STL\…`).
 pub fn join(root: &str, rel: &str) -> String {
+    let root = crate::winpath::native(root);
     if rel.is_empty() {
-        return root.to_string();
+        return root;
     }
-    let rel = if SEP == '/' { rel.to_string() } else { rel.replace('/', &SEP.to_string()) };
-    crate::winpath::join(root, &rel)
+    crate::winpath::join(&root, &crate::winpath::native(rel))
 }
 
 /// `root` joined with a relative path in `/` form whatever the system (what
@@ -191,6 +190,13 @@ mod tests {
 
     #[test]
     fn joins() {
+        if cfg!(windows) {
+            assert_eq!(join("F:/STL", "00 - Kickstarters/a.7z"), r"F:\STL\00 - Kickstarters\a.7z");
+            assert_eq!(join("F:/", "a.7z"), r"F:\a.7z");
+            assert_eq!(join("F:/STL", ""), r"F:\STL");
+        } else {
+            assert_eq!(join("/srv/stl", "a/b.7z"), "/srv/stl/a/b.7z");
+        }
         assert_eq!(posix_join(r"D:\STL", "a/b.zip"), "D:/STL/a/b.zip");
         assert_eq!(posix_join("/srv/stl/", ""), "/srv/stl");
         assert_eq!(posix_join("/", "x"), "/x");

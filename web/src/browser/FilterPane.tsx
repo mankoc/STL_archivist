@@ -1,6 +1,8 @@
 // The filter pane: one collapsible section per facet, as in the desktop app.
 // A value cycles include (+) → exclude (−) → off; the circle on a section
-// header cycles "has a value" → "has no value" → off. Counts are scoped by
+// header cycles "has a value" → "has no value" → off. A row with children
+// (a folder, a year, a collection) opens on a click and filters on a
+// double-click or a click on its mark. Counts are scoped by
 // the other sections while a filter is active.
 import { ActionIcon, Box, Group, ScrollArea, Text, TextInput, Tooltip, UnstyledButton } from "@mantine/core";
 import {
@@ -9,6 +11,7 @@ import {
   IconCircle,
   IconCircleCheck,
   IconCircleMinus,
+  IconFilter,
   IconMinus,
   IconPlus,
 } from "@tabler/icons-react";
@@ -28,6 +31,7 @@ import {
   groupCount,
   groupMarkOf,
   libraryFolderTree,
+  rowClick,
   type LibraryNode,
   markOf,
   pathCount,
@@ -45,26 +49,57 @@ interface Props {
 /** Sections with more values than this get their own search box. */
 const SEARCH_FROM = 15;
 
-function MarkIcon({ mark }: { mark: ReturnType<typeof markOf> }) {
-  if (mark === "include") return <IconPlus size={14} color="var(--mantine-color-green-6)" />;
-  if (mark === "exclude") return <IconMinus size={14} color="var(--mantine-color-red-6)" />;
-  return <Box w={14} />;
+/** A row's filter mark, clickable: + include, − exclude; a faint funnel on a row
+ * with children (whose own click opens it) while it filters nothing. */
+function MarkIcon({ mark, expandable, onClick }: { mark: ReturnType<typeof markOf>; expandable: boolean; onClick: () => void }) {
+  const icon =
+    mark === "include" ? <IconPlus size={14} color="var(--mantine-color-green-6)" />
+    : mark === "exclude" ? <IconMinus size={14} color="var(--mantine-color-red-6)" />
+    : expandable ? <IconFilter size={12} />
+    : null;
+  if (!icon) return <Box w={14} />;
+  return (
+    <ActionIcon
+      size={14}
+      variant="transparent"
+      color="gray"
+      component="span"
+      className={mark ? undefined : classes.unmarked}
+      onClick={(e: MouseEvent) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      onDoubleClick={(e: MouseEvent) => e.stopPropagation()}
+      aria-label="Filter: include, exclude, off"
+      title="Filter: include, exclude, off (or double-click the row)"
+    >
+      {icon}
+    </ActionIcon>
+  );
 }
 
 function ValueRow(props: {
   label: ReactNode;
   count: number | undefined;
   mark: ReturnType<typeof markOf>;
+  /** Filter by the value (cycle its mark). */
   onClick: () => void;
   onContextMenu?: (e: MouseEvent) => void;
   depth?: number;
-  toggle?: ReactNode;
+  /** The row has children: whether they show, and showing or hiding them. */
+  expand?: { open: boolean; onToggle: () => void };
 }) {
+  const { expand } = props;
   return (
     <UnstyledButton
       className={classes.value}
       data-mark={props.mark}
-      onClick={props.onClick}
+      onClick={(e: MouseEvent) => {
+        const action = rowClick(e.detail, expand != null);
+        if (action === "toggle") expand?.onToggle();
+        if (action === "filter") props.onClick();
+      }}
+      onDoubleClick={expand && props.onClick}
       onContextMenu={props.onContextMenu && ((e: MouseEvent) => {
         e.preventDefault();
         props.onContextMenu?.(e);
@@ -72,8 +107,8 @@ function ValueRow(props: {
       style={{ paddingLeft: 8 + (props.depth ?? 0) * 14 }}
     >
       <Group gap={6} wrap="nowrap">
-        {props.toggle ?? <Box w={16} />}
-        <MarkIcon mark={props.mark} />
+        {expand ? <Toggle open={expand.open} onClick={expand.onToggle} /> : <Box w={16} />}
+        <MarkIcon mark={props.mark} expandable={expand != null} onClick={props.onClick} />
         <Text size="sm" truncate flex={1}>
           {props.label}
         </Text>
@@ -163,15 +198,13 @@ function matches(label: string, search: string) {
 }
 
 export function FilterPane({ tree, spec, onChange, onFolderMenu }: Props) {
-  const value = (facet: string, v: FilterValue, label: string, kind: string, countKey: string, depth = 0, toggle?: ReactNode) => (
+  const value = (facet: string, v: FilterValue, label: string, kind: string, countKey: string) => (
     <ValueRow
       key={`${facet}:${JSON.stringify(v)}`}
       label={label}
       count={countOf(tree, kind, countKey)}
       mark={markOf(spec, facet, v)}
       onClick={() => onChange(cycleValue(spec, facet, v))}
-      depth={depth}
-      toggle={toggle}
     />
   );
   const texts = (facet: string, list: string[], search: string) =>
@@ -240,6 +273,7 @@ function Toggle({ open, onClick }: { open: boolean; onClick: () => void }) {
         e.stopPropagation();
         onClick();
       }}
+      onDoubleClick={(e: MouseEvent) => e.stopPropagation()}
       aria-label={open ? "Collapse" : "Expand"}
     >
       {open ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
@@ -265,7 +299,7 @@ function Dates({ tree, spec, onChange }: Omit<Props, never>) {
             count={countOf(tree, "date_year", String(year))}
             mark={markOf(spec, "date", { year })}
             onClick={() => onChange(cycleValue(spec, "date", { year }))}
-            toggle={months.length ? <Toggle open={!!open[year]} onClick={() => setOpen({ ...open, [year]: !open[year] })} /> : undefined}
+            expand={months.length ? { open: !!open[year], onToggle: () => setOpen({ ...open, [year]: !open[year] }) } : undefined}
           />
           {open[year] &&
             (months as number[]).map((m) => (
@@ -300,7 +334,7 @@ function Collections({ tree, spec, onChange, search }: Props & { search: string 
                 count={countOf(tree, "collection", String(c.id))}
                 mark={markOf(spec, "collection", c.id)}
                 onClick={() => onChange(cycleValue(spec, "collection", c.id))}
-                toggle={children.length ? <Toggle open={!!open[c.id] || !!search} onClick={() => setOpen({ ...open, [c.id]: !open[c.id] })} /> : undefined}
+                expand={children.length ? { open: !!open[c.id] || !!search, onToggle: () => setOpen({ ...open, [c.id]: !open[c.id] }) } : undefined}
               />
               {(open[c.id] || !!search) &&
                 children
@@ -346,7 +380,7 @@ function LibraryFolders({ lib, tree, spec, onChange, onFolderMenu }: { lib: Libr
         count={countOf(tree, "library", String(lib.id))}
         mark={markOf(spec, "library", lib.id)}
         onClick={() => onChange(cycleValue(spec, "library", lib.id))}
-        toggle={<Toggle open={open} onClick={() => setOpen(!open)} />}
+        expand={{ open, onToggle: () => setOpen(!open) }}
       />
       {open && lib.roots.map((n) => <Folder key={n.path} node={n} depth={1} tree={tree} spec={spec} onChange={onChange} onFolderMenu={onFolderMenu} />)}
     </Box>
@@ -364,7 +398,7 @@ function Folder({ node, depth, tree, spec, onChange, onFolderMenu }: { node: Fol
         onClick={() => onChange(cycleValue(spec, "path", node.path))}
         onContextMenu={onFolderMenu && ((e) => onFolderMenu(node.path, e))}
         depth={depth}
-        toggle={node.children.length ? <Toggle open={open} onClick={() => setOpen(!open)} /> : undefined}
+        expand={node.children.length ? { open, onToggle: () => setOpen(!open) } : undefined}
       />
       {open && node.children.map((c) => <Folder key={c.path} node={c} depth={depth + 1} tree={tree} spec={spec} onChange={onChange} onFolderMenu={onFolderMenu} />)}
     </Box>

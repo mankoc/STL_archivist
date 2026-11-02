@@ -24,6 +24,15 @@
   background: var(--mantine-color-default-hover);
 }
 
+/* The funnel of a row with children that filters nothing: faint until hovered. */
+.unmarked {
+  opacity: 0.35;
+}
+
+.value:hover .unmarked {
+  opacity: 0.8;
+}
+
 .value[data-mark="include"] {
   background: var(--mantine-color-green-light);
 }

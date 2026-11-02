@@ -250,17 +250,19 @@ export const TOPICS: Topic[] = [
       { p: "**Library** has the filter pane on the left, the models in the middle and the selected model's details on the right." },
       { h: "Search and filters" },
       { list: [
-        "**Search** matches titles, creators, sculptors, collections, paths and tags. The **Search** button beside the box chooses the fields (also source, subcollection, category, release, description and URL) and turns on **fuzzy** matching: every word must appear somewhere in the chosen fields, accents and case are ignored, and words of four letters or more may have a typo (two from seven letters), so *drgon alce* finds Alice's Red Dragon. The choice is kept in this browser.",
+        "**Search** matches titles, creators, sculptors, collections, paths and tags. The **options** button (sliders) inside the box chooses the fields (also source, subcollection, category, release, description and URL) and turns on **fuzzy** matching: every word must appear somewhere in the chosen fields, accents and case are ignored, and words of four letters or more may have a typo (two from seven letters), so *drgon alce* finds Alice's Red Dragon. The choice is kept in this browser.",
         "**Filter pane** — one section per field. Click a value to cycle it: **+** (green) only models with it, **−** (red) hide them, a third click clears it. Several values combine.",
+        "Values with children — folders in **Path**, years in **Date**, collections with subcollections — open or close on a click; **double-click** them, or click their mark (a faint funnel until set), to filter.",
         "The **circle** on a section's header cycles *has a value* / *has no value* / off — for example models without tags.",
         "Counts beside values show how many models each would match together with the other active filters. Long sections have their own search box. **Clear** removes every filter.",
       ] },
       { h: "Table and grid" },
       { list: [
         "Click a header to sort (ascending, descending, off); drag a header's edge to resize.",
-        "**Columns** chooses the columns (saved with your account); *More columns* adds Warning, Sequence, Images, Compression, To print, Missing, Added, Updated, URL, Description, Folder and Archive hash. To move a column, point at its header: drag the grip (⋮⋮) left of its name and drop it on the header of the column whose place it should take (outlined while you are over it); the order is saved with your account, and **Reset column order** in the menu restores the default.",
-        "**Table / Images** switches to a thumbnail grid of the same models.",
-        "Click selects; **Ctrl**-click adds or removes; **Shift**-click selects a range. The selection drives Mass edit, Archives and the AI tagger.",
+        "**Columns** (the icon at the right end of the table header) chooses the columns (saved with your account); *More columns* adds Warning, Sequence, Images, Compression, To print, Missing, Added, Updated, URL, Description, Folder and Archive hash. To move a column, point at its header: drag the grip (⋮⋮) left of its name and drop it on the header of the column whose place it should take (outlined while you are over it); the order is saved with your account, and **Reset column order** in the menu restores the default. **Paths relative to their library** shows each path below its library folder (the full path in its tooltip). Web addresses in the URL column are links.",
+        "The **table / images** icons switch to a thumbnail grid of the same models.",
+        "Click selects; **Ctrl**-click or a row's checkbox adds or removes; **Shift**-click selects a range; the header's checkbox (or **Ctrl+A**) selects all. **✕** beside the count clears the selection. The selection drives **Mass edit** and **Actions** (AI tagger, Clear warnings, the archive files, Remove from library).",
+        "**Right-click** a row or image for the same actions on the selection (the row joins it unless it is part of it), plus **Edit…** and, for one model, its archive: Download, Open folder / in MeshPeek / in packer (desktop app) and Copy path. Viewers get the archive's part.",
       ] },
       { h: "Details pane" },
       { list: [
@@ -307,9 +309,9 @@ export const TOPICS: Topic[] = [
     title: "Working with archive files",
     summary: "Rescan, regenerate thumbnails, sort files into folders, delete files.",
     blocks: [
-      { p: "Select models, then open **Archives** above the table. These run as [jobs](jobs)." },
+      { p: "Select models, then open **Actions** above the table (or right-click them); the *Archive files* part runs as [jobs](jobs)." },
       { list: [
-        "**Rescan** re-reads the archives (metadata, file list, presupports, warnings, scales) — after replacing an archive's contents in place. Right-clicking a row or image offers it too: for the selection when the row is part of it, else for that model.",
+        "**Rescan** re-reads the archives (metadata, file list, presupports, warnings, scales) — after replacing an archive's contents in place. Right-clicking a row or image offers the same actions: for the selection when the row is part of it, else for that model.",
         "Right-click a folder in the filter pane's **Path** section to **crawl** it (new and changed archives) or **rescan** it (every archive read again) as a part of its library: it keeps the library's path pattern, and is not added to *Libraries* as a folder of its own.",
         "**Generate thumbnails** replaces the models' images with new ones from their archives, up to *Thumbnails per archive*.",
         "**Sort files…** moves the archives into a folder tree built from a [pattern](path-patterns) under a target folder (*Browse…* can make a new folder there with **New folder**). When every archive of a folder goes to one folder, the folder's other files (pictures, links, `info.json`) go with them (*FILE* in the preview); subfolders stay, and a folder left empty is removed. The **?** beside the pattern lists the tokens (click one to add it), and **Saved** keeps patterns with your account to pick again later. **Preview** shows every move first (*COLLISION*: a file of that name exists and a numbered name is used; *MISS*: the archive is not on disk). **Move** moves all or none: if one move fails, the others are put back. Drag the dialog's bottom-right corner to make it larger. Needs *Allow file sorting* in the settings.",
@@ -349,7 +351,7 @@ export const TOPICS: Topic[] = [
       { p: "The AI tagger uses Qwen2.5-VL (through llama.cpp) to look at a model's thumbnails, archive path, file names and catalogued metadata, and suggests tags, title, creator, sculptor, collection, scale, source, year and description." },
       { h: "Using it" },
       { list: [
-        "Select models, then **AI tagger**. If the model is not available the drawer says what is missing.",
+        "Select models, then **Actions → AI tagger…** (or right-click them). If the model is not available the drawer says what is missing.",
         "**Review one by one** — **Suggest** asks about the current model (the first request also loads the model, which takes a while). Edit the tags and fields, then **Save & next** or **Skip**.",
         "**Process all** — tags every selected model in one job and saves the results.",
         "Options: **Max tags**; **Ignore catalogued metadata** (images and names only); **Overwrite filled fields** (by default only empty fields are filled; tags are always added).",

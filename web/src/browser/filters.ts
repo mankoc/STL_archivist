@@ -35,6 +35,17 @@ export function markOf(spec: FilterSpec, facet: string, v: FilterValue): Mark {
   return undefined;
 }
 
+/**
+ * What a click on a filter-pane row does. A row that expands (a folder, a year, a
+ * collection with subcollections) opens or closes, and a double-click filters by it
+ * (its second click closes it again, so the row stays as it was); the other rows
+ * filter. `detail` is the click count (0 from the keyboard).
+ */
+export function rowClick(detail: number, expandable: boolean): "toggle" | "filter" | null {
+  if (!expandable) return "filter";
+  return detail <= 2 ? "toggle" : null;
+}
+
 /** The spec after clicking a value: off → include → exclude → off. */
 export function cycleValue(spec: FilterSpec, facet: string, v: FilterValue): FilterSpec {
   const mark = markOf(spec, facet, v);

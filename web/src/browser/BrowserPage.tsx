@@ -1,10 +1,13 @@
 // The browser: filter pane, table and detail pane (the desktop's main window).
-import { Anchor, Box, Button, Center, Checkbox, Group, Loader, Menu, Modal, Popover, SegmentedControl, SimpleGrid, Stack, Switch, Text, TextInput } from "@mantine/core";
+import {
+  ActionIcon, Anchor, Box, Button, Center, Checkbox, CloseButton, Group, Loader, Menu, Modal, Popover, SegmentedControl, SimpleGrid, Stack, Switch, Text,
+  TextInput, Tooltip, VisuallyHidden,
+} from "@mantine/core";
 import { useDebouncedValue, useHotkeys } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconAdjustmentsHorizontal, IconAlertTriangleOff, IconArchive, IconColumns, IconEdit, IconFilterOff, IconRefresh, IconSearch, IconSparkles, IconSquare, IconSquareCheck, IconTrash } from "@tabler/icons-react";
+import { IconAdjustmentsHorizontal, IconChevronDown, IconColumns, IconEdit, IconFilterOff, IconPhoto, IconRefresh, IconSearch, IconTable } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { type CSSProperties, type PointerEvent as ReactPointerEvent, useEffect, useRef, useState } from "react";
+import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useRef, useState } from "react";
 
 import { api, unwrap } from "../api/client";
 import { hasRole, useUser } from "../auth/user";
@@ -23,6 +26,8 @@ import { COLUMNS, ModelTable, type Sort, useModelIds } from "./ModelTable";
 import { customised, DEFAULT_OPTIONS, loadOptions, placeholder, saveOptions, SEARCH_FIELDS, type SearchOptions } from "./search";
 import { NONE, click, contextClick, coverage, prune, selectAll, type Selection } from "./selection";
 import { HIGHLIGHT_WARNINGS } from "./warnings";
+import { RELATIVE_PATHS } from "./cells";
+import { type ModelActionHandlers, ModelActionItems } from "./ModelActions";
 import classes from "./BrowserPage.module.css";
 
 const SHOW = ["library", "author", "tags", "source", "date", "sculptor", "collection", "subcollection", "category", "release", "scale", "presupports", "path"];
@@ -92,6 +97,12 @@ export function BrowserPage() {
     });
     await api.DELETE("/api/me/settings/{key}", { params: { path: { key: COLUMN_ORDER_KEY } } });
   };
+  const relativePaths = prefs.data?.[RELATIVE_PATHS] === true;
+  const toggleRelativePaths = async () => {
+    const value = !relativePaths;
+    queryClient.setQueryData<Record<string, unknown>>(["me-settings"], (old) => ({ ...old, [RELATIVE_PATHS]: value }));
+    await api.PUT("/api/me/settings/{key}", { params: { path: { key: RELATIVE_PATHS } }, body: value as never });
+  };
   const columnItem = (c: (typeof COLUMNS)[number]) => (
     <Menu.Item key={c.id} disabled={c.id === ALWAYS_SHOWN} onClick={() => toggleColumn(c)}
       leftSection={<Checkbox size="xs" readOnly checked={isShown(c, choice)} tabIndex={-1} />}>
@@ -123,14 +134,13 @@ export function BrowserPage() {
   const covered = coverage(selection, order);
   const selectEvery = (all: boolean) => setSelection((s) => (all ? selectAll(s, order) : NONE));
   useHotkeys([["mod+A", () => selectEvery(true)]]);
-  // Editors get a menu on a right-clicked row (viewers keep the browser's own).
-  const openMenu = editor
-    ? (id: number, e: React.MouseEvent) => {
-        const r = contextClick(selection, order, id);
-        setSelection(r.selection);
-        setMenu({ x: e.clientX, y: e.clientY, ids: r.ids });
-      }
-    : undefined;
+  // The right-click menu of a row or image: editors act on the selection it
+  // makes, viewers on the clicked model (its archive).
+  const openMenu = (id: number, e: React.MouseEvent) => {
+    const r = contextClick(selection, order, id);
+    setSelection(r.selection);
+    setMenu({ x: e.clientX, y: e.clientY, ids: editor ? r.ids : [id] });
+  };
 
   const clearWarnings = async (ids: number[]) => {
     try {
@@ -151,6 +161,18 @@ export function BrowserPage() {
     } catch (err) {
       notifications.show({ color: "red", message: (err as Error).message });
     }
+  };
+
+  // The toolbar's Actions menu and the right-click menu (ModelActions.tsx).
+  const actions: ModelActionHandlers = {
+    edit: setEditing,
+    massEdit: () => setMassEdit(true),
+    aiTagger: () => setAiTagger(true),
+    clearWarnings: (ids) => void clearWarnings(ids),
+    queueJob: (body, what) => void queueJob(body, what),
+    sortFiles: () => setSorting(true),
+    deleteFiles: () => setConfirmDelete(true),
+    remove: () => setConfirmRemove(true),
   };
 
   const tree = useQuery({
@@ -196,106 +218,86 @@ export function BrowserPage() {
             value={searchText}
             onChange={(e) => setSearchText(e.currentTarget.value)}
             w={320}
+            rightSectionPointerEvents="all"
+            rightSection={
+              <Popover position="bottom-end" shadow="md" withArrow>
+                <Popover.Target>
+                  <Tooltip label="Search options" openDelay={400}>
+                    <ActionIcon size="sm" variant={customised(searchOptions) ? "light" : "subtle"} color={customised(searchOptions) ? undefined : "gray"}
+                      aria-label="Search options" data-testid="search-options">
+                      <IconAdjustmentsHorizontal size={14} />
+                    </ActionIcon>
+                  </Tooltip>
+                </Popover.Target>
+                <Popover.Dropdown>
+                  <Stack gap="xs">
+                    <Text size="xs" fw={600}>Search in</Text>
+                    <SimpleGrid cols={2} spacing="xs" verticalSpacing={6}>
+                      {SEARCH_FIELDS.map((f) => {
+                        const on = searchOptions.fields.includes(f.value);
+                        return (
+                          <Checkbox key={f.value} size="xs" label={f.label} checked={on}
+                            disabled={on && searchOptions.fields.length === 1}
+                            onChange={() => setSearchOptions({
+                              ...searchOptions,
+                              fields: SEARCH_FIELDS.map((x) => x.value).filter((v) => (v === f.value ? !on : searchOptions.fields.includes(v))),
+                            })} />
+                        );
+                      })}
+                    </SimpleGrid>
+                    <Switch size="xs" label="Fuzzy: ignore accents, allow typos" checked={searchOptions.fuzzy}
+                      onChange={(e) => setSearchOptions({ ...searchOptions, fuzzy: e.currentTarget.checked })} />
+                    <Text size="xs" c="dimmed" maw={260}>
+                      {searchOptions.fuzzy
+                        ? "Every word must appear in one of the fields; words of four letters or more may have a typo (two from seven letters)."
+                        : "Finds the text as typed inside any of the fields."}
+                    </Text>
+                    {customised(searchOptions) && (
+                      <Anchor size="xs" component="button" onClick={() => setSearchOptions(DEFAULT_OPTIONS)}>Reset</Anchor>
+                    )}
+                  </Stack>
+                </Popover.Dropdown>
+              </Popover>
+            }
           />
-          <Popover position="bottom-start" shadow="md" withArrow>
-            <Popover.Target>
-              <Button size="compact-xs" variant={customised(searchOptions) ? "light" : "subtle"}
-                leftSection={<IconAdjustmentsHorizontal size={14} />} data-testid="search-options">
-                Search
-              </Button>
-            </Popover.Target>
-            <Popover.Dropdown>
-              <Stack gap="xs">
-                <Text size="xs" fw={600}>Search in</Text>
-                <SimpleGrid cols={2} spacing="xs" verticalSpacing={6}>
-                  {SEARCH_FIELDS.map((f) => {
-                    const on = searchOptions.fields.includes(f.value);
-                    return (
-                      <Checkbox key={f.value} size="xs" label={f.label} checked={on}
-                        disabled={on && searchOptions.fields.length === 1}
-                        onChange={() => setSearchOptions({
-                          ...searchOptions,
-                          fields: SEARCH_FIELDS.map((x) => x.value).filter((v) => (v === f.value ? !on : searchOptions.fields.includes(v))),
-                        })} />
-                    );
-                  })}
-                </SimpleGrid>
-                <Switch size="xs" label="Fuzzy: ignore accents, allow typos" checked={searchOptions.fuzzy}
-                  onChange={(e) => setSearchOptions({ ...searchOptions, fuzzy: e.currentTarget.checked })} />
-                <Text size="xs" c="dimmed" maw={260}>
-                  {searchOptions.fuzzy
-                    ? "Every word must appear in one of the fields; words of four letters or more may have a typo (two from seven letters)."
-                    : "Finds the text as typed inside any of the fields."}
-                </Text>
-                {customised(searchOptions) && (
-                  <Anchor size="xs" component="button" onClick={() => setSearchOptions(DEFAULT_OPTIONS)}>Reset</Anchor>
-                )}
-              </Stack>
-            </Popover.Dropdown>
-          </Popover>
-          <Text size="xs" c="dimmed">
-            {ids.data ? `${ids.data.length.toLocaleString()} model${ids.data.length === 1 ? "" : "s"}` : ""}
-            {selection.ids.size > 1 ? ` · ${selection.ids.size.toLocaleString()} selected` : ""}
-          </Text>
-          {order.length > 0 && (
-            <Button size="compact-xs" variant="subtle" leftSection={covered === "all" ? <IconSquare size={14} /> : <IconSquareCheck size={14} />}
-              onClick={() => selectEvery(covered !== "all")} title="Ctrl+A selects all" data-testid="select-all">
-              {covered === "all" ? "Select none" : "Select all"}
-            </Button>
-          )}
-          {view === "table" && (
-            <Menu closeOnItemClick={false} position="bottom-start">
-              <Menu.Target>
-                <Button size="compact-xs" variant="subtle" leftSection={<IconColumns size={14} />} data-testid="columns-menu">
-                  Columns
+          <Group gap={4} wrap="nowrap">
+            <Text size="xs" c="dimmed">
+              {ids.data ? `${ids.data.length.toLocaleString()} model${ids.data.length === 1 ? "" : "s"}` : ""}
+              {selection.ids.size > 0 ? ` · ${selection.ids.size.toLocaleString()} selected` : ""}
+            </Text>
+            {selection.ids.size > 0 && (
+              <CloseButton size="xs" onClick={() => setSelection(NONE)} aria-label="Clear the selection" title="Clear the selection" data-testid="clear-selection" />
+            )}
+          </Group>
+          <Group gap="xs" ml="auto" wrap="nowrap">
+            {editor && selection.ids.size > 0 && (
+              <>
+                <Button size="compact-xs" variant="subtle" leftSection={<IconEdit size={14} />} onClick={() => setMassEdit(true)}>
+                  Mass edit
                 </Button>
-              </Menu.Target>
-              <Menu.Dropdown mah="70vh" style={{ overflowY: "auto" }}>
-                {COLUMNS.filter((c) => !c.optional).map(columnItem)}
-                <Menu.Label>More columns</Menu.Label>
-                {COLUMNS.filter((c) => c.optional).map(columnItem)}
-                <Menu.Divider />
-                <Text size="xs" c="dimmed" px="sm" py={4} maw={250}>
-                  To move a column, drag the ⋮⋮ grip left of its name in the table header and drop it on the
-                  column whose place it should take.
-                </Text>
-                <Menu.Item disabled={!choice.order.length} onClick={resetOrder} data-testid="reset-column-order">
-                  Reset column order
-                </Menu.Item>
-              </Menu.Dropdown>
-            </Menu>
-          )}
-          <SegmentedControl size="xs" value={view} onChange={(v) => setView(v as "table" | "grid")}
-            data={[{ value: "table", label: "Table" }, { value: "grid", label: "Images" }]} data-testid="view-toggle" />
-          {editor && selection.ids.size > 0 && (
-            <Group gap="xs" ml="auto">
-              <Button size="compact-xs" variant="subtle" leftSection={<IconEdit size={14} />} onClick={() => setMassEdit(true)}>
-                Mass edit
-              </Button>
-              <Button size="compact-xs" variant="subtle" leftSection={<IconSparkles size={14} />} onClick={() => setAiTagger(true)} data-testid="ai-tagger">
-                AI tagger
-              </Button>
-              <Menu position="bottom-end">
-                <Menu.Target>
-                  <Button size="compact-xs" variant="subtle" leftSection={<IconArchive size={14} />} data-testid="archive-menu">
-                    Archives
-                  </Button>
-                </Menu.Target>
-                <Menu.Dropdown>
-                  <Menu.Item onClick={() => queueJob({ kind: "rescan", ids: selectedIds() }, "Rescan")}>Rescan</Menu.Item>
-                  <Menu.Item onClick={() => queueJob({ kind: "generate_thumbnails", ids: selectedIds() }, "Thumbnail generation")}>
-                    Generate thumbnails
-                  </Menu.Item>
-                  <Menu.Item onClick={() => setSorting(true)}>Sort files…</Menu.Item>
-                  <Menu.Divider />
-                  <Menu.Item color="red" onClick={() => setConfirmDelete(true)}>Delete files…</Menu.Item>
-                </Menu.Dropdown>
-              </Menu>
-              <Button size="compact-xs" variant="subtle" color="red" leftSection={<IconTrash size={14} />} onClick={() => setConfirmRemove(true)}>
-                Remove from library
-              </Button>
-            </Group>
-          )}
+                <Menu position="bottom-end">
+                  <Menu.Target>
+                    <Button size="compact-xs" variant="subtle" rightSection={<IconChevronDown size={14} />} data-testid="actions-menu">
+                      Actions
+                    </Button>
+                  </Menu.Target>
+                  <Menu.Dropdown>
+                    <ModelActionItems ids={selectedIds()} where="toolbar" editor={editor} on={actions} />
+                  </Menu.Dropdown>
+                </Menu>
+              </>
+            )}
+            <SegmentedControl
+              size="xs"
+              value={view}
+              onChange={(v) => setView(v as "table" | "grid")}
+              data={[
+                { value: "table", label: <ViewLabel label="Table" icon={<IconTable size={14} />} /> },
+                { value: "grid", label: <ViewLabel label="Images" icon={<IconPhoto size={14} />} /> },
+              ]}
+              data-testid="view-toggle"
+            />
+          </Group>
         </Group>
         <Box className={classes.tableBody}>
           {view === "grid" ? (
@@ -312,7 +314,37 @@ export function BrowserPage() {
               choice={choice}
               highlightWarnings={prefs.data?.[HIGHLIGHT_WARNINGS] === true}
               onMoveColumn={moveCol}
-              checkboxes={covered === "none" ? undefined : { coverage: covered, onAll: selectEvery }}
+              checkboxes={{ coverage: covered, onAll: selectEvery }}
+              relativePaths={relativePaths}
+              corner={
+                <Menu closeOnItemClick={false} position="bottom-end">
+                  <Menu.Target>
+                    <Tooltip label="Columns" openDelay={400}>
+                      <ActionIcon size="sm" variant="subtle" color="gray" aria-label="Columns" data-testid="columns-menu">
+                        <IconColumns size={16} />
+                      </ActionIcon>
+                    </Tooltip>
+                  </Menu.Target>
+                  <Menu.Dropdown mah="70vh" style={{ overflowY: "auto" }}>
+                    {COLUMNS.filter((c) => !c.optional).map(columnItem)}
+                    <Menu.Label>More columns</Menu.Label>
+                    {COLUMNS.filter((c) => c.optional).map(columnItem)}
+                    <Menu.Divider />
+                    <Menu.Item onClick={toggleRelativePaths} leftSection={<Checkbox size="xs" readOnly checked={relativePaths} tabIndex={-1} />}
+                      data-testid="relative-paths">
+                      Paths relative to their library
+                    </Menu.Item>
+                    <Menu.Divider />
+                    <Text size="xs" c="dimmed" px="sm" py={4} maw={250}>
+                      To move a column, drag the ⋮⋮ grip left of its name in the table header and drop it on the
+                      column whose place it should take.
+                    </Text>
+                    <Menu.Item disabled={!choice.order.length} onClick={resetOrder} data-testid="reset-column-order">
+                      Reset column order
+                    </Menu.Item>
+                  </Menu.Dropdown>
+                </Menu>
+              }
             />
           )}
         </Box>
@@ -336,12 +368,7 @@ export function BrowserPage() {
           <div style={{ position: "fixed", left: menu?.x ?? 0, top: menu?.y ?? 0, width: 0, height: 0 }} />
         </Menu.Target>
         <Menu.Dropdown data-testid="row-menu">
-          <Menu.Item leftSection={<IconRefresh size={14} />} onClick={() => menu && queueJob({ kind: "rescan", ids: menu.ids }, "Rescan")}>
-            {menu && menu.ids.length > 1 ? `Rescan ${menu.ids.length} archives` : "Rescan"}
-          </Menu.Item>
-          <Menu.Item leftSection={<IconAlertTriangleOff size={14} />} onClick={() => menu && clearWarnings(menu.ids)}>
-            Clear warnings
-          </Menu.Item>
+          {menu && <ModelActionItems ids={menu.ids} where="menu" editor={editor} on={actions} />}
         </Menu.Dropdown>
       </Menu>
       <Menu opened={folderMenu != null} onChange={(o) => !o && setFolderMenu(null)} position="bottom-start" withinPortal>
@@ -392,5 +419,17 @@ export function BrowserPage() {
         </Group>
       </Modal>
     </div>
+  );
+}
+
+/** A view toggle choice: its icon, named in a tooltip and to screen readers. */
+function ViewLabel({ label, icon }: { label: string; icon: ReactNode }) {
+  return (
+    <Tooltip label={label} openDelay={400}>
+      <Center>
+        {icon}
+        <VisuallyHidden>{label}</VisuallyHidden>
+      </Center>
+    </Tooltip>
   );
 }

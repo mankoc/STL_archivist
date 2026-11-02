@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026.45.8 — 2026-11-02
+
+- **A tidier library toolbar.** The search options are a button inside the search box; the
+  count says how many models are selected, with **✕** to clear the selection. *Select all*
+  is gone: the table always has its checkbox column (the header's box selects all or none;
+  **Ctrl+A** still works, also in the image grid). **Mass edit** stays a button, and one
+  **Actions** menu holds the rest: *AI tagger*, *Clear warnings*, *Rescan*, *Generate
+  thumbnails*, *Sort files*, *Delete files* and *Remove from library*. Table / Images are
+  icons, and *Columns* is an icon at the right end of the table header.
+- **The right-click menu of a row or image** has the same actions, plus *Edit…* (one model)
+  or *Mass edit…*, and for one model its archive: *Download*, *Open folder*, *Open in
+  MeshPeek*, *Open in packer* and *Copy path*. Viewers get it too, with the archive's part.
+- **The filter tree:** a folder (also a year, or a collection with subcollections) opens or
+  closes on a click; a **double-click**, or a click on its mark, filters by it.
+- **Paths relative to their library** (*Columns* menu, saved for your account): the Path
+  column shows each path below its library folder; the full path is its tooltip.
+- **The URL column** links web addresses (they open in a new tab).
+- **Fixed:** paths mixed separators on Windows (`F:/STL\00 - Kickstarters\…`) when the
+  library folder had been stored with `/`; they are spelled `F:\STL\…` now.
+
 ## 2026.45.7 — 2026-11-02
 
 - **Mass edit's sculptor, release, collection, subcollection and category** suggest values
