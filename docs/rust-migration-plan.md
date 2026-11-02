@@ -1344,6 +1344,12 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.45.5: **Open in packer.** The desktop shell's `packer_state`, `pick_packer`,
+  `clear_packer` and `open_in_packer` (in `SERVER_PERMISSIONS`; the program is chosen only
+  in a file dialog, `Saved.packer_path`, else `find_packer`: PeaZip, then 7-Zip's `7zFM`).
+  MeshPeek's commands share `find_program`, `chosen_program` and `ProgramState`.
+  `web/src/desktop.ts` (`packerState`, `openInPacker`, …), the detail pane's button and
+  `ProgramSettings` in Settings.
 - 2026.45.4: **No collections from the AI tagger.** `build_meta_prompt` asks for 7 lines
   (no `COLLECTION` / `SUBCOLLECTION`); `AiFields`, `AiFieldValues` and `ai_commit` lost
   both fields. **Clear warnings:** `POST /api/models/clear-warnings` (editors;

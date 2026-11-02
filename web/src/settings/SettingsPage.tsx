@@ -16,7 +16,7 @@ import { type Accent, ACCENT_SETTING, ACCENTS, DEFAULT_ACCENT, isAccent, useSetA
 import { api, type Schemas, unwrap } from "../api/client";
 import { hasRole, useUser } from "../auth/user";
 import { HIGHLIGHT_WARNINGS } from "../browser/warnings";
-import { clearMeshPeek, inDesktopShell, meshpeekState, pickMeshPeek } from "../desktop";
+import { clearMeshPeek, clearPacker, inDesktopShell, meshpeekState, packerState, pickMeshPeek, pickPacker, type ProgramState } from "../desktop";
 import { ComponentsPanel } from "../jobs/ComponentsPanel";
 import { MaintenanceTab } from "../jobs/MaintenanceTab";
 import { BackupsTab, SidecarsTab, WorkersTab } from "../jobs/SettingsTabs";
@@ -64,6 +64,7 @@ export function SettingsPage() {
         <Stack maw={520}>
           <AccountSettings />
           {inDesktopShell() && <MeshPeekSettings />}
+          {inDesktopShell() && <PackerSettings />}
         </Stack>
       </Tabs.Panel>
       <Tabs.Panel value="library">
@@ -178,34 +179,64 @@ function AccountSettings() {
 
 /** The MeshPeek program "Open in MeshPeek" runs on this computer (the desktop shell keeps it). */
 function MeshPeekSettings() {
+  return (
+    <ProgramSettings
+      title="MeshPeek on this computer" queryKey="meshpeek" state={meshpeekState} pick={pickMeshPeek} clear={clearMeshPeek}
+      notFound="Not found (no meshpeek on the PATH or in Program Files)"
+      found="Found automatically; choose the program if MeshPeek is somewhere else." testId="meshpeek-settings"
+    />
+  );
+}
+
+/** The archive program "Open in packer" runs on this computer (the desktop shell keeps it). */
+function PackerSettings() {
+  return (
+    <ProgramSettings
+      title="Archive program on this computer" queryKey="packer" state={packerState} pick={pickPacker} clear={clearPacker}
+      notFound="Not found (no PeaZip or 7-Zip on the PATH or in Program Files)"
+      found="Found automatically; choose another program (PeaZip, 7-Zip, WinRAR, …) to open archives with." testId="packer-settings"
+    />
+  );
+}
+
+function ProgramSettings({ title, queryKey, state, pick, clear, notFound, found, testId }: {
+  title: string;
+  queryKey: string;
+  state: () => Promise<ProgramState | null>;
+  pick: () => Promise<unknown>;
+  clear: () => Promise<unknown>;
+  notFound: string;
+  found: string;
+  testId: string;
+}) {
   const queryClient = useQueryClient();
-  const state = useQuery({ queryKey: ["meshpeek"], queryFn: meshpeekState });
+  const query = useQuery({ queryKey: [queryKey], queryFn: state });
   const change = async (call: () => Promise<unknown>) => {
     try {
       await call();
-      await queryClient.invalidateQueries({ queryKey: ["meshpeek"] });
+      await queryClient.invalidateQueries({ queryKey: [queryKey] });
     } catch (err) {
       fail(err);
     }
   };
-  const s = state.data;
+  const s = query.data;
   return (
-    <Card withBorder data-testid="meshpeek-settings">
+    <Card withBorder data-testid={testId}>
       <Title order={5} mb="sm">
-        MeshPeek on this computer
+        {title}
       </Title>
       <Text size="sm" style={{ wordBreak: "break-all" }}>
-        {s?.program ?? (s?.chosen ? `Not found at ${s.chosen}` : "Not found (no meshpeek on the PATH or in Program Files)")}
+        {s?.program ?? (s?.chosen ? `Not found at ${s.chosen}` : notFound)}
       </Text>
       <Text size="xs" c="dimmed" mb="sm">
-        {s?.chosen ? "Chosen here." : "Found automatically; choose the program if MeshPeek is somewhere else."}
+        {s?.chosen ? "Chosen here." : found}
       </Text>
       <Group gap="xs">
-        <Button size="xs" variant="light" onClick={() => change(pickMeshPeek)}>
+        <Button size="xs" variant="light" onClick={() => change(pick)}>
           Choose program…
         </Button>
         {s?.chosen && (
-          <Button size="xs" variant="subtle" onClick={() => change(clearMeshPeek)}>
+          <Button size="xs" variant="subtle" onClick={() => change(clear)}>
             Find automatically
           </Button>
         )}

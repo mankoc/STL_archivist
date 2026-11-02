@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.45.5 — 2026-11-02
+
+- **Open in packer** (desktop app): the detail pane opens the model's archive in an archive
+  program. PeaZip, else 7-Zip, is found on the `PATH` or in Program Files;
+  *Settings → Account → Archive program on this computer* chooses another one (WinRAR, …).
+
 ## 2026.45.4 — 2026-11-02
 
 - **The AI tagger leaves collection and subcollection alone.** It no longer asks the model

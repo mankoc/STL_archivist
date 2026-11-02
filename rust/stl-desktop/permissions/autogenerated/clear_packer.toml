@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-clear-packer"
+description = "Enables the clear_packer command without any pre-configured scope."
+commands.allow = ["clear_packer"]
+
+[[permission]]
+identifier = "deny-clear-packer"
+description = "Denies the clear_packer command without any pre-configured scope."
+commands.deny = ["clear_packer"]

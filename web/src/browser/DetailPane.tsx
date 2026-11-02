@@ -5,12 +5,12 @@ import { ActionIcon, Badge, Box, Button, Center, CopyButton, Group, Image, Loade
 import { useEffect, useState } from "react";
 import { Dropzone, IMAGE_MIME_TYPE } from "@mantine/dropzone";
 import { notifications } from "@mantine/notifications";
-import { IconCopy, IconCube, IconDownload, IconEdit, IconExternalLink, IconFolderOpen, IconPhotoPlus, IconTrash } from "@tabler/icons-react";
+import { IconCopy, IconCube, IconDownload, IconEdit, IconExternalLink, IconFileZip, IconFolderOpen, IconPhotoPlus, IconTrash } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api, ApiError, type Schemas, unwrap } from "../api/client";
 import { hasRole, useUser } from "../auth/user";
-import { inDesktopShell, meshpeekState, openFolder, openInMeshPeek } from "../desktop";
+import { inDesktopShell, meshpeekState, openFolder, openInMeshPeek, openInPacker, packerState } from "../desktop";
 import { ArchiveInfo } from "./ArchiveInfo";
 import { ImageViewer, type ViewerImage } from "./ImageViewer";
 import { baseName, formatDate, formatSize } from "../format";
@@ -49,6 +49,7 @@ export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: num
     setModelView(null);
   }, [id]);
   const meshpeek = useQuery({ queryKey: ["meshpeek"], queryFn: meshpeekState, enabled: inDesktopShell() });
+  const packer = useQuery({ queryKey: ["packer"], queryFn: packerState, enabled: inDesktopShell() });
   const queryClient = useQueryClient();
   const refresh = async () => {
     for (const key of ["model", "rows", "editor"]) await queryClient.invalidateQueries({ queryKey: [key] });
@@ -173,6 +174,17 @@ export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: num
               onClick={() => openInMeshPeek(d.client_path!).catch(notify)}
             >
               Open in MeshPeek
+            </Button>
+          )}
+          {d.client_path && packer.data?.program && (
+            <Button
+              size="xs"
+              variant="subtle"
+              leftSection={<IconFileZip size={14} />}
+              onClick={() => openInPacker(d.client_path!).catch(notify)}
+              data-testid="open-in-packer"
+            >
+              Open in packer
             </Button>
           )}
           {d.client_path && inDesktopShell() && (

@@ -1,6 +1,6 @@
 // The StlArchivist desktop shell (rust/stl-desktop): when the web client runs in
 // its window, the shell lets this page show folders in the file manager, open
-// archives in MeshPeek, and run a compute worker for this server. Those are the
+// archives in MeshPeek or an archive program, and run a compute worker for this server. Those are the
 // only shell commands a server's page may call.
 
 import type { ComponentsInfo } from "./jobs/components";
@@ -24,23 +24,27 @@ export async function openFolder(path: string): Promise<void> {
   await invoke("open_folder", { path });
 }
 
-/** MeshPeek on this computer: the program chosen in Settings, and the one "Open in MeshPeek" runs. */
-export interface MeshPeekState {
+/** A program on this computer (MeshPeek, the archive program): the one chosen in Settings, and the one the shell runs. */
+export interface ProgramState {
   chosen: string | null;
-  /** null: no MeshPeek (the chosen one is missing, or none was found). */
+  /** null: no program (the chosen one is missing, or none was found). */
   program: string | null;
 }
+export type MeshPeekState = ProgramState;
 
-/** MeshPeek on this computer; null outside the desktop app, or in an older one. */
-export async function meshpeekState(): Promise<MeshPeekState | null> {
+/** A shell command's state; null outside the desktop app, or in an older one without it. */
+async function programState(cmd: string): Promise<ProgramState | null> {
   const invoke = shellInvoke();
   if (!invoke) return null;
   try {
-    return (await invoke("meshpeek_state")) as MeshPeekState;
+    return (await invoke(cmd)) as ProgramState;
   } catch {
     return null;
   }
 }
+
+/** MeshPeek on this computer; null outside the desktop app, or in an older one. */
+export const meshpeekState = () => programState("meshpeek_state");
 
 /** Choose MeshPeek's program in the shell's file dialog; null when cancelled. */
 export const pickMeshPeek = () => shellCall<MeshPeekState | null>("pick_meshpeek");
@@ -50,6 +54,15 @@ export const clearMeshPeek = () => shellCall<MeshPeekState>("clear_meshpeek");
 /** Open an archive (`path`, as this computer sees it) in MeshPeek, or one model file inside it (`entry`). */
 export const openInMeshPeek = (path: string, entry?: string) =>
   shellCall<void>("open_in_meshpeek", { path, entry: entry ?? null });
+
+/** The archive program (PeaZip, 7-Zip, …) on this computer; null outside the desktop app, or in an older one. */
+export const packerState = () => programState("packer_state");
+/** Choose the archive program in the shell's file dialog; null when cancelled. */
+export const pickPacker = () => shellCall<ProgramState | null>("pick_packer");
+/** Forget the chosen program: the shell looks for PeaZip or 7-Zip again. */
+export const clearPacker = () => shellCall<ProgramState>("clear_packer");
+/** Open an archive (`path`, as this computer sees it) in the archive program. */
+export const openInPacker = (path: string) => shellCall<void>("open_in_packer", { path });
 
 /** The desktop app's compute worker, as this server's page sees it. */
 export interface WorkerState {

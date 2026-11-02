@@ -13,7 +13,7 @@ can open a library on your computer without setting up a server.
 [the HTTP API](docs/api.md) ·
 and in the interface, the **?** button: searchable in-depth help on every feature
 
-Version: 2026.45.4
+Version: 2026.45.5
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). This version opens its data directory and, since 2026.43.7, converts it once
@@ -81,6 +81,8 @@ Version: 2026.45.4
   (WebGPU or WebGL2): a folder tree of the files, several shown together, per-file colour,
   material and wireframe, a view cube; in the desktop app, **Open in MeshPeek** when it is installed (found
   on the `PATH` or in Program Files, or chosen in *Settings → Account*)
+- **Open in packer** (desktop app) — opens a model's archive in an archive program: PeaZip
+  or 7-Zip when installed, or the program chosen in *Settings → Account*
 
 ## Installation
 

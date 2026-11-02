@@ -166,7 +166,8 @@ launcher capability (`capabilities/launcher.json`) lists what the bundled page m
 About window, `capabilities/about.json`, only reads the version), and
 server origins get only `SERVER_PERMISSIONS` (`open_folder`, the MeshPeek commands
 (`meshpeek_state`, `pick_meshpeek` / `clear_meshpeek` — its program is chosen only in a
-file dialog, never named by a page — and `open_in_meshpeek` on a local archive) and the compute worker's
+file dialog, never named by a page — and `open_in_meshpeek` on a local archive), the archive
+program's (`packer_state`, `pick_packer`, `clear_packer`, `open_in_packer`, the same way) and the compute worker's
 commands: start/stop/state, its folder's components through `stl-server components`, and
 picking its folder; runtime capability in `grant`). The worker commands act for the calling
 page's origin only; component changes run the server binary, never code in the shell. Installer
