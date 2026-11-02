@@ -22,7 +22,6 @@ pub mod monitor;
 pub mod sidecars;
 pub mod sync;
 pub mod tools;
-pub mod web;
 pub mod worker;
 pub mod workers;
 

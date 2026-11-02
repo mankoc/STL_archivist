@@ -506,27 +506,26 @@ pub async fn add_images(
                     Err(_) => failed.push(name),
                 }
             }
-            let added = store_thumbnails(lib, id, thumbs)?;
+            let names: Vec<String> = thumbs.iter().map(|(n, _)| n.clone()).collect();
+            let ids = lib.db.with_tx(|tx| browser::add_images(tx, id, &names))?;
+            let items: Vec<(u64, &[u8])> = ids.iter().zip(&thumbs).map(|(&i, (_, t))| (i as u64, t.as_slice())).collect();
+            if let Err(e) = lib.thumbs.put_many(&items) {
+                lib.db.with_tx(|tx| maintenance::delete_images(tx, &ids))?;
+                return Err(e.into());
+            }
+            let refs: Vec<(i64, String)> = ids.iter().map(|&i| (i, i.to_string())).collect();
+            lib.db.with_tx(|tx| browser::set_image_thumbnails(tx, &refs))?;
+            let digests: HashMap<u64, Option<Vec<u8>>> =
+                lib.thumbs.digests(&ids.iter().map(|&i| i as u64).collect::<Vec<_>>())?.into_iter().collect();
+            let added = ids
+                .iter()
+                .map(|&i| ImageRef { id: i, thumbnail: digests.get(&(i as u64)).map(|d| thumbnail_url(i, d.as_deref())) })
+                .collect();
             Ok((AddedImages { added, failed }, path))
         })
         .await?;
     lib.schedule_sidecars([path]);
     Ok(Json(result))
-}
-
-/// Add thumbnails (`(file name, thumbnail)`) as new images of model `id`.
-pub(crate) fn store_thumbnails(lib: &Library, id: i64, thumbs: Vec<(String, Vec<u8>)>) -> Result<Vec<ImageRef>, ApiError> {
-    let names: Vec<String> = thumbs.iter().map(|(n, _)| n.clone()).collect();
-    let ids = lib.db.with_tx(|tx| browser::add_images(tx, id, &names))?;
-    let items: Vec<(u64, &[u8])> = ids.iter().zip(&thumbs).map(|(&i, (_, t))| (i as u64, t.as_slice())).collect();
-    if let Err(e) = lib.thumbs.put_many(&items) {
-        lib.db.with_tx(|tx| maintenance::delete_images(tx, &ids))?;
-        return Err(e.into());
-    }
-    let refs: Vec<(i64, String)> = ids.iter().map(|&i| (i, i.to_string())).collect();
-    lib.db.with_tx(|tx| browser::set_image_thumbnails(tx, &refs))?;
-    let digests: HashMap<u64, Option<Vec<u8>>> = lib.thumbs.digests(&ids.iter().map(|&i| i as u64).collect::<Vec<_>>())?.into_iter().collect();
-    Ok(ids.iter().map(|&i| ImageRef { id: i, thumbnail: digests.get(&(i as u64)).map(|d| thumbnail_url(i, d.as_deref())) }).collect())
 }
 
 /// Remove one image and its thumbnail.

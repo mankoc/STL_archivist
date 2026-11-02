@@ -1,7 +1,6 @@
 fn main() {
     // The launcher page may call its commands; a server's pages only `open_folder`,
-    // the MeshPeek and packer ones, `read_web_page` and the worker's (granted per server
-    // at runtime, see `grant`).
+    // the MeshPeek and packer ones and the worker's (granted per server at runtime, see `grant`).
     const COMMANDS: &[&str] = &[
         "list_servers",
         "save_servers",
@@ -21,7 +20,6 @@ fn main() {
         "pick_packer",
         "clear_packer",
         "open_in_packer",
-        "read_web_page",
         "start_worker",
         "stop_worker",
         "worker_state",

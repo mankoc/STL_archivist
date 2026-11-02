@@ -64,18 +64,6 @@ export const clearPacker = () => shellCall<ProgramState>("clear_packer");
 /** Open an archive (`path`, as this computer sees it) in the archive program. */
 export const openInPacker = (path: string) => shellCall<void>("open_in_packer", { path });
 
-/** A model's page as the desktop app's reader window had it (for `/api/web/read-captured`). */
-export interface CapturedPage {
-  url: string;
-  html: string;
-  /** Images it showed large. */
-  images: string[];
-}
-
-/** Read a model's page in a window of the desktop app (sites that answer only a browser, or need a
- *  sign-in): the user hands it over with the window's "Use this page"; null when cancelled or closed. */
-export const readWebPage = (url: string) => shellCall<CapturedPage | null>("read_web_page", { url });
-
 /** The desktop app's compute worker, as this server's page sees it. */
 export interface WorkerState {
   /** A worker runs for this server. */
