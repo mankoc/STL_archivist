@@ -1,0 +1,36 @@
+/* Resizable by its bottom-right corner; the preview table takes the height. */
+.content.content {
+  flex: 0 0 auto;
+  width: var(--modal-size);
+  min-width: min(480px, 100%);
+  max-width: calc(100vw - 2rem);
+  min-height: 320px;
+  resize: both;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.body.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.stack {
+  flex: 1;
+  min-height: 0;
+}
+
+.rows {
+  flex: 1 1 auto;
+  min-height: 120px;
+  overflow: auto;
+}
+
+@media (max-width: 48em) {
+  .content.content {
+    resize: none;
+  }
+}
