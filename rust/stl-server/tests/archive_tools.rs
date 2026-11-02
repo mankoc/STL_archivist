@@ -169,6 +169,18 @@ async fn delete_files_to_the_trash() {
     let note: Value = serde_json::from_str(&std::fs::read_to_string(trash.join("Dragon.zip.json")).unwrap()).unwrap();
     assert!(note["original_path"].as_str().unwrap().ends_with("Dragon.zip"));
     assert_eq!(scalar::<i64>(&lib, "SELECT count(*) FROM models"), 0);
+
+    // Nothing deleted: the job fails with the reason, and the record stays.
+    write_zip(&root.join("Studio").join("Knight.zip"), &[("knight.stl", b"solid k\nendsolid\n")]);
+    run(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy()})).await;
+    let knight: i64 = scalar(&lib, "SELECT id FROM models");
+    std::fs::remove_file(root.join("Studio").join("Knight.zip")).unwrap();
+    std::fs::create_dir(root.join("Studio").join("Knight.zip")).unwrap();
+    std::fs::write(lib.dir.path().join("settings.json"), json!({"allow_file_delete": true}).to_string()).unwrap();
+    let v = finish(&lib, &ed, json!({"kind": "delete_files", "ids": [knight]})).await;
+    assert_eq!(v["job"]["state"], "failed", "{v}");
+    assert!(v["job"]["message"].as_str().unwrap().starts_with("could not delete "), "{v}");
+    assert_eq!(scalar::<i64>(&lib, "SELECT count(*) FROM models"), 1);
 }
 
 #[tokio::test(flavor = "multi_thread")]

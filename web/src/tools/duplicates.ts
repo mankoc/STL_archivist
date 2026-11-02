@@ -49,3 +49,17 @@ export function pageOf<T>(rows: T[], page: number, size = PAGE_SIZE): T[] {
   const p = Math.min(Math.max(1, page), pageCount(rows.length, size));
   return rows.slice((p - 1) * size, p * size);
 }
+
+/** What became of an archive deleted from a result list, by its delete_files
+ *  job (`undefined` until the job list has it). */
+export type Deletion = { state: "deleting" | "deleted" | "failed"; message?: string };
+
+export function deletion(job: Job | undefined): Deletion {
+  if (!job || job.state === "queued" || job.state === "running") return { state: "deleting" };
+  if (job.state === "done") return { state: "deleted" };
+  return { state: "failed", message: job.message || job.state };
+}
+
+export function deletionLabel(d: Deletion): string {
+  return d.state === "deleting" ? "Deleting…" : d.state === "deleted" ? "Deleted" : `Not deleted: ${d.message}`;
+}

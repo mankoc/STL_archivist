@@ -338,6 +338,7 @@ export const TOPICS: Topic[] = [
         "**Metadata** — models with equal (*Exact*), almost equal (*Levenshtein*, up to N edits) or similar-sounding (*Soundex*) values in the chosen columns.",
       ] },
       { p: "**Compare** opens two models side by side. Filter the results with the box above them." },
+      { p: "The bin before an archive deletes its file (editors, once *Allow Delete files* is on in the library settings): after you confirm, a **Delete files** job moves it to the trash folder (or deletes it, without one) and removes the model. The list marks it *Deleted*, or shows why it could not be." },
     ],
   },
 

@@ -1,4 +1,4 @@
-import { latestJob, matches, pageCount, pageOf, percentLabel, scoreLabel, type Job } from "./duplicates";
+import { deletion, deletionLabel, latestJob, matches, pageCount, pageOf, percentLabel, scoreLabel, type Job } from "./duplicates";
 
 const job = (id: number, kind: string): Job =>
   ({ id, kind, request: { kind }, state: "done", user: "ed", done: 0, total: 0, created_at: id }) as Job;
@@ -36,5 +36,18 @@ describe("duplicates", () => {
     expect(pageOf(rows, 3)).toEqual(rows.slice(200));
     expect(pageOf(rows, 9)).toEqual(rows.slice(200));
     expect(pageOf(rows, 0)[0]).toBe(0);
+  });
+
+  it("follows an archive's deletion by its job", () => {
+    const at = (state: Job["state"], message?: string): Job => ({ ...job(5, "delete_files"), state, message });
+    expect(deletion(undefined)).toEqual({ state: "deleting" });
+    expect(deletion(at("queued")).state).toBe("deleting");
+    expect(deletion(at("running")).state).toBe("deleting");
+    expect(deletion(at("done", "1 archive(s) deleted"))).toEqual({ state: "deleted" });
+    expect(deletion(at("failed", "could not delete F:/a.7z: denied"))).toEqual({ state: "failed", message: "could not delete F:/a.7z: denied" });
+    expect(deletion(at("cancelled")).message).toBe("cancelled");
+    expect(deletionLabel({ state: "deleting" })).toBe("Deleting…");
+    expect(deletionLabel({ state: "deleted" })).toBe("Deleted");
+    expect(deletionLabel({ state: "failed", message: "denied" })).toBe("Not deleted: denied");
   });
 });

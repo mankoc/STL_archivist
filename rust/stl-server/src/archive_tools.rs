@@ -144,8 +144,9 @@ fn move_to_trash(file: &Path, trash: &Path, title: Option<&str>, creator: Option
 
 /// Delete Files: move each archive to the trash folder (or delete it), then
 /// remove the records whose file step succeeded. Needs *allow file delete* in
-/// the library settings.
-pub fn delete_files(lib: &Library, log: &dyn Fn(String), ids: &[i64]) -> Result<(usize, usize, Vec<String>), String> {
+/// the library settings. Returns how many were deleted, the errors (`path:
+/// why`) and the paths deleted.
+pub fn delete_files(lib: &Library, log: &dyn Fn(String), ids: &[i64]) -> Result<(usize, Vec<String>, Vec<String>), String> {
     let settings = LibrarySettings::load(&lib.config.data_dir);
     if !settings.allow_file_delete() {
         return Err("deleting archive files is disabled in the library settings (allow file delete)".into());
@@ -155,7 +156,7 @@ pub fn delete_files(lib: &Library, log: &dyn Fn(String), ids: &[i64]) -> Result<
         std::fs::create_dir_all(t).map_err(|e| format!("trash folder {}: {e}", t.display()))?;
     }
     let rows = lib.db.with(|c| browser::deletion_rows(c, ids)).map_err(db)?;
-    let (mut done, mut failed, mut paths) = (Vec::new(), 0usize, Vec::new());
+    let (mut done, mut failed, mut paths) = (Vec::new(), Vec::new(), Vec::new());
     for (id, path, title, creator, hash) in rows {
         let path = path.unwrap_or_default();
         let file = Path::new(&path);
@@ -173,8 +174,8 @@ pub fn delete_files(lib: &Library, log: &dyn Fn(String), ids: &[i64]) -> Result<
                 paths.push(path);
             }
             Err(e) => {
-                failed += 1;
                 log(format!("ERROR {path}: {e}"));
+                failed.push(format!("{path}: {e}"));
             }
         }
     }
