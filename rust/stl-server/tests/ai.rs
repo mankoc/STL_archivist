@@ -102,6 +102,7 @@ async fn suggest_commit_and_batch() {
     assert_eq!(s["fields"]["title"], "The Dark Knight");
     assert_eq!(s["fields"]["source"], "patreon");
     assert_eq!(s["fields"]["year"], 2023);
+    assert!(s["fields"].get("collection").is_none(), "{s}");
     assert_eq!(s["fields"]["scale"], "32 mm", "scales come from the text, not the model's guess");
     assert_eq!(s["image_ids"].as_array().unwrap().len(), 1);
     {
@@ -141,8 +142,8 @@ async fn suggest_commit_and_batch() {
     assert_eq!(v["job"]["message"], "saved 2 of 2 model(s)");
     let sculptor: String = scalar(&lib, &format!("SELECT s.name FROM models m JOIN sculptors s ON s.id = m.sculptor_id WHERE m.id = {knight}"));
     assert_eq!(sculptor, "Studio", "filled fields are kept");
-    let collection: String = scalar(&lib, &format!("SELECT c.name FROM models m JOIN collections c ON c.id = m.collection_id WHERE m.id = {knight}"));
-    assert_eq!(collection, "comics");
+    let collections: i64 = scalar(&lib, &format!("SELECT count(collection_id) FROM models WHERE id IN ({dragon}, {knight})"));
+    assert_eq!(collections, 0, "the tagger never fills collections");
 }
 
 #[tokio::test(flavor = "multi_thread")]

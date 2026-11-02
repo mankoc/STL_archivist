@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026.45.4 — 2026-11-02
+
+- **The AI tagger leaves collection and subcollection alone.** It no longer asks the model
+  for them, suggests them or saves them; the drawer has no fields for them.
+- **Clear warnings** in a model's right-click menu (editors): removes the warnings of the
+  selected models, for false positives. A rescan detects them again.
+
 ## 2026.45.3 — 2026-11-02
 
 - **Sort files can be resized:** drag the dialog's bottom-right corner; the preview table

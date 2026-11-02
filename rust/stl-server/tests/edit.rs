@@ -70,6 +70,7 @@ async fn viewers_cannot_edit() {
         ("PUT", format!("/api/models/{id}/editor"), json!({})),
         ("POST", "/api/models/mass-edit".into(), json!({"ids": [id]})),
         ("POST", "/api/models/delete".into(), json!({"ids": [id]})),
+        ("POST", "/api/models/clear-warnings".into(), json!({"ids": [id]})),
         ("POST", "/api/lookups/tag".into(), json!({"name": "x"})),
         ("POST", "/api/authors".into(), json!({"action": "delete", "name": "x"})),
     ] {
@@ -294,6 +295,17 @@ async fn deleting_models_removes_their_thumbnails() {
     assert_eq!(l.scalar::<i64>("SELECT count(*) FROM models"), 1);
     assert!(l.lib.state.thumbs.get_many(&[50]).unwrap().is_empty());
     assert!(l.folder.join("030 - Red riding hood.zip").is_file(), "the archive file stays");
+}
+
+#[tokio::test]
+async fn clearing_warnings() {
+    let l = library();
+    let (a, b) = (l.ids[0], l.ids[1]);
+    l.lib.state.db.with(|c| c.execute("UPDATE models SET warning = 'No images found' WHERE id = ?1", [a])).unwrap();
+    let r = l.call("POST", "/api/models/clear-warnings", Some(json!({"ids": [a, b, 999]}))).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    assert_eq!(r.json()["models"], 1, "only the model that had a warning");
+    assert_eq!(l.scalar::<i64>("SELECT count(warning) FROM models"), 0);
 }
 
 #[tokio::test]

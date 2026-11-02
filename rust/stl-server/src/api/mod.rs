@@ -69,6 +69,7 @@ use crate::AppState;
         edit::mass_edit,
         edit::parse_paths,
         edit::delete_models,
+        edit::clear_warnings,
         edit::add_images,
         edit::delete_image,
         lookups::list,
@@ -196,6 +197,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/models/mass-edit", post(edit::mass_edit))
         .route("/api/models/parse-paths", post(edit::parse_paths))
         .route("/api/models/delete", post(edit::delete_models))
+        .route("/api/models/clear-warnings", post(edit::clear_warnings))
         .route("/api/models/{id}/images", post(edit::add_images).layer(DefaultBodyLimit::max(edit::MAX_IMAGES_REQUEST_BYTES)))
         .route("/api/images/{id}", delete(edit::delete_image))
         .route("/api/editor/choices", get(edit::choices))

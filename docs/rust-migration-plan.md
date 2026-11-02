@@ -1344,6 +1344,11 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.45.4: **No collections from the AI tagger.** `build_meta_prompt` asks for 7 lines
+  (no `COLLECTION` / `SUBCOLLECTION`); `AiFields`, `AiFieldValues` and `ai_commit` lost
+  both fields. **Clear warnings:** `POST /api/models/clear-warnings` (editors;
+  `maintenance::clear_warnings` returns the models that had any, whose sidecars are
+  rewritten), the row menu's *Clear warnings*.
 - 2026.45.3: **Resizable Sort files.** The modal's content has CSS `resize: both` (a flex
   column whose preview table takes the height; `SortModal.module.css`); a `ResizeObserver`
   stores the dragged size (`stl.sort.size`), restored through the modal's `styles`.

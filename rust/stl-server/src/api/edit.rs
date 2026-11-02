@@ -421,6 +421,22 @@ pub async fn delete_models(State(lib): State<AppState>, me: CurrentUser, Json(re
     Ok(Json(Changed { models }))
 }
 
+/// Clear the warnings of models (false positives); a rescan detects them again.
+#[utoipa::path(post, path = "/api/models/clear-warnings", tag = "editing", request_body = IdsRequest,
+    responses((status = 200, body = Changed), (status = 403, body = crate::error::ErrorBody)))]
+pub async fn clear_warnings(State(lib): State<AppState>, me: CurrentUser, Json(req): Json<IdsRequest>) -> Result<Json<Changed>, ApiError> {
+    editor(&me)?;
+    let paths = lib
+        .run(move |lib| {
+            let changed = lib.db.with_tx(|tx| stl_core::storage::maintenance::clear_warnings(tx, &req.ids))?;
+            Ok::<_, ApiError>(lib.db.with(|c| model_edit::archive_paths(c, &changed))?.into_values().collect::<Vec<_>>())
+        })
+        .await?;
+    let models = paths.len();
+    lib.schedule_sidecars(paths);
+    Ok(Json(Changed { models }))
+}
+
 /// Drop thumbnail references (`images.thumbnail_path`: the image id) from the
 /// store, after the database change committed.
 fn delete_thumbnails(lib: &Library, refs: &[String]) -> Result<(), ApiError> {

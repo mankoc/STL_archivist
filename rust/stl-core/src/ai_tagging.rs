@@ -176,19 +176,13 @@ pub fn build_meta_prompt(archive_path: &str, meta: &[(String, String)]) -> Strin
          TITLE: <model title>\n\
          CREATOR: <publisher, brand or author name>\n\
          SCULPTOR: <artist or sculptor name>\n\
-         COLLECTION: <the MOST SPECIFIC applicable from: fantasy, sci-fi, comics, tv, movies, games, books, \
-         anime, real life, historic, cartoons, music and musicians, modelling, props, pin-ups. Prefer specific \
-         over generic — e.g. Batman is 'comics' (not 'fantasy'), a Star Wars trooper is 'movies', a Witcher \
-         figure is 'games'. Use 'fantasy'/'sci-fi' only for original/generic creatures with no known franchise.>\n\
-         SUBCOLLECTION: <the specific franchise, publisher, series or universe within the collection — e.g. DC \
-         or Marvel for comics, Star Wars for movies, Warhammer 40k for games. Empty if none/unknown.>\n\
          SCALE: <ONLY if a scale such as 28mm, 32mm, 1/35 or 54mm is explicitly written in the path, filenames, \
          or existing metadata above. A scale CANNOT be seen in an image — never guess or infer it. Leave empty \
          if it is not stated in text.>\n\
          SOURCE: <one of: patreon, kickstarter, myminifactory — or empty>\n\
          YEAR: <4-digit release year — or empty>\n\
          DESCRIPTION: <one sentence describing the model>\n\
-         Output ONLY these 9 lines.",
+         Output ONLY these 7 lines.",
         format_known_meta(meta)
     )
 }
@@ -255,8 +249,6 @@ pub fn normalize_meta(meta: &[(String, String)]) -> AiFields {
         title: get("TITLE"),
         creator: get("CREATOR"),
         sculptor: get("SCULPTOR"),
-        collection: get("COLLECTION"),
-        subcollection: get("SUBCOLLECTION"),
         scale: get("SCALE"),
         description: get("DESCRIPTION"),
         source: if VALID_SOURCES.contains(&source.as_str()) { source } else { String::new() },
@@ -345,7 +337,7 @@ mod tests {
         assert!(p.contains("Image file names: \"front\", \"back\". Existing catalogued metadata"));
         assert!(p.contains("- Title: Batman\n"));
         assert!(build_tags_prompt(&[], "D:/x.zip", &[]).contains("Image file names: (none). Use the full path"));
-        assert!(build_meta_prompt("D:/x.zip", &[]).ends_with("Output ONLY these 9 lines."));
+        assert!(build_meta_prompt("D:/x.zip", &[]).ends_with("Output ONLY these 7 lines."));
         assert_eq!(image_stem(3, Some("renders/front.png")), "front");
         assert_eq!(image_stem(3, None), "img3");
     }

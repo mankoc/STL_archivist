@@ -272,8 +272,6 @@ pub struct AiFields {
     pub description: String,
     pub source: String,
     pub sculptor: String,
-    pub collection: String,
-    pub subcollection: String,
     pub scale: String,
     pub year: Option<i64>,
 }
@@ -303,12 +301,6 @@ pub fn ai_commit(tx: &Transaction, model_id: i64, f: &AiFields, tags: &[String],
     }
     if !f.sculptor.is_empty() && (overwrite || new.sculptor_id.is_none()) {
         new.sculptor_id = set_named(tx, "sculptors", &f.sculptor)?;
-    }
-    if !f.collection.is_empty() && (overwrite || new.collection_id.is_none()) {
-        set_collection(tx, &mut new, clean(Some(&f.collection)).as_deref())?;
-    }
-    if !f.subcollection.is_empty() && new.collection_id.is_some() && (overwrite || new.subcollection_id.is_none()) {
-        set_subcollection(tx, &mut new, clean(Some(&f.subcollection)).as_deref())?;
     }
     if !f.scale.is_empty() {
         let has_scales: bool =

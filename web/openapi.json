@@ -2045,6 +2045,47 @@
         }
       }
     },
+    "/api/models/clear-warnings": {
+      "post": {
+        "tags": [
+          "editing"
+        ],
+        "summary": "Clear the warnings of models (false positives); a rescan detects them again.",
+        "operationId": "post_models_clear_warnings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changed"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/models/delete": {
       "post": {
         "tags": [
@@ -4048,9 +4089,6 @@
         "type": "object",
         "description": "The metadata fields the tagger fills (`normalize_meta`).",
         "properties": {
-          "collection": {
-            "type": "string"
-          },
           "creator": {
             "type": "string"
           },
@@ -4066,9 +4104,6 @@
           "source": {
             "type": "string",
             "description": "`patreon`, `kickstarter`, `myminifactory` or empty."
-          },
-          "subcollection": {
-            "type": "string"
           },
           "title": {
             "type": "string"
