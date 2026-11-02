@@ -8,12 +8,15 @@ import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-quer
 import { type PointerEvent as ReactPointerEvent, useEffect, useState } from "react";
 
 import { api, unwrap } from "../api/client";
-import { CLEAR_PRESUPPORTS, emptyForm, FIND_FIELDS, MANUAL, type MassForm, toRequest } from "./massEdit";
+import { CLEAR_PRESUPPORTS, emptyForm, FIND_FIELDS, MANUAL, type ManualField, type MassForm, toRequest } from "./massEdit";
 import { clampWidth, loadWidth, MASS_EDIT, saveWidth } from "./paneWidth";
 import { PatternTools } from "./PatternTools";
+import { SuggestInput } from "./SuggestInput";
 import classes from "./MassEditDrawer.module.css";
 
 const LIMIT = 50;
+/** The `/api/editor/choices` list each typed field suggests from (none for the URL). */
+const MANUAL_CHOICES: Partial<Record<ManualField, string>> = { title: "titles", creator: "creators", source: "sources", release_date: "dates" };
 /** Paths parsed as the pattern is typed; *Show all parsed values* parses every selected one. */
 const PREVIEW_ROWS = 5;
 
@@ -167,11 +170,12 @@ export function MassEditDrawer({ ids, opened, onClose }: { ids: number[]; opened
         <SimpleGrid cols={2} spacing="xs">
           {MANUAL.map(([k, label]) => (
             <Group key={k} align="flex-end" wrap="nowrap" gap="xs">
-              <TextInput
+              <SuggestInput
                 label={label}
                 value={form.manual[k]}
+                options={MANUAL_CHOICES[k] ? list(MANUAL_CHOICES[k]) : []}
                 disabled={form.clear[k]}
-                onChange={(e) => setForm((f) => ({ ...f, manual: { ...f.manual, [k]: e.currentTarget.value } }))}
+                onChange={(v) => setForm((f) => ({ ...f, manual: { ...f.manual, [k]: v } }))}
                 flex={1}
                 data-testid={`mass-${k}`}
               />
@@ -194,8 +198,8 @@ export function MassEditDrawer({ ids, opened, onClose }: { ids: number[]; opened
           <Autocomplete label="Collection" value={form.collection} onChange={(v) => set("collection", v)} data={list("collections")} limit={LIMIT} />
           <Autocomplete label="Subcollection" value={form.subcollection} onChange={(v) => set("subcollection", v)} data={list("subcollections")} limit={LIMIT} />
           <Autocomplete label="Category" value={form.category} onChange={(v) => set("category", v)} data={list("categories")} limit={LIMIT} />
-          <TextInput label="Scale" description="Comma-separated, added" value={form.scale} onChange={(e) => set("scale", e.currentTarget.value)} />
-          <TextInput label="Tags" description="Comma-separated, added" value={form.tags} onChange={(e) => set("tags", e.currentTarget.value)} data-testid="mass-tags" />
+          <SuggestInput label="Scale" description="Comma-separated, added" value={form.scale} onChange={(v) => set("scale", v)} options={list("scales")} commaList />
+          <SuggestInput label="Tags" description="Comma-separated, added" value={form.tags} onChange={(v) => set("tags", v)} options={list("tags")} commaList data-testid="mass-tags" />
         </SimpleGrid>
         <Divider label="Find & replace" labelPosition="left" />
         <SimpleGrid cols={2} spacing="xs">

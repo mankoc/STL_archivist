@@ -13,13 +13,15 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { type KeyboardEvent, type ReactNode, useMemo, useRef, useState } from "react";
+import { type ReactNode, useMemo, useRef, useState } from "react";
 
 import { api, type Schemas, unwrap } from "../api/client";
 import { baseName, formatDate, formatSize } from "../format";
 import type { FilterSpec } from "./filters";
 import { type ColumnChoice, visible } from "./columns";
 import { rowTone } from "./warnings";
+import { CELL_CHOICES } from "./suggest";
+import { SuggestInput } from "./SuggestInput";
 import { blockIds, blocksFor } from "./rowBlocks";
 import type { Selection } from "./selection";
 import classes from "./ModelTable.module.css";
@@ -128,7 +130,20 @@ async function saveCell(id: number, field: string, value: string) {
   unwrap(await api.PATCH("/api/models/cells", { body: { edits: [{ id, field, value }] } }));
 }
 
-function CellEditor(props: { initial: string; onDone: (value: string | null) => void }) {
+/** The values a cell of `field` suggests (`suggest.ts`), and whether it is a list. */
+function useCellChoices(field: string | undefined, enabled: boolean): { options: string[]; list: boolean } {
+  const choices = useQuery({
+    queryKey: ["lookups", "choices"],
+    queryFn: async () => unwrap(await api.GET("/api/editor/choices")) as Record<string, string[]>,
+    enabled,
+  });
+  const c = field ? CELL_CHOICES[field] : undefined;
+  if (!c) return { options: [], list: false };
+  if ("values" in c) return { options: c.values, list: false };
+  return { options: choices.data?.[c.key] ?? [], list: c.list ?? false };
+}
+
+function CellEditor(props: { initial: string; options: string[]; list: boolean; onDone: (value: string | null) => void }) {
   const [value, setValue] = useState(props.initial);
   const done = useRef(false);
   const finish = (v: string | null) => {
@@ -136,17 +151,19 @@ function CellEditor(props: { initial: string; onDone: (value: string | null) => 
     done.current = true;
     props.onDone(v !== null && v !== props.initial ? v : null);
   };
-  const key = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") finish(value);
-    if (e.key === "Escape") finish(null);
-  };
   return (
-    <input
-      className={classes.editor}
+    <SuggestInput
+      classNames={{ input: classes.editor }}
+      variant="unstyled"
+      size="xs"
       value={value}
+      options={props.options}
+      commaList={props.list}
       autoFocus
-      onChange={(e) => setValue(e.currentTarget.value)}
-      onKeyDown={key}
+      onChange={setValue}
+      // A single value is saved when picked; a list's item is added, and Enter saves.
+      onPick={props.list ? undefined : finish}
+      onKey={(key, v) => finish(key === "Enter" ? v : null)}
       onBlur={() => finish(value)}
       onClick={(e) => e.stopPropagation()}
       data-testid="cell-editor"
@@ -163,6 +180,7 @@ export function ModelTable({ query, onSort, selection, onRowClick, onRowContextM
   const [sizing, setSizing] = useState<ColumnSizingState>({});
 
   const shown = useMemo(() => visible(COLUMNS, choice ?? { hidden: [], shown: [], order: [] }), [choice]);
+  const cellChoices = useCellChoices(editing ? shown[editing.column]?.field : undefined, editing != null);
   // Moving a column (dragged by its grip): the one dragged, and the one it would take the place of.
   const dragged = useRef<string | null>(null);
   const [dropOn, setDropOn] = useState<string | null>(null);
@@ -353,6 +371,8 @@ export function ModelTable({ query, onSort, selection, onRowClick, onRowContextM
                     {isEditing ? (
                       <CellEditor
                         initial={c.text!(row)}
+                        options={cellChoices.options}
+                        list={cellChoices.list}
                         onDone={async (value) => {
                           setEditing(null);
                           if (value === null) return;
