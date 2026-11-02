@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026.45.3 — 2026-11-02
+
+- **Sort files can be resized:** drag the dialog's bottom-right corner; the preview table
+  takes the extra height. The size is remembered in this browser.
+
 ## 2026.45.2 — 2026-11-02
 
 - **Mass edit can be resized:** drag its left edge (double-click it for the usual width).

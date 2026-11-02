@@ -1,14 +1,17 @@
 // Sort files: move the selected archives into a folder tree built from a path
 // pattern, after a preview (the desktop's Sort / Organise Files dialog).
-import { Alert, Badge, Button, Group, Modal, ScrollArea, Stack, Table, Text, TextInput } from "@mantine/core";
+import { Alert, Badge, Button, Group, Modal, Stack, Table, Text, TextInput } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useState } from "react";
 
 import { api, type Schemas, unwrap } from "../api/client";
 import { FolderPicker } from "../jobs/FolderPicker";
 import { PatternTools } from "./PatternTools";
+import classes from "./SortModal.module.css";
 
 const PATTERN_KEY = "stl.sort.pattern";
+/** The size the dialog was resized to, remembered in this browser. */
+const SIZE_KEY = "stl.sort.size";
 const STATUS_COLOR: Record<string, string> = { OK: "green", COLLISION: "yellow", MISS: "red", SKIP: "gray", ERROR: "red", FILE: "blue" };
 
 function stored(): string {
@@ -17,6 +20,32 @@ function stored(): string {
   } catch {
     return "{collection}/{creator}/{title}";
   }
+}
+
+function storedSize(): { width?: string; height?: string } {
+  try {
+    const v = JSON.parse(localStorage.getItem(SIZE_KEY) ?? "{}");
+    return typeof v?.width === "string" && typeof v?.height === "string" ? { width: v.width, height: v.height } : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Remembers the dialog's size once its corner has been dragged (or a size restored). */
+function rememberSize(stack: HTMLDivElement | null) {
+  const content = stack?.closest<HTMLElement>(".mantine-Modal-content");
+  if (!content || typeof ResizeObserver === "undefined") return;
+  const observer = new ResizeObserver(() => {
+    const { width, height } = content.style;
+    if (!width) return;
+    try {
+      localStorage.setItem(SIZE_KEY, JSON.stringify({ width, height }));
+    } catch {
+      /* per-viewer convenience only */
+    }
+  });
+  observer.observe(content);
+  return () => observer.disconnect();
 }
 
 export function SortModal({ ids, opened, onClose }: { ids: number[]; opened: boolean; onClose: () => void }) {
@@ -56,8 +85,15 @@ export function SortModal({ ids, opened, onClose }: { ids: number[]; opened: boo
   };
 
   return (
-    <Modal opened={opened} onClose={onClose} title={`Sort ${ids.length} archive(s)`} size="xl">
-      <Stack>
+    <Modal
+      opened={opened}
+      onClose={onClose}
+      title={`Sort ${ids.length} archive(s)`}
+      size="xl"
+      classNames={{ content: classes.content, body: classes.body }}
+      styles={{ content: opened ? storedSize() : undefined }}
+    >
+      <Stack ref={rememberSize} className={classes.stack}>
         <Group align="flex-end">
           <TextInput label="Target folder" value={target} onChange={(e) => { setTarget(e.currentTarget.value); setRows(null); }} style={{ flex: 1 }} />
           <Button variant="default" onClick={() => setPicker(true)}>Browse…</Button>
@@ -79,7 +115,7 @@ export function SortModal({ ids, opened, onClose }: { ids: number[]; opened: boo
           <Button onClick={move} disabled={!moving} data-testid="sort-move">Move {moving || ""} file(s)</Button>
         </Group>
         {rows && (
-          <ScrollArea.Autosize mah="45vh">
+          <div className={classes.rows}>
             <Table fz="xs" striped data-testid="sort-rows">
               <Table.Tbody>
                 {rows.map((r) => (
@@ -91,7 +127,7 @@ export function SortModal({ ids, opened, onClose }: { ids: number[]; opened: boo
                 ))}
               </Table.Tbody>
             </Table>
-          </ScrollArea.Autosize>
+          </div>
         )}
         <Text size="xs" c="dimmed">
           When every archive of a folder goes to one folder, the folder’s other files (pictures, links, info.json) go with
