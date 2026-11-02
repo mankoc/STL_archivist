@@ -1,7 +1,7 @@
 // The browser table: every matching id in display order (one request), rows
 // fetched in blocks as they scroll into view, virtualised rendering. Sorting
 // runs on the server (`/api/models/ids`), ties ordered by id.
-import { Box, Center, Checkbox, Group, Loader, Text, Tooltip, UnstyledButton } from "@mantine/core";
+import { Anchor, Box, Center, Checkbox, Group, Loader, Text, Tooltip, UnstyledButton } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { IconChevronDown, IconChevronUp, IconGripVertical } from "@tabler/icons-react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -20,6 +20,7 @@ import { baseName, formatDate, formatSize } from "../format";
 import type { FilterSpec } from "./filters";
 import { type ColumnChoice, visible } from "./columns";
 import { rowTone } from "./warnings";
+import { shownPath, webHref } from "./cells";
 import { CELL_CHOICES } from "./suggest";
 import { SuggestInput } from "./SuggestInput";
 import { blockIds, blocksFor } from "./rowBlocks";
@@ -40,13 +41,19 @@ export interface Query {
   sort: Sort | null;
 }
 
+/** How cells show their values (the user's choices). */
+interface CellOptions {
+  /** The Path column shows paths below their library folder. */
+  relativePaths: boolean;
+}
+
 interface Column {
   id: string;
   header: string;
   size: number;
   /** The server's sort column, when the column can be sorted. */
   sortKey?: string;
-  render: (row: Row) => ReactNode;
+  render: (row: Row, options: CellOptions) => ReactNode;
   /** The cell-edit field (`PATCH /api/models/cells`) and the text to start from. */
   field?: string;
   text?: (row: Row) => string;
@@ -73,7 +80,10 @@ export const COLUMNS: Column[] = [
   { id: "tags", header: "Tags", size: 200, render: (r) => r.tags, field: "tags", text: text("tags") },
   { id: "presupports", header: "Presupports", size: 110, sortKey: "presupports", render: (r) => r.presupports, field: "presupports", text: text("presupports") },
   { id: "size", header: "File Size", size: 90, sortKey: "archive_size", render: (r) => formatSize(r.archive_size) },
-  { id: "path", header: "Path", size: 360, sortKey: "archive_path", render: (r) => r.archive_path },
+  {
+    id: "path", header: "Path", size: 360, sortKey: "archive_path",
+    render: (r, o) => <span title={o.relativePaths ? r.archive_path ?? undefined : undefined}>{shownPath(r.archive_path, r.rel_path, o.relativePaths)}</span>,
+  },
   { id: "library", header: "Library", size: 140, sortKey: "library_name", render: (r) => r.library },
   // Optional columns.
   { id: "warning", header: "Warning", size: 220, optional: true, render: (r) => r.warning?.split("\n").join("; ") },
@@ -84,13 +94,24 @@ export const COLUMNS: Column[] = [
   { id: "missing", header: "Missing", size: 80, optional: true, render: (r) => (r.is_missing ? "missing" : null) },
   { id: "added", header: "Added", size: 140, sortKey: "created_at", optional: true, render: (r) => stamp(r.created_at) },
   { id: "updated", header: "Updated", size: 140, optional: true, render: (r) => stamp(r.updated_at) },
-  { id: "url", header: "URL", size: 240, optional: true, render: (r) => r.url },
+  { id: "url", header: "URL", size: 240, optional: true, render: (r) => <UrlCell url={r.url} /> },
   { id: "description", header: "Description", size: 300, optional: true, render: (r) => r.description },
   { id: "folder", header: "Folder", size: 300, optional: true, render: (r) => r.archive_folder },
   { id: "hash", header: "Archive hash", size: 200, optional: true, render: (r) => r.archive_hash },
 ];
 
 const ROW_HEIGHT = 30;
+
+/** A web address opens in a new tab; anything else is shown as text. */
+function UrlCell({ url }: { url: string | null | undefined }) {
+  const href = webHref(url);
+  if (!href) return url;
+  return (
+    <Anchor href={href} target="_blank" rel="noopener noreferrer" size="sm" title={href} onClick={(e) => e.stopPropagation()}>
+      {url}
+    </Anchor>
+  );
+}
 
 export function useModelIds(query: Query) {
   return useQuery({
@@ -119,11 +140,16 @@ interface Props {
   highlightWarnings?: boolean;
   /** A column's header was dragged onto another's (none: headers do not move). */
   onMoveColumn?: (from: string, to: string) => void;
-  /** A checkbox column (shown while rows are selected): how much is selected, and select all or none. */
+  /** A checkbox column: how much is selected, and select all or none. */
   checkboxes?: { coverage: "none" | "some" | "all"; onAll: (all: boolean) => void };
+  /** The Path column shows paths below their library folder. */
+  relativePaths?: boolean;
+  /** At the header's right end, kept in view (the Columns menu). */
+  corner?: ReactNode;
 }
 
 const CHECK_WIDTH = 34;
+const CORNER_WIDTH = 32;
 
 /** Save one cell (`PATCH /api/models/cells`). */
 async function saveCell(id: number, field: string, value: string) {
@@ -171,7 +197,7 @@ function CellEditor(props: { initial: string; options: string[]; list: boolean; 
   );
 }
 
-export function ModelTable({ query, onSort, selection, onRowClick, onRowContextMenu, editable, choice, highlightWarnings, onMoveColumn, checkboxes }: Props) {
+export function ModelTable({ query, onSort, selection, onRowClick, onRowContextMenu, editable, choice, highlightWarnings, onMoveColumn, checkboxes, relativePaths = false, corner }: Props) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<{ id: number; column: number } | null>(null);
   const ids = useModelIds(query);
@@ -245,7 +271,7 @@ export function ModelTable({ query, onSort, selection, onRowClick, onRowContextM
 
   return (
     <div ref={scrollRef} className={classes.scroll} data-testid="model-table">
-      <div className={classes.header} style={{ width }}>
+      <div className={classes.header} style={{ width: width + (corner ? CORNER_WIDTH : 0), minWidth: "100%" }}>
         {checkboxes && (
           <div className={`${classes.headerCell} ${classes.check}`} style={{ width: CHECK_WIDTH }}>
             <Checkbox
@@ -322,6 +348,11 @@ export function ModelTable({ query, onSort, selection, onRowClick, onRowContextM
             </div>
           );
         })}
+        {corner && (
+          <div className={classes.corner} style={{ width: CORNER_WIDTH }}>
+            {corner}
+          </div>
+        )}
       </div>
       <div style={{ height: virtualizer.getTotalSize(), width, position: "relative" }}>
         {items.map((item) => {
@@ -385,7 +416,7 @@ export function ModelTable({ query, onSort, selection, onRowClick, onRowContextM
                         }}
                       />
                     ) : row ? (
-                      c.render(row)
+                      c.render(row, { relativePaths })
                     ) : i === 0 ? (
                       "…"
                     ) : null}

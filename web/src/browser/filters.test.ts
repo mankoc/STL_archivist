@@ -8,8 +8,23 @@ import {
   groupMarkOf,
   isEmpty,
   markOf,
+  rowClick,
   type FilterTree,
 } from "./filters";
+
+describe("row clicks", () => {
+  it("expands a row that has children and filters the others", () => {
+    expect(rowClick(1, true)).toBe("toggle");
+    expect(rowClick(0, true)).toBe("toggle");
+    expect(rowClick(1, false)).toBe("filter");
+  });
+
+  it("leaves an expandable row as it was after a double-click", () => {
+    // The second click closes it again; the double-click itself filters.
+    expect(rowClick(2, true)).toBe("toggle");
+    expect(rowClick(3, true)).toBe(null);
+  });
+});
 
 describe("value cycling", () => {
   it("goes off → include → exclude → off", () => {

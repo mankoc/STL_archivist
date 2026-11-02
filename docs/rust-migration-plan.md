@@ -1344,6 +1344,14 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.45.8: **Toolbar and menus.** `web/src/browser/ModelActions.tsx` (`ModelActionItems`,
+  the toolbar's *Actions* and the right-click menu, for viewers too; one model's archive
+  items read the detail pane's `["model", id]` query). The checkbox column is always
+  shown; `ModelTable`'s `corner` holds the Columns menu (sticky at the header's right).
+  `cells.ts`: `shownPath` (the per-user setting `relative_paths`, rows' `rel_path`) and
+  `webHref` (http(s) only). `filters.rowClick`: rows with children open on a click and
+  filter on a double-click or their mark. **Path spelling:** `relpath::join` (and so SQL
+  `path_join`) spells the root with the system's separator too.
 - 2026.45.7: Mass edit's remaining `Autocomplete`s are `SuggestInput`s; Escape with
   suggestions showing only closes them (`onKey` gets it otherwise). `web/openapi.json`
   regenerated (2026.45.5 and .6 left its version stale).

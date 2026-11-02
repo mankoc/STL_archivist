@@ -13,7 +13,7 @@ can open a library on your computer without setting up a server.
 [the HTTP API](docs/api.md) ·
 and in the interface, the **?** button: searchable in-depth help on every feature
 
-Version: 2026.45.7
+Version: 2026.45.8
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). This version opens its data directory and, since 2026.43.7, converts it once
@@ -46,7 +46,8 @@ Version: 2026.45.7
   false positives until the archive is rescanned
 - **Browser** — faceted filters (include / exclude per value, has-value groups, counts),
   search in chosen fields (optionally fuzzy: accents ignored, typos tolerated), a sortable virtualised table with in-place editing (suggesting the values in the library), selectable columns and
-  (optionally) rows with warnings highlighted, folders of the filter tree crawled or
+  (optionally) rows with warnings highlighted, paths relative to their library, links in the
+  URL column, folders of the filter tree crawled or
   rescanned from their right-click menu, an
   image grid, a detail pane with thumbnails, downloads and image drag-and-drop, and a
   folder-by-folder archive browser
@@ -182,11 +183,12 @@ server) on the same data directory is refused.
 1. **Libraries → Add library**: browse to your archive folder, set a path pattern if your folders
    follow one, and **Crawl**. Jobs run in the server, one at a time; the page can be closed. *Jobs* pauses,
    continues and stops them.
-2. **Library**: filter, search, edit; *Columns* chooses the table's columns, *Images* shows a
-   grid. Select models for *Mass edit*, the *AI tagger* or *Archives* (rescan, thumbnails,
-   sort files, delete files): click, Ctrl+click, Shift+click, or *Select all* (Ctrl+A). While
-   models are selected the table shows a checkbox per row, and one in its header for all or
-   none.
+2. **Library**: filter, search, edit; the columns icon (right end of the table header) chooses
+   the table's columns, the images icon shows a grid. Select models (click, Ctrl+click,
+   Shift+click, a row's checkbox, or the header's checkbox / Ctrl+A for all) for *Mass edit* or
+   *Actions* (AI tagger, clear warnings, rescan, thumbnails, sort files, delete files, remove),
+   or right-click them for the same actions and, for one model, its archive (download, open,
+   copy path). In the filter tree, a folder opens on a click and filters on a double-click.
 3. **Libraries → Update all** re-crawls every library later, keeping the records of archives moved
    between libraries and removing those of archives that are gone.
 4. Or let the server keep up: the eye button on a library **monitors** it. The server
