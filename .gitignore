@@ -27,3 +27,5 @@ TODOs.md
 .autoclaude
 # Claude agent-farm settings backups (machine-specific)
 .claude_agent_farm_backups/
+# Docker Compose personal overrides (machine-specific paths)
+docker/compose.override.yml

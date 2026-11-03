@@ -144,6 +144,35 @@ docker run -d --name stl -p 8770:8770 -v /srv/stl-data:/data -v /srv/STL:/librar
 docker exec -it stl stl-server create-admin admin
 ```
 
+Or use Docker Compose with `docker/compose.override.yml` to customize paths for your setup.
+Create or edit `docker/compose.override.yml` with your data and library paths:
+
+```yaml
+services:
+  stlarchivist:
+    image: mankoc/stlarchivist:latest
+    container_name: stlarchivist
+    restart: unless-stopped
+    ports:
+      - "8770:8770"
+    volumes:
+      - /home/user/stlarchivist-data:/data
+      - /mnt/archive1:/library
+      - /mnt/archive2:/library2
+    environment:
+      STL_LOG: info
+```
+
+Then:
+
+```bash
+cd docker
+docker compose up -d
+docker compose exec stlarchivist stl-server create-admin admin
+```
+
+Update with `docker compose pull && docker compose up -d`.
+
 ## Running
 
 ### Desktop app
