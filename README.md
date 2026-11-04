@@ -13,7 +13,7 @@ can open a library on your computer without setting up a server.
 [the HTTP API](docs/api.md) ·
 and in the interface, the **?** button: searchable in-depth help on every feature
 
-Version: 2026.45.16
+Version: 2026.45.17
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). This version opens its data directory and, since 2026.43.7, converts it once
@@ -127,7 +127,7 @@ code 0 on success).
 ```
 
 The model viewer's WebAssembly is committed (`web/src/viewer/wasm`), so building needs no
-WebAssembly tools. After changing `rust/stl-viewer` or the vendored MeshPeek crates,
+WebAssembly tools. After changing `rust/stl-viewer` or the MeshPeek tag,
 regenerate it with `npm run gen:viewer` (in `web/`; needs `rustup target add
 wasm32-unknown-unknown` and `cargo install wasm-bindgen-cli --version 0.2.129`).
 
@@ -361,8 +361,6 @@ stl_database/
 │   ├── stl-server/          # HTTP + WebSocket API (axum), jobs, accounts, AI, backups
 │   ├── stl-desktop/         # Desktop app (Tauri): launcher page and window on a server
 │   ├── stl-proc/            # Child processes that end with their parent
-│   ├── meshpeek-core/       # MeshPeek's model loaders (vendored; see its README.md)
-│   ├── meshpeek-render/     # MeshPeek's wgpu renderer (vendored)
 │   └── stl-viewer/          # The web client's model viewer: meshpeek-render in WebAssembly
 ├── web/                     # Web client (React, TypeScript, Mantine, TanStack)
 ├── resources/               # Application icon (the STL Archivist emblem; copies in rust/stl-desktop/icons, rust/stl-desktop/ui and web/public)

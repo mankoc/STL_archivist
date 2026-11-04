@@ -1689,6 +1689,8 @@ the path is visible. No business logic and no Tauri commands for data.
   model" changes or files move). `build.ps1` releases its mutex in `finally`.
 - 2026.43.15: the view cube is dragged to orbit (pointer capture on the cube's SVG; a press
   under `viewCube.ts`'s `CLICK_SLOP` is a click on the face it started on).
+- 2026.45.17: `meshpeek-core` and `meshpeek-render` are no longer vendored: they come from the MeshPeek
+  repository by release tag, which `.github/workflows/meshpeek.yml` moves to each new release.
 
 ### Phase 8: Retire Python (small)
 

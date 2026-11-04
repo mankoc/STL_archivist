@@ -1,10 +1,10 @@
 [workspace]
 # StlArchivist Rust core. See docs/rust-migration-plan.md.
 resolver = "2"
-members = ["stl-core", "stl-server", "stl-desktop", "stl-proc", "meshpeek-core", "meshpeek-render", "stl-viewer"]
+members = ["stl-core", "stl-server", "stl-desktop", "stl-proc", "stl-viewer"]
 
 [workspace.package]
-version = "2026.45.16"
+version = "2026.45.17"
 edition = "2024"
 license = "CC-BY-NC-SA-4.0"
 

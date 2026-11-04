@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026.45.17 — 2026-11-04
+
+- **The model viewer has MeshPeek 0.5.9's loaders and renderer**: `.ags` files show their raft and
+  bracing as RuneBrace does.
+- **Security:** a Lychee `.lys` file could make the server open a path named inside it (`libraryFile`
+  objects). Such objects are now skipped: model files never open other files on the server.
+- MeshPeek's crates are no longer copied into this repository: `meshpeek-core` and `meshpeek-render`
+  come from the MeshPeek repository by release tag. A daily workflow, `meshpeek.yml`, moves to each new
+  release, rebuilds the viewer, runs the checks and pushes to `main`.
+
 ## 2026.45.16 — 2026-11-04
 
 - **Long lists in the filter pane are grouped by first letter.** *Creators*, *Tags*, *Sculptor*,
