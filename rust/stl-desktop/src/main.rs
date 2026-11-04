@@ -24,6 +24,9 @@
 //! Links that open a new window (`target="_blank"`, `window.open`): pages of
 //! a server the app connected to open in a window of their own (signed in, as
 //! the main one); other web pages in the default browser; nothing else opens.
+//!
+//! Updates: a page names only a version. The shell builds the GitHub address
+//! itself, takes only a release newer than this app, and asks in its own dialog.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::collections::{BTreeMap, HashSet};
@@ -40,8 +43,10 @@ use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuild
 use tauri::tray::TrayIconBuilder;
 use tauri::webview::NewWindowResponse;
 use tauri::{AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder};
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
+const RELEASE_DOWNLOADS: &str = "https://github.com/mankoc/STL_archivist/releases/download";
+const INSTALLER_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const MAIN: &str = "main";
 const ABOUT: &str = "about";
 /// The shell's name and version: the window's title until a page names it.
@@ -236,6 +241,7 @@ const SERVER_PERMISSIONS: &[&str] = &[
     "allow-pick-packer",
     "allow-clear-packer",
     "allow-open-in-packer",
+    "allow-install-update",
     "allow-start-worker",
     "allow-stop-worker",
     "allow-worker-state",
@@ -859,6 +865,50 @@ fn open_in_packer(app: AppHandle, path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// The installer's address and file name for `version`, a release newer than `current`.
+fn installer_of(version: &str, current: &str) -> Result<(String, String), String> {
+    let parts = |v: &str| v.split('.').map(str::parse::<u32>).collect::<Result<Vec<_>, _>>();
+    let wanted = parts(version).ok().filter(|p| p.len() == 3).ok_or_else(|| format!("Not a version: {version}"))?;
+    if parts(current).is_ok_and(|mine| wanted <= mine) {
+        return Err(format!("This app is already at version {current}"));
+    }
+    let version = format!("{}.{}.{}", wanted[0], wanted[1], wanted[2]);
+    let name = format!("StlArchivist_{version}_x64-setup.exe");
+    Ok((format!("{RELEASE_DOWNLOADS}/v{version}/{name}"), name))
+}
+
+fn download_installer(url: &str, dest: &Path) -> Result<(), String> {
+    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(INSTALLER_TIMEOUT)).build().into();
+    let mut resp = agent.get(url).call().map_err(|e| format!("Download failed: {e}"))?;
+    let mut file = std::fs::File::create(dest).map_err(|e| format!("{}: {e}", dest.display()))?;
+    std::io::copy(&mut resp.body_mut().as_reader(), &mut file).map_err(|e| format!("Download failed: {e}"))?;
+    Ok(())
+}
+
+/// Download `version`'s installer, run it and close the app, once the user agrees.
+#[tauri::command]
+async fn install_update(app: AppHandle, version: String) -> Result<(), String> {
+    if !cfg!(windows) {
+        return Err("Updates install only on Windows; download this one from the release page".to_string());
+    }
+    let (url, name) = installer_of(&version, env!("CARGO_PKG_VERSION"))?;
+    let agreed = app
+        .dialog()
+        .message(format!("Download and install StlArchivist {version}? The app closes to update."))
+        .title("Update StlArchivist")
+        .buttons(MessageDialogButtons::OkCancelCustom("Install".to_string(), "Cancel".to_string()))
+        .blocking_show();
+    if !agreed {
+        return Ok(());
+    }
+    let dest = std::env::temp_dir().join(name);
+    let target = dest.clone();
+    tauri::async_runtime::spawn_blocking(move || download_installer(&url, &target)).await.map_err(|e| e.to_string())??;
+    Command::new(&dest).spawn().map_err(|e| format!("The installer could not start: {e}"))?;
+    app.exit(0);
+    Ok(())
+}
+
 /// Back to the launcher page.
 fn show_launcher(app: &AppHandle) {
     let url = app.state::<Shell>().launcher.lock().unwrap_or_else(|e| e.into_inner()).clone();
@@ -1005,6 +1055,7 @@ fn main() {
             pick_packer,
             clear_packer,
             open_in_packer,
+            install_update,
             start_worker,
             stop_worker,
             worker_state,
@@ -1030,6 +1081,17 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_page_can_only_ask_for_a_newer_release() {
+        let (url, name) = installer_of("2026.46.0", "2026.45.13").unwrap();
+        assert_eq!(name, "StlArchivist_2026.46.0_x64-setup.exe");
+        assert_eq!(url, format!("{RELEASE_DOWNLOADS}/v2026.46.0/{name}"));
+        assert!(installer_of("2026.45.13", "2026.45.13").is_err());
+        assert!(installer_of("2026.45.12", "2026.45.13").is_err());
+        assert!(installer_of("../../evil", "2026.45.13").is_err());
+        assert!(installer_of("2027.1", "2026.45.13").is_err());
+    }
 
     #[test]
     fn server_urls() {

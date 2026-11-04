@@ -505,7 +505,7 @@ export const TOPICS: Topic[] = [
     summary: "Your account and the library's settings.",
     blocks: [
       { list: [
-        "**Account** — your colour scheme (light, dark, or follow the system) and accent colour (buttons, selections and highlights), and **Highlight models with warnings**: library table rows of unreadable archives turn red, rows with other warnings yellow; in the desktop app also the MeshPeek program **Open in MeshPeek** runs and the archive program **Open in packer** runs.",
+        "**Account** — your colour scheme (light, dark, or follow the system) and accent colour (buttons, selections and highlights), and **Highlight models with warnings**: library table rows of unreadable archives turn red, rows with other warnings yellow, and **Check for updates** (off to start with): the server asks GitHub for a new release when you open StlArchivist and at most once a day, and a banner announces it, with **Download and install** in the desktop app on Windows; in the desktop app also the MeshPeek program **Open in MeshPeek** runs and the archive program **Open in packer** runs.",
         "**Library** (administrators change, everyone sees):",
       ] },
       { table: { head: ["Section", "Settings"], rows: [

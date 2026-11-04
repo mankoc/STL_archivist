@@ -20,6 +20,7 @@ fn main() {
         "pick_packer",
         "clear_packer",
         "open_in_packer",
+        "install_update",
         "start_worker",
         "stop_worker",
         "worker_state",

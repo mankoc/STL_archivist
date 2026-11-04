@@ -1344,6 +1344,12 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.45.13: **Update check.** `stl-server/src/updates.rs` reads GitHub's latest release
+  and keeps the answer for a day (an hour after a failure); `GET /api/system/info` asks it only
+  for users whose `check_updates` setting is true, and the client's `UpdateBanner` refetches
+  hourly. The desktop's `install_update` takes only a version: it builds the release address
+  itself, refuses anything not newer than the app, and confirms in a native dialog.
+- 2026.45.12: Import from a web page (2026.45.11) reverted.
 - 2026.45.10: **Deleting from the duplicate lists.** `DuplicatesPage`'s `useRemover`: one
   `delete_files` job per archive, followed through the `["jobs"]` cache (`duplicates.ts`
   `deletion`); the buttons need the editor role and `allow_file_delete`. The `delete_files`

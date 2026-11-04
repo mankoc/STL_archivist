@@ -20,6 +20,7 @@ import { clearMeshPeek, clearPacker, inDesktopShell, meshpeekState, packerState,
 import { ComponentsPanel } from "../jobs/ComponentsPanel";
 import { MaintenanceTab } from "../jobs/MaintenanceTab";
 import { BackupsTab, SidecarsTab, WorkersTab } from "../jobs/SettingsTabs";
+import { CHECK_UPDATES } from "../shell/updates";
 import { type LibrarySettings, SETTINGS_QUERY } from "./librarySettings";
 import { settingsTab } from "./tabs";
 
@@ -114,6 +115,16 @@ function AccountSettings() {
       fail(err);
     }
   };
+  const checkUpdates = prefs.data?.[CHECK_UPDATES] === true;
+  const chooseCheckUpdates = async (on: boolean) => {
+    queryClient.setQueryData(["me-settings"], (d: Record<string, unknown> | undefined) => ({ ...d, [CHECK_UPDATES]: on }));
+    try {
+      unwrap(await api.PUT("/api/me/settings/{key}", { params: { path: { key: CHECK_UPDATES } }, body: on as never }));
+      await queryClient.invalidateQueries({ queryKey: ["system-info"] });
+    } catch (err) {
+      fail(err);
+    }
+  };
   const chooseAccent = async (a: Accent) => {
     setAccent(a);
     queryClient.setQueryData(["me-settings"], (d: Record<string, unknown> | undefined) => ({ ...d, [ACCENT_SETTING]: a }));
@@ -172,6 +183,14 @@ function AccountSettings() {
         checked={highlight}
         onChange={(e) => chooseHighlight(e.currentTarget.checked)}
         data-testid="highlight-warnings"
+      />
+      <Switch
+        mt="md"
+        label="Check for updates"
+        description="The server asks GitHub for a new release when you open StlArchivist, and at most once a day."
+        checked={checkUpdates}
+        onChange={(e) => chooseCheckUpdates(e.currentTarget.checked)}
+        data-testid="check-updates"
       />
     </Card>
   );

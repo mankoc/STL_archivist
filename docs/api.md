@@ -1,6 +1,6 @@
 # StlArchivist API
 
-Version 2026.45.10. Generated from `web/openapi.json` by `tools/api_doc.py`; the
+Version 2026.45.13. Generated from `web/openapi.json` by `tools/api_doc.py`; the
 running server serves the same document at `GET /api/openapi.json`. Do not edit by hand:
 run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after changing routes.
 
@@ -1275,6 +1275,7 @@ One of:
 |---|---|---|
 | `models` | integer | Models in the library. |
 | `name` | string | Always `"stlLibrary"`. |
+| `update` (optional) | null \| [UpdateInfo](#updateinfo) |  |
 | `version` | string |  |
 
 ### Session
@@ -1371,6 +1372,15 @@ What a sync would do, before it runs.
 |---|---|---|
 | `ids` | integer[] |  |
 | `target` | string | The resulting tag's name (an existing tag, matched case-insensitively, or a new one). |
+
+### UpdateInfo
+
+| Field | Type | Description |
+|---|---|---|
+| `current` | string |  |
+| `installer_url` (optional) | string \| null | The newer release's Windows installer. |
+| `latest` (optional) | string \| null | The newer version, when there is one. |
+| `release_url` (optional) | string \| null | The newer release's page. |
 
 ### User
 

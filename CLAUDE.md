@@ -169,7 +169,8 @@ server origins get only `SERVER_PERMISSIONS` (`open_folder`, the MeshPeek comman
 file dialog, never named by a page — and `open_in_meshpeek` on a local archive), the archive
 program's (`packer_state`, `pick_packer`, `clear_packer`, `open_in_packer`, the same way) and the compute worker's
 commands: start/stop/state, its folder's components through `stl-server components`, and
-picking its folder; runtime capability in `grant`). The worker commands act for the calling
+picking its folder, and `install_update`, which takes only a version and builds the GitHub
+address itself; runtime capability in `grant`). The worker commands act for the calling
 page's origin only; links opening a new window go through `new_window_target` (a granted
 server's pages in an app window, other web pages in the default browser, nothing else); component changes run the server binary, never code in the shell. Installer
 settings are in `tauri.bundle.json`, merged only by `cargo tauri build --config …`, so plain
