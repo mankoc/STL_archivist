@@ -4,13 +4,49 @@ import {
   cycleGroup,
   cycleValue,
   folderTree,
+  groupByLetter,
+  letterOf,
   libraryFolderTree,
   groupMarkOf,
   isEmpty,
   markOf,
   rowClick,
+  sumCounts,
   type FilterTree,
 } from "./filters";
+
+describe("letter groups", () => {
+  it("takes the first letter, without case, accents or leading punctuation", () => {
+    expect(letterOf("bob")).toBe("B");
+    expect(letterOf("Émile")).toBe("E");
+    expect(letterOf("\"Big\" Bob")).toBe("B");
+    expect(letterOf(", - Anna")).toBe("A");
+    expect(letterOf("ßeta")).toBe("S");
+  });
+
+  it("puts every digit in one group, and names without letters or digits in another", () => {
+    expect(letterOf("3D Art")).toBe("0-9");
+    expect(letterOf("28mm")).toBe("0-9");
+    expect(letterOf("---")).toBe("#");
+    expect(letterOf("")).toBe("#");
+  });
+
+  it("orders digits, letters, the rest, keeping each group's order", () => {
+    const groups = groupByLetter(["zed", "!!", "9", "alba", "1", "Aaron"], (s) => s);
+    expect(groups).toEqual([
+      { letter: "0-9", items: ["9", "1"] },
+      { letter: "A", items: ["alba", "Aaron"] },
+      { letter: "Z", items: ["zed"] },
+      { letter: "#", items: ["!!"] },
+    ]);
+  });
+
+  it("adds up the counts it has", () => {
+    expect(sumCounts([1, undefined, 2])).toBe(3);
+    expect(sumCounts([undefined])).toBeUndefined();
+    expect(sumCounts([0])).toBe(0);
+  });
+});
 
 describe("row clicks", () => {
   it("expands a row that has children and filters the others", () => {

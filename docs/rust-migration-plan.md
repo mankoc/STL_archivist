@@ -1344,6 +1344,9 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.45.16: **Letter groups in the filter pane.** Client only: `filters.ts` (`letterOf`,
+  `groupByLetter`, `sumCounts`) and `Letters` in `FilterPane.tsx`. Letter rows only open and
+  close; they do not filter.
 - 2026.45.15: **MeshPeek 0.5.8.** `meshpeek-core` and `meshpeek-render` merged three ways with
   MeshPeek `3a70011` (base `e2138f2`), keeping the changes in `meshpeek-core/README.md`; the viewer's
   wasm regenerated. MeshPeek's application changes (reflectiveness slider, background colour,
