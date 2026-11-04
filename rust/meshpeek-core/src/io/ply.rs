@@ -2,13 +2,15 @@
 
 use std::path::Path;
 
+use rayon::prelude::*;
+
 use crate::error::{LoadError, Result};
-use crate::io::{fan, map_file};
+use crate::io::{fan, read_file};
 use crate::mesh::Mesh;
 
 /// Load a PLY file.
 pub fn load(path: &Path) -> Result<Mesh> {
-    load_bytes(&map_file(path)?, path)
+    load_bytes(&read_file(path)?, path)
 }
 
 /// Parse file contents already in memory; `path` only names the file in error messages.
@@ -62,6 +64,36 @@ impl Scalar {
             Self::F64 => 8,
         }
     }
+
+    /// The value of this type at the start of `bytes` (big- or little-endian), as `f64`.
+    fn read(self, bytes: &[u8], big: bool) -> f64 {
+        let size = self.size();
+        let mut b = [0u8; 8];
+        b[..size].copy_from_slice(&bytes[..size]);
+        if big {
+            b[..size].reverse();
+        }
+        match self {
+            Self::I8 => b[0] as i8 as f64,
+            Self::U8 => b[0] as f64,
+            Self::I16 => i16::from_le_bytes([b[0], b[1]]) as f64,
+            Self::U16 => u16::from_le_bytes([b[0], b[1]]) as f64,
+            Self::I32 => i32::from_le_bytes(b[..4].try_into().unwrap()) as f64,
+            Self::U32 => u32::from_le_bytes(b[..4].try_into().unwrap()) as f64,
+            Self::F32 => f32::from_le_bytes(b[..4].try_into().unwrap()) as f64,
+            Self::F64 => f64::from_le_bytes(b),
+        }
+    }
+
+    /// A colour channel stored in this type as 0–255: floats run from 0 to 1, 16-bit values to 65535.
+    fn channel(self, value: f64) -> u8 {
+        let value = match self {
+            Self::F32 | Self::F64 => value * 255.0,
+            Self::U16 => value / 257.0,
+            _ => value,
+        };
+        value.round().clamp(0.0, 255.0) as u8
+    }
 }
 
 /// One `property` line of an element.
@@ -101,21 +133,14 @@ impl Reader<'_> {
         let size = scalar.size();
         let bytes = self.data.get(self.pos..self.pos + size).ok_or("file ends early")?;
         self.pos += size;
-        let mut b = [0u8; 8];
-        b[..size].copy_from_slice(bytes);
-        if self.format == Format::Big {
-            b[..size].reverse();
-        }
-        Ok(match scalar {
-            Scalar::I8 => b[0] as i8 as f64,
-            Scalar::U8 => b[0] as f64,
-            Scalar::I16 => i16::from_le_bytes([b[0], b[1]]) as f64,
-            Scalar::U16 => u16::from_le_bytes([b[0], b[1]]) as f64,
-            Scalar::I32 => i32::from_le_bytes(b[..4].try_into().unwrap()) as f64,
-            Scalar::U32 => u32::from_le_bytes(b[..4].try_into().unwrap()) as f64,
-            Scalar::F32 => f32::from_le_bytes(b[..4].try_into().unwrap()) as f64,
-            Scalar::F64 => f64::from_le_bytes(b),
-        })
+        Ok(scalar.read(bytes, self.format == Format::Big))
+    }
+
+    /// The next `count` rows of `stride` bytes of a binary body, if the file holds them.
+    fn rows(&mut self, count: usize, stride: usize) -> Option<&[u8]> {
+        let rows = self.data.get(self.pos..self.pos.checked_add(count.checked_mul(stride)?)?)?;
+        self.pos += rows.len();
+        Some(rows)
     }
 }
 
@@ -134,8 +159,12 @@ pub fn parse(data: &[u8]) -> std::result::Result<Mesh, String> {
     for element in &elements {
         let column = |name: &str| element.properties.iter().position(|p| p.name == name);
         let xyz = [column("x"), column("y"), column("z")];
-        let rgb = [column("red"), column("green"), column("blue")];
-        let index_list = column("vertex_indices").or_else(|| column("vertex_index"));
+        let either = |a: &str, b: &str| column(a).or_else(|| column(b));
+        let rgb = [either("red", "diffuse_red"), either("green", "diffuse_green"), either("blue", "diffuse_blue")];
+        let index_list = either("vertex_indices", "vertex_index");
+        if format != Format::Ascii && read_fast(&mut reader, element, index_list, &mut mesh, &mut colors) {
+            continue;
+        }
         let mut row = vec![0f64; element.properties.len()];
         for _ in 0..element.count {
             polygon.clear();
@@ -157,7 +186,7 @@ pub fn parse(data: &[u8]) -> std::result::Result<Mesh, String> {
                 let [Some(x), Some(y), Some(z)] = xyz else { return Err("vertex element without x, y, z".into()) };
                 mesh.vertices.push([row[x] as f32, row[y] as f32, row[z] as f32]);
                 if let [Some(r), Some(g), Some(b)] = rgb {
-                    colors.push([row[r] as u8, row[g] as u8, row[b] as u8]);
+                    colors.push([r, g, b].map(|c| element.properties[c].scalar.channel(row[c])));
                 }
             } else if element.name == "face" {
                 fan(&polygon, &mut mesh.faces);
@@ -174,6 +203,56 @@ pub fn parse(data: &[u8]) -> std::result::Result<Mesh, String> {
         mesh.colors = Some(colors);
     }
     Ok(mesh)
+}
+
+/// The common layouts of a binary body read in parallel, straight from the bytes: vertices with fixed-size
+/// properties only, and faces that are all triangles. Returns `false`, having read nothing, for anything else
+/// (the caller then reads the element value by value).
+fn read_fast(
+    reader: &mut Reader,
+    element: &Element,
+    index_list: Option<usize>,
+    mesh: &mut Mesh,
+    colors: &mut Vec<[u8; 3]>,
+) -> bool {
+    let big = reader.format == Format::Big;
+    let props = &element.properties;
+    if element.name == "vertex" && props.iter().all(|p| p.list_count.is_none()) {
+        let column = |name: &str| props.iter().position(|p| p.name == name);
+        let [Some(x), Some(y), Some(z)] = [column("x"), column("y"), column("z")] else { return false };
+        let either = |a: &str, b: &str| column(a).or_else(|| column(b));
+        let rgb = [either("red", "diffuse_red"), either("green", "diffuse_green"), either("blue", "diffuse_blue")];
+        let offsets: Vec<usize> =
+            props.iter().scan(0, |at, p| Some(std::mem::replace(at, *at + p.scalar.size()))).collect();
+        let stride: usize = props.iter().map(|p| p.scalar.size()).sum();
+        let Some(rows) = reader.rows(element.count, stride) else { return false };
+        let value = |row: &[u8], c: usize| props[c].scalar.read(&row[offsets[c]..], big);
+        let vertices = rows.par_chunks_exact(stride).map(|r| [x, y, z].map(|c| value(r, c) as f32));
+        mesh.vertices.par_extend(vertices);
+        if let [Some(r), Some(g), Some(b)] = rgb {
+            let channels = [r, g, b];
+            colors.par_extend(
+                rows.par_chunks_exact(stride).map(|row| channels.map(|c| props[c].scalar.channel(value(row, c)))),
+            );
+        }
+        return true;
+    }
+    let [only] = props.as_slice() else { return false };
+    let Some(count_type) = only.list_count else { return false };
+    if element.name != "face" || index_list != Some(0) {
+        return false;
+    }
+    let (head, size) = (count_type.size(), only.scalar.size());
+    let stride = head + 3 * size;
+    let start = reader.pos;
+    let Some(rows) = reader.rows(element.count, stride) else { return false };
+    if !rows.par_chunks_exact(stride).all(|row| count_type.read(row, big) == 3.0) {
+        reader.pos = start; // not all triangles
+        return false;
+    }
+    let index = |row: &[u8], k: usize| only.scalar.read(&row[head + k * size..], big) as u32;
+    mesh.faces.par_extend(rows.par_chunks_exact(stride).map(|row| [0, 1, 2].map(|k| index(row, k))));
+    true
 }
 
 /// The body format and the elements declared in the header text (up to `end_header`).
@@ -249,5 +328,30 @@ mod tests {
         assert_eq!(mesh.vertices[1], [1., 0., 0.]);
         assert_eq!(mesh.colors.unwrap()[0], [9, 8, 7]);
         assert_eq!(mesh.faces, vec![[0, 1, 2]]);
+    }
+
+    #[test]
+    fn binary_big_endian_with_a_quad_and_float_colours() {
+        let header = "element vertex 4\nproperty double x\nproperty double y\nproperty double z\n\
+                      property float red\nproperty float green\nproperty float blue\n\
+                      element face 1\nproperty list uchar uint vertex_indices\nend_header\n";
+        let mut data = format!("ply\nformat binary_big_endian 1.0\n{header}").into_bytes();
+        for v in [[0f64, 0., 0.], [1., 0., 0.], [1., 1., 0.], [0., 1., 0.]] {
+            v.iter().for_each(|x| data.extend(x.to_be_bytes()));
+            [1f32, 0.5, 0.].iter().for_each(|c| data.extend(c.to_be_bytes()));
+        }
+        data.push(4); // a quad: read value by value
+        [0u32, 1, 2, 3].iter().for_each(|i| data.extend(i.to_be_bytes()));
+        let mesh = parse(&data).unwrap();
+        assert_eq!(mesh.vertices[2], [1., 1., 0.]);
+        assert_eq!(mesh.colors.unwrap()[3], [255, 128, 0]); // floats 0..1 scaled to 0..255
+        assert_eq!(mesh.faces, vec![[0, 1, 2], [0, 2, 3]]);
+    }
+
+    #[test]
+    fn ascii_float_colours() {
+        let header = HEADER.replace("uchar red", "float red").replace("uchar green", "float green");
+        let text = format!("ply\nformat ascii 1.0\n{header}0 0 0 1 0.5 0\n1 0 0 0 0 0\n0 1 0 0 0 0\n3 0 1 2\n");
+        assert_eq!(parse(text.as_bytes()).unwrap().colors.unwrap()[0], [255, 128, 0]);
     }
 }

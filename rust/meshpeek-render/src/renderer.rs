@@ -272,17 +272,26 @@ impl Renderer {
         id
     }
 
+    /// Where the object with this id is in `objects`, if it still exists (ids grow as objects are added, so
+    /// the list is sorted by id).
+    fn index(&self, id: ObjectId) -> Option<usize> {
+        self.objects.binary_search_by_key(&id.0, |(i, _)| i.0).ok()
+    }
+
     /// The object with this id, if it still exists.
     fn object(&mut self, id: ObjectId) -> Option<&mut Object> {
-        self.objects.iter_mut().find(|(i, _)| *i == id).map(|(_, o)| o)
+        let index = self.index(id)?;
+        Some(&mut self.objects[index].1)
     }
 
     /// Show or hide an object.
     pub fn set_visible(&mut self, id: ObjectId, visible: bool) {
         if let Some(object) = self.object(id) {
-            object.visible = visible;
+            if object.visible != visible {
+                object.visible = visible;
+                self.dirty = true;
+            }
         }
-        self.dirty = true;
     }
 
     /// Move an object by `offset` (world units).
@@ -301,9 +310,9 @@ impl Renderer {
             if object.style != style {
                 object.style = style;
                 queue.write_buffer(&object.uniform, 0, bytemuck::bytes_of(&object_uniform(object.model, style)));
+                self.dirty = true; // only then: Preferences sets every style on each frame while it is open
             }
         }
-        self.dirty = true;
     }
 
     /// Remove one object.
@@ -384,8 +393,7 @@ impl Renderer {
 
     /// World-space bounds of one object.
     pub fn object_bounds(&self, id: ObjectId) -> Option<(DVec3, DVec3)> {
-        let (_, object) = self.objects.iter().find(|(i, _)| *i == id)?;
-        world_bounds(object)
+        world_bounds(&self.objects[self.index(id)?].1)
     }
 
     /// World-space bounds of all visible objects and plates.

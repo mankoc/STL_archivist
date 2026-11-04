@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026.45.15 — 2026-11-04
+
+- **The model viewer has MeshPeek 0.5.8's loaders and renderer.** Binary PLY files load about five
+  times faster and Lychee scenes faster.
+- **Fixed in the model viewer:** binary STL files whose header gives the wrong triangle count
+  now load, as do ASCII STL files with names or comments that are not UTF-8. PLY colours stored as
+  floating-point or 16-bit values no longer show as black, `diffuse_red/green/blue` are recognised,
+  and OBJ vertex colours written from 0 to 255 are no longer all white.
+
 ## 2026.45.14 — 2026-11-04
 
 - **`.ags` support projects** open in the model viewer, with MeshPeek's loader: the model, its

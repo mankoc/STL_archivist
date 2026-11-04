@@ -17,7 +17,7 @@ use glam::{DMat4, DVec3};
 use rayon::prelude::*;
 
 use crate::error::{LoadError, Result};
-use crate::io::map_file;
+use crate::io::read_file;
 use crate::mesh::Mesh;
 use crate::scene::{ObjectKind, Scene, SceneObject};
 
@@ -50,7 +50,7 @@ const CONTACT_TYPES: [u32; 2] = [1, 2];
 
 /// Load a `.chitubox` project.
 pub fn load(path: &Path) -> Result<Scene> {
-    load_bytes(&map_file(path)?, path)
+    load_bytes(&read_file(path)?, path)
 }
 
 /// Parse a `.chitubox` project already in memory; `path` names the file in errors and in the objects.

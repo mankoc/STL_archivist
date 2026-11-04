@@ -11,7 +11,7 @@ use super::raft::{self, Footprint, Foundation, Kind, Placement, RaftFoot};
 use super::value::{self, get, ids, index, path, str_of, vec3};
 use super::{codec, mesh_bin, supports};
 use crate::error::{LoadError, Result};
-use crate::io::{Data, map_file};
+use crate::io::{Data, read_file};
 use crate::mesh::Mesh;
 use crate::scene::{ObjectKind, Plate, Scene, SceneObject};
 
@@ -113,7 +113,7 @@ fn object_raft(object: Option<&Value>, mesh: &Mesh, feet: Option<Vec<RaftFoot>>,
 /// Load a `.lys` scene: its models, their supports (with `support_sides` facets round) and rafts, and the
 /// build plate.
 pub fn load(file: &Path, support_sides: u32) -> Result<Scene> {
-    load_data(file, Data::Mapped(map_file(file)?), support_sides)
+    load_data(file, read_file(file)?, support_sides)
 }
 
 /// Like [`load`] for contents already in memory; `file` only labels the objects.

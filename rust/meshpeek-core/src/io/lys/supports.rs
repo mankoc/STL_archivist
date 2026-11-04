@@ -19,6 +19,7 @@ use std::collections::HashMap;
 use std::f64::consts::PI;
 
 use glam::{DMat4, DVec3};
+use rayon::prelude::*;
 use rmpv::Value;
 
 use super::raft::{self, Foundation, RaftFoot};
@@ -495,197 +496,217 @@ pub fn build(
         );
     }
 
-    // pass 2: geometry
+    // pass 2: the geometry of each support on its own, in parallel, then gathered per object in file order
+    let built: Vec<(&str, Vec<Mesh>, Option<RaftFoot>)> = order
+        .par_iter()
+        .map(|&sid| {
+            let p = &prepared[sid];
+            let (pieces, foot) = geometry(p, &prepared, objects, sides, raft_default);
+            (p.tip_object, pieces, foot)
+        })
+        .collect();
     let mut pieces: HashMap<String, Vec<Mesh>> = HashMap::new();
     let mut feet: HashMap<String, Vec<RaftFoot>> = HashMap::new();
-    for sid in order {
-        let p = &prepared[sid];
-        let parent_diameter = |parent: Option<&str>, z: f64| {
-            parent.and_then(|id| prepared.get(id)).map(|parent| smallest_diameter(parent, Some(z)))
-        };
-        let list = pieces.entry(p.tip_object.to_string()).or_default();
-        let s = &p.s;
-        let rings = sides / 2;
-
-        // A brace between two supports is drawn by Lychee (when not hovered) as one straight capsule from its base
-        // along the base normal, as long as the straight distance, narrowing from the diameter of the support it
-        // starts on to that of the support it ends on.
-        if p.bracing {
-            let length = p.total_length;
-            let mut radius = 0.01_f64.max((length * 1.75).min(s.base_tip_diameter)) / 2.0;
-            let mut point_radius = 0.01_f64.max(s.base_tip_point_diameter / 2.0);
-            if !p.mini {
-                if let Some(diameter) = parent_diameter(p.parent_base, p.base_point.z) {
-                    point_radius = radius.min(diameter / 2.0);
-                }
-            }
-            radius = point_radius;
-            if let Some(diameter) = parent_diameter(p.parent_tip, p.tip_point.z) {
-                radius = radius.min(diameter / 2.0);
-            }
-            radius = 0.01_f64.max((length * 1.75).min(radius * 2.0)) / 2.0;
-            point_radius = 0.01_f64.max((length * 1.75).min(point_radius * 2.0)) / 2.0;
-            list.extend(terminal(
-                &s.base_tip_type,
-                p.base_point,
-                p.base_point + p.base_orientation * length,
-                point_radius,
-                radius,
-                true,
-                true,
-                sides,
-                rings,
-                2,
-                false,
-            ));
-            continue;
+    for (object, meshes, foot) in built {
+        pieces.entry(object.to_string()).or_default().extend(meshes);
+        if let Some(foot) = foot {
+            feet.entry(object.to_string()).or_default().push(foot);
         }
+    }
+    let meshes = pieces.into_par_iter().map(|(object, pieces)| (object, Mesh::merge(pieces))).collect();
+    (meshes, feet)
+}
 
-        // tip
-        let mut penetration = s.tip_penetration;
-        let mut radius = s.tip_diameter / 2.0;
-        let mut point_radius = s.tip_point_diameter / 2.0;
-        if p.mini {
-            radius = point_radius;
+/// The pieces of one support (tip, middle, base) and, for a plate support standing on a raft, its foot (the raft
+/// is built around the feet). `prepared` holds every support, for the diameters of parents.
+fn geometry(
+    p: &Prepared,
+    prepared: &HashMap<&str, Prepared>,
+    objects: &HashMap<&str, &Value>,
+    sides: usize,
+    raft_default: bool,
+) -> (Vec<Mesh>, Option<RaftFoot>) {
+    let parent_diameter = |parent: Option<&str>, z: f64| {
+        parent.and_then(|id| prepared.get(id)).map(|parent| smallest_diameter(parent, Some(z)))
+    };
+    let mut list = Vec::new();
+    let mut foot_on_raft = None;
+    let s = &p.s;
+    let rings = sides / 2;
+
+    // A brace between two supports is drawn by Lychee (when not hovered) as one straight capsule from its base
+    // along the base normal, as long as the straight distance, narrowing from the diameter of the support it
+    // starts on to that of the support it ends on.
+    if p.bracing {
+        let length = p.total_length;
+        let mut radius = 0.01_f64.max((length * 1.75).min(s.base_tip_diameter)) / 2.0;
+        let mut point_radius = 0.01_f64.max(s.base_tip_point_diameter / 2.0);
+        if !p.mini {
+            if let Some(diameter) = parent_diameter(p.parent_base, p.base_point.z) {
+                point_radius = radius.min(diameter / 2.0);
+            }
         }
+        radius = point_radius;
         if let Some(diameter) = parent_diameter(p.parent_tip, p.tip_point.z) {
             radius = radius.min(diameter / 2.0);
-            point_radius = radius;
-            penetration = 0.0;
         }
-        if p.mini {
-            radius -= (radius - s.base_tip_point_diameter / 2.0) * PERCENT_LENGTH_BRACING;
-        }
-        let tip_length = if p.bracing || p.mini {
-            (p.total_length * PERCENT_LENGTH_BRACING).min(MAX_LENGTH_BRACING) + penetration
-        } else {
-            p.tip_point.distance(p.tip_join) + penetration
-        };
-        if !p.mini {
-            radius = 0.01_f64.max((tip_length * 1.75).min(radius * 2.0)) / 2.0;
-            point_radius = 0.01_f64.max((tip_length * 1.75).min(point_radius * 2.0)) / 2.0;
-        }
-        let tip_point_end = if s.tip_type == "cube" { p.tip_point } else { p.tip_point - p.tip_normal * penetration };
+        radius = 0.01_f64.max((length * 1.75).min(radius * 2.0)) / 2.0;
+        point_radius = 0.01_f64.max((length * 1.75).min(point_radius * 2.0)) / 2.0;
         list.extend(terminal(
-            &s.tip_type,
-            tip_point_end,
-            p.tip_join,
+            &s.base_tip_type,
+            p.base_point,
+            p.base_point + p.base_orientation * length,
             point_radius,
             radius,
-            p.parent_tip.is_some(),
+            true,
+            true,
+            sides,
+            rings,
+            2,
             false,
+        ));
+        return (list, None);
+    }
+
+    // tip
+    let mut penetration = s.tip_penetration;
+    let mut radius = s.tip_diameter / 2.0;
+    let mut point_radius = s.tip_point_diameter / 2.0;
+    if p.mini {
+        radius = point_radius;
+    }
+    if let Some(diameter) = parent_diameter(p.parent_tip, p.tip_point.z) {
+        radius = radius.min(diameter / 2.0);
+        point_radius = radius;
+        penetration = 0.0;
+    }
+    if p.mini {
+        radius -= (radius - s.base_tip_point_diameter / 2.0) * PERCENT_LENGTH_BRACING;
+    }
+    let tip_length = if p.bracing || p.mini {
+        (p.total_length * PERCENT_LENGTH_BRACING).min(MAX_LENGTH_BRACING) + penetration
+    } else {
+        p.tip_point.distance(p.tip_join) + penetration
+    };
+    if !p.mini {
+        radius = 0.01_f64.max((tip_length * 1.75).min(radius * 2.0)) / 2.0;
+        point_radius = 0.01_f64.max((tip_length * 1.75).min(point_radius * 2.0)) / 2.0;
+    }
+    let tip_point_end = if s.tip_type == "cube" { p.tip_point } else { p.tip_point - p.tip_normal * penetration };
+    list.extend(terminal(
+        &s.tip_type,
+        tip_point_end,
+        p.tip_join,
+        point_radius,
+        radius,
+        p.parent_tip.is_some(),
+        false,
+        sides,
+        rings,
+        if p.bracing || p.mini { 2 } else { rings },
+        !p.bracing,
+    ));
+    if s.tip_break_point > 0.0 && !p.mini && p.parent_tip.is_none() {
+        list.push(sphere(p.tip_point, 0.01_f64.max(tip_length.min(s.tip_break_point)) / 2.0, sides));
+    }
+
+    // base
+    let base_radius;
+    if p.branch {
+        let mut base_penetration = if p.parent_base.is_some() { 0.0 } else { s.base_tip_penetration };
+        let length = if p.parent_base.is_some() { p.length_join } else { p.length_join + base_penetration };
+        let mut r = 0.01_f64.max((length * 1.75).min(s.base_tip_diameter)) / 2.0;
+        let mut pr = 0.01_f64.max(s.base_tip_point_diameter / 2.0);
+        if p.parent_base.is_some() {
+            base_penetration = 0.0;
+            if !p.mini {
+                if let Some(diameter) = parent_diameter(p.parent_base, p.base_point.z) {
+                    pr = r.min(diameter / 2.0);
+                }
+            }
+            r = pr;
+        }
+        if p.mini {
+            r = pr;
+            r -= (r - s.tip_point_diameter / 2.0) * PERCENT_LENGTH_BRACING;
+        } else {
+            r = 0.01_f64.max((length * 1.75).min(r * 2.0)) / 2.0;
+            pr = 0.01_f64.max((length * 1.75).min(pr * 2.0)) / 2.0;
+        }
+        base_radius = r;
+        let base_point_end =
+            if s.base_tip_type == "cube" { p.base_point } else { p.base_point - p.base_orientation * base_penetration };
+        list.extend(terminal(
+            &s.base_tip_type,
+            base_point_end,
+            p.base_join,
+            pr,
+            r,
+            p.parent_base.is_some(),
+            p.bracing,
             sides,
             rings,
             if p.bracing || p.mini { 2 } else { rings },
-            !p.bracing,
+            !p.mini && !p.bracing,
         ));
-        if s.tip_break_point > 0.0 && !p.mini && p.parent_tip.is_none() {
-            list.push(sphere(p.tip_point, 0.01_f64.max(tip_length.min(s.tip_break_point)) / 2.0, sides));
+        if s.base_tip_break_point > 0.0 && !p.mini && p.parent_base.is_none() {
+            list.push(sphere(p.base_point, 0.01_f64.max(length.min(s.base_tip_break_point)) / 2.0, sides));
         }
-
-        // base
-        let base_radius;
-        if p.branch {
-            let mut base_penetration = if p.parent_base.is_some() { 0.0 } else { s.base_tip_penetration };
-            let length = if p.parent_base.is_some() { p.length_join } else { p.length_join + base_penetration };
-            let mut r = 0.01_f64.max((length * 1.75).min(s.base_tip_diameter)) / 2.0;
-            let mut pr = 0.01_f64.max(s.base_tip_point_diameter / 2.0);
-            if p.parent_base.is_some() {
-                base_penetration = 0.0;
-                if !p.mini {
-                    if let Some(diameter) = parent_diameter(p.parent_base, p.base_point.z) {
-                        pr = r.min(diameter / 2.0);
-                    }
-                }
-                r = pr;
-            }
-            if p.mini {
-                r = pr;
-                r -= (r - s.tip_point_diameter / 2.0) * PERCENT_LENGTH_BRACING;
-            } else {
-                r = 0.01_f64.max((length * 1.75).min(r * 2.0)) / 2.0;
-                pr = 0.01_f64.max((length * 1.75).min(pr * 2.0)) / 2.0;
-            }
-            base_radius = r;
-            let base_point_end = if s.base_tip_type == "cube" {
-                p.base_point
-            } else {
-                p.base_point - p.base_orientation * base_penetration
-            };
-            list.extend(terminal(
-                &s.base_tip_type,
-                base_point_end,
-                p.base_join,
-                pr,
-                r,
-                p.parent_base.is_some(),
-                p.bracing,
-                sides,
-                rings,
-                if p.bracing || p.mini { 2 } else { rings },
-                !p.mini && !p.bracing,
-            ));
-            if s.base_tip_break_point > 0.0 && !p.mini && p.parent_base.is_none() {
-                list.push(sphere(p.base_point, 0.01_f64.max(length.min(s.base_tip_break_point)) / 2.0, sides));
-            }
-        } else {
-            let column = if p.mini { s.base_tip_point_diameter / 2.0 } else { s.base_join_diameter / 2.0 };
-            base_radius = column;
-            let foot = DVec3::new(p.base_point.x, p.base_point.y, 0.0);
-            // the column from the plate to the join, flat at the plate, with a ball at the join
-            let (from, to) = (foot + DVec3::Z * 0.01, foot + DVec3::Z * (p.length_join + 0.01));
-            match s.mid_type.as_str() {
-                "cube" => list.push(capsule_twisted(from, to, column, column, true, false, 4, 1, 2, -PI / 4.0)),
-                "cross" => list.push(prism(from, to, &cross_profile(), column, column)),
-                _ => list.push(capsule(from, to, column, column, true, false, sides, 1, rings)),
-            }
-            list.push(sphere(foot + DVec3::Z * p.length_join, column, sides));
-            // foot pad and join cone, or just the cone on a raft
-            let object = objects.get(p.base_object).copied();
-            let raft = Foundation::of(object, raft_default);
-            let on_raft = raft.enabled && raft.base_support;
-            if !on_raft {
-                list.push(pad(foot, s, sides));
-            } else {
-                let cone = if s.base_join_cone > 0.0 {
-                    s.base_join_cone + s.base_join_diameter / 2.0
-                } else {
-                    s.base_join_diameter / 2.0
-                };
-                feet.entry(p.tip_object.to_string()).or_default().push(RaftFoot {
-                    position: foot,
-                    node_diameter: (cone * 2.0).ceil(),
-                    join_diameter: s.base_join_diameter,
-                    reach: cone,
-                });
-            }
-            if s.base_join_cone > 0.0 {
-                let join_radius = s.base_join_diameter / 2.0;
-                let height =
-                    s.base_join_cone.min(s.base_diameter / 2.0 - join_radius).min(p.tip_join.z - join_radius).max(0.0);
-                let offset = if on_raft { raft.base_lift() } else { s.base_length - 0.001 };
-                list.push(frustum(foot + DVec3::Z * offset, height + join_radius, join_radius, height, sides * 2, -PI));
-            }
-        }
-
-        // middle: a straight capsule from the base join to the tip join
-        let mut length = p.base_join.distance(p.tip_join);
-        if p.branch && p.mini {
-            length += 0.01;
-        }
-        let direction = unit(p.tip_join - p.base_join, DVec3::Z);
-        let top_flat = p.branch && s.base_tip_type != "cylinder";
-        let bottom_flat = s.tip_type != "cylinder";
-        let (from, to) = (p.base_join, p.base_join + direction * length);
+    } else {
+        let column = if p.mini { s.base_tip_point_diameter / 2.0 } else { s.base_join_diameter / 2.0 };
+        base_radius = column;
+        let foot = DVec3::new(p.base_point.x, p.base_point.y, 0.0);
+        // the column from the plate to the join, flat at the plate, with a ball at the join
+        let (from, to) = (foot + DVec3::Z * 0.01, foot + DVec3::Z * (p.length_join + 0.01));
         match s.mid_type.as_str() {
-            "cube" => list.push(prism(from, to, &polygon(4, 1.0, PI / 4.0), base_radius, radius)),
-            "cross" => list.push(prism(from, to, &cross_profile(), base_radius, radius)),
-            _ => list.push(capsule(from, to, base_radius, radius, top_flat, bottom_flat, sides, rings, rings)),
+            "cube" => list.push(capsule_twisted(from, to, column, column, true, false, 4, 1, 2, -PI / 4.0)),
+            "cross" => list.push(prism(from, to, &cross_profile(), column, column)),
+            _ => list.push(capsule(from, to, column, column, true, false, sides, 1, rings)),
+        }
+        list.push(sphere(foot + DVec3::Z * p.length_join, column, sides));
+        // foot pad and join cone, or just the cone on a raft
+        let object = objects.get(p.base_object).copied();
+        let raft = Foundation::of(object, raft_default);
+        let on_raft = raft.enabled && raft.base_support;
+        if !on_raft {
+            list.push(pad(foot, s, sides));
+        } else {
+            let cone = if s.base_join_cone > 0.0 {
+                s.base_join_cone + s.base_join_diameter / 2.0
+            } else {
+                s.base_join_diameter / 2.0
+            };
+            foot_on_raft = Some(RaftFoot {
+                position: foot,
+                node_diameter: (cone * 2.0).ceil(),
+                join_diameter: s.base_join_diameter,
+                reach: cone,
+            });
+        }
+        if s.base_join_cone > 0.0 {
+            let join_radius = s.base_join_diameter / 2.0;
+            let height =
+                s.base_join_cone.min(s.base_diameter / 2.0 - join_radius).min(p.tip_join.z - join_radius).max(0.0);
+            let offset = if on_raft { raft.base_lift() } else { s.base_length - 0.001 };
+            list.push(frustum(foot + DVec3::Z * offset, height + join_radius, join_radius, height, sides * 2, -PI));
         }
     }
 
-    let meshes = pieces.into_iter().map(|(object, pieces)| (object, Mesh::merge(pieces))).collect();
-    (meshes, feet)
+    // middle: a straight capsule from the base join to the tip join
+    let mut length = p.base_join.distance(p.tip_join);
+    if p.branch && p.mini {
+        length += 0.01;
+    }
+    let direction = unit(p.tip_join - p.base_join, DVec3::Z);
+    let top_flat = p.branch && s.base_tip_type != "cylinder";
+    let bottom_flat = s.tip_type != "cylinder";
+    let (from, to) = (p.base_join, p.base_join + direction * length);
+    match s.mid_type.as_str() {
+        "cube" => list.push(prism(from, to, &polygon(4, 1.0, PI / 4.0), base_radius, radius)),
+        "cross" => list.push(prism(from, to, &cross_profile(), base_radius, radius)),
+        _ => list.push(capsule(from, to, base_radius, radius, top_flat, bottom_flat, sides, rings, rings)),
+    }
+    (list, foot_on_raft)
 }
 
 /// The foot pad of a plate support: `base.length` thick, `base.diameter` wide at the plate, its top wider by

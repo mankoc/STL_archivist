@@ -3,6 +3,8 @@
 //! Layout (verified on sample files): five u32 (version = 2, header_len, n_indices, n_coords, reserved), then
 //! `n_indices` u32 and `n_coords` f32. Data always starts at byte 20 even though header_len reads 12.
 
+use rayon::prelude::*;
+
 use crate::error::{LoadError, Result};
 use crate::mesh::Mesh;
 
@@ -22,13 +24,12 @@ pub fn parse(raw: &[u8]) -> Result<Mesh> {
     if raw.len() != HEADER_SIZE + 4 * (n_indices + n_coords) || n_indices % 3 != 0 || n_coords % 3 != 0 {
         return Err(LoadError::format("mesh member size does not match its header"));
     }
-    let u32_at = |i: usize| u32::from_le_bytes(raw[i..i + 4].try_into().unwrap());
-    let faces: Vec<[u32; 3]> =
-        (0..n_indices / 3).map(|t| [0, 1, 2].map(|k| u32_at(HEADER_SIZE + (t * 3 + k) * 4))).collect();
+    // three u32 (a triangle) or three f32 (a vertex) per 12 bytes, read in parallel
+    let triple = |t: &[u8]| [0, 1, 2].map(|k| u32::from_le_bytes(t[k * 4..k * 4 + 4].try_into().unwrap()));
     let coords = HEADER_SIZE + 4 * n_indices;
-    let vertices: Vec<[f32; 3]> =
-        (0..n_coords / 3).map(|v| [0, 1, 2].map(|k| f32::from_bits(u32_at(coords + (v * 3 + k) * 4)))).collect();
-    if faces.iter().flatten().any(|&i| i as usize >= vertices.len()) {
+    let faces: Vec<[u32; 3]> = raw[HEADER_SIZE..coords].par_chunks_exact(12).map(triple).collect();
+    let vertices: Vec<[f32; 3]> = raw[coords..].par_chunks_exact(12).map(|v| triple(v).map(f32::from_bits)).collect();
+    if faces.par_iter().any(|f| f.iter().any(|&i| i as usize >= vertices.len())) {
         return Err(LoadError::format("mesh member refers to a vertex that does not exist"));
     }
     Ok(Mesh::new(vertices, faces))
