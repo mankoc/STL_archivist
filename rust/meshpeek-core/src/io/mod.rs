@@ -11,6 +11,7 @@ pub mod stl;
 pub mod threemf;
 
 use std::fs::File;
+use std::io::Read;
 use std::path::Path;
 
 use glam::{DMat4, DVec4};
@@ -51,7 +52,7 @@ pub fn extension(path: &Path) -> String {
     path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default()
 }
 
-/// File contents: memory-mapped from disk or owned (unpacked from an archive).
+/// File contents: memory-mapped from disk (very large files) or owned (read whole, or unpacked from an archive).
 pub enum Data {
     /// A file mapped read-only from disk.
     Mapped(Mmap),
@@ -87,12 +88,12 @@ pub fn parse_mesh(name: &Path, data: &[u8]) -> Result<Mesh> {
 
 /// Load a single-mesh file (STL, OBJ, PLY).
 pub fn load_mesh(path: &Path) -> Result<Mesh> {
-    parse_mesh(path, &map_file(path)?)
+    parse_mesh(path, &read_file(path)?)
 }
 
 /// Load any supported file. Single meshes keep their file coordinates, apart from the OBJ up-axis fix.
 pub fn load(path: &Path, options: &LoadOptions) -> Result<Scene> {
-    load_data(path, Data::Mapped(map_file(path)?), options)
+    load_data(path, read_file(path)?, options)
 }
 
 /// Like [`load`] for a file whose contents are already in memory (e.g. unpacked from an archive);
@@ -145,15 +146,30 @@ pub(crate) fn stem(path: &Path) -> String {
     path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
-/// Memory-map a file for reading: the OS pages it in on demand instead of us copying it.
-pub(crate) fn map_file(path: &Path) -> Result<Mmap> {
-    let file = File::open(path).map_err(|e| LoadError::io(path, e))?;
-    if file.metadata().map_err(|e| LoadError::io(path, e))?.len() == 0 {
+/// Files up to this size are read whole into memory; larger ones are memory-mapped.
+const READ_WHOLE: u64 = 1 << 30;
+
+/// Read a file for parsing, from start to end in one pass. The parsers then work on many parts of it at once,
+/// which on a memory map of a file not yet cached means random reads: on a hard disk several times slower
+/// than reading it in order (3.4 s instead of 0.5 s for a 95 MB STL). Files above [`READ_WHOLE`] are mapped,
+/// to spare memory, and their pages touched in order first so the disk still reads them sequentially.
+pub(crate) fn read_file(path: &Path) -> Result<Data> {
+    let mut file = File::open(path).map_err(|e| LoadError::io(path, e))?;
+    let len = file.metadata().map_err(|e| LoadError::io(path, e))?.len();
+    if len == 0 {
         return Err(LoadError::format(format!("{}: file is empty", path.display())));
     }
+    if len <= READ_WHOLE {
+        let mut bytes = Vec::with_capacity(len as usize);
+        file.read_to_end(&mut bytes).map_err(|e| LoadError::io(path, e))?;
+        return Ok(Data::Owned(bytes));
+    }
     // SAFETY: the map is read-only; if another program truncates the file while we read it the process
-    // can fault, the usual trade-off of mapped I/O, accepted here for speed and memory.
-    unsafe { Mmap::map(&file) }.map_err(|e| LoadError::io(path, e))
+    // can fault, the usual trade-off of mapped I/O, accepted here for memory.
+    let map = unsafe { Mmap::map(&file) }.map_err(|e| LoadError::io(path, e))?;
+    let touched = map.iter().step_by(4096).fold(0u8, |acc, b| acc ^ b);
+    std::hint::black_box(touched);
+    Ok(Data::Mapped(map))
 }
 
 /// Human-readable file size (bytes, KB or MB).

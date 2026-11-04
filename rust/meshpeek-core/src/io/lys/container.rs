@@ -21,7 +21,7 @@ pub enum Archive {
 impl Archive {
     /// Open a file from disk (memory-mapped).
     pub fn open_path(path: &std::path::Path) -> Result<Self> {
-        Self::open(Data::Mapped(crate::io::map_file(path)?))
+        Self::open(crate::io::read_file(path)?)
     }
 
     /// Open file contents, detecting ZIP or MNGO from the first bytes.

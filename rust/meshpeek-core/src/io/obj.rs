@@ -8,12 +8,12 @@ use std::path::Path;
 use rayon::prelude::*;
 
 use crate::error::{LoadError, Result};
-use crate::io::{fan, line_chunks, map_file};
+use crate::io::{fan, line_chunks, read_file};
 use crate::mesh::Mesh;
 
 /// Load an OBJ file.
 pub fn load(path: &Path) -> Result<Mesh> {
-    load_bytes(&map_file(path)?, path)
+    load_bytes(&read_file(path)?, path)
 }
 
 /// Parse file contents already in memory; `path` only names the file in error messages.
@@ -25,7 +25,8 @@ pub fn load_bytes(data: &[u8], path: &Path) -> Result<Mesh> {
 #[derive(Default)]
 struct Chunk {
     vertices: Vec<[f32; 3]>,
-    colors: Vec<[u8; 3]>,
+    /// Vertex colours as written (scaled to 0–255 once the whole file is known).
+    colors: Vec<[f32; 3]>,
     all_colored: bool,
     /// Corner indices as written in the file (1-based, or negative = relative to the vertices so far).
     corners: Vec<i64>,
@@ -33,8 +34,8 @@ struct Chunk {
     faces: Vec<(u32, u32)>,
 }
 
-/// Parse OBJ text: `v` lines (with optional `r g b` in 0..1) and `f` lines (polygons are fan-triangulated).
-/// Vertex colours are kept only when every vertex has them.
+/// Parse OBJ text: `v` lines (with optional `r g b`, from 0 to 1, or to 255 in some exporters) and `f` lines
+/// (polygons are fan-triangulated). Vertex colours are kept only when every vertex has them.
 pub fn parse(data: &[u8]) -> std::result::Result<Mesh, String> {
     let chunks: Vec<Chunk> = line_chunks(data, rayon::current_num_threads() * 4)
         .into_par_iter()
@@ -65,7 +66,10 @@ pub fn parse(data: &[u8]) -> std::result::Result<Mesh, String> {
         mesh.vertices.extend_from_slice(&chunk.vertices);
     }
     if colored {
-        mesh.colors = Some(chunks.iter().flat_map(|c| c.colors.iter().copied()).collect());
+        let colors = || chunks.iter().flat_map(|c| c.colors.iter());
+        // a value above 1 anywhere: the file uses 0..255
+        let scale = if colors().flatten().any(|&v| v > 1.0) { 1.0 } else { 255.0 };
+        mesh.colors = Some(colors().map(|c| c.map(|v| (v * scale).round().clamp(0.0, 255.0) as u8)).collect());
     }
     mesh.faces = faces;
     Ok(mesh)
@@ -94,7 +98,7 @@ fn parse_chunk(text: &[u8]) -> std::result::Result<Chunk, String> {
                 }
                 chunk.vertices.push([values[0] as f32, values[1] as f32, values[2] as f32]);
                 if n == 6 {
-                    chunk.colors.push([0, 1, 2].map(|i| (values[3 + i] * 255.0 + 0.5).clamp(0.0, 255.0) as u8));
+                    chunk.colors.push([0, 1, 2].map(|i| values[3 + i] as f32));
                 } else {
                     chunk.all_colored = false;
                 }
@@ -170,6 +174,12 @@ mod tests {
         let mesh = parse(text.as_bytes()).unwrap();
         assert_eq!(mesh.faces, vec![[0, 1, 2], [0, 2, 3], [0, 3, 4], [0, 1, 2]]);
         assert_eq!(mesh.colors.unwrap()[..2], [[255, 0, 0], [0, 255, 0]]);
+    }
+
+    #[test]
+    fn vertex_colors_from_0_to_255() {
+        let mesh = parse(b"v 0 0 0 255 0 0\nv 1 0 0 0 128 0\nv 0 1 0 1 1 1\nf 1 2 3\n").unwrap();
+        assert_eq!(mesh.colors.unwrap(), [[255, 0, 0], [0, 128, 0], [1, 1, 1]]);
     }
 
     #[test]

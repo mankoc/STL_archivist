@@ -66,7 +66,11 @@ impl Mesh {
 
     /// Concatenate meshes, offsetting each one's indices. Colours are kept only if every mesh has them.
     pub fn merge(meshes: impl IntoIterator<Item = Mesh>) -> Self {
-        let mut out = Mesh::default();
+        let meshes: Vec<Mesh> = meshes.into_iter().collect();
+        let (vertices, faces) = meshes.iter().fold((0, 0), |(v, f), m| (v + m.vertices.len(), f + m.faces.len()));
+        // the room for all of them at once: supports are thousands of small pieces, so growing step by step
+        // would copy the arrays again and again
+        let mut out = Mesh { vertices: Vec::with_capacity(vertices), faces: Vec::with_capacity(faces), colors: None };
         let mut colors = Some(Vec::new());
         for mesh in meshes {
             let offset = out.vertices.len() as u32;
