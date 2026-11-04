@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.45.14 — 2026-11-04
+
+- **`.ags` support projects** open in the model viewer, with MeshPeek's loader: the model, its
+  supports and a raft rebuilt from their feet. Only projects that store their model open;
+  one that only names a model file is refused.
+- Crawls and rescans list `.ags` files with the archive's printable files, and an archive with one
+  counts as *Presupported*. Archives already in the library show this after a rescan.
+
 ## 2026.45.13 — 2026-11-04
 
 - **Check for updates** (*Settings → Account*, saved for your account, off by default). While

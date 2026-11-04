@@ -174,7 +174,7 @@ in this browser.
   without a list gets it from *Rescan* or *Settings → Maintenance → Read missing file
   lists*). The cube beside a model file opens it in the model viewer.
 - **View model** opens the model viewer: the archive's 3D model files (STL, OBJ, PLY, 3MF,
-  Lychee `.lys`, CHITUBOX `.chitubox`, `.ctp` and `.ctb`) on the left, the chosen one drawn
+  Lychee `.lys`, CHITUBOX `.chitubox`, `.ctp` and `.ctb`, `.ags` support projects) on the left, the chosen one drawn
   with MeshPeek's renderer (WebGPU, or WebGL2 in browsers without it). The server unpacks the
   file, so it works in any browser. The files are a folder tree (drag its edge to widen it):
   click a file to show it alone; tick files, or a folder for all its files, or **Ctrl**-click,
