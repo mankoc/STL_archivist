@@ -27,7 +27,7 @@ npm run build        # web/dist, served by stl-server
 npm test             # vitest
 npm run gen:api      # after changing server routes or schemas, then (from the repository root)
 python tools/api_doc.py  # docs/api.md, the API reference, from web/openapi.json
-npm run gen:viewer   # after changing rust/stl-viewer or meshpeek-*: web/src/viewer/wasm (committed);
+npm run gen:viewer   # after changing rust/stl-viewer or the MeshPeek tag: web/src/viewer/wasm (committed);
                      # needs the wasm32-unknown-unknown target and wasm-bindgen-cli 0.2.129
 
 # Checks (all must pass)
@@ -47,8 +47,6 @@ stl_database/
 │   │                  #   ONNX Runtime), AI (llama-server), backups
 │   ├── stl-desktop/   # Tauri shell: launcher page (ui/), window on a server, tray, menus
 │   ├── stl-proc/      # end_with_parent: child processes die with their parent (Windows job)
-│   ├── meshpeek-core/ # MeshPeek's model loaders, vendored (README.md: what changed), + `wire`
-│   ├── meshpeek-render/ # MeshPeek's wgpu renderer, vendored
 │   └── stl-viewer/    # the web client's model viewer: meshpeek-render in WebAssembly
 ├── web/               # React 19 + Mantine 8 + TanStack client
 ├── docker/            # Server image (Dockerfile, built from the repository root), compose.yml
@@ -89,8 +87,11 @@ stl_database/
 - **Rules:** custom presupport patterns run only when `rules::portable_pattern` accepts them.
 - **Model viewer:** `stl_core::view` loads an archive member with `meshpeek-core` and
   encodes it with `meshpeek_core::wire`, which `stl-viewer` (wasm) decodes; change both ends
-  together (and its version). Keep the vendored MeshPeek crates close to MeshPeek: note any
-  change in `meshpeek-core/README.md`. `stl-viewer` has dependencies only on `wasm32`
+  together (and its version). `meshpeek-core` and `meshpeek-render` live in the MeshPeek repository
+  and are used by release tag: change them there. `.github/workflows/meshpeek.yml` follows new releases by
+  itself (tag, wasm, checks, version, changelog, push to main). To try unreleased MeshPeek code, add a
+  `[patch."https://github.com/mankoc/meshpeek"]` with paths to your own `~/.cargo/config.toml`. Load files
+  with `LoadOptions::default()`: `external_files` must stay off here, because project files name paths. `stl-viewer` has dependencies only on `wasm32`
   (empty elsewhere), and the web client never loads its wasm in tests.
 
 ## Server (`rust/stl-server`)

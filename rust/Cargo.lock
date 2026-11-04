@@ -1103,6 +1103,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "delaunator"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e1ee323c1275374f7e612d3724d12707079fb6a2117349fe144def656f5a880"
+dependencies = [
+ "robust",
+]
+
+[[package]]
 name = "deranged"
 version = "0.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3132,10 +3141,12 @@ dependencies = [
 
 [[package]]
 name = "meshpeek-core"
-version = "0.5.8"
+version = "0.5.9"
+source = "git+https://github.com/mankoc/meshpeek?tag=v0.5.9#7dd88e9ea573ea845bb9b84a0808363127fca0eb"
 dependencies = [
  "aes 0.8.4",
  "base64 0.22.1",
+ "delaunator",
  "fast-float2",
  "flate2",
  "glam",
@@ -3150,7 +3161,8 @@ dependencies = [
 
 [[package]]
 name = "meshpeek-render"
-version = "0.5.8"
+version = "0.5.9"
+source = "git+https://github.com/mankoc/meshpeek?tag=v0.5.9#7dd88e9ea573ea845bb9b84a0808363127fca0eb"
 dependencies = [
  "bytemuck",
  "glam",
@@ -4497,6 +4509,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "robust"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e27ee8bb91ca0adcf0ecb116293afa12d393f9c2b9b9cd54d33e8078fe19839"
+
+[[package]]
 name = "rsqlite-vfs"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5125,7 +5143,7 @@ checksum = "ff7589a1859b09232522bb9edf076ca7fcf14ded96685d3fa629db73023ffbb7"
 
 [[package]]
 name = "stl-core"
-version = "2026.45.16"
+version = "2026.45.17"
 dependencies = [
  "avif-parse",
  "crc32fast",
@@ -5154,7 +5172,7 @@ dependencies = [
 
 [[package]]
 name = "stl-desktop"
-version = "2026.45.16"
+version = "2026.45.17"
 dependencies = [
  "serde",
  "serde_json",
@@ -5168,14 +5186,14 @@ dependencies = [
 
 [[package]]
 name = "stl-proc"
-version = "2026.45.16"
+version = "2026.45.17"
 dependencies = [
  "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "stl-server"
-version = "2026.45.16"
+version = "2026.45.17"
 dependencies = [
  "argon2",
  "axum",
@@ -5215,7 +5233,7 @@ dependencies = [
 
 [[package]]
 name = "stl-viewer"
-version = "2026.45.16"
+version = "2026.45.17"
 dependencies = [
  "console_error_panic_hook",
  "glam",

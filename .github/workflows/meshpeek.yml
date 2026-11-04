@@ -1,0 +1,108 @@
+name: Follow MeshPeek releases
+
+# Every day: when MeshPeek has a newer release, move the crates to its tag, rebuild the viewer's WebAssembly, run the
+# checks of rust.yml and push the result to main. If a check fails nothing is pushed, and the run shows the failure.
+
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+    inputs:
+      rehearse:
+        description: Run every step on the tag in use, without pushing
+        type: boolean
+        default: false
+
+concurrency: meshpeek
+
+permissions:
+  contents: write
+
+env:
+  WASM_BINDGEN_VERSION: 0.2.129 # = wasm-bindgen in rust/stl-viewer/Cargo.toml
+
+jobs:
+  update:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Latest release
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          latest=$(gh api repos/mankoc/meshpeek/releases/latest --jq .tag_name)
+          current=$(python tools/update_meshpeek.py current)
+          echo "in use: $current, latest: $latest"
+          newest=$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -n 1)
+          if [ "${{ inputs.rehearse }}" = "true" ]; then
+            echo "tag=$current" >> "$GITHUB_OUTPUT"
+          elif [ "$latest" != "$current" ] && [ "$newest" = "$latest" ]; then # never back: a release can still be building
+            echo "tag=$latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v5
+        if: steps.release.outputs.tag
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.release.outputs.tag
+        with:
+          components: clippy
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.release.outputs.tag
+        with:
+          workspaces: rust
+
+      - name: Move to the new tag
+        if: steps.release.outputs.tag
+        shell: bash
+        run: |
+          python tools/update_meshpeek.py set "${{ steps.release.outputs.tag }}"
+          python tools/update_meshpeek.py release "${{ steps.release.outputs.tag }}" | tee version.txt
+          cd rust && cargo metadata --format-version 1 > /dev/null # updates Cargo.lock
+
+      - name: Rebuild the viewer
+        if: steps.release.outputs.tag
+        working-directory: web
+        run: |
+          cargo install wasm-bindgen-cli --version ${{ env.WASM_BINDGEN_VERSION }} --locked
+          npm ci --no-fund --no-audit
+          npm run gen:viewer
+
+      - name: Web client
+        if: steps.release.outputs.tag
+        working-directory: web
+        run: |
+          npm test
+          npm run build
+
+      - name: Rust tests
+        if: steps.release.outputs.tag
+        working-directory: rust
+        run: cargo test --workspace
+
+      - name: Clippy
+        if: steps.release.outputs.tag
+        working-directory: rust
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Push
+        if: steps.release.outputs.tag && !inputs.rehearse
+        shell: bash
+        run: |
+          tag="${{ steps.release.outputs.tag }}"
+          version=$(cat version.txt)
+          rm version.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: MeshPeek ${tag#v} in the model viewer ($version)"
+          git push
