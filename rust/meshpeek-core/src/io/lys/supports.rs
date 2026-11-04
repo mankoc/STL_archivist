@@ -251,7 +251,7 @@ pub(crate) fn sphere(centre: DVec3, radius: f64, sides: usize) -> Mesh {
 }
 
 /// Pad or cone standing on height `z` (plate-parallel): `bottom` radius at `z`, `top` radius at `z + height`.
-fn frustum(centre: DVec3, bottom: f64, top: f64, height: f64, sides: usize, start: f64) -> Mesh {
+pub(crate) fn frustum(centre: DVec3, bottom: f64, top: f64, height: f64, sides: usize, start: f64) -> Mesh {
     let flat = |r: f64| raft::circle(glam::DVec2::new(centre.x, centre.y), r.max(1e-4), sides, start);
     raft::loft(&flat(bottom), centre.z, &flat(top), centre.z + height.max(1e-4))
 }

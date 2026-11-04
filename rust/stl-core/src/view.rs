@@ -203,6 +203,7 @@ mod tests {
 
     #[test]
     fn model_members_are_listed_by_name() {
+        assert!(is_viewable("supports/arm.AGS"));
         let dir = tempfile::tempdir().unwrap();
         let names: Vec<String> = viewable_members(&archive(dir.path())).unwrap().into_iter().map(|m| m.name).collect();
         assert_eq!(names, ["a.obj", "bad.stl", "Parts/b.STL"]);

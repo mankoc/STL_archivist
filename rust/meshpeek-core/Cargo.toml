@@ -9,11 +9,13 @@ publish = false
 [features]
 default = ["io"]
 # Loading files (everything but meshes, scenes and the wire format); off in the web viewer.
-io = ["dep:aes", "dep:fast-float2", "dep:memchr", "dep:memmap2", "dep:rmpv", "dep:serde_json", "dep:zip"]
+io = ["dep:aes", "dep:base64", "dep:fast-float2", "dep:flate2", "dep:memchr", "dep:memmap2", "dep:rmpv", "dep:serde_json", "dep:zip"]
 
 [dependencies]
 aes = { version = "0.8.4", optional = true }
+base64 = { version = "0.22.1", optional = true }
 fast-float2 = { version = "0.2.4", optional = true }
+flate2 = { version = "1.1.10", optional = true }
 glam = "0.34.1"
 memchr = { version = "2.8.3", optional = true }
 memmap2 = { version = "0.9.11", optional = true }

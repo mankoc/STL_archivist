@@ -21,7 +21,7 @@ pub struct Options {
 
 /// The printable suffixes the rescan stores in the STL file list (the
 /// desktop's `_stl_exts`, narrower than the crawler's).
-const RESCAN_STL_EXTS: [&str; 4] = [".stl", ".obj", ".lys", ".chitubox"];
+const RESCAN_STL_EXTS: [&str; 5] = [".stl", ".obj", ".lys", ".chitubox", ".ags"];
 
 fn patterns(list: &[String]) -> Result<PresupportPatterns, String> {
     let defaults: Vec<String> = rules::DEFAULT_PRESUPPORT_PATTERNS.iter().map(|s| s.to_string()).collect();

@@ -19,7 +19,7 @@ use fancy_regex::{Regex, RegexBuilder};
 
 pub const IMAGE_SUFFIXES: &[&str] = &[".jpg", ".jpeg", ".png", ".webp", ".bmp", ".avif", ".gif"];
 pub const ARCHIVE_SUFFIXES: &[&str] = &[".7z", ".zip", ".rar"];
-const PRINTABLE_SUFFIXES: &[&str] = &[".stl", ".obj", ".lys", ".lyt", ".chitubox", ".ctp"];
+const PRINTABLE_SUFFIXES: &[&str] = &[".stl", ".obj", ".lys", ".lyt", ".chitubox", ".ctp", ".ags"];
 
 pub const DEFAULT_PRESUPPORT_PATTERNS: &[&str] = &[
     r"[_ -]presupported",
@@ -125,6 +125,7 @@ pub fn detect_presupport<S: AsRef<str>>(names: &[S]) -> &'static str {
         match suffix.as_str() {
             ".lys" | ".lyt" => return "Lychee",
             ".chitu" | ".chitubox" | ".ctp" => chitu = true,
+            ".ags" => presupported = true,
             ".stl" if PRESUPPORTED_STEM.is_match(p.stem()).unwrap_or(false) => presupported = true,
             _ => {}
         }
@@ -594,6 +595,8 @@ mod tests {
         assert_eq!(detect_presupport(&["a/body.stl", "x.lys"]), "Lychee");
         assert_eq!(detect_presupport(&["a.ctp", "b_supported.stl"]), "Chitubox");
         assert_eq!(detect_presupport(&["arm-Supported.stl"]), "Presupported");
+        assert_eq!(detect_presupport(&["arm.ags"]), "Presupported");
+        assert_eq!(detect_presupport(&["arm.ags", "x.lys"]), "Lychee");
         assert_eq!(detect_presupport(&["arm.stl", "pic.jpg"]), "No");
     }
 

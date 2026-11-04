@@ -283,7 +283,7 @@ fn size_limit(name: &str) -> u64 {
     if is_image_or_pdf(name) { SIZE_LIMIT_IMAGE } else { SIZE_LIMIT_META }
 }
 
-const STL_EXTS: [&str; 6] = [".stl", ".obj", ".lys", ".lyt", ".chitubox", ".ctp"];
+const STL_EXTS: [&str; 7] = [".stl", ".obj", ".lys", ".lyt", ".chitubox", ".ctp", ".ags"];
 
 /// `extract_archive_contents` natively, or `None` where the native readers refuse.
 pub(crate) fn extract_native(path: &str, unrar: &str) -> Option<Extracted> {

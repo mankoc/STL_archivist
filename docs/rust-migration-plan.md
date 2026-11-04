@@ -1344,6 +1344,10 @@ the path is visible. No business logic and no Tauri commands for data.
   (`GpuMesh::upload_with`, line lists; browsers have no `POLYGON_MODE_LINE`),
   `remove_object`, `set_mesh` and `set_plates`. The archive's file list is a tree in both
   the viewer and the Files window (`web/src/browser/fileTree.ts`).
+- 2026.45.14: **`.ags` support projects.** `meshpeek-core/src/io/ags.rs` from MeshPeek 0.5.8,
+  without its `ModelPath` fallback (a server must not open a path named by an archive's file);
+  the rest of 0.5.7 and 0.5.8 is not synced. `.ags` joins the crawler's and rescan's file lists
+  and the printable suffixes, and `detect_presupport` reports it as `Presupported`.
 - 2026.45.13: **Update check.** `stl-server/src/updates.rs` reads GitHub's latest release
   and keeps the answer for a day (an hour after a failure); `GET /api/system/info` asks it only
   for users whose `check_updates` setting is true, and the client's `UpdateBanner` refetches
