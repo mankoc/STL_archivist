@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026.45.13 — 2026-11-04
+
+- **Check for updates** (*Settings → Account*, saved for your account, off by default). While
+  it is on, the server asks GitHub for the latest release when you open StlArchivist and at
+  most once a day, and a banner announces a newer version with a link to it. Closing the banner
+  hides that version.
+- **Download and install** in the banner (desktop app on Windows): after a confirmation, the app
+  downloads the release's installer from GitHub, runs it and closes.
+- Server: `GET /api/system/info` returns `update` for users with the check on.
+
+## 2026.45.12 — 2026-11-03
+
+- **Removed Import from a web page** (2026.45.11), with its routes, the desktop app's reader
+  window and the `web_allow_private` setting.
+
 ## 2026.45.10 — 2026-11-02
 
 - **Duplicates: delete an archive from the results.** A bin button before each archive (STL

@@ -2857,6 +2857,7 @@ export interface components {
             models: number;
             /** @description Always `"stlLibrary"`. */
             name: string;
+            update?: null | components["schemas"]["UpdateInfo"];
             version: string;
         };
         Session: {
@@ -2973,6 +2974,15 @@ export interface components {
             ids: number[];
             /** @description The resulting tag's name (an existing tag, matched case-insensitively, or a new one). */
             target: string;
+        };
+        UpdateInfo: {
+            current: string;
+            /** @description The newer release's Windows installer. */
+            installer_url?: string | null;
+            /** @description The newer version, when there is one. */
+            latest?: string | null;
+            /** @description The newer release's page. */
+            release_url?: string | null;
         };
         User: {
             disabled: boolean;

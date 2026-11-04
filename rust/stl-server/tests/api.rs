@@ -93,6 +93,7 @@ async fn info_reports_version_and_size() {
     let v = r.json();
     assert_eq!(v["name"], "stlLibrary");
     assert_eq!(v["models"], 3);
+    assert!(v["update"].is_null(), "no update check until the user turns it on");
 }
 
 #[tokio::test]

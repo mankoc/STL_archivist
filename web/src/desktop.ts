@@ -63,6 +63,8 @@ export const pickPacker = () => shellCall<ProgramState | null>("pick_packer");
 export const clearPacker = () => shellCall<ProgramState>("clear_packer");
 /** Open an archive (`path`, as this computer sees it) in the archive program. */
 export const openInPacker = (path: string) => shellCall<void>("open_in_packer", { path });
+/** Ask the shell to download and run `version`'s installer (it confirms, and closes the app). */
+export const installUpdate = (version: string) => shellCall<void>("install_update", { version });
 
 /** The desktop app's compute worker, as this server's page sees it. */
 export interface WorkerState {

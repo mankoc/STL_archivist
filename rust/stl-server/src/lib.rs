@@ -22,6 +22,7 @@ pub mod monitor;
 pub mod sidecars;
 pub mod sync;
 pub mod tools;
+pub mod updates;
 pub mod worker;
 pub mod workers;
 
@@ -60,6 +61,8 @@ pub struct Library {
     pub generation: std::sync::atomic::AtomicU64,
     /// The unfiltered filter pane (see `api::filter`).
     pub tree_cache: api::filter::TreeCache,
+    /// Check for updates on GitHub.
+    pub updates: updates::UpdateChecker,
     _lock: LibraryLock,
 }
 
@@ -133,6 +136,7 @@ impl Library {
             instance: sync::new_instance(),
             generation: Default::default(),
             tree_cache: Default::default(),
+            updates: Default::default(),
             config,
             _lock: lock,
         })

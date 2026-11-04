@@ -15,14 +15,21 @@ pub struct ServerInfo {
     pub version: &'static str,
     /// Models in the library.
     pub models: i64,
+    /// Update information (if available).
+    pub update: Option<crate::updates::UpdateInfo>,
 }
 
 /// Name, version and library size.
 #[utoipa::path(get, path = "/api/system/info", tag = "system",
     responses((status = 200, body = ServerInfo)))]
-pub async fn info(State(lib): State<AppState>, _me: CurrentUser) -> Result<Json<ServerInfo>, ApiError> {
-    let models = lib
-        .run(|lib| Ok(lib.db.with(|c| c.query_row("SELECT count(*) FROM models", [], |r| r.get(0)))?))
+pub async fn info(State(lib): State<AppState>, me: CurrentUser) -> Result<Json<ServerInfo>, ApiError> {
+    let (models, update) = lib
+        .run(move |lib| {
+            let models: i64 = lib.db.with(|c| c.query_row("SELECT count(*) FROM models", [], |r| r.get(0)))?;
+            let settings = lib.accounts.with(|c| crate::accounts::settings(c, me.user.id))?;
+            let enabled = settings.get("check_updates").and_then(serde_json::Value::as_bool).unwrap_or(false);
+            Ok((models, enabled.then(|| lib.updates.check(stl_core::VERSION))))
+        })
         .await?;
-    Ok(Json(ServerInfo { name: "stlLibrary", version: stl_core::VERSION, models }))
+    Ok(Json(ServerInfo { name: "stlLibrary", version: stl_core::VERSION, models, update }))
 }

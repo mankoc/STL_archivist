@@ -39,6 +39,8 @@ import { StatsPage } from "../tools/StatsPage";
 import { SettingsPage } from "../settings/SettingsPage";
 import { type Page, usePage } from "./route";
 import { STATUS_BAR_HEIGHT, StatusBar } from "./StatusBar";
+import { UpdateBanner } from "./UpdateBanner";
+import { CHECK_UPDATES } from "./updates";
 
 /** The header's page buttons, in order (Help is the ? button). */
 const PAGE_BUTTONS: { value: Page; label: string; icon: typeof IconBooks }[] = [
@@ -144,6 +146,7 @@ export function Shell({ user }: { user: Schemas["User"] }) {
           </Group>
         </AppShell.Header>
         <AppShell.Main style={{ height: "100vh", paddingTop: 48, paddingBottom: STATUS_BAR_HEIGHT, display: "flex", flexDirection: "column" }}>
+          <UpdateBanner enabled={prefs.data?.[CHECK_UPDATES] === true} />
           {page === "help" ? (
             <HelpPage />
           ) : page === "libraries" ? (
