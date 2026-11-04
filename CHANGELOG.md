@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026.45.16 — 2026-11-04
+
+- **Long lists in the filter pane are grouped by first letter.** *Creators*, *Tags*, *Sculptor*,
+  *Collection* and *Release*, when they hold more than 15 values, show a row per letter that
+  opens on a click, with its values' counts added up. All digits share one group (**0-9**); accents
+  and leading punctuation are ignored, and names with neither letters nor digits go under **#**.
+
 ## 2026.45.15 — 2026-11-04
 
 - **The model viewer has MeshPeek 0.5.8's loaders and renderer.** Binary PLY files load about five

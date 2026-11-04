@@ -13,7 +13,7 @@ can open a library on your computer without setting up a server.
 [the HTTP API](docs/api.md) ·
 and in the interface, the **?** button: searchable in-depth help on every feature
 
-Version: 2026.45.15
+Version: 2026.45.16
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). This version opens its data directory and, since 2026.43.7, converts it once
@@ -44,7 +44,8 @@ Version: 2026.45.15
   with presupported STLs, no images, no printable files or nested archives, with *Warning
   details* showing which files trigger each; *Clear warnings* (right-click a row) dismisses
   false positives until the archive is rescanned
-- **Browser** — faceted filters (include / exclude per value, has-value groups, counts),
+- **Browser** — faceted filters (include / exclude per value, has-value groups, counts, long
+  lists grouped by first letter),
   search in chosen fields (optionally fuzzy: accents ignored, typos tolerated), a sortable virtualised table with in-place editing (suggesting the values in the library), selectable columns and
   (optionally) rows with warnings highlighted, paths relative to their library, links in the
   URL column, folders of the filter tree crawled or

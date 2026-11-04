@@ -97,6 +97,43 @@ export function groupCount(tree: FilterTree, group: string): number | undefined 
   return scoped ?? tree.counts.group?.[group];
 }
 
+export const DIGITS = "0-9";
+export const NO_LETTER = "#";
+
+/** The group of a long list a name goes in: its first letter (accents and leading
+ * punctuation ignored), {@link DIGITS}, or {@link NO_LETTER} without either. */
+export function letterOf(name: string): string {
+  const first = name.normalize("NFD").match(/[\p{L}\p{N}]/u)?.[0];
+  if (first === undefined) return NO_LETTER;
+  return /\p{N}/u.test(first) ? DIGITS : [...first.toLocaleUpperCase()][0];
+}
+
+export interface LetterGroup<T> {
+  letter: string;
+  items: T[];
+}
+
+/** `items` by {@link letterOf}, keeping their order: digits first, then letters, then the rest. */
+export function groupByLetter<T>(items: T[], name: (item: T) => string): LetterGroup<T>[] {
+  const groups = new Map<string, T[]>();
+  for (const item of items) {
+    const letter = letterOf(name(item));
+    const list = groups.get(letter);
+    if (list) list.push(item);
+    else groups.set(letter, [item]);
+  }
+  const rank = (letter: string) => (letter === DIGITS ? 0 : letter === NO_LETTER ? 2 : 1);
+  return [...groups.entries()]
+    .map(([letter, list]) => ({ letter, items: list }))
+    .sort((a, b) => rank(a.letter) - rank(b.letter) || a.letter.localeCompare(b.letter));
+}
+
+/** The values' counts added up; undefined when none has a count. */
+export function sumCounts(counts: (number | undefined)[]): number | undefined {
+  const known = counts.filter((c) => c !== undefined);
+  return known.length ? known.reduce((a, b) => a + b, 0) : undefined;
+}
+
 export interface FolderNode {
   name: string;
   path: string;

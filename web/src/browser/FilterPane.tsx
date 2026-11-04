@@ -2,8 +2,8 @@
 // A value cycles include (+) → exclude (−) → off; the circle on a section
 // header cycles "has a value" → "has no value" → off. A row with children
 // (a folder, a year, a collection) opens on a click and filters on a
-// double-click or a click on its mark. Counts are scoped by
-// the other sections while a filter is active.
+// double-click or a click on its mark. Long lists are grouped by first letter.
+// Counts are scoped by the other sections while a filter is active.
 import { ActionIcon, Box, Group, ScrollArea, Text, TextInput, Tooltip, UnstyledButton } from "@mantine/core";
 import {
   IconChevronDown,
@@ -28,6 +28,7 @@ import {
   type FilterValue,
   folderTree,
   type FolderNode,
+  groupByLetter,
   groupCount,
   groupMarkOf,
   libraryFolderTree,
@@ -35,6 +36,7 @@ import {
   type LibraryNode,
   markOf,
   pathCount,
+  sumCounts,
 } from "./filters";
 import classes from "./FilterPane.module.css";
 
@@ -46,12 +48,12 @@ interface Props {
   onFolderMenu?: (folder: string, e: MouseEvent) => void;
 }
 
-/** Sections with more values than this get their own search box. */
+/** Sections with more values than this get their own search box, and their list letter groups. */
 const SEARCH_FROM = 15;
 
 /** A row's filter mark, clickable: + include, − exclude; a faint funnel on a row
  * with children (whose own click opens it) while it filters nothing. */
-function MarkIcon({ mark, expandable, onClick }: { mark: ReturnType<typeof markOf>; expandable: boolean; onClick: () => void }) {
+function MarkIcon({ mark, expandable, onClick }: { mark: ReturnType<typeof markOf>; expandable: boolean; onClick?: () => void }) {
   const icon =
     mark === "include" ? <IconPlus size={14} color="var(--mantine-color-green-6)" />
     : mark === "exclude" ? <IconMinus size={14} color="var(--mantine-color-red-6)" />
@@ -67,7 +69,7 @@ function MarkIcon({ mark, expandable, onClick }: { mark: ReturnType<typeof markO
       className={mark ? undefined : classes.unmarked}
       onClick={(e: MouseEvent) => {
         e.stopPropagation();
-        onClick();
+        onClick?.();
       }}
       onDoubleClick={(e: MouseEvent) => e.stopPropagation()}
       aria-label="Filter: include, exclude, off"
@@ -82,8 +84,8 @@ function ValueRow(props: {
   label: ReactNode;
   count: number | undefined;
   mark: ReturnType<typeof markOf>;
-  /** Filter by the value (cycle its mark). */
-  onClick: () => void;
+  /** Filter by the value (cycle its mark); none on a row that only opens. */
+  onClick?: () => void;
   onContextMenu?: (e: MouseEvent) => void;
   depth?: number;
   /** The row has children: whether they show, and showing or hiding them. */
@@ -97,7 +99,7 @@ function ValueRow(props: {
       onClick={(e: MouseEvent) => {
         const action = rowClick(e.detail, expand != null);
         if (action === "toggle") expand?.onToggle();
-        if (action === "filter") props.onClick();
+        if (action === "filter") props.onClick?.();
       }}
       onDoubleClick={expand && props.onClick}
       onContextMenu={props.onContextMenu && ((e: MouseEvent) => {
@@ -108,7 +110,7 @@ function ValueRow(props: {
     >
       <Group gap={6} wrap="nowrap">
         {expand ? <Toggle open={expand.open} onClick={expand.onToggle} /> : <Box w={16} />}
-        <MarkIcon mark={props.mark} expandable={expand != null} onClick={props.onClick} />
+        <MarkIcon mark={props.mark} expandable={expand != null && props.onClick != null} onClick={props.onClick} />
         <Text size="sm" truncate flex={1}>
           {props.label}
         </Text>
@@ -197,20 +199,74 @@ function matches(label: string, search: string) {
   return !search || label.toLowerCase().includes(search);
 }
 
+/** A long list under a row per first letter; a short one as it is. A letter holding
+ * a filtered value starts open, so that no filter hides in a closed group. */
+function Letters<T>(props: {
+  items: T[];
+  name: (item: T) => string;
+  count: (item: T) => number | undefined;
+  marked: (item: T) => boolean;
+  searching: boolean;
+  render: (item: T, depth: number) => ReactNode;
+}) {
+  const { items, name, count, marked, searching, render } = props;
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  if (items.length <= SEARCH_FROM) return <>{items.map((item) => render(item, 0))}</>;
+  return (
+    <>
+      {groupByLetter(items, name).map((group) => {
+        const shown = searching || (open[group.letter] ?? group.items.some(marked));
+        return (
+          <Box key={group.letter}>
+            <ValueRow
+              label={group.letter}
+              count={sumCounts(group.items.map(count))}
+              mark={undefined}
+              expand={{ open: shown, onToggle: () => setOpen({ ...open, [group.letter]: !shown }) }}
+            />
+            {shown && group.items.map((item) => render(item, 1))}
+          </Box>
+        );
+      })}
+    </>
+  );
+}
+
 export function FilterPane({ tree, spec, onChange, onFolderMenu }: Props) {
-  const value = (facet: string, v: FilterValue, label: string, kind: string, countKey: string) => (
+  const value = (facet: string, v: FilterValue, label: string, kind: string, countKey: string, depth = 0) => (
     <ValueRow
       key={`${facet}:${JSON.stringify(v)}`}
       label={label}
       count={countOf(tree, kind, countKey)}
       mark={markOf(spec, facet, v)}
       onClick={() => onChange(cycleValue(spec, facet, v))}
+      depth={depth}
     />
   );
   const texts = (facet: string, list: string[], search: string) =>
     list.filter((t) => matches(t, search)).map((t) => value(facet, t, t, facet, t));
   const named = (facet: string, list: FilterTree["sculptors"], search: string) =>
     list.filter((n) => matches(n.name, search)).map((n) => value(facet, n.id, n.name, facet, String(n.id)));
+  const lettered = (facet: string, list: string[], search: string) => (
+    <Letters
+      items={list.filter((t) => matches(t, search))}
+      name={(t) => t}
+      count={(t) => countOf(tree, facet, t)}
+      marked={(t) => markOf(spec, facet, t) !== undefined}
+      searching={!!search}
+      render={(t, depth) => value(facet, t, t, facet, t, depth)}
+    />
+  );
+  const letteredNames = (facet: string, list: FilterTree["sculptors"], search: string) => (
+    <Letters
+      items={list.filter((n) => matches(n.name, search))}
+      name={(n) => n.name}
+      count={(n) => countOf(tree, facet, String(n.id))}
+      marked={(n) => markOf(spec, facet, n.id) !== undefined}
+      searching={!!search}
+      render={(n, depth) => value(facet, n.id, n.name, facet, String(n.id), depth)}
+    />
+  );
   const common = { spec, tree, onChange };
 
   return (
@@ -221,10 +277,10 @@ export function FilterPane({ tree, spec, onChange, onFolderMenu }: Props) {
         </Section>
       )}
       <Section title="Creators" group="creator" {...common} searchable={tree.creators.length > SEARCH_FROM}>
-        {(s) => texts("creator", tree.creators, s)}
+        {(s) => lettered("creator", tree.creators, s)}
       </Section>
       <Section title="Tags" group="tag" {...common} searchable={tree.tags.length > SEARCH_FROM}>
-        {(s) => texts("tag", tree.tags, s)}
+        {(s) => lettered("tag", tree.tags, s)}
       </Section>
       <Section title="Type" group="source" {...common}>
         {(s) => texts("source", tree.sources, s)}
@@ -233,7 +289,7 @@ export function FilterPane({ tree, spec, onChange, onFolderMenu }: Props) {
         {() => <Dates tree={tree} spec={spec} onChange={onChange} />}
       </Section>
       <Section title="Sculptor" group="sculptor" {...common} searchable={tree.sculptors.length > SEARCH_FROM}>
-        {(s) => named("sculptor", tree.sculptors, s)}
+        {(s) => letteredNames("sculptor", tree.sculptors, s)}
       </Section>
       <Section title="Collection" group="collection" {...common} searchable={tree.collections.length > SEARCH_FROM}>
         {(s) => <Collections tree={tree} spec={spec} onChange={onChange} search={s} />}
@@ -242,7 +298,7 @@ export function FilterPane({ tree, spec, onChange, onFolderMenu }: Props) {
         {(s) => named("category", tree.categories, s)}
       </Section>
       <Section title="Release" group="release" {...common} searchable={tree.releases.length > SEARCH_FROM}>
-        {(s) => named("release", tree.releases, s)}
+        {(s) => letteredNames("release", tree.releases, s)}
       </Section>
       <Section title="Scale" group="scale" {...common}>
         {(s) => named("scale", tree.scales, s)}
@@ -321,38 +377,44 @@ function Dates({ tree, spec, onChange }: Omit<Props, never>) {
 function Collections({ tree, spec, onChange, search }: Props & { search: string }) {
   const [open, setOpen] = useState<Record<number, boolean>>({});
   const subs = new Map(tree.subcollections.map((c) => [c.id, c.subcollections]));
-  return (
-    <>
-      {tree.collections
-        .filter((c) => matches(c.name, search) || (subs.get(c.id) ?? []).some((s) => matches(s.name, search)))
-        .map((c) => {
-          const children = subs.get(c.id) ?? [];
-          return (
-            <Box key={c.id}>
+  type Collection = FilterTree["collections"][number];
+  const row = (c: Collection, depth: number) => {
+    const children = subs.get(c.id) ?? [];
+    return (
+      <Box key={c.id}>
+        <ValueRow
+          label={c.name}
+          count={countOf(tree, "collection", String(c.id))}
+          mark={markOf(spec, "collection", c.id)}
+          onClick={() => onChange(cycleValue(spec, "collection", c.id))}
+          depth={depth}
+          expand={children.length ? { open: !!open[c.id] || !!search, onToggle: () => setOpen({ ...open, [c.id]: !open[c.id] }) } : undefined}
+        />
+        {(open[c.id] || !!search) &&
+          children
+            .filter((s) => matches(s.name, search) || matches(c.name, search))
+            .map((s) => (
               <ValueRow
-                label={c.name}
-                count={countOf(tree, "collection", String(c.id))}
-                mark={markOf(spec, "collection", c.id)}
-                onClick={() => onChange(cycleValue(spec, "collection", c.id))}
-                expand={children.length ? { open: !!open[c.id] || !!search, onToggle: () => setOpen({ ...open, [c.id]: !open[c.id] }) } : undefined}
+                key={s.id}
+                label={s.name}
+                count={countOf(tree, "subcollection", String(s.id))}
+                mark={markOf(spec, "subcollection", s.id)}
+                onClick={() => onChange(cycleValue(spec, "subcollection", s.id))}
+                depth={depth + 1}
               />
-              {(open[c.id] || !!search) &&
-                children
-                  .filter((s) => matches(s.name, search) || matches(c.name, search))
-                  .map((s) => (
-                    <ValueRow
-                      key={s.id}
-                      label={s.name}
-                      count={countOf(tree, "subcollection", String(s.id))}
-                      mark={markOf(spec, "subcollection", s.id)}
-                      onClick={() => onChange(cycleValue(spec, "subcollection", s.id))}
-                      depth={1}
-                    />
-                  ))}
-            </Box>
-          );
-        })}
-    </>
+            ))}
+      </Box>
+    );
+  };
+  return (
+    <Letters
+      items={tree.collections.filter((c) => matches(c.name, search) || (subs.get(c.id) ?? []).some((s) => matches(s.name, search)))}
+      name={(c) => c.name}
+      count={(c) => countOf(tree, "collection", String(c.id))}
+      marked={(c) => markOf(spec, "collection", c.id) !== undefined || (subs.get(c.id) ?? []).some((s) => markOf(spec, "subcollection", s.id) !== undefined)}
+      searching={!!search}
+      render={row}
+    />
   );
 }
 
