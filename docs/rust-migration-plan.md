@@ -1,6 +1,6 @@
 # Rust Migration Plan
 
-**Status:** Phases 0 and 1 done (2026-10-17); Phase 2 done (2026-10-18) except PDF via pdfium; Phase 3 next. Written 2026-10-17.
+**Status:** finished and frozen (2026-11-06): the migration is complete, and this file is kept as history. Changes go in `CHANGELOG.md` and no longer here. The compatibility rules below still apply.
 
 **Goal:** move stlLibrary to Rust for **performance**, a **small native distribution** and a
 **server / client** architecture like Jellyfin's: one server owns the library, and every user
