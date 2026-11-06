@@ -75,10 +75,10 @@ pub async fn by_image(
             let max = q.max_distance.unwrap_or(10).min(128);
             lib.run(move |lib| {
                 let query = stl_core::dhash::dhash(&image).map_err(|e| ApiError::bad_request(format!("not a readable image: {e}")))?;
-                let rows = lib.db.with(views::image_hash_rows)?;
+                let rows = lib.db.with(views::image_hashes)?;
                 let mut outdated = 0;
                 let mut hits: Vec<(u32, usize)> = Vec::new();
-                for (i, (_, hash, ..)) in rows.iter().enumerate() {
+                for (i, (_, _, hash)) in rows.iter().enumerate() {
                     match parse_dhash(hash) {
                         Some(h) => {
                             let d = (h ^ query).count_ones();
@@ -95,16 +95,19 @@ pub async fn by_image(
                 let mut best: Vec<(u32, usize)> = Vec::new();
                 let mut seen = std::collections::HashSet::new();
                 for (d, i) in hits {
-                    if seen.insert(rows[i].0) {
+                    if seen.insert(rows[i].1) {
                         best.push((d, i));
                     }
                 }
+                let ids: Vec<i64> = best.iter().map(|&(_, i)| rows[i].0).collect();
+                let details = lib.db.with(|c| views::image_details(c, &ids))?;
                 let picked: Vec<(f64, i64, String, String, Option<String>)> = best
                     .into_iter()
-                    .map(|(d, i)| {
-                        let (model_id, _, thumb, title, path) = &rows[i];
+                    .filter_map(|(d, i)| {
+                        let (image, model_id, _) = &rows[i];
+                        let (thumb, title, path) = details.get(image)?;
                         let archive = path.as_deref().map(|p| std::path::Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()).unwrap_or_default();
-                        (f64::from(d), *model_id, title.clone().unwrap_or_default(), archive, thumb.clone())
+                        Some((f64::from(d), *model_id, title.clone().unwrap_or_default(), archive, thumb.clone()))
                     })
                     .collect();
                 Ok(SearchResult { method: "dhash".into(), matches: with_thumbnails(lib, picked)?, capped, outdated })

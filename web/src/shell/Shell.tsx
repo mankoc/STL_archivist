@@ -20,27 +20,29 @@ import {
 } from "@tabler/icons-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, lazy, Suspense, useEffect, useState } from "react";
 
 import { ACCENT_SETTING, DEFAULT_ACCENT, isAccent, useSetAccent } from "../accent";
 import { api, type Schemas, unwrap } from "../api/client";
 import { useServerEvents } from "../api/events";
 import { UserContext } from "../auth/user";
 import { BrowserPage } from "../browser/BrowserPage";
-import { HelpPage } from "../help/HelpPage";
 import splash from "../help/splash.jpg";
-import { JobsPage } from "../jobs/JobsPage";
-import { LibrariesPage } from "../jobs/LibrariesPage";
-import { LookupsPage } from "../lookups/LookupsPage";
-import { DuplicatesPage } from "../tools/DuplicatesPage";
-import { FindByImagePage } from "../tools/FindByImagePage";
-import { FoldersPage } from "../tools/FoldersPage";
-import { StatsPage } from "../tools/StatsPage";
-import { SettingsPage } from "../settings/SettingsPage";
 import { type Page, usePage } from "./route";
 import { STATUS_BAR_HEIGHT, StatusBar } from "./StatusBar";
 import { UpdateBanner } from "./UpdateBanner";
 import { CHECK_UPDATES } from "./updates";
+
+// Loaded when opened: the browser is what nearly every visit needs.
+const HelpPage = lazy(() => import("../help/HelpPage").then((m) => ({ default: m.HelpPage })));
+const JobsPage = lazy(() => import("../jobs/JobsPage").then((m) => ({ default: m.JobsPage })));
+const LibrariesPage = lazy(() => import("../jobs/LibrariesPage").then((m) => ({ default: m.LibrariesPage })));
+const LookupsPage = lazy(() => import("../lookups/LookupsPage").then((m) => ({ default: m.LookupsPage })));
+const DuplicatesPage = lazy(() => import("../tools/DuplicatesPage").then((m) => ({ default: m.DuplicatesPage })));
+const FindByImagePage = lazy(() => import("../tools/FindByImagePage").then((m) => ({ default: m.FindByImagePage })));
+const FoldersPage = lazy(() => import("../tools/FoldersPage").then((m) => ({ default: m.FoldersPage })));
+const StatsPage = lazy(() => import("../tools/StatsPage").then((m) => ({ default: m.StatsPage })));
+const SettingsPage = lazy(() => import("../settings/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 
 /** The header's page buttons, in order (Help is the ? button). */
 const PAGE_BUTTONS: { value: Page; label: string; icon: typeof IconBooks }[] = [
@@ -147,6 +149,7 @@ export function Shell({ user }: { user: Schemas["User"] }) {
         </AppShell.Header>
         <AppShell.Main style={{ height: "100vh", paddingTop: 48, paddingBottom: STATUS_BAR_HEIGHT, display: "flex", flexDirection: "column" }}>
           <UpdateBanner enabled={prefs.data?.[CHECK_UPDATES] === true} />
+          <Suspense fallback={null}>
           {page === "help" ? (
             <HelpPage />
           ) : page === "libraries" ? (
@@ -168,6 +171,7 @@ export function Shell({ user }: { user: Schemas["User"] }) {
           ) : (
             <BrowserPage />
           )}
+          </Suspense>
         </AppShell.Main>
         <AppShell.Footer>
           <StatusBar />

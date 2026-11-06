@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026.45.33 — 2026-11-06
+
+- **Find by Image reads less:** only the hashes of all images, then the details of the matches. On 400,000 images a
+  search's read takes 0.2 s instead of 0.6 s and holds 28 MB instead of about 100 MB.
+- **Job progress events leave out the job's list of ids:** 589 KB per event became under 2 KB for a job on 100,000
+  models, and jobs no longer copy that list at every step. `GET /api/jobs/{id}` still has the whole request.
+- **Four redundant database indexes are dropped** at start, as each was the start of a longer one. Writes do less work.
+- **The web client loads pages when they're opened,** so the main script goes from 1,092 KB to 897 KB. The folder tree
+  in the filter pane is no longer rebuilt on every render.
+
 ## 2026.45.32 — 2026-11-06
 
 - **Renaming, merging or deleting a tag, scale, category, collection, subcollection or creator now updates the

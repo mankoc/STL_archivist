@@ -16,7 +16,7 @@ import {
   IconPlus,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
-import { type MouseEvent, type ReactNode, useState } from "react";
+import { type MouseEvent, type ReactNode, useMemo, useState } from "react";
 
 import { api, unwrap } from "../api/client";
 import {
@@ -422,8 +422,8 @@ function Collections({ tree, spec, onChange, search }: Props & { search: string 
  * them; folders outside every library folder as a plain tree. */
 function PathTree({ tree, spec, onChange, onFolderMenu }: Props) {
   const libs = useQuery({ queryKey: ["libraries"], queryFn: async () => unwrap(await api.GET("/api/libraries")) });
-  if (!libs.data) return <>{folderTree(tree.folders).map((n) => <Folder key={n.path} node={n} depth={0} tree={tree} spec={spec} onChange={onChange} onFolderMenu={onFolderMenu} />)}</>;
-  const t = libraryFolderTree(tree.folders, libs.data);
+  const t = useMemo(() => (libs.data ? libraryFolderTree(tree.folders, libs.data) : null), [tree.folders, libs.data]);
+  if (!t) return <>{folderTree(tree.folders).map((n) => <Folder key={n.path} node={n} depth={0} tree={tree} spec={spec} onChange={onChange} onFolderMenu={onFolderMenu} />)}</>;
   return (
     <>
       {t.libraries.map((l) => <LibraryFolders key={l.id} lib={l} tree={tree} spec={spec} onChange={onChange} onFolderMenu={onFolderMenu} />)}
