@@ -302,25 +302,43 @@ pub fn image_dhash(lib: &Library, ctl: &Control, log: &dyn Fn(String), max_dist:
     }))
 }
 
+/// A vector as a map key, without a copy: equal when bit for bit the same.
+struct SameBits<'a>(&'a [f32]);
+
+impl PartialEq for SameBits<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.iter().map(|x| x.to_bits()).eq(other.0.iter().map(|x| x.to_bits()))
+    }
+}
+
+impl Eq for SameBits<'_> {}
+
+impl std::hash::Hash for SameBits<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.iter().for_each(|x| state.write_u32(x.to_bits()));
+    }
+}
+
 /// Find Duplicate Archives → Images by AI embedding.
 pub fn image_clip(lib: &Library, ctl: &Control, log: &dyn Fn(String), threshold: f32, max_models: usize) -> Result<JobResult, String> {
     log("Loading image embeddings…".into());
     let dim = schema_sql::EMBED_DIM as usize;
     let (img_model, mat) = lib.db.with(|c| vectors::load_model_vectors(c, dim)).map_err(db)?;
-    let mut index: HashMap<Vec<u32>, usize> = HashMap::new();
     let mut vecs: Vec<f32> = Vec::new();
-    let img_item: Vec<usize> = mat
-        .chunks(dim)
-        .map(|v| {
-            let key: Vec<u32> = v.iter().map(|x| x.to_bits()).collect();
-            *index.entry(key).or_insert_with(|| {
-                let mut v = v.to_vec();
-                stl_core::clip::normalize(&mut v);
-                vecs.extend(v);
-                vecs.len() / dim - 1
+    let img_item: Vec<usize> = {
+        let mut index: HashMap<SameBits, usize> = HashMap::new();
+        mat.chunks(dim)
+            .map(|v| {
+                *index.entry(SameBits(v)).or_insert_with(|| {
+                    let mut v = v.to_vec();
+                    stl_core::clip::normalize(&mut v);
+                    vecs.extend(v);
+                    vecs.len() / dim - 1
+                })
             })
-        })
-        .collect();
+            .collect()
+    };
+    drop(mat);
     let n_items = vecs.len() / dim;
     log(format!("Comparing {n_items} distinct image(s) ({} images)…", img_model.len()));
     let near = stl_core::embedding::near_pairs_cosine(&vecs, dim, threshold, ctl).map_err(|_| "stopped".to_string())?;

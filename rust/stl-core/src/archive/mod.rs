@@ -82,9 +82,9 @@ pub fn list_members(path: &Path) -> Result<Vec<ArchiveMember>, ArchiveError> {
 /// Decompressed bytes of the named members, as `(name, data)`.
 ///
 /// Names that are missing or empty, and damaged members (bad CRC and the like,
-/// per member for ZIP), are left out; what the reader does not handle (an
-/// encrypted member, a compression method) fails the whole call, except in a ZIP
-/// where other members could be read.
+/// per member for ZIP), are left out, and so is what the reader does not handle (an
+/// encrypted member, a compression method) as long as something else could be
+/// read: with nothing read, that fails the call.
 pub fn read_members(path: &Path, names: &[String]) -> Result<Vec<(String, Vec<u8>)>, ArchiveError> {
     read_members_with(path, names, "")
 }
