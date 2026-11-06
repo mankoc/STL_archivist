@@ -83,7 +83,8 @@ pub fn list_members(path: &Path) -> Result<Vec<ArchiveMember>, ArchiveError> {
 ///
 /// Names that are missing or empty, and damaged members (bad CRC and the like,
 /// per member for ZIP), are left out; what the reader does not handle (an
-/// encrypted member, a compression method) fails the whole call.
+/// encrypted member, a compression method) fails the whole call, except in a ZIP
+/// where other members could be read.
 pub fn read_members(path: &Path, names: &[String]) -> Result<Vec<(String, Vec<u8>)>, ArchiveError> {
     read_members_with(path, names, "")
 }

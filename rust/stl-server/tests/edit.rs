@@ -113,6 +113,43 @@ async fn cell_edits_and_sidecars() {
     assert!(l.lib.state.sidecars.pending().is_empty());
 }
 
+/// Sidecars hold the names, so whatever changes a name queues the models' folders.
+#[tokio::test]
+async fn name_changes_refresh_sidecars() {
+    let l = library();
+    let id = l.ids[0];
+    let r = l
+        .call("PATCH", "/api/models/cells", Some(json!({"edits": [
+            {"id": id, "field": "tags", "value": "one, two"},
+            {"id": id, "field": "collection", "value": "Comics"},
+            {"id": id, "field": "creator", "value": "Ann"},
+        ]})))
+        .await;
+    assert_eq!(r.status, StatusCode::OK);
+    let tag = |name: &str| -> i64 { l.scalar(&format!("SELECT id FROM tags WHERE name = '{name}'")) };
+    let collection: i64 = l.scalar("SELECT id FROM collections WHERE name = 'Comics'");
+    let (one, two) = (tag("one"), tag("two"));
+    let steps = [
+        ("PATCH", format!("/api/lookups/tag/{one}"), Some(json!({"name": "uno"}))),
+        ("POST", "/api/lookups/tag/merge".to_string(), Some(json!({"keep": two, "remove": one}))),
+        ("POST", "/api/tags/merge".to_string(), Some(json!({"ids": [two], "target": "final"}))),
+        ("POST", "/api/authors".to_string(), Some(json!({"action": "rename", "name": "Ann", "to": "Bea"}))),
+        ("POST", "/api/authors".to_string(), Some(json!({"action": "merge", "name": "Bea", "to": "Cy"}))),
+        ("POST", "/api/authors".to_string(), Some(json!({"action": "delete", "name": "Cy"}))),
+        ("DELETE", format!("/api/lookups/collection/{collection}"), None),
+    ];
+    for (method, uri, body) in steps {
+        l.lib.state.export_pending_sidecars();
+        let r = l.call(method, &uri, body.clone()).await;
+        assert_eq!(r.status, StatusCode::NO_CONTENT, "{method} {uri} {body:?}");
+        assert_eq!(l.lib.state.sidecars.pending(), vec![l.folder.to_string_lossy().into_owned()], "{method} {uri} {body:?}");
+    }
+    let last = tag("final");
+    l.lib.state.export_pending_sidecars();
+    assert_eq!(l.call("DELETE", &format!("/api/lookups/tag/{last}"), None).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(l.lib.state.sidecars.pending().len(), 1, "deleting a tag");
+}
+
 #[tokio::test]
 async fn sidecars_follow_the_library_setting() {
     let l = library();

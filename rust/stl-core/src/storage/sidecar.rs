@@ -503,15 +503,24 @@ pub fn listed_archives(path: &Path) -> SResult<Vec<String>> {
         .collect())
 }
 
+/// A folder's sidecar, read for [`import`].
+pub struct Sidecar {
+    data: Json,
+    thumbs: HashMap<String, Vec<u8>>,
+}
+
+/// Read `folder`'s sidecar. This decompresses all its thumbnails, so it comes
+/// before the transaction of [`import`]: edits wait for that one.
+pub fn read(folder: &str) -> SResult<Sidecar> {
+    let (data, thumbs) = read_sidecar(&PathBuf::from(join(folder, METADATA_FILENAME)))?;
+    Ok(Sidecar { data, thumbs })
+}
+
 /// Insert the sidecar's records whose archive exists
 /// and is not in the database yet; returns their archive paths. Thumbnails are
 /// written to `store` in one transaction.
-pub fn import(tx: &Transaction, store: &ThumbStore, folder: &str) -> SResult<Vec<String>> {
-    let metadata_path = PathBuf::from(join(folder, METADATA_FILENAME));
-    if !metadata_path.exists() {
-        return Ok(Vec::new());
-    }
-    let (data, thumbs) = read_sidecar(&metadata_path)?;
+pub fn import(tx: &Transaction, store: &ThumbStore, folder: &str, sidecar: Sidecar) -> SResult<Vec<String>> {
+    let Sidecar { data, thumbs } = sidecar;
     let Json::Object(data) = data else { return unsupported("metadata.json is not an object") };
     let version_ok = match data.get("version") {
         Some(Json::Number(n)) => n.as_f64() == Some(1.0),
@@ -679,7 +688,7 @@ mod tests {
         migrate(&dst, &Vectors::default()).unwrap();
         let mut conn = open(&dst).unwrap();
         let tx = conn.transaction().unwrap();
-        let imported = import(&tx, &store, &folder_s).unwrap();
+        let imported = import(&tx, &store, &folder_s, read(&folder_s).unwrap()).unwrap();
         tx.commit().unwrap();
         assert_eq!(imported, [crate::winpath::join(&folder_s, "a.zip")]);
         let (root, rel): (String, String) =

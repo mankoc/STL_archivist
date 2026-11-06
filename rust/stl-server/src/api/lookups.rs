@@ -106,18 +106,22 @@ pub async fn rename(
     }
     let outcome = lib
         .run(move |lib| {
-            Ok(lib.db.with_tx(|tx| {
+            Ok(lib.db.with_tx(|tx| -> rusqlite::Result<_> {
                 if admin::name_of(tx, &kind, id)?.is_none() {
                     return Ok(None);
                 }
-                admin::rename(tx, &kind, id, &name).map(Some)
+                let paths = admin::archive_paths(tx, &kind, id)?;
+                Ok(Some(admin::rename(tx, &kind, id, &name)?.then_some(paths)))
             })?)
         })
         .await?;
     match outcome {
         None => Err(ApiError::not_found(format!("no {id}"))),
-        Some(true) => Ok(StatusCode::NO_CONTENT),
-        Some(false) => Err(ApiError::new(StatusCode::CONFLICT, "the name is taken")),
+        Some(Some(paths)) => {
+            lib.schedule_sidecars(paths);
+            Ok(StatusCode::NO_CONTENT)
+        }
+        Some(None) => Err(ApiError::new(StatusCode::CONFLICT, "the name is taken")),
     }
 }
 
@@ -148,17 +152,21 @@ pub async fn info(State(lib): State<AppState>, _me: CurrentUser, Path((kind, id)
 pub async fn delete(State(lib): State<AppState>, me: CurrentUser, Path((kind, id)): Path<(String, i64)>) -> Result<StatusCode, ApiError> {
     me.require(Role::Editor)?;
     kind_ok(&kind)?;
-    let found = lib
+    let paths = lib
         .run(move |lib| {
-            Ok(lib.db.with_tx(|tx| {
+            Ok(lib.db.with_tx(|tx| -> rusqlite::Result<_> {
                 if admin::name_of(tx, &kind, id)?.is_none() {
-                    return Ok(false);
+                    return Ok(None);
                 }
-                admin::delete(tx, &kind, id).map(|_| true)
+                let paths = admin::archive_paths(tx, &kind, id)?;
+                admin::delete(tx, &kind, id)?;
+                Ok(Some(paths))
             })?)
         })
         .await?;
-    if found { Ok(StatusCode::NO_CONTENT) } else { Err(ApiError::not_found(format!("no {id}"))) }
+    let paths = paths.ok_or_else(|| ApiError::not_found(format!("no {id}")))?;
+    lib.schedule_sidecars(paths);
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -185,17 +193,21 @@ pub async fn merge(
     if m.keep == m.remove {
         return Err(ApiError::bad_request("cannot merge a row into itself"));
     }
-    let found = lib
+    let paths = lib
         .run(move |lib| {
-            Ok(lib.db.with_tx(|tx| {
+            Ok(lib.db.with_tx(|tx| -> rusqlite::Result<_> {
                 if admin::name_of(tx, &kind, m.keep)?.is_none() || admin::name_of(tx, &kind, m.remove)?.is_none() {
-                    return Ok(false);
+                    return Ok(None);
                 }
-                admin::merge(tx, &kind, m.keep, m.remove).map(|_| true)
+                let paths = admin::archive_paths(tx, &kind, m.remove)?;
+                admin::merge(tx, &kind, m.keep, m.remove)?;
+                Ok(Some(paths))
             })?)
         })
         .await?;
-    if found { Ok(StatusCode::NO_CONTENT) } else { Err(ApiError::not_found("no such row")) }
+    let paths = paths.ok_or_else(|| ApiError::not_found("no such row"))?;
+    lib.schedule_sidecars(paths);
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Most pairs one search returns.
@@ -299,7 +311,19 @@ pub async fn merge_tags(State(lib): State<AppState>, me: CurrentUser, Json(m): J
     if m.target.trim().is_empty() {
         return Err(ApiError::bad_request("a target name is needed"));
     }
-    lib.run(move |lib| Ok(lib.db.with_tx(|tx| admin::merge_tags(tx, &m.ids, &m.target))?)).await?;
+    let paths = lib
+        .run(move |lib| {
+            Ok(lib.db.with_tx(|tx| -> rusqlite::Result<_> {
+                let mut paths = Vec::new();
+                for &id in &m.ids {
+                    paths.extend(admin::archive_paths(tx, "tag", id)?);
+                }
+                admin::merge_tags(tx, &m.ids, &m.target)?;
+                Ok(paths)
+            })?)
+        })
+        .await?;
+    lib.schedule_sidecars(paths);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -361,14 +385,20 @@ pub async fn change_author(State(lib): State<AppState>, me: CurrentUser, Json(c)
         ("rename" | "merge" | "delete", _) => {}
         _ => return Err(ApiError::bad_request(format!("unknown action {action:?}"))),
     }
-    lib.run(move |lib| {
-        Ok(lib.db.with_tx(|tx| match (action.as_str(), to) {
-            ("rename", Some(to)) => admin::rename_author(tx, &name, &to),
-            ("merge", Some(to)) => admin::merge_authors(tx, &to, &name),
-            _ => admin::delete_author(tx, &name),
-        })?)
-    })
-    .await?;
+    let paths = lib
+        .run(move |lib| {
+            Ok(lib.db.with_tx(|tx| -> rusqlite::Result<_> {
+                let paths = admin::author_archive_paths(tx, &name)?;
+                match (action.as_str(), to) {
+                    ("rename", Some(to)) => admin::rename_author(tx, &name, &to)?,
+                    ("merge", Some(to)) => admin::merge_authors(tx, &to, &name)?,
+                    _ => admin::delete_author(tx, &name)?,
+                }
+                Ok(paths)
+            })?)
+        })
+        .await?;
+    lib.schedule_sidecars(paths);
     Ok(StatusCode::NO_CONTENT)
 }
 

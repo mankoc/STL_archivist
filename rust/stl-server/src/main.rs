@@ -1,4 +1,6 @@
 //! `stl-server [--data-dir DIR] [--bind ADDR:PORT]`: run the server (see `stl_server::config`).
+//! It stops on Ctrl-C and, with `STL_STOP_WITH_STDIN` set, when its standard input closes
+//! (how the desktop app asks its local server to stop).
 //! `stl-server create-admin NAME [--data-dir DIR]`: create the first administrator
 //! (password from `STL_ADMIN_PASSWORD` or the first line of standard input), for
 //! installs where `POST /api/auth/setup` cannot come from the server's own machine
@@ -67,14 +69,31 @@ async fn run(args: &[String]) -> Result<(), String> {
     let warm = Arc::clone(&library);
     tokio::task::spawn_blocking(move || stl_server::api::filter::warm_tree(&warm));
     axum::serve(listener, app(Arc::clone(&library)).into_make_service_with_connect_info::<std::net::SocketAddr>())
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-            tracing::info!("shutting down");
-        })
+        .with_graceful_shutdown(stop_requested())
         .await
         .map_err(|e| e.to_string())?;
     // Edits made just before shutdown still get their sidecars.
     tokio::task::spawn_blocking(move || library.export_pending_sidecars()).await.map_err(|e| e.to_string())
+}
+
+async fn stop_requested() {
+    let stdin_closed = async {
+        if std::env::var_os("STL_STOP_WITH_STDIN").is_none() {
+            return std::future::pending().await;
+        }
+        let (closed, wait) = tokio::sync::oneshot::channel::<()>();
+        // A thread of its own: the runtime would wait for a blocking task when it ends.
+        std::thread::spawn(move || {
+            let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
+            let _ = closed.send(());
+        });
+        let _ = wait.await;
+    };
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        () = stdin_closed => {}
+    }
+    tracing::info!("shutting down");
 }
 
 fn create_admin(args: &[String]) -> Result<(), String> {
