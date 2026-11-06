@@ -44,8 +44,7 @@ pub(super) fn list_members(path: &Path) -> Result<Vec<ArchiveMember>, ArchiveErr
 ///
 /// Inside a solid block everything before a wanted file must be decoded too;
 /// unwanted entries are drained and decoding of a block stops after its last
-/// wanted file. Any decode or CRC error fails the whole call, so the Python
-/// reader (which would also fail on it) decides what to do.
+/// wanted file. Any decode or CRC error fails the whole call.
 pub(super) fn read_members(
     path: &Path,
     wanted: &[String],
@@ -74,7 +73,7 @@ pub(super) fn read_members(
 
     // `BlockDecoder` visits files `first .. first + num_unpack_sub_streams`, so an
     // entry without a stream (directory, empty file) inside a solid block hides
-    // the block's last files (py7zr writes such archives). Leave those to Python.
+    // the block's last files (py7zr writes such archives). Those are refused.
     let mut streams = vec![0usize; archive.blocks.len()];
     for (f, b) in archive.files.iter().zip(&archive.stream_map.file_block_index) {
         if let Some(b) = *b

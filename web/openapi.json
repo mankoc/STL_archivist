@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.45.23"
+    "version": "2026.45.24"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -8516,7 +8516,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Regular expressions for presupported STL file names (the portable subset)."
+            "description": "Regular expressions for presupported STL file names (case-insensitive)."
           },
           "recurse_subdirs": {
             "type": "boolean"

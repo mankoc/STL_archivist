@@ -222,7 +222,7 @@ fn py_str(v: &serde_json::Value) -> Option<String> {
         Value::Bool(false) => Some("False".into()),
         Value::Null => Some("None".into()),
         Value::Number(n) if n.is_i64() || n.is_u64() => Some(n.to_string()),
-        Value::Number(n) => n.as_f64().map(crate::pyjson::float_repr),
+        Value::Number(n) => Some(n.to_string()),
         Value::Array(_) | Value::Object(_) => None,
     }
 }

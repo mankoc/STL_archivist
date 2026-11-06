@@ -1,6 +1,6 @@
 # StlArchivist API
 
-Version 2026.45.21. Generated from `web/openapi.json` by `tools/api_doc.py`; the
+Version 2026.45.24. Generated from `web/openapi.json` by `tools/api_doc.py`; the
 running server serves the same document at `GET /api/openapi.json`. Do not edit by hand:
 run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after changing routes.
 
@@ -1306,7 +1306,7 @@ The settings, with their effective values (defaults filled in).
 | `metadata_sidecar_enabled` | boolean | Write `METADATA.7z` sidecars into archive folders. |
 | `metadata_thumbnails` | boolean | Include thumbnails in sidecars. |
 | `monitor_interval_minutes` | integer | Monitored folders are checked this often (minutes, 1 to 1440). |
-| `presupport_patterns` | string[] | Regular expressions for presupported STL file names (the portable subset). |
+| `presupport_patterns` | string[] | Regular expressions for presupported STL file names (case-insensitive). |
 | `recurse_subdirs` | boolean |  |
 | `trash_folder_path` | string |  |
 | `use_trash_folder` | boolean | Deleted archives go to `trash_folder_path` (when set) instead of being deleted. |

@@ -1,7 +1,6 @@
-//! Native answers to what the desktop app does with Python libraries:
-//! CLIP embeddings (ONNX Runtime) and PDF previews (pdfium). Both libraries
-//! are loaded at runtime, so the server runs without them: a missing library
-//! or model just turns the feature off, as a missing package does in the app.
+//! CLIP embeddings (ONNX Runtime) and PDF previews (pdfium). Both libraries are
+//! loaded at runtime, so the server runs without them: a missing library or
+//! model just turns the feature off.
 //!
 //! - ONNX Runtime: `onnxruntime` in `server.json`, `ORT_DYLIB_PATH`, or
 //!   `onnxruntime.dll` / `libonnxruntime.so` / `.dylib` next to the server or in

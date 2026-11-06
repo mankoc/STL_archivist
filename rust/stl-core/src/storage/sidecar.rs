@@ -1,11 +1,7 @@
-//! `METADATA.7z` sidecars: a port of `app/crawler/folder_metadata.py`
-//! (`export_folder_metadata`, `import_folder_metadata`).
-//!
-//! The export writes the same `metadata.json` (`json.dumps(..., indent=2)`
-//! layout, dict order, `repr(float)`) and thumbnail members. The import refuses
-//! ([`SidecarError::Unsupported`]) any sidecar where Python would raise, store a
-//! non-text value, or read the JSON differently, before writing anything, and
-//! the caller uses Python.
+//! `METADATA.7z` sidecars: `metadata.json` and thumbnails, written beside the
+//! archives of a folder and read back by a crawl of it. An import refuses
+//! ([`SidecarError::Unsupported`]) a sidecar it cannot read in full, before
+//! writing anything.
 
 use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
@@ -13,11 +9,11 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::types::Value;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use serde::Serialize;
 use serde_json::Value as Json;
 
 use super::edit::{lookup, py_strip, subcollection, tag, utc_now_text};
 use super::libraries::{self, Roots};
-use crate::pyjson::{J, dumps_indent2, utc_now_isoformat};
 use crate::thumbstore::ThumbStore;
 use crate::winpath::WinPath;
 
@@ -29,7 +25,7 @@ const SCHEMA_VERSION: i64 = 1;
 #[derive(Debug)]
 pub enum SidecarError {
     Db(rusqlite::Error),
-    /// Input the port leaves to Python (nothing was written).
+    /// Input that cannot be taken (nothing was written).
     Unsupported(String),
     /// Writing the sidecar file failed.
     Io(String),
@@ -59,12 +55,12 @@ fn unsupported<T>(m: impl Into<String>) -> SResult<T> {
     Err(SidecarError::Unsupported(m.into()))
 }
 
-fn value_json(v: Value) -> SResult<J> {
+fn value_json(v: Value) -> SResult<Json> {
     Ok(match v {
-        Value::Null => J::Null,
-        Value::Integer(i) => J::Int(i),
-        Value::Real(f) => J::Float(f),
-        Value::Text(s) => J::Str(s),
+        Value::Null => Json::Null,
+        Value::Integer(i) => i.into(),
+        Value::Real(f) => f.into(),
+        Value::Text(s) => s.into(),
         Value::Blob(_) => return unsupported("a blob value in a model column"),
     })
 }
@@ -76,21 +72,72 @@ fn normcase(p: &str) -> String {
 
 use crate::winpath::join;
 
+/// `metadata.json`.
+#[derive(Serialize)]
+struct SidecarFile {
+    version: i64,
+    generated_at: String,
+    models: Vec<SidecarModel>,
+    pattern: Json,
+}
+
+#[derive(Serialize)]
+struct SidecarModel {
+    archive_name: String,
+    archive_hash: String,
+    title: Json,
+    creator: Json,
+    source: Json,
+    release_year: Json,
+    release_month: Json,
+    url: Json,
+    description: Json,
+    sequence: Json,
+    presupports: Json,
+    warning: Json,
+    compression_rate: Json,
+    sculptor: Json,
+    collection: Json,
+    subcollection: Json,
+    category: Json,
+    release: Json,
+    /// The archive's size, so a library reading the sidecar elsewhere can trust
+    /// it without opening the archive while the size still matches.
+    archive_size: Json,
+    scales: Vec<String>,
+    tags: Vec<String>,
+    images: Vec<SidecarImage>,
+    stl_files: Vec<SidecarStl>,
+}
+
+#[derive(Serialize)]
+struct SidecarImage {
+    filename: String,
+    thumbnail: String,
+}
+
+#[derive(Serialize)]
+struct SidecarStl {
+    filename: Json,
+    file_size: Json,
+    archive_hash: Json,
+}
+
 struct Snapshot {
-    data: J,
+    data: SidecarFile,
     /// `(member name, image id)` of the thumbnails to embed.
     thumbs: Vec<(String, i64)>,
 }
 
-fn names(conn: &Connection, sql: &str, id: i64) -> SResult<Vec<J>> {
+fn names(conn: &Connection, sql: &str, id: i64) -> SResult<Vec<String>> {
     let mut st = conn.prepare_cached(sql)?;
-    let v: Vec<String> = st.query_map([id], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
-    Ok(v.into_iter().map(J::Str).collect())
+    Ok(st.query_map([id], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)
 }
 
 fn snapshot(conn: &Connection, folder: &str, include_thumbnails: bool) -> SResult<Option<Snapshot>> {
     // The folder's archives: in the deepest library holding it, at its relative folder.
-    let Some((library, rel_folder)) = Roots::load(conn)?.locate_folder(folder) else { return Ok(None) };
+    let roots = Roots::load(conn)?;
+    let Some((library, rel_folder)) = roots.locate_folder(folder) else { return Ok(None) };
     let mut st = conn.prepare(&format!(
         "SELECT m.id, {}, m.archive_hash, m.title, m.creator, m.source, m.release_year, m.release_month, \
          m.url, m.description, m.sequence, m.presupports, m.warning, m.compression_rate, \
@@ -107,7 +154,7 @@ fn snapshot(conn: &Connection, folder: &str, include_thumbnails: bool) -> SResul
     let rows: Vec<Vec<Value>> = st
         .query_map(params![library, rel_folder], |r| (0..20).map(|k| r.get::<_, Value>(k)).collect())?
         .collect::<rusqlite::Result<_>>()?;
-    let mut entries = Vec::new();
+    let mut models = Vec::new();
     let mut thumbs = Vec::new();
     for row in rows {
         let mut row = row.into_iter();
@@ -123,47 +170,12 @@ fn snapshot(conn: &Connection, folder: &str, include_thumbnails: bool) -> SResul
         if normcase(&WinPath::new(&path).parent().as_posix()) != want {
             continue;
         }
-        let m_idx = entries.len();
-        let hash = match next() {
+        let m_idx = models.len();
+        let archive_hash = match next() {
             Value::Text(s) => s,
             Value::Null => String::new(),
-            other => match value_json(other)? {
-                J::Str(s) => s,
-                _ => return unsupported("a non-text archive_hash"),
-            },
+            _ => return unsupported("a non-text archive_hash"),
         };
-        let mut fields: Vec<(String, J)> = vec![
-            ("archive_name".into(), J::Str(WinPath::new(&path).name().to_string())),
-            ("archive_hash".into(), J::Str(hash)),
-        ];
-        for key in [
-            "title", "creator", "source", "release_year", "release_month", "url", "description", "sequence",
-            "presupports", "warning", "compression_rate",
-        ] {
-            fields.push((key.into(), value_json(next())?));
-        }
-        for key in ["sculptor", "collection", "subcollection", "category", "release"] {
-            fields.push((key.into(), value_json(next())?));
-        }
-        // The archive's size, so a library reading the sidecar elsewhere can trust it
-        // without opening the archive while the size still matches.
-        fields.push(("archive_size".into(), value_json(next())?));
-        fields.push((
-            "scales".into(),
-            J::Arr(names(
-                conn,
-                "SELECT s.name FROM model_scales k JOIN scales s ON s.id = k.scale_id WHERE k.model_id = ?1 ORDER BY s.id",
-                id,
-            )?),
-        ));
-        fields.push((
-            "tags".into(),
-            J::Arr(names(
-                conn,
-                "SELECT t.name FROM model_tags k JOIN tags t ON t.id = k.tag_id WHERE k.model_id = ?1 ORDER BY t.id",
-                id,
-            )?),
-        ));
         let mut images = Vec::new();
         if include_thumbnails {
             let mut st = conn.prepare_cached("SELECT id, filename, thumbnail_path FROM images WHERE model_id = ?1 ORDER BY id")?;
@@ -174,58 +186,71 @@ fn snapshot(conn: &Connection, folder: &str, include_thumbnails: bool) -> SResul
                     continue;
                 }
                 let member = format!("{THUMBS_DIR}/{m_idx}_{i_idx}.jpg");
-                images.push(J::Obj(vec![
-                    ("filename".into(), J::Str(filename.unwrap_or_default())),
-                    ("thumbnail".into(), J::Str(member.clone())),
-                ]));
+                images.push(SidecarImage { filename: filename.unwrap_or_default(), thumbnail: member.clone() });
                 thumbs.push((member, image_id));
             }
         }
-        fields.push(("images".into(), J::Arr(images)));
         let mut st = conn.prepare_cached(
             "SELECT filename, file_size, archive_hash FROM stl_files WHERE model_id = ?1 ORDER BY filename",
         )?;
         let files: Vec<(Value, Value, Value)> =
             st.query_map([id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<_>>()?;
-        let files = files
+        let stl_files = files
             .into_iter()
-            .map(|(f, s, h)| {
-                Ok(J::Obj(vec![
-                    ("filename".into(), value_json(f)?),
-                    ("file_size".into(), value_json(s)?),
-                    ("archive_hash".into(), value_json(h)?),
-                ]))
-            })
+            .map(|(f, s, h)| Ok(SidecarStl { filename: value_json(f)?, file_size: value_json(s)?, archive_hash: value_json(h)? }))
             .collect::<SResult<Vec<_>>>()?;
-        fields.push(("stl_files".into(), J::Arr(files)));
-        entries.push(J::Obj(fields));
+        models.push(SidecarModel {
+            archive_name: WinPath::new(&path).name().to_string(),
+            archive_hash,
+            // In the order of the SELECT.
+            title: value_json(next())?,
+            creator: value_json(next())?,
+            source: value_json(next())?,
+            release_year: value_json(next())?,
+            release_month: value_json(next())?,
+            url: value_json(next())?,
+            description: value_json(next())?,
+            sequence: value_json(next())?,
+            presupports: value_json(next())?,
+            warning: value_json(next())?,
+            compression_rate: value_json(next())?,
+            sculptor: value_json(next())?,
+            collection: value_json(next())?,
+            subcollection: value_json(next())?,
+            category: value_json(next())?,
+            release: value_json(next())?,
+            archive_size: value_json(next())?,
+            scales: names(conn, "SELECT s.name FROM model_scales k JOIN scales s ON s.id = k.scale_id WHERE k.model_id = ?1 ORDER BY s.id", id)?,
+            tags: names(conn, "SELECT t.name FROM model_tags k JOIN tags t ON t.id = k.tag_id WHERE k.model_id = ?1 ORDER BY t.id", id)?,
+            images,
+            stl_files,
+        });
     }
-    if entries.is_empty() {
+    if models.is_empty() {
         return Ok(None);
     }
     // The pattern of the library the folder is the root of (none for other folders).
-    let pattern: Option<Value> = match Roots::load(conn)?.locate_root(folder) {
+    let pattern: Option<Value> = match roots.locate_root(folder) {
         Some(id) => conn.query_row("SELECT pattern FROM libraries WHERE id = ?1", [id], |r| r.get(0)).optional()?,
         None => None,
     };
-    let data = J::Obj(vec![
-        ("version".into(), J::Int(SCHEMA_VERSION)),
-        ("generated_at".into(), J::Str(utc_now_isoformat())),
-        ("models".into(), J::Arr(entries)),
-        ("pattern".into(), value_json(pattern.unwrap_or(Value::Null))?),
-    ]);
+    let data = SidecarFile {
+        version: SCHEMA_VERSION,
+        generated_at: format!("{}+00:00", utc_now_text().replacen(' ', "T", 1)),
+        models,
+        pattern: value_json(pattern.unwrap_or(Value::Null))?,
+    };
     Ok(Some(Snapshot { data, thumbs }))
 }
 
-/// `export_folder_metadata`: write `folder/METADATA.7z` for the archives directly
-/// in `folder` (`folder` as `str(Path)`). `Ok(false)`: no records. A write
-/// failure is [`SidecarError::Io`] (Python logs it and returns `False`).
+/// Write `folder/METADATA.7z` for the archives directly in `folder`.
+/// `Ok(false)`: no records. A write failure is [`SidecarError::Io`].
 pub fn export(conn: &Connection, store: Option<&ThumbStore>, folder: &str, include_thumbnails: bool) -> SResult<bool> {
     if include_thumbnails && store.is_none() {
         return unsupported("thumbnails requested without a native thumbnail store");
     }
     let Some(snap) = snapshot(conn, folder, include_thumbnails)? else { return Ok(false) };
-    let json = dumps_indent2(&snap.data).into_bytes();
+    let json = serde_json::to_vec_pretty(&snap.data).expect("the sidecar serialises");
     let blobs: HashMap<i64, Vec<u8>> = match store {
         Some(s) if !snap.thumbs.is_empty() => {
             let ids: Vec<u64> = snap.thumbs.iter().map(|(_, id)| *id as u64).collect();
@@ -478,7 +503,7 @@ pub fn listed_archives(path: &Path) -> SResult<Vec<String>> {
         .collect())
 }
 
-/// `import_folder_metadata`: insert the sidecar's records whose archive exists
+/// Insert the sidecar's records whose archive exists
 /// and is not in the database yet; returns their archive paths. Thumbnails are
 /// written to `store` in one transaction.
 pub fn import(tx: &Transaction, store: &ThumbStore, folder: &str) -> SResult<Vec<String>> {

@@ -1,5 +1,5 @@
 //! RAR catalog and member reads: a port of what `rarfile` (4.2) returns for
-//! `RarFile(path).infolist()` and `RarFile.read(name)` in `app/crawler/archive.py`.
+//! `RarFile(path).infolist()` and `RarFile.read(name)`.
 //!
 //! The catalog parses RAR 2.9 / 3 / 4 and RAR5 headers as `rarfile` does:
 //! names decoded the same way (RAR3's compressed-Unicode names, then UTF-8,
@@ -7,7 +7,7 @@
 //! stopped where `rarfile` stops (a header CRC error, EOF, an unknown RAR5 block,
 //! encrypted headers). Anything `rarfile` would treat differently or that this
 //! port does not cover exactly — SFX archives, volumes, comments, malformed
-//! headers — returns [`ArchiveError::Unsupported`], and the Python reader runs.
+//! headers — returns [`ArchiveError::Unsupported`].
 //!
 //! Member data comes from the UnRAR tool (`unrar p`), as `rarfile` gets it;
 //! stored members are read directly. Data whose CRC does not match is left

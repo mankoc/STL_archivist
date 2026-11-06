@@ -1,15 +1,13 @@
 //! Crawler rules over archive member names: presupport classification, warnings,
-//! scale detection. A port of `app/crawler/rules.py`; golden tests compare the two.
+//! scale detection.
 //!
-//! The Python code reads member names through `pathlib` on Windows, so [`MemberPath`]
-//! reproduces `WindowsPath` for names that use `/`: empty and `.` segments vanish,
-//! a leading `X:` is a drive part, and `suffix` / `stem` follow Python 3.14
-//! (`"a."` has suffix `"."`; a name of dots only has no suffix).
+//! [`MemberPath`] reads member names as `pathlib` does on Windows, as the first
+//! version of these rules did: empty and `.` segments vanish, a leading `X:` is a
+//! drive part, and `suffix` / `stem` follow Python 3.14 (`"a."` has suffix `"."`;
+//! a name of dots only has no suffix).
 //!
-//! Presupport filename patterns are Python regexes (the defaults use a
-//! lookbehind), compiled here with `fancy-regex`. A pattern that `fancy-regex`
-//! rejects makes the call fail with [`RulesError::Pattern`] instead of skipping
-//! it, because Python might accept it; the caller then uses the Python rules.
+//! Presupport filename patterns are regular expressions, case-insensitive,
+//! compiled with `fancy-regex` (the defaults use a lookbehind).
 
 use std::collections::HashSet;
 use std::fmt;
@@ -35,7 +33,7 @@ pub const WARNING_NO_PRINTABLE: &str = "Archive without printable files";
 
 #[derive(Debug)]
 pub enum RulesError {
-    /// A presupport pattern `fancy-regex` cannot compile (or run).
+    /// A presupport pattern that does not compile (or run).
     Pattern(String),
 }
 
@@ -181,269 +179,23 @@ fn segment_support_state(segment: &str) -> Option<SupportState> {
     marked.then_some(SupportState::Marked)
 }
 
-// ── Portable presupport patterns ────────────────────────────────────────────
-// The grammar of `rules.portable_pattern_error` in Python (see its comment):
-// syntax that `re` and fancy-regex read the same way, case-insensitively.
-
-const PORTABLE_ESCAPABLE: &str = ".^$*+?()[]{}|\\-/";
-
-#[derive(Clone, Copy, PartialEq)]
-enum Prev {
-    Start,
-    Atom,
-    Anchor,
-    Look,
-    Quant,
-    Lazy,
+/// A presupport pattern compiled, or why it is not valid. `\Z` is what older
+/// versions saved for the end of a name.
+pub fn compile_pattern(p: &str) -> Result<Regex, String> {
+    RegexBuilder::new(&p.replace(r"\Z", r"\z")).case_insensitive(true).build().map_err(|e| format!("not a valid regular expression ({e})"))
 }
 
-fn printable(c: char) -> bool {
-    (' '..='~').contains(&c)
-}
-
-/// The fancy-regex form of a portable pattern (`$` → `(?=\n?\z)`, `\Z` → `\z`),
-/// or why it is not portable. Compiles the result.
-pub fn portable_pattern(p: &str) -> Result<String, String> {
-    let out = portable_translate(p)?;
-    RegexBuilder::new(&out).case_insensitive(true).build().map_err(|e| format!("not a valid regular expression ({e})"))?;
-    Ok(out)
-}
-
-fn portable_translate(p: &str) -> Result<String, String> {
-    let c: Vec<char> = p.chars().collect();
-    let n = c.len();
-    let (mut i, mut depth, mut prev) = (0usize, 0usize, Prev::Start);
-    let mut looks: Vec<bool> = Vec::new();
-    let mut out = String::with_capacity(p.len() + 8);
-    while i < n {
-        let ch = c[i];
-        if !printable(ch) {
-            return Err(format!("use only printable ASCII characters (found {ch:?} at {i})"));
-        }
-        match ch {
-            '\\' => {
-                let Some(&e) = c.get(i + 1) else { return Err("a pattern cannot end with a backslash".into()) };
-                prev = match e {
-                    'd' | 'D' => Prev::Atom,
-                    'A' | 'Z' => Prev::Anchor,
-                    e if PORTABLE_ESCAPABLE.contains(e) => Prev::Atom,
-                    e => return Err(format!("the escape \\{e} is not supported (at {i})")),
-                };
-                out.push('\\');
-                out.push(if e == 'Z' { 'z' } else { e });
-                i += 2;
-            }
-            '[' => {
-                let j = portable_class(&c, i)?;
-                out.extend(&c[i..j]);
-                i = j;
-                prev = Prev::Atom;
-            }
-            '(' => {
-                let rest: String = c[i + 1..].iter().collect();
-                if rest.starts_with('?') {
-                    let kind = ["?<=", "?<!", "?:", "?=", "?!"]
-                        .into_iter()
-                        .find(|k| rest.starts_with(k))
-                        .ok_or_else(|| format!("only (?:...), (?=...), (?!...), (?<=...) and (?<!...) groups are supported (at {i})"))?;
-                    looks.push(kind != "?:");
-                    out.push('(');
-                    out.push_str(kind);
-                    i += 1 + kind.len();
-                } else {
-                    looks.push(false);
-                    out.push('(');
-                    i += 1;
-                }
-                depth += 1;
-                prev = Prev::Start;
-            }
-            ')' => {
-                if depth == 0 {
-                    return Err(format!("unbalanced parenthesis (at {i})"));
-                }
-                depth -= 1;
-                prev = if looks.pop() == Some(true) { Prev::Look } else { Prev::Atom };
-                out.push(')');
-                i += 1;
-            }
-            '|' => {
-                prev = Prev::Start;
-                out.push('|');
-                i += 1;
-            }
-            '*' | '+' | '?' | '{' => {
-                if ch == '?' && prev == Prev::Quant {
-                    prev = Prev::Lazy;
-                    out.push('?');
-                    i += 1;
-                    continue;
-                }
-                if prev != Prev::Atom {
-                    return Err(format!("nothing to repeat at {i}"));
-                }
-                if ch == '{' {
-                    let j = portable_braces(&c, i)?;
-                    out.extend(&c[i..j]);
-                    i = j;
-                } else {
-                    out.push(ch);
-                    i += 1;
-                }
-                prev = Prev::Quant;
-            }
-            '^' => {
-                prev = Prev::Anchor;
-                out.push('^');
-                i += 1;
-            }
-            '$' => {
-                prev = Prev::Anchor;
-                out.push_str(r"(?=\n?\z)");
-                i += 1;
-            }
-            '}' | ']' => return Err(format!("escape a literal '{ch}' as \\{ch} (at {i})")),
-            _ => {
-                prev = Prev::Atom;
-                out.push(ch);
-                i += 1;
-            }
-        }
-    }
-    if depth > 0 {
-        return Err("unbalanced parenthesis".into());
-    }
-    Ok(out)
-}
-
-/// End index of a `{n}`, `{n,}` or `{n,m}` quantifier at `i`.
-fn portable_braces(c: &[char], i: usize) -> Result<usize, String> {
-    let bad = || format!("use {{n}}, {{n,}} or {{n,m}}, or escape a literal '{{' as \\{{ (at {i})");
-    let digits = |from: usize| c[from..].iter().take_while(|d| d.is_ascii_digit()).count();
-    let mut j = i + 1;
-    let nl = digits(j);
-    if nl == 0 {
-        return Err(bad());
-    }
-    let lo: String = c[j..j + nl].iter().collect();
-    j += nl;
-    let mut hi = String::new();
-    if c.get(j) == Some(&',') {
-        j += 1;
-        let nh = digits(j);
-        hi = c[j..j + nh].iter().collect();
-        j += nh;
-    }
-    if c.get(j) != Some(&'}') {
-        return Err(bad());
-    }
-    let value = |s: &str| {
-        let t = s.trim_start_matches('0');
-        if t.len() > 6 { u32::MAX } else { t.parse::<u32>().unwrap_or(0) }
-    };
-    if !hi.is_empty() && value(&hi) < value(&lo) {
-        return Err(format!("bad repeat range (at {i})"));
-    }
-    if value(&lo) > 1000 || (!hi.is_empty() && value(&hi) > 1000) {
-        return Err(format!("repeat counts above 1000 are not supported (at {i})"));
-    }
-    Ok(j + 1)
-}
-
-/// End index (after `]`) of the character class at `i`.
-fn portable_class(c: &[char], i: usize) -> Result<usize, String> {
-    let n = c.len();
-    let mut j = i + 1;
-    if c.get(j) == Some(&'^') {
-        j += 1;
-    }
-    if c.get(j) == Some(&']') {
-        return Err(format!("escape a ']' at the start of a class as \\] (at {j})"));
-    }
-    let mut items = 0;
-    let mut prev_single: Option<char> = None;
-    while j < n {
-        let ch = c[j];
-        if !printable(ch) {
-            return Err(format!("use only printable ASCII characters (found {ch:?} at {j})"));
-        }
-        if ch == ']' {
-            if items == 0 {
-                return Err(format!("empty character class (at {i})"));
-            }
-            return Ok(j + 1);
-        }
-        if ch == '[' {
-            return Err(format!("escape a '[' inside a class as \\[ (at {j})"));
-        }
-        if j + 1 < n && ((ch == '&' && c[j + 1] == '&') || (ch == '-' && c[j + 1] == '-') || (ch == '~' && c[j + 1] == '~'))
-        {
-            return Err(format!("'{ch}{ch}' inside a class is not supported (at {j})"));
-        }
-        if ch == '\\' {
-            let Some(&e) = c.get(j + 1) else { break };
-            prev_single = match e {
-                'd' | 'D' => None,
-                e if PORTABLE_ESCAPABLE.contains(e) => Some(e),
-                e => return Err(format!("the escape \\{e} is not supported in a class (at {j})")),
-            };
-            j += 2;
-            items += 1;
-            continue;
-        }
-        if ch == '-'
-            && let Some(lo) = prev_single
-            && j + 1 < n
-            && c[j + 1] != ']'
-        {
-            let (hi, step) = match c[j + 1] {
-                '\\' => match c.get(j + 2) {
-                    Some(&e) if PORTABLE_ESCAPABLE.contains(e) => (e, 3),
-                    _ => return Err(format!("a range must end in a single character (at {j})")),
-                },
-                '[' => return Err(format!("escape a '[' inside a class as \\[ (at {})", j + 1)),
-                h => (h, 2),
-            };
-            if !printable(hi) {
-                return Err(format!("use only printable ASCII characters (found {hi:?} at {})", j + 1));
-            }
-            if hi < lo {
-                return Err(format!("bad character range {lo}-{hi} (at {j})"));
-            }
-            j += step;
-            prev_single = None;
-            items += 1;
-            continue;
-        }
-        if ch == '-' && items > 0 && c.get(j + 1) != Some(&']') {
-            return Err(format!("escape a '-' in the middle of a class as \\- (at {j})"));
-        }
-        prev_single = Some(ch);
-        items += 1;
-        j += 1;
-    }
-    Err(format!("unterminated character class (at {i})"))
-}
-
-/// Compiled presupport filename patterns (`compile_presupport_patterns`).
+/// Compiled presupport filename patterns.
 pub struct PresupportPatterns(Vec<Regex>);
 
 impl PresupportPatterns {
-    /// `None`: the built-in defaults. A pattern that is not portable
-    /// ([`portable_pattern`]) is an error, and the caller uses Python.
+    /// `None`: the built-in defaults.
     pub fn new<S: AsRef<str>>(patterns: Option<&[S]>) -> Result<Self, RulesError> {
         match patterns {
             None => Ok(PresupportPatterns(vec![DEFAULT_PRESUPPORT.clone()])),
             Some(ps) => ps
                 .iter()
-                .map(|p| {
-                    let translated =
-                        portable_pattern(p.as_ref()).map_err(|e| RulesError::Pattern(format!("{}: {e}", p.as_ref())))?;
-                    RegexBuilder::new(&translated)
-                        .case_insensitive(true)
-                        .build()
-                        .map_err(|e| RulesError::Pattern(format!("{}: {e}", p.as_ref())))
-                })
+                .map(|p| compile_pattern(p.as_ref()).map_err(|e| RulesError::Pattern(format!("{}: {e}", p.as_ref()))))
                 .collect::<Result<Vec<_>, _>>()
                 .map(PresupportPatterns),
         }
@@ -616,22 +368,17 @@ mod tests {
     #[test]
     fn invalid_pattern_is_an_error() {
         assert!(PresupportPatterns::new(Some(&["(unclosed"])).is_err());
-        assert!(PresupportPatterns::new(Some(&["[[:alpha:]]"])).is_err());
     }
 
     #[test]
-    fn portable_patterns() {
+    fn custom_patterns() {
         for p in DEFAULT_PRESUPPORT_PATTERNS {
-            assert!(portable_pattern(p).is_ok(), "{p}");
+            assert!(compile_pattern(p).is_ok(), "{p}");
         }
-        assert_eq!(portable_pattern(r"^s_.*\.stl$").unwrap(), r"^s_.*\.stl(?=\n?\z)");
-        assert_eq!(portable_pattern(r"x\Z").unwrap(), r"x\z");
-        for bad in [r"[[:alpha:]]", r"(?<n>x)", r"\x{41}", r"\w", "é", r"a**", r"[]]", r"x{,3}", r"[a-z-0]", r"(?i)x"] {
-            assert!(portable_pattern(bad).is_err(), "{bad}");
-        }
-        let pats = PresupportPatterns::new(Some(&[r"_sup\.stl$"])).unwrap();
-        assert!(pats.any_match("a_SUP.stl\n").unwrap());
-        assert!(!pats.any_match("a_sup.stl\n\n").unwrap());
+        assert!(compile_pattern(r"\w+_sup\.stl$").is_ok());
+        let pats = PresupportPatterns::new(Some(&[r"_sup\.stl\Z"])).unwrap();
+        assert!(pats.any_match("a_SUP.stl").unwrap(), "case-insensitive, and \\Z as saved by older versions");
+        assert!(!pats.any_match("a_sup.stl.bak").unwrap());
     }
 
     #[test]

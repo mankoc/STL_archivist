@@ -4,9 +4,8 @@
 //!
 //! Member names decide the archive fingerprint, so every rule that changes a
 //! name is reproduced, with the Windows behaviour of `os.sep`. Where CPython
-//! would raise, this returns an error; anything CPython would accept silently
-//! but that looks damaged (short reads) is also an error, so the Python reader
-//! decides those archives.
+//! would raise, this returns an error; so does anything it would accept silently
+//! but that looks damaged (short reads).
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -180,8 +179,7 @@ pub(super) fn list_members(path: &Path) -> Result<Vec<ArchiveMember>, ArchiveErr
 /// `NameToInfo` keeps the last entry of a duplicated name, and so does this.
 /// A member that `zipfile` would fail to read (header name mismatch,
 /// overlapped entries, bad CRC) is left out, as `read_batch` does. Encrypted
-/// members and methods other than stored/deflate make the whole call fail,
-/// so the Python reader handles that archive.
+/// members and methods other than stored/deflate make the whole call fail.
 pub(super) fn read_members(
     path: &Path,
     wanted: &[String],

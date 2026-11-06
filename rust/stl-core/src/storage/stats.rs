@@ -1,6 +1,5 @@
-//! Library statistics: a port of `app/services/library_stats.py` (the
-//! Statistics and Column Distribution dialogs). Values are returned raw; the
-//! Python service applies the labels.
+//! Library statistics (the Statistics page). Values are returned raw; the API
+//! applies the labels.
 
 use rusqlite::Connection;
 use rusqlite::types::Value;

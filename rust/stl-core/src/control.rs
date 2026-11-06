@@ -1,9 +1,8 @@
 //! Progress reporting and cancellation for long-running operations.
 //!
-//! Worker threads update a shared [`Control`]; whoever started the job (the
-//! PyO3 binding today, a server job later) polls [`Control::progress`] and calls
-//! [`Control::request_stop`]. No callback crosses into a worker thread, so the
-//! core never needs the Python GIL or an async runtime.
+//! Worker threads update a shared [`Control`]; whoever started the job polls
+//! [`Control::progress`] and calls [`Control::request_stop`]. No callback crosses
+//! into a worker thread, so the core never needs an async runtime.
 //!
 //! A paused operation waits at its next checkpoint ([`Control::is_stopped`] or
 //! [`Control::check`]) until it is resumed or stopped.

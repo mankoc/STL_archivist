@@ -231,7 +231,7 @@ pub fn warning_details(lib: &Library, path: Option<&str>, warning: Option<&str>)
                         }
                         Err(e) => Some(e.to_string()),
                     },
-                    Err(e) => Some(format!("the presupport patterns use syntax only the desktop app reads ({e})")),
+                    Err(e) => Some(e.to_string()),
                 }
             }
         },

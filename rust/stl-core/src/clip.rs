@@ -1,8 +1,6 @@
-//! CLIP image preprocessing: a port of `_preprocess` in
-//! `app/utils/image_embedding.py`. The encoder itself runs in ONNX Runtime
-//! (the server's `embed` module); vectors from either side are L2-normalised
-//! and stored under the same `EMBED_MODEL_ID`, so the preprocessing must stay
-//! close to Python's (a golden test compares the tensors).
+//! CLIP image preprocessing. The encoder itself runs in ONNX Runtime (the
+//! server's `tools` module); vectors are L2-normalised and stored under
+//! `EMBED_MODEL_ID`, so a change here must keep them comparable with stored ones.
 
 use fast_image_resize::images::Image as FirImage;
 use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};

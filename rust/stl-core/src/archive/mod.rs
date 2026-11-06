@@ -1,17 +1,17 @@
 //! Archive catalogs: member names, CRCs and sizes, read without decompressing.
 //!
-//! The member list feeds the archive fingerprint (`archive_hash`), so it must
-//! match what the Python readers produce **exactly** (compatibility rule 1 in
-//! `docs/rust-migration-plan.md`):
+//! The member list feeds the archive fingerprint (`archive_hash`), so what these
+//! readers return must not change: names and CRCs of existing archives must keep
+//! giving the fingerprints already stored (compatibility rule 1 in
+//! `docs/rust-migration-plan.md`).
 //!
 //! * ZIP: a port of CPython 3.14's `zipfile` catalog reader (`zip.rs`).
 //! * 7z: `sevenz-rust2`, with `py7zr`'s name rule (`\` becomes `/`).
-//! * RAR: not handled here yet; the Python `rarfile` reader stays in use.
+//! * RAR: a port of `rarfile`'s catalog (`rar.rs`).
 //!
 //! Whenever a catalog looks unusual, these readers return an error instead of
-//! guessing, and the caller falls back to the Python reader. They must also
-//! fail wherever the Python reader fails, so the two never disagree about an
-//! archive that only one of them can read.
+//! guessing: the crawler then gives the archive a fallback fingerprint from its
+//! size and date, and a rescan reports that it cannot read it.
 
 mod rar;
 mod sevenz;
@@ -81,9 +81,9 @@ pub fn list_members(path: &Path) -> Result<Vec<ArchiveMember>, ArchiveError> {
 
 /// Decompressed bytes of the named members, as `(name, data)`.
 ///
-/// Names that are missing, empty, or that the Python reader would skip
-/// (bad CRC and the like, per member for ZIP) are left out; anything this
-/// reader does not handle exactly fails the whole call instead.
+/// Names that are missing or empty, and damaged members (bad CRC and the like,
+/// per member for ZIP), are left out; what the reader does not handle (an
+/// encrypted member, a compression method) fails the whole call.
 pub fn read_members(path: &Path, names: &[String]) -> Result<Vec<(String, Vec<u8>)>, ArchiveError> {
     read_members_with(path, names, "")
 }

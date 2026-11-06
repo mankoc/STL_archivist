@@ -39,7 +39,7 @@ pub struct Settings {
     pub warn_low_compression: bool,
     /// Compression rate above which an archive counts as poorly compressed.
     pub low_compression_threshold: f64,
-    /// Regular expressions for presupported STL file names (the portable subset).
+    /// Regular expressions for presupported STL file names (case-insensitive).
     pub presupport_patterns: Vec<String>,
     pub ai_embeddings_enabled: bool,
     pub ai_embeddings_during_crawl: bool,
@@ -109,7 +109,7 @@ impl Settings {
             return Err(ApiError::bad_request("ai_temperature is between 0 and 2"));
         }
         for p in &self.presupport_patterns {
-            stl_core::rules::portable_pattern(p).map_err(|e| ApiError::bad_request(format!("pattern {p:?}: {e}")))?;
+            stl_core::rules::compile_pattern(p).map_err(|e| ApiError::bad_request(format!("pattern {p:?}: {e}")))?;
         }
         Ok(())
     }

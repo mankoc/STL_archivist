@@ -39,8 +39,8 @@ async fn settings_round_trip() {
 
     // Invalid values are refused, nothing is written.
     let mut bad = v.clone();
-    bad["presupport_patterns"] = serde_json::json!([r"\w+_sup\.stl$"]);
-    assert_eq!(call(s, "PUT", "/api/settings/library", Some(&admin), Some(bad)).await.status, StatusCode::BAD_REQUEST, "non-portable pattern");
+    bad["presupport_patterns"] = serde_json::json!(["(unclosed"]);
+    assert_eq!(call(s, "PUT", "/api/settings/library", Some(&admin), Some(bad)).await.status, StatusCode::BAD_REQUEST, "invalid pattern");
     let mut bad = v.clone();
     bad["max_workers"] = 0.into();
     assert_eq!(call(s, "PUT", "/api/settings/library", Some(&admin), Some(bad)).await.status, StatusCode::BAD_REQUEST);

@@ -1,12 +1,6 @@
-//! Model editing for the editor dialog, the AI tagger and the mass editor: a
-//! port of `app/services/model_edit.py` (with `path_pattern.apply_extracted_to_model`).
-//!
-//! The mass editor's find & replace is reproduced for the cases where Rust and
-//! Python's `re` agree exactly: a literal find text (case-insensitive only when
-//! it is ASCII) and a replacement without backslashes (Python expands `\1`,
-//! `\n`, `\g<0>`, ...). Anything else, and tag lists that would link one tag
-//! twice (an IntegrityError in Python), returns [`EditError::Unsupported`]
-//! before writing, and the caller uses Python.
+//! Model editing for the editor dialog, the AI tagger and the mass editor.
+//! A tag list that would link one tag twice returns [`EditError::Unsupported`]
+//! before writing.
 
 use std::collections::{BTreeSet, HashMap};
 

@@ -1,7 +1,5 @@
-//! Rescan and Generate Thumbnails for one archive (the desktop's `RescanWorker`
-//! and `ThumbnailGeneratorWorker` in `app/ui/browser_jobs.py`), with the native
-//! readers only: an archive they refuse is reported, not guessed at. The
-//! results go to `storage::jobs::apply_rescan` / `replace_thumbnails`.
+//! Rescan and Generate Thumbnails for one archive: an archive the readers refuse
+//! is reported, not guessed at. The results go to `storage::jobs::apply_rescan` / `replace_thumbnails`.
 
 use crate::crawler::{extract_native, fallback_fingerprint};
 use crate::metadata;
@@ -24,9 +22,7 @@ pub struct Options {
 const RESCAN_STL_EXTS: [&str; 5] = [".stl", ".obj", ".lys", ".chitubox", ".ags"];
 
 fn patterns(list: &[String]) -> Result<PresupportPatterns, String> {
-    let defaults: Vec<String> = rules::DEFAULT_PRESUPPORT_PATTERNS.iter().map(|s| s.to_string()).collect();
-    let r = if list == defaults.as_slice() { PresupportPatterns::new::<String>(None) } else { PresupportPatterns::new(Some(list)) };
-    r.map_err(|e| format!("the presupport patterns use syntax only the desktop app reads ({e})"))
+    PresupportPatterns::new(Some(list)).map_err(|e| e.to_string())
 }
 
 /// Rescan values for the archive at `path`, whose record has `old_size`,

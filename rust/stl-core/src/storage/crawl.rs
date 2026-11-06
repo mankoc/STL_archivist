@@ -1,15 +1,9 @@
-//! The crawl's database phases: a port of `CrawlerWorker`'s Phase 1 lookup,
-//! Phase 2 diff (with early move matching), Phase 4 upsert and the post-crawl
-//! reconciliation of missing records (`app/crawler/crawler.py`).
-//!
-//! The Python side still computes what needs Python semantics or libraries:
-//! metadata, rule results, path-pattern matches and their parsed dates and
-//! numbers, thumbnails (precomputed JPEGs and dHashes) and CLIP vectors. This
-//! module applies them in the order the ORM would, so ids and values match:
-//! SQLAlchemy flushes a mapper's INSERTs before its DELETEs, and SQLite reuses
-//! the highest rowid, so image rows are inserted, then deleted, in that order.
+//! The crawl's database phases: Phase 1 lookup, Phase 2 diff (with early move
+//! matching), Phase 4 upsert and the post-crawl reconciliation of missing records.
+//! The crawler computes what they store: metadata, rule results, path-pattern
+//! matches, thumbnails and CLIP vectors.
 
-#![allow(clippy::type_complexity)] // row tuples mirror the Python records
+#![allow(clippy::type_complexity)] // row tuples
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -203,19 +197,10 @@ pub fn diff(
 pub struct UpsertConfig {
     pub warn_low_compression: bool,
     pub low_compression_threshold: f64,
-    pub force_creator: Option<String>,
-    pub force_source: Option<String>,
-    pub force_sculptor: Option<String>,
-    pub force_category: Option<String>,
-    pub force_collection: Option<String>,
-    pub force_release: Option<String>,
-    pub force_scale: Option<String>,
-    /// `parse_release_date(force_date)` when `force_date` is set.
-    pub force_date: Option<(Option<i64>, Option<i64>)>,
     pub embed_dim: usize,
 }
 
-/// A path-pattern match with Python's parses of its date and number.
+/// A path-pattern match with its date and number parsed.
 #[derive(Debug, Clone, Default)]
 pub struct Extracted {
     pub fields: Vec<(String, String)>,
@@ -228,7 +213,7 @@ pub struct Extracted {
 /// One extracted image: name, thumbnail JPEG, formatted dHash, CLIP vector blob.
 pub type Thumb = (String, Option<Vec<u8>>, Option<String>, Option<Vec<u8>>);
 
-/// What a new or changed archive contributes (Python computes it).
+/// What a new or changed archive contributes.
 #[derive(Debug, Clone, Default)]
 pub struct Changed {
     pub title: Option<String>,
@@ -462,8 +447,8 @@ fn link_all(tx: &Transaction, table: &str, col: &str, model_id: i64, ids: &[i64]
     Ok(())
 }
 
-/// Image ids from stored thumbnail references (`delete_thumbnails`).
-fn ref_ids(refs: &[String]) -> Vec<u64> {
+/// Image ids from stored thumbnail references.
+pub(crate) fn ref_ids(refs: &[String]) -> Vec<u64> {
     refs.iter()
         .filter_map(|r| {
             if !r.is_empty() && r.bytes().all(|b| b.is_ascii_digit()) {
@@ -523,7 +508,7 @@ fn upsert<'a>(
     if beside {
         row.warning = super::maintenance::without_warning(row.warning.as_deref(), crate::rules::WARNING_NO_IMAGES);
     }
-    let mut scales: Option<Vec<i64>> = None;
+    let mut scales: Option<Vec<i64>> = None; // none found: the record's stay
     if !ch.scales.is_empty() {
         scales = Some(ch.scales.iter().map(|s| lookup(tx, "scales", s)).collect::<Result<_>>()?);
     }
@@ -545,35 +530,6 @@ fn upsert<'a>(
     }
     if let Some(rel) = ch.release.as_deref().filter(|r| !r.is_empty()) {
         row.release_id = Some(lookup(tx, "releases", rel)?);
-    }
-    // Forced values
-    let set = |v: &Option<String>| v.as_deref().filter(|s| !s.is_empty()).map(str::to_string);
-    if let Some(v) = set(&cfg.force_creator) {
-        row.creator = Some(v);
-    }
-    if let Some(v) = set(&cfg.force_source) {
-        row.source = Some(v);
-    }
-    if let Some(v) = set(&cfg.force_sculptor) {
-        row.sculptor_id = Some(lookup(tx, "sculptors", &v)?);
-    }
-    if let Some(v) = set(&cfg.force_category) {
-        row.category_id = Some(lookup(tx, "categories", &v)?);
-    }
-    if let Some(v) = set(&cfg.force_collection) {
-        row.collection_id = Some(lookup(tx, "collections", &v)?);
-    }
-    if let Some(v) = set(&cfg.force_release) {
-        row.release_id = Some(lookup(tx, "releases", &v)?);
-    }
-    if let Some(v) = set(&cfg.force_scale) {
-        scales = Some(vec![lookup(tx, "scales", &v)?]);
-    }
-    if let Some((Some(y), m)) = cfg.force_date
-        && y != 0
-    {
-        row.release_year = Some(y);
-        row.release_month = m;
     }
     if let Some(ex) = &input.extracted {
         apply_pattern(tx, &mut row, ex)?;
@@ -600,13 +556,6 @@ fn upsert<'a>(
 
     let mut out = Upserted::default();
     if input.existing.is_none() || hash_changed {
-        let mut pending: Vec<i64> = Vec::new(); // image deletes the next flush runs
-        let flush = |pending: &mut Vec<i64>| -> Result<()> {
-            for id in pending.drain(..) {
-                tx.execute("DELETE FROM images WHERE id = ?1", [id])?;
-            }
-            Ok(())
-        };
         if hash_changed {
             let mut st = tx.prepare("SELECT id, thumbnail_path FROM images WHERE model_id = ?1 ORDER BY id")?;
             let old_imgs: Vec<(i64, Option<String>)> =
@@ -615,47 +564,37 @@ fn upsert<'a>(
             if let Some(s) = store {
                 let _ = s.delete_many(&ref_ids(&refs));
             }
-            pending.extend(old_imgs.iter().map(|(id, _)| *id));
-        }
-        let mut ids = Vec::with_capacity(ch.thumbs.len());
-        for (name, ..) in &ch.thumbs {
-            tx.execute("INSERT INTO images (model_id, filename) VALUES (?1, ?2)", params![model_id, name])?;
-            ids.push(tx.last_insert_rowid());
-        }
-        flush(&mut pending)?;
-        let mut resolved: Vec<(i64, &Vec<u8>, &Option<String>, &Option<Vec<u8>>)> = Vec::new();
-        for (id, (_, jpeg, dhash, vec)) in ids.iter().zip(&ch.thumbs) {
-            match jpeg.as_ref().filter(|j| !j.is_empty()) {
-                Some(j) => resolved.push((*id, j, dhash, vec)),
-                None => pending.push(*id),
+            for (id, _) in &old_imgs {
+                tx.execute("DELETE FROM images WHERE id = ?1", [id])?;
             }
         }
-        if store.is_some() {
-            puts.extend(resolved.iter().map(|(id, j, ..)| (*id as u64, j.as_slice())));
+        // An image row for each thumbnail made; its id is the store's key.
+        let add = |name: &str, dhash: &Option<String>| -> Result<i64> {
+            tx.execute("INSERT INTO images (model_id, filename, dhash) VALUES (?1, ?2, ?3)", params![model_id, name, dhash])?;
+            let id = tx.last_insert_rowid();
+            tx.execute("UPDATE images SET thumbnail_path = ?2 WHERE id = ?1", params![id, id.to_string()])?;
+            Ok(id)
+        };
+        let mut vecs: Vec<(i64, Vec<u8>)> = Vec::new();
+        for (name, jpeg, dhash, vector) in &ch.thumbs {
+            let Some(j) = jpeg.as_ref().filter(|j| !j.is_empty()) else { continue };
+            let id = add(name, dhash)?;
+            if store.is_some() {
+                puts.push((id as u64, j.as_slice()));
+            }
+            vecs.extend(vector.clone().map(|v| (id, v)));
+            out.thumbnails += 1;
         }
-        for (id, _, dhash, _) in &resolved {
-            tx.execute("UPDATE images SET thumbnail_path = ?2, dhash = ?3 WHERE id = ?1", params![id, id.to_string(), dhash])?;
-        }
-        let vecs: Vec<(i64, Vec<u8>)> =
-            resolved.iter().filter_map(|(id, _, _, v)| v.as_ref().map(|v| (*id, v.clone()))).collect();
         if !vecs.is_empty() {
             vectors::store(tx, cfg.embed_dim, &vecs)?;
         }
-        out.thumbnails = resolved.len();
         for (name, jpeg, dhash) in &ch.folder_images {
-            tx.execute("INSERT INTO images (model_id, filename) VALUES (?1, ?2)", params![model_id, name])?;
-            let id = tx.last_insert_rowid();
-            flush(&mut pending)?;
-            let jpeg = jpeg.as_ref().filter(|j| !j.is_empty() && store.is_some());
-            if let Some(j) = jpeg {
+            if let Some(j) = jpeg.as_ref().filter(|j| !j.is_empty() && store.is_some()) {
+                let id = add(name, dhash)?;
                 puts.push((id as u64, j.as_slice()));
-                tx.execute("UPDATE images SET thumbnail_path = ?2, dhash = ?3 WHERE id = ?1", params![id, id.to_string(), dhash])?;
                 out.folder_images += 1;
-            } else {
-                pending.push(id);
             }
         }
-        flush(&mut pending)?;
     }
     tx.execute("DELETE FROM stl_files WHERE model_id = ?1", [model_id])?;
     for (name, size) in &ch.stl_info {

@@ -34,7 +34,7 @@ pub const GIF_MAX_BYTES: usize = 2 * 1024 * 1024;
 pub enum ThumbError {
     /// Corrupt or truncated image data.
     Decode(String),
-    /// Valid data in a format or variant handled by the Python fallback.
+    /// Valid data in a format or variant this module does not decode.
     Unsupported(String),
 }
 
