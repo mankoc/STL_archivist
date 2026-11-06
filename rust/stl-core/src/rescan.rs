@@ -117,6 +117,9 @@ pub fn thumbnails(path: &str, max_thumbnails: usize, max_size: u32, opts: &Optio
     }
     let pats = patterns(&opts.presupport_patterns)?;
     let extracted = extract_native(path, &opts.unrar).ok_or("the server cannot read this archive")?;
+    if let Some(why) = &extracted.unread {
+        return Err(format!("the archive's images cannot be read ({why})"));
+    }
     let mut images: Vec<&(String, Vec<u8>)> = extracted
         .contents
         .iter()

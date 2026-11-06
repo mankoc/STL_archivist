@@ -440,7 +440,10 @@ user `monitor`; nothing is queued when nothing changed, or while a crawl of the 
 *Update all* is waiting or running). The crawl adds and updates records as any crawl does;
 records of archives that vanished are **marked missing** rather than deleted (an archive
 that turns up in another library is matched by hash), and *Settings → Maintenance → Remove
-missing archives* deletes the records of every missing archive. Checks run while the server
+missing archives* deletes the records of every missing archive. An archive that comes back
+clears its mark at the next check. A monitored folder with no archives left is taken for an
+unmounted share and not crawled; a manual crawl of it marks its records missing and deletes
+nothing. Checks run while the server
 does; changes made while it was off are found at the first check after it starts. Changes
 are picked up at the next check, not at once, which also works on network shares where file
 notifications do not.

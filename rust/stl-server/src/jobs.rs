@@ -1813,7 +1813,21 @@ fn crawl(
         lib.job_log(job, format!("Crawling {folder} as a part of the library folder {root}."));
     }
     let s = crawl_folder(lib, job, folder, pattern, force_rescan, recurse, keep_missing, None, library_root)?;
-    Ok(format!("{} new, {} updated, {} unchanged", s.new, s.updated, s.unchanged))
+    Ok(crawl_message(&s))
+}
+
+/// A crawl's outcome, with whatever it did to records beyond reading archives.
+fn crawl_message(s: &crawler::Summary) -> String {
+    let mut message = format!("{} new, {} updated, {} unchanged", s.new, s.updated, s.unchanged);
+    for (n, what) in [(s.moved, "moved"), (s.deleted, "deleted"), (s.marked, "flagged missing")] {
+        if n > 0 {
+            message.push_str(&format!(", {n} {what}"));
+        }
+    }
+    if s.listing_incomplete {
+        message.push_str("; the folder could not be read in full (see the log)");
+    }
+    message
 }
 
 /// `_UpdateAllWorker`: crawl each folder with deletion deferred, then match
@@ -1832,6 +1846,8 @@ fn update_folders(lib: &Library, job: &Job, folders: Vec<String>) -> Result<Stri
     let new_paths = Mutex::new(Vec::new());
     let (mut new, mut updated, mut unchanged) = (0, 0, 0);
     let mut crawled = Vec::new();
+    // What is flagged under these is gone: their listings were complete.
+    let mut listed = Vec::new();
     for (k, folder) in folders.iter().enumerate() {
         if job.stopped() {
             break;
@@ -1841,6 +1857,9 @@ fn update_folders(lib: &Library, job: &Job, folders: Vec<String>) -> Result<Stri
             Ok(s) => {
                 (new, updated, unchanged) = (new + s.new, updated + s.updated, unchanged + s.unchanged);
                 crawled.push(folder.clone());
+                if !s.listing_incomplete {
+                    listed.push(folder.clone());
+                }
             }
             Err(e) => lib.job_log(job, format!("ERROR {folder}: {e}")),
         }
@@ -1855,7 +1874,7 @@ fn update_folders(lib: &Library, job: &Job, folders: Vec<String>) -> Result<Stri
             lib.job_log(job, format!("Cross-folder move: {old} → {new}"));
         }
         update(job, |i| i.phase = Some("Cleaning up deleted files…".into()));
-        let (deleted, refs) = lib.db.with_tx(|tx| storage::jobs::delete_missing_under(tx, &crawled)).map_err(db_err)?;
+        let (deleted, refs) = lib.db.with_tx(|tx| storage::jobs::delete_missing_under(tx, &listed)).map_err(db_err)?;
         delete_thumb_refs(lib, &refs)?;
         for p in &deleted {
             lib.job_log(job, format!("Deleted: {p}"));

@@ -90,6 +90,9 @@ pub struct Extracted {
     pub names: Vec<String>,
     pub stl_info: Vec<(String, Option<i64>)>,
     pub uncompressed: Option<i64>,
+    /// Why `contents` is empty though the catalog was read (no UnRAR, an
+    /// encrypted member, a compression method the readers lack).
+    pub unread: Option<String>,
 }
 
 #[derive(Debug)]
@@ -165,6 +168,9 @@ pub struct Summary {
     pub deleted: usize,
     pub marked: usize,
     pub new_paths: Vec<String>,
+    /// The folder listing cannot be trusted (a folder could not be read, or a
+    /// library with records came back empty): what it lacks is not gone.
+    pub listing_incomplete: bool,
 }
 
 // ── listing ──────────────────────────────────────────────────────────────────
@@ -191,20 +197,39 @@ fn sort_paths(v: &mut [String]) {
 /// a folder named like an archive (`Dragon.7z/`) is entered, not listed.
 /// Folders in `skip` (the roots of libraries inside this one) are not entered.
 pub fn list_archives(root: &str, recurse: bool, skip: &[String]) -> Vec<String> {
-    list_archives_stat(root, recurse, skip).into_iter().map(|(p, _)| p).collect()
+    list_archives_stat(root, recurse, skip).files.into_iter().map(|(p, _)| p).collect()
+}
+
+/// What [`list_archives_stat`] found.
+#[derive(Debug, Default)]
+pub struct Listing {
+    /// Each archive with its `(size, mtime_ns)`.
+    pub files: Vec<(String, Option<(i64, i64)>)>,
+    /// Folders that could not be read (in full): whether their archives
+    /// still exist is unknown, so no record below them may be judged gone.
+    pub unreadable: Vec<String>,
 }
 
 /// [`list_archives`] with each archive's `(size, mtime_ns)` as the directory
 /// listing gives it (on Windows it comes with the listing, without opening or
 /// asking about each file; `None` when it could not be had).
-pub fn list_archives_stat(root: &str, recurse: bool, skip: &[String]) -> Vec<(String, Option<(i64, i64)>)> {
+pub fn list_archives_stat(root: &str, recurse: bool, skip: &[String]) -> Listing {
     let skip: Vec<String> = skip.iter().map(|s| crate::relpath::path_key(s)).collect();
     let mut out = Vec::new();
+    let mut unreadable = Vec::new();
     let join = crate::winpath::join;
     let mut stack = vec![root.to_string()];
     while let Some(dir) = stack.pop() {
-        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
-        for e in rd.flatten() {
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            unreadable.push(dir);
+            continue;
+        };
+        let mut complete = true;
+        for e in rd {
+            let Ok(e) = e else {
+                complete = false;
+                continue;
+            };
             let name = e.file_name().to_string_lossy().into_owned();
             let path = join(&dir, &name);
             let ft = e.file_type().ok();
@@ -228,12 +253,15 @@ pub fn list_archives_stat(root: &str, recurse: bool, skip: &[String]) -> Vec<(St
                 out.push((path, stat));
             }
         }
+        if !complete {
+            unreadable.push(dir);
+        }
         if !recurse {
             break;
         }
     }
     out.sort_by_cached_key(|(p, _)| sort_key(p));
-    out
+    Listing { files: out, unreadable }
 }
 
 // ── phase 1 ──────────────────────────────────────────────────────────────────
@@ -299,7 +327,15 @@ pub(crate) fn extract_native(path: &str, unrar: &str) -> Option<Extracted> {
         .filter(|n| size_by_name.get(n.as_str()).copied().flatten().is_none_or(|s| s <= size_limit(n)))
         .cloned()
         .collect();
-    let read = if to_read.is_empty() { Vec::new() } else { archive::read_members_with(p, &to_read, unrar).ok()? };
+    // Members that cannot be read cost the thumbnails, not the catalog read above.
+    let (read, unread) = if to_read.is_empty() {
+        (Vec::new(), None)
+    } else {
+        match archive::read_members_with(p, &to_read, unrar) {
+            Ok(read) => (read, None),
+            Err(e) => (Vec::new(), Some(e.to_string())),
+        }
+    };
     // A dict built from the pairs: first position, last value.
     let mut order: Vec<String> = Vec::new();
     let mut data: HashMap<String, Vec<u8>> = HashMap::new();
@@ -316,7 +352,7 @@ pub(crate) fn extract_native(path: &str, unrar: &str) -> Option<Extracted> {
             (b.len() as u64 <= size_limit(&n)).then_some((n, b))
         })
         .collect();
-    Some(Extracted { contents, names, stl_info, uncompressed })
+    Some(Extracted { contents, names, stl_info, uncompressed, unread })
 }
 
 /// An archive's `.url` and `info.json` members (name, bytes; each at most 1 MB),
@@ -387,6 +423,9 @@ fn prepare(path: &str, cfg: &CrawlConfig, host: &dyn Host) -> Prepared {
         Response::Extracted(x) => x,
         _ => Extracted::default(),
     });
+    if let Some(why) = &extracted.unread {
+        host.emit(Event::Warning(format!("{}: images not read ({why}); its file list is kept", WinPath::new(path).name())));
+    }
     let candidates: Vec<&(String, Vec<u8>)> =
         extracted.contents.iter().filter(|(n, _)| is_image_or_pdf(n)).take(cfg.max_thumbnails).collect();
     let precomp = candidates
@@ -551,6 +590,8 @@ struct Run<'a> {
     listed: HashMap<String, (i64, i64)>,
     /// The archives (`relpath::path_key`s) whose records this crawl imported from sidecars.
     from_sidecar: HashSet<String>,
+    /// Records of archives not found are flagged, whatever `defer_missing_deletion` says.
+    keep_records: bool,
 }
 
 fn tx(conn: &mut rusqlite::Connection) -> rusqlite::Result<rusqlite::Transaction<'_>> {
@@ -809,6 +850,7 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
         inner_roots: Vec::new(),
         listed: HashMap::new(),
         from_sidecar: HashSet::new(),
+        keep_records: false,
     };
     // The crawled folder is a library (made now when it is none yet), or a part of
     // one (`library_root`); the libraries inside it are crawled on their own.
@@ -827,15 +869,36 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
     // One listing of the folder gives the archives with their sizes and times: the
     // comparisons with the records below happen in memory.
     host.emit(Event::Phase("Retrieving file list…".into()));
-    let listing = list_archives_stat(&cfg.source_dir, cfg.recurse, &run.inner_roots);
-    let archives: Vec<String> = listing.iter().map(|(p, _)| p.clone()).collect();
-    run.listed = listing.into_iter().filter_map(|(p, s)| s.map(|s| (p, s))).collect();
+    let Listing { files, unreadable } = list_archives_stat(&cfg.source_dir, cfg.recurse, &run.inner_roots);
+    for dir in &unreadable {
+        host.emit(Event::Warning(format!("cannot read the folder {dir}: its records stay as they are")));
+    }
+    run.summary.listing_incomplete = !unreadable.is_empty();
+    let archives: Vec<String> = files.iter().map(|(p, _)| p.clone()).collect();
+    run.listed = files.into_iter().filter_map(|(p, s)| s.map(|s| (p, s))).collect();
     host.emit(Event::Phase("Scanning for deleted files…".into()));
     // A full (recursive) listing of a whole library folder covers every one of its
     // records; for a part of one, records are looked for on disk.
     let keys: HashSet<String> = archives.iter().map(|p| crate::relpath::path_key(p)).collect();
     let whole = cfg.recurse && cfg.library_root.is_none();
-    let missing = db::collect_missing(&run.conn, whole.then_some((library, &keys)))?;
+    let db::MissingScan { missing, back } = db::collect_missing(&run.conn, whole.then_some((library, &keys)), &unreadable)?;
+    if !back.is_empty() {
+        let t = tx(&mut run.conn)?;
+        storage::maintenance::clear_missing(&t, &back)?;
+        t.commit()?;
+        run.log(format!("{} archive(s) flagged missing are back on disk.", back.len()));
+    }
+    // A folder that lost every archive at once is more likely an unmounted share
+    // than a deliberate clean-up: flagged records come back by themselves.
+    if archives.is_empty() && missing.iter().any(|m| storage::libraries::contains(&cfg.source_dir, &m.1)) {
+        run.keep_records = true;
+        run.summary.listing_incomplete = true;
+        host.emit(Event::Warning(format!(
+            "{} holds no archives, but records do: is its drive or share connected? They are flagged missing, not deleted \
+             (Remove missing archives deletes them).",
+            cfg.source_dir
+        )));
+    }
     if !missing.is_empty() {
         run.log(format!("{} recorded archive(s) not found on disk — checked for moves after the crawl.", missing.len()));
     }
@@ -1044,9 +1107,10 @@ fn reconcile(run: &mut Run<'_>, missing: Vec<db::Missing>) -> Result<(), CrawlEr
     if unmatched.is_empty() {
         return Ok(());
     }
-    let (deleted, marked, _deferred, refs) = {
+    let (deleted, marked, deferred, refs) = {
         let t = tx(&mut run.conn)?;
-        let r = db::mark_missing(&t, &unmatched, &run.cfg.source_dir, &run.inner_roots, run.cfg.defer_missing_deletion)?;
+        let defer = run.cfg.defer_missing_deletion || run.keep_records;
+        let r = db::mark_missing(&t, &unmatched, &run.cfg.source_dir, &run.inner_roots, defer)?;
         t.commit()?;
         r
     };
@@ -1058,7 +1122,7 @@ fn reconcile(run: &mut Run<'_>, missing: Vec<db::Missing>) -> Result<(), CrawlEr
         run.log(format!("Not found on disk (record kept, marked missing): {p}"));
         run.host.emit(Event::Marked(p.clone()));
     }
-    (run.summary.deleted, run.summary.marked) = (deleted.len(), marked.len());
+    (run.summary.deleted, run.summary.marked) = (deleted.len(), marked.len() + deferred);
     delete_refs(run.store, &refs);
     if !deleted.is_empty() {
         run.log(format!("Deleted {} record(s) removed from the crawled folder.", deleted.len()));
@@ -1101,7 +1165,7 @@ mod tests {
         assert_eq!(names(list_archives(&root, false, &[])), ["a.ZIP", "b.rar"]);
         assert_eq!(names(list_archives(&root, true, &[crate::winpath::join(&root, "B")])), ["a.ZIP", "b.rar", &format!("D.7z{sep}e.zip")], "an inner library");
         // The listing's sizes and times are what asking each file gives.
-        for (p, stat) in list_archives_stat(&root, true, &[]) {
+        for (p, stat) in list_archives_stat(&root, true, &[]).files {
             assert_eq!(stat, db::stat(&p), "{p}");
         }
         let stl = stl_dict(

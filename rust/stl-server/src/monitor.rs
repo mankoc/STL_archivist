@@ -74,7 +74,7 @@ pub fn check(lib: &Arc<Library>, force: bool) -> Vec<JobInfo> {
             }
         };
         if changes.any() {
-            tracing::info!(folder = %f.path, new = changes.new, modified = changes.modified, gone = changes.gone, "monitored folder changed: crawling");
+            tracing::info!(folder = %f.path, new = changes.new, modified = changes.modified, gone = changes.gone, back = changes.back, "monitored folder changed: crawling");
             let request = JobRequest::Crawl { folder: f.path.clone(), pattern: None, force_rescan: false, recurse: None, keep_missing: true, in_library: false };
             queued.push(lib.submit_job(request, USER));
         }

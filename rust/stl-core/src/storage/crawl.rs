@@ -672,12 +672,22 @@ fn upsert<'a>(
 /// A missing record: `(id, archive_path, archive_hash or "", file name, archive_size)`.
 pub type Missing = (i64, String, String, String, Option<i64>);
 
-/// `_collect_missing`: records whose archive is gone, plus those already flagged.
+/// What [`collect_missing`] found.
+#[derive(Debug, Default)]
+pub struct MissingScan {
+    /// Records whose archive is gone (flagged or not).
+    pub missing: Vec<Missing>,
+    /// Records flagged missing whose archive is there again.
+    pub back: Vec<i64>,
+}
+
+/// Which records' archives are gone, and which flagged ones have returned.
 ///
 /// `listed`: a library and every archive found in it (`relpath::path_key`s of a
 /// full listing): its records are judged by that listing, without asking the
-/// file system about each; those of other libraries are looked up.
-pub fn collect_missing(conn: &Connection, listed: Option<(i64, &HashSet<String>)>) -> Result<Vec<Missing>> {
+/// file system about each; those of other libraries are looked up. Records
+/// below an `unreadable` folder are not judged at all.
+pub fn collect_missing(conn: &Connection, listed: Option<(i64, &HashSet<String>)>, unreadable: &[String]) -> Result<MissingScan> {
     use rayon::prelude::*;
     type Row = (i64, Option<i64>, Option<String>, Option<String>, Option<i64>, bool);
     let mut st = conn.prepare(&format!(
@@ -691,21 +701,27 @@ pub fn collect_missing(conn: &Connection, listed: Option<(i64, &HashSet<String>)
         Some((id, keys)) if library == Some(id) => !keys.contains(&crate::relpath::path_key(path)),
         _ => !Path::new(&crate::relpath::on_disk(path)).exists(),
     };
+    let judged = |p: &Option<String>| p.as_deref().is_some_and(|p| !p.is_empty() && !unreadable.iter().any(|d| libraries::contains(d, p)));
     let absent: HashSet<i64> = rows
         .par_iter()
-        .filter(|(_, _, p, _, _, missing)| !missing && p.as_deref().is_some_and(|p| !p.is_empty()))
+        .filter(|(_, _, p, ..)| judged(p))
         .filter(|(_, library, p, ..)| gone(*library, p.as_deref().unwrap_or_default()))
         .map(|(id, ..)| *id)
         .collect();
-    Ok(rows
-        .into_iter()
-        .filter(|(id, _, p, _, _, missing)| p.as_deref().is_some_and(|p| !p.is_empty()) && (*missing || absent.contains(id)))
-        .map(|(id, _, p, h, size, _)| {
+    let mut scan = MissingScan::default();
+    for (id, _, p, h, size, flagged) in rows {
+        if !judged(&p) {
+            continue;
+        }
+        if absent.contains(&id) {
             let p = p.unwrap_or_default();
             let name = WinPath::new(&p).name().to_string();
-            (id, p, h.unwrap_or_default(), name, size)
-        })
-        .collect())
+            scan.missing.push((id, p, h.unwrap_or_default(), name, size));
+        } else if flagged {
+            scan.back.push(id);
+        }
+    }
+    Ok(scan)
 }
 
 /// `_reconcile_moved_files` matching and merging: returns `(matched (id, old
