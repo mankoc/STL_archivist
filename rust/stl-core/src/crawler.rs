@@ -554,7 +554,7 @@ fn tx(conn: &mut rusqlite::Connection) -> rusqlite::Result<rusqlite::Transaction
 
 impl Run<'_> {
     /// `moves.index_by_hash`: a missing record, as a candidate for what a new archive is.
-    fn index_missing(&mut self, (id, _, h, name, _): &db::Missing) {
+    fn index_missing(&mut self, db::Missing { id, hash: h, name, .. }: &db::Missing) {
         self.names.insert(*id, name.clone());
         if h.is_empty() || h.starts_with("fallback:") {
             return;
@@ -800,14 +800,17 @@ impl Run<'_> {
         let archive_name = WinPath::new(path).name().to_string();
         let (presupports, warnings, scales) = rules_for(&self.patterns, self.checks, &archive_name, &x.names);
         let (year, month) = path_pattern::parse_release_date(meta.release_date.as_deref().unwrap_or(""));
-        let mut thumbs: Vec<db::Thumb> =
-            prep.precomp.iter().map(|(n, j, d)| (n.clone(), j.clone(), if j.is_some() { d.clone() } else { None }, None)).collect();
+        let mut thumbs: Vec<db::Thumb> = prep
+            .precomp
+            .iter()
+            .map(|(n, j, d)| db::Thumb { name: n.clone(), jpeg: j.clone(), dhash: d.clone().filter(|_| j.is_some()), vector: None })
+            .collect();
         if cfg.embed {
-            let resolved: Vec<usize> = (0..thumbs.len()).filter(|&i| thumbs[i].1.is_some()).collect();
-            let jpegs: Vec<Vec<u8>> = resolved.iter().map(|&i| thumbs[i].1.clone().unwrap_or_default()).collect();
+            let resolved: Vec<usize> = (0..thumbs.len()).filter(|&i| thumbs[i].jpeg.is_some()).collect();
+            let jpegs: Vec<Vec<u8>> = resolved.iter().map(|&i| thumbs[i].jpeg.clone().unwrap_or_default()).collect();
             if let Some(v) = host.embed(&jpegs) {
                 for (i, vec) in resolved.into_iter().zip(v) {
-                    thumbs[i].3 = vec;
+                    thumbs[i].vector = vec;
                 }
             }
         }
@@ -833,109 +836,308 @@ impl Run<'_> {
     }
 }
 
+impl<'a> Run<'a> {
+    fn open(db_path: &Path, store: Option<&'a ThumbStore>, cfg: &'a CrawlConfig, host: &'a dyn Host) -> Result<Self, CrawlError> {
+        let conn = storage::open(db_path)?;
+        let (patterns, checks) = match PresupportPatterns::new(Some(&cfg.presupport_patterns)) {
+            Ok(patterns) => (patterns, cfg.warn),
+            Err(e) => {
+                host.emit(Event::Warning(format!("{e}: presupport warnings are skipped in this crawl.")));
+                let patterns = PresupportPatterns::new::<&str>(None).map_err(|e| CrawlError::Io(std::io::Error::other(e.to_string())))?;
+                (patterns, Checks { presupported: false, ..cfg.warn })
+            }
+        };
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(cfg.max_workers.max(1))
+            .build()
+            .map_err(|e| CrawlError::Io(std::io::Error::other(e.to_string())))?;
+        Ok(Run {
+            conn,
+            store,
+            cfg,
+            host,
+            pool,
+            summary: Summary::default(),
+            failures: 0,
+            patterns,
+            checks,
+            candidates: HashMap::new(),
+            ambiguous: HashSet::new(),
+            outside: db::Outside::default(),
+            gone_outside: Vec::new(),
+            names: HashMap::new(),
+            early_moved: HashSet::new(),
+            moved_new_paths: HashSet::new(),
+            existing_hashes: HashMap::new(),
+            inner_roots: Vec::new(),
+            listed: HashMap::new(),
+            from_sidecar: HashSet::new(),
+            keep_records: false,
+            folder_patterns: Default::default(),
+            folder_cache: HashMap::new(),
+        })
+    }
+}
+
+impl Run<'_> {
+    /// The library the crawl is in, with what is known of it.
+    fn enter_library(&mut self) -> Result<i64, CrawlError> {
+        let cfg = self.cfg;
+        // The crawled folder is a library (made now when it is none yet), or a part of
+        // one (`library_root`); the libraries inside it are crawled on their own.
+        let library = match &cfg.library_root {
+            Some(root) => storage::libraries::Roots::load(&self.conn)?
+                .locate_root(root)
+                .ok_or_else(|| CrawlError::Io(std::io::Error::other(format!("{root} is not a library folder"))))?,
+            None => {
+                let t = tx(&mut self.conn)?;
+                let id = storage::libraries::create(&t, &cfg.source_dir, storage::libraries::Target::Around, None, None)?;
+                t.commit()?;
+                id
+            }
+        };
+        self.inner_roots = storage::libraries::Roots::load(&self.conn)?.inner(library).into_iter().map(|(_, r)| r).collect();
+        if let Some(pattern) = &cfg.keep_pattern
+            && let Some(rel) = crate::relpath::RelPath::from_abs(cfg.root(), &cfg.source_dir)
+        {
+            let t = tx(&mut self.conn)?;
+            storage::libraries::set_folder_pattern(&t, library, rel.as_str(), pattern)?;
+            t.commit()?;
+        }
+        self.folder_patterns = storage::libraries::FolderPatterns::load(&self.conn, library)?;
+        Ok(library)
+    }
+
+    /// The archives found, and the folders that could not be read.
+    fn list(&mut self) -> (Vec<String>, Vec<String>) {
+        let (cfg, host) = (self.cfg, self.host);
+        // One listing of the folder gives the archives with their sizes and times: the
+        // comparisons with the records below happen in memory.
+        host.emit(Event::Phase("Retrieving file list…".into()));
+        let Listing { files, unreadable } = list_archives_stat(&cfg.source_dir, cfg.recurse, &self.inner_roots);
+        for dir in &unreadable {
+            host.emit(Event::Warning(format!("cannot read the folder {dir}: its records stay as they are")));
+        }
+        self.summary.listing_incomplete = !unreadable.is_empty();
+        let archives: Vec<String> = files.iter().map(|(p, _)| p.clone()).collect();
+        self.listed = files.into_iter().filter_map(|(p, s)| s.map(|s| (p, s))).collect();
+        (archives, unreadable)
+    }
+
+    /// The records below the crawled folder whose archives are gone.
+    fn scan_missing(&mut self, library: i64, archives: &[String], unreadable: &[String]) -> Result<Vec<db::Missing>, CrawlError> {
+        let (cfg, host) = (self.cfg, self.host);
+        host.emit(Event::Phase("Scanning for deleted files…".into()));
+        // A full (recursive) listing of a whole library folder covers every one of its
+        // records; for a part of one, records are looked for on disk.
+        let keys: HashSet<String> = archives.iter().map(|p| crate::relpath::path_key(p)).collect();
+        let whole = cfg.recurse && cfg.library_root.is_none();
+        let db::MissingScan { missing, back, outside } =
+            db::collect_missing(&self.conn, whole.then_some((library, &keys)), unreadable, &cfg.source_dir, &self.inner_roots)?;
+        self.outside = db::Outside::new(outside);
+        if !back.is_empty() {
+            let t = tx(&mut self.conn)?;
+            storage::maintenance::clear_missing(&t, &back)?;
+            t.commit()?;
+            self.log(format!("{} archive(s) flagged missing are back on disk.", back.len()));
+        }
+        // A folder that lost every archive at once is more likely an unmounted share
+        // than a deliberate clean-up: flagged records come back by themselves.
+        if archives.is_empty() && missing.iter().any(|m| storage::libraries::contains(&cfg.source_dir, &m.path)) {
+            self.keep_records = true;
+            self.summary.listing_incomplete = true;
+            host.emit(Event::Warning(format!(
+                "{} holds no archives, but records do: is its drive or share connected? They are flagged missing, not deleted \
+                 (Remove missing archives deletes them).",
+                cfg.source_dir
+            )));
+        }
+        if !missing.is_empty() {
+            self.log(format!("{} recorded archive(s) not found on disk — checked for moves after the crawl.", missing.len()));
+        }
+        for m in &missing {
+            self.index_missing(m);
+        }
+        Ok(missing)
+    }
+
+    /// Records for archives that have none, from their folders' sidecars.
+    fn import_sidecars(&mut self, archives: &[String]) -> Result<(), CrawlError> {
+        let (cfg, host, store) = (self.cfg, self.host, self.store);
+        if cfg.sidecars
+            && let Some(st) = store
+        {
+            // The folders in crawl order, with their archives.
+            let mut folders: Vec<(String, Vec<String>)> = Vec::new();
+            let mut at: HashMap<String, usize> = HashMap::new();
+            for p in archives {
+                let folder = crate::winpath::native(&WinPath::new(p).parent().as_posix());
+                match at.get(&folder) {
+                    Some(&i) => folders[i].1.push(p.clone()),
+                    None => {
+                        at.insert(folder.clone(), folders.len());
+                        folders.push((folder, vec![p.clone()]));
+                    }
+                }
+            }
+            let root = WinPath::new(cfg.root()).as_posix();
+            for (folder, paths) in &folders {
+                if host.should_stop() {
+                    break;
+                }
+                if !Path::new(folder).join(sidecar::METADATA_FILENAME).exists() {
+                    continue;
+                }
+                // Importing only adds the archives without a record, and reading a sidecar
+                // decompresses all its thumbnails: a folder whose archives all have one is left
+                // alone (but the crawled folder's own sidecar can still give the library its pattern).
+                let is_root = WinPath::new(folder).as_posix().trim_end_matches('/').eq_ignore_ascii_case(root.trim_end_matches('/'));
+                if !is_root && db::existing(&self.conn, paths)?.len() == paths.len() {
+                    continue;
+                }
+                let folder = folder.clone();
+                let imported = {
+                    let read = sidecar::read(&folder);
+                    let t = tx(&mut self.conn)?;
+                    match read.and_then(|s| sidecar::import(&t, st, &folder, s)) {
+                        Ok(v) => {
+                            t.commit()?;
+                            self.from_sidecar.extend(v.iter().map(|p| crate::relpath::path_key(p)));
+                            v.len()
+                        }
+                        Err(e) => {
+                            drop(t);
+                            host.emit(Event::Warning(format!("cannot import METADATA.7z in {folder}: {e}")));
+                            0
+                        }
+                    }
+                };
+                if imported > 0 {
+                    self.log(format!("Imported {imported} record(s) from METADATA.7z in {}", WinPath::new(&folder).name()));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Hash, read and record the archives; returns the folders whose sidecars changed.
+    fn process(&mut self, archives: &[String]) -> Result<HashSet<String>, CrawlError> {
+        let host = self.host;
+        let total = archives.len();
+        if total > 0 {
+            host.emit(Event::Phase(format!("Computing hashes for {total} archive(s)…")));
+        }
+        let mut modified: HashSet<String> = HashSet::new();
+        for start in (0..total).step_by(BATCH_SIZE) {
+            if host.should_stop() {
+                break;
+            }
+            let batch = &archives[start..(start + BATCH_SIZE).min(total)];
+            if self.batch(batch, start, &mut modified)? || host.should_stop() {
+                break;
+            }
+        }
+        Ok(modified)
+    }
+
+    /// Write the sidecars of the folders that changed.
+    fn export_sidecars(&mut self, modified: HashSet<String>) {
+        let (cfg, host, store) = (self.cfg, self.host, self.store);
+        if !modified.is_empty() && cfg.sidecars && store.is_some() {
+            self.log(format!("Updating METADATA.7z in {} folder(s)…", modified.len()));
+            let mut folders: Vec<String> = modified.into_iter().map(|f| crate::winpath::native(&f)).collect();
+            sort_paths(&mut folders);
+            for folder in folders {
+                if host.should_stop() {
+                    break;
+                }
+                match sidecar::export(&self.conn, store, &folder, cfg.sidecar_thumbnails) {
+                    Ok(_) => self.log(format!("  Updated METADATA.7z in {}", WinPath::new(&folder).name())),
+                    Err(e) => host.emit(Event::Warning(format!("cannot write METADATA.7z in {folder}: {e}"))),
+                }
+            }
+        }
+    }
+
+    /// Match the missing records with the new archives; the rest go, or are flagged.
+    fn settle_missing(&mut self, missing: Vec<db::Missing>) -> Result<(), CrawlError> {
+        let host = self.host;
+        if !self.early_moved.is_empty() {
+            self.log(format!("Matched {} moved file(s) by content, without re-extracting.", self.early_moved.len()));
+        }
+        // New archives may also be records from elsewhere that hashes did not tell.
+        for path in self.summary.new_paths.clone() {
+            if let Some(&(size, _)) = self.listed.get(&path) {
+                let gone = self.outside.gone_with_name(WinPath::new(&path).name(), size);
+                for m in gone {
+                    self.names.insert(m.id, m.name.clone());
+                    self.gone_outside.push(m);
+                }
+            }
+        }
+        let gone_outside = std::mem::take(&mut self.gone_outside);
+        let missing: Vec<db::Missing> = missing.into_iter().chain(gone_outside).filter(|m| !self.early_moved.contains(&m.id)).collect();
+        if !missing.is_empty() {
+            host.emit(Event::Phase(format!("Looking for {} archive(s) not found on disk among the new ones…", missing.len())));
+            reconcile(self, missing)?;
+        }
+        Ok(())
+    }
+
+    /// Note the crawl on the folder, and drop lookups nothing uses any more.
+    fn close(&mut self, total: usize) -> Result<(), CrawlError> {
+        let cfg = self.cfg;
+        if cfg.library_root.is_none() {
+            let now = writes::utc_now_text();
+            let t = tx(&mut self.conn)?;
+            db::record_folder(
+                &t,
+                &cfg.source_dir,
+                Some(cfg.pattern.as_str()).filter(|p| !p.is_empty()),
+                &now,
+                total as i64,
+                self.summary.new as i64,
+                self.summary.updated as i64,
+            )?;
+            t.commit()?;
+        }
+        {
+            let t = tx(&mut self.conn)?;
+            let pruned = writes::prune_unused_lookups(&t)?;
+            t.commit()?;
+            if !pruned.is_empty() {
+                let order = ["subcollections", "collections", "sculptors", "categories", "releases", "scales"];
+                let summary: Vec<String> = order
+                    .iter()
+                    .filter_map(|k| pruned.iter().find(|(n, _)| n == k).map(|(n, c)| format!("{c} {n}")))
+                    .collect();
+                self.log(format!("Pruned unused lookups: {}", summary.join(", ")));
+            }
+        }
+        Ok(())
+    }
+
+    /// The last log line, and what the crawl did.
+    fn finish(mut self) -> Summary {
+        self.summary.moved += self.early_moved.len();
+        let s = &self.summary;
+        let mut done = format!("Crawl complete: {} new, {} updated, {} unchanged", s.new, s.updated, s.unchanged);
+        for (n, what) in [(s.moved, "moved"), (s.deleted, "deleted"), (s.marked, "marked missing")] {
+            if n > 0 {
+                done.push_str(&format!(", {n} {what}"));
+            }
+        }
+        self.log(format!("{done}."));
+        self.summary
+    }
+}
+
 /// Crawl `cfg.source_dir` into the database at `db_path`.
 pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host: &dyn Host) -> Result<Summary, CrawlError> {
-    let conn = storage::open(db_path)?;
-    let (patterns, checks) = match PresupportPatterns::new(Some(&cfg.presupport_patterns)) {
-        Ok(patterns) => (patterns, cfg.warn),
-        Err(e) => {
-            host.emit(Event::Warning(format!("{e}: presupport warnings are skipped in this crawl.")));
-            let patterns = PresupportPatterns::new::<&str>(None).map_err(|e| CrawlError::Io(std::io::Error::other(e.to_string())))?;
-            (patterns, Checks { presupported: false, ..cfg.warn })
-        }
-    };
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(cfg.max_workers.max(1))
-        .build()
-        .map_err(|e| CrawlError::Io(std::io::Error::other(e.to_string())))?;
-    let mut run = Run {
-        conn,
-        store,
-        cfg,
-        host,
-        pool,
-        summary: Summary::default(),
-        failures: 0,
-        patterns,
-        checks,
-        candidates: HashMap::new(),
-        ambiguous: HashSet::new(),
-        outside: db::Outside::default(),
-        gone_outside: Vec::new(),
-        names: HashMap::new(),
-        early_moved: HashSet::new(),
-        moved_new_paths: HashSet::new(),
-        existing_hashes: HashMap::new(),
-        inner_roots: Vec::new(),
-        listed: HashMap::new(),
-        from_sidecar: HashSet::new(),
-        keep_records: false,
-        folder_patterns: Default::default(),
-        folder_cache: HashMap::new(),
-    };
-    // The crawled folder is a library (made now when it is none yet), or a part of
-    // one (`library_root`); the libraries inside it are crawled on their own.
-    let library = match &cfg.library_root {
-        Some(root) => storage::libraries::Roots::load(&run.conn)?
-            .locate_root(root)
-            .ok_or_else(|| CrawlError::Io(std::io::Error::other(format!("{root} is not a library folder"))))?,
-        None => {
-            let t = tx(&mut run.conn)?;
-            let id = storage::libraries::create(&t, &cfg.source_dir, storage::libraries::Target::Around, None, None)?;
-            t.commit()?;
-            id
-        }
-    };
-    run.inner_roots = storage::libraries::Roots::load(&run.conn)?.inner(library).into_iter().map(|(_, r)| r).collect();
-    if let Some(pattern) = &cfg.keep_pattern
-        && let Some(rel) = crate::relpath::RelPath::from_abs(cfg.root(), &cfg.source_dir)
-    {
-        let t = tx(&mut run.conn)?;
-        storage::libraries::set_folder_pattern(&t, library, rel.as_str(), pattern)?;
-        t.commit()?;
-    }
-    run.folder_patterns = storage::libraries::FolderPatterns::load(&run.conn, library)?;
-    // One listing of the folder gives the archives with their sizes and times: the
-    // comparisons with the records below happen in memory.
-    host.emit(Event::Phase("Retrieving file list…".into()));
-    let Listing { files, unreadable } = list_archives_stat(&cfg.source_dir, cfg.recurse, &run.inner_roots);
-    for dir in &unreadable {
-        host.emit(Event::Warning(format!("cannot read the folder {dir}: its records stay as they are")));
-    }
-    run.summary.listing_incomplete = !unreadable.is_empty();
-    let archives: Vec<String> = files.iter().map(|(p, _)| p.clone()).collect();
-    run.listed = files.into_iter().filter_map(|(p, s)| s.map(|s| (p, s))).collect();
-    host.emit(Event::Phase("Scanning for deleted files…".into()));
-    // A full (recursive) listing of a whole library folder covers every one of its
-    // records; for a part of one, records are looked for on disk.
-    let keys: HashSet<String> = archives.iter().map(|p| crate::relpath::path_key(p)).collect();
-    let whole = cfg.recurse && cfg.library_root.is_none();
-    let db::MissingScan { missing, back, outside } =
-        db::collect_missing(&run.conn, whole.then_some((library, &keys)), &unreadable, &cfg.source_dir, &run.inner_roots)?;
-    run.outside = db::Outside::new(outside);
-    if !back.is_empty() {
-        let t = tx(&mut run.conn)?;
-        storage::maintenance::clear_missing(&t, &back)?;
-        t.commit()?;
-        run.log(format!("{} archive(s) flagged missing are back on disk.", back.len()));
-    }
-    // A folder that lost every archive at once is more likely an unmounted share
-    // than a deliberate clean-up: flagged records come back by themselves.
-    if archives.is_empty() && missing.iter().any(|m| storage::libraries::contains(&cfg.source_dir, &m.1)) {
-        run.keep_records = true;
-        run.summary.listing_incomplete = true;
-        host.emit(Event::Warning(format!(
-            "{} holds no archives, but records do: is its drive or share connected? They are flagged missing, not deleted \
-             (Remove missing archives deletes them).",
-            cfg.source_dir
-        )));
-    }
-    if !missing.is_empty() {
-        run.log(format!("{} recorded archive(s) not found on disk — checked for moves after the crawl.", missing.len()));
-    }
-    for m in &missing {
-        run.index_missing(m);
-    }
+    let mut run = Run::open(db_path, store, cfg, host)?;
+    let library = run.enter_library()?;
+    let (archives, unreadable) = run.list();
+    let missing = run.scan_missing(library, &archives, &unreadable)?;
 
     let total = archives.len();
     run.summary.total = total;
@@ -943,146 +1145,12 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
     run.log(msg.clone());
     host.emit(Event::Phase(msg));
 
-    if cfg.sidecars
-        && let Some(st) = store
-    {
-        // The folders in crawl order, with their archives.
-        let mut folders: Vec<(String, Vec<String>)> = Vec::new();
-        let mut at: HashMap<String, usize> = HashMap::new();
-        for p in &archives {
-            let folder = crate::winpath::native(&WinPath::new(p).parent().as_posix());
-            match at.get(&folder) {
-                Some(&i) => folders[i].1.push(p.clone()),
-                None => {
-                    at.insert(folder.clone(), folders.len());
-                    folders.push((folder, vec![p.clone()]));
-                }
-            }
-        }
-        let root = WinPath::new(cfg.root()).as_posix();
-        for (folder, paths) in &folders {
-            if host.should_stop() {
-                break;
-            }
-            if !Path::new(folder).join(sidecar::METADATA_FILENAME).exists() {
-                continue;
-            }
-            // Importing only adds the archives without a record, and reading a sidecar
-            // decompresses all its thumbnails: a folder whose archives all have one is left
-            // alone (but the crawled folder's own sidecar can still give the library its pattern).
-            let is_root = WinPath::new(folder).as_posix().trim_end_matches('/').eq_ignore_ascii_case(root.trim_end_matches('/'));
-            if !is_root && db::existing(&run.conn, paths)?.len() == paths.len() {
-                continue;
-            }
-            let folder = folder.clone();
-            let imported = {
-                let read = sidecar::read(&folder);
-                let t = tx(&mut run.conn)?;
-                match read.and_then(|s| sidecar::import(&t, st, &folder, s)) {
-                    Ok(v) => {
-                        t.commit()?;
-                        run.from_sidecar.extend(v.iter().map(|p| crate::relpath::path_key(p)));
-                        v.len()
-                    }
-                    Err(e) => {
-                        drop(t);
-                        host.emit(Event::Warning(format!("cannot import METADATA.7z in {folder}: {e}")));
-                        0
-                    }
-                }
-            };
-            if imported > 0 {
-                run.log(format!("Imported {imported} record(s) from METADATA.7z in {}", WinPath::new(&folder).name()));
-            }
-        }
-    }
-
-    if total > 0 {
-        host.emit(Event::Phase(format!("Computing hashes for {total} archive(s)…")));
-    }
-    let mut modified: HashSet<String> = HashSet::new();
-    for start in (0..total).step_by(BATCH_SIZE) {
-        if host.should_stop() {
-            break;
-        }
-        let batch = &archives[start..(start + BATCH_SIZE).min(total)];
-        if run.batch(batch, start, &mut modified)? || host.should_stop() {
-            break;
-        }
-    }
-
-    if !modified.is_empty() && cfg.sidecars && store.is_some() {
-        run.log(format!("Updating METADATA.7z in {} folder(s)…", modified.len()));
-        let mut folders: Vec<String> = modified.into_iter().map(|f| crate::winpath::native(&f)).collect();
-        sort_paths(&mut folders);
-        for folder in folders {
-            if host.should_stop() {
-                break;
-            }
-            match sidecar::export(&run.conn, store, &folder, cfg.sidecar_thumbnails) {
-                Ok(_) => run.log(format!("  Updated METADATA.7z in {}", WinPath::new(&folder).name())),
-                Err(e) => host.emit(Event::Warning(format!("cannot write METADATA.7z in {folder}: {e}"))),
-            }
-        }
-    }
-
-    if !run.early_moved.is_empty() {
-        run.log(format!("Matched {} moved file(s) by content, without re-extracting.", run.early_moved.len()));
-    }
-    // New archives may also be records from elsewhere that hashes did not tell.
-    for path in run.summary.new_paths.clone() {
-        if let Some(&(size, _)) = run.listed.get(&path) {
-            let gone = run.outside.gone_with_name(WinPath::new(&path).name(), size);
-            for m in gone {
-                run.names.insert(m.0, m.3.clone());
-                run.gone_outside.push(m);
-            }
-        }
-    }
-    let gone_outside = std::mem::take(&mut run.gone_outside);
-    let missing: Vec<db::Missing> = missing.into_iter().chain(gone_outside).filter(|m| !run.early_moved.contains(&m.0)).collect();
-    if !missing.is_empty() {
-        host.emit(Event::Phase(format!("Looking for {} archive(s) not found on disk among the new ones…", missing.len())));
-        reconcile(&mut run, missing)?;
-    }
-
-    if cfg.library_root.is_none() {
-        let now = writes::utc_now_text();
-        let t = tx(&mut run.conn)?;
-        db::record_folder(
-            &t,
-            &cfg.source_dir,
-            Some(cfg.pattern.as_str()).filter(|p| !p.is_empty()),
-            &now,
-            total as i64,
-            run.summary.new as i64,
-            run.summary.updated as i64,
-        )?;
-        t.commit()?;
-    }
-    {
-        let t = tx(&mut run.conn)?;
-        let pruned = writes::prune_unused_lookups(&t)?;
-        t.commit()?;
-        if !pruned.is_empty() {
-            let order = ["subcollections", "collections", "sculptors", "categories", "releases", "scales"];
-            let summary: Vec<String> = order
-                .iter()
-                .filter_map(|k| pruned.iter().find(|(n, _)| n == k).map(|(n, c)| format!("{c} {n}")))
-                .collect();
-            run.log(format!("Pruned unused lookups: {}", summary.join(", ")));
-        }
-    }
-    run.summary.moved += run.early_moved.len();
-    let s = &run.summary;
-    let mut done = format!("Crawl complete: {} new, {} updated, {} unchanged", s.new, s.updated, s.unchanged);
-    for (n, what) in [(s.moved, "moved"), (s.deleted, "deleted"), (s.marked, "marked missing")] {
-        if n > 0 {
-            done.push_str(&format!(", {n} {what}"));
-        }
-    }
-    run.log(format!("{done}."));
-    Ok(run.summary)
+    run.import_sidecars(&archives)?;
+    let modified = run.process(&archives)?;
+    run.export_sidecars(modified);
+    run.settle_missing(missing)?;
+    run.close(total)?;
+    Ok(run.finish())
 }
 
 fn delete_refs(store: Option<&ThumbStore>, refs: &[String]) {
@@ -1124,7 +1192,7 @@ fn reconcile(run: &mut Run<'_>, missing: Vec<db::Missing>) -> Result<(), CrawlEr
         }
         run.summary.moved += matched.len();
     }
-    let unmatched: Vec<db::Missing> = missing.into_iter().filter(|m| !matched.contains(&m.0)).collect();
+    let unmatched: Vec<db::Missing> = missing.into_iter().filter(|m| !matched.contains(&m.id)).collect();
     if unmatched.is_empty() {
         return Ok(());
     }

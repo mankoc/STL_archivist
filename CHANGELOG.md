@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026.45.40 — 2026-11-06
+
+- **Code structure, with no change in behaviour:** a crawl now reads as a list of named steps, `upsert` is split into its
+  new values and its images, and `Missing` and `Thumb` are structs instead of positional tuples.
+
 ## 2026.45.39 — 2026-11-06
 
 - **Code structure, with no change in behaviour:** `jobs.rs` is split by subject into `jobs/`, and `JobResult` moved

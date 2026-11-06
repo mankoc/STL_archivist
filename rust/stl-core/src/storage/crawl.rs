@@ -210,8 +210,16 @@ pub struct Extracted {
     pub sequence: Option<i64>,
 }
 
-/// One extracted image: name, thumbnail JPEG, formatted dHash, CLIP vector blob.
-pub type Thumb = (String, Option<Vec<u8>>, Option<String>, Option<Vec<u8>>);
+/// One extracted image.
+#[derive(Debug, Clone, Default)]
+pub struct Thumb {
+    pub name: String,
+    pub jpeg: Option<Vec<u8>>,
+    /// Formatted perceptual hash.
+    pub dhash: Option<String>,
+    /// CLIP vector blob.
+    pub vector: Option<Vec<u8>>,
+}
 
 /// What a new or changed archive contributes.
 #[derive(Debug, Clone, Default)]
@@ -468,29 +476,9 @@ pub fn ref_ids(refs: &[String]) -> Vec<u64> {
         .collect()
 }
 
-/// Phase 4 for one archive (`_upsert_archive`), inside the caller's savepoint.
-/// The thumbnails to store go to `puts` (image id, JPEG), written by
-/// [`upsert_batch`] in one transaction of the store.
-fn upsert<'a>(
-    tx: &Transaction,
-    store: Option<&ThumbStore>,
-    cfg: &UpsertConfig,
-    input: &'a UpsertInput,
-    puts: &mut Vec<(u64, &'a [u8])>,
-) -> Result<Upserted> {
-    let Some(ch) = &input.changed else {
-        // Unchanged: re-apply the pattern without overwriting.
-        if let (Some(id), Some(ex)) = (input.existing, &input.extracted) {
-            reapply_pattern(tx, id, ex)?;
-        }
-        return Ok(Upserted::default());
-    };
-    let old = match input.existing {
-        Some(id) => Some(load(tx, id)?),
-        None => None,
-    };
-    let hash_changed = old.as_ref().is_some_and(|o| o.archive_hash != input.hash);
-    let mut row = old.clone().unwrap_or_default();
+/// What the model's row, scales and tags become.
+fn new_values(tx: &Transaction, cfg: &UpsertConfig, input: &UpsertInput, ch: &Changed, old: Option<&ModelRow>, hash_changed: bool) -> Result<(ModelRow, Option<Vec<i64>>, Vec<i64>)> {
+    let mut row = old.cloned().unwrap_or_default();
     row.archive_hash = input.hash.clone();
     if let Some((size, mtime)) = stat(&input.path) {
         row.archive_size = Some(size);
@@ -546,6 +534,85 @@ fn upsert<'a>(
         }
     }
     row.stl_list_hash = Some(input.hash.clone());
+    Ok((row, scales, tag_ids))
+}
+
+/// The model's images, from what was just read; the thumbnails go in `puts`.
+fn replace_images<'a>(
+    tx: &Transaction,
+    store: Option<&ThumbStore>,
+    cfg: &UpsertConfig,
+    ch: &'a Changed,
+    model_id: i64,
+    hash_changed: bool,
+    puts: &mut Vec<(u64, &'a [u8])>,
+) -> Result<Upserted> {
+    let mut out = Upserted::default();
+    if hash_changed {
+        let mut st = tx.prepare("SELECT id, thumbnail_path FROM images WHERE model_id = ?1 ORDER BY id")?;
+        let old_imgs: Vec<(i64, Option<String>)> =
+            st.query_map([model_id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_>>()?;
+        let refs: Vec<String> = old_imgs.iter().filter_map(|(_, t)| t.clone()).filter(|t| !t.is_empty()).collect();
+        if let Some(s) = store {
+            let _ = s.delete_many(&ref_ids(&refs));
+        }
+        for (id, _) in &old_imgs {
+            tx.execute("DELETE FROM images WHERE id = ?1", [id])?;
+        }
+    }
+    // An image row for each thumbnail made; its id is the store's key.
+    let add = |name: &str, dhash: &Option<String>| -> Result<i64> {
+        tx.execute("INSERT INTO images (model_id, filename, dhash) VALUES (?1, ?2, ?3)", params![model_id, name, dhash])?;
+        let id = tx.last_insert_rowid();
+        tx.execute("UPDATE images SET thumbnail_path = ?2 WHERE id = ?1", params![id, id.to_string()])?;
+        Ok(id)
+    };
+    let mut vecs: Vec<(i64, Vec<u8>)> = Vec::new();
+    for Thumb { name, jpeg, dhash, vector } in &ch.thumbs {
+        let Some(j) = jpeg.as_ref().filter(|j| !j.is_empty()) else { continue };
+        let id = add(name, dhash)?;
+        if store.is_some() {
+            puts.push((id as u64, j.as_slice()));
+        }
+        vecs.extend(vector.clone().map(|v| (id, v)));
+        out.thumbnails += 1;
+    }
+    if !vecs.is_empty() {
+        vectors::store(tx, cfg.embed_dim, &vecs)?;
+    }
+    for (name, jpeg, dhash) in &ch.folder_images {
+        if let Some(j) = jpeg.as_ref().filter(|j| !j.is_empty() && store.is_some()) {
+            let id = add(name, dhash)?;
+            puts.push((id as u64, j.as_slice()));
+            out.folder_images += 1;
+        }
+    }
+    Ok(out)
+}
+
+/// Phase 4 for one archive (`_upsert_archive`), inside the caller's savepoint.
+/// The thumbnails to store go to `puts` (image id, JPEG), written by
+/// [`upsert_batch`] in one transaction of the store.
+fn upsert<'a>(
+    tx: &Transaction,
+    store: Option<&ThumbStore>,
+    cfg: &UpsertConfig,
+    input: &'a UpsertInput,
+    puts: &mut Vec<(u64, &'a [u8])>,
+) -> Result<Upserted> {
+    let Some(ch) = &input.changed else {
+        // Unchanged: re-apply the pattern without overwriting.
+        if let (Some(id), Some(ex)) = (input.existing, &input.extracted) {
+            reapply_pattern(tx, id, ex)?;
+        }
+        return Ok(Upserted::default());
+    };
+    let old = match input.existing {
+        Some(id) => Some(load(tx, id)?),
+        None => None,
+    };
+    let hash_changed = old.as_ref().is_some_and(|o| o.archive_hash != input.hash);
+    let (row, scales, tag_ids) = new_values(tx, cfg, input, ch, old.as_ref(), hash_changed)?;
 
     let model_id = match (input.existing, &old) {
         (Some(id), Some(o)) => {
@@ -559,48 +626,11 @@ fn upsert<'a>(
     }
     link_all(tx, "model_tags", "tag_id", model_id, &tag_ids)?;
 
-    let mut out = Upserted::default();
-    if input.existing.is_none() || hash_changed {
-        if hash_changed {
-            let mut st = tx.prepare("SELECT id, thumbnail_path FROM images WHERE model_id = ?1 ORDER BY id")?;
-            let old_imgs: Vec<(i64, Option<String>)> =
-                st.query_map([model_id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_>>()?;
-            let refs: Vec<String> = old_imgs.iter().filter_map(|(_, t)| t.clone()).filter(|t| !t.is_empty()).collect();
-            if let Some(s) = store {
-                let _ = s.delete_many(&ref_ids(&refs));
-            }
-            for (id, _) in &old_imgs {
-                tx.execute("DELETE FROM images WHERE id = ?1", [id])?;
-            }
-        }
-        // An image row for each thumbnail made; its id is the store's key.
-        let add = |name: &str, dhash: &Option<String>| -> Result<i64> {
-            tx.execute("INSERT INTO images (model_id, filename, dhash) VALUES (?1, ?2, ?3)", params![model_id, name, dhash])?;
-            let id = tx.last_insert_rowid();
-            tx.execute("UPDATE images SET thumbnail_path = ?2 WHERE id = ?1", params![id, id.to_string()])?;
-            Ok(id)
-        };
-        let mut vecs: Vec<(i64, Vec<u8>)> = Vec::new();
-        for (name, jpeg, dhash, vector) in &ch.thumbs {
-            let Some(j) = jpeg.as_ref().filter(|j| !j.is_empty()) else { continue };
-            let id = add(name, dhash)?;
-            if store.is_some() {
-                puts.push((id as u64, j.as_slice()));
-            }
-            vecs.extend(vector.clone().map(|v| (id, v)));
-            out.thumbnails += 1;
-        }
-        if !vecs.is_empty() {
-            vectors::store(tx, cfg.embed_dim, &vecs)?;
-        }
-        for (name, jpeg, dhash) in &ch.folder_images {
-            if let Some(j) = jpeg.as_ref().filter(|j| !j.is_empty() && store.is_some()) {
-                let id = add(name, dhash)?;
-                puts.push((id as u64, j.as_slice()));
-                out.folder_images += 1;
-            }
-        }
-    }
+    let out = if input.existing.is_none() || hash_changed {
+        replace_images(tx, store, cfg, ch, model_id, hash_changed, puts)?
+    } else {
+        Upserted::default()
+    };
     tx.execute("DELETE FROM stl_files WHERE model_id = ?1", [model_id])?;
     for (name, size) in &ch.stl_info {
         tx.execute(
@@ -613,8 +643,17 @@ fn upsert<'a>(
 
 // ── Post-crawl ───────────────────────────────────────────────────────────────
 
-/// A missing record: `(id, archive_path, archive_hash or "", file name, archive_size)`.
-pub type Missing = (i64, String, String, String, Option<i64>);
+/// A record whose archive is gone, or may be.
+#[derive(Debug, Clone)]
+pub struct Missing {
+    pub id: i64,
+    pub path: String,
+    /// `""` when it has none.
+    pub hash: String,
+    /// The archive's file name.
+    pub name: String,
+    pub size: Option<i64>,
+}
 
 /// What [`collect_missing`] found.
 #[derive(Debug, Default)]
@@ -641,12 +680,12 @@ pub struct Outside {
 impl Outside {
     pub fn new(rows: Vec<Missing>) -> Self {
         let mut outside = Outside::default();
-        for (i, (_, _, hash, name, size)) in rows.iter().enumerate() {
-            if !hash.is_empty() && !hash.starts_with("fallback:") {
-                outside.by_hash.entry(hash.clone()).or_default().push(i);
+        for (i, m) in rows.iter().enumerate() {
+            if !m.hash.is_empty() && !m.hash.starts_with("fallback:") {
+                outside.by_hash.entry(m.hash.clone()).or_default().push(i);
             }
-            if let Some(size) = size {
-                outside.by_name.entry((name.clone(), *size)).or_default().push(i);
+            if let Some(size) = m.size {
+                outside.by_name.entry((m.name.clone(), size)).or_default().push(i);
             }
         }
         outside.rows = rows;
@@ -668,7 +707,7 @@ impl Outside {
     fn gone(&mut self, found: Vec<usize>) -> Vec<Missing> {
         let mut gone = Vec::new();
         for i in found {
-            if self.checked.insert(i) && !Path::new(&crate::relpath::on_disk(&self.rows[i].1)).exists() {
+            if self.checked.insert(i) && !Path::new(&crate::relpath::on_disk(&self.rows[i].path)).exists() {
                 gone.push(self.rows[i].clone());
             }
         }
@@ -715,19 +754,20 @@ pub fn collect_missing(
         .filter(|(_, library, p, ..)| gone(*library, p.as_deref().unwrap_or_default()))
         .map(|(id, ..)| *id)
         .collect();
+    let missing = |id, path: Option<String>, hash: Option<String>, size| {
+        let path = path.unwrap_or_default();
+        let name = WinPath::new(&path).name().to_string();
+        Missing { id, path, hash: hash.unwrap_or_default(), name, size }
+    };
     let mut scan = MissingScan::default();
     for (id, library, p, h, size, flagged) in rows {
         if !judged(&p) {
             continue;
         }
         if !in_scope(library, p.as_deref().unwrap_or_default()) {
-            let p = p.unwrap_or_default();
-            let name = WinPath::new(&p).name().to_string();
-            scan.outside.push((id, p, h.unwrap_or_default(), name, size));
+            scan.outside.push(missing(id, p, h, size));
         } else if absent.contains(&id) {
-            let p = p.unwrap_or_default();
-            let name = WinPath::new(&p).name().to_string();
-            scan.missing.push((id, p, h.unwrap_or_default(), name, size));
+            scan.missing.push(missing(id, p, h, size));
         } else if flagged {
             scan.back.push(id);
         }
@@ -773,14 +813,14 @@ pub fn reconcile(
     }
     let mut missing_collision: HashSet<&str> = HashSet::new();
     let mut seen: HashSet<&str> = HashSet::new();
-    for (_, _, h, _, _) in missing {
+    for Missing { hash: h, .. } in missing {
         if !h.is_empty() && !seen.insert(h.as_str()) {
             missing_collision.insert(h.as_str());
         }
     }
     let mut used: HashSet<String> = HashSet::new();
     let (mut matched, mut skipped, mut refs) = (Vec::new(), Vec::new(), Vec::new());
-    for (id, old_path, h, name, size) in missing {
+    for Missing { id, path: old_path, hash: h, name, size } in missing {
         let mut target: Option<String> = None;
         if !h.is_empty() && !hash_collision.contains(h) && !missing_collision.contains(h.as_str())
             && let Some(c) = hash_to_path.get(h)
@@ -842,7 +882,7 @@ pub fn mark_missing(
         }
     };
     let (mut deleted, mut marked, mut deferred, mut refs) = (Vec::new(), Vec::new(), 0, Vec::new());
-    for (id, path, ..) in missing {
+    for Missing { id, path, .. } in missing {
         let flag: Option<bool> = tx
             .query_row("SELECT is_missing FROM models WHERE id = ?1", [id], |r| r.get::<_, Option<bool>>(0))
             .optional()?
