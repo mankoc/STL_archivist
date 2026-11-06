@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026.45.26 — 2026-11-06
+
+- **Merge similar** on the Lookups page, on every tab and for creators: it lists near-duplicate names by
+  spelling (ignoring case), by sound, or by shared words, with how many models use each, and one click on
+  the name to keep merges the pair. The old desktop app had this; the web client only merged by hand.
+- **Merge the two selected** now works for tags and scales, where it failed.
+
 ## 2026.45.25 — 2026-11-06
 
 - The README no longer lists the limit on custom presupport patterns that 2026.45.24 removed.

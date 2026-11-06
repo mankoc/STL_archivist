@@ -258,7 +258,8 @@ Editing needs the editor role.
 - **Lookups** page — tags, categories, collections, subcollections and scales: rename,
   delete (it shows how many models lose the value first), merge two entries (for tags: merge
   the selected tags into one) and *delete unused tags*. The **Creators** tab renames,
-  merges and clears creators, and edits a creator's profile.
+  merges and clears creators, and edits a creator's profile. **Merge similar…**, on every
+  tab, lists near-duplicates by spelling, sound or shared words; click the name to keep.
 
 Edits update the folder's `METADATA.7z` sidecar shortly afterwards when sidecars are on.
 

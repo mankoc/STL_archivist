@@ -1723,6 +1723,10 @@ the path is visible. No business logic and no Tauri commands for data.
   that only describe a behaviour (`str.strip`, `zipfile`) stay. The readers' name handling stays too:
   it decides `archive_hash`.
 - 2026.45.25: README: the pattern limit left over from 2026.45.24.
+- 2026.45.26: `GET /api/lookups/{kind}/similar` (kinds plus `creator`) over `strings::similar_pairs` (`Likeness`:
+  the desktop's Levenshtein and Soundex, and shared words by an index of the words, standing in for rapidfuzz's
+  token-set ratio); subcollections are compared within their collection, as `name_dedup` did. `admin::merge`
+  takes `tag` and `scale` (`merge_links`).
 
 ### Phase 8: Retire Python (small)
 

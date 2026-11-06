@@ -78,6 +78,7 @@ use crate::AppState;
         lookups::rename,
         lookups::delete,
         lookups::merge,
+        lookups::similar,
         lookups::merge_tags,
         lookups::unused_tags,
         lookups::delete_unused_tags,
@@ -205,6 +206,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/editor/subcollections", get(edit::subcollections))
         .route("/api/lookups/{kind}", get(lookups::list).post(lookups::add))
         .route("/api/lookups/{kind}/merge", post(lookups::merge))
+        .route("/api/lookups/{kind}/similar", get(lookups::similar))
         .route("/api/lookups/{kind}/{id}", get(lookups::info).patch(lookups::rename).delete(lookups::delete))
         .route("/api/tags/merge", post(lookups::merge_tags))
         .route("/api/tags/unused", get(lookups::unused_tags).delete(lookups::delete_unused_tags))

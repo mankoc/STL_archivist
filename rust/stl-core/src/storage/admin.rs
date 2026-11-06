@@ -173,10 +173,28 @@ fn delete_collection(tx: &Transaction, id: i64) -> Result<()> {
     Ok(())
 }
 
+/// The models linked to `delete_id` in `links` (`col`: the lookup's column) are
+/// linked to `keep_id` instead, once each, and `delete_id` leaves `table`.
+fn merge_links(tx: &Transaction, links: &str, col: &str, table: &str, keep_id: i64, delete_id: i64, now: &str) -> Result<()> {
+    tx.execute(
+        &format!("UPDATE models SET updated_at = ?2 WHERE id IN (SELECT model_id FROM {links} WHERE {col} = ?1)"),
+        params![delete_id, now],
+    )?;
+    tx.execute(
+        &format!("INSERT OR IGNORE INTO {links} (model_id, {col}) SELECT model_id, ?1 FROM {links} WHERE {col} = ?2"),
+        [keep_id, delete_id],
+    )?;
+    tx.execute(&format!("DELETE FROM {links} WHERE {col} = ?1"), [delete_id])?;
+    tx.execute(&format!("DELETE FROM {table} WHERE id = ?1"), [delete_id])?;
+    Ok(())
+}
+
 /// `merge`: the models of `delete_id` move to `keep_id`, then `delete_id` goes.
 pub fn merge(tx: &Transaction, kind: &str, keep_id: i64, delete_id: i64) -> Result<()> {
     let now = utc_now_text();
     match kind {
+        "tag" => merge_links(tx, "model_tags", "tag_id", "tags", keep_id, delete_id, &now)?,
+        "scale" => merge_links(tx, "model_scales", "scale_id", "scales", keep_id, delete_id, &now)?,
         "category" => {
             tx.execute(
                 "UPDATE models SET category_id = ?1, updated_at = ?3 WHERE category_id = ?2",
