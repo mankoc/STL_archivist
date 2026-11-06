@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { coalesced } from "./events";
+import { coalesced, LIBRARY_KEYS, staleKeys } from "./events";
 
 describe("coalesced", () => {
   beforeEach(() => void vi.useFakeTimers());
@@ -28,5 +28,20 @@ describe("coalesced", () => {
     reload.cancel();
     vi.advanceTimersByTime(300);
     expect(run).not.toHaveBeenCalled();
+  });
+});
+
+describe("staleKeys", () => {
+  it("leaves the filter pane alone when only rows changed", () => {
+    const keys = staleKeys(new Set(["rows"]));
+    expect(keys).toContain("rows");
+    expect(keys).not.toContain("tree");
+    expect(keys).not.toContain("libraries");
+  });
+
+  it("reloads everything for anything else, even among rows", () => {
+    expect(staleKeys(new Set(["rows", "models"]))).toBe(LIBRARY_KEYS);
+    expect(staleKeys(new Set(["crawl"]))).toBe(LIBRARY_KEYS);
+    expect(staleKeys(new Set())).toBe(LIBRARY_KEYS);
   });
 });

@@ -157,6 +157,7 @@ async fn records_below_an_unreadable_folder_are_not_judged() {
     write_zip(&root.join("locked").join("A.zip"), "a.stl");
     write_zip(&root.join("open").join("B.zip"), "b.stl");
     crawl(&lib, &ed, &root).await;
+    let folder = root.to_string_lossy().into_owned();
     let locked = root.join("locked").to_string_lossy().into_owned();
     let open = stl_core::relpath::path_key(&root.join("open").join("B.zip").to_string_lossy());
     let scan = lib
@@ -165,7 +166,7 @@ async fn records_below_an_unreadable_folder_are_not_judged() {
         .with(|c| {
             let id = c.query_row("SELECT id FROM libraries", [], |r| r.get::<_, i64>(0))?;
             let listed = std::collections::HashSet::from([open]);
-            stl_core::storage::crawl::collect_missing(c, Some((id, &listed)), std::slice::from_ref(&locked))
+            stl_core::storage::crawl::collect_missing(c, Some((id, &listed)), std::slice::from_ref(&locked), &folder, &[])
         })
         .unwrap();
     assert!(scan.missing.is_empty() && scan.back.is_empty(), "{scan:?}");

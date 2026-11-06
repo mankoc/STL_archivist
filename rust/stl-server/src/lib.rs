@@ -36,6 +36,10 @@ pub use config::Config;
 pub use error::ApiError;
 
 /// Everything a request handler needs.
+/// What a library change announces when only table rows differ: nothing in the
+/// filter pane changed.
+pub const ROWS_CHANGED: &str = "rows";
+
 pub struct Library {
     pub config: Config,
     pub db: Pool,
@@ -59,7 +63,7 @@ pub struct Library {
     pub importing: std::sync::atomic::AtomicBool,
     /// Random, for this run: a sync refuses a "remote" that is this server.
     pub instance: String,
-    /// Raised by every library change ([`Library::changed`]): cached answers go stale.
+    /// Raised by library changes ([`Library::changed`]): cached answers go stale.
     pub generation: std::sync::atomic::AtomicU64,
     /// The unfiltered filter pane (see `api::filter`).
     pub tree_cache: api::filter::TreeCache,

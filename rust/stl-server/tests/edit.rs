@@ -113,6 +113,32 @@ async fn cell_edits_and_sidecars() {
     assert!(l.lib.state.sidecars.pending().is_empty());
 }
 
+/// A title isn't in the filter pane: the tree stays valid, and clients reload only rows.
+#[tokio::test]
+async fn edits_outside_the_filter_pane_keep_the_tree() {
+    let l = library();
+    let id = l.ids[0];
+    let generation = || l.lib.state.generation.load(std::sync::atomic::Ordering::SeqCst);
+    let mut events = l.lib.state.jobs.events.subscribe();
+    let before = generation();
+    for field in ["title", "sequence", "to_print"] {
+        let value = if field == "title" { "New title" } else { "1" };
+        let r = l.call("PATCH", "/api/models/cells", Some(json!({"edits": [{"id": id, "field": field, "value": value}]}))).await;
+        assert_eq!(r.status, StatusCode::OK);
+        let event = serde_json::to_value(events.recv().await.unwrap()).unwrap();
+        assert_eq!(event["what"], "rows", "{field}");
+    }
+    assert_eq!(generation(), before);
+
+    let r = l.call("PATCH", "/api/models/cells", Some(json!({"edits": [
+        {"id": id, "field": "title", "value": "Newer"},
+        {"id": id, "field": "tags", "value": "dragon"},
+    ]}))).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(serde_json::to_value(events.recv().await.unwrap()).unwrap()["what"], "models");
+    assert_eq!(generation(), before + 1);
+}
+
 /// Sidecars hold the names, so whatever changes a name queues the models' folders.
 #[tokio::test]
 async fn name_changes_refresh_sidecars() {

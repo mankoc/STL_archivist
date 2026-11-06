@@ -49,34 +49,52 @@ fn apply_folder_pattern(lib: &Library, roots: &Roots, id: i64, path: &str) -> Re
     }
 }
 
+/// The crawl's workers, and how many models to give them at a time: archives are
+/// read and converted in parallel, while the writes stay in order.
+fn workers(settings: &LibrarySettings) -> Result<(rayon::ThreadPool, usize), String> {
+    let n = settings.max_workers().max(1);
+    Ok((rayon::ThreadPoolBuilder::new().num_threads(n).build().map_err(|e| e.to_string())?, n * 2))
+}
+
 /// Rescan: re-read each archive's metadata, rules and hash, keeping user edits
 /// (`storage::jobs::apply_rescan`), and read its folder's path pattern again, as a crawl does.
 pub fn rescan_models(lib: &Library, ctl: &Control, log: &dyn Fn(String), ids: &[i64]) -> Result<Outcome, String> {
     let settings = LibrarySettings::load(&lib.config.data_dir);
     let opts = options(lib, &settings);
     let roots = lib.db.with(Roots::load).map_err(db)?;
+    let (pool, chunk) = workers(&settings)?;
     ctl.set_total(ids.len() as u64);
     let mut out = Outcome::default();
-    for &id in ids {
+    for chunk in ids.chunks(chunk) {
         if ctl.is_stopped() {
             break;
         }
-        ctl.advance(1);
-        let Some((Some(path), size, mtime, hash)) = lib.db.with(|c| jobs_db::rescan_state(c, id)).map_err(db)? else { continue };
-        match rescan::rescan(&path, size, mtime, &hash, &opts) {
-            Ok(values) => {
-                let applied = lib.db.with_tx(|tx| Ok::<_, rusqlite::Error>(jobs_db::apply_rescan(tx, id, &values))).map_err(db)?;
-                match applied {
-                    Ok(true) => {
-                        apply_folder_pattern(lib, &roots, id, &path)?;
-                        out.done += 1;
-                        out.touched.push(path);
-                    }
-                    Ok(false) => {}
-                    Err(e) => log(format!("{}: {e}", file_name(&path))),
-                }
+        let mut models = Vec::with_capacity(chunk.len());
+        for &id in chunk {
+            match lib.db.with(|c| jobs_db::rescan_state(c, id)).map_err(db)? {
+                Some((Some(path), size, mtime, hash)) => models.push((id, path, size, mtime, hash)),
+                _ => ctl.advance(1),
             }
-            Err(e) => log(format!("{}: {e}", file_name(&path))),
+        }
+        let read: Vec<_> =
+            pool.install(|| models.par_iter().map(|(_, path, size, mtime, hash)| rescan::rescan(path, *size, *mtime, hash, &opts)).collect());
+        for ((id, path, ..), read) in models.into_iter().zip(read) {
+            ctl.advance(1);
+            match read {
+                Ok(values) => {
+                    let applied = lib.db.with_tx(|tx| Ok::<_, rusqlite::Error>(jobs_db::apply_rescan(tx, id, &values))).map_err(db)?;
+                    match applied {
+                        Ok(true) => {
+                            apply_folder_pattern(lib, &roots, id, &path)?;
+                            out.done += 1;
+                            out.touched.push(path);
+                        }
+                        Ok(false) => {}
+                        Err(e) => log(format!("{}: {e}", file_name(&path))),
+                    }
+                }
+                Err(e) => log(format!("{}: {e}", file_name(&path))),
+            }
         }
     }
     Ok(out)
@@ -87,13 +105,11 @@ pub fn generate_thumbnails(lib: &Library, ctl: &Control, log: &dyn Fn(String), i
     let settings = LibrarySettings::load(&lib.config.data_dir);
     let opts = options(lib, &settings);
     let size = settings.max_thumb_size();
-    let workers = settings.max_workers().max(1);
-    let pool = rayon::ThreadPoolBuilder::new().num_threads(workers).build().map_err(|e| e.to_string())?;
+    let (pool, chunk) = workers(&settings)?;
     ctl.set_total(ids.len() as u64);
     let mut out = Outcome::default();
     let mut position = 0;
-    // A few models at a time: reading and converting run in parallel, the writes in order.
-    for chunk in ids.chunks(workers * 2) {
+    for chunk in ids.chunks(chunk) {
         if ctl.is_stopped() {
             log("Thumbnail generation cancelled".into());
             break;

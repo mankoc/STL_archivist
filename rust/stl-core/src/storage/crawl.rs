@@ -623,15 +623,73 @@ pub struct MissingScan {
     pub missing: Vec<Missing>,
     /// Records flagged missing whose archive is there again.
     pub back: Vec<i64>,
+    /// Records elsewhere, not looked at: see [`Outside`].
+    pub outside: Vec<Missing>,
 }
 
-/// Which records' archives are gone, and which flagged ones have returned.
+/// The records outside a crawled folder. Their disks are left alone (they may be
+/// asleep) unless a new archive may be one of them: the same content, or the same
+/// name and size. Only then is that record's file looked for.
+#[derive(Debug, Default)]
+pub struct Outside {
+    rows: Vec<Missing>,
+    by_hash: HashMap<String, Vec<usize>>,
+    by_name: HashMap<(String, i64), Vec<usize>>,
+    checked: HashSet<usize>,
+}
+
+impl Outside {
+    pub fn new(rows: Vec<Missing>) -> Self {
+        let mut outside = Outside::default();
+        for (i, (_, _, hash, name, size)) in rows.iter().enumerate() {
+            if !hash.is_empty() && !hash.starts_with("fallback:") {
+                outside.by_hash.entry(hash.clone()).or_default().push(i);
+            }
+            if let Some(size) = size {
+                outside.by_name.entry((name.clone(), *size)).or_default().push(i);
+            }
+        }
+        outside.rows = rows;
+        outside
+    }
+
+    /// The records with this content whose archive is gone.
+    pub fn gone_with_hash(&mut self, hash: &str) -> Vec<Missing> {
+        let found = self.by_hash.remove(hash).unwrap_or_default();
+        self.gone(found)
+    }
+
+    /// The records of this file name and size whose archive is gone.
+    pub fn gone_with_name(&mut self, name: &str, size: i64) -> Vec<Missing> {
+        let found = self.by_name.remove(&(name.to_string(), size)).unwrap_or_default();
+        self.gone(found)
+    }
+
+    fn gone(&mut self, found: Vec<usize>) -> Vec<Missing> {
+        let mut gone = Vec::new();
+        for i in found {
+            if self.checked.insert(i) && !Path::new(&crate::relpath::on_disk(&self.rows[i].1)).exists() {
+                gone.push(self.rows[i].clone());
+            }
+        }
+        gone
+    }
+}
+
+/// Which records' archives are gone, and which flagged ones have returned, below
+/// the crawled `folder` but not below `inner` (the roots of libraries inside it).
 ///
 /// `listed`: a library and every archive found in it (`relpath::path_key`s of a
 /// full listing): its records are judged by that listing, without asking the
-/// file system about each; those of other libraries are looked up. Records
-/// below an `unreadable` folder are not judged at all.
-pub fn collect_missing(conn: &Connection, listed: Option<(i64, &HashSet<String>)>, unreadable: &[String]) -> Result<MissingScan> {
+/// file system about each; others below `folder` are looked up. Records below an
+/// `unreadable` folder are not judged at all.
+pub fn collect_missing(
+    conn: &Connection,
+    listed: Option<(i64, &HashSet<String>)>,
+    unreadable: &[String],
+    folder: &str,
+    inner: &[String],
+) -> Result<MissingScan> {
     use rayon::prelude::*;
     type Row = (i64, Option<i64>, Option<String>, Option<String>, Option<i64>, bool);
     let mut st = conn.prepare(&format!(
@@ -645,19 +703,28 @@ pub fn collect_missing(conn: &Connection, listed: Option<(i64, &HashSet<String>)
         Some((id, keys)) if library == Some(id) => !keys.contains(&crate::relpath::path_key(path)),
         _ => !Path::new(&crate::relpath::on_disk(path)).exists(),
     };
+    let in_scope = |library: Option<i64>, path: &str| {
+        listed.is_some_and(|(id, _)| library == Some(id))
+            || (libraries::contains(folder, path) && !inner.iter().any(|root| libraries::contains(root, path)))
+    };
     let judged = |p: &Option<String>| p.as_deref().is_some_and(|p| !p.is_empty() && !unreadable.iter().any(|d| libraries::contains(d, p)));
     let absent: HashSet<i64> = rows
         .par_iter()
         .filter(|(_, _, p, ..)| judged(p))
+        .filter(|(_, library, p, ..)| in_scope(*library, p.as_deref().unwrap_or_default()))
         .filter(|(_, library, p, ..)| gone(*library, p.as_deref().unwrap_or_default()))
         .map(|(id, ..)| *id)
         .collect();
     let mut scan = MissingScan::default();
-    for (id, _, p, h, size, flagged) in rows {
+    for (id, library, p, h, size, flagged) in rows {
         if !judged(&p) {
             continue;
         }
-        if absent.contains(&id) {
+        if !in_scope(library, p.as_deref().unwrap_or_default()) {
+            let p = p.unwrap_or_default();
+            let name = WinPath::new(&p).name().to_string();
+            scan.outside.push((id, p, h.unwrap_or_default(), name, size));
+        } else if absent.contains(&id) {
             let p = p.unwrap_or_default();
             let name = WinPath::new(&p).name().to_string();
             scan.missing.push((id, p, h.unwrap_or_default(), name, size));

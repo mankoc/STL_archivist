@@ -749,7 +749,9 @@ impl Library {
 
     /// Tell clients the library changed.
     pub fn changed(&self, what: &str) {
-        self.generation.fetch_add(1, Ordering::SeqCst);
+        if what != crate::ROWS_CHANGED {
+            self.generation.fetch_add(1, Ordering::SeqCst);
+        }
         self.jobs.send(ServerEvent::LibraryChanged { what: what.to_string() });
     }
 

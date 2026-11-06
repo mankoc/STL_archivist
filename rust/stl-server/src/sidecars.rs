@@ -15,6 +15,13 @@ use crate::library_settings::LibrarySettings;
 
 pub const DEBOUNCE: Duration = Duration::from_millis(1500);
 
+/// A sidecar is one file, rewritten whole, thumbnails included. How long to wait
+/// after exports that took `took`, so that big folders aren't rewritten back to
+/// back while someone keeps editing: they take a tenth of the time at most.
+fn pause_after(took: Duration) -> Duration {
+    (took * 10).min(Duration::from_secs(60))
+}
+
 #[derive(Default)]
 pub struct SidecarQueue {
     pending: Mutex<BTreeSet<String>>,
@@ -93,6 +100,21 @@ async fn worker(lib: Weak<Library>, wake: Arc<Notify>) {
         // Wait until edits stop arriving for a while.
         while tokio::time::timeout(DEBOUNCE, wake.notified()).await.is_ok() {}
         let Some(l) = lib.upgrade() else { return };
+        let started = std::time::Instant::now();
         let _ = tokio::task::spawn_blocking(move || l.export_pending_sidecars()).await;
+        // Edits meanwhile stay pending (and shutdown exports them).
+        tokio::time::sleep(pause_after(started.elapsed())).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slow_exports_wait_longer() {
+        assert_eq!(pause_after(Duration::from_millis(20)), Duration::from_millis(200));
+        assert_eq!(pause_after(Duration::from_secs(2)), Duration::from_secs(20));
+        assert_eq!(pause_after(Duration::from_secs(30)), Duration::from_secs(60));
     }
 }
