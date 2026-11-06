@@ -231,15 +231,27 @@ pub fn duplicate_rows(conn: &Connection) -> Result<Vec<DuplicateRow>> {
     Ok(rows)
 }
 
-pub type HashRow = (i64, String, Option<String>, Option<String>, Option<String>);
+/// Image id, model id, perceptual hash.
+pub type HashRow = (i64, i64, String);
 
-pub fn image_hash_rows(conn: &Connection) -> Result<Vec<HashRow>> {
+/// Every image's hash, for comparing: what a search shows comes from
+/// [`image_details`], for the few that match.
+pub fn image_hashes(conn: &Connection) -> Result<Vec<HashRow>> {
+    let mut st = conn.prepare("SELECT id, model_id, dhash FROM images WHERE dhash IS NOT NULL ORDER BY id")?;
+    st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect()
+}
+
+/// Thumbnail, title and archive path, by image id.
+pub type ImageDetail = (Option<String>, Option<String>, Option<String>);
+
+pub fn image_details(conn: &Connection, ids: &[i64]) -> Result<HashMap<i64, ImageDetail>> {
+    let json = format!("[{}]", ids.iter().map(i64::to_string).collect::<Vec<_>>().join(","));
     let mut st = conn.prepare(&format!(
-        "SELECT i.model_id, i.dhash, i.thumbnail_path, m.title, {} \
-         FROM images i JOIN models m ON i.model_id = m.id WHERE i.dhash IS NOT NULL ORDER BY i.id",
+        "SELECT i.id, i.thumbnail_path, m.title, {} FROM images i JOIN models m ON i.model_id = m.id \
+         WHERE i.id IN (SELECT value FROM json_each(?1))",
         archive_path_sql("m")
     ))?;
-    st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?.collect()
+    st.query_map([json], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?, r.get(3)?))))?.collect()
 }
 
 #[cfg(test)]
@@ -273,6 +285,39 @@ mod tests {
         assert_eq!(grid[0].scales, ["75mm", "28mm"]);
         assert_eq!(stl_files(&conn, 1).unwrap()[0].0, "a.stl");
         assert_eq!(duplicate_rows(&conn).unwrap()[0].scales, ["75mm", "28mm"]);
-        assert_eq!(image_hash_rows(&conn).unwrap().len(), 1);
+        let hashes = image_hashes(&conn).unwrap();
+        assert_eq!(hashes, [(1, 1, "2:ab".to_string())]);
+        let details = image_details(&conn, &[1, 9]).unwrap();
+        assert_eq!(details.len(), 1);
+        let (thumb, title, path) = &details[&1];
+        assert_eq!((thumb.as_deref(), title.as_deref()), (Some("5"), Some("A")));
+        assert!(path.as_deref().is_some_and(|p| p.ends_with("x.7z")));
+    }
+
+    /// Each of these is the start of a longer index, which serves the same searches.
+    #[test]
+    fn redundant_indexes_go() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("lib.db");
+        migrate(&path, &Vectors::default()).unwrap();
+        let conn = open(&path).unwrap();
+        conn.execute_batch("CREATE INDEX ix_models_creator ON models (creator)").unwrap();
+        drop(conn);
+        migrate(&path, &Vectors::default()).unwrap();
+        let conn = open(&path).unwrap();
+        for name in ["ix_models_release_year", "ix_models_creator", "ix_models_sculptor_id", "ix_models_collection_id"] {
+            let found: i64 = conn.query_row("SELECT count(*) FROM sqlite_master WHERE name = ?1", [name], |r| r.get(0)).unwrap();
+            assert_eq!(found, 0, "{name}");
+        }
+        for (column, index) in [
+            ("release_year", "ix_models_release_date"),
+            ("creator", "ix_models_creator_source"),
+            ("sculptor_id", "ix_models_sculptor_collection"),
+            ("collection_id", "ix_models_collection_subcollection"),
+        ] {
+            let sql = format!("EXPLAIN QUERY PLAN SELECT id FROM models WHERE {column} = 1");
+            let plan: String = conn.query_row(&sql, [], |r| r.get(3)).unwrap();
+            assert!(plan.contains(index), "{plan}");
+        }
     }
 }

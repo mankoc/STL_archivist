@@ -226,3 +226,17 @@ fn closing_standard_input_stops_the_server_cleanly() {
     server.kill().unwrap();
     panic!("the server kept running");
 }
+
+/// Progress reaches every client several times a second: a job on the whole library
+/// must not send them its list of ids each time.
+#[tokio::test(flavor = "multi_thread")]
+async fn job_events_leave_out_the_list_of_ids() {
+    let lib = empty_library();
+    let mut events = lib.state.jobs.events.subscribe();
+    let job = lib.state.submit_job(stl_server::jobs::JobRequest::Rescan { ids: (1..=100_000).collect() }, "ed");
+    let event = serde_json::to_string(&events.recv().await.unwrap()).unwrap();
+    assert!(event.len() < 2_000, "{} bytes", event.len());
+    let ed = lib.user("ed", Role::Editor);
+    let full = call(&lib.state, "GET", &format!("/api/jobs/{}", job.id), Some(&ed), None).await.json();
+    assert_eq!(full["job"]["request"]["ids"].as_array().map(Vec::len), Some(100_000), "asking for the job gives all of it");
+}

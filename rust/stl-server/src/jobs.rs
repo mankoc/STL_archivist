@@ -286,6 +286,23 @@ fn default_max_tags() -> usize {
 }
 
 impl JobRequest {
+    /// This request without its list of ids: what clients need to show a job, as
+    /// `GET /api/jobs/{id}` has the rest.
+    fn brief(&self) -> JobRequest {
+        let mut brief = self.clone();
+        match &mut brief {
+            JobRequest::Rescan { ids }
+            | JobRequest::GenerateThumbnails { ids, .. }
+            | JobRequest::SortFiles { ids, .. }
+            | JobRequest::DeleteFiles { ids }
+            | JobRequest::AiTag { ids, .. }
+            | JobRequest::FindMoved { ids }
+            | JobRequest::SearchFolder { ids, .. } => ids.clear(),
+            _ => {}
+        }
+        brief
+    }
+
     pub fn kind(&self) -> &'static str {
         match self {
             JobRequest::Crawl { .. } => "crawl",
@@ -421,7 +438,9 @@ pub enum JobState {
 pub struct JobInfo {
     pub id: u64,
     pub kind: &'static str,
-    pub request: JobRequest,
+    // Shared: `Job::info` runs at every progress step, and this can list 100,000 ids.
+    #[schema(value_type = JobRequest)]
+    pub request: Arc<JobRequest>,
     pub state: JobState,
     /// Who submitted it.
     pub user: String,
@@ -480,6 +499,8 @@ pub enum ServerEvent {
 
 pub struct Job {
     info: Mutex<JobInfo>,
+    /// The request as events carry it ([`JobRequest::brief`]).
+    brief: Arc<JobRequest>,
     log: Mutex<VecDeque<String>>,
     stop: AtomicBool,
     ctl: Control,
@@ -595,7 +616,8 @@ impl Jobs {
     }
 
     fn publish(&self, job: &Job) {
-        self.send(ServerEvent::Job { job: Box::new(job.info()) });
+        let info = JobInfo { request: Arc::clone(&job.brief), ..job.info() };
+        self.send(ServerEvent::Job { job: Box::new(info) });
     }
 
     fn next_queued(&self) -> Option<Arc<Job>> {
@@ -689,11 +711,13 @@ impl Library {
     pub fn submit_job(self: &Arc<Self>, request: JobRequest, user: &str) -> JobInfo {
         let jobs = &self.jobs;
         let id = jobs.next_id.fetch_add(1, Ordering::Relaxed);
+        let brief = Arc::new(request.brief());
         let job = Arc::new(Job {
+            brief,
             info: Mutex::new(JobInfo {
                 id,
                 kind: request.kind(),
-                request,
+                request: Arc::new(request),
                 state: JobState::Queued,
                 user: user.to_string(),
                 phase: None,
@@ -810,7 +834,7 @@ async fn worker(lib: Weak<Library>, wake: Arc<Notify>) {
 }
 
 fn run(lib: &Library, job: &Job) -> Result<String, String> {
-    let request = job.info().request;
+    let request = JobRequest::clone(&job.info().request);
     match request {
         JobRequest::Crawl { folder, pattern, force_rescan, recurse, keep_missing, in_library } => {
             crawl(lib, job, folder, pattern, force_rescan, recurse, keep_missing, in_library)

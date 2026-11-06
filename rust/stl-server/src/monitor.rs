@@ -33,7 +33,7 @@ pub struct Monitor {
 fn busy(jobs: &[JobInfo], folder: &str) -> bool {
     jobs.iter().any(|j| {
         matches!(j.state, JobState::Queued | JobState::Running)
-            && match &j.request {
+            && match &*j.request {
                 JobRequest::Crawl { folder: f, .. } => f == folder,
                 JobRequest::UpdateFolders { .. } => true,
                 _ => false,

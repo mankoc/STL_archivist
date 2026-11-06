@@ -230,6 +230,13 @@ pub fn migrate(path: &Path, vectors: &Vectors) -> Result<MigrateReport> {
     for ddl in schema_sql::ENSURE_INDEXES {
         tx.execute_batch(ddl)?;
     }
+    // Each is the start of a longer index, and costs every write.
+    tx.execute_batch(
+        "DROP INDEX IF EXISTS ix_models_release_year;
+         DROP INDEX IF EXISTS ix_models_creator;
+         DROP INDEX IF EXISTS ix_models_sculptor_id;
+         DROP INDEX IF EXISTS ix_models_collection_id;",
+    )?;
     // ANALYZE reads every table and index: minutes on a hard disk, on every start. It
     // runs (on a sample of each index) when there are no statistics yet or the schema
     // changed; otherwise `PRAGMA optimize` refreshes only the statistics gone stale.
