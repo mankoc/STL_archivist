@@ -226,7 +226,7 @@ async fn a_library_moves_without_a_recrawl() {
     assert_eq!(call(&lib.state, "GET", "/api/libraries", Some(&ed), None).await.json()[0]["folders"][0]["reachable"], true);
     // A crawl now finds the Dragon unchanged, and the Knight gone.
     let v = run(&lib, &ed, json!({"kind": "crawl", "folder": new.to_string_lossy()})).await;
-    assert_eq!(v["job"]["message"], "0 new, 0 updated, 1 unchanged", "{v}");
+    assert_eq!(v["job"]["message"], "0 new, 0 updated, 1 unchanged, 1 deleted", "{v}");
 
     // A root that is no folder, or one outside the editor's roots, is refused.
     let r = call(&lib.state, "POST", "/api/jobs", Some(&ed), Some(json!({"kind": "relocate_library", "id": id, "root": "/definitely/not/here"}))).await;

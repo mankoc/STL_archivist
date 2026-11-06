@@ -1699,6 +1699,15 @@ the path is visible. No business logic and no Tauri commands for data.
 - 2026.45.20: `SortModal` keeps the target folder in `localStorage` (`stl.sort.target`), saved on a preview.
 - 2026.45.21: `DELETE /api/jobs` (`Jobs::clear_finished`) keeps jobs with a `result`, because pages find
   theirs through the job list; a `jobs_cleared` event reloads other clients' lists.
+- 2026.45.22: fixes from the full code review. `sort_files::execute` reserves each destination in the plan
+  (`unique_target` looks at `taken` as well as the disk). `crawler::list_archives_stat` returns a `Listing`
+  with its `unreadable` folders; `crawl::collect_missing` skips the records below them and returns a
+  `MissingScan` (`back`: flagged records found again, cleared by the crawl; the flagged-means-gone rule came
+  over from Python, but monitored crawls made the flag common). A library that lists empty with records
+  in scope sets `Run.keep_records` (flag, do not delete) and `Summary.listing_incomplete`, which also
+  keeps a folder out of Update Folders' `delete_missing_under`. `Extracted.unread` keeps the catalog when
+  members cannot be read. Exclusions in `library::conditions` are `(...) IS NOT TRUE`, and creator and
+  source compare exact values: neither quirk needs to match Python any more.
 
 ### Phase 8: Retire Python (small)
 

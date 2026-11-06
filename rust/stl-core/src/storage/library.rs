@@ -3,13 +3,11 @@
 //! (`table_ids`, `page_rows`, the predicates of `conditions`), of
 //! `app/services/filter_tree.py` and of `lookups.py` / `model_summary.py`.
 //!
-//! The predicates reproduce SQLAlchemy's SQL, quirks included, because the
-//! results must match the Python services exactly (golden-tested):
+//! The predicates:
 //!
-//! * an exclusion is `NOT IN` / `NOT LIKE` / `NOT (...)`, so a row whose column
-//!   is NULL is excluded too (excluding a creator hides models without one);
-//! * creator and source compare `lower(column)` (ASCII-only in SQLite) with
-//!   values lowered the Unicode way, as Python's `str.lower` does;
+//! * an exclusion keeps the rows without a value (`(...) IS NOT TRUE`: excluding
+//!   a creator or a warning does not hide the models that have none);
+//! * creator and source compare the exact value, as the pane lists and counts them;
 //! * `LIKE` patterns are not escaped (`%` and `_` in a folder name are wildcards).
 //!
 //! Folder and file-type values use `pathlib.WindowsPath` semantics ([`WinPath`]).
@@ -155,6 +153,12 @@ fn text_values<'a>(values: impl Iterator<Item = &'a str>) -> Vec<Value> {
     values.map(|s| Value::Text(s.to_string())).collect()
 }
 
+/// `expr` is one of `values`, or with `exclude` is not (a NULL is not one of them).
+fn one_of(expr: &str, values: Vec<Value>, exclude: bool) -> Sql {
+    let test = format!("{expr} IN ({})", placeholders(values.len()));
+    Sql::with(if exclude { format!("({test}) IS NOT TRUE") } else { test }, values)
+}
+
 fn int_values(values: &[FilterValue]) -> Vec<Value> {
     values
         .iter()
@@ -180,13 +184,9 @@ fn conditions(spec: &FilterSpec, t: &str, skip: Option<&str>, path_table: Option
 
     for facet in ["creator", "source"] {
         if want(facet) {
-            for (values, neg) in [(inc.get(facet), ""), (exc.get(facet), "NOT ")] {
+            for (values, exclude) in [(inc.get(facet), false), (exc.get(facet), true)] {
                 if let Some(vs) = values {
-                    let lowered: Vec<String> = FilterSpec::texts(vs).map(str::to_lowercase).collect();
-                    out.push(Sql::with(
-                        format!("lower({t}.{facet}) {neg}IN ({})", placeholders(lowered.len())),
-                        lowered.into_iter().map(Value::Text).collect(),
-                    ));
+                    out.push(one_of(&format!("{t}.{facet}"), text_values(FilterSpec::texts(vs)), exclude));
                 }
             }
         }
@@ -239,7 +239,7 @@ fn conditions(spec: &FilterSpec, t: &str, skip: Option<&str>, path_table: Option
                     }
                 }
                 let joined = parts.iter().map(|p| format!("({p})")).collect::<Vec<_>>().join(" OR ");
-                let text = if neg { format!("NOT ({joined})") } else { format!("({joined})") };
+                let text = if neg { format!("({joined}) IS NOT TRUE") } else { format!("({joined})") };
                 out.push(Sql::with(text, params));
             }
         }
@@ -247,10 +247,9 @@ fn conditions(spec: &FilterSpec, t: &str, skip: Option<&str>, path_table: Option
 
     for &(facet, column) in ID_FACETS {
         if want(facet) {
-            for (values, neg) in [(inc.get(facet), ""), (exc.get(facet), "NOT ")] {
+            for (values, exclude) in [(inc.get(facet), false), (exc.get(facet), true)] {
                 if let Some(vs) = values {
-                    let p = int_values(vs);
-                    out.push(Sql::with(format!("{} {neg}IN ({})", column_of(t, column), placeholders(p.len())), p));
+                    out.push(one_of(&column_of(t, column), int_values(vs), exclude));
                 }
             }
         }
@@ -273,10 +272,9 @@ fn conditions(spec: &FilterSpec, t: &str, skip: Option<&str>, path_table: Option
     }
 
     if want("presupports") {
-        for (values, neg) in [(inc.get("presupports"), ""), (exc.get("presupports"), "NOT ")] {
+        for (values, exclude) in [(inc.get("presupports"), false), (exc.get("presupports"), true)] {
             if let Some(vs) = values {
-                let p = text_values(FilterSpec::texts(vs));
-                out.push(Sql::with(format!("{t}.presupports {neg}IN ({})", placeholders(p.len())), p));
+                out.push(one_of(&format!("{t}.presupports"), text_values(FilterSpec::texts(vs)), exclude));
             }
         }
     }
@@ -289,7 +287,7 @@ fn conditions(spec: &FilterSpec, t: &str, skip: Option<&str>, path_table: Option
         }
         if let Some(vs) = exc.get("warning") {
             let p = text_values(FilterSpec::texts(vs));
-            let parts = vec![format!("{t}.warning NOT LIKE '%' || ? || '%'"); p.len()];
+            let parts = vec![format!("({t}.warning LIKE '%' || ? || '%') IS NOT TRUE"); p.len()];
             out.push(Sql::with(format!("({})", parts.join(" AND ")), p));
         }
     }

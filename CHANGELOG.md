@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026.45.22 — 2026-11-06
+
+- **Sort files no longer overwrites files.** Two moves with one destination (archives with the same
+  name, or a `cover.jpg` from each of two folders sorted together) both got the same "free" name, and
+  the second replaced the first. Each now gets its own name, and the preview shows *COLLISION*. An
+  archive already where the pattern puts it stays there instead of becoming `name_1`.
+- **A crawl no longer deletes the record of an archive that is on disk.** A record marked missing (by a
+  monitored crawl, say) was deleted by the next crawl even when its archive had come back. Crawls now
+  clear the mark, and monitored folders start a crawl for it.
+- **A crawl no longer takes what it cannot see for deleted.** The records below a folder that could not
+  be read stay as they are, and a library that comes back empty (an unmounted share) has its records
+  marked missing, not deleted; *Update folders* does not clean those up either. Crawl results now say
+  how many records were moved, deleted or marked missing, and when a folder could not be read in full.
+- **An unreadable member no longer costs an archive its file list.** When images could not be read (a
+  RAR without UnRAR, an encrypted member, a ZIP method the reader lacks) the catalog already read was
+  dropped too, leaving no STL list and false *without images* and *without printable files* warnings.
+  The crawl now keeps the list and logs a warning; Generate thumbnails leaves the images it has.
+- **Excluding a filter value keeps models without a value**: excluding one warning hid every model with
+  no warnings, and excluding a creator every model with no creator.
+- **Creators and sources are matched exactly**, as the filter pane lists and counts them, so names
+  starting with a non-ASCII capital ("Élan") can be selected.
+
 ## 2026.45.21 — 2026-11-06
 
 - **Clear finished on the Jobs page** removes done, failed and stopped jobs from the list. Jobs holding

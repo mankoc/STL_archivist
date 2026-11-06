@@ -18,11 +18,13 @@ pub struct Changes {
     pub new: usize,
     pub modified: usize,
     pub gone: usize,
+    /// Records flagged missing whose archive is back (a crawl clears the flag).
+    pub back: usize,
 }
 
 impl Changes {
     pub fn any(&self) -> bool {
-        self.new + self.modified + self.gone > 0
+        self.new + self.modified + self.gone + self.back > 0
     }
 }
 
@@ -38,7 +40,7 @@ pub fn changes(conn: &Connection, folder: &str, recurse: bool, size_only: bool) 
     let roots = crate::storage::libraries::Roots::load(conn)?;
     let inner: Vec<String> = roots.locate_root(folder).map(|id| roots.inner(id).into_iter().map(|(_, r)| r).collect()).unwrap_or_default();
     // One listing gives the archives with their sizes and times; the rest is compared in memory.
-    let listing = crate::crawler::list_archives_stat(folder, recurse, &inner);
+    let crate::crawler::Listing { files: listing, unreadable } = crate::crawler::list_archives_stat(folder, recurse, &inner);
     let files: Vec<String> = listing.iter().map(|(p, _)| p.clone()).collect();
     let mut out = Changes::default();
     let known: HashMap<String, (Option<i64>, Option<i64>)> =
@@ -55,22 +57,28 @@ pub fn changes(conn: &Connection, folder: &str, recurse: bool, size_only: bool) 
     }
     // A library's own records (not those of libraries inside it), or for a
     // folder that is no library, every record below it.
-    const PRESENT: &str = "SELECT path_join(l.root, m.rel_path) FROM models m JOIN libraries l ON l.id = m.library_id \
-                           WHERE NOT coalesce(m.is_missing, 0)";
-    let recorded: Vec<String> = match roots.locate_root(folder) {
-        Some(id) => conn.prepare(&format!("{PRESENT} AND m.library_id = ?1"))?.query_map([id], |r| r.get(0))?.collect::<Result<_>>()?,
+    const RECORDED: &str = "SELECT path_join(l.root, m.rel_path), coalesce(m.is_missing, 0) FROM models m JOIN libraries l ON l.id = m.library_id";
+    let row = |r: &rusqlite::Row| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?));
+    let recorded: Vec<(String, bool)> = match roots.locate_root(folder) {
+        Some(id) => conn.prepare(&format!("{RECORDED} WHERE m.library_id = ?1"))?.query_map([id], row)?.collect::<Result<_>>()?,
         None => conn
-            .prepare(&format!("{PRESENT} AND posix_join(l.root, m.rel_path) LIKE ?1 ESCAPE '!'"))?
-            .query_map([under(folder)], |r| r.get(0))?
+            .prepare(&format!("{RECORDED} WHERE posix_join(l.root, m.rel_path) LIKE ?1 ESCAPE '!'"))?
+            .query_map([under(folder)], row)?
             .collect::<Result<_>>()?,
     };
+    // Below a folder that could not be read nothing is known. A folder with no
+    // archive left at all is taken for an unmounted share: no crawl for that.
+    let known = |p: &str| !unreadable.iter().any(|d| crate::storage::libraries::contains(d, p));
     // A recursive listing covers every record counted here; otherwise each is looked up.
     let listed: std::collections::HashSet<String> = files.iter().map(|p| crate::relpath::path_key(p)).collect();
-    out.gone = if recurse {
-        recorded.iter().filter(|p| !listed.contains(&crate::relpath::path_key(p))).count()
-    } else {
-        recorded.iter().filter(|p| !Path::new(&crate::relpath::on_disk(p)).exists()).count()
-    };
+    let found = |p: &str| if recurse { listed.contains(&crate::relpath::path_key(p)) } else { Path::new(&crate::relpath::on_disk(p)).exists() };
+    for (p, flagged) in recorded.iter().filter(|(p, _)| known(p)) {
+        match (*flagged, found(p)) {
+            (false, false) if !files.is_empty() => out.gone += 1,
+            (true, true) => out.back += 1,
+            _ => {}
+        }
+    }
     Ok(out)
 }
 
@@ -92,7 +100,7 @@ mod tests {
         migrate(&db, &Vectors::default()).unwrap();
         let conn = open(&db).unwrap();
         let folder = crate::winpath::native(&root.to_string_lossy());
-        assert_eq!(changes(&conn, &folder, true, false).unwrap(), Changes { new: 2, modified: 0, gone: 0 });
+        assert_eq!(changes(&conn, &folder, true, false).unwrap(), Changes { new: 2, ..Default::default() });
 
         // Recorded as they are: nothing to do.
         // The monitored folder is a library; a path outside it gets its own.
@@ -123,12 +131,17 @@ mod tests {
         std::fs::write(root.join("a.zip"), b"aaaa-longer").unwrap();
         std::fs::remove_file(root.join("sub").join("b.zip")).unwrap();
         std::fs::write(root.join("c.7z"), b"c").unwrap();
-        assert_eq!(changes(&conn, &folder, true, false).unwrap(), Changes { new: 1, modified: 1, gone: 1 });
+        assert_eq!(changes(&conn, &folder, true, false).unwrap(), Changes { new: 1, modified: 1, gone: 1, back: 0 });
 
         // Records elsewhere, or already missing, are not this folder's business.
         insert(&crate::winpath::native(&dir.path().join("other").join("x.zip").to_string_lossy()), 1, 1);
         conn.execute("UPDATE models SET is_missing = 1 WHERE rel_path LIKE '%b.zip'", []).unwrap();
-        assert_eq!(changes(&conn, &folder, true, false).unwrap(), Changes { new: 1, modified: 1, gone: 0 });
+        assert_eq!(changes(&conn, &folder, true, false).unwrap(), Changes { new: 1, modified: 1, ..Default::default() });
+
+        // A flagged archive that is back: a crawl clears the flag.
+        std::fs::write(root.join("sub").join("b.zip"), b"bbbb").unwrap();
+        assert_eq!(changes(&conn, &folder, true, false).unwrap().back, 1);
+        std::fs::remove_file(root.join("sub").join("b.zip")).unwrap();
 
         // Only a time that differs: changed, unless sizes alone count.
         let a = path("a.zip");
@@ -136,5 +149,12 @@ mod tests {
         conn.execute("UPDATE models SET archive_size = ?1, archive_mtime_ns = ?2 WHERE rel_path = 'a.zip'", [s, m - 1]).unwrap();
         assert_eq!(changes(&conn, &folder, true, false).unwrap().modified, 1);
         assert_eq!(changes(&conn, &folder, true, true).unwrap().modified, 0);
+
+        // Every archive gone at once: an unmounted share, not a reason to crawl.
+        conn.execute("UPDATE models SET is_missing = 0", []).unwrap();
+        for f in ["a.zip", "c.7z"] {
+            std::fs::remove_file(root.join(f)).unwrap();
+        }
+        assert_eq!(changes(&conn, &folder, true, false).unwrap().gone, 0);
     }
 }

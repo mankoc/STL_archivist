@@ -120,7 +120,12 @@ folders every* minutes (*Settings → Library*, default 30) the server compares 
 the library by file size and date (size alone with *Detect changed archives by size only*),
 without opening archives, and crawls it only when archives were added, changed or removed (the job shows as started by `monitor`). Archives that vanished
 are marked missing instead of deleted; *Settings → Maintenance → Remove missing archives* deletes their
-records.
+records. An archive that comes back clears its mark at the next check.
+
+**When a folder cannot be read.** A crawl never takes what it cannot see for deleted: the records
+below a folder it could not read stay as they are, and when a whole library comes back empty (a
+share that is not mounted, a disconnected drive) its records are only marked missing. The job says
+so, and they are back to normal at the first crawl that finds the archives again.
 
 > In the desktop app's *This computer* mode, the server belongs to the window: closing the
 > window stops a running crawl. The next crawl or *Update all* continues from there.
@@ -268,8 +273,8 @@ Select models, then open **Archives** above the table (or right-click a row or i
   to the library's *thumbnails per archive*.
 - **Sort files…** moves the archives into a folder tree built from a pattern, for example
   `{collection}/{creator}/{title}` under a target folder. **Preview** shows every move first
-  (*COLLISION* means a file of that name exists, and a numbered name is used; *MISS* means the
-  archive is not on disk). **Move** moves all of them or none: if one move fails, the others
+  (*COLLISION* means a file of that name exists or another move goes there, and a numbered name
+  is used; *MISS* means the archive is not on disk). **Move** moves all of them or none: if one move fails, the others
   are put back. Needs *file sorting* on in the library settings.
 - **Delete files…** deletes the archive files and removes their records. With a trash folder
   set in the library settings, the files are moved there with a small note (`.json`) for

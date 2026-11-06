@@ -152,7 +152,7 @@ endsolid
     let studio = root.join("Studio");
     let id = submit(&lib, &ed, json!({"kind": "crawl", "folder": studio.to_string_lossy(), "in_library": true})).await;
     let v = wait(&lib, &ed, id).await;
-    assert_eq!(v["job"]["message"], "1 new, 0 updated, 2 unchanged", "{v}");
+    assert_eq!(v["job"]["message"], "1 new, 0 updated, 2 unchanged, 1 flagged missing", "{v}");
     assert_eq!(count(&lib, "SELECT count(*) FROM libraries"), 1, "Studio is not made a library folder");
     assert_eq!(count(&lib, "SELECT count(DISTINCT library_id) FROM models"), 1);
     // The library's pattern reads the path from its root.
@@ -468,6 +468,7 @@ async fn update_folders_keeps_records_moved_between_folders() {
     let (a, b) = (lib.dir.path().join("a"), lib.dir.path().join("b"));
     write_zip(&a.join("Dragon.zip"), &[("dragon.stl", b"solid d\nendsolid\n")]);
     write_zip(&a.join("Gone.zip"), &[("gone.stl", b"solid g\nendsolid\n")]);
+    write_zip(&a.join("Stays.zip"), &[("stays.stl", b"solid s\nendsolid\n")]);
     write_zip(&b.join("Knight.zip"), &[("knight.stl", b"solid k\nendsolid\n")]);
     for f in [&a, &b] {
         let id = submit(&lib, &ed, json!({"kind": "crawl", "folder": f.to_string_lossy()})).await;
@@ -484,7 +485,7 @@ async fn update_folders_keeps_records_moved_between_folders() {
     assert_eq!(v["job"]["counts"], json!({"new": 0, "updated": 0, "deleted": 1}), "{v}");
     assert_eq!(v["changes"]["new"], json!([]), "Dragon moved: not new");
     assert_eq!(v["changes"]["deleted"], json!([a.join("Gone.zip").to_string_lossy()]), "{v}");
-    assert_eq!(count(&lib, "SELECT count(*) FROM models"), 2, "Gone is deleted, Dragon kept once");
+    assert_eq!(count(&lib, "SELECT count(*) FROM models"), 3, "Gone is deleted, Dragon kept once");
     let (title, path): (String, String) = lib
         .state
         .db

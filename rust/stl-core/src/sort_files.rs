@@ -5,7 +5,7 @@
 //! goes to one folder, the folder's other files (pictures, links, `info.json`)
 //! go with them.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use rusqlite::types::Value;
@@ -204,18 +204,33 @@ pub fn preview(sources: &[SortSource], ids: &[i64], base: &Path, pattern: &str, 
         })
         .collect();
     rows.extend(companions(&rows));
+    // Two rows of the plan going to one place collide as well.
+    let mut planned = HashSet::new();
+    for r in rows.iter_mut().filter(|r| r.moves()) {
+        if !planned.insert(path_key(Path::new(&r.to))) && r.status == "OK" {
+            r.status = "COLLISION";
+        }
+    }
     rows
 }
 
-/// `_unique_target`: `path`, or the first free `<stem>_<n><ext>` beside it.
-fn unique_target(path: &Path) -> PathBuf {
-    if !path.exists() {
+/// How two paths of a plan compare (letter case aside on Windows).
+fn path_key(path: &Path) -> String {
+    crate::relpath::path_key(&path.to_string_lossy())
+}
+
+/// `path`, or the first `<stem>_<n><ext>` beside it, free on disk and not in
+/// `taken` (the destinations already planned: nothing has moved yet, so the
+/// disk alone would give two rows the same name, and a rename replaces its target).
+fn unique_target(path: &Path, taken: &HashSet<String>) -> PathBuf {
+    let free = |p: &Path| !p.exists() && !taken.contains(&path_key(p));
+    if free(path) {
         return path.to_path_buf();
     }
     let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let ext = path.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
     let parent = path.parent().unwrap_or(Path::new(""));
-    (1..).map(|n| parent.join(format!("{stem}_{n}{ext}"))).find(|p| !p.exists()).expect("a free name")
+    (1..).map(|n| parent.join(format!("{stem}_{n}{ext}"))).find(|p| free(p)).expect("a free name")
 }
 
 fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
@@ -233,16 +248,21 @@ fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
 /// happened (including any file that could not be moved back).
 pub fn execute(rows: &[PlanRow]) -> Result<Vec<(i64, String)>, String> {
     let mut plan = Vec::new();
+    let mut taken = HashSet::new();
     for r in rows.iter().filter(|r| r.moves()) {
         let src = PathBuf::from(&r.from);
         if !src.exists() {
             return Err(format!("source file no longer exists: {}; no files were moved", src.display()));
         }
-        plan.push((src, unique_target(Path::new(&r.to)), r.id));
+        let to = Path::new(&r.to);
+        // An archive already where the pattern puts it stays there.
+        let dst = if path_key(&src) == path_key(to) { src.clone() } else { unique_target(to, &taken) };
+        taken.insert(path_key(&dst));
+        plan.push((src, dst, r.id));
     }
     let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new();
     let mut error = None;
-    for (src, dst, _) in &plan {
+    for (src, dst, _) in plan.iter().filter(|(src, dst, _)| src != dst) {
         if let Some(dir) = dst.parent()
             && let Err(e) = std::fs::create_dir_all(dir)
         {
@@ -269,7 +289,7 @@ pub fn execute(rows: &[PlanRow]) -> Result<Vec<(i64, String)>, String> {
             format!("{e}; these files could not be moved back: {}", failed.join("; "))
         });
     }
-    let mut dirs: Vec<PathBuf> = plan.iter().filter_map(|(s, _, _)| s.parent().map(Path::to_path_buf)).collect();
+    let mut dirs: Vec<PathBuf> = plan.iter().filter(|(s, d, _)| s != d).filter_map(|(s, _, _)| s.parent().map(Path::to_path_buf)).collect();
     dirs.sort_by_key(|d| std::cmp::Reverse(d.components().count()));
     dirs.dedup();
     for d in dirs {
@@ -309,6 +329,57 @@ mod tests {
             subcollection: None,
             release: None,
         }
+    }
+
+    /// `name` in `dir`, holding `text`.
+    fn file(dir: &Path, name: &str, text: &str) -> String {
+        std::fs::create_dir_all(dir).unwrap();
+        let p = dir.join(name);
+        std::fs::write(&p, text).unwrap();
+        p.to_string_lossy().into_owned()
+    }
+
+    fn contents(dir: &Path) -> Vec<String> {
+        let mut v: Vec<String> = std::fs::read_dir(dir).unwrap().flatten().filter(|e| e.path().is_file()).map(|e| std::fs::read_to_string(e.path()).unwrap()).collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn two_archives_with_one_destination_are_both_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let (a, b) = (file(&dir.path().join("a"), "Dragon.zip", "first"), file(&dir.path().join("b"), "Dragon.zip", "second"));
+        let base = dir.path().join("sorted");
+        let sources = [source(1, &a, Some("Dragon"), Some("Sanix")), source(2, &b, Some("Dragon"), Some("Sanix"))];
+        let rows = preview(&sources, &[1, 2], &base, "{title}", UNKNOWN);
+        assert_eq!(rows.iter().map(|r| r.status).collect::<Vec<_>>(), ["OK", "COLLISION"], "the plan shows it");
+        let moved = execute(&rows).unwrap();
+        assert_eq!(contents(&base), ["first", "second"]);
+        assert_eq!(moved[0].1, base.join("Dragon.zip").to_string_lossy());
+        assert_eq!(moved[1].1, base.join("Dragon_1.zip").to_string_lossy(), "the database gets the name used");
+    }
+
+    #[test]
+    fn folders_sorted_together_keep_their_other_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let (da, db) = (dir.path().join("a"), dir.path().join("b"));
+        let (one, two) = (file(&da, "One.zip", "one"), file(&db, "Two.zip", "two"));
+        file(&da, "cover.jpg", "cover of a");
+        file(&db, "cover.jpg", "cover of b");
+        let base = dir.path().join("sorted");
+        let sources = [source(1, &one, Some("One"), Some("Studio")), source(2, &two, Some("Two"), Some("Studio"))];
+        execute(&preview(&sources, &[1, 2], &base, "{creator}/{title}", UNKNOWN)).unwrap();
+        assert_eq!(contents(&base.join("Studio")), ["cover of a", "cover of b", "one", "two"]);
+    }
+
+    #[test]
+    fn an_archive_already_in_place_stays() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("sorted");
+        let a = file(&base, "Dragon.zip", "first");
+        let rows = preview(&[source(1, &a, Some("Dragon"), None)], &[1], &base, "{title}", UNKNOWN);
+        assert_eq!(execute(&rows).unwrap(), vec![(1, a)]);
+        assert_eq!(std::fs::read_dir(&base).unwrap().count(), 1, "not renamed to Dragon_1.zip");
     }
 
     #[test]
