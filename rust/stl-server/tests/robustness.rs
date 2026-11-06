@@ -153,3 +153,76 @@ async fn answers_are_compressed_but_not_archives() {
     assert!(archive.headers.get(header::CONTENT_ENCODING).is_none(), "an archive is compressed already");
     assert!(archive.headers.get(header::CONTENT_LENGTH).is_some(), "and its download keeps its size");
 }
+
+/// A ZIP of stored members, those named in `locked` marked as encrypted.
+fn zip_with_locked(names: &[&str], locked: &[&str]) -> Vec<u8> {
+    let stored = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    let mut z = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    for name in names {
+        z.start_file(*name, stored).unwrap();
+        z.write_all(b"image").unwrap();
+    }
+    let mut bytes = z.finish().unwrap().into_inner();
+    let entries: Vec<usize> = bytes.windows(4).enumerate().filter(|(_, w)| *w == b"PK\x01\x02").map(|(i, _)| i).collect();
+    for at in entries {
+        let len = u16::from_le_bytes([bytes[at + 28], bytes[at + 29]]) as usize;
+        let name = std::str::from_utf8(&bytes[at + 46..at + 46 + len]).unwrap();
+        if locked.contains(&name) {
+            bytes[at + 8] |= 1;
+        }
+    }
+    bytes
+}
+
+#[test]
+fn an_encrypted_member_leaves_the_others_readable() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("some.zip");
+    std::fs::write(&path, zip_with_locked(&["a.jpg", "b.jpg", "c.jpg"], &["b.jpg"])).unwrap();
+    let wanted: Vec<String> = ["a.jpg", "b.jpg", "c.jpg"].map(String::from).to_vec();
+    let read = stl_core::archive::read_members(&path, &wanted).unwrap();
+    assert_eq!(read.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["a.jpg", "c.jpg"]);
+}
+
+/// With nothing read, callers must hear why: "no images" would be a different answer.
+#[test]
+fn an_archive_with_nothing_readable_is_still_an_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("all.zip");
+    std::fs::write(&path, zip_with_locked(&["a.jpg", "b.jpg"], &["a.jpg", "b.jpg"])).unwrap();
+    let wanted: Vec<String> = ["a.jpg", "b.jpg"].map(String::from).to_vec();
+    assert!(stl_core::archive::read_members(&path, &wanted).is_err());
+}
+
+/// The desktop app stops its local server by closing its standard input, which
+/// runs the shutdown that exports pending sidecars, where killing it would not.
+#[test]
+fn closing_standard_input_stops_the_server_cleanly() {
+    use std::io::BufRead;
+    use std::process::{Command, Stdio};
+    let dir = tempfile::tempdir().unwrap();
+    let mut server = Command::new(env!("CARGO_BIN_EXE_stl-server"))
+        .args(["--data-dir", &dir.path().to_string_lossy(), "--bind", "127.0.0.1:0"])
+        .env("STL_STOP_WITH_STDIN", "1")
+        .env("NO_COLOR", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let output = std::io::BufReader::new(server.stdout.take().unwrap());
+    let mut lines = output.lines();
+    assert!(lines.by_ref().map_while(Result::ok).any(|l| l.contains("listening on")), "the server started");
+    std::thread::spawn(move || lines.for_each(drop));
+
+    drop(server.stdin.take());
+    for _ in 0..200 {
+        if let Some(status) = server.try_wait().unwrap() {
+            assert!(status.success(), "{status}");
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    server.kill().unwrap();
+    panic!("the server kept running");
+}

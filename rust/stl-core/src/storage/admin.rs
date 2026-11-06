@@ -140,6 +140,33 @@ fn null_ref(tx: &Transaction, column: &str, where_sql: &str, param: i64) -> Resu
     Ok(())
 }
 
+/// The archives of the models a lookup row is set on: what a change to the row
+/// touches, read before it (sidecars hold the names).
+pub fn archive_paths(conn: &Connection, kind: &str, id: i64) -> Result<Vec<String>> {
+    let sql = match kind {
+        "tag" => "SELECT model_id FROM model_tags WHERE tag_id = ?1",
+        "scale" => "SELECT model_id FROM model_scales WHERE scale_id = ?1",
+        "category" => "SELECT id FROM models WHERE category_id = ?1",
+        "subcollection" => "SELECT id FROM models WHERE subcollection_id = ?1",
+        "collection" => {
+            "SELECT id FROM models WHERE collection_id = ?1 \
+             OR subcollection_id IN (SELECT id FROM subcollections WHERE collection_id = ?1)"
+        }
+        other => return Err(rusqlite::Error::InvalidParameterName(format!("unknown lookup kind: {other}"))),
+    };
+    paths_of(conn, sql, id)
+}
+
+/// [`archive_paths`] for a creator's name.
+pub fn author_archive_paths(conn: &Connection, name: &str) -> Result<Vec<String>> {
+    paths_of(conn, "SELECT id FROM models WHERE creator = ?1", name)
+}
+
+fn paths_of(conn: &Connection, sql: &str, key: impl rusqlite::ToSql) -> Result<Vec<String>> {
+    let ids = conn.prepare(sql)?.query_map([key], |r| r.get(0))?.collect::<Result<Vec<i64>>>()?;
+    Ok(super::model_edit::archive_paths(conn, &ids)?.into_values().collect())
+}
+
 /// `delete`.
 pub fn delete(tx: &Transaction, kind: &str, id: i64) -> Result<()> {
     match kind {

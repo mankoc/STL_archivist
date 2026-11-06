@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026.45.32 — 2026-11-06
+
+- **Renaming, merging or deleting a tag, scale, category, collection, subcollection or creator now updates the
+  `METADATA.7z` sidecars** of the models involved. They used to keep the old name.
+- **An encrypted image in a ZIP no longer hides the archive's other images.** Only that member is skipped. An archive
+  where nothing can be read still reports the error, so Rescan doesn't take it for an archive with no images.
+- **Crawls read sidecars before taking the database's write lock,** so edits don't wait while a sidecar's thumbnails
+  are decompressed.
+- **The desktop app stops its local server cleanly,** so sidecars of the latest edits are written. It closes the
+  server's standard input (`STL_STOP_WITH_STDIN`), and kills it only if it hasn't stopped after 15 seconds.
+- **The desktop app keeps the previous server log** as `stl-server.previous.log`, for when a run crashed, and a crash
+  can no longer leave `servers.json` half written.
+- **Updates check the installer's checksum** against the SHA-256 GitHub publishes for it, and refuse to run a download
+  that differs.
+
 ## 2026.45.31 — 2026-11-06
 
 - **A damaged archive can no longer crash the server.** A ZIP whose header claimed an impossible size ended the

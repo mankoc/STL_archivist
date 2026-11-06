@@ -172,8 +172,9 @@ pub(super) fn list_members(path: &Path) -> Result<Vec<ArchiveMember>, ArchiveErr
 ///
 /// `NameToInfo` keeps the last entry of a duplicated name, and so does this.
 /// A member that `zipfile` would fail to read (header name mismatch,
-/// overlapped entries, bad CRC) is left out, as `read_batch` does. Encrypted
-/// members and methods other than stored/deflate make the whole call fail.
+/// overlapped entries, bad CRC) is left out, as `read_batch` does. So are
+/// encrypted members and methods other than stored/deflate, unless nothing
+/// else was read: then the call fails, as "no data" would be a different answer.
 pub(super) fn read_members(
     path: &Path,
     wanted: &[String],
@@ -186,24 +187,24 @@ pub(super) fn read_members(
     }
     let selected: Vec<(&String, &Entry)> =
         wanted.iter().filter_map(|n| by_name.get(n.as_str()).map(|e| (n, *e))).collect();
-    for (_, e) in &selected {
+    let mut out = Vec::new();
+    let mut skipped = None;
+    for (name, e) in selected {
         // Encrypted (bit 0), compressed patched data (5), strong encryption (6).
         if e.flags & 0b110_0001 != 0 {
-            return Err(ArchiveError::Unsupported("encrypted or patched zip member".into()));
-        }
-        if e.method != 0 && e.method != 8 {
-            return Err(ArchiveError::Unsupported(format!("zip compression method {}", e.method)));
-        }
-    }
-    let mut out = Vec::new();
-    for (name, e) in selected {
-        if let Some(data) = read_entry(&mut f, e)?
+            skipped = Some("encrypted or patched zip member".to_string());
+        } else if e.method != 0 && e.method != 8 {
+            skipped = Some(format!("zip compression method {}", e.method));
+        } else if let Some(data) = read_entry(&mut f, e)?
             && !data.is_empty()
         {
             out.push((name.clone(), data));
         }
     }
-    Ok(out)
+    match skipped {
+        Some(why) if out.is_empty() => Err(ArchiveError::Unsupported(why)),
+        _ => Ok(out),
+    }
 }
 
 /// One member's bytes, or `None` where `ZipFile.open`/`read` would raise.

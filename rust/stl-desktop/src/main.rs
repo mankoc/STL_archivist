@@ -33,7 +33,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::io::BufRead;
 use std::sync::Arc;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -46,6 +46,7 @@ use tauri::{AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindowBuilder}
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 const RELEASE_DOWNLOADS: &str = "https://github.com/mankoc/STL_archivist/releases/download";
+const RELEASE_API: &str = "https://api.github.com/repos/mankoc/STL_archivist/releases/tags";
 const INSTALLER_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const MAIN: &str = "main";
 const ABOUT: &str = "about";
@@ -55,6 +56,8 @@ const SERVERS_FILE: &str = "servers.json";
 /// How long a local server that is still running may take to answer. A first
 /// start can be slow (backing a large library up and moving it to libraries),
 /// and a server that fails exits, so this only bounds a hung one.
+/// How long the local server gets to stop by itself: a running job can hold it up.
+const LOCAL_STOP_TIMEOUT: Duration = Duration::from_secs(15);
 const LOCAL_START_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 /// A remembered server.
@@ -132,12 +135,23 @@ impl Drop for WorkerProc {
 
 struct LocalServer {
     child: Child,
+    /// Closing it asks the server to stop (`STL_STOP_WITH_STDIN`).
+    stdin: Option<ChildStdin>,
     url: String,
     data_dir: String,
 }
 
 impl Drop for LocalServer {
     fn drop(&mut self) {
+        // It writes the sidecars of the latest edits before it ends.
+        drop(self.stdin.take());
+        let deadline = Instant::now() + LOCAL_STOP_TIMEOUT;
+        while Instant::now() < deadline {
+            if !matches!(self.child.try_wait(), Ok(None)) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
@@ -196,7 +210,14 @@ fn store_saved(app: &AppHandle, saved: &Saved) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    std::fs::write(&path, serde_json::to_string_pretty(saved).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+    write_atomic(&path, &serde_json::to_string_pretty(saved).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+}
+
+/// Replace `path` in one step: a crash leaves the old file or the new one, whole.
+fn write_atomic(path: &Path, text: &str) -> std::io::Result<()> {
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, text)?;
+    std::fs::rename(&tmp, path)
 }
 
 /// `http(s)://host[:port]` with no path, query or credentials.
@@ -336,11 +357,14 @@ fn spawn_local(app: &AppHandle, data_dir: &str) -> Result<LocalServer, String> {
     let log_dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&log_dir).map_err(|e| e.to_string())?;
     let log_path = log_dir.join("stl-server.log");
+    // The last run's log survives one start, for when that run crashed.
+    let _ = std::fs::rename(&log_path, log_dir.join("stl-server.previous.log"));
     let log = std::fs::File::create(&log_path).map_err(|e| e.to_string())?;
     let mut cmd = Command::new(&exe);
     cmd.args(["--data-dir", data_dir, "--bind", &format!("127.0.0.1:{port}")])
         .env("NO_COLOR", "1")
-        .stdin(Stdio::null())
+        .env("STL_STOP_WITH_STDIN", "1")
+        .stdin(Stdio::piped())
         .stdout(log.try_clone().map_err(|e| e.to_string())?)
         .stderr(log);
     #[cfg(windows)]
@@ -351,6 +375,7 @@ fn spawn_local(app: &AppHandle, data_dir: &str) -> Result<LocalServer, String> {
     let mut child = cmd.spawn().map_err(|e| format!("cannot start {}: {e}", exe.display()))?;
     // Even if this shell crashes, the server (and its library lock) goes with it.
     stl_proc::end_with_parent(&child);
+    let stdin = child.stdin.take();
     let url = format!("http://127.0.0.1:{port}");
     let base = Url::parse(&url).map_err(|e| e.to_string())?;
     let deadline = Instant::now() + LOCAL_START_TIMEOUT;
@@ -359,7 +384,7 @@ fn spawn_local(app: &AppHandle, data_dir: &str) -> Result<LocalServer, String> {
             return Err(format!("the local server stopped ({status}):\n{}", log_tail(&log_path)));
         }
         if reachable(&base, Duration::from_secs(2)).is_ok() {
-            return Ok(LocalServer { child, url, data_dir: data_dir.to_string() });
+            return Ok(LocalServer { child, stdin, url, data_dir: data_dir.to_string() });
         }
         if Instant::now() > deadline {
             let _ = child.kill();
@@ -866,7 +891,7 @@ fn open_in_packer(app: AppHandle, path: String) -> Result<(), String> {
 }
 
 /// The installer's address and file name for `version`, a release newer than `current`.
-fn installer_of(version: &str, current: &str) -> Result<(String, String), String> {
+fn installer_of(version: &str, current: &str) -> Result<(String, String, String), String> {
     let parts = |v: &str| v.split('.').map(str::parse::<u32>).collect::<Result<Vec<_>, _>>();
     let wanted = parts(version).ok().filter(|p| p.len() == 3).ok_or_else(|| format!("Not a version: {version}"))?;
     if parts(current).is_ok_and(|mine| wanted <= mine) {
@@ -874,14 +899,37 @@ fn installer_of(version: &str, current: &str) -> Result<(String, String), String
     }
     let version = format!("{}.{}.{}", wanted[0], wanted[1], wanted[2]);
     let name = format!("StlArchivist_{version}_x64-setup.exe");
-    Ok((format!("{RELEASE_DOWNLOADS}/v{version}/{name}"), name))
+    Ok((format!("{RELEASE_DOWNLOADS}/v{version}/{name}"), name, format!("{RELEASE_API}/v{version}")))
 }
 
-fn download_installer(url: &str, dest: &Path) -> Result<(), String> {
+/// The SHA-256 GitHub publishes for the asset `name`, from a release's JSON.
+fn asset_digest(release: &str, name: &str) -> Option<String> {
+    let release: serde_json::Value = serde_json::from_str(release).ok()?;
+    let asset = release["assets"].as_array()?.iter().find(|a| a["name"] == name)?;
+    Some(asset["digest"].as_str()?.strip_prefix("sha256:")?.to_lowercase())
+}
+
+fn sha256_of(path: &Path) -> std::io::Result<String> {
+    use sha2::Digest as _;
+    let mut hash = sha2::Sha256::new();
+    std::io::copy(&mut std::fs::File::open(path)?, &mut hash)?;
+    Ok(format!("{:x}", hash.finalize()))
+}
+
+/// Download the installer to `dest`; it stays there only if its checksum is right.
+fn download_installer(url: &str, release: &str, name: &str, dest: &Path) -> Result<(), String> {
     let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(INSTALLER_TIMEOUT)).build().into();
+    let about = agent.get(release).call().and_then(|mut r| r.body_mut().read_to_string());
+    let about = about.map_err(|e| format!("Cannot read the release: {e}"))?;
+    let expected = asset_digest(&about, name).ok_or_else(|| format!("The release gives no checksum for {name}"))?;
     let mut resp = agent.get(url).call().map_err(|e| format!("Download failed: {e}"))?;
     let mut file = std::fs::File::create(dest).map_err(|e| format!("{}: {e}", dest.display()))?;
     std::io::copy(&mut resp.body_mut().as_reader(), &mut file).map_err(|e| format!("Download failed: {e}"))?;
+    drop(file);
+    if sha256_of(dest).map_err(|e| format!("{}: {e}", dest.display()))? != expected {
+        let _ = std::fs::remove_file(dest);
+        return Err("The download is damaged (its checksum differs), so nothing was installed".to_string());
+    }
     Ok(())
 }
 
@@ -891,7 +939,7 @@ async fn install_update(app: AppHandle, version: String) -> Result<(), String> {
     if !cfg!(windows) {
         return Err("Updates install only on Windows; download this one from the release page".to_string());
     }
-    let (url, name) = installer_of(&version, env!("CARGO_PKG_VERSION"))?;
+    let (url, name, release) = installer_of(&version, env!("CARGO_PKG_VERSION"))?;
     let agreed = app
         .dialog()
         .message(format!("Download and install StlArchivist {version}? The app closes to update."))
@@ -901,9 +949,9 @@ async fn install_update(app: AppHandle, version: String) -> Result<(), String> {
     if !agreed {
         return Ok(());
     }
-    let dest = std::env::temp_dir().join(name);
+    let dest = std::env::temp_dir().join(&name);
     let target = dest.clone();
-    tauri::async_runtime::spawn_blocking(move || download_installer(&url, &target)).await.map_err(|e| e.to_string())??;
+    tauri::async_runtime::spawn_blocking(move || download_installer(&url, &release, &name, &target)).await.map_err(|e| e.to_string())??;
     Command::new(&dest).spawn().map_err(|e| format!("The installer could not start: {e}"))?;
     app.exit(0);
     Ok(())
@@ -1080,11 +1128,39 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn write_atomic_replaces_the_file_and_leaves_nothing_else() {
+        let dir = std::env::temp_dir().join(format!("stl-desktop-atomic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("servers.json");
+        std::fs::write(&path, "old").unwrap();
+        super::write_atomic(&path, "new").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn installer_checksums() {
+        let release = r#"{"assets": [{"name": "a.exe", "digest": "sha256:ABC1"}, {"name": "b.exe", "digest": null}]}"#;
+        assert_eq!(super::asset_digest(release, "a.exe").as_deref(), Some("abc1"));
+        assert_eq!(super::asset_digest(release, "b.exe"), None, "an older asset without one");
+        assert_eq!(super::asset_digest(release, "c.exe"), None);
+        assert_eq!(super::asset_digest("not json", "a.exe"), None);
+
+        let file = std::env::temp_dir().join(format!("stl-desktop-sha-{}", std::process::id()));
+        std::fs::write(&file, "abc").unwrap();
+        let hash = super::sha256_of(&file).unwrap();
+        std::fs::remove_file(&file).unwrap();
+        assert_eq!(hash, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    }
+
     use super::*;
 
     #[test]
     fn a_page_can_only_ask_for_a_newer_release() {
-        let (url, name) = installer_of("2026.46.0", "2026.45.13").unwrap();
+        let (url, name, release) = installer_of("2026.46.0", "2026.45.13").unwrap();
+        assert!(release.ends_with("/releases/tags/v2026.46.0"));
         assert_eq!(name, "StlArchivist_2026.46.0_x64-setup.exe");
         assert_eq!(url, format!("{RELEASE_DOWNLOADS}/v2026.46.0/{name}"));
         assert!(installer_of("2026.45.13", "2026.45.13").is_err());

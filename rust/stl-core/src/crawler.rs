@@ -947,8 +947,9 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
             }
             let folder = folder.clone();
             let imported = {
+                let read = sidecar::read(&folder);
                 let t = tx(&mut run.conn)?;
-                match sidecar::import(&t, st, &folder) {
+                match read.and_then(|s| sidecar::import(&t, st, &folder, s)) {
                     Ok(v) => {
                         t.commit()?;
                         run.from_sidecar.extend(v.iter().map(|p| crate::relpath::path_key(p)));
