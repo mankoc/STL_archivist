@@ -252,7 +252,7 @@ pub async fn download(State(lib): State<AppState>, _me: CurrentUser, UrlPath(id)
     let ascii: String = name.chars().map(|c| if c.is_ascii() && c != '"' && c != '\\' { c } else { '_' }).collect();
     let utf8: String = name.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect();
     let disposition = format!("attachment; filename=\"{ascii}\"; filename*=UTF-8''{utf8}");
-    let mut resp = Body::from_stream(tokio_util::io::ReaderStream::new(file)).into_response();
+    let mut resp = Body::from_stream(tokio_util::io::ReaderStream::with_capacity(file, crate::api::DOWNLOAD_CHUNK)).into_response();
     let h = resp.headers_mut();
     h.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/octet-stream"));
     if let Ok(v) = HeaderValue::from_str(&disposition) {

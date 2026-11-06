@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026.45.31 — 2026-11-06
+
+- **A damaged archive can no longer crash the server.** A ZIP whose header claimed an impossible size ended the
+  whole process, not just the crawl; reads now take what is in the file. A ZIP member can no longer inflate
+  far past its declared size, and stored RAR members are read the same safe way.
+- **Sign-in is harder to abuse:** names longer than any account's are refused without being remembered, so they
+  can't fill memory, and four password checks run at a time.
+- **Delete files, Sort files and other tools find archives named in decomposed Unicode** (some macOS names). Delete
+  files used to remove the record and leave the file.
+- **Responses are compressed** (gzip) for JSON and the web client's files, which helps on slower links. Images
+  and archives aren't, and downloads keep their size.
+- **Downloads read 256 KB at a time** instead of 4 KB.
+- **Bursts of library changes are one reload** in the web client, 0.3 seconds after the first.
+
 ## 2026.45.30 — 2026-11-06
 
 - `docs/rust-migration-plan.md` is frozen as history: the migration is finished, and changes are recorded here only. Its compatibility rules still apply.

@@ -677,9 +677,8 @@ pub fn read_members(path: &Path, names: &[String], unrar: &str) -> Result<Vec<(S
         let data = if e.stored {
             let mut f = std::fs::File::open(path)?;
             f.seek(SeekFrom::Start(e.data_offset))?;
-            let mut buf = vec![0u8; e.compress_size.min(e.size) as usize];
-            let got = read_up_to(&mut f, &mut buf)?;
-            buf.truncate(got);
+            let mut buf = Vec::new();
+            f.take(e.compress_size.min(e.size)).read_to_end(&mut buf)?;
             buf
         } else {
             if unrar.is_empty() || !Path::new(unrar).is_file() {

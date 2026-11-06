@@ -46,16 +46,10 @@ struct EndRec {
 
 fn read_exact_at(f: &mut File, pos: u64, len: usize) -> Result<Vec<u8>, ArchiveError> {
     f.seek(SeekFrom::Start(pos))?;
-    let mut buf = vec![0u8; len];
-    let mut got = 0;
-    while got < len {
-        let n = f.read(&mut buf[got..])?;
-        if n == 0 {
-            break;
-        }
-        got += n;
-    }
-    buf.truncate(got);
+    // `len` comes from the archive's headers: read what is there, and allocate no
+    // more than that, whatever they claim (a failed allocation ends the process).
+    let mut buf = Vec::new();
+    f.take(len as u64).read_to_end(&mut buf)?;
     Ok(buf)
 }
 
@@ -226,8 +220,8 @@ fn read_entry(f: &mut File, e: &Entry) -> Result<Option<Vec<u8>>, ArchiveError> 
         // zipfile compares the *decoded* names; leave that judgement to it.
         return Err(ArchiveError::Unsupported("local header name differs".into()));
     }
-    let data_start = e.header_offset + 30 + name_len + extra_len;
-    if data_start + e.compress_size > e.end_offset && e.end_offset != e.header_offset {
+    let data_start = e.header_offset.saturating_add(30 + name_len + extra_len);
+    if data_start.saturating_add(e.compress_size) > e.end_offset && e.end_offset != e.header_offset {
         return Ok(None); // "Overlapped entries" (zip bomb guard; equal offsets only warn)
     }
     let raw = read_exact_at(f, data_start, e.compress_size as usize)?;
@@ -238,7 +232,9 @@ fn read_entry(f: &mut File, e: &Entry) -> Result<Option<Vec<u8>>, ArchiveError> 
         raw
     } else {
         let mut out = Vec::with_capacity(e.member.size.unwrap_or(0).min(1 << 26) as usize);
-        if flate2::read::DeflateDecoder::new(&raw[..]).read_to_end(&mut out).is_err() {
+        // At most a byte past the declared size: enough to see it differs.
+        let limit = e.member.size.unwrap_or(0).saturating_add(1);
+        if flate2::read::DeflateDecoder::new(&raw[..]).take(limit).read_to_end(&mut out).is_err() {
             return Ok(None);
         }
         out

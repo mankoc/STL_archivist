@@ -35,6 +35,9 @@ use utoipa::{Modify, OpenApi};
 
 use crate::AppState;
 
+/// Bytes read at a time for a download: each read is a trip to the blocking pool.
+pub const DOWNLOAD_CHUNK: usize = 256 * 1024;
+
 #[derive(OpenApi)]
 #[openapi(
     info(title = "StlArchivist API", description = "The StlArchivist server's HTTP API. Every route except \

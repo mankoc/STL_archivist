@@ -11,6 +11,23 @@ type Job = Schemas["JobInfo"];
 /** The query keys a library change makes stale. */
 export const LIBRARY_KEYS = ["ids", "rows", "tree", "model", "editor", "lookups", "libraries", "grid", "folders", "folder-cells"] as const;
 
+/** How long library changes are gathered into one reload. */
+export const RELOAD_DELAY = 300;
+
+/** `run`, once, `ms` after the first of any number of calls. */
+export function coalesced(run: () => void, ms: number): { call: () => void; cancel: () => void } {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return {
+    call: () => {
+      timer ??= setTimeout(() => {
+        timer = undefined;
+        run();
+      }, ms);
+    },
+    cancel: () => clearTimeout(timer),
+  };
+}
+
 /** Every event, for components that follow one (a job's log lines). */
 const bus = new EventTarget();
 
@@ -30,6 +47,10 @@ export function useServerEvents(onEvent?: (e: ServerEvent) => void): void {
     let retry = 1000;
     let closed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // A burst of changes (a mass edit, another client typing) is one reload.
+    const reload = coalesced(() => {
+      for (const key of LIBRARY_KEYS) void queryClient.invalidateQueries({ queryKey: [key] });
+    }, RELOAD_DELAY);
     const connect = () => {
       const proto = location.protocol === "https:" ? "wss" : "ws";
       socket = new WebSocket(`${proto}://${location.host}/api/events`);
@@ -38,11 +59,7 @@ export function useServerEvents(onEvent?: (e: ServerEvent) => void): void {
       };
       socket.onmessage = (msg) => {
         const event = JSON.parse(msg.data as string) as ServerEvent;
-        if (event.type === "library_changed" || event.type === "resync") {
-          for (const key of LIBRARY_KEYS) {
-            void queryClient.invalidateQueries({ queryKey: [key] });
-          }
-        }
+        if (event.type === "library_changed" || event.type === "resync") reload.call();
         if (event.type === "job") {
           // Progress arrives twice a second: patch the cached list instead of refetching.
           const job = event.job;
@@ -65,6 +82,7 @@ export function useServerEvents(onEvent?: (e: ServerEvent) => void): void {
     return () => {
       closed = true;
       clearTimeout(timer);
+      reload.cancel();
       socket?.close();
     };
   }, [queryClient, onEvent]);

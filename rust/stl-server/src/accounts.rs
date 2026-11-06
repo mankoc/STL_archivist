@@ -22,7 +22,7 @@ pub const SESSION_IDLE_SECS: i64 = 30 * 24 * 3600;
 const TOUCH_SECS: i64 = 60;
 
 pub const MIN_PASSWORD: usize = 8;
-const MAX_NAME: usize = 64;
+pub const MAX_NAME: usize = 64;
 const MAX_SETTING_BYTES: usize = 64 * 1024;
 
 const SCHEMA: &str = "

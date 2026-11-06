@@ -96,6 +96,10 @@ pub async fn setup(
     responses((status = 200, body = Session), (status = 401, body = crate::error::ErrorBody),
               (status = 429, body = crate::error::ErrorBody)))]
 pub async fn login(State(lib): State<AppState>, headers: HeaderMap, Json(c): Json<Credentials>) -> Result<Response, ApiError> {
+    // No account has such a name: neither hash anything for it nor remember it.
+    if c.name.trim().chars().count() > accounts::MAX_NAME {
+        return Err(ApiError::new(StatusCode::UNAUTHORIZED, "wrong name or password"));
+    }
     if let Some(left) = lib.logins.locked_for(&c.name, accounts::now()) {
         return Err(ApiError::new(
             StatusCode::TOO_MANY_REQUESTS,
@@ -103,6 +107,8 @@ pub async fn login(State(lib): State<AppState>, headers: HeaderMap, Json(c): Jso
         ));
     }
     let name = c.name.clone();
+    // Each check takes about 19 MB, and anyone can ask for one.
+    let _permit = lib.password_checks.acquire().await.map_err(|e| ApiError::internal(e.to_string()))?;
     let found = lib
         .run(move |lib| {
             Ok(lib.accounts.with(|db| {

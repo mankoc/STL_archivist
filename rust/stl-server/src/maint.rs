@@ -267,7 +267,8 @@ pub fn recheck_warnings(lib: &Library, ctl: &Control, log: &dyn Fn(String), whic
         no_printable: false,
     };
     let evaluate = |path: &Option<String>| -> Option<bool> {
-        let p = Path::new(path.as_deref().filter(|p| !p.is_empty())?);
+        let p = stl_core::relpath::on_disk(path.as_deref().filter(|p| !p.is_empty())?);
+        let p = Path::new(&p);
         if !p.is_file() {
             return None;
         }
@@ -385,7 +386,7 @@ pub fn read_file_lists(lib: &Library, ctl: &Control, log: &dyn Fn(String)) -> Re
         }
         let catalogs: Vec<(&String, &String, Vec<stl_core::archive::ArchiveMember>)> = chunk
             .par_iter()
-            .filter_map(|(p, h)| stl_core::archive::list_members(Path::new(p)).ok().map(|m| (p, h, m)))
+            .filter_map(|(p, h)| stl_core::archive::list_members(Path::new(&stl_core::relpath::on_disk(p))).ok().map(|m| (p, h, m)))
             .collect();
         out.failed += chunk.len() - catalogs.len();
         out.read += catalogs.len();
