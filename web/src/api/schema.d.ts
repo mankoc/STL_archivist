@@ -433,7 +433,12 @@ export interface paths {
          *     (compacting the database, backups, imports and syncs: admin).
          */
         post: operations["post_jobs"];
-        delete?: never;
+        /**
+         * Remove the finished jobs from the list, except those holding a result
+         *     (duplicate searches, record lists, AI suggestions): pages read theirs from
+         *     the job. Needs the editor role.
+         */
+        delete: operations["delete_jobs"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2849,6 +2854,9 @@ export interface components {
         } | {
             /** @enum {string} */
             type: "resync";
+        } | {
+            /** @enum {string} */
+            type: "jobs_cleared";
         };
         ServerInfo: {
             /**
@@ -3879,6 +3887,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JobInfo"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_jobs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Count"];
                 };
             };
             403: {

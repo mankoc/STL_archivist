@@ -1697,6 +1697,8 @@ the path is visible. No business logic and no Tauri commands for data.
   left out) reaches `values`, `path_pattern::render` and `target`. `sanitise_segment` now gives `""`
   for nothing or only dots (no more `..` out of the target folder), and `target` decides what fills it.
 - 2026.45.20: `SortModal` keeps the target folder in `localStorage` (`stl.sort.target`), saved on a preview.
+- 2026.45.21: `DELETE /api/jobs` (`Jobs::clear_finished`) keeps jobs with a `result`, because pages find
+  theirs through the job list; a `jobs_cleared` event reloads other clients' lists.
 
 ### Phase 8: Retire Python (small)
 

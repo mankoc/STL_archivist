@@ -474,6 +474,8 @@ pub enum ServerEvent {
     LibraryChanged { what: String },
     /// Events were dropped for this client (it was too slow); reload everything.
     Resync,
+    /// Finished jobs were cleared: reload the job list.
+    JobsCleared,
 }
 
 pub struct Job {
@@ -553,6 +555,10 @@ impl Job {
     fn stopped(&self) -> bool {
         self.ctl.is_stopped() || self.stop.load(Ordering::Relaxed)
     }
+
+    fn finished(&self) -> bool {
+        matches!(self.info().state, JobState::Done | JobState::Failed | JobState::Cancelled)
+    }
 }
 
 pub struct Jobs {
@@ -606,17 +612,29 @@ impl Jobs {
 
     fn trim(&self) {
         let mut list = self.list.lock().unwrap_or_else(|e| e.into_inner());
-        let finished = list.iter().filter(|j| matches!(j.info().state, JobState::Done | JobState::Failed | JobState::Cancelled)).count();
-        let mut excess = finished.saturating_sub(KEEP_FINISHED);
+        let mut excess = list.iter().filter(|j| j.finished()).count().saturating_sub(KEEP_FINISHED);
         list.retain(|j| {
-            let old = matches!(j.info().state, JobState::Done | JobState::Failed | JobState::Cancelled);
-            if old && excess > 0 {
+            if j.finished() && excess > 0 {
                 excess -= 1;
                 false
             } else {
                 true
             }
         });
+    }
+
+    /// Remove the finished jobs, except those holding a result: the duplicate,
+    /// record and AI tagger pages read theirs from the job. Gives how many went.
+    pub fn clear_finished(&self) -> usize {
+        let mut list = self.list.lock().unwrap_or_else(|e| e.into_inner());
+        let before = list.len();
+        list.retain(|j| !j.finished() || j.result().is_some());
+        let cleared = before - list.len();
+        drop(list);
+        if cleared > 0 {
+            self.send(ServerEvent::JobsCleared);
+        }
+        cleared
     }
 
     /// Cancel a job: a queued one at once, a running one at its next checkpoint.

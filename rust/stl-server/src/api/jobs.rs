@@ -21,6 +21,16 @@ pub async fn list(State(lib): State<AppState>, _me: CurrentUser) -> Json<Vec<Job
     Json(lib.jobs.list())
 }
 
+/// Remove the finished jobs from the list, except those holding a result
+/// (duplicate searches, record lists, AI suggestions): pages read theirs from
+/// the job. Needs the editor role.
+#[utoipa::path(delete, path = "/api/jobs", tag = "jobs",
+    responses((status = 200, body = super::lookups::Count), (status = 403, body = crate::error::ErrorBody)))]
+pub async fn clear(State(lib): State<AppState>, me: CurrentUser) -> Result<Json<super::lookups::Count>, ApiError> {
+    me.require(Role::Editor)?;
+    Ok(Json(super::lookups::Count { count: lib.jobs.clear_finished() as i64 }))
+}
+
 /// Queue a job. Jobs run one at a time, in order. Needs the editor role
 /// (compacting the database, backups, imports and syncs: admin).
 #[utoipa::path(post, path = "/api/jobs", tag = "jobs", request_body = JobRequest,

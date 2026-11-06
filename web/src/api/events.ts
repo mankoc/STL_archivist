@@ -50,7 +50,7 @@ export function useServerEvents(onEvent?: (e: ServerEvent) => void): void {
             old ? (old.some((j) => j.id === job.id) ? old.map((j) => (j.id === job.id ? job : j)) : [...old, job]) : old,
           );
         }
-        if (event.type === "resync") void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+        if (event.type === "resync" || event.type === "jobs_cleared") void queryClient.invalidateQueries({ queryKey: ["jobs"] });
         onEvent?.(event);
         bus.dispatchEvent(new CustomEvent("event", { detail: event }));
       };

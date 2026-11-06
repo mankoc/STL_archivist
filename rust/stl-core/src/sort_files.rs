@@ -325,6 +325,18 @@ mod tests {
     }
 
     #[test]
+    fn first_characters_of_a_field() {
+        let base = Path::new("D:/new");
+        let s = source(1, "D:/old/Dragon.zip", Some("Dragon"), Some("Sanix"));
+        let to = |pattern| target(base, pattern, &s, UNKNOWN);
+        assert_eq!(to("{title:1}/{author:4}/{title}"), base.join("D").join("Sani").join("Dragon.zip"));
+        assert_eq!(to("{Title:3}"), base.join("Dra.zip"));
+        assert_eq!(to("{author:40}/{title}"), base.join("Sanix").join("Dragon.zip"), "shorter than asked");
+        let s = source(1, "D:/old/Dragon.zip", Some("Éclair"), None);
+        assert_eq!(target(base, "{title:1}/{title}", &s, UNKNOWN), base.join("É").join("Éclair.zip"), "characters, not bytes");
+    }
+
+    #[test]
     fn missing_fields() {
         let base = Path::new("D:/new");
         let s = source(1, "D:/old/Dragon.zip", Some("Red"), None);

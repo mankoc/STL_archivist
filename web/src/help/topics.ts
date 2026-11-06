@@ -476,6 +476,7 @@ export const TOPICS: Topic[] = [
         "The **pause** button holds a job at its next safe point until you press **continue**; a paused job that has not started yet lets the jobs behind it go first.",
         "The **stop** button stops a job at its next safe point, keeping the work already done.",
         "Progress shows items done out of the total and, after a few seconds, an estimate of the time left.",
+        "**Clear finished** removes done, failed and stopped jobs from the list, with their logs. Jobs holding results that other pages show (duplicate searches, record lists, AI suggestions) stay.",
       ] },
     ],
   },

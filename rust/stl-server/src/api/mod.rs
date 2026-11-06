@@ -86,6 +86,7 @@ use crate::AppState;
         lookups::profile,
         lookups::save_profile,
         jobs::list,
+        jobs::clear,
         jobs::submit,
         jobs::detail,
         jobs::cancel,
@@ -213,7 +214,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/images/{id}/thumbnail", get(thumbs::image_thumbnail))
         .route("/api/images/{id}/original", get(thumbs::image_original))
         .route("/api/thumb/{digest}", get(thumbs::thumb))
-        .route("/api/jobs", get(jobs::list).post(jobs::submit))
+        .route("/api/jobs", get(jobs::list).post(jobs::submit).delete(jobs::clear))
         .route("/api/jobs/{id}", get(jobs::detail).delete(jobs::cancel))
         .route("/api/jobs/{id}/pause", post(jobs::pause))
         .route("/api/jobs/{id}/resume", post(jobs::resume))

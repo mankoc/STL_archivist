@@ -68,7 +68,7 @@ export function PatternTools({ pattern, onChange, mode }: { pattern: string; onC
             {mode === "sort" ? (
               <>
                 <Code>{"{title:20}"}</Code> keeps the first 20 characters, so <Code>{"{creator:1}/{creator}/{title}"}</Code> puts Sanix
-                under <Code>S/Sanix/</Code>. Case does not matter. A missing value becomes <Code>_unknown</Code>; characters not
+                under <Code>S/Sanix/</Code>. Case does not matter. <em>Missing fields</em> chooses what a field without a value becomes; characters not
                 allowed in file names become <Code>_</Code>.
               </>
             ) : (

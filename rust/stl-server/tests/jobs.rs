@@ -513,3 +513,27 @@ async fn clear_library_needs_an_admin_and_confirmation() {
     let stats = lib.state.thumbs.stats().unwrap();
     assert_eq!((stats.thumbnails, stats.blobs), (0, 0), "thumbnails dropped");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn clearing_finished_jobs_keeps_results() {
+    let lib = empty_library();
+    let ed = lib.user("ed", Role::Editor);
+    let viewer = lib.user("vic", Role::Viewer);
+    let root = archives(&lib);
+    let crawl = submit(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy()})).await;
+    assert_eq!(wait(&lib, &ed, crawl).await["job"]["state"], "done");
+    let finder = submit(&lib, &ed, json!({"kind": "find_content_duplicates", "threshold": 0.8})).await;
+    assert_eq!(wait(&lib, &ed, finder).await["job"]["state"], "done");
+
+    assert_eq!(call(&lib.state, "DELETE", "/api/jobs", Some(&viewer), None).await.status, StatusCode::FORBIDDEN);
+    let mut events = lib.state.jobs.events.subscribe();
+    let r = call(&lib.state, "DELETE", "/api/jobs", Some(&ed), None).await;
+    assert_eq!((r.status, r.json()["count"].as_i64()), (StatusCode::OK, Some(1)));
+    assert!(std::iter::from_fn(|| events.try_recv().ok()).any(|e| matches!(e, ServerEvent::JobsCleared)));
+
+    let list = call(&lib.state, "GET", "/api/jobs", Some(&ed), None).await.json();
+    let ids: Vec<u64> = list.as_array().unwrap().iter().map(|j| j["id"].as_u64().unwrap()).collect();
+    assert_eq!(ids, vec![finder], "the job with a result stays");
+    assert_eq!(call(&lib.state, "GET", &format!("/api/jobs/{crawl}"), Some(&ed), None).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(call(&lib.state, "DELETE", "/api/jobs", Some(&ed), None).await.json()["count"], 0);
+}
