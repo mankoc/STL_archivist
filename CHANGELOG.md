@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026.45.37 — 2026-11-06
+
+- **RAR archives read much faster with UnRAR:** one run reads all the members needed, instead of one run each, which
+  decoded a solid archive from its start every time. 30 members of a solid archive took 1.96 s and now take 0.10 s.
+- **An unreadable member in a `.rar` or `.7z` no longer hides the rest,** as already in a ZIP: an encrypted RAR member
+  or a damaged 7z block costs only its own members. With nothing readable, the error is still reported.
+- **CLIP embeddings prepare a batch's images on all cores,** so a GPU waits less, and the search for duplicate images
+  keeps one copy fewer of every vector.
+
 ## 2026.45.36 — 2026-11-06
 
 - **Editing a title, sequence or To print cell no longer reloads the filter pane** on any client, and the server keeps

@@ -240,3 +240,50 @@ async fn job_events_leave_out_the_list_of_ids() {
     let full = call(&lib.state, "GET", &format!("/api/jobs/{}", job.id), Some(&ed), None).await.json();
     assert_eq!(full["job"]["request"]["ids"].as_array().map(Vec::len), Some(100_000), "asking for the job gives all of it");
 }
+
+/// WinRAR's tools, where they are installed: RAR archives can't be written otherwise.
+fn winrar() -> Option<(std::path::PathBuf, String)> {
+    let dir = std::path::Path::new(r"C:\Program Files\WinRAR");
+    let unrar = dir.join("UnRAR.exe");
+    (dir.join("Rar.exe").is_file() && unrar.is_file()).then(|| (dir.join("Rar.exe"), unrar.to_string_lossy().into_owned()))
+}
+
+#[test]
+fn a_solid_rar_gives_every_member_but_the_locked_one() {
+    let Some((rar, unrar)) = winrar() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let archive = dir.path().join("solid.rar");
+    let mut names = Vec::new();
+    for i in 0..30u32 {
+        let name = format!("img{i:02}.jpg");
+        let data: Vec<u8> = (0..400_000u32).map(|k| (k.wrapping_mul(2654435761).wrapping_add(i) >> 13) as u8).collect();
+        std::fs::write(dir.path().join(&name), data).unwrap();
+        names.push(name);
+    }
+    let status = std::process::Command::new(&rar).current_dir(dir.path()).args(["a", "-s", "-idq"]).arg(&archive).args(&names).status().unwrap();
+    assert!(status.success());
+    // Out of archive order, as callers ask.
+    let wanted: Vec<String> = names.iter().rev().cloned().collect();
+    let started = std::time::Instant::now();
+    let read = stl_core::archive::read_members_with(&archive, &wanted, &unrar).unwrap();
+    println!("BENCH {:?} for {} members", started.elapsed(), read.len());
+    assert_eq!(read.len(), 30);
+    for (name, data) in &read {
+        assert_eq!(*data, std::fs::read(dir.path().join(name)).unwrap(), "{name}");
+    }
+
+    // Updating a solid archive repacks it, so the locked member needs a plain one.
+    let plain = dir.path().join("plain.rar");
+    let rar_add = |flags: &[&str], name: &str| {
+        let status = std::process::Command::new(&rar).current_dir(dir.path()).arg("a").args(flags).arg("-idq").arg(&plain).arg(name).status().unwrap();
+        assert!(status.success());
+    };
+    std::fs::write(dir.path().join("locked.jpg"), b"secret").unwrap();
+    rar_add(&[], &names[0]);
+    rar_add(&["-pSecret"], "locked.jpg");
+    let both = [names[0].clone(), "locked.jpg".to_string()];
+    let read = stl_core::archive::read_members_with(&plain, &both, &unrar).unwrap();
+    assert_eq!(read.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), [names[0].as_str()]);
+    let locked = stl_core::archive::read_members_with(&plain, &both[1..], &unrar);
+    assert!(locked.is_err(), "with nothing else to give, it says why");
+}

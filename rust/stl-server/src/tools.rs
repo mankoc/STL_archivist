@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use rayon::prelude::*;
 use ort::ep::{self, ExecutionProviderDispatch};
 use ort::session::Session;
 use ort::value::Tensor;
@@ -158,11 +159,13 @@ impl Embedder {
         let mut out = vec![None; images.len()];
         for start in (0..images.len()).step_by(BATCH) {
             let end = (start + BATCH).min(images.len());
+            // Decoding and resizing take longer than a GPU's inference: all cores on it.
+            let prepared: Vec<_> = images[start..end].par_iter().map(|img| stl_core::clip::preprocess(img).ok()).collect();
             let mut idx = Vec::new();
             let mut data = Vec::new();
-            for (i, img) in images.iter().enumerate().take(end).skip(start) {
-                if let Ok(t) = stl_core::clip::preprocess(img) {
-                    idx.push(i);
+            for (i, t) in prepared.into_iter().enumerate() {
+                if let Some(t) = t {
+                    idx.push(start + i);
                     data.extend_from_slice(&t);
                 }
             }

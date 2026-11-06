@@ -663,46 +663,84 @@ fn quiet(cmd: &mut std::process::Command) -> &mut std::process::Command {
     cmd
 }
 
+/// Members given to one UnRAR run: their names go on its command line.
+const UNRAR_BATCH: usize = 200;
+
+/// What UnRAR prints for `members`, one after the other in archive order.
+fn unrar_print(path: &Path, unrar: &str, members: &[&str]) -> Result<Vec<u8>, ArchiveError> {
+    let names = members.iter().map(|m| m.replace('/', std::path::MAIN_SEPARATOR_STR));
+    let output = quiet(std::process::Command::new(unrar).args(["p", "-inul", "-p-", "--"]).arg(path).args(names))
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()?;
+    Ok(output.stdout)
+}
+
 /// `RarFile.read(name)` for each name, as `_RarReader.read_batch` collects it:
-/// missing names, empty data and members `rarfile` fails to read are left out.
+/// missing names, empty data and members `rarfile` fails to read are left out. So
+/// are members this reader cannot read (encrypted, or compressed without UnRAR),
+/// unless nothing else was read: then the call fails, as for ZIP.
+///
+/// One UnRAR run reads the compressed members: a solid archive is decoded from its
+/// start for each run. Its output is cut by the sizes in the catalog, and a piece
+/// with the wrong CRC (a member UnRAR failed on shifts the rest) is read on its own.
 pub fn read_members(path: &Path, names: &[String], unrar: &str) -> Result<Vec<(String, Vec<u8>)>, ArchiveError> {
     let cat = catalog(path)?;
-    let mut out = Vec::new();
+    let good = |e: &Entry, data: &[u8]| data.len() as u64 == e.size && crc32fast::hash(data) == e.crc;
+    let mut read: std::collections::HashMap<&str, Vec<u8>> = std::collections::HashMap::new();
+    let mut skipped = None;
+    let mut queue: Vec<(usize, &str, &Entry)> = Vec::new();
     for name in names {
         // getinfo: the last entry with that name.
-        let Some(e) = cat.entries.iter().rev().find(|e| e.name == name.trim_end_matches('/')) else { continue };
+        let Some((at, e)) = cat.entries.iter().enumerate().rev().find(|(_, e)| e.name == name.trim_end_matches('/')) else { continue };
         if e.password || !e.has_crc {
-            return unsupported("encrypted member or member without a CRC32");
-        }
-        let data = if e.stored {
+            skipped = Some("encrypted member or member without a CRC32");
+        } else if e.stored {
             let mut f = std::fs::File::open(path)?;
             f.seek(SeekFrom::Start(e.data_offset))?;
             let mut buf = Vec::new();
             f.take(e.compress_size.min(e.size)).read_to_end(&mut buf)?;
-            buf
+            if good(e, &buf) {
+                read.insert(name, buf);
+            }
+        } else if unrar.is_empty() || !Path::new(unrar).is_file() {
+            skipped = Some("no UnRAR tool configured");
+        } else if name.contains(['*', '?']) || name.starts_with('-') {
+            skipped = Some("member name UnRAR would read as a pattern");
         } else {
-            if unrar.is_empty() || !Path::new(unrar).is_file() {
-                return unsupported("no UnRAR tool configured");
-            }
-            if name.contains(['*', '?']) || name.starts_with('-') {
-                return unsupported("member name UnRAR would read as a pattern");
-            }
-            let member = name.replace('/', std::path::MAIN_SEPARATOR_STR);
-            let output = quiet(std::process::Command::new(unrar).args(["p", "-inul", "-p-", "--"]).arg(path).arg(&member))
-                .stdin(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .output()?;
-            
-            output.stdout
-        };
-        if data.len() as u64 != e.size || crc32fast::hash(&data) != e.crc {
-            continue; // rarfile raises on a short read or bad CRC; read_batch skips it
-        }
-        if !data.is_empty() {
-            out.push((name.clone(), data));
+            queue.push((at, name, e));
         }
     }
-    Ok(out)
+    queue.sort_by_key(|(at, ..)| *at);
+    queue.dedup_by_key(|(at, ..)| *at);
+    for batch in queue.chunks(UNRAR_BATCH) {
+        let members: Vec<&str> = batch.iter().map(|(_, name, _)| *name).collect();
+        let output = unrar_print(path, unrar, &members)?;
+        let mut rest = output.as_slice();
+        for (_, name, e) in batch {
+            let (piece, after) = rest.split_at((e.size as usize).min(rest.len()));
+            rest = after;
+            if good(e, piece) {
+                read.insert(name, piece.to_vec());
+            } else {
+                // rarfile raises on a short read or bad CRC; read_batch skips it.
+                let alone = unrar_print(path, unrar, &[name])?;
+                if good(e, &alone) {
+                    read.insert(name, alone);
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for name in names {
+        if let Some(data) = read.get(name.as_str()).filter(|d| !d.is_empty()) {
+            out.push((name.clone(), data.clone()));
+        }
+    }
+    match skipped {
+        Some(why) if out.is_empty() => unsupported(why),
+        _ => Ok(out),
+    }
 }
 
 #[cfg(test)]

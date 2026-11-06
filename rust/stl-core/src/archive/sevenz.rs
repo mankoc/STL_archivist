@@ -82,17 +82,20 @@ pub(super) fn read_members(
             streams[b] += 1;
         }
     }
-    for &(block, _) in &blocks {
+    let mut failed = None;
+    blocks.retain(|&(block, _)| {
         let first = archive.stream_map.block_first_file_index[block];
-        if archive.files[first..first + streams[block]].iter().any(|f| !f.has_stream) {
-            return Err(ArchiveError::Unsupported("7z block interleaves empty entries".into()));
+        let readable = !archive.files[first..first + streams[block]].iter().any(|f| !f.has_stream);
+        if !readable {
+            failed = Some(ArchiveError::Unsupported("7z block interleaves empty entries".into()));
         }
-    }
+        readable
+    });
 
     let mut out: HashMap<String, Vec<u8>> = HashMap::new();
     let password = Password::empty();
     for (block, mut remaining) in blocks {
-        BlockDecoder::new(1, block, &archive, &password, &mut file)
+        let decoded = BlockDecoder::new(1, block, &archive, &password, &mut file)
             .for_each_entries(&mut |entry, reader| {
                 let name = entry.name.replace('\\', "/");
                 if entry.size > 0 && wanted.contains(name.as_str()) {
@@ -106,7 +109,14 @@ pub(super) fn read_members(
                     Ok(true)
                 }
             })
-            .map_err(map_err)?;
+            .map_err(map_err);
+        // A block that can't be decoded (encrypted, damaged) costs its own members.
+        if let Err(e) = decoded {
+            failed = Some(e);
+        }
+    }
+    if let Some(e) = failed.filter(|_| out.is_empty()) {
+        return Err(e);
     }
     let mut out: Vec<(String, Vec<u8>)> = out.into_iter().filter(|(_, d)| !d.is_empty()).collect();
     out.sort_unstable_by(|a, b| a.0.cmp(&b.0));
@@ -129,6 +139,24 @@ mod tests {
         let mut b = vec![0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c, 0x00, 0x04, 0x8d, 0x9b, 0xd5, 0x0f];
         b.resize(32, 0);
         b
+    }
+
+    #[test]
+    fn a_block_that_cannot_be_read_costs_only_its_members() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("two.7z");
+        let mut w = sevenz_rust2::ArchiveWriter::create(&p).unwrap();
+        w.set_content_methods(vec![sevenz_rust2::EncoderMethod::COPY.into()]);
+        for (name, data) in [("a.jpg", b"aaaaaaaa"), ("b.jpg", b"bbbbbbbb")] {
+            w.push_archive_entry(sevenz_rust2::ArchiveEntry::new_file(name), Some(std::io::Cursor::new(&data[..]))).unwrap();
+        }
+        w.finish().unwrap();
+        let mut bytes = std::fs::read(&p).unwrap();
+        bytes[32] ^= 1; // the first block's data, after the signature header
+        std::fs::write(&p, &bytes).unwrap();
+        let names = ["a.jpg".to_string(), "b.jpg".to_string()];
+        assert_eq!(read_members(&p, &names).unwrap(), [("b.jpg".to_string(), b"bbbbbbbb".to_vec())]);
+        assert!(read_members(&p, &names[..1]).is_err(), "with nothing else to give, it says why");
     }
 
     #[test]
