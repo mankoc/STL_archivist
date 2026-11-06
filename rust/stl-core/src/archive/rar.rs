@@ -653,23 +653,13 @@ pub fn list_members(path: &Path) -> Result<Vec<ArchiveMember>, ArchiveError> {
         .collect())
 }
 
-/// Hide the console window the UnRAR tool would open.
-fn quiet(cmd: &mut std::process::Command) -> &mut std::process::Command {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    }
-    cmd
-}
-
 /// Members given to one UnRAR run: their names go on its command line.
 const UNRAR_BATCH: usize = 200;
 
 /// What UnRAR prints for `members`, one after the other in archive order.
 fn unrar_print(path: &Path, unrar: &str, members: &[&str]) -> Result<Vec<u8>, ArchiveError> {
     let names = members.iter().map(|m| m.replace('/', std::path::MAIN_SEPARATOR_STR));
-    let output = quiet(std::process::Command::new(unrar).args(["p", "-inul", "-p-", "--"]).arg(path).args(names))
+    let output = stl_proc::no_window(std::process::Command::new(unrar).args(["p", "-inul", "-p-", "--"]).arg(path).args(names))
         .stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .output()?;

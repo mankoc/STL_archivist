@@ -111,7 +111,7 @@ fn image_type(name: &str) -> Option<&'static str> {
 pub async fn image_original(State(lib): State<AppState>, _me: CurrentUser, Path(id): Path<i64>) -> Result<Response, ApiError> {
     let found = lib
         .run(move |lib| {
-            let Some((archive, Some(name))) = lib.db.with(|c| stl_core::storage::views::image_source(c, id))? else {
+            let Some((archive, Some(name))) = lib.db.with(|c| stl_core::storage::model_views::image_source(c, id))? else {
                 return Ok(None);
             };
             let Some(ct) = image_type(&name) else { return Ok(None) };

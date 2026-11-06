@@ -239,7 +239,7 @@ async fn recrawls_keep_unchanged_archives_and_skip_known_sidecars() {
     // Every archive known: the sidecar is not read. One record gone: it comes back from it.
     assert!(!v["log"].to_string().contains("METADATA.7z in"), "{v}");
     let dragon: i64 = lib.state.db.with(|c| c.query_row("SELECT id FROM models WHERE title = 'Dragon'", [], |r| r.get(0))).unwrap();
-    lib.state.db.with_tx(|tx| stl_core::storage::browser::delete_models(tx, &[dragon])).unwrap();
+    lib.state.db.with_tx(|tx| stl_core::storage::model_files::delete_models(tx, &[dragon])).unwrap();
     let v = crawl().await;
     assert!(v["log"].to_string().contains("Imported 1 record(s) from METADATA.7z in Studio"), "{v}");
     assert_eq!(count(&lib, "SELECT count(*) FROM models WHERE title = 'Dragon'"), 1);

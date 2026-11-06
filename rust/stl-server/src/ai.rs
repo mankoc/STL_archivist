@@ -13,7 +13,7 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use stl_core::control::Control;
-use stl_core::storage::model_edit::{AiFields, AiInputs};
+use stl_core::storage::model_editor::{AiFields, AiInputs};
 use utoipa::ToSchema;
 
 use crate::library_settings::LibrarySettings;
@@ -178,11 +178,7 @@ impl AiRuntime {
             cmd.args(["-ngl", &n.to_string()]);
         }
         cmd.stdout(Stdio::null()).stderr(Stdio::null()).stdin(Stdio::null());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-        }
+        stl_proc::no_window(&mut cmd);
         log("Starting the AI model server (loading the model)…".into());
         tracing::info!(exe = %spec.exe.display(), port, "starting llama-server");
         let child = cmd.spawn().map_err(|e| format!("cannot start {}: {e}", spec.exe.display()))?;
@@ -370,7 +366,7 @@ pub fn suggest(lib: &Library, ctl: &Control, log: &dyn Fn(String), model_id: i64
     use stl_core::ai_tagging as T;
     let inputs: AiInputs = lib
         .db
-        .with(|c| stl_core::storage::model_edit::ai_model_inputs(c, model_id))
+        .with(|c| stl_core::storage::model_editor::ai_model_inputs(c, model_id))
         .map_err(|e| format!("database: {e}"))?
         .ok_or_else(|| format!("no model {model_id}"))?;
     let ids: Vec<u64> = inputs.images.iter().map(|&(i, _)| i as u64).collect();
@@ -420,12 +416,12 @@ pub fn commit(lib: &Library, model_id: i64, fields: AiFieldValues, tags: &[Strin
     let fields: AiFields = fields.into();
     let done = lib
         .db
-        .with_tx(|tx| stl_core::storage::model_edit::ai_commit(tx, model_id, &fields, tags, overwrite))
+        .with_tx(|tx| stl_core::storage::model_editor::ai_commit(tx, model_id, &fields, tags, overwrite))
         .map_err(|e| e.to_string())?;
     if !done {
         return Ok(None);
     }
-    let path = lib.db.with(|c| stl_core::storage::model_edit::archive_paths(c, &[model_id])).map_err(|e| e.to_string())?;
+    let path = lib.db.with(|c| stl_core::storage::model_editor::archive_paths(c, &[model_id])).map_err(|e| e.to_string())?;
     Ok(path.into_values().next())
 }
 

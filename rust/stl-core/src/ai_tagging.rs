@@ -8,7 +8,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 use crate::rules::{self, MemberPath};
-use crate::storage::model_edit::{AiFields, AiInputs};
+use crate::storage::model_editor::{AiFields, AiInputs};
 
 /// Python's `str.isspace` (Unicode `White_Space` plus the four separators).
 fn py_isspace(c: char) -> bool {

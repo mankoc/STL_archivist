@@ -9,7 +9,7 @@ use stl_core::control::Control;
 use stl_core::rescan::{self, Options};
 use stl_core::rules::{self, Checks, PresupportPatterns};
 use stl_core::storage::libraries::{FolderPatterns, Roots};
-use stl_core::storage::{browser, crawl as crawl_db, jobs as jobs_db};
+use stl_core::storage::{model_files, crawl as crawl_db, jobs as jobs_db};
 use utoipa::ToSchema;
 
 use crate::Library;
@@ -177,7 +177,7 @@ fn move_to_trash(file: &Path, trash: &Path, title: Option<&str>, creator: Option
         "title": title,
         "creator": creator,
         "archive_hash": hash,
-        "deleted_at": stl_core::storage::edit::utc_now_text(),
+        "deleted_at": stl_core::storage::writes::utc_now_text(),
     });
     let mut sidecar = dest.clone().into_os_string();
     sidecar.push(".json");
@@ -200,7 +200,7 @@ pub fn delete_files(lib: &Library, log: &dyn Fn(String), ids: &[i64]) -> Result<
     if let Some(t) = &trash {
         std::fs::create_dir_all(t).map_err(|e| format!("trash folder {}: {e}", t.display()))?;
     }
-    let rows = lib.db.with(|c| browser::deletion_rows(c, ids)).map_err(db)?;
+    let rows = lib.db.with(|c| model_files::deletion_rows(c, ids)).map_err(db)?;
     let (mut done, mut failed, mut paths) = (Vec::new(), Vec::new(), Vec::new());
     for (id, path, title, creator, hash) in rows {
         let path = path.unwrap_or_default();
@@ -224,8 +224,8 @@ pub fn delete_files(lib: &Library, log: &dyn Fn(String), ids: &[i64]) -> Result<
             }
         }
     }
-    let refs = lib.db.with_tx(|tx| browser::delete_models(tx, &done)).map_err(db)?;
-    let thumb_ids: Vec<u64> = refs.iter().filter_map(|r| r.trim().parse().ok()).collect();
+    let refs = lib.db.with_tx(|tx| model_files::delete_models(tx, &done)).map_err(db)?;
+    let thumb_ids: Vec<u64> = stl_core::storage::crawl::ref_ids(&refs);
     lib.thumbs.delete_many(&thumb_ids).map_err(|e| e.to_string())?;
     Ok((done.len(), failed, paths))
 }

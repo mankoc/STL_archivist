@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
-use super::edit::{lookup, merge_into_missing, delete_model, utc_now_text};
+use super::writes::{lookup, merge_into_missing, delete_model, utc_now_text};
 use crate::thumbstore::ThumbStore;
 use crate::winpath::WinPath;
 

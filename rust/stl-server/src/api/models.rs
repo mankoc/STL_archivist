@@ -9,7 +9,7 @@ use axum::extract::{ConnectInfo, Path, State};
 use axum::http::HeaderMap;
 use rusqlite::types::Value;
 use serde::{Deserialize, Serialize};
-use stl_core::storage::{browser, library};
+use stl_core::storage::{model_files, queries};
 use utoipa::ToSchema;
 
 use super::filter::FilterSpecDto;
@@ -60,18 +60,18 @@ pub struct IdList {
 pub async fn ids(State(lib): State<AppState>, _me: CurrentUser, Json(q): Json<ModelQuery>) -> Result<Json<IdList>, ApiError> {
     let spec = q.filter.to_spec()?;
     if let Some(s) = &q.sort
-        && !library::SORT_COLUMNS.contains(&s.column.as_str())
+        && !queries::SORT_COLUMNS.contains(&s.column.as_str())
     {
         return Err(ApiError::bad_request(format!("cannot sort by {:?}", s.column)));
     }
-    if let Some(f) = q.search_fields.iter().find(|f| !library::SEARCH_FIELDS.contains(&f.as_str())) {
+    if let Some(f) = q.search_fields.iter().find(|f| !queries::SEARCH_FIELDS.contains(&f.as_str())) {
         return Err(ApiError::bad_request(format!("cannot search in {f:?}")));
     }
-    let search = library::Search { text: q.search, fields: q.search_fields, fuzzy: q.fuzzy };
+    let search = queries::Search { text: q.search, fields: q.search_fields, fuzzy: q.fuzzy };
     let ids = lib
         .run(move |lib| {
             let sort = q.sort.as_ref().map(|s| (s.column.as_str(), s.descending));
-            Ok(lib.db.with(|c| library::table_ids(c, &spec, &search, sort))?)
+            Ok(lib.db.with(|c| queries::table_ids(c, &spec, &search, sort))?)
         })
         .await?;
     Ok(Json(IdList { ids }))
@@ -125,8 +125,8 @@ pub struct Row {
     pub rel_path: String,
 }
 
-impl From<library::PageRow> for Row {
-    fn from(r: library::PageRow) -> Self {
+impl From<queries::PageRow> for Row {
+    fn from(r: queries::PageRow) -> Self {
         Row {
             id: r.id,
             title: r.title,
@@ -175,7 +175,7 @@ pub async fn rows(State(lib): State<AppState>, _me: CurrentUser, Json(req): Json
     if req.ids.len() > MAX_ROWS {
         return Err(ApiError::bad_request(format!("at most {MAX_ROWS} rows per request")));
     }
-    let rows = lib.run(move |lib| Ok(lib.db.with(|c| library::page_rows(c, &req.ids))?)).await?;
+    let rows = lib.run(move |lib| Ok(lib.db.with(|c| queries::page_rows(c, &req.ids))?)).await?;
     Ok(Json(Rows { rows: rows.into_iter().map(Row::from).collect() }))
 }
 
@@ -226,7 +226,7 @@ pub async fn detail(
     let detail = lib
         .run(move |lib| {
             let (summary, images) = lib.db.with(|c| {
-                Ok::<_, rusqlite::Error>((library::model_summary(c, id)?, browser::model_images(c, id)?))
+                Ok::<_, rusqlite::Error>((queries::model_summary(c, id)?, model_files::model_images(c, id)?))
             })?;
             let Some(summary) = summary else { return Ok(None) };
             let ids: Vec<u64> = images.iter().map(|&(i, _)| i as u64).collect();

@@ -7,7 +7,7 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
-use stl_core::storage::{model_edit, views};
+use stl_core::storage::{model_editor, model_views};
 use stl_core::view::{self, ViewError};
 use utoipa::ToSchema;
 
@@ -27,7 +27,7 @@ pub struct StlFile {
 #[utoipa::path(get, path = "/api/models/{id}/files", tag = "library", params(("id" = i64, Path)),
     responses((status = 200, body = Vec<StlFile>)))]
 pub async fn files(State(lib): State<AppState>, _me: CurrentUser, Path(id): Path<i64>) -> Result<Json<Vec<StlFile>>, ApiError> {
-    let rows = lib.run(move |lib| Ok::<_, ApiError>(lib.db.with(|c| views::stl_files(c, id))?)).await?;
+    let rows = lib.run(move |lib| Ok::<_, ApiError>(lib.db.with(|c| model_views::stl_files(c, id))?)).await?;
     Ok(Json(rows.into_iter().map(|(filename, size, hash)| StlFile { filename, size, hash }).collect()))
 }
 
@@ -47,7 +47,7 @@ pub struct ArchiveFile {
 #[utoipa::path(get, path = "/api/models/{id}/archive-files", tag = "library", params(("id" = i64, Path)),
     responses((status = 200, body = Vec<ArchiveFile>)))]
 pub async fn archive_files(State(lib): State<AppState>, _me: CurrentUser, Path(id): Path<i64>) -> Result<Json<Vec<ArchiveFile>>, ApiError> {
-    let rows = lib.run(move |lib| Ok::<_, ApiError>(lib.db.with(|c| views::archive_files(c, id))?)).await?;
+    let rows = lib.run(move |lib| Ok::<_, ApiError>(lib.db.with(|c| model_views::archive_files(c, id))?)).await?;
     Ok(Json(rows.into_iter().map(|(name, size, crc)| ArchiveFile { name, size, crc: format!("{:08x}", crc as u32) }).collect()))
 }
 
@@ -58,7 +58,7 @@ pub async fn archive_files(State(lib): State<AppState>, _me: CurrentUser, Path(i
 pub async fn warnings(State(lib): State<AppState>, _me: CurrentUser, Path(id): Path<i64>) -> Result<Json<WarningDetails>, ApiError> {
     let details = lib
         .run(move |lib| {
-            let (path, warning) = lib.db.with(|c| views::path_warning(c, id))?.ok_or_else(|| ApiError::not_found(format!("no model {id}")))?;
+            let (path, warning) = lib.db.with(|c| model_views::path_warning(c, id))?.ok_or_else(|| ApiError::not_found(format!("no model {id}")))?;
             Ok::<_, ApiError>(crate::archive_tools::warning_details(lib, path.as_deref(), warning.as_deref()))
         })
         .await?;
@@ -76,7 +76,7 @@ pub struct ViewableFile {
 
 /// The archive's path on the server, when the model exists and the file is there.
 fn archive_on_disk(lib: &crate::Library, id: i64) -> Result<std::path::PathBuf, ApiError> {
-    let path = lib.db.with(|c| model_edit::archive_paths(c, &[id]))?.remove(&id).ok_or_else(|| ApiError::not_found(format!("no model {id}")))?;
+    let path = lib.db.with(|c| model_editor::archive_paths(c, &[id]))?.remove(&id).ok_or_else(|| ApiError::not_found(format!("no model {id}")))?;
     let path = std::path::PathBuf::from(stl_core::relpath::on_disk(&path));
     if !path.is_file() {
         return Err(ApiError::not_found("the archive is not on disk"));

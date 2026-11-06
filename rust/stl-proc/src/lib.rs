@@ -10,6 +10,16 @@
 
 use std::process::Child;
 
+/// Keep a child from opening a console window on Windows (nothing elsewhere).
+pub fn no_window(cmd: &mut std::process::Command) -> &mut std::process::Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    cmd
+}
+
 /// Make `child` end when this process ends. Best effort: returns whether the
 /// child was attached.
 pub fn end_with_parent(child: &Child) -> bool {

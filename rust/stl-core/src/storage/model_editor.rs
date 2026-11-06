@@ -7,7 +7,7 @@ use std::collections::{BTreeSet, HashMap};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 use super::Result;
-use super::edit::{
+use super::writes::{
     EditError, Row, assign_scales_ext, assign_tags_ext, clean, load_row, lookup, py_int, py_strip, release_date,
     set_collection, set_subcollection, split_list, store_row, subcollection, tag,
 };

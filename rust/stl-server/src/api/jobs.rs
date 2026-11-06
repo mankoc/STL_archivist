@@ -91,7 +91,7 @@ pub struct JobDetail {
     /// The job's log, oldest line first (at most the last 2,000 lines).
     pub log: Vec<String>,
     /// What a duplicate finder found, once it is done (`pairs` or `groups`).
-    pub result: Option<crate::dupes::JobResult>,
+    pub result: Option<crate::jobs::JobResult>,
     /// The archives a crawl added, updated and deleted (for jobs with `counts`).
     pub changes: Option<crate::jobs::JobChanges>,
 }

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use axum::Json;
 use axum::extract::State;
 use serde::{Deserialize, Serialize};
-use stl_core::storage::library::{self, FilterValue, Key};
+use stl_core::storage::queries::{self, FilterValue, Key};
 use utoipa::ToSchema;
 
 use crate::auth::CurrentUser;
@@ -43,11 +43,11 @@ pub struct FilterSpecDto {
 }
 
 impl FilterSpecDto {
-    pub fn to_spec(&self) -> Result<library::FilterSpec, ApiError> {
-        let mut spec = library::FilterSpec::default();
+    pub fn to_spec(&self) -> Result<queries::FilterSpec, ApiError> {
+        let mut spec = queries::FilterSpec::default();
         for (src, dst) in [(&self.include, &mut spec.include), (&self.exclude, &mut spec.exclude)] {
             for (facet, values) in src {
-                if !library::FACETS.contains(&facet.as_str()) {
+                if !queries::FACETS.contains(&facet.as_str()) {
                     return Err(ApiError::bad_request(format!("unknown facet {facet:?}")));
                 }
                 if values.is_empty() {
@@ -66,7 +66,7 @@ impl FilterSpecDto {
         }
         for (src, dst) in [(&self.has_value, &mut spec.has_value), (&self.no_value, &mut spec.no_value)] {
             for g in src {
-                if !library::GROUPS.contains(&g.as_str()) {
+                if !queries::GROUPS.contains(&g.as_str()) {
                     return Err(ApiError::bad_request(format!("unknown group {g:?}")));
                 }
                 dst.insert(g.clone());
@@ -172,8 +172,8 @@ fn sorted(m: Option<HashMap<String, i64>>) -> Option<BTreeMap<String, i64>> {
     m.map(|m| m.into_iter().collect())
 }
 
-impl From<library::FilterTree> for FilterTree {
-    fn from(t: library::FilterTree) -> Self {
+impl From<queries::FilterTree> for FilterTree {
+    fn from(t: queries::FilterTree) -> Self {
         FilterTree {
             counts: counts(&t.counts),
             scoped_counts: counts(&t.scoped_counts),
@@ -210,18 +210,18 @@ impl From<library::FilterTree> for FilterTree {
 pub async fn tree(State(lib): State<AppState>, _me: CurrentUser, Json(req): Json<FilterTreeRequest>) -> Result<Json<FilterTree>, ApiError> {
     let spec = req.filter.as_ref().map(FilterSpecDto::to_spec).transpose()?.filter(|s| !s.is_empty());
     for s in &req.show {
-        if !library::SHOW.contains(&s.as_str()) {
+        if !queries::SHOW.contains(&s.as_str()) {
             return Err(ApiError::bad_request(format!("unknown section {s:?}")));
         }
     }
-    let show = library::Show(req.show.iter().cloned().collect());
+    let show = queries::Show(req.show.iter().cloned().collect());
     let Some(spec) = spec else {
         let tree = lib.run(move |lib| Ok(unfiltered_tree(lib, show, req.counts)?)).await?;
         return Ok(Json((*tree).clone()));
     };
     let tree = lib
         .run(move |lib| {
-            let mut tree = FilterTree::from(library::scoped_tree(&lib.db, &spec, &show, req.counts)?);
+            let mut tree = FilterTree::from(queries::scoped_tree(&lib.db, &spec, &show, req.counts)?);
             if req.counts {
                 let all = unfiltered_tree(lib, show, true)?;
                 (tree.counts, tree.path_counts) = (all.counts.clone(), all.path_counts.clone());
@@ -247,14 +247,14 @@ struct CachedTree {
 /// [`TreeCache`]'s answer, computed when missing or stale. Held while computing,
 /// so a request arriving meanwhile (the start-up warm-up and the first page) waits
 /// for it instead of reading the disk a second time.
-pub fn unfiltered_tree(lib: &crate::Library, show: library::Show, counts: bool) -> rusqlite::Result<Arc<FilterTree>> {
+pub fn unfiltered_tree(lib: &crate::Library, show: queries::Show, counts: bool) -> rusqlite::Result<Arc<FilterTree>> {
     let mut slot = lib.tree_cache.0.lock().unwrap_or_else(|e| e.into_inner());
     let generation = lib.generation.load(std::sync::atomic::Ordering::SeqCst);
     let key: BTreeSet<String> = show.0.iter().cloned().collect();
     if let Some(c) = slot.as_ref().filter(|c| c.generation == generation && c.show == key && c.counts == counts) {
         return Ok(Arc::clone(&c.tree));
     }
-    let tree: Arc<FilterTree> = Arc::new(library::filter_tree_parallel(&lib.db, &show, counts)?.into());
+    let tree: Arc<FilterTree> = Arc::new(queries::filter_tree_parallel(&lib.db, &show, counts)?.into());
     // Computed from what the database held at `generation` (a change since makes it stale).
     *slot = Some(CachedTree { generation, show: key, counts, tree: Arc::clone(&tree) });
     Ok(tree)
@@ -262,7 +262,7 @@ pub fn unfiltered_tree(lib: &crate::Library, show: library::Show, counts: bool) 
 
 /// Fill [`TreeCache`] with what the web client's filter pane asks for first.
 pub fn warm_tree(lib: &crate::Library) {
-    let show = library::Show(library::SHOW.iter().map(|s| s.to_string()).collect());
+    let show = queries::Show(queries::SHOW.iter().map(|s| s.to_string()).collect());
     if let Err(e) = unfiltered_tree(lib, show, true) {
         tracing::warn!("filter pane warm-up: {e}");
     }

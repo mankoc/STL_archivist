@@ -4,7 +4,7 @@ use rusqlite::types::Value;
 use rusqlite::{Connection, Transaction, params};
 
 use super::Result;
-use super::edit::{delete_model, utc_now_text};
+use super::writes::{delete_model, utc_now_text};
 
 /// `(id, thumbnail_path)` of a model's images, in id order.
 pub fn model_images(conn: &Connection, model_id: i64) -> Result<Vec<(i64, Option<String>)>> {

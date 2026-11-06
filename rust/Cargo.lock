@@ -5172,7 +5172,7 @@ checksum = "ff7589a1859b09232522bb9edf076ca7fcf14ded96685d3fa629db73023ffbb7"
 
 [[package]]
 name = "stl-core"
-version = "2026.45.38"
+version = "2026.45.39"
 dependencies = [
  "avif-parse",
  "crc32fast",
@@ -5193,6 +5193,7 @@ dependencies = [
  "serde_json",
  "sevenz-rust2",
  "sqlite-vec",
+ "stl-proc",
  "tempfile",
  "unicode-normalization",
  "uuid",
@@ -5202,7 +5203,7 @@ dependencies = [
 
 [[package]]
 name = "stl-desktop"
-version = "2026.45.38"
+version = "2026.45.39"
 dependencies = [
  "serde",
  "serde_json",
@@ -5217,14 +5218,14 @@ dependencies = [
 
 [[package]]
 name = "stl-proc"
-version = "2026.45.38"
+version = "2026.45.39"
 dependencies = [
  "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "stl-server"
-version = "2026.45.38"
+version = "2026.45.39"
 dependencies = [
  "argon2",
  "axum",
@@ -5264,7 +5265,7 @@ dependencies = [
 
 [[package]]
 name = "stl-viewer"
-version = "2026.45.38"
+version = "2026.45.39"
 dependencies = [
  "console_error_panic_hook",
  "glam",

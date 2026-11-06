@@ -115,7 +115,7 @@ impl Library {
                 thumbnails_deleted = refs.len(),
                 "archive paths moved to libraries (relative paths); the earlier desktop app can no longer open this library"
             );
-            let ids: Vec<u64> = refs.iter().filter_map(|r| r.trim().parse().ok()).collect();
+            let ids: Vec<u64> = stl_core::storage::crawl::ref_ids(&refs);
             if !ids.is_empty() {
                 thumbs.delete_many(&ids).map_err(|e| format!("thumbnail store: {e}"))?;
             }
