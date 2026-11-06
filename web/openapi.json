@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.45.20"
+    "version": "2026.45.21"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -1000,6 +1000,35 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/JobInfo"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Remove the finished jobs from the list, except those holding a result\n(duplicate searches, record lists, AI suggestions): pages read theirs from\nthe job. Needs the editor role.",
+        "operationId": "delete_jobs",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Count"
                 }
               }
             }
@@ -8324,6 +8353,21 @@
                 "type": "string",
                 "enum": [
                   "resync"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Finished jobs were cleared: reload the job list.",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "jobs_cleared"
                 ]
               }
             }

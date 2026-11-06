@@ -1,8 +1,9 @@
 // Jobs: the job queue and a live log. Libraries (crawls) and Database
 // Maintenance have their own places (LibrariesPage, Settings → Maintenance).
-import { ActionIcon, Badge, Box, Card, Group, Progress, ScrollArea, SegmentedControl, Stack, Text, Title, UnstyledButton } from "@mantine/core";
+import { ActionIcon, Badge, Box, Button, Card, Group, Progress, ScrollArea, SegmentedControl, Stack, Text, Title, UnstyledButton } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
 import { IconPlayerPause, IconPlayerPlay, IconPlayerStop } from "@tabler/icons-react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api, unwrap } from "../api/client";
@@ -28,15 +29,36 @@ export function JobsPage() {
   const [selected, setSelected] = useState<number | null>(null);
   const list = sortJobs(jobs.data ?? []);
   const now = useNow(list.some(isActive));
-  const shown = selected ?? list[0]?.id ?? null;
+  const shown = list.some((j) => j.id === selected) ? selected : list[0]?.id ?? null;
+  const queryClient = useQueryClient();
+  const clear = async () => {
+    try {
+      const { count } = unwrap(await api.DELETE("/api/jobs"));
+      notifications.show({ message: count ? `Cleared ${count} finished job(s)` : "Nothing to clear: the jobs left hold results" });
+      await queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    } catch (err) {
+      notifications.show({ color: "red", message: (err as Error).message });
+    }
+  };
 
   return (
     <div className={classes.layout}>
       <Stack gap="md" className={classes.column}>
         <Card withBorder className={classes.jobs}>
-          <Title order={5} mb="xs">
-            Jobs
-          </Title>
+          <Group justify="space-between" mb="xs">
+            <Title order={5}>Jobs</Title>
+            {editor && list.some((j) => !isActive(j)) && (
+              <Button
+                size="compact-xs"
+                variant="default"
+                title="Removes finished jobs from the list. Jobs holding results (duplicate searches, record lists, AI suggestions) stay."
+                onClick={clear}
+                data-testid="jobs-clear"
+              >
+                Clear finished
+              </Button>
+            )}
+          </Group>
           <ScrollArea.Autosize mah="calc(100vh - 160px)">
             {list.map((job) => {
               const p = percent(job);

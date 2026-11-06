@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026.45.21 — 2026-11-06
+
+- **Clear finished on the Jobs page** removes done, failed and stopped jobs from the list. Jobs holding
+  results that other pages show (duplicate searches, record lists, AI suggestions) stay.
+- The pattern help in Sort files points to *Missing fields* instead of saying a missing value is always
+  `_unknown`.
+
 ## 2026.45.20 — 2026-11-06
 
 - **Sort files remembers the last target folder** in this browser, as it does the pattern.

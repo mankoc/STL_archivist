@@ -1,6 +1,6 @@
 # StlArchivist API
 
-Version 2026.45.20. Generated from `web/openapi.json` by `tools/api_doc.py`; the
+Version 2026.45.21. Generated from `web/openapi.json` by `tools/api_doc.py`; the
 running server serves the same document at `GET /api/openapi.json`. Do not edit by hand:
 run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after changing routes.
 
@@ -18,7 +18,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
   or `GET /api/jobs/{id}`.
 - Writes that change the library are announced on `/api/events` as `library_changed`.
 
-## Endpoints (98)
+## Endpoints (99)
 
 - [Sign-in and sessions](#sign-in-and-sessions) (5)
 - [Users and preferences](#users-and-preferences) (7)
@@ -29,7 +29,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 - [Thumbnails and images](#thumbnails-and-images) (3)
 - [Files and folders](#files-and-folders) (3)
 - [Libraries and their folders](#libraries-and-their-folders) (6)
-- [Jobs and events](#jobs-and-events) (7)
+- [Jobs and events](#jobs-and-events) (8)
 - [Maintenance](#maintenance) (3)
 - [Backups](#backups) (4)
 - [Search](#search) (1)
@@ -155,6 +155,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 | `GET /api/events` | The event stream: `ServerEvent` JSON text frames (job progress and logs, library changes). Authenticates like any route (the session cookie works for browsers, which cannot set headers on a WebSocket). |  | 101 [ServerEvent](#serverevent) |  |
 | `GET /api/jobs` | Queued, running and recently finished jobs, oldest first. |  | 200 [JobInfo](#jobinfo)[] |  |
 | `POST /api/jobs` | Queue a job. Jobs run one at a time, in order. Needs the editor role (compacting the database, backups, imports and syncs: admin). | body: [JobRequest](#jobrequest) | 202 [JobInfo](#jobinfo) | 403 |
+| `DELETE /api/jobs` | Remove the finished jobs from the list, except those holding a result (duplicate searches, record lists, AI suggestions): pages read theirs from the job. Needs the editor role. |  | 200 [Count](#count) | 403 |
 | `GET /api/jobs/{id}` | One job with its log. | path `id`: integer | 200 [JobDetail](#jobdetail) | 404 |
 | `DELETE /api/jobs/{id}` | Cancel a job: a queued one at once, a running one at its next checkpoint (what it finished so far stays). 409 when it has already finished. | path `id`: integer | 202 | 404, 409 |
 | `POST /api/jobs/{id}/pause` | Pause a job: a running one waits at its next checkpoint, a queued one is passed over, until it is resumed. 409 when it has already finished. | path `id`: integer | 202 | 404, 409 |
@@ -1268,6 +1269,7 @@ One of:
 - `type: "job_log"` — `id`, `line`: One log line of a running job.
 - `type: "library_changed"` — `what`: The library changed (`models`, `lookups`, `crawl`, …): reload what is shown.
 - `type: "resync"`: Events were dropped for this client (it was too slow); reload everything.
+- `type: "jobs_cleared"`: Finished jobs were cleared: reload the job list.
 
 ### ServerInfo
 
