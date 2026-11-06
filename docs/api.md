@@ -18,7 +18,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
   or `GET /api/jobs/{id}`.
 - Writes that change the library are announced on `/api/events` as `library_changed`.
 
-## Endpoints (100)
+## Endpoints (101)
 
 - [Sign-in and sessions](#sign-in-and-sessions) (5)
 - [Users and preferences](#users-and-preferences) (7)
@@ -28,7 +28,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 - [Lookups (sculptors, collections, tags…)](#lookups-sculptors-collections-tags) (14)
 - [Thumbnails and images](#thumbnails-and-images) (3)
 - [Files and folders](#files-and-folders) (3)
-- [Libraries and their folders](#libraries-and-their-folders) (6)
+- [Libraries and their folders](#libraries-and-their-folders) (7)
 - [Jobs and events](#jobs-and-events) (8)
 - [Maintenance](#maintenance) (3)
 - [Backups](#backups) (4)
@@ -146,6 +146,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 | `POST /api/libraries` | Add a folder (editors, inside their roots) to a library, or as a new library: 201, or 200 with the folder already there (in that library). Records of folders around it below the folder move into it. | body: [NewLibrary](#newlibrary) | 200 [LibraryInfo](#libraryinfo)<br>201 [LibraryInfo](#libraryinfo) | 400, 403, 404 |
 | `PATCH /api/libraries/folders/{id}` | Set a library folder's pattern, monitor it, or move it with its records to another library or a new one (editors). A library left without folders goes. | path `id`: integer<br>body: [FolderChange](#folderchange) | 200 [LibraryFolder](#libraryfolder) | 400, 404 |
 | `POST /api/libraries/folders/{id}/remove` | Remove one folder of a library (editors): its records go to the folder around it, or are deleted with their images when there is none. A library left without folders goes too. Files are not touched. | path `id`: integer | 200 [LibraryRemoved](#libraryremoved) | 404 |
+| `GET /api/libraries/pattern-sample` | What a crawl of the folder with this pattern would read from its first archives (editors). Nothing is changed. | query `folder`: string<br>query `pattern`: string | 200 [PatternSample](#patternsample)[] | 403 |
 | `PATCH /api/libraries/{id}` | Rename a library (editors). A name another library has gets a number. | path `id`: integer<br>body: [LibraryChange](#librarychange) | 200 [LibraryInfo](#libraryinfo) | 400, 404 |
 | `POST /api/libraries/{id}/remove` | Remove a library with all its folders (editors): their records go to a folder of another library around them, or are deleted with their images. Files are not touched. | path `id`: integer | 200 [LibraryRemoved](#libraryremoved) | 404 |
 
@@ -976,7 +977,7 @@ Models with equal or similar values in one column.
 | Field | Type | Description |
 |---|---|---|
 | `client_path` (optional) | string \| null | The archive's path as this client sees it, when it can open it there (a client on the server's machine, or a `path_map` entry); otherwise offer `/api/models/{id}/archive`. |
-| `fields` | object | `title`, `creator`, `source`, `sculptor_name`, `collection_name`, `subcollection_name`, `category_name`, `release_name`, `release_year`, `release_month`, `archive_path`, `archive_size`, `is_missing`, `tags` (comma-separated) and `image_count`. |
+| `fields` | object | `title`, `creator`, `source`, `sculptor_name`, `collection_name`, `subcollection_name`, `category_name`, `release_name`, `release_year`, `release_month`, `archive_path`, `archive_size`, `is_missing`, `warning`, `tags` (comma-separated) and `image_count`. |
 | `id` | integer |  |
 | `images` | [ImageRef](#imageref)[] |  |
 
@@ -1081,6 +1082,15 @@ A folder here and the same folder on the remote: a path-start rule, used both wa
 | Field | Type | Description |
 |---|---|---|
 | `paths` | string[] |  |
+
+### PatternSample
+
+One archive, and what the pattern reads from its path.
+
+| Field | Type | Description |
+|---|---|---|
+| `fields` | [SampleField](#samplefield)[] | Empty when the pattern does not fit the path. |
+| `path` | string | Below the library folder's root. |
 
 ### PreviewFolder
 
@@ -1252,6 +1262,13 @@ One table row.
 | Field | Type | Description |
 |---|---|---|
 | `ids` | integer[] |  |
+
+### SampleField
+
+| Field | Type | Description |
+|---|---|---|
+| `field` | string |  |
+| `value` | string |  |
 
 ### SearchResult
 

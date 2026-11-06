@@ -98,6 +98,36 @@ async fn a_folder_keeps_the_pattern_it_was_crawled_with() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_pattern_can_be_tried_on_a_folders_archives() {
+    let lib = empty_library();
+    std::fs::write(lib.dir.path().join("settings.json"), r#"{"metadata_sidecar_enabled": false}"#).unwrap();
+    let ed = lib.user("ed", Role::Editor);
+    let viewer = lib.user("vi", Role::Viewer);
+    let root = lib.dir.path().join("archives");
+    write_zip(&root.join("Studio").join("Dragon").join("One.zip"));
+    write_zip(&root.join("Other").join("Two.zip"));
+    run(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy()})).await;
+
+    let folder = root.join("Studio").to_string_lossy().replace('\\', "/");
+    let uri = |pattern: &str| format!("/api/libraries/pattern-sample?folder={}&pattern={}", enc(&folder), enc(pattern));
+    let r = call(&lib.state, "GET", &uri("{sculptor}/{collection}/{title}"), Some(&ed), None).await;
+    assert_eq!(
+        r.json(),
+        json!([{"path": "Studio/Dragon/One.zip", "fields": [
+            {"field": "sculptor_name", "value": "Studio"}, {"field": "collection_name", "value": "Dragon"}, {"field": "title", "value": "One"},
+        ]}])
+    );
+    let r = call(&lib.state, "GET", &uri(""), Some(&ed), None).await;
+    assert_eq!(r.json(), json!([{"path": "Studio/Dragon/One.zip", "fields": []}]));
+    let r = call(&lib.state, "GET", &uri("{title}"), Some(&viewer), None).await;
+    assert_eq!(r.status, axum::http::StatusCode::FORBIDDEN);
+}
+
+fn enc(s: &str) -> String {
+    s.bytes().map(|b| if b.is_ascii_alphanumeric() { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_stored_folder_pattern_can_be_changed_and_forgotten() {
     let lib = empty_library();
     std::fs::write(lib.dir.path().join("settings.json"), r#"{"metadata_sidecar_enabled": false}"#).unwrap();

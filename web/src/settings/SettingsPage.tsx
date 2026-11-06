@@ -23,6 +23,7 @@ import { BackupsTab, SidecarsTab, WorkersTab } from "../jobs/SettingsTabs";
 import { CHECK_UPDATES } from "../shell/updates";
 import { type LibrarySettings, SETTINGS_QUERY } from "./librarySettings";
 import { settingsTab } from "./tabs";
+import { PatternsTab } from "./PatternsTab";
 
 type Role = Schemas["Role"];
 const ROLES: { value: Role; label: string }[] = [
@@ -41,7 +42,7 @@ export function SettingsPage() {
   const editor = hasRole(user, "editor");
   const components = admin || inDesktopShell();
   const tabs = [
-    "account", "library", "maintenance", "sidecars", ...(admin ? ["backups"] : []), "workers",
+    "account", "library", "patterns", "maintenance", "sidecars", ...(admin ? ["backups"] : []), "workers",
     ...(components ? ["components"] : []), ...(admin ? ["users"] : []),
   ];
   return (
@@ -54,6 +55,7 @@ export function SettingsPage() {
       <Tabs.List mb="md">
         <Tabs.Tab value="account">Account</Tabs.Tab>
         <Tabs.Tab value="library">Library</Tabs.Tab>
+        <Tabs.Tab value="patterns">Patterns</Tabs.Tab>
         <Tabs.Tab value="maintenance">Maintenance</Tabs.Tab>
         <Tabs.Tab value="sidecars">Sidecars</Tabs.Tab>
         {admin && <Tabs.Tab value="backups">Backups &amp; transfer</Tabs.Tab>}
@@ -70,6 +72,9 @@ export function SettingsPage() {
       </Tabs.Panel>
       <Tabs.Panel value="library">
         <LibrarySettingsForm editable={admin} />
+      </Tabs.Panel>
+      <Tabs.Panel value="patterns">
+        <PatternsTab editor={editor} />
       </Tabs.Panel>
       <Tabs.Panel value="maintenance">
         <MaintenanceTab />

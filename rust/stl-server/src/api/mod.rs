@@ -98,6 +98,7 @@ pub const DOWNLOAD_CHUNK: usize = 256 * 1024;
         jobs::resume,
         jobs::events,
         libraries::list,
+        libraries::pattern_sample,
         libraries::add,
         libraries::change,
         libraries::remove,
@@ -225,6 +226,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/jobs/{id}/resume", post(jobs::resume))
         .route("/api/events", get(jobs::events))
         .route("/api/libraries", get(libraries::list).post(libraries::add))
+        .route("/api/libraries/pattern-sample", get(libraries::pattern_sample))
         .route("/api/libraries/{id}", patch(libraries::change))
         .route("/api/libraries/{id}/remove", post(libraries::remove))
         .route("/api/libraries/folders/{id}", patch(libraries::change_folder))

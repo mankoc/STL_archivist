@@ -191,8 +191,8 @@ pub struct ModelDetail {
     pub id: i64,
     /// `title`, `creator`, `source`, `sculptor_name`, `collection_name`,
     /// `subcollection_name`, `category_name`, `release_name`, `release_year`,
-    /// `release_month`, `archive_path`, `archive_size`, `is_missing`, `tags`
-    /// (comma-separated) and `image_count`.
+    /// `release_month`, `archive_path`, `archive_size`, `is_missing`, `warning`,
+    /// `tags` (comma-separated) and `image_count`.
     #[schema(value_type = Object)]
     pub fields: BTreeMap<String, serde_json::Value>,
     pub images: Vec<ImageRef>,

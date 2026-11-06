@@ -7,6 +7,7 @@ import {
   groupByLetter,
   letterOf,
   libraryFolderTree,
+  shownFolders,
   groupMarkOf,
   isEmpty,
   markOf,
@@ -153,5 +154,19 @@ describe("folder tree", () => {
     expect(t.libraries[1].roots[0].children.map((n) => n.path)).toEqual(["D:/STL/Gambody/Dragon"]);
     // Folders under no root, and look-alike prefixes, stay plain.
     expect(t.other.map((n) => n.name)).toEqual(["D:", "F:"]);
+  });
+});
+
+describe("shownFolders", () => {
+  const tree = (folders: string[], scoped?: string[]) => ({ folders, scoped_folders: scoped }) as unknown as Parameters<typeof shownFolders>[0];
+
+  it("lists the folders other filters leave, which the server sends apart", () => {
+    expect(shownFolders(tree([], ["D:/a"]), EMPTY)).toEqual(["D:/a"]);
+    expect(shownFolders(tree(["D:/a", "D:/b"]), EMPTY)).toEqual(["D:/a", "D:/b"]);
+  });
+
+  it("keeps a selected folder, so that it can be cleared", () => {
+    expect(shownFolders(tree([], ["D:/a"]), { ...EMPTY, include: { path: ["D:/b"] } })).toEqual(["D:/a", "D:/b"]);
+    expect(shownFolders(tree([], ["D:/a"]), { ...EMPTY, exclude: { path: ["D:/a"] } })).toEqual(["D:/a"]);
   });
 });

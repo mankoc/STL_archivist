@@ -1,4 +1,4 @@
-import { clampWidth, DEFAULT_WIDTH, loadWidth, MASS_EDIT, MIN_WIDTH, saveWidth } from "./paneWidth";
+import { clampWidth, DEFAULT_WIDTH, FILTER_PANE, loadWidth, MASS_EDIT, MIN_WIDTH, saveWidth } from "./paneWidth";
 
 describe("detail pane width", () => {
   it("stays within limits", () => {
@@ -13,6 +13,17 @@ describe("detail pane width", () => {
     expect(loadWidth()).toBe(DEFAULT_WIDTH);
     saveWidth(450);
     expect(loadWidth()).toBe(450);
+  });
+
+  it("keeps the filter pane's width apart", () => {
+    localStorage.clear();
+    const { key, fallback, min, maxShare } = FILTER_PANE;
+    expect(loadWidth(key, fallback, min)).toBe(280);
+    saveWidth(420, key);
+    expect(loadWidth(key, fallback, min)).toBe(420);
+    expect(loadWidth()).toBe(DEFAULT_WIDTH);
+    expect(clampWidth(50, 1600, maxShare, min)).toBe(200);
+    expect(clampWidth(1500, 1600, maxShare, min)).toBe(800);
   });
 
   it("keeps the mass editor's width apart", () => {

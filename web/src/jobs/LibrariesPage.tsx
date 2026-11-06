@@ -12,6 +12,7 @@ import { addJob, type Job, type JobRequest } from "./jobs";
 import { JobLog } from "./JobsPage";
 import classes from "./JobsPage.module.css";
 import { LibrariesCard } from "./LibrariesCard";
+import { PatternSample } from "../browser/PatternSample";
 
 export function LibrariesPage() {
   const user = useUser();
@@ -63,6 +64,7 @@ export function LibrariesPage() {
               value={crawl.pattern}
               onChange={(e) => setCrawl({ ...crawl, pattern: e.currentTarget.value })}
             />
+            <PatternSample folder={crawl.folder} pattern={crawl.pattern} />
             <Checkbox label="Re-extract archives whose content did not change" checked={crawl.force} onChange={(e) => setCrawl({ ...crawl, force: e.currentTarget.checked })} />
             <Group justify="flex-end">
               <Button variant="default" onClick={() => setCrawl(null)}>

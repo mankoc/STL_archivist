@@ -8,7 +8,7 @@
 use std::path::Path as FsPath;
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use stl_core::storage::libraries::{self, Folder, Group, Removed, Target};
@@ -254,6 +254,48 @@ pub async fn change_folder(State(lib): State<AppState>, me: CurrentUser, Path(id
     let (info, touched) = info;
     lib.schedule_sidecars(touched);
     Ok(Json(info))
+}
+
+/// Archives shown as a pattern's sample.
+const SAMPLES: i64 = 3;
+
+#[derive(Deserialize, utoipa::IntoParams)]
+#[serde(deny_unknown_fields)]
+pub struct SampleQuery {
+    /// A folder of a library, as the filter tree spells it.
+    pub folder: String,
+    /// The path pattern being typed.
+    pub pattern: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct SampleField {
+    pub field: String,
+    pub value: String,
+}
+
+/// One archive, and what the pattern reads from its path.
+#[derive(Serialize, ToSchema)]
+pub struct PatternSample {
+    /// Below the library folder's root.
+    pub path: String,
+    /// Empty when the pattern does not fit the path.
+    pub fields: Vec<SampleField>,
+}
+
+/// What a crawl of the folder with this pattern would read from its first
+/// archives (editors). Nothing is changed.
+#[utoipa::path(get, path = "/api/libraries/pattern-sample", tag = "libraries", params(SampleQuery),
+    responses((status = 200, body = Vec<PatternSample>), (status = 403, body = crate::error::ErrorBody)))]
+pub async fn pattern_sample(State(lib): State<AppState>, me: CurrentUser, Query(q): Query<SampleQuery>) -> Result<Json<Vec<PatternSample>>, ApiError> {
+    me.require(Role::Editor)?;
+    let pattern = q.pattern.trim().to_string();
+    let rows = lib.run(move |lib| Ok(lib.db.with(|c| stl_core::crawler::pattern_samples(c, &q.folder, &pattern, SAMPLES))?)).await?;
+    let sample = |(path, fields): (String, Vec<(String, String)>)| PatternSample {
+        path,
+        fields: fields.into_iter().map(|(field, value)| SampleField { field, value }).collect(),
+    };
+    Ok(Json(rows.into_iter().map(sample).collect()))
 }
 
 #[derive(Serialize, ToSchema)]

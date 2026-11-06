@@ -16,7 +16,8 @@ import { DetailPane } from "./DetailPane";
 import { EditorDrawer } from "./EditorDrawer";
 import { FilterPane } from "./FilterPane";
 import { GridView } from "./GridView";
-import { clampWidth, DEFAULT_WIDTH, loadWidth, saveWidth } from "./paneWidth";
+import { clampWidth, DEFAULT_WIDTH, FILTER_PANE, loadWidth, saveWidth } from "./paneWidth";
+import { PatternSample } from "./PatternSample";
 import { folderPattern } from "./patterns";
 import { SortModal } from "./SortModal";
 import { AiTaggerDrawer } from "./AiTaggerDrawer";
@@ -49,28 +50,35 @@ export function BrowserPage() {
   const [massEdit, setMassEdit] = useState(false);
   const [aiTagger, setAiTagger] = useState(false);
   const [view, setView] = useState<"table" | "grid">("table");
-  // The detail pane's width, dragged by its left edge.
+  // The side panes' widths, dragged by their inner edges.
   const layoutRef = useRef<HTMLDivElement>(null);
   const [detailWidth, setDetailWidth] = useState(loadWidth);
-  const [dragging, setDragging] = useState(false);
-  const startDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
+  const [filterWidth, setFilterWidth] = useState(() => loadWidth(FILTER_PANE.key, FILTER_PANE.fallback, FILTER_PANE.min));
+  const [dragging, setDragging] = useState<"filter" | "detail" | null>(null);
+  const startDrag = (pane: "filter" | "detail") => (e: ReactPointerEvent<HTMLDivElement>) => {
     e.preventDefault();
     const layout = layoutRef.current;
     if (!layout) return;
     const target = e.currentTarget;
     target.setPointerCapture(e.pointerId);
-    setDragging(true);
-    let width = detailWidth;
+    setDragging(pane);
+    let width = pane === "filter" ? filterWidth : detailWidth;
     const move = (ev: PointerEvent) => {
       const box = layout.getBoundingClientRect();
-      width = clampWidth(box.right - ev.clientX, box.width);
-      setDetailWidth(width);
+      if (pane === "filter") {
+        width = clampWidth(ev.clientX - box.left, box.width, FILTER_PANE.maxShare, FILTER_PANE.min);
+        setFilterWidth(width);
+      } else {
+        width = clampWidth(box.right - ev.clientX, box.width);
+        setDetailWidth(width);
+      }
     };
     const up = () => {
       target.removeEventListener("pointermove", move);
       target.removeEventListener("pointerup", up);
-      setDragging(false);
-      saveWidth(width);
+      setDragging(null);
+      if (pane === "filter") saveWidth(width, FILTER_PANE.key);
+      else saveWidth(width);
     };
     target.addEventListener("pointermove", move);
     target.addEventListener("pointerup", up);
@@ -186,8 +194,16 @@ export function BrowserPage() {
   });
 
   return (
-    <div className={classes.layout} ref={layoutRef} style={{ "--detail-width": `${detailWidth}px` } as CSSProperties}>
+    <div className={classes.layout} ref={layoutRef} style={{ "--detail-width": `${detailWidth}px`, "--filter-width": `${filterWidth}px` } as CSSProperties}>
       <Box className={classes.filters}>
+        <div
+          className={`${classes.splitter} ${classes.splitterRight}`}
+          data-dragging={dragging === "filter" || undefined}
+          onPointerDown={startDrag("filter")}
+          onDoubleClick={() => { setFilterWidth(FILTER_PANE.fallback); saveWidth(FILTER_PANE.fallback, FILTER_PANE.key); }}
+          title="Drag to resize; double-click to reset"
+          data-testid="filter-splitter"
+        />
         <Group justify="space-between" px="xs" py={6} className={classes.toolbar}>
           <Text size="sm" fw={600}>
             Filter
@@ -356,8 +372,8 @@ export function BrowserPage() {
       <Box className={classes.detail}>
         <div
           className={classes.splitter}
-          data-dragging={dragging || undefined}
-          onPointerDown={startDrag}
+          data-dragging={dragging === "detail" || undefined}
+          onPointerDown={startDrag("detail")}
           onDoubleClick={() => { setDetailWidth(DEFAULT_WIDTH); saveWidth(DEFAULT_WIDTH); }}
           title="Drag to resize; double-click to reset"
           data-testid="detail-splitter"
@@ -412,6 +428,7 @@ export function BrowserPage() {
               onChange={(e) => setPatternCrawl({ ...patternCrawl, pattern: e.currentTarget.value })}
               data-autofocus
             />
+            <PatternSample folder={patternCrawl.folder} pattern={patternCrawl.pattern} />
             <Group justify="flex-end">
               <Button variant="default" onClick={() => setPatternCrawl(null)}>Cancel</Button>
               <Button

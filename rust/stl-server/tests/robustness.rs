@@ -130,6 +130,30 @@ async fn sort_files_finds_a_decomposed_name() {
     assert!(!file.exists() && root.join("sorted").join("Moved.zip").exists(), "the archive moved");
 }
 
+/// The detail pane shows a model's warnings, and the Files window highlights by them.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_models_details_carry_its_warnings() {
+    let lib = empty_library();
+    std::fs::write(lib.dir.path().join("settings.json"), r#"{"metadata_sidecar_enabled": false}"#).unwrap();
+    let ed = lib.user("ed", Role::Editor);
+    let root = lib.dir.path().join("archives");
+    std::fs::create_dir_all(&root).unwrap();
+    let mut z = zip::ZipWriter::new(std::fs::File::create(root.join("Sonja.zip")).unwrap());
+    for name in ["SONJA/SONJA_SFW_pre_supported/ARM.stl", "SONJA/ARM.stl", "SONJA/render.jpg"] {
+        z.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+        z.write_all(b"solid x\nendsolid\n").unwrap();
+    }
+    z.finish().unwrap();
+    run(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy()})).await;
+    let id: i64 = lib.state.db.with(|c| c.query_row("SELECT id FROM models", [], |r| r.get(0))).unwrap();
+
+    let details = call(&lib.state, "GET", &format!("/api/models/{id}"), Some(&ed), None).await.json();
+    assert_eq!(details["fields"]["warning"], "Models with presupported stl", "{details}");
+    let why = call(&lib.state, "GET", &format!("/api/models/{id}/warnings"), Some(&ed), None).await.json();
+    assert_eq!(why["sections"][0]["members"][0]["name"], "SONJA/SONJA_SFW_pre_supported/ARM.stl", "{why}");
+    assert_eq!(why["sections"][0]["members"].as_array().map(Vec::len), Some(1), "only the presupported file");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn answers_are_compressed_but_not_archives() {
     let lib = empty_library();

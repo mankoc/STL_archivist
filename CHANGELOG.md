@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026.45.41 — 2026-11-06
+
+- **Warnings show in the detail pane, and the Files window highlights by them.** A model's details never carried its
+  warnings, so the badges, *Warning details* and the highlighting of files and folders (new in 2026.45.27) never appeared.
+- **Path and other filters work together.** With a warning or any other filter on, the Path section emptied, so no folder
+  could be chosen. It now lists the folders left, and always a selected one.
+- **The filter pane uses the whole height:** open sections are no longer cut off at 320 pixels with a scrollbar of their
+  own; the pane scrolls as one.
+- **The filter pane can be resized:** drag its right edge; a double-click resets it. The width is remembered in this
+  browser.
+- **The crawl dialogs show a sample:** what the pattern being typed reads from the folder's first archives, as the crawl
+  would (`GET /api/libraries/pattern-sample`).
+- **Settings → Patterns** lists the patterns stored for library folders and the folders inside them, to change or forget.
+
 ## 2026.45.40 — 2026-11-06
 
 - **Code structure, with no change in behaviour:** a crawl now reads as a list of named steps, `upsert` is split into its

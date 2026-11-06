@@ -1,6 +1,6 @@
 .layout {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr) var(--detail-width, 320px);
+  grid-template-columns: var(--filter-width, 280px) minmax(0, 1fr) var(--detail-width, 320px);
   height: 100%;
   min-height: 0;
 }
@@ -16,6 +16,7 @@
 
 .filters {
   border-right: 1px solid var(--mantine-color-default-border);
+  position: relative;
 }
 
 .detail {
@@ -23,7 +24,7 @@
   position: relative;
 }
 
-/* The detail pane's left edge: drag to resize. */
+/* A side pane's inner edge: drag to resize. */
 .splitter {
   position: absolute;
   left: -4px;
@@ -32,6 +33,11 @@
   width: 8px;
   cursor: col-resize;
   z-index: 10;
+}
+
+.splitterRight {
+  left: auto;
+  right: -4px;
 }
 
 .splitter:hover,

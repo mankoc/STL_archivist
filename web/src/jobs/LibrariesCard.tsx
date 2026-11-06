@@ -13,6 +13,7 @@ import { Fragment, useState } from "react";
 import { api, unwrap } from "../api/client";
 import { HelpLink } from "../help/HelpPage";
 import { FolderPicker } from "./FolderPicker";
+import { StoredPattern } from "./StoredPattern";
 import { type JobRequest } from "./jobs";
 import {
   folderAt,
@@ -135,7 +136,7 @@ export function LibrariesCard({ editor, onCrawl, start }: {
                     </Group>
                     {f.pattern && <Text size="xs" c="dimmed">{f.pattern}</Text>}
                     {f.subfolder_patterns.map((s) => (
-                      <SubfolderPattern key={s.folder} folder={s.folder} pattern={s.pattern} editor={editor} onSave={(pattern) => void patchFolder(f.id, { subfolder: { folder: s.folder, pattern } })} />
+                      <StoredPattern key={s.folder} folder={s.folder} pattern={s.pattern} editor={editor} onSave={(pattern) => void patchFolder(f.id, { subfolder: { folder: s.folder, pattern } })} />
                     ))}
                   </Table.Td>
                   {editor && (
@@ -291,49 +292,6 @@ export function LibrariesCard({ editor, onCrawl, start }: {
 }
 
 /** Move a library folder to a new root: check every archive there first, then move. */
-/** A sub-folder's stored pattern; editors change it in place, or forget it. */
-function SubfolderPattern({ folder, pattern, editor, onSave }: { folder: string; pattern: string; editor: boolean; onSave: (pattern: string) => void }) {
-  const [draft, setDraft] = useState<string | null>(null);
-  if (draft !== null) {
-    return (
-      <TextInput
-        size="xs"
-        autoFocus
-        label={folder}
-        value={draft}
-        onChange={(e) => setDraft(e.currentTarget.value)}
-        onBlur={() => setDraft(null)}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") setDraft(null);
-          if (e.key === "Enter") {
-            onSave(draft);
-            setDraft(null);
-          }
-        }}
-      />
-    );
-  }
-  return (
-    <Group gap={2} wrap="nowrap">
-      <Text size="xs" c="dimmed">{folder}: {pattern}</Text>
-      {editor && (
-        <>
-          <Tooltip label="Change this folder's pattern">
-            <ActionIcon size="xs" variant="subtle" aria-label={`Change the pattern of ${folder}`} onClick={() => setDraft(pattern)}>
-              <IconPencil size={12} />
-            </ActionIcon>
-          </Tooltip>
-          <Tooltip label="Forget this folder's pattern: it uses the library folder's again">
-            <ActionIcon size="xs" variant="subtle" color="red" aria-label={`Forget the pattern of ${folder}`} onClick={() => onSave("")}>
-              <IconTrash size={12} />
-            </ActionIcon>
-          </Tooltip>
-        </>
-      )}
-    </Group>
-  );
-}
-
 function MoveFolder({ folder, onClose }: { folder: LibraryFolder; onClose: () => void }) {
   const [root, setRoot] = useState("");
   const [fixCase, setFixCase] = useState(true);

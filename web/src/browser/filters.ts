@@ -212,6 +212,13 @@ export function libraryFolderTree(
   return { libraries: out, other: folderTree(other) };
 }
 
+/** The folders the Path section lists: those of the models other filters leave (the
+ * server sends them apart), and the selected ones, so that they can be cleared. */
+export function shownFolders(tree: FilterTree, spec: FilterSpec): string[] {
+  const selected = [...(spec.include?.path ?? []), ...(spec.exclude?.path ?? [])].filter((p): p is string => typeof p === "string");
+  return [...new Set([...(tree.scoped_folders ?? tree.folders), ...selected])];
+}
+
 export function pathCount(tree: FilterTree, path: string): number | undefined {
   if (tree.scoped && tree.scoped_path_counts) return tree.scoped_path_counts[path] ?? 0;
   return tree.path_counts?.[path];
