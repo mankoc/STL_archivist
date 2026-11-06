@@ -13,7 +13,7 @@ can open a library on your computer without setting up a server.
 [the HTTP API](docs/api.md) ·
 and in the interface, the **?** button: searchable in-depth help on every feature
 
-Version: 2026.45.24
+Version: 2026.45.25
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). This version opens its data directory and, since 2026.43.7, converts it once
@@ -322,8 +322,6 @@ Compared with the earlier desktop application, which could fall back to Python l
 - an archive the built-in readers refuse is skipped (its fingerprint falls back to its size
   and date) rather than read another way;
 - CMYK JPEG and tiled ("grid") AVIF images get no thumbnail (other AVIF images do);
-- custom presupport patterns must use syntax the Rust regex engine reads the same way
-  (a crawl logs a warning and skips the presupport check when one does not);
 - the interface is in English only.
 
 ## Path Patterns
