@@ -1727,6 +1727,8 @@ the path is visible. No business logic and no Tauri commands for data.
   the desktop's Levenshtein and Soundex, and shared words by an index of the words, standing in for rapidfuzz's
   token-set ratio); subcollections are compared within their collection, as `name_dedup` did. `admin::merge`
   takes `tag` and `scale` (`merge_links`).
+- 2026.45.27: `ArchiveInfo`'s file tree reads `/api/models/{id}/warnings` (the Warning details query) when the model
+  has warnings; `warnings.ts`'s `warningsByFile` turns its sections into member name → warnings. `fileTree` no longer carries the CRC.
 
 ### Phase 8: Retire Python (small)
 

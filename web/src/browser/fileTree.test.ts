@@ -29,7 +29,7 @@ describe("file tree", () => {
       files: ["STL/supported/part2.stl", "STL/part2.stl", "STL/part10.stl"],
       size: 600,
     });
-    expect(tree.info.get("STL/supported/part2.stl")).toEqual({ kind: "file", name: "STL/supported/part2.stl", size: 300, crc: "00000004" });
+    expect(tree.info.get("STL/supported/part2.stl")).toEqual({ kind: "file", name: "STL/supported/part2.stl", size: 300 });
     expect(treeFiles(tree)).toEqual(["STL/supported/part2.stl", "STL/part2.stl", "STL/part10.stl", "a.png", "readme.txt"]);
   });
 

@@ -1,7 +1,7 @@
 // The detail pane's archive section: the stored warnings with the members that
-// trigger them (Warning Details), and the files in the archive with their CRC-32
-// (Show Files, as a folder tree), as the last crawl or rescan read the
-// archive's catalog. The model files the server can show (`/viewable`, read
+// trigger them (Warning Details), and the files in the archive (Show Files, as a
+// folder tree, those behind a warning highlighted), as the last crawl or rescan
+// read the archive's catalog. The model files the server can show (`/viewable`, read
 // from the archive now) open in the model viewer.
 import { ActionIcon, Alert, Badge, Button, getTreeExpandedState, Group, Loader, Modal, Stack, Table, Text, Tooltip, Tree, useTree } from "@mantine/core";
 import { IconAlertTriangle, IconChevronRight, IconCube, IconFile, IconFiles, IconFolder } from "@tabler/icons-react";
@@ -11,6 +11,7 @@ import { useMemo, useState } from "react";
 import { api, unwrap } from "../api/client";
 import { formatSize } from "../format";
 import { fileTree } from "./fileTree";
+import { warningsByFile } from "./warnings";
 
 export function ArchiveInfo({ id, warning, onView }: { id: number; warning: string | null; onView: (file: string) => void }) {
   const [open, setOpen] = useState<"warnings" | "files" | null>(null);
@@ -43,6 +44,7 @@ export function ArchiveInfo({ id, warning, onView }: { id: number; warning: stri
         {open === "files" && (
           <FileList
             id={id}
+            warned={lines.length > 0}
             onView={(file) => {
               setOpen(null);
               onView(file);
@@ -89,7 +91,7 @@ function WarningDetails({ id }: { id: number }) {
   );
 }
 
-function FileList({ id, onView }: { id: number; onView: (file: string) => void }) {
+function FileList({ id, warned, onView }: { id: number; warned: boolean; onView: (file: string) => void }) {
   const q = useQuery({
     queryKey: ["model-files", id],
     queryFn: async () => unwrap(await api.GET("/api/models/{id}/archive-files", { params: { path: { id } } })),
@@ -101,6 +103,14 @@ function FileList({ id, onView }: { id: number; onView: (file: string) => void }
     retry: false,
   });
   const viewable = useMemo(() => new Set((models.data ?? []).map((f) => f.name)), [models.data]);
+  // The same query as Warning details; it opens the archive, so only with warnings to explain.
+  const details = useQuery({
+    queryKey: ["model-warnings", id],
+    queryFn: async () => unwrap(await api.GET("/api/models/{id}/warnings", { params: { path: { id } } })),
+    enabled: warned,
+    retry: false,
+  });
+  const warnings = useMemo(() => warningsByFile(details.data?.sections ?? []), [details.data]);
   if (q.isPending) return <Loader size="sm" />;
   if (q.isError) return <Alert color="red">{q.error.message}</Alert>;
   if (!q.data.length) {
@@ -110,14 +120,16 @@ function FileList({ id, onView }: { id: number; onView: (file: string) => void }
       </Text>
     );
   }
-  return <FileTreeView files={q.data} viewable={viewable} onView={onView} />;
+  return <FileTreeView files={q.data} viewable={viewable} warnings={warnings} onView={onView} />;
 }
 
-/** The archive's folders and files, all folders open; model files have a view button. */
-function FileTreeView({ files, viewable, onView }: {
-  files: { name: string; size?: number | null; crc: string }[];
+/** The archive's folders and files, all folders open; model files have a view button, and files behind a warning stand out. */
+function FileTreeView({ files, viewable, warnings, onView }: {
+  files: { name: string; size?: number | null }[];
   /** The model files the viewer can show. */
   viewable: Set<string>;
+  /** The warnings each file triggers. */
+  warnings: Map<string, string[]>;
   onView: (file: string) => void;
 }) {
   const tree = useMemo(() => fileTree(files), [files]);
@@ -125,7 +137,10 @@ function FileTreeView({ files, viewable, onView }: {
   return (
     <Stack gap={4} data-testid="file-list">
       <Group gap="xs" justify="space-between">
-        <Text size="xs" c="dimmed">{files.length} file{files.length === 1 ? "" : "s"}</Text>
+        <Text size="xs" c="dimmed">
+          {files.length} file{files.length === 1 ? "" : "s"}
+          {warnings.size > 0 && `, ${warnings.size} with a warning`}
+        </Text>
         <Group gap={4}>
           <Button size="compact-xs" variant="subtle" onClick={() => controller.expandAllNodes()}>Expand all</Button>
           <Button size="compact-xs" variant="subtle" onClick={() => controller.collapseAllNodes()}>Collapse all</Button>
@@ -137,6 +152,11 @@ function FileTreeView({ files, viewable, onView }: {
         levelOffset={18}
         renderNode={({ node, expanded, hasChildren, elementProps }) => {
           const info = tree.info.get(node.value)!;
+          const reasons = info.kind === "file" ? warnings.get(info.name!) : undefined;
+          // A folder stands out too, so a closed one does not hide its files.
+          const warned = reasons != null || (info.files ?? []).some((f) => warnings.has(f));
+          const color = warned ? "orange" : undefined;
+          const name = <Text size="xs" c={color} fw={reasons ? 600 : undefined} style={{ flex: 1, minWidth: 0, wordBreak: "break-all" }}>{node.label}</Text>;
           return (
             <Group gap={6} wrap="nowrap" {...elementProps} style={{ ...elementProps.style, minHeight: 24 }}>
               {hasChildren ? (
@@ -144,15 +164,18 @@ function FileTreeView({ files, viewable, onView }: {
               ) : (
                 <span style={{ width: 14, flexShrink: 0 }} />
               )}
-              {info.kind === "folder" ? <IconFolder size={14} style={{ flexShrink: 0 }} /> : <IconFile size={14} style={{ flexShrink: 0 }} />}
-              <Text size="xs" style={{ flex: 1, minWidth: 0, wordBreak: "break-all" }}>{node.label}</Text>
+              {info.kind === "folder" ? (
+                <IconFolder size={14} color={warned ? "var(--mantine-color-orange-text)" : undefined} style={{ flexShrink: 0 }} />
+              ) : reasons ? (
+                <IconAlertTriangle size={14} color="var(--mantine-color-orange-text)" style={{ flexShrink: 0 }} />
+              ) : (
+                <IconFile size={14} style={{ flexShrink: 0 }} />
+              )}
+              {reasons ? <Tooltip label={reasons.join(", ")}>{name}</Tooltip> : name}
               {info.kind === "folder" ? (
                 <Text size="xs" c="dimmed" w={170} ta="right">{info.files!.length} file{info.files!.length === 1 ? "" : "s"} · {formatSize(info.size)}</Text>
               ) : (
-                <>
-                  <Text size="xs" w={80} ta="right">{formatSize(info.size)}</Text>
-                  <Text size="xs" w={70} ff="monospace" c="dimmed">{info.crc}</Text>
-                </>
+                <Text size="xs" w={80} ta="right">{formatSize(info.size)}</Text>
               )}
               <span style={{ width: 28, flexShrink: 0 }}>
                 {info.kind === "file" && viewable.has(info.name!) && (

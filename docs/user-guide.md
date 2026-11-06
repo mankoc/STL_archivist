@@ -174,7 +174,7 @@ in this browser.
 - **Download** the archive; **Copy path** (when the server's path makes sense on your
   computer); **Open folder** in the desktop app shows the archive in the file manager.
 - **Files** shows the archive's folders and files as a tree (a chain of single folders is one
-  row), with each file's size and CRC-32 and each folder's file count, as the last crawl or
+  row), with each file's size and each folder's file count, the files behind a warning highlighted, as the last crawl or
   rescan read the archive's catalog (a crawl reads only new and changed archives: a record
   without a list gets it from *Rescan* or *Settings → Maintenance → Read missing file
   lists*). The cube beside a model file opens it in the model viewer.

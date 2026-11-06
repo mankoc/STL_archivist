@@ -5,16 +5,14 @@ import type { TreeNodeData } from "@mantine/core";
 export interface ArchiveEntry {
   name: string;
   size?: number | null;
-  crc?: string;
 }
 
-/** A node's details: a file's member name, size and CRC; a folder's files (member names, at any depth) and total size. */
+/** A node's details: a file's member name and size; a folder's files (member names, at any depth) and total size. */
 export interface NodeInfo {
   kind: "file" | "folder";
   /** A file's member name in the archive. */
   name?: string;
   size: number | null;
-  crc?: string;
   /** A folder's files, in tree order. */
   files?: string[];
 }
@@ -77,7 +75,7 @@ export function fileTree(entries: ArchiveEntry[]): FileTree {
       let value = e.name;
       for (let n = 2; used.has(value); n++) value = `${e.name}#${n}`;
       used.add(value);
-      info.set(value, { kind: "file", name: e.name, size: e.size ?? null, crc: e.crc });
+      info.set(value, { kind: "file", name: e.name, size: e.size ?? null });
       return { value, label: leaf(e.name) };
     });
     return [...folders, ...files];

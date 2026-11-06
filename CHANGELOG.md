@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.45.27 — 2026-11-06
+
+- **The Files window highlights the files behind a model's warnings**: they stand out, pointing at one
+  says which warning it triggers, and folders holding one are marked, so a closed folder hides nothing. The
+  CRC column is gone (the API still gives it).
+
 ## 2026.45.26 — 2026-11-06
 
 - **Merge similar** on the Lookups page, on every tab and for creators: it lists near-duplicate names by
