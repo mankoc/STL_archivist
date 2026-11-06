@@ -14,3 +14,12 @@ export function rowTone(warning: string | null | undefined): Tone | null {
   if (lines.length === 0) return null;
   return lines.some((l) => l.startsWith(UNREADABLE)) ? "unreadable" : "warning";
 }
+
+/** The warnings each archive member triggers, from Warning details' sections. */
+export function warningsByFile(sections: { warning: string; members: { name: string }[] }[]): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const s of sections) {
+    for (const m of s.members) out.set(m.name, [...(out.get(m.name) ?? []), s.warning]);
+  }
+  return out;
+}
