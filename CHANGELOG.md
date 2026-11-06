@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.45.35 — 2026-11-06
+
+- **Generate Thumbnails is about nine times faster:** archives are read and converted in parallel (the crawl's worker
+  setting), only the images needed are read, and each model's thumbnails go to the store in one commit. 60 archives of
+  12 images, keeping 3, took 7.8 s and now take 0.85 s. Images that can't be read give way to the next ones.
+
 ## 2026.45.34 — 2026-11-06
 
 - **`rust-toolchain.toml` pins Rust 1.99.0** for development and CI, and the Docker image builds with the same version.

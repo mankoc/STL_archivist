@@ -1,6 +1,7 @@
 //! Archive tools on selected models (the desktop browser's context menu):
 //! Rescan, Generate Thumbnails, Delete Files, and Warning Details.
 
+use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -86,34 +87,48 @@ pub fn generate_thumbnails(lib: &Library, ctl: &Control, log: &dyn Fn(String), i
     let settings = LibrarySettings::load(&lib.config.data_dir);
     let opts = options(lib, &settings);
     let size = settings.max_thumb_size();
+    let workers = settings.max_workers().max(1);
+    let pool = rayon::ThreadPoolBuilder::new().num_threads(workers).build().map_err(|e| e.to_string())?;
     ctl.set_total(ids.len() as u64);
     let mut out = Outcome::default();
-    for (k, &id) in ids.iter().enumerate() {
+    let mut position = 0;
+    // A few models at a time: reading and converting run in parallel, the writes in order.
+    for chunk in ids.chunks(workers * 2) {
         if ctl.is_stopped() {
             log("Thumbnail generation cancelled".into());
             break;
         }
-        ctl.advance(1);
-        let Some((Some(path), ..)) = lib.db.with(|c| jobs_db::rescan_state(c, id)).map_err(db)? else { continue };
-        log(format!("[{}/{}] {}", k + 1, ids.len(), file_name(&path)));
-        let t = match rescan::thumbnails(&path, max, size, &opts) {
-            Ok(t) => t,
-            Err(e) => {
-                log(format!("  WARNING: {e}, skipping"));
-                continue;
+        let mut models = Vec::with_capacity(chunk.len());
+        for &id in chunk {
+            position += 1;
+            match lib.db.with(|c| jobs_db::rescan_state(c, id)).map_err(db)? {
+                Some((Some(path), ..)) => models.push((position, id, path)),
+                _ => ctl.advance(1),
             }
-        };
-        for f in &t.failed {
-            log(format!("  WARNING: thumbnail conversion failed for {f}"));
         }
-        let stored = lib
-            .db
-            .with_tx(|tx| jobs_db::replace_thumbnails(tx, Some(&lib.thumbs), id, &t.thumbs, t.warning.as_deref()))
-            .map_err(db)?;
-        if let Some(n) = stored {
-            log(format!("  {n} thumbnail(s) stored"));
-            out.done += 1;
-            out.touched.push(path);
+        let made: Vec<_> = pool.install(|| models.par_iter().map(|(_, _, path)| rescan::thumbnails(path, max, size, &opts)).collect());
+        for ((k, id, path), made) in models.into_iter().zip(made) {
+            ctl.advance(1);
+            log(format!("[{}/{}] {}", k, ids.len(), file_name(&path)));
+            let t = match made {
+                Ok(t) => t,
+                Err(e) => {
+                    log(format!("  WARNING: {e}, skipping"));
+                    continue;
+                }
+            };
+            for f in &t.failed {
+                log(format!("  WARNING: thumbnail conversion failed for {f}"));
+            }
+            let stored = lib
+                .db
+                .with_tx(|tx| jobs_db::replace_thumbnails(tx, Some(&lib.thumbs), id, &t.thumbs, t.warning.as_deref()))
+                .map_err(db)?;
+            if let Some(n) = stored {
+                log(format!("  {n} thumbnail(s) stored"));
+                out.done += 1;
+                out.touched.push(path);
+            }
         }
     }
     Ok(out)

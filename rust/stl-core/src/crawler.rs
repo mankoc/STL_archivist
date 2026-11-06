@@ -24,7 +24,7 @@ use crate::winpath::WinPath;
 
 const BATCH_SIZE: usize = 50;
 const MAX_CONSECUTIVE_FAILURES: usize = 50;
-const SIZE_LIMIT_IMAGE: u64 = 50 * 1024 * 1024;
+pub(crate) const SIZE_LIMIT_IMAGE: u64 = 50 * 1024 * 1024;
 const SIZE_LIMIT_META: u64 = 1024 * 1024;
 
 /// The crawl settings (`CrawlerConfig` plus the source folder and pattern).
