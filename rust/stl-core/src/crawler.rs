@@ -313,18 +313,25 @@ fn size_limit(name: &str) -> u64 {
 
 const STL_EXTS: [&str; 7] = [".stl", ".obj", ".lys", ".lyt", ".chitubox", ".ctp", ".ags"];
 
-/// `extract_archive_contents` natively, or `None` where the native readers refuse.
-pub(crate) fn extract_native(path: &str, unrar: &str) -> Option<Extracted> {
+/// The archive's catalog and its `.url` and `info.json` members, with its first
+/// `max_images` images and PDFs (`None`: every one; in a solid archive, reading
+/// stops after the last member wanted). `None` where the catalog cannot be read.
+pub(crate) fn extract_native(path: &str, unrar: &str, max_images: Option<usize>) -> Option<Extracted> {
     let p = Path::new(path);
     let members = archive::list_members(p).ok()?;
     let names: Vec<String> = members.iter().map(|m| m.name.clone()).collect();
     let uncompressed = Some(members.iter().filter_map(|m| m.size).sum::<u64>() as i64);
     let stl_info = stl_dict(members.iter().map(|m| (m.name.clone(), m.size.map(|s| s as i64))));
     let size_by_name: HashMap<&str, Option<u64>> = members.iter().map(|m| (m.name.as_str(), m.size)).collect();
+    let mut images = 0;
     let to_read: Vec<String> = names
         .iter()
         .filter(|n| is_wanted(n))
         .filter(|n| size_by_name.get(n.as_str()).copied().flatten().is_none_or(|s| s <= size_limit(n)))
+        .filter(|n| {
+            images += usize::from(is_image_or_pdf(n));
+            !is_image_or_pdf(n) || max_images.is_none_or(|max| images <= max)
+        })
         .cloned()
         .collect();
     // Members that cannot be read cost the thumbnails, not the catalog read above.
@@ -419,7 +426,7 @@ struct Prepared {
 }
 
 fn prepare(path: &str, cfg: &CrawlConfig, host: &dyn Host) -> Prepared {
-    let extracted = extract_native(path, &cfg.unrar).unwrap_or_else(|| match host.call(Request::Extract(path.to_string())) {
+    let mut extracted = extract_native(path, &cfg.unrar, Some(cfg.max_thumbnails)).unwrap_or_else(|| match host.call(Request::Extract(path.to_string())) {
         Response::Extracted(x) => x,
         _ => Extracted::default(),
     });
@@ -440,6 +447,8 @@ fn prepare(path: &str, cfg: &CrawlConfig, host: &dyn Host) -> Prepared {
             (name.clone(), jpeg, dh)
         })
         .collect();
+    // A batch waits for its last archive: only the small files are needed from here on.
+    extracted.contents.retain(|(name, _)| !is_image_or_pdf(name));
     Prepared { extracted, precomp }
 }
 
@@ -521,43 +530,33 @@ fn rules_for(cfg: &CrawlConfig, archive_name: &str, names: &[String], host: &dyn
     (presupports, Some(warnings).filter(|w| !w.is_empty()), scales)
 }
 
-fn folder_images(path: &str, cfg: &CrawlConfig, host: &dyn Host) -> Vec<(String, Option<Vec<u8>>, Option<String>)> {
-    let mut out = Vec::new();
-    let source = WinPath::new(cfg.root()).as_posix().to_lowercase();
-    let mut folder = WinPath::new(path).parent();
-    loop {
-        let posix = folder.as_posix();
-        if metadata::win_relative_parts(&posix, cfg.root()).is_none() {
-            break;
-        }
-        let dir = crate::winpath::native(&posix);
-        let mut files: Vec<String> = std::fs::read_dir(&dir)
-            .map(|rd| {
-                rd.flatten()
-                    .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
-                    .map(|e| e.file_name().to_string_lossy().into_owned())
-                    .filter(|n| rules::IMAGE_SUFFIXES.contains(&suffix_lower(n).as_str()))
-                    .map(|n| crate::winpath::join(&dir, &n))
-                    .collect()
+/// An image beside an archive: its path, thumbnail and dHash.
+type FolderImage = (String, Option<Vec<u8>>, Option<String>);
+
+/// The images directly in folder `dir`, in order, in parallel.
+fn images_in(dir: &str, pool: &rayon::ThreadPool, cfg: &CrawlConfig, host: &dyn Host) -> Vec<FolderImage> {
+    let mut files: Vec<String> = std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.flatten()
+                .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .filter(|n| rules::IMAGE_SUFFIXES.contains(&suffix_lower(n).as_str()))
+                .map(|n| crate::winpath::join(dir, &n))
+                .collect()
+        })
+        .unwrap_or_default();
+    sort_paths(&mut files);
+    pool.install(|| {
+        files
+            .into_par_iter()
+            .filter_map(|f| {
+                let raw = std::fs::read(&f).ok()?;
+                let jpeg = thumbnail(&raw, cfg.max_thumb_size, false, host);
+                let dh = jpeg.as_deref().and_then(dhash_text);
+                Some((f, jpeg, dh))
             })
-            .unwrap_or_default();
-        sort_paths(&mut files);
-        for f in files {
-            let Ok(raw) = std::fs::read(&f) else { continue };
-            let jpeg = thumbnail(&raw, cfg.max_thumb_size, false, host);
-            let dh = jpeg.as_deref().and_then(dhash_text);
-            out.push((f, jpeg, dh));
-        }
-        if posix.to_lowercase() == source {
-            break;
-        }
-        let parent = folder.parent();
-        if parent == folder {
-            break;
-        }
-        folder = parent;
-    }
-    out
+            .collect()
+    })
 }
 
 fn metadata_for(path: &str, contents: &[(String, Vec<u8>)], cfg: &CrawlConfig) -> Metadata {
@@ -592,6 +591,9 @@ struct Run<'a> {
     from_sidecar: HashSet<String>,
     /// Records of archives not found are flagged, whatever `defer_missing_deletion` says.
     keep_records: bool,
+    /// The images of the current archive's folders: archives come in path order,
+    /// so its neighbours share them, and each is decoded once.
+    folder_cache: HashMap<String, Vec<FolderImage>>,
 }
 
 fn tx(conn: &mut rusqlite::Connection) -> rusqlite::Result<rusqlite::Transaction<'_>> {
@@ -787,7 +789,36 @@ impl Run<'_> {
         Ok(host.should_stop())
     }
 
-    fn changed(&self, path: &str, hash: &str, existing_id: Option<i64>, prep: &Prepared) -> db::Changed {
+    /// The images in the archive's folder and those above it, up to the library's root.
+    fn folder_images(&mut self, path: &str) -> Vec<FolderImage> {
+        let (cfg, host) = (self.cfg, self.host);
+        let mut out = Vec::new();
+        let mut chain = HashSet::new();
+        let source = WinPath::new(cfg.root()).as_posix().to_lowercase();
+        let mut folder = WinPath::new(path).parent();
+        loop {
+            let posix = folder.as_posix();
+            if metadata::win_relative_parts(&posix, cfg.root()).is_none() {
+                break;
+            }
+            let dir = crate::winpath::native(&posix);
+            let images = self.folder_cache.entry(dir.clone()).or_insert_with(|| images_in(&dir, &self.pool, cfg, host));
+            out.extend(images.iter().cloned());
+            chain.insert(dir);
+            if posix.to_lowercase() == source {
+                break;
+            }
+            let parent = folder.parent();
+            if parent == folder {
+                break;
+            }
+            folder = parent;
+        }
+        self.folder_cache.retain(|dir, _| chain.contains(dir));
+        out
+    }
+
+    fn changed(&mut self, path: &str, hash: &str, existing_id: Option<i64>, prep: &Prepared) -> db::Changed {
         let (cfg, host) = (self.cfg, self.host);
         let x = &prep.extracted;
         let meta = metadata_for(path, &x.contents, cfg);
@@ -821,7 +852,7 @@ impl Run<'_> {
             scales,
             uncompressed_size: x.uncompressed,
             thumbs,
-            folder_images: if fresh { folder_images(path, cfg, host) } else { Vec::new() },
+            folder_images: if fresh { self.folder_images(path) } else { Vec::new() },
             stl_info: x.stl_info.clone(),
         }
     }
@@ -851,6 +882,7 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
         listed: HashMap::new(),
         from_sidecar: HashSet::new(),
         keep_records: false,
+        folder_cache: HashMap::new(),
     };
     // The crawled folder is a library (made now when it is none yet), or a part of
     // one (`library_root`); the libraries inside it are crawled on their own.
@@ -1139,6 +1171,28 @@ fn reconcile(run: &mut Run<'_>, missing: Vec<db::Missing>) -> Result<(), CrawlEr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_images_used_are_read() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.zip");
+        let mut z = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+        let o = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        for name in ["1.jpg", "model.stl", "2.png", "info.json", "3.jpg", "link.url", "4.pdf"] {
+            z.start_file(name, o).unwrap();
+            z.write_all(b"data").unwrap();
+        }
+        z.finish().unwrap();
+        let read = |max| {
+            let x = extract_native(&path.to_string_lossy(), "", max).unwrap();
+            assert_eq!(x.names.len(), 7, "the catalog is whole");
+            x.contents.into_iter().map(|(n, _)| n).collect::<Vec<_>>()
+        };
+        assert_eq!(read(Some(2)), ["1.jpg", "2.png", "info.json", "link.url"]);
+        assert_eq!(read(Some(0)), ["info.json", "link.url"]);
+        assert_eq!(read(None).len(), 6);
+    }
 
     #[test]
     fn log_lines_name_the_archive() {

@@ -1708,6 +1708,12 @@ the path is visible. No business logic and no Tauri commands for data.
   keeps a folder out of Update Folders' `delete_missing_under`. `Extracted.unread` keeps the catalog when
   members cannot be read. Exclusions in `library::conditions` are `(...) IS NOT TRUE`, and creator and
   source compare exact values: neither quirk needs to match Python any more.
+- 2026.45.23: `crawler::extract_native` takes `max_images` (crawls: `max_thumbnails`; Rescan: 0; Generate Thumbnails:
+  all, as it goes on past failed conversions), and `prepare` drops the raw images, which sat in `Prepared`
+  until the batch's upsert. `Run::folder_images` keeps `folder_cache`, the current archive's chain of folders
+  only (archives come in path order). `library::filter_tree` gave way to `filter_tree_parallel` and
+  `scoped_tree`, which leaves `counts` and `path_counts` to the server's `TreeCache`; its sections run in
+  parallel except under a folder filter, whose temporary table lives on one connection.
 
 ### Phase 8: Retire Python (small)
 

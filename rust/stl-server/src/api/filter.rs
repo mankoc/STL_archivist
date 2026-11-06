@@ -208,19 +208,28 @@ impl From<library::FilterTree> for FilterTree {
 #[utoipa::path(post, path = "/api/filter-tree", tag = "library", request_body = FilterTreeRequest,
     responses((status = 200, body = FilterTree), (status = 400, body = crate::error::ErrorBody)))]
 pub async fn tree(State(lib): State<AppState>, _me: CurrentUser, Json(req): Json<FilterTreeRequest>) -> Result<Json<FilterTree>, ApiError> {
-    let spec = req.filter.as_ref().map(FilterSpecDto::to_spec).transpose()?;
+    let spec = req.filter.as_ref().map(FilterSpecDto::to_spec).transpose()?.filter(|s| !s.is_empty());
     for s in &req.show {
         if !library::SHOW.contains(&s.as_str()) {
             return Err(ApiError::bad_request(format!("unknown section {s:?}")));
         }
     }
     let show = library::Show(req.show.iter().cloned().collect());
-    if spec.as_ref().is_none_or(|s| s.is_empty()) {
+    let Some(spec) = spec else {
         let tree = lib.run(move |lib| Ok(unfiltered_tree(lib, show, req.counts)?)).await?;
         return Ok(Json((*tree).clone()));
-    }
-    let tree = lib.run(move |lib| Ok(lib.db.with(|c| library::filter_tree(c, spec.as_ref(), &show, req.counts))?)).await?;
-    Ok(Json(tree.into()))
+    };
+    let tree = lib
+        .run(move |lib| {
+            let mut tree = FilterTree::from(library::scoped_tree(&lib.db, &spec, &show, req.counts)?);
+            if req.counts {
+                let all = unfiltered_tree(lib, show, true)?;
+                (tree.counts, tree.path_counts) = (all.counts.clone(), all.path_counts.clone());
+            }
+            Ok(tree)
+        })
+        .await?;
+    Ok(Json(tree))
 }
 
 /// The unfiltered tree, kept until the library changes: it reads most of the
