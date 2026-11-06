@@ -14,10 +14,13 @@ use crate::path_pattern;
 use crate::storage::browser::SortSource;
 use crate::storage::sidecar::METADATA_FILENAME;
 
-/// `str(v).strip()`, or `_unknown` for nothing (`_safe`).
-fn safe(v: Option<String>) -> String {
+/// What a field without a value becomes unless the user chose otherwise.
+pub const UNKNOWN: &str = "_unknown";
+
+/// `str(v).strip()`, or `missing` for nothing (`_safe`).
+fn safe(v: Option<String>, missing: &str) -> String {
     let s = v.map(|s| s.trim().to_string()).unwrap_or_default();
-    if s.is_empty() { "_unknown".into() } else { s }
+    if s.is_empty() { missing.into() } else { s }
 }
 
 fn value_text(v: &Value) -> Option<String> {
@@ -37,8 +40,9 @@ fn int(v: &Value) -> Option<i64> {
     }
 }
 
-/// The token values `render_path_pattern` substitutes for one model.
-pub fn values(s: &SortSource) -> HashMap<String, String> {
+/// The token values `render_path_pattern` substitutes for one model, `missing`
+/// for the fields it has no value in.
+pub fn values(s: &SortSource, missing: &str) -> HashMap<String, String> {
     let date = path_pattern::format_release_date(int(&s.release_year), int(&s.release_month));
     let pairs = [
         ("source", s.source.clone()),
@@ -58,11 +62,11 @@ pub fn values(s: &SortSource) -> HashMap<String, String> {
         ("sequence", value_text(&s.sequence)),
         ("release", s.release.clone()),
     ];
-    pairs.into_iter().map(|(k, v)| (k.to_string(), safe(v))).collect()
+    pairs.into_iter().map(|(k, v)| (k.to_string(), safe(v, missing))).collect()
 }
 
-/// `_sanitise_segment`: unsafe characters become `_`, runs of `_` collapse,
-/// and an empty result is `_unknown`.
+/// `_sanitise_segment`: unsafe characters become `_` and runs of `_` collapse.
+/// Nothing left, or only dots (`..` would leave the target folder), gives `""`.
 pub fn sanitise_segment(segment: &str) -> String {
     let mut out = String::new();
     for ch in segment.trim().chars() {
@@ -72,25 +76,32 @@ pub fn sanitise_segment(segment: &str) -> String {
         }
     }
     let s = out.trim_matches('_');
-    if s.is_empty() { "_unknown".into() } else { s.to_string() }
+    if s.chars().all(|c| c == '.') { String::new() } else { s.to_string() }
 }
 
-/// `_compute_target`: `base` / sanitised folders / sanitised name + the archive's extension.
-pub fn target(base: &Path, pattern: &str, source: &SortSource) -> PathBuf {
+/// `_compute_target`: `base` / sanitised folders / sanitised name + the archive's
+/// extension. Fields without a value become `missing`; when that is empty, a
+/// folder level with nothing in it is left out, and a file name with nothing in
+/// it is the archive's own.
+pub fn target(base: &Path, pattern: &str, source: &SortSource, missing: &str) -> PathBuf {
     let src = source.archive_path.clone().unwrap_or_default();
     let src_path = Path::new(&src);
     let ext = src_path.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
-    let rendered = path_pattern::render(pattern.trim_matches(['/', '\\']), &values(source));
+    let rendered = path_pattern::render(pattern.trim_matches(['/', '\\']), &values(source, missing), missing);
     let rendered = rendered.replace('\\', "/");
-    let parts: Vec<&str> = rendered.split('/').filter(|p| !p.is_empty()).collect();
-    let (dirs, stem) = match parts.split_last() {
-        Some((last, dirs)) => (dirs.iter().map(|d| sanitise_segment(d)).collect::<Vec<_>>(), sanitise_segment(last)),
-        None => (Vec::new(), sanitise_segment(&src_path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default())),
-    };
+    let fill = sanitise_segment(missing);
+    let mut parts: Vec<&str> = rendered.split('/').collect();
+    let name = parts.pop().map(sanitise_segment).unwrap_or_default();
     let mut dir = base.to_path_buf();
-    for d in dirs {
-        dir.push(d);
+    for d in parts.into_iter().filter(|d| !d.is_empty()) {
+        let d = sanitise_segment(d);
+        let d = if d.is_empty() { fill.clone() } else { d };
+        if !d.is_empty() {
+            dir.push(d);
+        }
     }
+    let own = sanitise_segment(&src_path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default());
+    let stem = [name, own, fill].into_iter().find(|s| !s.is_empty()).unwrap_or_else(|| UNKNOWN.into());
     dir.join(format!("{stem}{ext}"))
 }
 
@@ -173,7 +184,7 @@ fn companions(rows: &[PlanRow]) -> Vec<PlanRow> {
 }
 
 /// `_refresh_preview`: the plan for `ids`, in that order, then the [`companions`].
-pub fn preview(sources: &[SortSource], ids: &[i64], base: &Path, pattern: &str) -> Vec<PlanRow> {
+pub fn preview(sources: &[SortSource], ids: &[i64], base: &Path, pattern: &str, missing: &str) -> Vec<PlanRow> {
     let by_id: HashMap<i64, &SortSource> = sources.iter().map(|s| (s.id, s)).collect();
     let mut rows: Vec<PlanRow> = ids
         .iter()
@@ -187,7 +198,7 @@ pub fn preview(sources: &[SortSource], ids: &[i64], base: &Path, pattern: &str) 
             if !Path::new(&src).exists() {
                 return PlanRow { id, status: "MISS", from: src, to: "source file not found on disk".into() };
             }
-            let to = target(base, pattern, s);
+            let to = target(base, pattern, s, missing);
             let collision = to.exists() && to != Path::new(&src);
             PlanRow { id, status: if collision { "COLLISION" } else { "OK" }, from: src, to: to.to_string_lossy().into_owned() }
         })
@@ -303,13 +314,40 @@ mod tests {
     #[test]
     fn segments_and_targets() {
         assert_eq!(sanitise_segment(" a:b**c "), "a_b_c");
-        assert_eq!(sanitise_segment("___"), "_unknown");
+        assert_eq!(sanitise_segment("___"), "");
+        assert_eq!(sanitise_segment(" .. "), "");
         let s = source(1, "D:/old/Dragon.zip", Some("Red: Dragon"), None);
-        let t = target(Path::new("D:/new"), "/{collection}/{creator}/{title} {date}/", &s);
+        let t = target(Path::new("D:/new"), "/{collection}/{creator}/{title} {date}/", &s, UNKNOWN);
         assert_eq!(t, Path::new("D:/new").join("Fantasy").join("unknown").join("Red_ Dragon 2024.zip"), "as Python: \"_unknown\".strip(\"_\")");
         let s = SortSource { source: Some("Patreon".into()), ..source(1, "D:/old/Dragon.zip", Some("Dragon"), Some("Sanix")) };
-        let t = target(Path::new("D:/new"), "{creator}/{Type}/{date} - {title}", &s);
+        let t = target(Path::new("D:/new"), "{creator}/{Type}/{date} - {title}", &s, UNKNOWN);
         assert_eq!(t, Path::new("D:/new").join("Sanix").join("Patreon").join("2024 - Dragon.zip"), "{{type}} is {{source}}, any case");
+    }
+
+    #[test]
+    fn missing_fields() {
+        let base = Path::new("D:/new");
+        let s = source(1, "D:/old/Dragon.zip", Some("Red"), None);
+        let to = |pattern, missing| target(base, pattern, &s, missing);
+        assert_eq!(to("{collection}/{creator}/{title}", "N/A"), base.join("Fantasy").join("N_A").join("Red.zip"));
+        assert_eq!(to("{collection}/{creator}/{title}", ""), base.join("Fantasy").join("Red.zip"), "no folder level");
+        assert_eq!(to("{nope}/{title}", "none"), base.join("none").join("Red.zip"), "a token nothing fills");
+        assert_eq!(to("{nope}/{title}", ""), base.join("Red.zip"));
+        assert_eq!(to("{title} {creator}", ""), base.join("Red.zip"));
+        // A file name with nothing in it is the archive's, not its folder's.
+        let s = source(1, "D:/old/Dragon.zip", None, Some("Sanix"));
+        assert_eq!(target(base, "{creator}/{title}", &s, ""), base.join("Sanix").join("Dragon.zip"));
+        assert_eq!(target(base, "{title}", &s, "none"), base.join("none.zip"));
+    }
+
+    #[test]
+    fn stays_in_the_target_folder() {
+        let base = Path::new("D:/new");
+        let s = source(1, "D:/old/Dragon.zip", Some("Red"), None);
+        assert_eq!(target(base, "../../{title}", &s, ""), base.join("Red.zip"));
+        assert_eq!(target(base, "{creator}/{title}", &s, ".."), base.join("Red.zip"));
+        let s = source(1, "D:/old/Dragon.zip", Some(".."), None);
+        assert_eq!(target(base, "{title}/x", &s, ""), base.join("x.zip"));
     }
 
     #[test]
@@ -327,7 +365,7 @@ mod tests {
             source(1, &old.join("a.zip").to_string_lossy(), Some("Same"), None),
             source(2, &old.join("b.zip").to_string_lossy(), Some("Other"), None),
         ];
-        let rows = preview(&sources, &[1, 2, 3], &new, "{collection}/{title}");
+        let rows = preview(&sources, &[1, 2, 3], &new, "{collection}/{title}", UNKNOWN);
         assert_eq!(rows.iter().map(|r| r.status).collect::<Vec<_>>(), ["COLLISION", "OK", "ERROR"]);
         let done = execute(&rows).unwrap();
         assert_eq!(done[0].1, new.join("Fantasy").join("Same_1.zip").to_string_lossy());
@@ -363,7 +401,7 @@ mod tests {
             source(1, &old.join("oola.zip").to_string_lossy(), Some("Oola"), None),
             source(2, &mixed.join("a.zip").to_string_lossy(), Some("A"), None),
         ];
-        let rows = preview(&sources, &[1, 2], &new, "{collection}/{title}");
+        let rows = preview(&sources, &[1, 2], &new, "{collection}/{title}", UNKNOWN);
         let files: Vec<(&str, String)> = rows.iter().filter(|r| r.status == "FILE").map(|r| (r.status, r.to.clone())).collect();
         let target = new.join("Fantasy");
         assert_eq!(
@@ -380,12 +418,12 @@ mod tests {
         // A folder left with only its sidecar is removed.
         std::fs::remove_dir_all(old.join("extra")).unwrap();
         let both = [source(3, &target.join("Oola.zip").to_string_lossy(), Some("Oola"), None), source(5, &target.join("A.zip").to_string_lossy(), Some("A"), None)];
-        let rows = preview(&both, &[3, 5], &dir.path().join("again"), "{title}");
+        let rows = preview(&both, &[3, 5], &dir.path().join("again"), "{title}", UNKNOWN);
         execute(&rows).unwrap();
         assert!(dir.path().join("again").join("info.json").is_file());
         assert!(!target.exists(), "emptied");
         std::fs::write(old.join("x.zip"), "x").unwrap();
-        let rows = preview(&[source(4, &old.join("x.zip").to_string_lossy(), Some("X"), None)], &[4], &dir.path().join("third"), "{title}");
+        let rows = preview(&[source(4, &old.join("x.zip").to_string_lossy(), Some("X"), None)], &[4], &dir.path().join("third"), "{title}", UNKNOWN);
         execute(&rows).unwrap();
         assert!(!old.exists(), "a folder holding only its sidecar goes too");
     }

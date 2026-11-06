@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.45.18"
+    "version": "2026.45.19"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -6359,7 +6359,7 @@
           },
           {
             "type": "object",
-            "description": "Move the models' archives into a folder tree under `target_dir` built\nfrom `pattern` (Sort Files). Needs *file sorting* in the settings.",
+            "description": "Move the models' archives into a folder tree under `target_dir` built\nfrom `pattern` (Sort Files), fields without a value becoming `missing`\n(default `_unknown`; `\"\"` leaves them empty). Needs *file sorting* in the settings.",
             "required": [
               "ids",
               "target_dir",
@@ -6378,6 +6378,12 @@
                 "type": "string",
                 "enum": [
                   "sort_files"
+                ]
+              },
+              "missing": {
+                "type": [
+                  "string",
+                  "null"
                 ]
               },
               "pattern": {
@@ -8548,6 +8554,13 @@
               "type": "integer",
               "format": "int64"
             }
+          },
+          "missing": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What fields without a value become; `\"\"` leaves them empty (a folder level\nis left out, a file name is the archive's). Default: `_unknown`."
           },
           "pattern": {
             "type": "string",

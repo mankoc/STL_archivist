@@ -2217,6 +2217,7 @@ export interface components {
             ids: number[];
             /** @enum {string} */
             kind: "sort_files";
+            missing?: string | null;
             pattern: string;
             target_dir: string;
         } | {
@@ -2939,6 +2940,11 @@ export interface components {
         };
         SortRequest: {
             ids: number[];
+            /**
+             * @description What fields without a value become; `""` leaves them empty (a folder level
+             *     is left out, a file name is the archive's). Default: `_unknown`.
+             */
+            missing?: string | null;
             /** @description `{collection}/{creator}/{title}`: folders, then the file name. */
             pattern: string;
             /** @description The folder the tree is built in (a server folder). */

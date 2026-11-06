@@ -203,8 +203,19 @@ async fn sort_files_by_pattern() {
     assert_eq!((rows[1]["status"].as_str(), rows[1]["id"].as_i64()), (Some("FILE"), Some(0)));
     assert_eq!(rows[1]["to"], json!(target.join("In").join("cover.jpg").to_string_lossy()));
 
+    // Fields without a value: a text, or left empty.
+    let mut empty = body.clone();
+    empty["pattern"] = json!("{url}/{sculptor}/{title}");
+    let mut text = empty.clone();
+    text["missing"] = json!("none");
+    let rows = call(&lib.state, "POST", "/api/sort/preview", Some(&ed), Some(text)).await.json();
+    assert_eq!(rows[0]["to"], json!(target.join("none").join("In").join("Dragon.zip").to_string_lossy()));
+    empty["missing"] = json!("");
+    let rows = call(&lib.state, "POST", "/api/sort/preview", Some(&ed), Some(empty.clone())).await.json();
+    assert_eq!(rows[0]["to"], json!(target.join("In").join("Dragon.zip").to_string_lossy()));
+
     // Off by default.
-    let mut job = body.clone();
+    let mut job = empty;
     job["kind"] = json!("sort_files");
     assert_eq!(finish(&lib, &ed, job.clone()).await["job"]["state"], "failed");
     std::fs::write(lib.dir.path().join("settings.json"), r#"{"file_sorting_enabled": true}"#).unwrap();
