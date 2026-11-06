@@ -266,7 +266,7 @@ pub struct LibraryRemoved {
 }
 
 fn removed(lib: &crate::Library, r: Removed) -> Result<LibraryRemoved, ApiError> {
-    let ids: Vec<u64> = r.refs.iter().filter_map(|s| s.trim().parse().ok()).collect();
+    let ids: Vec<u64> = stl_core::storage::crawl::ref_ids(&r.refs);
     lib.thumbs.delete_many(&ids)?;
     Ok(LibraryRemoved { moved_to: r.moved_to, moved: r.moved, deleted: r.deleted })
 }

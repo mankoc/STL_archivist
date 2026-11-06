@@ -7,7 +7,7 @@ use axum::Json;
 use axum::extract::State;
 use serde::{Deserialize, Serialize};
 use stl_core::sort_files;
-use stl_core::storage::browser;
+use stl_core::storage::model_files;
 use utoipa::ToSchema;
 
 use crate::accounts::Role;
@@ -49,7 +49,7 @@ pub async fn preview(State(lib): State<AppState>, me: CurrentUser, Json(req): Js
     let rows = lib
         .run(move |lib| {
             super::files::check_access(lib, &me, &PathBuf::from(&req.target_dir))?;
-            let sources = lib.db.with(|c| browser::sort_sources(c, &req.ids))?;
+            let sources = lib.db.with(|c| model_files::sort_sources(c, &req.ids))?;
             let missing = req.missing.as_deref().unwrap_or(sort_files::UNKNOWN);
             Ok::<_, ApiError>(sort_files::preview(&sources, &req.ids, &PathBuf::from(&req.target_dir), &req.pattern, missing))
         })

@@ -13,7 +13,7 @@ use std::path::Path;
 
 use rusqlite::{Connection, OptionalExtension, Result, Transaction, params};
 
-use super::edit::utc_now_text;
+use super::writes::utc_now_text;
 use crate::relpath::{self, RelPath, path_key};
 use crate::winpath::WinPath;
 
@@ -452,7 +452,7 @@ pub fn remove(tx: &Transaction, id: i64) -> Result<Removed> {
                 out.moved += 1;
             }
             _ => {
-                out.refs.extend(super::edit::delete_model(tx, mid)?);
+                out.refs.extend(super::writes::delete_model(tx, mid)?);
                 out.deleted += 1;
             }
         }

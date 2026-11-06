@@ -737,11 +737,7 @@ fn self_extract(archive: &Path, into: &Path, picks: &[(&str, &str)]) -> Result<(
     fs::create_dir_all(&out).map_err(|e| e.to_string())?;
     let mut cmd = std::process::Command::new(archive);
     cmd.arg("-s").arg(format!("-d{}", out.display()));
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    }
+    stl_proc::no_window(&mut cmd);
     let status = cmd.status().map_err(|e| format!("{}: {e}", archive.display()))?;
     if !status.success() {
         return Err(format!("{} did not unpack ({status})", archive.display()));
@@ -771,11 +767,7 @@ fn check_signature(path: &Path, signer: &str) -> Result<(), String> {
     // Started from PowerShell 7, Windows PowerShell would take its module path
     // and fail to load `Get-AuthenticodeSignature`.
     cmd.args(["-NoProfile", "-NonInteractive", "-Command", &script]).env_remove("PSModulePath");
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    }
+    stl_proc::no_window(&mut cmd);
     let out = cmd.output().map_err(|e| format!("cannot check the signature: {e}"))?;
     let text = String::from_utf8_lossy(&out.stdout);
     let mut lines = text.lines().map(str::trim);

@@ -10,7 +10,7 @@ use rayon::prelude::*;
 use serde::Serialize;
 use stl_core::control::Control;
 use stl_core::rules::{self, Checks, PresupportPatterns};
-use stl_core::storage::{browser, crawl as crawl_db, maintenance};
+use stl_core::storage::{model_files, crawl as crawl_db, maintenance};
 use utoipa::ToSchema;
 
 use crate::Library;
@@ -174,7 +174,7 @@ pub fn search_folder(
             }
         }
         if !moves.is_empty() {
-            lib.db.with_tx(|tx| browser::set_archive_paths(tx, &moves, Some(folder))).map_err(db)?;
+            lib.db.with_tx(|tx| model_files::set_archive_paths(tx, &moves, Some(folder))).map_err(db)?;
         }
     }
     log(format!("Search complete: {} of {} missing archive(s) located.", found.len(), found.len() + targets.len()));
@@ -455,7 +455,7 @@ pub fn reread_links(lib: &Library, ctl: &Control, log: &dyn Fn(String), overwrit
                 let mut changed = Vec::new();
                 for (id, path, meta) in &found {
                     let Some(meta) = meta else { continue };
-                    if stl_core::storage::model_edit::links_commit(tx, *id, meta, overwrite).map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.to_string().into()))? {
+                    if stl_core::storage::model_editor::links_commit(tx, *id, meta, overwrite).map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.to_string().into()))? {
                         changed.push((*path).clone());
                     }
                 }

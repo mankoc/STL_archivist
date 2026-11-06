@@ -21,21 +21,21 @@
 
 pub mod delta;
 pub mod admin;
-pub mod browser;
+pub mod model_files;
 pub mod crawl;
 pub mod duplicates;
-pub mod edit;
+pub mod writes;
 pub mod jobs;
 pub mod libraries;
-pub mod library;
+pub mod queries;
 pub mod maintenance;
-pub mod model_edit;
+pub mod model_editor;
 pub mod pool;
 pub mod schema_sql;
 pub mod sidecar;
 pub mod stats;
 pub mod vectors;
-pub mod views;
+pub mod model_views;
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -235,7 +235,8 @@ pub fn migrate(path: &Path, vectors: &Vectors) -> Result<MigrateReport> {
         "DROP INDEX IF EXISTS ix_models_release_year;
          DROP INDEX IF EXISTS ix_models_creator;
          DROP INDEX IF EXISTS ix_models_sculptor_id;
-         DROP INDEX IF EXISTS ix_models_collection_id;",
+         DROP INDEX IF EXISTS ix_models_collection_id;
+         DROP TABLE IF EXISTS filter_cache;",
     )?;
     // ANALYZE reads every table and index: minutes on a hard disk, on every start. It
     // runs (on a sample of each index) when there are no statistics yet or the schema
@@ -435,7 +436,7 @@ mod tests {
         assert!(report.tables_created.contains(&"models".to_string()));
         let conn = open(&path).unwrap();
         let t = tables(&conn).unwrap();
-        for name in ["models", "images", "image_vec", "vector_store_info", "model_tags", "filter_cache"] {
+        for name in ["models", "images", "image_vec", "vector_store_info", "model_tags"] {
             assert!(t.contains(name), "{name}");
         }
         let v: String = conn.query_row("SELECT vec_version()", [], |r| r.get(0)).unwrap();

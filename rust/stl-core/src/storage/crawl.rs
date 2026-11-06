@@ -12,7 +12,7 @@ use std::path::Path;
 use rusqlite::types::Value;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
-use super::edit::{lookup, py_strip, relocate, subcollection, tag, utc_now_text};
+use super::writes::{lookup, py_strip, relocate, subcollection, tag, utc_now_text};
 use super::libraries::{self, Roots};
 use super::{schema_sql, vectors};
 use crate::thumbstore::ThumbStore;
@@ -456,7 +456,7 @@ fn link_all(tx: &Transaction, table: &str, col: &str, model_id: i64, ids: &[i64]
 }
 
 /// Image ids from stored thumbnail references.
-pub(crate) fn ref_ids(refs: &[String]) -> Vec<u64> {
+pub fn ref_ids(refs: &[String]) -> Vec<u64> {
     refs.iter()
         .filter_map(|r| {
             if !r.is_empty() && r.bytes().all(|b| b.is_ascii_digit()) {
@@ -807,7 +807,7 @@ pub fn reconcile(
         if !exists {
             continue;
         }
-        refs.extend(super::edit::merge_into_missing(tx, *id, new_id)?);
+        refs.extend(super::writes::merge_into_missing(tx, *id, new_id)?);
         used.insert(new_path.clone());
         matched.push((*id, old_path.clone(), new_path));
     }
@@ -855,7 +855,7 @@ pub fn mark_missing(
                 }
                 deferred += 1;
             } else {
-                refs.extend(super::edit::delete_model(tx, *id)?);
+                refs.extend(super::writes::delete_model(tx, *id)?);
                 deleted.push(path.clone());
             }
         } else if !already {

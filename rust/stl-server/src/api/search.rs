@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use axum::Json;
 use axum::extract::{Multipart, Query, State};
 use serde::{Deserialize, Serialize};
-use stl_core::storage::{vectors, views};
+use stl_core::storage::{vectors, model_views};
 use utoipa::ToSchema;
 
 use super::thumbs::thumbnail_url;
@@ -49,10 +49,6 @@ pub struct SearchResult {
     pub outdated: usize,
 }
 
-fn parse_dhash(s: &str) -> Option<u128> {
-    s.strip_prefix("2:").filter(|h| h.len() == 32).and_then(|h| u128::from_str_radix(h, 16).ok())
-}
-
 /// Search with an image (multipart, one file).
 #[utoipa::path(post, path = "/api/search/image", tag = "search", params(SearchQuery),
     request_body(content_type = "multipart/form-data", description = "The image (64 MB at most)"),
@@ -75,11 +71,11 @@ pub async fn by_image(
             let max = q.max_distance.unwrap_or(10).min(128);
             lib.run(move |lib| {
                 let query = stl_core::dhash::dhash(&image).map_err(|e| ApiError::bad_request(format!("not a readable image: {e}")))?;
-                let rows = lib.db.with(views::image_hashes)?;
+                let rows = lib.db.with(model_views::image_hashes)?;
                 let mut outdated = 0;
                 let mut hits: Vec<(u32, usize)> = Vec::new();
                 for (i, (_, _, hash)) in rows.iter().enumerate() {
-                    match parse_dhash(hash) {
+                    match stl_core::dhash::parse(hash) {
                         Some(h) => {
                             let d = (h ^ query).count_ones();
                             if d <= max {
@@ -100,7 +96,7 @@ pub async fn by_image(
                     }
                 }
                 let ids: Vec<i64> = best.iter().map(|&(_, i)| rows[i].0).collect();
-                let details = lib.db.with(|c| views::image_details(c, &ids))?;
+                let details = lib.db.with(|c| model_views::image_details(c, &ids))?;
                 let picked: Vec<(f64, i64, String, String, Option<String>)> = best
                     .into_iter()
                     .filter_map(|(d, i)| {

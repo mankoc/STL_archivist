@@ -30,7 +30,7 @@ pub fn dir(data_dir: &Path) -> PathBuf {
 
 /// `stlLibrary_backup_<YYYYmmdd_HHMMSS>.7z` (UTC), the desktop's naming.
 pub fn new_name() -> String {
-    let now = stl_core::storage::edit::utc_now_text(); // "YYYY-MM-DD HH:MM:SS.ffffff"
+    let now = stl_core::storage::writes::utc_now_text(); // "YYYY-MM-DD HH:MM:SS.ffffff"
     let digits: String = now.chars().take(19).filter(char::is_ascii_digit).collect();
     format!("{PREFIX}{}_{}.7z", &digits[..8], &digits[8..])
 }

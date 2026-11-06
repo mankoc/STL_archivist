@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026.45.39 — 2026-11-06
+
+- **Code structure, with no change in behaviour:** `jobs.rs` is split by subject into `jobs/`, and `JobResult` moved
+  there from `dupes.rs`. The overlapping `storage` modules have clearer names: `library` is `queries`, `views` is
+  `model_views`, `browser` is `model_files`, `edit` is `writes` and `model_edit` is `model_editor`.
+- **Repeated helpers merged:** one parser each for thumbnail references and stored perceptual hashes, one list of archive
+  suffixes, and `stl_proc::no_window` for the console window blocks.
+- **Schema leftovers removed:** the unused `filter_cache` table goes at start, and so do the `ADD_COLUMNS` entries SQLite
+  would have refused (`NOT NULL` without a default).
+
 ## 2026.45.38 — 2026-11-06
 
 - **The Lookups page has Sculptors and Releases tabs:** rename, delete, merge and *Merge similar*, as for the other lists.

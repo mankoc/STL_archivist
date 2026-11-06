@@ -367,11 +367,7 @@ fn spawn_local(app: &AppHandle, data_dir: &str) -> Result<LocalServer, String> {
         .stdin(Stdio::piped())
         .stdout(log.try_clone().map_err(|e| e.to_string())?)
         .stderr(log);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    }
+    stl_proc::no_window(&mut cmd);
     let mut child = cmd.spawn().map_err(|e| format!("cannot start {}: {e}", exe.display()))?;
     // Even if this shell crashes, the server (and its library lock) goes with it.
     stl_proc::end_with_parent(&child);
@@ -433,11 +429,7 @@ fn run_worker(app: &AppHandle, server: &str, token: &str) -> Result<(), String> 
         .stdin(Stdio::null())
         .stdout(log.try_clone().map_err(|e| e.to_string())?)
         .stderr(log);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    }
+    stl_proc::no_window(&mut cmd);
     let child = cmd.spawn().map_err(|e| format!("cannot start {}: {e}", exe.display()))?;
     stl_proc::end_with_parent(&child);
     *slot = Some(WorkerProc { child, server: server.to_string(), data_dir, log_path });
@@ -528,11 +520,7 @@ async fn worker_components(app: AppHandle) -> Result<serde_json::Value, String> 
     tauri::async_runtime::spawn_blocking(move || {
         let mut cmd = Command::new(server_exe()?);
         cmd.args(["components", "status", "--data-dir", &dir]).stdin(Stdio::null()).stderr(Stdio::null());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-        }
+        stl_proc::no_window(&mut cmd);
         let out = cmd.output().map_err(|e| e.to_string())?;
         let info: serde_json::Value = serde_json::from_slice(&out.stdout).map_err(|_| format!("cannot read the components of {dir}"))?;
         Ok(serde_json::json!({"data_dir": dir, "info": info}))
@@ -563,11 +551,7 @@ fn change_worker_components(app: AppHandle, action: String, components: Vec<Stri
         cmd.arg("--variant").arg(format!("{k}={v}"));
     }
     cmd.args(["--data-dir", &dir]).env("NO_COLOR", "1").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    }
+    stl_proc::no_window(&mut cmd);
     let mut child = cmd.spawn().map_err(|e| e.to_string())?;
     stl_proc::end_with_parent(&child);
     let stdout = child.stdout.take().ok_or("no output")?;

@@ -108,7 +108,7 @@ pub fn clear_missing(tx: &Transaction, ids: &[i64]) -> Result<usize> {
     let json = format!("[{}]", ids.iter().map(i64::to_string).collect::<Vec<_>>().join(","));
     tx.execute(
         "UPDATE models SET is_missing = 0, updated_at = ?2 WHERE id IN (SELECT value FROM json_each(?1))",
-        rusqlite::params![json, super::edit::utc_now_text()],
+        rusqlite::params![json, super::writes::utc_now_text()],
     )
 }
 
@@ -278,7 +278,7 @@ pub fn without_warning(warning: Option<&str>, line: &str) -> Option<String> {
 
 /// Set `warning` of each model; `updated_at` changes only where it differs.
 pub fn set_warnings(tx: &Transaction, items: &[(i64, Option<String>)]) -> Result<()> {
-    let now = super::edit::utc_now_text();
+    let now = super::writes::utc_now_text();
     let mut st = tx.prepare("UPDATE models SET warning = ?2, updated_at = ?3 WHERE id = ?1 AND warning IS NOT ?2")?;
     for (id, w) in items {
         st.execute(params![id, w, now])?;
@@ -289,7 +289,7 @@ pub fn set_warnings(tx: &Transaction, items: &[(i64, Option<String>)]) -> Result
 /// Clear the warnings of the listed models (dismissed false positives); the
 /// ids of the models that had any. A rescan detects them again.
 pub fn clear_warnings(tx: &Transaction, ids: &[i64]) -> Result<Vec<i64>> {
-    let now = super::edit::utc_now_text();
+    let now = super::writes::utc_now_text();
     let mut st = tx.prepare("UPDATE models SET warning = NULL, updated_at = ?2 WHERE id = ?1 AND warning IS NOT NULL")?;
     let mut changed = Vec::new();
     for &id in ids {
@@ -323,7 +323,7 @@ pub fn merge_moved(tx: &Transaction, items: &[(i64, String)]) -> Result<(usize, 
             .optional()?;
         match (old, new) {
             (Some(()), Some(new_id)) => {
-                refs.extend(super::edit::merge_into_missing(tx, *old_id, new_id)?);
+                refs.extend(super::writes::merge_into_missing(tx, *old_id, new_id)?);
                 merged += 1;
             }
             _ => errors += 1,
@@ -336,8 +336,8 @@ pub fn merge_moved(tx: &Transaction, items: &[(i64, String)]) -> Result<(usize, 
 pub type Removed = (Vec<String>, Vec<(&'static str, usize)>);
 
 pub fn remove_records(tx: &Transaction, ids: &[i64]) -> Result<Removed> {
-    let refs = super::browser::delete_models(tx, ids)?;
-    Ok((refs, super::edit::prune_unused_lookups(tx)?))
+    let refs = super::model_files::delete_models(tx, ids)?;
+    Ok((refs, super::writes::prune_unused_lookups(tx)?))
 }
 
 /// Bytes held by free pages (`PRAGMA freelist_count * page_size`).
@@ -348,7 +348,7 @@ pub fn free_bytes(conn: &Connection) -> Result<i64> {
 }
 
 
-// ── database administration (app.database.db, filter_cache, maintenance) ──
+// ── database administration (app.database.db, maintenance) ──
 
 /// `compact_database`: `VACUUM` with temporary data on disk, then
 /// `wal_checkpoint(TRUNCATE)`. Returns whether the WAL was truncated (no
@@ -366,7 +366,7 @@ pub fn compact(conn: &Connection) -> Result<bool> {
 pub fn clear_all(tx: &Transaction) -> Result<()> {
     for table in [
         "folder_patterns", "model_tags", "model_scales", "stl_files", "archive_files", "images", "models", "subcollections", "collections", "sculptors",
-        "categories", "releases", "scales", "tags", "creators", "libraries", "library_groups", "filter_cache",
+        "categories", "releases", "scales", "tags", "creators", "libraries", "library_groups",
     ] {
         tx.execute(&format!("DELETE FROM {table}"), [])?;
     }

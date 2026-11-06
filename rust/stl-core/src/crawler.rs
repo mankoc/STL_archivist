@@ -18,7 +18,7 @@ use crate::archive;
 use crate::metadata::{self, Metadata};
 use crate::path_pattern;
 use crate::rules::{self, Checks, MemberPath, PresupportPatterns};
-use crate::storage::{self, crawl as db, edit, sidecar};
+use crate::storage::{self, crawl as db, writes, sidecar};
 use crate::thumbstore::ThumbStore;
 use crate::winpath::WinPath;
 
@@ -459,7 +459,7 @@ pub fn match_pattern(pattern: &str, path: &str, root: &str) -> Option<db::Extrac
         return None;
     }
     let get = |k: &str| fields.iter().find(|(f, _)| f == k).map(|(_, v)| v.clone());
-    let sequence = get("sequence").filter(|v| !v.is_empty()).and_then(|v| crate::pyunicode::py_int(edit::py_strip(&v)));
+    let sequence = get("sequence").filter(|v| !v.is_empty()).and_then(|v| crate::pyunicode::py_int(writes::py_strip(&v)));
     let release_date = get("release_date").filter(|v| !v.is_empty()).map(|v| path_pattern::parse_release_date(&v));
     Some(db::Extracted { fields, release_date, sequence })
 }
@@ -1047,7 +1047,7 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
     }
 
     if cfg.library_root.is_none() {
-        let now = edit::utc_now_text();
+        let now = writes::utc_now_text();
         let t = tx(&mut run.conn)?;
         db::record_folder(
             &t,
@@ -1062,7 +1062,7 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
     }
     {
         let t = tx(&mut run.conn)?;
-        let pruned = edit::prune_unused_lookups(&t)?;
+        let pruned = writes::prune_unused_lookups(&t)?;
         t.commit()?;
         if !pruned.is_empty() {
             let order = ["subcollections", "collections", "sculptors", "categories", "releases", "scales"];

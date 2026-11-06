@@ -14,7 +14,7 @@ use axum::extract::{Path as UrlPath, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
-use stl_core::storage::{duplicates, model_edit};
+use stl_core::storage::{duplicates, model_editor};
 use utoipa::ToSchema;
 
 use crate::accounts::Role;
@@ -24,7 +24,6 @@ use crate::{ApiError, AppState, Library};
 
 /// Most entries one listing returns.
 const MAX_ENTRIES: usize = 5000;
-const ARCHIVES: &[&str] = &["zip", "7z", "rar"];
 const SIDECAR: &str = "METADATA.7z";
 
 /// Canonical form for comparisons: resolved, forward slashes, no trailing
@@ -155,7 +154,7 @@ pub async fn browse(State(lib): State<AppState>, me: CurrentUser, Query(q): Quer
                     folders.push(Entry { name, path, kind: "folder", size: None });
                 } else if Path::new(&name)
                     .extension()
-                    .is_some_and(|x| ARCHIVES.contains(&x.to_string_lossy().to_lowercase().as_str()))
+                    .is_some_and(|x| stl_core::rules::ARCHIVE_SUFFIXES.contains(&format!(".{}", x.to_string_lossy().to_lowercase()).as_str()))
                     // The folder's sidecar is not a model archive (the crawler skips it too).
                     && !name.eq_ignore_ascii_case(SIDECAR)
                 {
@@ -243,7 +242,7 @@ pub async fn create_folder(State(lib): State<AppState>, me: CurrentUser, Json(re
     responses((status = 200, description = "The archive file", content_type = "application/octet-stream"),
               (status = 404, body = crate::error::ErrorBody)))]
 pub async fn download(State(lib): State<AppState>, _me: CurrentUser, UrlPath(id): UrlPath<i64>) -> Result<Response, ApiError> {
-    let path = lib.run(move |lib| Ok(lib.db.with(|c| model_edit::archive_paths(c, &[id]))?.remove(&id))).await?;
+    let path = lib.run(move |lib| Ok(lib.db.with(|c| model_editor::archive_paths(c, &[id]))?.remove(&id))).await?;
     let path = stl_core::relpath::on_disk(&path.ok_or_else(|| ApiError::not_found(format!("no model {id}")))?);
     let file = tokio::fs::File::open(&path).await.map_err(|_| ApiError::not_found("the archive is not on disk"))?;
     let len = file.metadata().await.map(|m| m.len()).ok();

@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::types::Value;
 
 use crate::path_pattern;
-use crate::storage::browser::SortSource;
+use crate::storage::model_files::SortSource;
 use crate::storage::sidecar::METADATA_FILENAME;
 
 /// What a field without a value becomes unless the user chose otherwise.
@@ -127,7 +127,7 @@ impl PlanRow {
 
 fn is_archive(name: &str) -> bool {
     let n = name.to_lowercase();
-    [".zip", ".7z", ".rar"].iter().any(|e| n.ends_with(e))
+    crate::rules::ARCHIVE_SUFFIXES.iter().any(|e| n.ends_with(e))
 }
 
 /// `FILE` rows: for each source folder whose archives (on disk, directly in it)

@@ -1,6 +1,7 @@
 //! The library schema: the source of truth since the SQLAlchemy models were
 //! removed (Phase 4h). Edit it here; a column added to an existing table also
-//! needs its `ADD_COLUMNS` entry so older databases are migrated.
+//! needs its `ADD_COLUMNS` entry so older databases are migrated (with a default,
+//! if `NOT NULL`: SQLite refuses to add such a column without one).
 //!
 //! `TABLES`: in dependency order, each table's `CREATE TABLE` and its indexes.
 //! `ADD_COLUMNS`: the `ALTER TABLE ... ADD COLUMN` run for a column missing
@@ -111,20 +112,6 @@ CREATE TABLE creators (
 	gumroad_url TEXT, 
 	myminifactory_url TEXT, 
 	PRIMARY KEY (name)
-)
-
-"#,
-        indexes: &[
-        ],
-    },
-    TableDdl {
-        name: "filter_cache",
-        create: r#"
-CREATE TABLE filter_cache (
-	id INTEGER NOT NULL, 
-	payload TEXT NOT NULL, 
-	updated_at DATETIME, 
-	PRIMARY KEY (id)
 )
 
 "#,
@@ -344,31 +331,11 @@ CREATE TABLE archive_files (
 /// `(table, column, ddl)`.
 pub const ADD_COLUMNS: &[(&str, &str, &str)] = &[
     ("libraries", "group_id", r#"ALTER TABLE "libraries" ADD COLUMN "group_id" INTEGER REFERENCES library_groups (id)"#),
-    ("categories", "id", r#"ALTER TABLE "categories" ADD COLUMN "id" INTEGER NOT NULL"#),
-    ("categories", "name", r#"ALTER TABLE "categories" ADD COLUMN "name" VARCHAR(128) NOT NULL"#),
-    ("collections", "id", r#"ALTER TABLE "collections" ADD COLUMN "id" INTEGER NOT NULL"#),
-    ("collections", "name", r#"ALTER TABLE "collections" ADD COLUMN "name" VARCHAR(128) NOT NULL"#),
-    ("creators", "name", r#"ALTER TABLE "creators" ADD COLUMN "name" VARCHAR(256) NOT NULL"#),
     ("creators", "full_name", r#"ALTER TABLE "creators" ADD COLUMN "full_name" VARCHAR(512)"#),
     ("creators", "patreon_url", r#"ALTER TABLE "creators" ADD COLUMN "patreon_url" TEXT"#),
     ("creators", "artstation_url", r#"ALTER TABLE "creators" ADD COLUMN "artstation_url" TEXT"#),
     ("creators", "gumroad_url", r#"ALTER TABLE "creators" ADD COLUMN "gumroad_url" TEXT"#),
     ("creators", "myminifactory_url", r#"ALTER TABLE "creators" ADD COLUMN "myminifactory_url" TEXT"#),
-    ("filter_cache", "id", r#"ALTER TABLE "filter_cache" ADD COLUMN "id" INTEGER NOT NULL DEFAULT 1"#),
-    ("filter_cache", "payload", r#"ALTER TABLE "filter_cache" ADD COLUMN "payload" TEXT NOT NULL"#),
-    ("filter_cache", "updated_at", r#"ALTER TABLE "filter_cache" ADD COLUMN "updated_at" DATETIME"#),
-    ("releases", "id", r#"ALTER TABLE "releases" ADD COLUMN "id" INTEGER NOT NULL"#),
-    ("releases", "name", r#"ALTER TABLE "releases" ADD COLUMN "name" VARCHAR(256) NOT NULL"#),
-    ("scales", "id", r#"ALTER TABLE "scales" ADD COLUMN "id" INTEGER NOT NULL"#),
-    ("scales", "name", r#"ALTER TABLE "scales" ADD COLUMN "name" VARCHAR(64) NOT NULL"#),
-    ("sculptors", "id", r#"ALTER TABLE "sculptors" ADD COLUMN "id" INTEGER NOT NULL"#),
-    ("sculptors", "name", r#"ALTER TABLE "sculptors" ADD COLUMN "name" VARCHAR(256) NOT NULL"#),
-    ("tags", "id", r#"ALTER TABLE "tags" ADD COLUMN "id" INTEGER NOT NULL"#),
-    ("tags", "name", r#"ALTER TABLE "tags" ADD COLUMN "name" VARCHAR(128) NOT NULL"#),
-    ("subcollections", "id", r#"ALTER TABLE "subcollections" ADD COLUMN "id" INTEGER NOT NULL"#),
-    ("subcollections", "collection_id", r#"ALTER TABLE "subcollections" ADD COLUMN "collection_id" INTEGER NOT NULL"#),
-    ("subcollections", "name", r#"ALTER TABLE "subcollections" ADD COLUMN "name" VARCHAR(128) NOT NULL"#),
-    ("models", "id", r#"ALTER TABLE "models" ADD COLUMN "id" INTEGER NOT NULL"#),
     ("models", "title", r#"ALTER TABLE "models" ADD COLUMN "title" VARCHAR(512)"#),
     ("models", "creator", r#"ALTER TABLE "models" ADD COLUMN "creator" VARCHAR(256)"#),
     ("models", "source", r#"ALTER TABLE "models" ADD COLUMN "source" VARCHAR(128)"#),
@@ -376,7 +343,6 @@ pub const ADD_COLUMNS: &[(&str, &str, &str)] = &[
     ("models", "release_month", r#"ALTER TABLE "models" ADD COLUMN "release_month" INTEGER"#),
     ("models", "url", r#"ALTER TABLE "models" ADD COLUMN "url" TEXT"#),
     ("models", "description", r#"ALTER TABLE "models" ADD COLUMN "description" TEXT"#),
-    ("models", "archive_hash", r#"ALTER TABLE "models" ADD COLUMN "archive_hash" VARCHAR(64) NOT NULL"#),
     ("models", "archive_size", r#"ALTER TABLE "models" ADD COLUMN "archive_size" INTEGER"#),
     ("models", "archive_mtime_ns", r#"ALTER TABLE "models" ADD COLUMN "archive_mtime_ns" INTEGER"#),
     ("models", "stl_list_hash", r#"ALTER TABLE "models" ADD COLUMN "stl_list_hash" VARCHAR(64)"#),
@@ -393,18 +359,10 @@ pub const ADD_COLUMNS: &[(&str, &str, &str)] = &[
     ("models", "subcollection_id", r#"ALTER TABLE "models" ADD COLUMN "subcollection_id" INTEGER"#),
     ("models", "category_id", r#"ALTER TABLE "models" ADD COLUMN "category_id" INTEGER"#),
     ("models", "release_id", r#"ALTER TABLE "models" ADD COLUMN "release_id" INTEGER"#),
-    ("images", "id", r#"ALTER TABLE "images" ADD COLUMN "id" INTEGER NOT NULL"#),
-    ("images", "model_id", r#"ALTER TABLE "images" ADD COLUMN "model_id" INTEGER NOT NULL"#),
     ("images", "filename", r#"ALTER TABLE "images" ADD COLUMN "filename" VARCHAR(512)"#),
     ("images", "thumbnail_path", r#"ALTER TABLE "images" ADD COLUMN "thumbnail_path" VARCHAR(512)"#),
     ("images", "thumbnail", r#"ALTER TABLE "images" ADD COLUMN "thumbnail" BLOB"#),
     ("images", "dhash", r#"ALTER TABLE "images" ADD COLUMN "dhash" VARCHAR(32)"#),
-    ("model_scales", "model_id", r#"ALTER TABLE "model_scales" ADD COLUMN "model_id" INTEGER NOT NULL"#),
-    ("model_scales", "scale_id", r#"ALTER TABLE "model_scales" ADD COLUMN "scale_id" INTEGER NOT NULL"#),
-    ("model_tags", "model_id", r#"ALTER TABLE "model_tags" ADD COLUMN "model_id" INTEGER NOT NULL"#),
-    ("model_tags", "tag_id", r#"ALTER TABLE "model_tags" ADD COLUMN "tag_id" INTEGER NOT NULL"#),
-    ("stl_files", "model_id", r#"ALTER TABLE "stl_files" ADD COLUMN "model_id" INTEGER NOT NULL"#),
-    ("stl_files", "filename", r#"ALTER TABLE "stl_files" ADD COLUMN "filename" VARCHAR(512) NOT NULL"#),
     ("stl_files", "file_size", r#"ALTER TABLE "stl_files" ADD COLUMN "file_size" INTEGER"#),
     ("stl_files", "archive_hash", r#"ALTER TABLE "stl_files" ADD COLUMN "archive_hash" VARCHAR(64)"#),
 ];

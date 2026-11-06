@@ -12,7 +12,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::Serialize;
 use serde_json::Value as Json;
 
-use super::edit::{lookup, py_strip, subcollection, tag, utc_now_text};
+use super::writes::{lookup, py_strip, subcollection, tag, utc_now_text};
 use super::libraries::{self, Roots};
 use crate::thumbstore::ThumbStore;
 use crate::winpath::WinPath;

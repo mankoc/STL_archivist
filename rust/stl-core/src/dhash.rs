@@ -31,6 +31,11 @@ const GRID: usize = 9;
 /// Images are shrunk to fit this size before hashing, like a default thumbnail.
 pub const SOURCE_SIZE: u32 = 512;
 
+/// A stored hash (`"2:"` + 32 hex); `None` for one of an older format.
+pub fn parse(stored: &str) -> Option<u128> {
+    stored.strip_prefix("2:").filter(|h| h.len() == 32).and_then(|h| u128::from_str_radix(h, 16).ok())
+}
+
 /// Format-2 dHash of an encoded image (any format `thumbnail` decodes).
 pub fn dhash(data: &[u8]) -> Result<u128, ThumbError> {
     let img = decode_fitted(data, SOURCE_SIZE)?;

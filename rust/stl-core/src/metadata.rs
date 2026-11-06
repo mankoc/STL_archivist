@@ -333,7 +333,7 @@ fn info_beside(archive_path: &Path) -> Option<Vec<u8>> {
     let parent = archive_path.parent().filter(|p| !p.as_os_str().is_empty())?;
     let is_archive = |n: &str| {
         let n = n.to_lowercase();
-        [".zip", ".7z", ".rar"].iter().any(|e| n.ends_with(e)) && n != "metadata.7z"
+        crate::rules::ARCHIVE_SUFFIXES.iter().any(|e| n.ends_with(e)) && n != "metadata.7z"
     };
     if glob_sorted(parent, is_archive).len() != 1 {
         return None;

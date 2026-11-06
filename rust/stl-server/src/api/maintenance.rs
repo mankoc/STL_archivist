@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use axum::Json;
 use axum::extract::State;
 use serde::{Deserialize, Serialize};
-use stl_core::storage::{maintenance, model_edit};
+use stl_core::storage::{maintenance, model_editor};
 use utoipa::ToSchema;
 
 use crate::accounts::Role;
@@ -47,7 +47,7 @@ pub async fn merge_moved(State(lib): State<AppState>, me: CurrentUser, Json(req)
     let (merged, errors) = lib
         .run(move |lib| {
             let (merged, errors, refs) = lib.db.with_tx(|tx| maintenance::merge_moved(tx, &items))?;
-            let ids: Vec<u64> = refs.iter().filter_map(|r| r.trim().parse().ok()).collect();
+            let ids: Vec<u64> = stl_core::storage::crawl::ref_ids(&refs);
             lib.thumbs.delete_many(&ids)?;
             Ok::<_, ApiError>((merged, errors))
         })
@@ -94,9 +94,9 @@ pub async fn remove(State(lib): State<AppState>, me: CurrentUser, Json(req): Jso
     me.require(Role::Editor)?;
     let (paths, pruned) = lib
         .run(move |lib| {
-            let paths = lib.db.with(|c| model_edit::archive_paths(c, &req.ids))?;
+            let paths = lib.db.with(|c| model_editor::archive_paths(c, &req.ids))?;
             let (refs, pruned) = lib.db.with_tx(|tx| maintenance::remove_records(tx, &req.ids))?;
-            let ids: Vec<u64> = refs.iter().filter_map(|r| r.trim().parse().ok()).collect();
+            let ids: Vec<u64> = stl_core::storage::crawl::ref_ids(&refs);
             lib.thumbs.delete_many(&ids)?;
             Ok::<_, ApiError>((paths.into_values().collect::<Vec<_>>(), pruned))
         })

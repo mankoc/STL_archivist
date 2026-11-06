@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use axum::Json;
 use axum::extract::State;
 use serde::{Deserialize, Serialize};
-use stl_core::storage::views;
+use stl_core::storage::model_views;
 use utoipa::ToSchema;
 
 use super::thumbs::thumbnail_url;
@@ -52,9 +52,9 @@ pub async fn grid(State(lib): State<AppState>, _me: CurrentUser, Json(req): Json
     }
     let cells = lib
         .run(move |lib| {
-            let rows = lib.db.with(|c| views::grid_models(c, &req.ids))?;
+            let rows = lib.db.with(|c| model_views::grid_models(c, &req.ids))?;
             let thumbs = first_thumb(lib, &rows.iter().map(|r| r.thumbs.clone()).collect::<Vec<_>>())?;
-            let text = |r: &views::GridModel, k: &str| -> Option<String> {
+            let text = |r: &model_views::GridModel, k: &str| -> Option<String> {
                 r.fields.iter().find(|(f, _)| *f == k).and_then(|(_, v)| match v {
                     rusqlite::types::Value::Text(s) => Some(s.clone()),
                     _ => None,
@@ -84,7 +84,7 @@ pub async fn grid(State(lib): State<AppState>, _me: CurrentUser, Json(req): Json
 /// The folders holding catalogued archives (forward slashes), sorted.
 #[utoipa::path(get, path = "/api/folders", tag = "library", responses((status = 200, body = Vec<String>)))]
 pub async fn folders(State(lib): State<AppState>, _me: CurrentUser) -> Result<Json<Vec<String>>, ApiError> {
-    Ok(Json(lib.run(|lib| Ok::<_, ApiError>(lib.db.with(views::archive_folders)?)).await?))
+    Ok(Json(lib.run(|lib| Ok::<_, ApiError>(lib.db.with(model_views::archive_folders)?)).await?))
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -102,7 +102,7 @@ pub struct FolderRequest {
 pub async fn folder(State(lib): State<AppState>, _me: CurrentUser, Json(req): Json<FolderRequest>) -> Result<Json<Vec<Cell>>, ApiError> {
     let cells = lib
         .run(move |lib| {
-            let rows = lib.db.with(|c| views::folder_models(c, &req.folder, req.include_subfolders))?;
+            let rows = lib.db.with(|c| model_views::folder_models(c, &req.folder, req.include_subfolders))?;
             let thumbs = first_thumb(lib, &rows.iter().map(|r| r.thumbs.clone()).collect::<Vec<_>>())?;
             Ok::<_, ApiError>(
                 rows.into_iter()

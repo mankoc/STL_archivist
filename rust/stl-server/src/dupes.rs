@@ -7,106 +7,14 @@ use std::path::Path;
 use serde::Serialize;
 use stl_core::control::Control;
 use utoipa::ToSchema;
-use stl_core::storage::{duplicates, schema_sql, vectors, views};
+use stl_core::storage::{duplicates, schema_sql, vectors, model_views};
 
 use crate::Library;
+use crate::jobs::JobResult;
 
 /// Most result rows kept (`image_duplicates.MAX_RESULTS`).
 pub const MAX_RESULTS: usize = 100_000;
 const DHASH_BATCH: usize = 1024;
-
-/// What a finder or maintenance job found (`JobDetail.result`).
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum JobResult {
-    Content { pairs: Vec<ContentRow> },
-    Images(ImageResult),
-    Metadata { groups: Vec<MetadataGroup> },
-    /// Records of a maintenance list (Verify, duplicate entries, moved, found).
-    Records { rows: Vec<crate::maint::RecordRow> },
-    /// The AI tagger's suggestion for one model (`ai_suggest`).
-    AiSuggestion(Box<crate::ai::AiSuggestion>),
-    /// What moving a library to a new root found (`relocate_library`).
-    Relocation(Relocation),
-    /// A package's folders and where their archives are here (`import_library`).
-    Import(ImportPreview),
-}
-
-/// A library package checked (and imported) by `import_library`.
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct ImportPreview {
-    /// The package (a name in the backups list).
-    pub name: String,
-    /// Its outermost folders; the folders inside them move along.
-    pub folders: Vec<ImportFolder>,
-    /// Records in the package.
-    pub models: i64,
-    /// It replaced this server's library (else it was only checked).
-    pub applied: bool,
-}
-
-/// One of a package's outermost folders.
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct ImportFolder {
-    pub uuid: String,
-    pub name: String,
-    /// The library it is a folder of.
-    pub library: String,
-    /// Its root where the package was made.
-    pub root: String,
-    /// Its root here: the one given, else the old one (kept when nothing maps it).
-    pub new_root: String,
-    /// `new_root` is a folder on this server.
-    pub root_exists: bool,
-    /// Records in it and the folders inside it.
-    pub models: i64,
-    /// Folders inside it, moved along.
-    pub inner: usize,
-    /// Archives found under `new_root`.
-    pub found: usize,
-    /// Found only with another letter case.
-    pub case_only: usize,
-    pub missing: usize,
-    /// Some relative paths not found.
-    pub missing_examples: Vec<String>,
-}
-
-/// The check (and move) of a library to a new root.
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct Relocation {
-    pub library: i64,
-    pub root: String,
-    pub total: usize,
-    pub found: usize,
-    /// Found only with another letter case.
-    pub case_only: usize,
-    pub missing: usize,
-    /// Some relative paths not found.
-    pub missing_examples: Vec<String>,
-    /// Libraries inside it, moved along.
-    pub inner: usize,
-    /// The root was changed (else only checked).
-    pub applied: bool,
-}
-
-impl JobResult {
-    /// Pairs or groups found.
-    pub fn len(&self) -> usize {
-        match self {
-            JobResult::Content { pairs } => pairs.len(),
-            JobResult::Images(r) => r.pairs.len(),
-            JobResult::Metadata { groups } => groups.len(),
-            JobResult::Records { rows } => rows.len(),
-            JobResult::AiSuggestion(_) => 1,
-            JobResult::Relocation(r) => r.total,
-            JobResult::Import(r) => r.folders.len(),
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-}
 
 /// Two archives sharing STL files (name and size).
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -182,10 +90,6 @@ fn db(e: rusqlite::Error) -> String {
     format!("database: {e}")
 }
 
-fn parse_dhash(s: &str) -> Option<u128> {
-    s.strip_prefix("2:").filter(|h| h.len() == 32).and_then(|h| u128::from_str_radix(h, 16).ok())
-}
-
 fn stem(path: &str) -> String {
     Path::new(path).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
 }
@@ -197,7 +101,7 @@ fn dhash_items(lib: &Library, log: &dyn Fn(String)) -> Result<Vec<(i64, u128)>, 
     let mut good = Vec::new();
     let mut todo = Vec::new();
     for (image, model, hash) in rows {
-        match hash.as_deref().and_then(parse_dhash) {
+        match hash.as_deref().and_then(stl_core::dhash::parse) {
             Some(h) => good.push((model, h)),
             None => todo.push((image, model)),
         }
@@ -396,7 +300,7 @@ pub const COLUMNS: &[(&str, &str, Option<usize>)] = &[
 /// Find Duplicates (metadata): models with identical, near (Levenshtein) or
 /// phonetically similar (Soundex) values, as the desktop's search worker.
 pub fn metadata(lib: &Library, ctl: &Control, columns: &[String], method: &str, max_distance: u32) -> Result<JobResult, String> {
-    let rows = lib.db.with(views::duplicate_rows).map_err(db)?;
+    let rows = lib.db.with(model_views::duplicate_rows).map_err(db)?;
     ctl.set_total(columns.len() as u64);
     let mut groups = Vec::new();
     for key in columns {
@@ -404,7 +308,7 @@ pub fn metadata(lib: &Library, ctl: &Control, columns: &[String], method: &str, 
             break;
         }
         let &(_, label, index) = COLUMNS.iter().find(|(k, ..)| k == key).ok_or(format!("unknown column {key:?}"))?;
-        let value = |r: &views::DuplicateRow| -> String {
+        let value = |r: &model_views::DuplicateRow| -> String {
             match index {
                 Some(i) => r.texts[i].clone().unwrap_or_default(),
                 None => {
@@ -414,9 +318,9 @@ pub fn metadata(lib: &Library, ctl: &Control, columns: &[String], method: &str, 
                 }
             }
         };
-        let model = |r: &views::DuplicateRow, v: &str| MetadataModel { id: r.id, title: r.texts[0].clone().unwrap_or_default(), value: v.to_string() };
+        let model = |r: &model_views::DuplicateRow, v: &str| MetadataModel { id: r.id, title: r.texts[0].clone().unwrap_or_default(), value: v.to_string() };
         let group = |similarity: String, models: Vec<MetadataModel>| MetadataGroup { column: label.to_string(), similarity, models };
-        let vals: Vec<(&views::DuplicateRow, String)> =
+        let vals: Vec<(&model_views::DuplicateRow, String)> =
             rows.iter().map(|r| (r, value(r).trim().to_string())).filter(|(_, v)| !v.is_empty()).collect();
         match method {
             "exact" => {

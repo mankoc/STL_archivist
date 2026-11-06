@@ -49,7 +49,8 @@ stl_database/
 │   ├── stl-server/    # axum HTTP + WebSocket API, accounts, jobs, sidecars, tools (pdfium,
 │   │                  #   ONNX Runtime), AI (llama-server), backups
 │   ├── stl-desktop/   # Tauri shell: launcher page (ui/), window on a server, tray, menus
-│   ├── stl-proc/      # end_with_parent: child processes die with their parent (Windows job)
+│   ├── stl-proc/      # end_with_parent: child processes die with their parent (Windows job);
+│   │                  #   no_window: no console window for a child
 │   └── stl-viewer/    # the web client's model viewer: meshpeek-render in WebAssembly
 ├── web/               # React 19 + Mantine 8 + TanStack client
 ├── docker/            # Server image (Dockerfile, built from the repository root), compose.yml
@@ -118,10 +119,10 @@ stl_database/
   `/api/images`, `/api/lookups`, `/api/maintenance`, `/api/libraries` and `/api/ai/commit` are announced by
   the `announce_changes` middleware (POSTs that only read are listed there). Library settings
   come from `library_settings::LibrarySettings` (`settings.json`, read per use).
-- **Jobs:** `jobs.rs`. A new kind is a `JobRequest` variant, a `kind()` name, a `run` arm,
+- **Jobs:** `jobs/` (the queue in `mod.rs`, `request.rs`, the bodies by subject). A new kind is a `JobRequest` variant, a `kind()` name, a `run` arm,
   checks in `JobRequest::validate` and (for read-only jobs) `read_only`. Report through
   `job.ctl` and `lib.job_log`, check `job.stopped()` between batches, queue sidecars with
-  `job.touch_sidecars`. Results go in `JobResult` (`dupes.rs`), returned in
+  `job.touch_sidecars`. Results go in `JobResult` (`jobs/result.rs`), returned in
   `JobDetail.result`. Crawls run `stl_core::crawler::crawl` with `ServerHost`. Monitored
   folders (`monitor.rs`) queue ordinary `crawl` jobs (`keep_missing`) from a background pass.
 - **Files:** browsing, crawling and any job given a folder (search folder, sort files,

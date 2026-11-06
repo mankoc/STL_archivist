@@ -133,7 +133,7 @@ fn restore(args: &[String]) -> Result<(), String> {
     }
     // Refuses while the server or the desktop app has the library open.
     let _lock = stl_core::lock::LibraryLock::acquire(&config.data_dir, "stl-server restore").map_err(|e| e.to_string())?;
-    let stamp: String = stl_core::storage::edit::utc_now_text().chars().take(19).filter(char::is_ascii_digit).collect();
+    let stamp: String = stl_core::storage::writes::utc_now_text().chars().take(19).filter(char::is_ascii_digit).collect();
     let r = stl_core::backup::restore(src, &config.data_dir, &stamp).map_err(|e| e.to_string())?;
     println!("Restored {} into {}.", src.display(), config.data_dir.display());
     if let Some(previous) = &r.previous {

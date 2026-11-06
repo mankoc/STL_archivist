@@ -13,7 +13,7 @@
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 use super::Result;
-use super::edit::utc_now_text;
+use super::writes::utc_now_text;
 
 /// `(table, models column or link table)` per lookup kind.
 fn table(kind: &str) -> Result<&'static str> {
@@ -36,7 +36,7 @@ pub type AdminRow = (i64, String, i64, Option<i64>, Option<String>);
 /// `list_lookups`.
 pub fn list(conn: &Connection, kind: &str) -> Result<Vec<AdminRow>> {
     let t = table(kind)?;
-    let counts = super::library::usage_counts(conn, kind)?;
+    let counts = super::queries::usage_counts(conn, kind)?;
     if kind == "subcollection" {
         let mut st = conn.prepare(
             "SELECT subcollections.id, subcollections.name, collections.id, collections.name FROM subcollections \
@@ -124,7 +124,7 @@ pub fn rename(tx: &Transaction, kind: &str, id: i64, new_name: &str) -> Result<b
 /// `delete_info`: `(name, models using it, subcollections)`.
 pub fn delete_info(conn: &Connection, kind: &str, id: i64) -> Result<Option<(String, i64, i64)>> {
     let Some((name, _)) = name_of(conn, kind, id)? else { return Ok(None) };
-    let used = super::library::usage_counts(conn, kind)?.get(&id).copied().unwrap_or(0);
+    let used = super::queries::usage_counts(conn, kind)?.get(&id).copied().unwrap_or(0);
     let subs = if kind == "collection" {
         conn.query_row("SELECT count(*) FROM subcollections WHERE collection_id = ?1", [id], |r| r.get(0))?
     } else {
@@ -168,7 +168,7 @@ pub fn author_archive_paths(conn: &Connection, name: &str) -> Result<Vec<String>
 
 fn paths_of(conn: &Connection, sql: &str, key: impl rusqlite::ToSql) -> Result<Vec<String>> {
     let ids = conn.prepare(sql)?.query_map([key], |r| r.get(0))?.collect::<Result<Vec<i64>>>()?;
-    Ok(super::model_edit::archive_paths(conn, &ids)?.into_values().collect())
+    Ok(super::model_editor::archive_paths(conn, &ids)?.into_values().collect())
 }
 
 /// `delete`.

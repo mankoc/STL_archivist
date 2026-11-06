@@ -8,9 +8,9 @@ use axum::{Extension, Json};
 use axum::extract::{Multipart, Path, Query, State};
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
-use stl_core::storage::edit::{self as core_edit, EditError};
-use stl_core::storage::model_edit::{self, EditorForm, Find, MassPlan};
-use stl_core::storage::{browser, maintenance};
+use stl_core::storage::writes::{self as core_edit, EditError};
+use stl_core::storage::model_editor::{self, EditorForm, Find, MassPlan};
+use stl_core::storage::{model_files, maintenance};
 use utoipa::ToSchema;
 
 use super::models::ImageRef;
@@ -122,7 +122,7 @@ fn date_text(year: Option<i64>, month: Option<i64>) -> String {
 pub async fn get_editor(State(lib): State<AppState>, _me: CurrentUser, Path(id): Path<i64>) -> Result<Json<EditorModel>, ApiError> {
     let m = lib
         .run(move |lib| {
-            let Some(m) = lib.db.with(|c| model_edit::model_for_editor(c, id))? else { return Ok(None) };
+            let Some(m) = lib.db.with(|c| model_editor::model_for_editor(c, id))? else { return Ok(None) };
             let ids: Vec<u64> = m.images.iter().map(|&(i, _)| i as u64).collect();
             let digests: HashMap<u64, Option<Vec<u8>>> = lib.thumbs.digests(&ids)?.into_iter().collect();
             let images = m
@@ -211,7 +211,7 @@ pub async fn save_editor(
         scales: f.scales,
         tags: f.tags,
     };
-    let saved = lib.run(move |lib| Ok(lib.db.with_tx(|tx| model_edit::save_model_editor(tx, id, &form))?)).await?;
+    let saved = lib.run(move |lib| Ok(lib.db.with_tx(|tx| model_editor::save_model_editor(tx, id, &form))?)).await?;
     match saved {
         None => Err(ApiError::not_found(format!("no model {id}"))),
         Some(path) => {
@@ -225,7 +225,7 @@ pub async fn save_editor(
 /// `releases`, `sculptors`, `collections`, `subcollections`, `categories`, `scales`.
 #[utoipa::path(get, path = "/api/editor/choices", tag = "editing", responses((status = 200, body = Object)))]
 pub async fn choices(State(lib): State<AppState>, _me: CurrentUser) -> Result<Json<BTreeMap<String, Vec<String>>>, ApiError> {
-    let c = lib.run(|lib| Ok(lib.db.with(model_edit::editor_choices)?)).await?;
+    let c = lib.run(|lib| Ok(lib.db.with(model_editor::editor_choices)?)).await?;
     Ok(Json(c.into_iter().map(|(k, v)| (k.to_string(), v)).collect()))
 }
 
@@ -242,7 +242,7 @@ pub async fn subcollections(
     _me: CurrentUser,
     Query(q): Query<CollectionQuery>,
 ) -> Result<Json<Vec<String>>, ApiError> {
-    Ok(Json(lib.run(move |lib| Ok(lib.db.with(|c| model_edit::subcollection_names(c, &q.collection))?)).await?))
+    Ok(Json(lib.run(move |lib| Ok(lib.db.with(|c| model_editor::subcollection_names(c, &q.collection))?)).await?))
 }
 
 // ── mass editor ──────────────────────────────────────────────────────────────
@@ -312,7 +312,7 @@ pub async fn mass_edit(State(lib): State<AppState>, me: CurrentUser, Json(m): Js
     }
     let (result, paths) = lib
         .run(move |lib| {
-            let paths = lib.db.with(|c| model_edit::archive_paths(c, &m.ids))?;
+            let paths = lib.db.with(|c| model_editor::archive_paths(c, &m.ids))?;
             let pattern = m.pattern.trim().to_string();
             let mut path_results = HashMap::new();
             if !pattern.is_empty() {
@@ -347,7 +347,7 @@ pub async fn mass_edit(State(lib): State<AppState>, me: CurrentUser, Json(m): Js
                 find: m.find.map(|f| Find { find: f.find, replace: f.replace, case: f.case, regex: f.regex, fields: f.fields }),
                 trim: m.trim,
             };
-            lib.db.with_tx(|tx| model_edit::mass_save(tx, &plan))?;
+            lib.db.with_tx(|tx| model_editor::mass_save(tx, &plan))?;
             Ok((MassResult { models: paths.len(), pattern_matches }, paths.into_values().collect::<Vec<_>>()))
         })
         .await?;
@@ -381,7 +381,7 @@ pub async fn parse_paths(State(lib): State<AppState>, _me: CurrentUser, Json(req
     }
     let out = lib
         .run(move |lib| {
-            let paths = lib.db.with(|c| model_edit::archive_paths(c, &req.ids))?;
+            let paths = lib.db.with(|c| model_editor::archive_paths(c, &req.ids))?;
             let pattern = req.pattern.trim().to_string();
             Ok(req
                 .ids
@@ -413,8 +413,8 @@ pub async fn delete_models(State(lib): State<AppState>, me: CurrentUser, Json(re
     editor(&me)?;
     let paths = lib
         .run(move |lib| {
-            let paths = lib.db.with(|c| model_edit::archive_paths(c, &req.ids))?;
-            let refs = lib.db.with_tx(|tx| browser::delete_models(tx, &req.ids))?;
+            let paths = lib.db.with(|c| model_editor::archive_paths(c, &req.ids))?;
+            let refs = lib.db.with_tx(|tx| model_files::delete_models(tx, &req.ids))?;
             delete_thumbnails(lib, &refs)?;
             Ok(paths.into_values().collect::<Vec<_>>())
         })
@@ -432,7 +432,7 @@ pub async fn clear_warnings(State(lib): State<AppState>, me: CurrentUser, Json(r
     let paths = lib
         .run(move |lib| {
             let changed = lib.db.with_tx(|tx| stl_core::storage::maintenance::clear_warnings(tx, &req.ids))?;
-            Ok::<_, ApiError>(lib.db.with(|c| model_edit::archive_paths(c, &changed))?.into_values().collect::<Vec<_>>())
+            Ok::<_, ApiError>(lib.db.with(|c| model_editor::archive_paths(c, &changed))?.into_values().collect::<Vec<_>>())
         })
         .await?;
     let models = paths.len();
@@ -443,7 +443,7 @@ pub async fn clear_warnings(State(lib): State<AppState>, me: CurrentUser, Json(r
 /// Drop thumbnail references (`images.thumbnail_path`: the image id) from the
 /// store, after the database change committed.
 fn delete_thumbnails(lib: &Library, refs: &[String]) -> Result<(), ApiError> {
-    let ids: Vec<u64> = refs.iter().filter_map(|r| r.trim().parse().ok()).collect();
+    let ids: Vec<u64> = stl_core::storage::crawl::ref_ids(refs);
     lib.thumbs.delete_many(&ids)?;
     Ok(())
 }
@@ -497,7 +497,7 @@ pub async fn add_images(
     }
     let (result, path) = lib
         .run(move |lib| {
-            let path = lib.db.with(|c| model_edit::archive_paths(c, &[id]))?.remove(&id);
+            let path = lib.db.with(|c| model_editor::archive_paths(c, &[id]))?.remove(&id);
             let Some(path) = path else { return Err(ApiError::not_found(format!("no model {id}"))) };
             let settings = LibrarySettings::load(&lib.config.data_dir);
             let size = if q.view { settings.view_thumb_size() } else { settings.max_thumb_size() };
@@ -510,14 +510,14 @@ pub async fn add_images(
                 }
             }
             let names: Vec<String> = thumbs.iter().map(|(n, _)| n.clone()).collect();
-            let ids = lib.db.with_tx(|tx| browser::add_images(tx, id, &names))?;
+            let ids = lib.db.with_tx(|tx| model_files::add_images(tx, id, &names))?;
             let items: Vec<(u64, &[u8])> = ids.iter().zip(&thumbs).map(|(&i, (_, t))| (i as u64, t.as_slice())).collect();
             if let Err(e) = lib.thumbs.put_many(&items) {
                 lib.db.with_tx(|tx| maintenance::delete_images(tx, &ids))?;
                 return Err(e.into());
             }
             let refs: Vec<(i64, String)> = ids.iter().map(|&i| (i, i.to_string())).collect();
-            lib.db.with_tx(|tx| browser::set_image_thumbnails(tx, &refs))?;
+            lib.db.with_tx(|tx| model_files::set_image_thumbnails(tx, &refs))?;
             let digests: HashMap<u64, Option<Vec<u8>>> =
                 lib.thumbs.digests(&ids.iter().map(|&i| i as u64).collect::<Vec<_>>())?.into_iter().collect();
             let added = ids
