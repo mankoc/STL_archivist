@@ -226,7 +226,8 @@ pub fn warning_details(lib: &Library, path: Option<&str>, warning: Option<&str>)
     let lines: Vec<String> = warning.unwrap_or("").split('\n').map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect();
     let mut matches: Vec<(&'static str, Vec<String>)> = Vec::new();
     let mut sizes: std::collections::HashMap<String, Option<u64>> = std::collections::HashMap::new();
-    let error = match path.map(Path::new).filter(|p| p.is_file()) {
+    let on_disk = path.map(stl_core::relpath::on_disk);
+    let error = match on_disk.as_deref().map(Path::new).filter(|p| p.is_file()) {
         None => Some("The archive is no longer at the catalogued path, so its files cannot be listed.".to_string()),
         Some(p) => match stl_core::archive::list_members(p) {
             Err(e) => Some(format!("The archive could not be read: {e}")),

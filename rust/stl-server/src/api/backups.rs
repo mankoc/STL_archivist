@@ -102,7 +102,7 @@ pub async fn download(State(lib): State<AppState>, me: CurrentUser, UrlPath(name
     let path = path_of(&lib, &name)?;
     let file = tokio::fs::File::open(&path).await.map_err(|_| ApiError::not_found(format!("no backup {name}")))?;
     let len = file.metadata().await.map(|m| m.len()).ok();
-    let mut resp = Body::from_stream(tokio_util::io::ReaderStream::new(file)).into_response();
+    let mut resp = Body::from_stream(tokio_util::io::ReaderStream::with_capacity(file, crate::api::DOWNLOAD_CHUNK)).into_response();
     let h = resp.headers_mut();
     h.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/x-7z-compressed"));
     if let Ok(v) = HeaderValue::from_str(&format!("attachment; filename=\"{name}\"")) {

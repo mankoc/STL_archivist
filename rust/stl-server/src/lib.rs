@@ -53,6 +53,8 @@ pub struct Library {
     pub monitor: monitor::Monitor,
     /// Model viewer loads running at once (`POST /api/models/{id}/view`).
     pub view_loads: tokio::sync::Semaphore,
+    /// Password checks running at once (`POST /api/auth/login`).
+    pub password_checks: tokio::sync::Semaphore,
     /// An imported library is replacing this one (`import_library`): writes wait.
     pub importing: std::sync::atomic::AtomicBool,
     /// Random, for this run: a sync refuses a "remote" that is this server.
@@ -132,6 +134,7 @@ impl Library {
             workers: workers::Workers::default(),
             monitor: monitor::Monitor::default(),
             view_loads: tokio::sync::Semaphore::new(2),
+            password_checks: tokio::sync::Semaphore::new(4),
             importing: Default::default(),
             instance: sync::new_instance(),
             generation: Default::default(),
@@ -158,12 +161,28 @@ impl Library {
 pub fn app(state: AppState) -> axum::Router {
     let web = state.config.web_dir();
     let router = api::router(Arc::clone(&state)).with_state(state);
-    match web {
+    let router = match web {
         // The client's files, and index.html for its routes (a single-page app).
         Some(dir) => {
             let index = tower_http::services::ServeFile::new(dir.join("index.html"));
             router.fallback_service(tower_http::services::ServeDir::new(dir).fallback(index))
         }
         None => router,
-    }
+    };
+    router.layer(compression())
+}
+
+/// JSON, the client's files and the like. Not images and archives, which are
+/// compressed already (and a download keeps its size), nor a WebSocket's upgrade.
+fn compression() -> tower_http::compression::CompressionLayer<impl tower_http::compression::Predicate> {
+    use axum::http::{Extensions, HeaderMap, StatusCode, Version};
+    use tower_http::compression::predicate::{DefaultPredicate, NotForContentType};
+    use tower_http::compression::{CompressionLayer, Predicate};
+    let not_an_upgrade = |status: StatusCode, _: Version, _: &HeaderMap, _: &Extensions| status != StatusCode::SWITCHING_PROTOCOLS;
+    CompressionLayer::new().compress_when(
+        DefaultPredicate::new()
+            .and(NotForContentType::const_new("application/octet-stream"))
+            .and(NotForContentType::const_new("application/x-7z-compressed"))
+            .and(not_an_upgrade),
+    )
 }

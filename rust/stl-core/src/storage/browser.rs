@@ -73,7 +73,7 @@ pub fn sort_sources(conn: &Connection, ids: &[i64]) -> Result<Vec<SortSource>> {
     st.query_map([json], |r| {
         Ok(SortSource {
             id: r.get(0)?,
-            archive_path: r.get(1)?,
+            archive_path: r.get::<_, Option<String>>(1)?.map(|p| crate::relpath::on_disk(&p)),
             title: r.get(2)?,
             source: r.get(3)?,
             creator: r.get(4)?,
@@ -117,7 +117,7 @@ pub fn deletion_rows(conn: &Connection, ids: &[i64]) -> Result<Vec<DeletionRow>>
          WHERE id IN (SELECT value FROM json_each(?1)) ORDER BY id",
         super::schema_sql::archive_path_sql("models")
     ))?;
-    st.query_map([json], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?.collect()
+    st.query_map([json], |r| Ok((r.get(0)?, r.get::<_, Option<String>>(1)?.map(|p| crate::relpath::on_disk(&p)), r.get(2)?, r.get(3)?, r.get(4)?)))?.collect()
 }
 
 #[cfg(test)]
