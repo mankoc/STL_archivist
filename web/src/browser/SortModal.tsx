@@ -11,6 +11,7 @@ import { PatternTools } from "./PatternTools";
 import classes from "./SortModal.module.css";
 
 const PATTERN_KEY = "stl.sort.pattern";
+const TARGET_KEY = "stl.sort.target";
 const MISSING_KEY = "stl.sort.missing";
 const MISSING_MODES: { value: MissingMode; label: string }[] = [
   { value: "unknown", label: "Write “unknown”" },
@@ -21,11 +22,11 @@ const MISSING_MODES: { value: MissingMode; label: string }[] = [
 const SIZE_KEY = "stl.sort.size";
 const STATUS_COLOR: Record<string, string> = { OK: "green", COLLISION: "yellow", MISS: "red", SKIP: "gray", ERROR: "red", FILE: "blue" };
 
-function stored(): string {
+function stored(key: string, fallback: string): string {
   try {
-    return localStorage.getItem(PATTERN_KEY) ?? "{collection}/{creator}/{title}";
+    return localStorage.getItem(key) ?? fallback;
   } catch {
-    return "{collection}/{creator}/{title}";
+    return fallback;
   }
 }
 
@@ -64,8 +65,8 @@ function rememberSize(stack: HTMLDivElement | null) {
 }
 
 export function SortModal({ ids, opened, onClose }: { ids: number[]; opened: boolean; onClose: () => void }) {
-  const [target, setTarget] = useState("");
-  const [pattern, setPattern] = useState(stored);
+  const [target, setTarget] = useState(() => stored(TARGET_KEY, ""));
+  const [pattern, setPattern] = useState(() => stored(PATTERN_KEY, "{collection}/{creator}/{title}"));
   const [missing, setMissing] = useState(storedMissing);
   const [picker, setPicker] = useState(false);
   const [rows, setRows] = useState<Schemas["SortRow"][] | null>(null);
@@ -85,6 +86,7 @@ export function SortModal({ ids, opened, onClose }: { ids: number[]; opened: boo
     try {
       setRows(unwrap(await api.POST("/api/sort/preview", { body: { ids, target_dir: target, pattern, missing: missingValue(missing) } })));
       try {
+        localStorage.setItem(TARGET_KEY, target);
         localStorage.setItem(PATTERN_KEY, pattern);
         localStorage.setItem(MISSING_KEY, JSON.stringify(missing));
       } catch {
