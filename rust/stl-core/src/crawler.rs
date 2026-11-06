@@ -282,8 +282,13 @@ const STL_EXTS: [&str; 7] = [".stl", ".obj", ".lys", ".lyt", ".chitubox", ".ctp"
 /// `max_images` images and PDFs (`None`: every one; in a solid archive, reading
 /// stops after the last member wanted). `None` where the catalog cannot be read.
 pub(crate) fn extract_native(path: &str, unrar: &str, max_images: Option<usize>) -> Option<Extracted> {
+    let members = archive::list_members(Path::new(path)).ok()?;
+    Some(extract_listed(path, &members, unrar, max_images))
+}
+
+/// [`extract_native`] of an archive whose catalog is at hand.
+fn extract_listed(path: &str, members: &[archive::ArchiveMember], unrar: &str, max_images: Option<usize>) -> Extracted {
     let p = Path::new(path);
-    let members = archive::list_members(p).ok()?;
     let names: Vec<String> = members.iter().map(|m| m.name.clone()).collect();
     let uncompressed = Some(members.iter().filter_map(|m| m.size).sum::<u64>() as i64);
     let stl_info = stl_dict(members.iter().map(|m| (m.name.clone(), m.size.map(|s| s as i64))));
@@ -324,7 +329,7 @@ pub(crate) fn extract_native(path: &str, unrar: &str, max_images: Option<usize>)
             (b.len() as u64 <= size_limit(&n)).then_some((n, b))
         })
         .collect();
-    Some(Extracted { contents, names, stl_info, uncompressed, unread })
+    Extracted { contents, names, stl_info, uncompressed, unread }
 }
 
 /// An archive's `.url` and `info.json` members (name, bytes; each at most 1 MB),
@@ -384,8 +389,12 @@ struct Prepared {
     precomp: Vec<(String, Option<Vec<u8>>, Option<String>)>,
 }
 
-fn prepare(path: &str, cfg: &CrawlConfig, host: &dyn Host) -> Prepared {
-    let mut extracted = extract_native(path, &cfg.unrar, Some(cfg.max_thumbnails)).unwrap_or_default();
+fn prepare(path: &str, members: Option<&Vec<archive::ArchiveMember>>, cfg: &CrawlConfig, host: &dyn Host) -> Prepared {
+    let max = Some(cfg.max_thumbnails);
+    let mut extracted = match members {
+        Some(members) => extract_listed(path, members, &cfg.unrar, max),
+        None => extract_native(path, &cfg.unrar, max).unwrap_or_default(),
+    };
     if let Some(why) = &extracted.unread {
         host.emit(Event::Warning(format!("{}: images not read ({why}); its file list is kept", WinPath::new(path).name())));
     }
@@ -515,6 +524,11 @@ struct Run<'a> {
     patterns: PresupportPatterns,
     checks: Checks,
     candidates: HashMap<String, i64>,
+    /// Hashes shared by several missing records: which one moved is unknown.
+    ambiguous: HashSet<String>,
+    /// Records outside the crawled folder, and those of them found gone.
+    outside: db::Outside,
+    gone_outside: Vec<db::Missing>,
     names: HashMap<i64, String>, // missing id -> file name
     early_moved: HashSet<i64>,
     moved_new_paths: HashSet<String>,
@@ -539,6 +553,20 @@ fn tx(conn: &mut rusqlite::Connection) -> rusqlite::Result<rusqlite::Transaction
 }
 
 impl Run<'_> {
+    /// `moves.index_by_hash`: a missing record, as a candidate for what a new archive is.
+    fn index_missing(&mut self, (id, _, h, name, _): &db::Missing) {
+        self.names.insert(*id, name.clone());
+        if h.is_empty() || h.starts_with("fallback:") {
+            return;
+        }
+        if self.candidates.contains_key(h) || self.ambiguous.contains(h) {
+            self.candidates.remove(h);
+            self.ambiguous.insert(h.clone());
+        } else {
+            self.candidates.insert(h.clone(), *id);
+        }
+    }
+
     /// The pattern for the archive at `path`.
     fn pattern_of(&self, path: &str) -> &str {
         let own = crate::relpath::RelPath::from_abs(self.cfg.root(), path).and_then(|r| self.folder_patterns.below(r.folder()));
@@ -623,6 +651,14 @@ impl Run<'_> {
             self.host.emit(Event::Phase("Checking database for changes…".into()));
         }
         let pairs: Vec<(String, String)> = batch.iter().cloned().zip(hashes.iter().cloned()).collect();
+        for (p, h) in &pairs {
+            if self.existing_hashes.get(p) != Some(h) {
+                for m in self.outside.gone_with_hash(h) {
+                    self.index_missing(&m);
+                    self.gone_outside.push(m);
+                }
+            }
+        }
         let read: HashSet<String> = lists.iter().map(|(p, _)| p.clone()).collect();
         let trusted: HashSet<String> = trusted.into_iter().collect();
         let diff = {
@@ -648,12 +684,13 @@ impl Run<'_> {
             self.host.emit(Event::Phase("Extracting new/changed archives…".into()));
         }
         let (cfg, host) = (self.cfg, self.host);
-        let prepared: HashMap<String, Prepared> =
-            self.pool.install(|| diff.to_extract.par_iter().map(|p| (p.clone(), prepare(p, cfg, host))).collect());
+        let members_of: HashMap<&str, &Vec<archive::ArchiveMember>> = lists.iter().map(|(p, m)| (p.as_str(), m)).collect();
+        let prepared: HashMap<String, Prepared> = self
+            .pool
+            .install(|| diff.to_extract.par_iter().map(|p| (p.clone(), prepare(p, members_of.get(p.as_str()).copied(), cfg, host))).collect());
         // Records without an STL list whose catalog was read anyway get it from that catalog
         // (no archive is opened for it).
         let hash_of: HashMap<&str, &str> = pairs.iter().map(|(p, h)| (p.as_str(), h.as_str())).collect();
-        let members_of: HashMap<&str, &Vec<archive::ArchiveMember>> = lists.iter().map(|(p, m)| (p.as_str(), m)).collect();
         let stl_lists: Vec<db::StlList> = diff
             .stl_backfill
             .iter()
@@ -822,6 +859,9 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
         patterns,
         checks,
         candidates: HashMap::new(),
+        ambiguous: HashSet::new(),
+        outside: db::Outside::default(),
+        gone_outside: Vec::new(),
         names: HashMap::new(),
         early_moved: HashSet::new(),
         moved_new_paths: HashSet::new(),
@@ -870,7 +910,9 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
     // records; for a part of one, records are looked for on disk.
     let keys: HashSet<String> = archives.iter().map(|p| crate::relpath::path_key(p)).collect();
     let whole = cfg.recurse && cfg.library_root.is_none();
-    let db::MissingScan { missing, back } = db::collect_missing(&run.conn, whole.then_some((library, &keys)), &unreadable)?;
+    let db::MissingScan { missing, back, outside } =
+        db::collect_missing(&run.conn, whole.then_some((library, &keys)), &unreadable, &cfg.source_dir, &run.inner_roots)?;
+    run.outside = db::Outside::new(outside);
     if !back.is_empty() {
         let t = tx(&mut run.conn)?;
         storage::maintenance::clear_missing(&t, &back)?;
@@ -891,21 +933,8 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
     if !missing.is_empty() {
         run.log(format!("{} recorded archive(s) not found on disk — checked for moves after the crawl.", missing.len()));
     }
-    // moves.index_by_hash
-    let mut shared = HashSet::new();
-    for (id, _, h, name, _) in &missing {
-        run.names.insert(*id, name.clone());
-        if h.is_empty() || h.starts_with("fallback:") {
-            continue;
-        }
-        if run.candidates.contains_key(h) {
-            shared.insert(h.clone());
-        } else {
-            run.candidates.insert(h.clone(), *id);
-        }
-    }
-    for h in shared {
-        run.candidates.remove(&h);
+    for m in &missing {
+        run.index_missing(m);
     }
 
     let total = archives.len();
@@ -1000,7 +1029,18 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
     if !run.early_moved.is_empty() {
         run.log(format!("Matched {} moved file(s) by content, without re-extracting.", run.early_moved.len()));
     }
-    let missing: Vec<db::Missing> = missing.into_iter().filter(|m| !run.early_moved.contains(&m.0)).collect();
+    // New archives may also be records from elsewhere that hashes did not tell.
+    for path in run.summary.new_paths.clone() {
+        if let Some(&(size, _)) = run.listed.get(&path) {
+            let gone = run.outside.gone_with_name(WinPath::new(&path).name(), size);
+            for m in gone {
+                run.names.insert(m.0, m.3.clone());
+                run.gone_outside.push(m);
+            }
+        }
+    }
+    let gone_outside = std::mem::take(&mut run.gone_outside);
+    let missing: Vec<db::Missing> = missing.into_iter().chain(gone_outside).filter(|m| !run.early_moved.contains(&m.0)).collect();
     if !missing.is_empty() {
         host.emit(Event::Phase(format!("Looking for {} archive(s) not found on disk among the new ones…", missing.len())));
         reconcile(&mut run, missing)?;

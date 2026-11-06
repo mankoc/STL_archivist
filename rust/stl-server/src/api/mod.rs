@@ -284,6 +284,11 @@ fn changes(method: &Method, path: &str) -> Option<&'static str> {
     }
 }
 
+/// In a response's extensions: what to announce, when the handler knows better
+/// than [`changes`], which sees only the route.
+#[derive(Clone, Copy)]
+pub struct Announce(pub &'static str);
+
 /// After a successful write, tell event-stream clients what kind of data changed.
 /// While an imported library replaces this one, writes are refused: they would
 /// land on other records in the new database.
@@ -294,7 +299,7 @@ async fn announce_changes(State(lib): State<AppState>, req: Request, next: Next)
     }
     let resp = next.run(req).await;
     if let Some(what) = what.filter(|_| resp.status().is_success()) {
-        lib.changed(what);
+        lib.changed(resp.extensions().get::<Announce>().map_or(what, |a| a.0));
     }
     resp
 }

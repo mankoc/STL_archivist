@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use axum::Json;
+use axum::{Extension, Json};
 use axum::extract::{Multipart, Path, Query, State};
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -15,6 +15,7 @@ use utoipa::ToSchema;
 
 use super::models::ImageRef;
 use super::thumbs::thumbnail_url;
+use super::Announce;
 use crate::accounts::Role;
 use crate::auth::CurrentUser;
 use crate::library_settings::LibrarySettings;
@@ -66,20 +67,22 @@ pub struct Changed {
 #[utoipa::path(patch, path = "/api/models/cells", tag = "editing", request_body = CellEdits,
     responses((status = 200, body = Changed), (status = 400, body = crate::error::ErrorBody),
               (status = 403, body = crate::error::ErrorBody)))]
-pub async fn cells(State(lib): State<AppState>, me: CurrentUser, Json(req): Json<CellEdits>) -> Result<Json<Changed>, ApiError> {
+pub async fn cells(State(lib): State<AppState>, me: CurrentUser, Json(req): Json<CellEdits>) -> Result<(Extension<Announce>, Json<Changed>), ApiError> {
     editor(&me)?;
     for e in &req.edits {
         if !core_edit::CELL_FIELDS.contains(&e.field.as_str()) {
             return Err(ApiError::bad_request(format!("unknown field {:?}", e.field)));
         }
     }
+    // These aren't in the filter pane, so its tree stays as it is.
+    let rows_only = req.edits.iter().all(|e| matches!(e.field.as_str(), "title" | "sequence" | "to_print"));
     let edits: Vec<(i64, String, Option<String>)> = req.edits.into_iter().map(|e| (e.id, e.field, e.value)).collect();
     let paths = lib.run(move |lib| Ok(lib.db.with_tx(|tx| core_edit::apply_cell_edits(tx, &edits))?)).await?;
     // One path per applied edit: count each model once.
     let paths: BTreeSet<String> = paths.into_iter().collect();
     let models = paths.len();
     lib.schedule_sidecars(paths);
-    Ok(Json(Changed { models }))
+    Ok((Extension(Announce(if rows_only { crate::ROWS_CHANGED } else { "models" })), Json(Changed { models })))
 }
 
 // ── model editor ─────────────────────────────────────────────────────────────

@@ -11,6 +11,14 @@ type Job = Schemas["JobInfo"];
 /** The query keys a library change makes stale. */
 export const LIBRARY_KEYS = ["ids", "rows", "tree", "model", "editor", "lookups", "libraries", "grid", "folders", "folder-cells"] as const;
 
+/** What a change of `what: "rows"` makes stale: a cell outside the filter pane. */
+const ROW_KEYS = ["ids", "rows", "model", "editor", "grid", "folder-cells"] as const;
+
+/** The query keys to reload after the changes `whats`. */
+export function staleKeys(whats: Set<string>): readonly string[] {
+  return whats.size > 0 && [...whats].every((w) => w === "rows") ? ROW_KEYS : LIBRARY_KEYS;
+}
+
 /** How long library changes are gathered into one reload. */
 export const RELOAD_DELAY = 300;
 
@@ -48,8 +56,10 @@ export function useServerEvents(onEvent?: (e: ServerEvent) => void): void {
     let closed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     // A burst of changes (a mass edit, another client typing) is one reload.
+    const whats = new Set<string>();
     const reload = coalesced(() => {
-      for (const key of LIBRARY_KEYS) void queryClient.invalidateQueries({ queryKey: [key] });
+      for (const key of staleKeys(whats)) void queryClient.invalidateQueries({ queryKey: [key] });
+      whats.clear();
     }, RELOAD_DELAY);
     const connect = () => {
       const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -59,7 +69,10 @@ export function useServerEvents(onEvent?: (e: ServerEvent) => void): void {
       };
       socket.onmessage = (msg) => {
         const event = JSON.parse(msg.data as string) as ServerEvent;
-        if (event.type === "library_changed" || event.type === "resync") reload.call();
+        if (event.type === "library_changed" || event.type === "resync") {
+          whats.add(event.type === "resync" ? "resync" : event.what);
+          reload.call();
+        }
         if (event.type === "job") {
           // Progress arrives twice a second: patch the cached list instead of refetching.
           const job = event.job;

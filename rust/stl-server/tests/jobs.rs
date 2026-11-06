@@ -152,7 +152,7 @@ endsolid
     let studio = root.join("Studio");
     let id = submit(&lib, &ed, json!({"kind": "crawl", "folder": studio.to_string_lossy(), "in_library": true})).await;
     let v = wait(&lib, &ed, id).await;
-    assert_eq!(v["job"]["message"], "1 new, 0 updated, 2 unchanged, 1 flagged missing", "{v}");
+    assert_eq!(v["job"]["message"], "1 new, 0 updated, 2 unchanged", "{v}");
     assert_eq!(count(&lib, "SELECT count(*) FROM libraries"), 1, "Studio is not made a library folder");
     assert_eq!(count(&lib, "SELECT count(DISTINCT library_id) FROM models"), 1);
     // The library's pattern reads the path from its root.
@@ -459,6 +459,44 @@ async fn websocket_streams_events() {
             _ => {}
         }
     }
+}
+
+/// A crawl looks at other libraries' disks only for an archive that may have come from
+/// them, so idle disks stay asleep. Records there wait for their own folder's crawl.
+#[tokio::test(flavor = "multi_thread")]
+async fn crawls_leave_other_libraries_alone_but_find_moves_from_them() {
+    let lib = empty_library();
+    std::fs::write(lib.dir.path().join("settings.json"), r#"{"metadata_sidecar_enabled": false}"#).unwrap();
+    let ed = lib.user("ed", Role::Editor);
+    let first = lib.dir.path().join("first");
+    let second = lib.dir.path().join("second");
+    for dir in [&first, &second] {
+        std::fs::create_dir_all(dir).unwrap();
+    }
+    let zip = |path: &std::path::Path, text: &[u8]| write_zip(path, &[("a.stl", text)]);
+    zip(&first.join("Moves.zip"), b"solid moves");
+    zip(&first.join("Renamed.zip"), b"solid renamed");
+    zip(&first.join("Gone.zip"), b"solid gone");
+    zip(&first.join("Stays.zip"), b"solid stays");
+    for dir in [&first, &second] {
+        let id = submit(&lib, &ed, json!({"kind": "crawl", "folder": dir.to_string_lossy()})).await;
+        assert_eq!(wait(&lib, &ed, id).await["job"]["state"], "done");
+    }
+    let ids = count(&lib, "SELECT sum(id) FROM models WHERE rel_path IN ('Moves.zip', 'Renamed.zip')");
+
+    std::fs::rename(first.join("Moves.zip"), second.join("Moves.zip")).unwrap();
+    std::fs::rename(first.join("Renamed.zip"), second.join("New name.zip")).unwrap();
+    std::fs::remove_file(first.join("Gone.zip")).unwrap();
+    let id = submit(&lib, &ed, json!({"kind": "crawl", "folder": second.to_string_lossy()})).await;
+    let v = wait(&lib, &ed, id).await;
+    assert_eq!(v["job"]["state"], "done", "{v}");
+    assert_eq!(count(&lib, "SELECT count(*) FROM models"), 4, "{v}");
+    assert_eq!(count(&lib, "SELECT sum(id) FROM models WHERE rel_path IN ('Moves.zip', 'New name.zip')"), ids, "the moved records keep their ids");
+    assert_eq!(count(&lib, "SELECT count(*) FROM models WHERE rel_path = 'Gone.zip' AND is_missing = 1"), 0, "not this crawl's to judge");
+
+    let id = submit(&lib, &ed, json!({"kind": "crawl", "folder": first.to_string_lossy()})).await;
+    assert_eq!(wait(&lib, &ed, id).await["job"]["state"], "done");
+    assert_eq!(count(&lib, "SELECT count(*) FROM models WHERE rel_path = 'Gone.zip'"), 0, "its own folder's crawl deals with it");
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026.45.36 — 2026-11-06
+
+- **Editing a title, sequence or To print cell no longer reloads the filter pane** on any client, and the server keeps
+  its filter tree. Clients reload only rows. Other edits can change the pane, so they still reload it.
+- **A crawl leaves other folders' disks alone,** so idle drives stay asleep. It checks a record outside the crawled
+  folder only when a new archive may be that record (same content, or same name and size), so moves between libraries
+  are still found. **Changed:** a gone archive elsewhere is now marked missing when its own folder is crawled, not by
+  any crawl.
+- **A crawl reads each new archive's catalog once,** not twice.
+- **Rescan reads archives in parallel,** with the crawl's worker setting.
+- **Big sidecars aren't rewritten back to back:** a sidecar is one file, so after an export the server waits ten times
+  as long as it took, up to a minute, before the next. Quitting still writes what's pending.
+
 ## 2026.45.35 — 2026-11-06
 
 - **Generate Thumbnails is about nine times faster:** archives are read and converted in parallel (the crawl's worker
