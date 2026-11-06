@@ -11,6 +11,7 @@ import { useState } from "react";
 
 import { api, type Schemas, unwrap } from "../api/client";
 import { hasRole, useUser } from "../auth/user";
+import { SimilarModal } from "./SimilarModal";
 
 type Kind = "tag" | "category" | "collection" | "subcollection" | "scale";
 type Row = Schemas["LookupRow"];
@@ -79,6 +80,7 @@ function LookupEditor({ kind }: { kind: Kind }) {
   const [merging, setMerging] = useState(false);
   const [keep, setKeep] = useState<string>("");
   const [tagTarget, setTagTarget] = useState("");
+  const [similar, setSimilar] = useState(false);
   const unused = useQuery({
     queryKey: ["lookups", "unused-tags"],
     queryFn: async () => unwrap(await api.GET("/api/tags/unused")).count,
@@ -103,6 +105,11 @@ function LookupEditor({ kind }: { kind: Kind }) {
     <Stack maw={860}>
       <Group>
         <TextInput placeholder="Search" value={search} onChange={(e) => setSearch(e.currentTarget.value)} w={260} />
+        {editor && (
+          <Button variant="default" onClick={() => setSimilar(true)}>
+            Merge similar…
+          </Button>
+        )}
         {editor && checked.length === 2 && (
           <Button
             variant="light"
@@ -259,6 +266,7 @@ function LookupEditor({ kind }: { kind: Kind }) {
           </Stack>
         )}
       </Modal>
+      <SimilarModal kind={kind} label={KINDS.find((k) => k.kind === kind)!.label.toLowerCase()} opened={similar} onClose={() => setSimilar(false)} onMerged={refresh} />
       <Modal opened={merging} onClose={() => setMerging(false)} title="Merge">
         <Stack>
           <Radio.Group label="Keep" value={keep} onChange={setKeep}>
@@ -296,6 +304,7 @@ function Authors() {
   const [action, setAction] = useState<{ kind: "rename" | "merge"; name: string } | null>(null);
   const [to, setTo] = useState("");
   const [profileFor, setProfileFor] = useState<string | null>(null);
+  const [similar, setSimilar] = useState(false);
   const list = (authors.data ?? []).filter((a) => a.name.toLowerCase().includes(search.toLowerCase()));
   const change = async (body: Schemas["AuthorChange"]) => {
     try {
@@ -307,7 +316,14 @@ function Authors() {
   };
   return (
     <Stack maw={760}>
-      <TextInput placeholder="Search" value={search} onChange={(e) => setSearch(e.currentTarget.value)} w={260} />
+      <Group>
+        <TextInput placeholder="Search" value={search} onChange={(e) => setSearch(e.currentTarget.value)} w={260} />
+        {editor && (
+          <Button variant="default" onClick={() => setSimilar(true)}>
+            Merge similar…
+          </Button>
+        )}
+      </Group>
       <Card withBorder p={0}>
         <ScrollArea h="60vh">
           <Table fz="sm" highlightOnHover stickyHeader verticalSpacing={4}>
@@ -370,6 +386,7 @@ function Authors() {
           </Button>
         </Stack>
       </Modal>
+      <SimilarModal kind="creator" label="creators" opened={similar} onClose={() => setSimilar(false)} onMerged={refresh} />
       <ProfileModal name={profileFor} onClose={() => setProfileFor(null)} editable={editor} />
     </Stack>
   );

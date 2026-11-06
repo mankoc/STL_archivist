@@ -302,6 +302,7 @@ export const TOPICS: Topic[] = [
       ] },
       { h: "Lookups" },
       { p: "The **Lookups** page manages tags, categories, collections, subcollections and scales: rename, delete (it says how many models lose the value first), merge two entries, and delete unused tags. The **Creators** tab renames, merges and clears creators and edits their profile (links to Patreon, ArtStation, Gumroad, MyMiniFactory)." },
+      { p: "**Merge similar…**, on every tab, finds near-duplicates: *Similar spelling* (up to so many letters apart, ignoring case), *Sounds alike*, or *Shared words* (the same words in another order, or one name inside another). Each pair shows how many models use its names; click the one to keep and the list updates, so you can go through them one by one." },
     ],
   },
   {

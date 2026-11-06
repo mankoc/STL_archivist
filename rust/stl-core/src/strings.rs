@@ -73,6 +73,79 @@ pub fn levenshtein_pairs(values: &[String], max: u32) -> Vec<(u32, u32, u32)> {
         .collect()
 }
 
+/// How names are compared by [`similar_pairs`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Likeness {
+    /// At most this many edits, letter case aside.
+    Spelling(u32),
+    /// The same Soundex code.
+    Sound,
+    /// At least this percentage of the shorter name's words in common, in any
+    /// order (`spectral warrior` and `warrior spectral`, `goblin` and `goblin warrior`).
+    Words(u32),
+}
+
+/// Pairs `(i, j, score)`, `i < j`, of `names` that are alike, the closest first
+/// (by Soundex code for [`Likeness::Sound`]). The score reads as the distance, the
+/// code or a percentage. At most `limit + 1` pairs: one more tells that there are more.
+pub fn similar_pairs(names: &[String], how: Likeness, limit: usize) -> Vec<(u32, u32, String)> {
+    let mut out: Vec<(u32, u32, String)> = match how {
+        Likeness::Spelling(max) => {
+            let folded: Vec<String> = names.iter().map(|n| n.to_lowercase()).collect();
+            let mut pairs = levenshtein_pairs(&folded, max);
+            pairs.sort_by_key(|&(i, j, d)| (d, i, j));
+            pairs.into_iter().take(limit + 1).map(|(i, j, d)| (i, j, d.to_string())).collect()
+        }
+        Likeness::Sound => {
+            let mut groups: std::collections::BTreeMap<String, Vec<u32>> = Default::default();
+            for (k, name) in names.iter().enumerate() {
+                groups.entry(soundex(name)).or_default().push(k as u32);
+            }
+            groups.remove("0000"); // no letters to compare
+            let pairs = groups.iter().flat_map(|(code, ks)| {
+                ks.iter().enumerate().flat_map(move |(n, &i)| ks[n + 1..].iter().map(move |&j| (i, j, code.clone())))
+            });
+            pairs.take(limit + 1).collect()
+        }
+        Likeness::Words(min) => {
+            let mut pairs = word_pairs(names, min);
+            pairs.sort_by_key(|&(i, j, p)| (std::cmp::Reverse(p), i, j));
+            pairs.into_iter().take(limit + 1).map(|(i, j, p)| (i, j, format!("{p}%"))).collect()
+        }
+    };
+    out.truncate(limit + 1);
+    out
+}
+
+/// [`Likeness::Words`]: the names sharing a word, through an index of the words.
+fn word_pairs(names: &[String], min: u32) -> Vec<(u32, u32, u32)> {
+    use std::collections::{HashMap, HashSet};
+    let lower: Vec<String> = names.iter().map(|n| n.to_lowercase()).collect();
+    let words: Vec<HashSet<&str>> = lower.iter().map(|n| n.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect()).collect();
+    let mut index: HashMap<&str, Vec<u32>> = HashMap::new();
+    for (k, set) in words.iter().enumerate() {
+        for &w in set {
+            index.entry(w).or_default().push(k as u32);
+        }
+    }
+    (0..words.len())
+        .into_par_iter()
+        .flat_map_iter(|i| {
+            let mut shared: HashMap<u32, u32> = HashMap::new();
+            for w in &words[i] {
+                for &j in index[w].iter().filter(|&&j| j > i as u32) {
+                    *shared.entry(j).or_default() += 1;
+                }
+            }
+            let words = &words;
+            shared.into_iter().filter_map(move |(j, n)| {
+                let percent = n * 100 / words[i].len().min(words[j as usize].len()) as u32;
+                (percent >= min).then_some((i as u32, j, percent))
+            })
+        })
+        .collect()
+}
+
 /// Soundex code of `s`, as `app.utils.string_utils.soundex`: NFKD-decompose,
 /// uppercase, keep ASCII letters; `"0000"` when none are left.
 ///
@@ -110,6 +183,22 @@ pub fn soundex(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn similar_names() {
+        let names: Vec<String> = ["Dragon", "dragons", "DRAGON", "goblin warrior", "warrior goblin", "goblin", "Smith", "Smyth", "123"].map(String::from).to_vec();
+        let found = |how, limit| similar_pairs(&names, how, limit);
+        let spelling = found(Likeness::Spelling(1), 100);
+        assert_eq!(spelling[0], (0, 2, "0".to_string()), "letter case aside, the closest first");
+        assert!(spelling.contains(&(0, 1, "1".to_string())) && spelling.contains(&(6, 7, "1".to_string())));
+        assert!(found(Likeness::Sound, 100).iter().any(|p| (p.0, p.1) == (6, 7)), "Smith sounds like Smyth");
+        assert!(found(Likeness::Sound, 100).iter().all(|p| p.0 != 8 && p.1 != 8), "digits have no sound");
+        let words = found(Likeness::Words(100), 100);
+        assert!(words.contains(&(3, 4, "100%".to_string())), "any order");
+        assert!(words.contains(&(3, 5, "100%".to_string())), "all of the shorter name's words");
+        assert!(found(Likeness::Words(100), 100).iter().all(|p| p.2 == "100%"));
+        assert_eq!(found(Likeness::Spelling(1), 1).len(), 2, "one past the limit tells there are more");
+    }
 
     fn c(s: &str) -> Vec<char> {
         s.chars().collect()

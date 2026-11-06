@@ -2,11 +2,14 @@
 //! scales; creator (author) names and creator profiles. Reading needs a
 //! session, changes need the editor role.
 
+use std::collections::BTreeMap;
+
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use stl_core::storage::admin;
+use stl_core::strings::Likeness;
 use utoipa::ToSchema;
 
 use crate::accounts::Role;
@@ -193,6 +196,92 @@ pub async fn merge(
         })
         .await?;
     if found { Ok(StatusCode::NO_CONTENT) } else { Err(ApiError::not_found("no such row")) }
+}
+
+/// Most pairs one search returns.
+const MAX_SIMILAR: usize = 2000;
+
+#[derive(Deserialize, utoipa::IntoParams)]
+#[serde(deny_unknown_fields)]
+pub struct SimilarQuery {
+    /// `spelling` (default), `sound` or `words`.
+    pub method: Option<String>,
+    /// `spelling`: most letters that differ (0 to 5, default 2; case aside).
+    /// `words`: least percentage of the shorter name's words shared (1 to 100, default 80).
+    pub threshold: Option<u32>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct SimilarName {
+    /// The row's id (0 for a creator, who has a name only).
+    pub id: i64,
+    pub name: String,
+    /// Models using it.
+    pub models: i64,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct SimilarPair {
+    pub a: SimilarName,
+    pub b: SimilarName,
+    /// The distance, the Soundex code or the percentage of words shared.
+    pub score: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct SimilarNames {
+    /// The closest first.
+    pub pairs: Vec<SimilarPair>,
+    /// More pairs exist than are returned.
+    pub truncated: bool,
+}
+
+/// `names`' similar pairs, added to `out` (at most [`MAX_SIMILAR`] and one).
+fn similar_in(rows: &[(i64, String, i64)], how: Likeness, out: &mut Vec<SimilarPair>) {
+    let names: Vec<String> = rows.iter().map(|r| r.1.clone()).collect();
+    let name = |k: u32| {
+        let (id, name, models) = &rows[k as usize];
+        SimilarName { id: *id, name: name.clone(), models: *models }
+    };
+    out.extend(stl_core::strings::similar_pairs(&names, how, MAX_SIMILAR).into_iter().map(|(i, j, score)| SimilarPair { a: name(i), b: name(j), score }));
+}
+
+/// Pairs of near-duplicate names of a lookup, or of the creators (kind
+/// `creator`), to merge. Subcollections are compared within their collection.
+#[utoipa::path(get, path = "/api/lookups/{kind}/similar", tag = "lookups",
+    params(("kind" = String, Path, description = "A lookup kind, or creator"), SimilarQuery),
+    responses((status = 200, body = SimilarNames), (status = 400, body = crate::error::ErrorBody), (status = 404, body = crate::error::ErrorBody)))]
+pub async fn similar(State(lib): State<AppState>, _me: CurrentUser, Path(kind): Path<String>, Query(q): Query<SimilarQuery>) -> Result<Json<SimilarNames>, ApiError> {
+    if kind != "creator" {
+        kind_ok(&kind)?;
+    }
+    let how = match q.method.as_deref().unwrap_or("spelling") {
+        "spelling" => Likeness::Spelling(q.threshold.unwrap_or(2).min(5)),
+        "sound" => Likeness::Sound,
+        "words" => Likeness::Words(q.threshold.unwrap_or(80).clamp(1, 100)),
+        other => return Err(ApiError::bad_request(format!("unknown method {other:?} (spelling, sound or words)"))),
+    };
+    let mut pairs = lib
+        .run(move |lib| {
+            let mut pairs = Vec::new();
+            if kind == "creator" {
+                let rows: Vec<(i64, String, i64)> = lib.db.with(admin::author_counts)?.into_iter().map(|(name, models)| (0, name, models)).collect();
+                similar_in(&rows, how, &mut pairs);
+            } else {
+                let mut groups: BTreeMap<Option<i64>, Vec<(i64, String, i64)>> = BTreeMap::new();
+                for (id, name, models, collection, _) in lib.db.with(|c| admin::list(c, &kind))? {
+                    groups.entry(collection).or_default().push((id, name, models));
+                }
+                for rows in groups.values() {
+                    similar_in(rows, how, &mut pairs);
+                }
+            }
+            Ok::<_, ApiError>(pairs)
+        })
+        .await?;
+    let truncated = pairs.len() > MAX_SIMILAR;
+    pairs.truncate(MAX_SIMILAR);
+    Ok(Json(SimilarNames { pairs, truncated }))
 }
 
 #[derive(Deserialize, ToSchema)]

@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.45.25"
+    "version": "2026.45.26"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -1649,6 +1649,84 @@
         "responses": {
           "204": {
             "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/lookups/{kind}/similar": {
+      "get": {
+        "tags": [
+          "lookups"
+        ],
+        "summary": "Pairs of near-duplicate names of a lookup, or of the creators (kind\n`creator`), to merge. Subcollections are compared within their collection.",
+        "operationId": "get_lookups_by_kind_similar",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "A lookup kind, or creator",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "method",
+            "in": "query",
+            "description": "`spelling` (default), `sound` or `words`.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "threshold",
+            "in": "query",
+            "description": "`spelling`: most letters that differ (0 to 5, default 2; case aside).\n`words`: least percentage of the shorter name's words shared (1 to 100, default 80).",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimilarNames"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           },
           "404": {
             "description": "",
@@ -8567,6 +8645,69 @@
           }
         },
         "additionalProperties": false
+      },
+      "SimilarName": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "models"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The row's id (0 for a creator, who has a name only)."
+          },
+          "models": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Models using it."
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "SimilarNames": {
+        "type": "object",
+        "required": [
+          "pairs",
+          "truncated"
+        ],
+        "properties": {
+          "pairs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SimilarPair"
+            },
+            "description": "The closest first."
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "More pairs exist than are returned."
+          }
+        }
+      },
+      "SimilarPair": {
+        "type": "object",
+        "required": [
+          "a",
+          "b",
+          "score"
+        ],
+        "properties": {
+          "a": {
+            "$ref": "#/components/schemas/SimilarName"
+          },
+          "b": {
+            "$ref": "#/components/schemas/SimilarName"
+          },
+          "score": {
+            "type": "string",
+            "description": "The distance, the Soundex code or the percentage of words shared."
+          }
+        }
       },
       "Sort": {
         "type": "object",

@@ -309,6 +309,58 @@ async fn clearing_warnings() {
 }
 
 #[tokio::test]
+async fn similar_names_are_found_and_merged() {
+    let l = library();
+    l.call("PATCH", "/api/models/cells", Some(json!({"edits": [
+        {"id": l.ids[0], "field": "tags", "value": "dragons, goblin warrior"},
+        {"id": l.ids[1], "field": "tags", "value": "dragon, warrior goblin, dragons"},
+        {"id": l.ids[0], "field": "creator", "value": "Sanix"},
+        {"id": l.ids[1], "field": "creator", "value": "sanix"},
+        {"id": l.ids[0], "field": "scale", "value": "32mm"},
+        {"id": l.ids[1], "field": "scale", "value": "35mm"},
+    ]}))).await;
+
+    let tags = l.call("GET", "/api/lookups/tag/similar?threshold=1", None).await.json();
+    assert_eq!(tags["pairs"].as_array().unwrap().len(), 1, "{tags}");
+    let pair = &tags["pairs"][0];
+    assert_eq!((pair["a"]["name"].as_str(), pair["b"]["name"].as_str(), pair["score"].as_str()), (Some("dragon"), Some("dragons"), Some("1")));
+    assert_eq!((pair["a"]["models"].as_i64(), pair["b"]["models"].as_i64(), tags["truncated"].as_bool()), (Some(1), Some(2), Some(false)));
+    let words = l.call("GET", "/api/lookups/tag/similar?method=words&threshold=100", None).await.json();
+    assert_eq!(words["pairs"][0]["score"], "100%", "the same words in another order: {words}");
+
+    let creators = l.call("GET", "/api/lookups/creator/similar", None).await.json();
+    assert_eq!(creators["pairs"][0]["score"], "0", "only the letter case differs: {creators}");
+    assert_eq!(creators["pairs"][0]["a"]["id"], 0);
+
+    // Tags and scales merge as the others do: a model with both keeps one link.
+    let (keep, remove) = (pair["a"]["id"].as_i64().unwrap(), pair["b"]["id"].as_i64().unwrap());
+    assert_eq!(l.call("POST", "/api/lookups/tag/merge", Some(json!({"keep": keep, "remove": remove}))).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(l.scalar::<i64>(&format!("SELECT count(*) FROM model_tags WHERE tag_id = {keep}")), 2);
+    assert_eq!(l.scalar::<i64>("SELECT count(*) FROM tags WHERE name = 'dragons'"), 0);
+    assert!(l.call("GET", "/api/lookups/tag/similar?threshold=1", None).await.json()["pairs"].as_array().unwrap().is_empty());
+    let scales = l.call("GET", "/api/lookups/scale/similar?threshold=1", None).await.json();
+    let (a, b) = (scales["pairs"][0]["a"]["id"].as_i64().unwrap(), scales["pairs"][0]["b"]["id"].as_i64().unwrap());
+    assert_eq!(l.call("POST", "/api/lookups/scale/merge", Some(json!({"keep": a, "remove": b}))).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(l.scalar::<i64>(&format!("SELECT count(*) FROM model_scales WHERE scale_id = {a}")), 2);
+
+    // Subcollections are compared within their collection.
+    for (kind, body) in [
+        ("collection", json!({"name": "Busts"})),
+        ("collection", json!({"name": "Minis"})),
+        ("subcollection", json!({"name": "Heroes", "collection": "Busts"})),
+        ("subcollection", json!({"name": "Heroes", "collection": "Minis"})),
+    ] {
+        assert_eq!(l.call("POST", &format!("/api/lookups/{kind}"), Some(body)).await.status, StatusCode::CREATED);
+    }
+    assert!(l.call("GET", "/api/lookups/subcollection/similar", None).await.json()["pairs"].as_array().unwrap().is_empty());
+    l.call("POST", "/api/lookups/subcollection", Some(json!({"name": "Hero", "collection": "Minis"}))).await;
+    assert_eq!(l.call("GET", "/api/lookups/subcollection/similar", None).await.json()["pairs"].as_array().unwrap().len(), 1);
+
+    assert_eq!(l.call("GET", "/api/lookups/tag/similar?method=nope", None).await.status, StatusCode::BAD_REQUEST);
+    assert_eq!(l.call("GET", "/api/lookups/nope/similar", None).await.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn lookups_and_authors() {
     let l = library();
     for kind in ["category", "collection"] {

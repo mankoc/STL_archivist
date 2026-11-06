@@ -642,6 +642,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lookups/{kind}/similar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Pairs of near-duplicate names of a lookup, or of the creators (kind
+         *     `creator`), to merge. Subcollections are compared within their collection.
+         */
+        get: operations["get_lookups_by_kind_similar"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lookups/{kind}/{id}": {
         parameters: {
             query?: never;
@@ -2936,6 +2956,31 @@ export interface components {
             password: string;
             user: string;
         };
+        SimilarName: {
+            /**
+             * Format: int64
+             * @description The row's id (0 for a creator, who has a name only).
+             */
+            id: number;
+            /**
+             * Format: int64
+             * @description Models using it.
+             */
+            models: number;
+            name: string;
+        };
+        SimilarNames: {
+            /** @description The closest first. */
+            pairs: components["schemas"]["SimilarPair"][];
+            /** @description More pairs exist than are returned. */
+            truncated: boolean;
+        };
+        SimilarPair: {
+            a: components["schemas"]["SimilarName"];
+            b: components["schemas"]["SimilarName"];
+            /** @description The distance, the Soundex code or the percentage of words shared. */
+            score: string;
+        };
         Sort: {
             /**
              * @description One of `title`, `creator`, `source`, `sculptor_name`, `collection_name`,
@@ -4361,6 +4406,52 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_lookups_by_kind_similar: {
+        parameters: {
+            query?: {
+                /** @description `spelling` (default), `sound` or `words`. */
+                method?: string | null;
+                /**
+                 * @description `spelling`: most letters that differ (0 to 5, default 2; case aside).
+                 *     `words`: least percentage of the shorter name's words shared (1 to 100, default 80).
+                 */
+                threshold?: number | null;
+            };
+            header?: never;
+            path: {
+                /** @description A lookup kind, or creator */
+                kind: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimilarNames"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
             };
             404: {
                 headers: {
