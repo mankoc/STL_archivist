@@ -1,6 +1,6 @@
-// Pane widths: the detail pane's and the mass editor's, dragged by their left
-// edge, kept within limits, and remembered in this browser (they depend on the
-// screen, not the account).
+// Pane widths: the filter pane's, dragged by its right edge, and the detail pane's
+// and the mass editor's, dragged by their left edge. They are kept within limits, and
+// remembered in this browser (they depend on the screen, not the account).
 
 export const DEFAULT_WIDTH = 320;
 export const MIN_WIDTH = 240;
@@ -8,6 +8,9 @@ const KEY = "stl.detailWidth";
 
 /** The mass edit drawer (Mantine's `xl` drawer to begin with). */
 export const MASS_EDIT = { key: "stl.massEditWidth", fallback: 780, min: 440, maxShare: 0.95 };
+
+/** The filter pane. */
+export const FILTER_PANE = { key: "stl.filterWidth", fallback: 280, min: 200, maxShare: 0.5 };
 
 /** `width` kept between `min` and `maxShare` of the page's width. */
 export function clampWidth(width: number, pageWidth: number, maxShare = 0.6, min = MIN_WIDTH): number {

@@ -596,7 +596,7 @@ pub fn model_summary(conn: &Connection, model_id: i64) -> Result<Option<Vec<(Str
     let mut st = conn.prepare(
         "SELECT v.id, v.title, v.creator, v.source, v.sculptor_name, v.collection_name, \
          v.subcollection_name, v.category_name, v.release_name, v.release_year, \
-         v.release_month, v.archive_path, v.archive_size, v.is_missing, \
+         v.release_month, v.archive_path, v.archive_size, v.is_missing, v.warning, \
          (SELECT group_concat(t.name, ', ') FROM model_tags mt \
             JOIN tags t ON t.id = mt.tag_id WHERE mt.model_id = v.id) AS tags, \
          (SELECT count(*) FROM images i WHERE i.model_id = v.id) AS image_count \

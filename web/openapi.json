@@ -1426,6 +1426,60 @@
         }
       }
     },
+    "/api/libraries/pattern-sample": {
+      "get": {
+        "tags": [
+          "libraries"
+        ],
+        "summary": "What a crawl of the folder with this pattern would read from its first\narchives (editors). Nothing is changed.",
+        "operationId": "get_libraries_pattern_sample",
+        "parameters": [
+          {
+            "name": "folder",
+            "in": "query",
+            "description": "A folder of a library, as the filter tree spells it.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pattern",
+            "in": "query",
+            "description": "The path pattern being typed.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PatternSample"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/libraries/{id}": {
       "patch": {
         "tags": [
@@ -7435,7 +7489,7 @@
           },
           "fields": {
             "type": "object",
-            "description": "`title`, `creator`, `source`, `sculptor_name`, `collection_name`,\n`subcollection_name`, `category_name`, `release_name`, `release_year`,\n`release_month`, `archive_path`, `archive_size`, `is_missing`, `tags`\n(comma-separated) and `image_count`."
+            "description": "`title`, `creator`, `source`, `sculptor_name`, `collection_name`,\n`subcollection_name`, `category_name`, `release_name`, `release_year`,\n`release_month`, `archive_path`, `archive_size`, `is_missing`, `warning`,\n`tags` (comma-separated) and `image_count`."
           },
           "id": {
             "type": "integer",
@@ -7758,6 +7812,27 @@
           }
         },
         "additionalProperties": false
+      },
+      "PatternSample": {
+        "type": "object",
+        "description": "One archive, and what the pattern reads from its path.",
+        "required": [
+          "path",
+          "fields"
+        ],
+        "properties": {
+          "fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SampleField"
+            },
+            "description": "Empty when the pattern does not fit the path."
+          },
+          "path": {
+            "type": "string",
+            "description": "Below the library folder's root."
+          }
+        }
       },
       "PreviewFolder": {
         "type": "object",
@@ -8343,6 +8418,21 @@
           }
         },
         "additionalProperties": false
+      },
+      "SampleField": {
+        "type": "object",
+        "required": [
+          "field",
+          "value"
+        ],
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        }
       },
       "SearchResult": {
         "type": "object",

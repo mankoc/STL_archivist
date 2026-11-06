@@ -4,7 +4,7 @@
 // (a folder, a year, a collection) opens on a click and filters on a
 // double-click or a click on its mark. Long lists are grouped by first letter.
 // Counts are scoped by the other sections while a filter is active.
-import { ActionIcon, Box, Group, ScrollArea, Text, TextInput, Tooltip, UnstyledButton } from "@mantine/core";
+import { ActionIcon, Box, Group, Text, TextInput, Tooltip, UnstyledButton } from "@mantine/core";
 import {
   IconChevronDown,
   IconChevronRight,
@@ -32,6 +32,7 @@ import {
   groupCount,
   groupMarkOf,
   libraryFolderTree,
+  shownFolders,
   rowClick,
   type LibraryNode,
   markOf,
@@ -188,7 +189,7 @@ function Section(props: {
               onChange={(e) => setSearch(e.currentTarget.value)}
             />
           )}
-          <ScrollArea.Autosize mah={320}>{props.children(search.toLowerCase())}</ScrollArea.Autosize>
+          {props.children(search.toLowerCase())}
         </Box>
       )}
     </Box>
@@ -422,8 +423,9 @@ function Collections({ tree, spec, onChange, search }: Props & { search: string 
  * them; folders outside every library folder as a plain tree. */
 function PathTree({ tree, spec, onChange, onFolderMenu }: Props) {
   const libs = useQuery({ queryKey: ["libraries"], queryFn: async () => unwrap(await api.GET("/api/libraries")) });
-  const t = useMemo(() => (libs.data ? libraryFolderTree(tree.folders, libs.data) : null), [tree.folders, libs.data]);
-  if (!t) return <>{folderTree(tree.folders).map((n) => <Folder key={n.path} node={n} depth={0} tree={tree} spec={spec} onChange={onChange} onFolderMenu={onFolderMenu} />)}</>;
+  const folders = useMemo(() => shownFolders(tree, spec), [tree, spec]);
+  const t = useMemo(() => (libs.data ? libraryFolderTree(folders, libs.data) : null), [folders, libs.data]);
+  if (!t) return <>{folderTree(folders).map((n) => <Folder key={n.path} node={n} depth={0} tree={tree} spec={spec} onChange={onChange} onFolderMenu={onFolderMenu} />)}</>;
   return (
     <>
       {t.libraries.map((l) => <LibraryFolders key={l.id} lib={l} tree={tree} spec={spec} onChange={onChange} onFolderMenu={onFolderMenu} />)}

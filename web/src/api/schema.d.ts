@@ -566,6 +566,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/libraries/pattern-sample": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What a crawl of the folder with this pattern would read from its first
+         *     archives (editors). Nothing is changed.
+         */
+        get: operations["get_libraries_pattern_sample"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/libraries/{id}": {
         parameters: {
             query?: never;
@@ -2555,8 +2575,8 @@ export interface components {
             /**
              * @description `title`, `creator`, `source`, `sculptor_name`, `collection_name`,
              *     `subcollection_name`, `category_name`, `release_name`, `release_year`,
-             *     `release_month`, `archive_path`, `archive_size`, `is_missing`, `tags`
-             *     (comma-separated) and `image_count`.
+             *     `release_month`, `archive_path`, `archive_size`, `is_missing`, `warning`,
+             *     `tags` (comma-separated) and `image_count`.
              */
             fields: Record<string, never>;
             /** Format: int64 */
@@ -2678,6 +2698,13 @@ export interface components {
         };
         Paths: {
             paths: string[];
+        };
+        /** @description One archive, and what the pattern reads from its path. */
+        PatternSample: {
+            /** @description Empty when the pattern does not fit the path. */
+            fields: components["schemas"]["SampleField"][];
+            /** @description Below the library folder's root. */
+            path: string;
         };
         /** @description One outermost folder of the sending side, and where a sync puts it. */
         PreviewFolder: {
@@ -2852,6 +2879,10 @@ export interface components {
         };
         RowsRequest: {
             ids: number[];
+        };
+        SampleField: {
+            field: string;
+            value: string;
         };
         SearchResult: {
             /** @description All of the closest images matched: more may exist (tighten the threshold). */
@@ -4256,6 +4287,38 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_libraries_pattern_sample: {
+        parameters: {
+            query: {
+                /** @description A folder of a library, as the filter tree spells it. */
+                folder: string;
+                /** @description The path pattern being typed. */
+                pattern: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PatternSample"][];
+                };
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

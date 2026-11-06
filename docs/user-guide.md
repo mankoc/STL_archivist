@@ -140,6 +140,8 @@ selected model's details on the right.
 
 ### Search and filters
 
+Drag the filter pane's right edge to resize it (a double-click resets it).
+
 - **Search** (above the table) matches titles, creators, paths and tags.
 - **Filter pane** — one section per field (Creators, Tags, Type, Date, Sculptor, Collection,
   Category, Release, Scale, Presupports, Warnings, File Type, Path). Click the arrow to open a

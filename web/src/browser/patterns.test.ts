@@ -1,4 +1,5 @@
-import { folderPattern, missingChoice, missingValue, savedPatterns, withoutPattern, withPattern } from "./patterns";
+import {
+  fieldLabel, folderPattern, missingChoice, missingValue, savedPatterns, withoutPattern, withPattern } from "./patterns";
 
 describe("folderPattern", () => {
   const libraries = [
@@ -46,5 +47,13 @@ describe("missing fields in Sort files", () => {
     expect(missingValue({ mode: "unknown", text: "x" })).toBeUndefined();
     expect(missingValue({ mode: "empty", text: "x" })).toBe("");
     expect(missingValue({ mode: "text", text: "x" })).toBe("x");
+  });
+});
+
+describe("fieldLabel", () => {
+  it("names a field for a person", () => {
+    expect(fieldLabel("sculptor_name")).toBe("Sculptor");
+    expect(fieldLabel("title")).toBe("Title");
+    expect(fieldLabel("something_else")).toBe("something else");
   });
 });

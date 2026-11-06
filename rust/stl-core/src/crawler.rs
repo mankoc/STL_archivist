@@ -464,6 +464,29 @@ pub fn match_pattern(pattern: &str, path: &str, root: &str) -> Option<db::Extrac
     Some(db::Extracted { fields, release_date, sequence })
 }
 
+/// An archive (its path below the library's root), and the fields and values read from it.
+pub type PatternSample = (String, Vec<(String, String)>);
+
+/// What `pattern` reads from the first `limit` recorded archives in `folder`, as a crawl
+/// would.
+pub fn pattern_samples(conn: &rusqlite::Connection, folder: &str, pattern: &str, limit: i64) -> rusqlite::Result<Vec<PatternSample>> {
+    let roots = storage::libraries::Roots::load(conn)?;
+    let Some((library, rel)) = roots.locate_folder(folder) else { return Ok(Vec::new()) };
+    let Some(root) = roots.root(library) else { return Ok(Vec::new()) };
+    let mut st = conn.prepare(
+        "SELECT rel_path FROM models WHERE library_id = ?1 \
+         AND (?2 = '' OR rel_folder = ?2 OR substr(rel_folder, 1, length(?2) + 1) = ?2 || '/') ORDER BY rel_path LIMIT ?3",
+    )?;
+    let paths = st.query_map(rusqlite::params![library, rel, limit], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(paths
+        .into_iter()
+        .map(|p| {
+            let fields = match_pattern(pattern, &crate::relpath::join(root, &p), root).map(|x| x.fields).unwrap_or_default();
+            (p, fields)
+        })
+        .collect())
+}
+
 /// Presupports, warnings and scales from an archive's member names.
 fn rules_for(patterns: &PresupportPatterns, checks: Checks, archive_name: &str, names: &[String]) -> (String, Option<String>, Vec<String>) {
     let warnings = rules::detect_warnings(names, checks, patterns).unwrap_or_default();

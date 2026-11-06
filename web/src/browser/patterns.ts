@@ -58,6 +58,12 @@ export function folderPattern(folder: string, libraries: { folders: PatternFolde
   return own?.pattern ?? holder.pattern ?? "";
 }
 
+/** A field as the crawl names it, for a person: `sculptor_name` is "Sculptor". */
+export function fieldLabel(field: string): string {
+  const name = field.replace(/_name$/, "");
+  return TOKENS.find((t) => t.token === name || t.aliases.includes(name))?.field ?? name.replace(/_/g, " ");
+}
+
 /** The saved patterns in a settings value (anything else: none). */
 export function savedPatterns(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((p): p is string => typeof p === "string" && p.trim() !== "") : [];
