@@ -145,6 +145,9 @@ selected model's details on the right.
   Category, Release, Scale, Presupports, Warnings, File Type, Path). Click the arrow to open a
   section, and click a value to cycle it: **+** (green) shows only models with that value,
   **−** (red) hides them, a third click clears it. Several values combine.
+  Hiding a value keeps the models with no value there (hiding one warning still shows models
+  without warnings). Creators and types match exactly as listed: *Merge similar…* on the Lookups
+  page joins spellings like `Alice` and `ALICE`.
 - The **circle on a section's header** cycles *has a value* / *has no value* / off, for
   example "models without tags".
 - The numbers beside values count the models each would match together with the other
@@ -271,7 +274,8 @@ Edits update the folder's `METADATA.7z` sidecar shortly afterwards when sidecars
 Select models, then open **Archives** above the table (or right-click a row or image for
 **Rescan**: the selection when the row is part of it, else just that model):
 
-- **Rescan** re-reads the archives (metadata, file list, presupports, warnings, scales). Use it
+- **Rescan** re-reads the archives (metadata, file list, presupports, warnings, scales) and fills
+  empty fields from the folder's path pattern. Use it
   after replacing an archive's contents in place.
 - **Generate thumbnails** replaces the models' images with new ones from their archives, up
   to the library's *thumbnails per archive*.

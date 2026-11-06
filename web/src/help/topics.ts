@@ -228,7 +228,7 @@ export const TOPICS: Topic[] = [
       { h: "Scales" },
       { p: "Scales such as `28mm`, `32mm` or `1/35` are read from the archive's name, its folders and its file names. A model can have several; they are a filter and a column." },
       { h: "Presupports" },
-      { p: "Presupported models are recognised from Lychee and Chitubox project files and from file names matching the presupport patterns (**Settings → Library → Warnings**). Patterns are regular expressions; a pattern the server cannot read the same way is skipped with a note in the crawl log." },
+      { p: "Presupported models are recognised from Lychee and Chitubox project files and from file names matching the presupport patterns (**Settings → Library → Warnings**). Patterns are regular expressions, matched ignoring case; a saved pattern that is not valid is reported in the crawl log, and that crawl skips the presupport warning." },
       { h: "Warnings" },
       { table: { head: ["Warning", "Raised when"], rows: [
         ["Presupported STL", "An STL looks presupported (by the patterns)"],
@@ -237,7 +237,7 @@ export const TOPICS: Topic[] = [
         ["No printable files", "No printable model file inside"],
         ["Low compression", "The archive's compression rate is above the threshold (default 0.95)"],
       ] } },
-      { p: "Which warnings are raised is set in **Settings → Library → Warnings**. Warnings show as orange badges in the details pane; **Warning details** lists the files behind each. After changing the settings, **Settings → Maintenance → Check images warning / Check presupport warning** fixes those warnings quickly without a full rescan." },
+      { p: "Which warnings are raised is set in **Settings → Library → Warnings**. Warnings show as orange badges in the details pane; **Warning details** lists the files behind each, and **Files** highlights them in the archive's tree. After changing the settings, **Settings → Maintenance → Check images warning / Check presupport warning** fixes those warnings quickly without a full rescan." },
     ],
   },
 
@@ -252,7 +252,7 @@ export const TOPICS: Topic[] = [
       { h: "Search and filters" },
       { list: [
         "**Search** matches titles, creators, sculptors, collections, paths and tags. The **options** button (sliders) inside the box chooses the fields (also source, subcollection, category, release, description and URL) and turns on **fuzzy** matching: every word must appear somewhere in the chosen fields, accents and case are ignored, and words of four letters or more may have a typo (two from seven letters), so *drgon alce* finds Alice's Red Dragon. The choice is kept in this browser.",
-        "**Filter pane** — one section per field. Click a value to cycle it: **+** (green) only models with it, **−** (red) hide them, a third click clears it. Several values combine.",
+        "**Filter pane** — one section per field. Click a value to cycle it: **+** (green) only models with it, **−** (red) hide them, a third click clears it. Several values combine. Hiding a value keeps the models with no value there: hiding one warning still shows the models without warnings, and to find those use the section's has-value circle. Creators and types match exactly as listed, so `Alice` and `ALICE` are separate rows; **Merge similar…** on the [Lookups](editing) page joins them.",
         "Long lists (**Creators**, **Tags**, **Sculptor**, **Collection** and **Release**, above 15 values) are grouped by first letter, ignoring accents and leading punctuation: all digits are one group, **0-9**, and names with neither letters nor digits are under **#**. Click a letter to open it. Its number adds up its values' counts. A letter holding a filtered value starts open, and the section's search box opens every letter that matches.",
         "Values with children — folders in **Path**, years in **Date**, collections with subcollections — open or close on a click; **double-click** them, or click their mark (a faint funnel until set), to filter.",
         "The **circle** on a section's header cycles *has a value* / *has no value* / off — for example models without tags.",
@@ -314,10 +314,10 @@ export const TOPICS: Topic[] = [
     blocks: [
       { p: "Select models, then open **Actions** above the table (or right-click them); the *Archive files* part runs as [jobs](jobs)." },
       { list: [
-        "**Rescan** re-reads the archives (metadata, file list, presupports, warnings, scales) — after replacing an archive's contents in place. Right-clicking a row or image offers the same actions: for the selection when the row is part of it, else for that model.",
-        "Right-click a folder in the filter pane's **Path** section to **crawl** it (new and changed archives) or **rescan** it (every archive read again) as a part of its library: it keeps the library's path pattern, and is not added to *Libraries* as a folder of its own.",
+        "**Rescan** re-reads the archives (metadata, file list, presupports, warnings, scales) and fills empty fields from the folder's [path pattern](path-patterns) — after replacing an archive's contents in place. Right-clicking a row or image offers the same actions: for the selection when the row is part of it, else for that model.",
+        "Right-click a folder in the filter pane's **Path** section to **crawl** it (new and changed archives) or **rescan** it (every archive read again) as a part of its library: it uses the folder's [path pattern](path-patterns) (the library's, unless it has its own), and is not added to *Libraries* as a folder of its own. **Crawl with a pattern…** gives it a pattern of its own, which is kept.",
         "**Generate thumbnails** replaces the models' images with new ones from their archives, up to *Thumbnails per archive*.",
-        "**Sort files…** moves the archives into a folder tree built from a [pattern](path-patterns) under a target folder (*Browse…* can make a new folder there with **New folder**). When every archive of a folder goes to one folder, the folder's other files (pictures, links, `info.json`) go with them (*FILE* in the preview); subfolders stay, and a folder left empty is removed. The **?** beside the pattern lists the tokens (click one to add it), and **Saved** keeps patterns with your account to pick again later. **Missing fields** chooses what a field without a value becomes: *unknown*, nothing, or a text of yours. Left empty, a folder level is left out and an empty file name keeps the archive's name; separators you typed in the pattern stay (`{date} - {title}` gives `- Dragon`). The dialog opens on the target folder, pattern and *Missing fields* of your last preview in this browser. **Preview** shows every move first (*COLLISION*: a file of that name exists and a numbered name is used; *MISS*: the archive is not on disk). **Move** moves all or none: if one move fails, the others are put back. Drag the dialog's bottom-right corner to make it larger. Needs *Allow file sorting* in the settings.",
+        "**Sort files…** moves the archives into a folder tree built from a [pattern](path-patterns) under a target folder (*Browse…* can make a new folder there with **New folder**). When every archive of a folder goes to one folder, the folder's other files (pictures, links, `info.json`) go with them (*FILE* in the preview); subfolders stay, and a folder left empty is removed. The **?** beside the pattern lists the tokens (click one to add it), and **Saved** keeps patterns with your account to pick again later. **Missing fields** chooses what a field without a value becomes: *unknown*, nothing, or a text of yours. Left empty, a folder level is left out and an empty file name keeps the archive's name; separators you typed in the pattern stay (`{date} - {title}` gives `- Dragon`). The dialog opens on the target folder, pattern and *Missing fields* of your last preview in this browser. **Preview** shows every move first (*COLLISION*: a file of that name exists, or another move goes there, and a numbered name is used; *MISS*: the archive is not on disk). **Move** moves all or none: if one move fails, the others are put back. Drag the dialog's bottom-right corner to make it larger. Needs *Allow file sorting* in the settings.",
         "**Delete files…** deletes the archive files and their records. With a trash folder set, files go there with a small `.json` note for recovery. Needs *Allow file delete* in the settings.",
       ] },
       { warn: "Sort files and Delete files change your disk. Preview first, and keep backups of archives you cannot download again." },
@@ -628,6 +628,9 @@ export const TOPICS: Topic[] = [
         ["Monitored folder not updated", "Changes are found at the next check (Settings → Library interval); the library's root must be reachable."],
         ["A library shows *root not found*", "Its folder moved, was renamed or is not mounted: mount it again, or use [Move](libraries) to point the library at its new folder."],
         ["Missing records pile up", "Settings → Maintenance → Remove missing archives, after checking they are really gone."],
+        ["A crawl marked a whole library missing", "Its folder was empty or could not be read: a share not mounted, a disconnected drive. Nothing was deleted: connect it and crawl again, and the marks go. If the archives really are gone, use Remove missing archives."],
+        ["A crawl says a folder could not be read", "Its records were left as they are, and the log names the folder: check its permissions or the disk."],
+        ["*Images not read* in a crawl's log", "The archive's file list is kept, but its images could not be read: UnRAR is missing for a `.rar` (Settings → Components), or they are encrypted or use a compression the server lacks."],
       ] } },
     ],
   },
