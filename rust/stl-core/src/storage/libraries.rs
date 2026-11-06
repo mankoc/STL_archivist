@@ -38,10 +38,62 @@ pub struct Folder {
     pub models: i64,
     /// The library it is a folder of.
     pub group_id: Option<i64>,
+    /// `(folder below the root, pattern)` of the folders with a pattern of their own.
+    pub subfolder_patterns: Vec<(String, String)>,
+}
+
+/// The path patterns of a library folder: its own, and those of the folders below
+/// its root that were crawled with one of their own. Patterns read paths from the root.
+#[derive(Debug, Clone, Default)]
+pub struct FolderPatterns {
+    library: Option<String>,
+    /// The deepest first.
+    below: Vec<(String, String)>,
+}
+
+impl FolderPatterns {
+    pub fn load(conn: &Connection, id: i64) -> Result<FolderPatterns> {
+        let library = conn.query_row("SELECT pattern FROM libraries WHERE id = ?1", [id], |r| r.get(0)).optional()?.flatten();
+        let mut st = conn.prepare("SELECT rel_folder, pattern FROM folder_patterns WHERE library_id = ?1 ORDER BY length(rel_folder) DESC")?;
+        let below = st.query_map([id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_>>()?;
+        Ok(FolderPatterns { library, below })
+    }
+
+    /// The pattern of the deepest folder holding `rel_folder` that has one of its own.
+    pub fn below(&self, rel_folder: &str) -> Option<&str> {
+        let key = path_key(rel_folder);
+        self.below
+            .iter()
+            .find(|(folder, _)| {
+                let folder = path_key(folder);
+                key == folder || key.strip_prefix(folder.as_str()).is_some_and(|rest| rest.starts_with('/'))
+            })
+            .map(|(_, pattern)| pattern.as_str())
+    }
+
+    /// The pattern for archives in `rel_folder`.
+    pub fn of(&self, rel_folder: &str) -> Option<&str> {
+        self.below(rel_folder).or(self.library.as_deref()).filter(|p| !p.is_empty())
+    }
+}
+
+/// Keep `pattern` for the folder `rel_folder` of library `id`; `""` forgets it.
+pub fn set_folder_pattern(tx: &Transaction, id: i64, rel_folder: &str, pattern: &str) -> Result<()> {
+    if pattern.is_empty() {
+        tx.execute("DELETE FROM folder_patterns WHERE library_id = ?1 AND rel_folder = ?2", params![id, rel_folder])?;
+    } else {
+        tx.execute(
+            "INSERT INTO folder_patterns (library_id, rel_folder, pattern) VALUES (?1, ?2, ?3) \
+             ON CONFLICT (library_id, rel_folder) DO UPDATE SET pattern = excluded.pattern",
+            params![id, rel_folder, pattern],
+        )?;
+    }
+    Ok(())
 }
 
 const COLUMNS: &str = "l.id, l.uuid, l.name, l.root, l.pattern, l.monitored, l.last_crawled_at, l.archive_count, \
-     l.new_count, l.updated_count, l.origin, (SELECT count(*) FROM models m WHERE m.library_id = l.id), l.group_id";
+     l.new_count, l.updated_count, l.origin, (SELECT count(*) FROM models m WHERE m.library_id = l.id), l.group_id, \
+     (SELECT json_group_array(json_array(p.rel_folder, p.pattern)) FROM folder_patterns p WHERE p.library_id = l.id)";
 
 fn from_row(r: &rusqlite::Row) -> Result<Folder> {
     Ok(Folder {
@@ -58,6 +110,7 @@ fn from_row(r: &rusqlite::Row) -> Result<Folder> {
         origin: r.get(10)?,
         models: r.get(11)?,
         group_id: r.get(12)?,
+        subfolder_patterns: serde_json::from_str(&r.get::<_, String>(13)?).unwrap_or_default(),
     })
 }
 

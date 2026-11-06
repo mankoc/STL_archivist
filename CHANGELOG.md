@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026.45.28 — 2026-11-06
+
+- **Each folder keeps the path pattern it was crawled with.** A folder inside a library can now have its own
+  (*Crawl with a pattern…* in the filter pane's folder menu; the Libraries page lists them), and every later
+  crawl of the library, monitored ones and Update folders included, uses it for the archives below that folder.
+- **Rescan uses the folder's pattern**: it fills empty fields from it, as a crawl does.
+
 ## 2026.45.27 — 2026-11-06
 
 - **The Files window highlights the files behind a model's warnings**: they stand out, pointing at one

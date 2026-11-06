@@ -7,7 +7,8 @@ use serde::Serialize;
 use stl_core::control::Control;
 use stl_core::rescan::{self, Options};
 use stl_core::rules::{self, Checks, PresupportPatterns};
-use stl_core::storage::{browser, jobs as jobs_db};
+use stl_core::storage::libraries::{FolderPatterns, Roots};
+use stl_core::storage::{browser, crawl as crawl_db, jobs as jobs_db};
 use utoipa::ToSchema;
 
 use crate::Library;
@@ -36,11 +37,23 @@ pub struct Outcome {
     pub touched: Vec<String>,
 }
 
+/// Fill the model's empty fields with the path pattern of its folder.
+fn apply_folder_pattern(lib: &Library, roots: &Roots, id: i64, path: &str) -> Result<(), String> {
+    let Some((library, rel)) = roots.locate(path) else { return Ok(()) };
+    let patterns = lib.db.with(|c| FolderPatterns::load(c, library)).map_err(db)?;
+    let matched = patterns.of(rel.folder()).zip(roots.root(library)).and_then(|(pattern, root)| stl_core::crawler::match_pattern(pattern, path, root));
+    match matched {
+        Some(ex) => lib.db.with_tx(|tx| crawl_db::reapply_pattern(tx, id, &ex)).map_err(db),
+        None => Ok(()),
+    }
+}
+
 /// Rescan: re-read each archive's metadata, rules and hash, keeping user edits
-/// the desktop's rescan keeps (`storage::jobs::apply_rescan`).
+/// (`storage::jobs::apply_rescan`), and read its folder's path pattern again, as a crawl does.
 pub fn rescan_models(lib: &Library, ctl: &Control, log: &dyn Fn(String), ids: &[i64]) -> Result<Outcome, String> {
     let settings = LibrarySettings::load(&lib.config.data_dir);
     let opts = options(lib, &settings);
+    let roots = lib.db.with(Roots::load).map_err(db)?;
     ctl.set_total(ids.len() as u64);
     let mut out = Outcome::default();
     for &id in ids {
@@ -54,6 +67,7 @@ pub fn rescan_models(lib: &Library, ctl: &Control, log: &dyn Fn(String), ids: &[
                 let applied = lib.db.with_tx(|tx| Ok::<_, rusqlite::Error>(jobs_db::apply_rescan(tx, id, &values))).map_err(db)?;
                 match applied {
                     Ok(true) => {
+                        apply_folder_pattern(lib, &roots, id, &path)?;
                         out.done += 1;
                         out.touched.push(path);
                     }

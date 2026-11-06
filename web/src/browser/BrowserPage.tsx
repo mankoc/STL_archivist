@@ -17,6 +17,7 @@ import { EditorDrawer } from "./EditorDrawer";
 import { FilterPane } from "./FilterPane";
 import { GridView } from "./GridView";
 import { clampWidth, DEFAULT_WIDTH, loadWidth, saveWidth } from "./paneWidth";
+import { folderPattern } from "./patterns";
 import { SortModal } from "./SortModal";
 import { AiTaggerDrawer } from "./AiTaggerDrawer";
 import { MassEditDrawer } from "./MassEditDrawer";
@@ -115,6 +116,9 @@ export function BrowserPage() {
   const [menu, setMenu] = useState<{ x: number; y: number; ids: number[] } | null>(null);
   // The Path section's right-click menu: where, and the folder.
   const [folderMenu, setFolderMenu] = useState<{ x: number; y: number; folder: string } | null>(null);
+  // *Crawl with a pattern…*: the folder, and the pattern being typed.
+  const [patternCrawl, setPatternCrawl] = useState<{ folder: string; pattern: string } | null>(null);
+  const libraries = useQuery({ queryKey: ["libraries"], queryFn: async () => unwrap(await api.GET("/api/libraries")) });
   const selectedIds = () => order.filter((i) => selection.ids.has(i));
   const queueJob = async (body: JobRequest, what: string) => {
     try {
@@ -389,8 +393,40 @@ export function BrowserPage() {
           >
             Rescan this folder (read every archive again)
           </Menu.Item>
+          <Menu.Item
+            leftSection={<IconRefresh size={14} />}
+            onClick={() => folderMenu && setPatternCrawl({ folder: folderMenu.folder, pattern: folderPattern(folderMenu.folder, libraries.data ?? []) })}
+          >
+            Crawl with a pattern…
+          </Menu.Item>
         </Menu.Dropdown>
       </Menu>
+      <Modal opened={patternCrawl != null} onClose={() => setPatternCrawl(null)} title="Crawl with a pattern">
+        {patternCrawl && (
+          <Stack>
+            <Text size="sm" style={{ overflowWrap: "anywhere" }}>{patternCrawl.folder}</Text>
+            <TextInput
+              label="Path pattern"
+              description="Kept for this folder: later crawls and rescans use it. Read from the library folder's root; empty goes back to the library's pattern."
+              value={patternCrawl.pattern}
+              onChange={(e) => setPatternCrawl({ ...patternCrawl, pattern: e.currentTarget.value })}
+              data-autofocus
+            />
+            <Group justify="flex-end">
+              <Button variant="default" onClick={() => setPatternCrawl(null)}>Cancel</Button>
+              <Button
+                onClick={async () => {
+                  const c = patternCrawl;
+                  setPatternCrawl(null);
+                  await queueJob({ kind: "crawl", folder: c.folder, in_library: true, pattern: c.pattern.trim() }, "Crawl");
+                }}
+              >
+                Start
+              </Button>
+            </Group>
+          </Stack>
+        )}
+      </Modal>
       {sorting && <SortModal ids={selectedIds()} opened onClose={() => setSorting(false)} />}
       <Modal opened={confirmDelete} onClose={() => setConfirmDelete(false)} title="Delete archive files">
         <Text size="sm">

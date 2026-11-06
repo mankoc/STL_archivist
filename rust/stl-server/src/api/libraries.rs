@@ -42,6 +42,9 @@ pub struct LibraryFolder {
     pub root: String,
     /// Path pattern its crawls use.
     pub pattern: Option<String>,
+    /// Folders below the root crawled with a pattern of their own, which their
+    /// archives keep using.
+    pub subfolder_patterns: Vec<SubfolderPattern>,
     pub monitored: bool,
     pub last_crawled_at: Option<String>,
     /// Archives found by its last crawl.
@@ -55,6 +58,14 @@ pub struct LibraryFolder {
     pub reachable: bool,
 }
 
+/// A folder's own path pattern.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SubfolderPattern {
+    /// Relative to the library folder's root (`/` separators).
+    pub folder: String,
+    pub pattern: String,
+}
+
 impl From<Folder> for LibraryFolder {
     fn from(l: Folder) -> Self {
         let reachable = !l.root.is_empty() && FsPath::new(&l.root).is_dir();
@@ -64,6 +75,7 @@ impl From<Folder> for LibraryFolder {
             name: l.name,
             root: l.root,
             pattern: l.pattern,
+            subfolder_patterns: l.subfolder_patterns.into_iter().map(|(folder, pattern)| SubfolderPattern { folder, pattern }).collect(),
             monitored: l.monitored,
             last_crawled_at: l.last_crawled_at,
             archive_count: l.archive_count,

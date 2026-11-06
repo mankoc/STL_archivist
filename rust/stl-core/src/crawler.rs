@@ -31,6 +31,9 @@ const SIZE_LIMIT_META: u64 = 1024 * 1024;
 #[derive(Debug, Clone, Default)]
 pub struct CrawlConfig {
     pub source_dir: String,
+    /// The pattern given for this crawl of a part of a library folder, to keep
+    /// for `source_dir` (`""`: forget the one kept).
+    pub keep_pattern: Option<String>,
     /// Crawl `source_dir` as a part of the library folder at this root: its
     /// records stay that folder's (pattern and metadata read from its root),
     /// and `source_dir` is not made a library folder.
@@ -437,11 +440,12 @@ fn result_line(idx: usize, total: usize, status: &str, name: &str, thumbnails: u
     format!("[{idx}/{total}] {status}: {name} ({stored})")
 }
 
-fn pattern_match(cfg: &CrawlConfig, path: &str) -> Option<db::Extracted> {
-    if cfg.pattern.is_empty() {
+/// What `pattern` reads from the archive's path below `root`.
+pub fn match_pattern(pattern: &str, path: &str, root: &str) -> Option<db::Extracted> {
+    if pattern.is_empty() {
         return None;
     }
-    let fields = path_pattern::parse_path(&cfg.pattern, &rel_path(path, cfg.root()));
+    let fields = path_pattern::parse_path(pattern, &rel_path(path, root));
     if fields.is_empty() {
         return None;
     }
@@ -523,6 +527,8 @@ struct Run<'a> {
     from_sidecar: HashSet<String>,
     /// Records of archives not found are flagged, whatever `defer_missing_deletion` says.
     keep_records: bool,
+    /// The patterns of the library folder's sub-folders, ahead of `cfg.pattern`.
+    folder_patterns: storage::libraries::FolderPatterns,
     /// The images of the current archive's folders: archives come in path order,
     /// so its neighbours share them, and each is decoded once.
     folder_cache: HashMap<String, Vec<FolderImage>>,
@@ -533,6 +539,12 @@ fn tx(conn: &mut rusqlite::Connection) -> rusqlite::Result<rusqlite::Transaction
 }
 
 impl Run<'_> {
+    /// The pattern for the archive at `path`.
+    fn pattern_of(&self, path: &str) -> &str {
+        let own = crate::relpath::RelPath::from_abs(self.cfg.root(), path).and_then(|r| self.folder_patterns.below(r.folder()));
+        own.unwrap_or(&self.cfg.pattern)
+    }
+
     fn log(&self, s: impl Into<String>) {
         self.host.emit(Event::Log(s.into()));
     }
@@ -661,7 +673,7 @@ impl Run<'_> {
                 path: p.clone(),
                 hash: h.clone(),
                 existing: existing_id,
-                extracted: pattern_match(cfg, p),
+                extracted: match_pattern(self.pattern_of(p), p, cfg.root()),
                 changed,
             });
             if host.should_stop() {
@@ -818,6 +830,7 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
         listed: HashMap::new(),
         from_sidecar: HashSet::new(),
         keep_records: false,
+        folder_patterns: Default::default(),
         folder_cache: HashMap::new(),
     };
     // The crawled folder is a library (made now when it is none yet), or a part of
@@ -834,6 +847,14 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
         }
     };
     run.inner_roots = storage::libraries::Roots::load(&run.conn)?.inner(library).into_iter().map(|(_, r)| r).collect();
+    if let Some(pattern) = &cfg.keep_pattern
+        && let Some(rel) = crate::relpath::RelPath::from_abs(cfg.root(), &cfg.source_dir)
+    {
+        let t = tx(&mut run.conn)?;
+        storage::libraries::set_folder_pattern(&t, library, rel.as_str(), pattern)?;
+        t.commit()?;
+    }
+    run.folder_patterns = storage::libraries::FolderPatterns::load(&run.conn, library)?;
     // One listing of the folder gives the archives with their sizes and times: the
     // comparisons with the records below happen in memory.
     host.emit(Event::Phase("Retrieving file list…".into()));

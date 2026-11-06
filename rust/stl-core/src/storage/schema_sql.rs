@@ -86,6 +86,21 @@ CREATE TABLE libraries (
         ],
     },
     TableDdl {
+        name: "folder_patterns",
+        create: r#"
+CREATE TABLE folder_patterns (
+	library_id INTEGER NOT NULL,
+	rel_folder TEXT NOT NULL,
+	pattern TEXT NOT NULL,
+	PRIMARY KEY (library_id, rel_folder),
+	FOREIGN KEY(library_id) REFERENCES libraries (id) ON DELETE CASCADE
+)
+
+"#,
+        indexes: &[
+        ],
+    },
+    TableDdl {
         name: "creators",
         create: r#"
 CREATE TABLE creators (

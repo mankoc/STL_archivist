@@ -2368,6 +2368,11 @@ export interface components {
             reachable: boolean;
             /** @description Where the folder is on the server. */
             root: string;
+            /**
+             * @description Folders below the root crawled with a pattern of their own, which their
+             *     archives keep using.
+             */
+            subfolder_patterns: components["schemas"]["SubfolderPattern"][];
             /** @description The same on every instance (export, sync). */
             uuid: string;
         };
@@ -3020,6 +3025,12 @@ export interface components {
             hash?: string | null;
             /** Format: int64 */
             size?: number | null;
+        };
+        /** @description A folder's own path pattern. */
+        SubfolderPattern: {
+            /** @description Relative to the library folder's root (`/` separators). */
+            folder: string;
+            pattern: string;
         };
         /** @description What a sync would do, before it runs. */
         SyncPreview: {
