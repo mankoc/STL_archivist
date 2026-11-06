@@ -47,15 +47,23 @@ pub fn replace_thumbnails(
         tx.execute("DELETE FROM images WHERE id = ?1", [id])?;
     }
     let mut count = 0;
-    for (name, jpeg) in thumbs {
-        let (Some(j), Some(s)) = (jpeg.as_ref().filter(|j| !j.is_empty()), store) else { continue };
-        tx.execute("INSERT INTO images (model_id, filename) VALUES (?1, ?2)", params![model_id, name])?;
-        let id = tx.last_insert_rowid();
-        if s.put_many(&[(id as u64, j.as_slice())]).is_ok() {
-            tx.execute("UPDATE images SET thumbnail_path = ?2 WHERE id = ?1", params![id, id.to_string()])?;
-            count += 1;
-        } else {
-            tx.execute("DELETE FROM images WHERE id = ?1", [id])?;
+    if let Some(s) = store {
+        let mut blobs: Vec<(u64, &[u8])> = Vec::new();
+        for (name, jpeg) in thumbs {
+            let Some(j) = jpeg.as_ref().filter(|j| !j.is_empty()) else { continue };
+            tx.execute("INSERT INTO images (model_id, filename) VALUES (?1, ?2)", params![model_id, name])?;
+            blobs.push((tx.last_insert_rowid() as u64, j.as_slice()));
+        }
+        // One store commit for the model.
+        let stored = s.put_many(&blobs).is_ok();
+        for (id, _) in &blobs {
+            let id = *id as i64;
+            if stored {
+                tx.execute("UPDATE images SET thumbnail_path = ?2 WHERE id = ?1", params![id, id.to_string()])?;
+                count += 1;
+            } else {
+                tx.execute("DELETE FROM images WHERE id = ?1", [id])?;
+            }
         }
     }
     tx.execute(
