@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026.45.30 — 2026-11-06
+
+- `docs/rust-migration-plan.md` is frozen as history: the migration is finished, and changes are recorded here only. Its compatibility rules still apply.
+
 ## 2026.45.29 — 2026-11-06
 
 - The help, user guide and README cover this week's changes: per-folder patterns in the folder menu and

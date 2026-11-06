@@ -51,7 +51,7 @@ stl_database/
 ├── web/               # React 19 + Mantine 8 + TanStack client
 ├── docker/            # Server image (Dockerfile, built from the repository root), compose.yml
 ├── resources/         # Application icon (copies in rust/stl-desktop/icons)
-└── docs/              # rust-migration-plan.md (history and per-step notes)
+└── docs/              # rust-migration-plan.md (frozen history; its compatibility rules still apply)
 ```
 
 ## Rules
@@ -185,8 +185,8 @@ builds need neither the web client nor the server built.
 
 ## Documentation and versions
 
-Always update the README, the changelog and the migration plan with the changes that are
-made. Commit messages carry no co-author lines.
+Always update the README and the changelog with the changes that are made.
+`docs/rust-migration-plan.md` is frozen history: only its compatibility rules still apply. Commit messages carry no co-author lines.
 
 **Every commit raises the version**, which is `<year>.<ISO week>.<N>`: the year and ISO week
 of the commit date, and `N` counting the commits of that week from 0 (`2026.43.0`,
