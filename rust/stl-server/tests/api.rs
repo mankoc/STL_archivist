@@ -104,6 +104,9 @@ async fn ids_filter_search_and_sort() {
     assert_eq!(v["ids"], json!(f.ids));
     let (_, v) = f.post("/api/models/ids", json!({"sort": {"column": "title"}})).await;
     assert_eq!(v["ids"], json!([f.ids[1], f.ids[2], f.ids[0]]));
+    let (s, v) = f.post("/api/models/ids", json!({"sort": {"column": "release_date", "descending": true}})).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(v["ids"], json!(f.ids)); // the same date: by id
     let (_, v) = f.post("/api/models/ids", json!({"filter": {"include": {"tag": ["dragon"]}}, "search": "red"})).await;
     assert_eq!(v["ids"], json!([f.ids[0]]));
     let (_, v) = f.post("/api/models/ids", json!({"search": "alice", "search_fields": ["title"]})).await;

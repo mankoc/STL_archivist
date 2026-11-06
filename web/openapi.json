@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.45.17"
+    "version": "2026.45.18"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -8526,7 +8526,7 @@
         "properties": {
           "column": {
             "type": "string",
-            "description": "One of `title`, `creator`, `source`, `sculptor_name`, `collection_name`,\n`subcollection_name`, `sequence`, `release_name`, `archive_path`,\n`presupports`, `created_at`, `archive_size`, `compression_rate`, `category_name`."
+            "description": "One of `title`, `creator`, `source`, `sculptor_name`, `collection_name`,\n`subcollection_name`, `sequence`, `release_name`, `archive_path`,\n`presupports`, `created_at`, `archive_size`, `compression_rate`, `category_name`,\n`library_name`, `release_date` (the release year, then its month)."
           },
           "descending": {
             "type": "boolean"

@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026.45.18 — 2026-11-06
+
+- **The table can be sorted by Date**: click the *Date* header to order models by release year, then
+  month. Models without a date stay last in both directions.
+
 ## 2026.45.17 — 2026-11-04
 
 - **The model viewer has MeshPeek 0.5.9's loaders and renderer**: `.ags` files show their raft and
