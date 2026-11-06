@@ -113,6 +113,36 @@ async fn cell_edits_and_sidecars() {
     assert!(l.lib.state.sidecars.pending().is_empty());
 }
 
+/// Sculptors and releases have what the other lookups have.
+#[tokio::test]
+async fn sculptors_and_releases_are_lookups() {
+    let l = library();
+    let (one, two) = (l.ids[0], l.ids[1]);
+    for (kind, names) in [("sculptor", ["Ann", "Anne"]), ("release", ["May", "Mai"])] {
+        let r = l
+            .call("PATCH", "/api/models/cells", Some(json!({"edits": [
+                {"id": one, "field": kind, "value": names[0]},
+                {"id": two, "field": kind, "value": names[1]},
+            ]})))
+            .await;
+        assert_eq!(r.status, StatusCode::OK);
+        let rows = l.call("GET", &format!("/api/lookups/{kind}"), None).await.json();
+        let id = |name: &str| rows.as_array().unwrap().iter().find(|r| r["name"] == name).unwrap()["id"].as_i64().unwrap();
+        let (keep, remove) = (id(names[0]), id(names[1]));
+        assert_eq!(l.call("PATCH", &format!("/api/lookups/{kind}/{keep}"), Some(json!({"name": "Kept"}))).await.status, StatusCode::NO_CONTENT);
+        l.lib.state.export_pending_sidecars();
+        let merge = l.call("POST", &format!("/api/lookups/{kind}/merge"), Some(json!({"keep": keep, "remove": remove}))).await;
+        assert_eq!(merge.status, StatusCode::NO_CONTENT);
+        assert_eq!(l.lib.state.sidecars.pending().len(), 1, "{kind}");
+        let rows = l.call("GET", &format!("/api/lookups/{kind}"), None).await.json();
+        assert_eq!(rows.as_array().unwrap().len(), 1, "{rows}");
+        assert_eq!(rows[0]["models"], 2);
+        assert_eq!(l.call("DELETE", &format!("/api/lookups/{kind}/{keep}"), None).await.status, StatusCode::NO_CONTENT);
+        let used: i64 = l.scalar(&format!("SELECT count(*) FROM models WHERE {kind}_id IS NOT NULL"));
+        assert_eq!(used, 0);
+    }
+}
+
 /// A title isn't in the filter pane: the tree stays valid, and clients reload only rows.
 #[tokio::test]
 async fn edits_outside_the_filter_pane_keep_the_tree() {

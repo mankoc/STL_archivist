@@ -13,7 +13,7 @@ can open a library on your computer without setting up a server.
 [the HTTP API](docs/api.md) ·
 and in the interface, the **?** button: searchable in-depth help on every feature
 
-Version: 2026.45.37
+Version: 2026.45.38
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). This version opens its data directory and, since 2026.43.7, converts it once
@@ -53,7 +53,7 @@ Version: 2026.45.37
   image grid, a detail pane with thumbnails, downloads and image drag-and-drop, and a
   folder-by-folder archive browser
 - **Editing** — model editor, mass editor (path patterns with a preview, find & replace,
-  trimming), lookup editors for tags, categories, collections, subcollections, scales and
+  trimming), lookup editors for tags, categories, collections, subcollections, scales, sculptors, releases and
   creators, with *Merge similar* to find and join near-duplicate names
 - **Duplicates** — archives sharing STL files, archives with similar images (perceptual hash
   or AI embedding, skipping banners shared by many archives), models with equal or similar

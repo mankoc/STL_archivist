@@ -50,7 +50,7 @@ The bar at the top switches pages:
 | **Folders** | Browsing archives folder by folder, as thumbnails |
 | **Find by Image** | Finding models that look like a picture |
 | **Duplicates** | Archives that share files or images; models with similar names |
-| **Lookups** | Tags, categories, collections, subcollections, scales, creators |
+| **Lookups** | Tags, categories, collections, subcollections, scales, sculptors, releases, creators |
 | **Libraries** | Libraries and their folders: add, crawl, monitor, rename, move, remove |
 | **Statistics** | Totals, rankings, and the distribution of any column |
 | **Settings** | Your account, the library's settings, and tabs for maintenance, sidecars, backups, compute workers, components and users |
@@ -261,7 +261,7 @@ Editing needs the editor role.
     regular expression); *Trim* removes stray spaces.
 - **Remove from library** removes the selected records (and their images) from the catalogue;
   the archive files stay. Crawling the folder again brings them back.
-- **Lookups** page — tags, categories, collections, subcollections and scales: rename,
+- **Lookups** page — tags, categories, collections, subcollections, scales, sculptors and releases: rename,
   delete (it shows how many models lose the value first), merge two entries (for tags: merge
   the selected tags into one) and *delete unused tags*. The **Creators** tab renames,
   merges and clears creators, and edits a creator's profile. **Merge similar…**, on every

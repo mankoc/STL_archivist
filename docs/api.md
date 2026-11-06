@@ -622,6 +622,7 @@ One of:
 | `monitored` (optional) | boolean \| null |  |
 | `new_library` (optional) | string \| null | Move the folder (with its records) to a new library with this name. |
 | `pattern` (optional) | string \| null | A path pattern; `""` clears it. |
+| `subfolder` (optional) | null \| [SubfolderPattern](#subfolderpattern) |  |
 
 ### FolderRequest
 

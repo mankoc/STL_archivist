@@ -1933,6 +1933,7 @@ export interface components {
             new_library?: string | null;
             /** @description A path pattern; `""` clears it. */
             pattern?: string | null;
+            subfolder?: null | components["schemas"]["SubfolderPattern"];
         };
         FolderRequest: {
             /** @description A folder from `/api/folders`. */

@@ -5427,6 +5427,17 @@
               "null"
             ],
             "description": "A path pattern; `\"\"` clears it."
+          },
+          "subfolder": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SubfolderPattern",
+                "description": "Set the pattern of a folder below the root; `\"\"` forgets it."
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -8831,7 +8842,8 @@
           "pattern": {
             "type": "string"
           }
-        }
+        },
+        "additionalProperties": false
       },
       "SyncPreview": {
         "type": "object",

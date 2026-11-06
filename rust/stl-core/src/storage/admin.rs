@@ -23,6 +23,8 @@ fn table(kind: &str) -> Result<&'static str> {
         "collection" => "collections",
         "subcollection" => "subcollections",
         "scale" => "scales",
+        "sculptor" => "sculptors",
+        "release" => "releases",
         other => return Err(rusqlite::Error::InvalidParameterName(format!("unknown lookup kind: {other}"))),
     })
 }
@@ -148,6 +150,8 @@ pub fn archive_paths(conn: &Connection, kind: &str, id: i64) -> Result<Vec<Strin
         "scale" => "SELECT model_id FROM model_scales WHERE scale_id = ?1",
         "category" => "SELECT id FROM models WHERE category_id = ?1",
         "subcollection" => "SELECT id FROM models WHERE subcollection_id = ?1",
+        "sculptor" => "SELECT id FROM models WHERE sculptor_id = ?1",
+        "release" => "SELECT id FROM models WHERE release_id = ?1",
         "collection" => {
             "SELECT id FROM models WHERE collection_id = ?1 \
              OR subcollection_id IN (SELECT id FROM subcollections WHERE collection_id = ?1)"
@@ -185,6 +189,14 @@ pub fn delete(tx: &Transaction, kind: &str, id: i64) -> Result<()> {
         "subcollection" => {
             null_ref(tx, "subcollection_id", "subcollection_id = ?1", id)?;
             tx.execute("DELETE FROM subcollections WHERE id = ?1", [id])?;
+        }
+        "sculptor" => {
+            null_ref(tx, "sculptor_id", "sculptor_id = ?1", id)?;
+            tx.execute("DELETE FROM sculptors WHERE id = ?1", [id])?;
+        }
+        "release" => {
+            null_ref(tx, "release_id", "release_id = ?1", id)?;
+            tx.execute("DELETE FROM releases WHERE id = ?1", [id])?;
         }
         "collection" => delete_collection(tx, id)?,
         other => return Err(rusqlite::Error::InvalidParameterName(format!("unknown lookup kind: {other}"))),
@@ -235,6 +247,14 @@ pub fn merge(tx: &Transaction, kind: &str, keep_id: i64, delete_id: i64) -> Resu
                 params![keep_id, delete_id, now],
             )?;
             tx.execute("DELETE FROM subcollections WHERE id = ?1", [delete_id])?;
+        }
+        "sculptor" => {
+            tx.execute("UPDATE models SET sculptor_id = ?1, updated_at = ?3 WHERE sculptor_id = ?2", params![keep_id, delete_id, now])?;
+            tx.execute("DELETE FROM sculptors WHERE id = ?1", [delete_id])?;
+        }
+        "release" => {
+            tx.execute("UPDATE models SET release_id = ?1, updated_at = ?3 WHERE release_id = ?2", params![keep_id, delete_id, now])?;
+            tx.execute("DELETE FROM releases WHERE id = ?1", [delete_id])?;
         }
         "collection" => {
             tx.execute(

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.45.38 — 2026-11-06
+
+- **The Lookups page has Sculptors and Releases tabs:** rename, delete, merge and *Merge similar*, as for the other lists.
+- **A sub-folder's stored path pattern can be changed or forgotten on the Libraries page,** and its sidecar now keeps it
+  (an optional `folder_pattern` key; older readers ignore it). A pattern already set isn't overwritten by an import.
+
 ## 2026.45.37 — 2026-11-06
 
 - **RAR archives read much faster with UnRAR:** one run reads all the members needed, instead of one run each, which

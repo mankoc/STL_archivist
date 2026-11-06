@@ -13,7 +13,7 @@ import { api, type Schemas, unwrap } from "../api/client";
 import { hasRole, useUser } from "../auth/user";
 import { SimilarModal } from "./SimilarModal";
 
-type Kind = "tag" | "category" | "collection" | "subcollection" | "scale";
+type Kind = "tag" | "category" | "collection" | "subcollection" | "scale" | "sculptor" | "release";
 type Row = Schemas["LookupRow"];
 
 const KINDS: { kind: Kind; label: string }[] = [
@@ -22,6 +22,8 @@ const KINDS: { kind: Kind; label: string }[] = [
   { kind: "collection", label: "Collections" },
   { kind: "subcollection", label: "Subcollections" },
   { kind: "scale", label: "Scales" },
+  { kind: "sculptor", label: "Sculptors" },
+  { kind: "release", label: "Releases" },
 ];
 
 function fail(err: unknown) {
