@@ -1,10 +1,17 @@
 # Changelog
 
+## 2026.45.29 — 2026-11-06
+
+- The help, user guide and README cover this week's changes: per-folder patterns in the folder menu and
+  Rescan, what hiding a filter value keeps, exact creator matching, collisions in Sort files, the highlighted
+  files, and new troubleshooting entries for a library marked missing, an unreadable folder and *images not read*.
+
 ## 2026.45.28 — 2026-11-06
 
 - **Each folder keeps the path pattern it was crawled with.** A folder inside a library can now have its own
   (*Crawl with a pattern…* in the filter pane's folder menu; the Libraries page lists them), and every later
-  crawl of the library, monitored ones and Update folders included, uses it for the archives below that folder.
+  crawl of the library, monitored ones and *Update all* included, uses it for the archives below that folder.
+  They live in a new table, `folder_patterns`, added by itself when the server starts.
 - **Rescan uses the folder's pattern**: it fills empty fields from it, as a crawl does.
 
 ## 2026.45.27 — 2026-11-06
@@ -17,7 +24,8 @@
 
 - **Merge similar** on the Lookups page, on every tab and for creators: it lists near-duplicate names by
   spelling (ignoring case), by sound, or by shared words, with how many models use each, and one click on
-  the name to keep merges the pair. The old desktop app had this; the web client only merged by hand.
+  the name to keep merges the pair. Subcollections are compared within their collection. The old desktop
+  app had this; the web client only merged by hand.
 - **Merge the two selected** now works for tags and scales, where it failed.
 
 ## 2026.45.25 — 2026-11-06
@@ -40,7 +48,8 @@
 ## 2026.45.23 — 2026-11-06
 
 - **Crawls use far less memory.** Only the images that become thumbnails are read (the first *Thumbnails
-  per archive*, in catalog order), and their bytes are let go once the thumbnails are made, instead of
+  per archive*, in catalog order; for a 7z that can be other images than before, for new crawls only),
+  and their bytes are let go once the thumbnails are made, instead of
   every image of a batch of 50 archives staying in memory: 3 GB down to under 80 MB on a test batch.
   A solid 7z also stops decompressing sooner.
 - **Images beside archives are decoded once per folder**, in parallel, instead of again for every archive:
@@ -57,19 +66,23 @@
   archive already where the pattern puts it stays there instead of becoming `name_1`.
 - **A crawl no longer deletes the record of an archive that is on disk.** A record marked missing (by a
   monitored crawl, say) was deleted by the next crawl even when its archive had come back. Crawls now
-  clear the mark, and monitored folders start a crawl for it.
+  clear the mark, and a monitored folder starts a crawl when a marked archive returns.
 - **A crawl no longer takes what it cannot see for deleted.** The records below a folder that could not
   be read stay as they are, and a library that comes back empty (an unmounted share) has its records
-  marked missing, not deleted; *Update folders* does not clean those up either. Crawl results now say
-  how many records were moved, deleted or marked missing, and when a folder could not be read in full.
+  marked missing, not deleted, until the archives are found or *Remove missing archives* deletes them.
+  *Update all* does not clean those up either, and a monitored folder with no archives left is not crawled.
+  This also means a folder you emptied on purpose is marked rather than deleted. Crawl results now say how
+  many records were moved, deleted or marked missing, and when a folder could not be read in full.
 - **An unreadable member no longer costs an archive its file list.** When images could not be read (a
   RAR without UnRAR, an encrypted member, a ZIP method the reader lacks) the catalog already read was
   dropped too, leaving no STL list and false *without images* and *without printable files* warnings.
-  The crawl now keeps the list and logs a warning; Generate thumbnails leaves the images it has.
+  The crawl now keeps the list and logs a warning, Rescan updates what it can, and Generate thumbnails
+  leaves the images the model has.
 - **Excluding a filter value keeps models without a value**: excluding one warning hid every model with
   no warnings, and excluding a creator every model with no creator.
 - **Creators and sources are matched exactly**, as the filter pane lists and counts them, so names
-  starting with a non-ASCII capital ("Élan") can be selected.
+  starting with a non-ASCII capital ("Élan") can be selected. `Alice` no longer also selects `ALICE`,
+  which has its own row and count.
 
 ## 2026.45.21 — 2026-11-06
 

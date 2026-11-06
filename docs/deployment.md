@@ -567,7 +567,7 @@ first.
 | Setup screen says it must run on the server | First-run setup is accepted only from the server's own machine and not through a proxy. Use a browser on that machine or `stl-server create-admin`. |
 | The page loads but jobs never show progress | The proxy drops WebSocket upgrades on `/api/events`; see the nginx example. |
 | "outside the library's folders" when adding a folder | Editors can only browse `roots` and libraries. Add the folder to `roots` in `server.json` (and restart), or let an administrator add it. |
-| `.rar` archives have no thumbnails or fail | UnRAR is missing; download it in *Settings → Components*, install it, or set `unrar`. |
+| `.rar` archives have no thumbnails (*images not read* in the crawl's log) | UnRAR is missing; download it in *Settings → Components*, install it, or set `unrar`, then *Generate thumbnails*. Their file lists are read without it. |
 | No AI options | ONNX Runtime or the CLIP model is missing (embeddings), or `llama-server` / the model files are (tagger). *AI tagger* shows the reason. |
 | Some archives are skipped or have no images | The built-in readers refuse a few unusual archives (the crawl log warns "cannot read archive"; each crawl tries them again), and CMYK JPEG and tiled ("grid") AVIF images are not decoded. |
 | Thumbnails missing after moving the server | The `thumbnails.lmdb` folder was not copied with the database. |

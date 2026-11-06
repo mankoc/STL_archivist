@@ -1734,6 +1734,8 @@ the path is visible. No business logic and no Tauri commands for data.
   per archive, and `CrawlConfig.keep_pattern` stores what a crawl of a part of a library was given. A library
   folder's own pattern stays in `libraries.pattern`. `crawler::match_pattern` and `crawl::reapply_pattern`
   serve Rescan (`archive_tools::apply_folder_pattern`).
+- 2026.45.29: documentation review: help topics, user guide, README and deployment notes caught up with 2026.45.22 to .28,
+  and those changelog entries completed.
 
 ### Phase 8: Retire Python (small)
 
