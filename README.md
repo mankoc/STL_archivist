@@ -13,7 +13,7 @@ can open a library on your computer without setting up a server.
 [the HTTP API](docs/api.md) ·
 and in the interface, the **?** button: searchable in-depth help on every feature
 
-Version: 2026.45.33
+Version: 2026.45.34
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). This version opens its data directory and, since 2026.43.7, converts it once
@@ -362,8 +362,8 @@ stl_database/
 │   └── stl-viewer/          # The web client's model viewer: meshpeek-render in WebAssembly
 ├── web/                     # Web client (React, TypeScript, Mantine, TanStack)
 ├── resources/               # Application icon (the STL Archivist emblem; copies in rust/stl-desktop/icons, rust/stl-desktop/ui and web/public)
-├── tools/create_ai_model.py # Regenerates the tiny CLIP stand-in used by the server tests
 ├── tools/api_doc.py         # Writes docs/api.md (the API reference) from web/openapi.json
+├── tools/version.py         # Raises the version everywhere and adds its changelog section
 └── docs/                    # Migration plan and design notes
 ```
 

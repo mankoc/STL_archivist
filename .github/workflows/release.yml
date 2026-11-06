@@ -31,7 +31,8 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Rust (rust-toolchain.toml)
+        run: rustup toolchain install
 
       - uses: Swatinem/rust-cache@v2
         with:

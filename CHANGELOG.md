@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026.45.34 — 2026-11-06
+
+- **`rust-toolchain.toml` pins Rust 1.99.0** for development and CI, and the Docker image builds with the same version.
+- **CI also runs the server's tests on Linux,** which is what the Docker image ships, and reports dependency advisories.
+- **`tools/version.py` raises the version** and adds the changelog section. The MeshPeek workflow uses it too.
+- **`web/openapi.json` and `docs/api.md` no longer carry the version,** so they change only with the API.
+- **Removed leftovers:** `tools/create_ai_model.py` (it served the Python tagger), `mailmap.txt`, the agent state files,
+  the Python launch configuration and most Python entries in `.gitignore`.
+
 ## 2026.45.33 — 2026-11-06
 
 - **Find by Image reads less:** only the hashes of all images, then the details of the matches. On 400,000 images a

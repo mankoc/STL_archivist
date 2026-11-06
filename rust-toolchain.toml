@@ -1,0 +1,5 @@
+# The Rust that development and CI use (keep RUST_VERSION in docker/Dockerfile the same).
+[toolchain]
+channel = "1.99.0"
+components = ["clippy"]
+targets = ["wasm32-unknown-unknown"]
