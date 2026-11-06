@@ -16,7 +16,7 @@ use crate::accounts::Role;
 use crate::auth::CurrentUser;
 use crate::{ApiError, AppState};
 
-pub const KINDS: &[&str] = &["tag", "category", "collection", "subcollection", "scale"];
+pub const KINDS: &[&str] = &["tag", "category", "collection", "subcollection", "scale", "sculptor", "release"];
 
 fn kind_ok(kind: &str) -> Result<(), ApiError> {
     if KINDS.contains(&kind) { Ok(()) } else { Err(ApiError::not_found(format!("no lookup kind {kind:?}"))) }

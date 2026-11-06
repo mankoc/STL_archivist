@@ -96,3 +96,24 @@ async fn a_folder_keeps_the_pattern_it_was_crawled_with() {
     run(&lib, &ed, json!({"kind": "crawl", "folder": folder})).await;
     assert_eq!(fields(&lib, "G.zip"), (Some("Set2".to_string()), None));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stored_folder_pattern_can_be_changed_and_forgotten() {
+    let lib = empty_library();
+    std::fs::write(lib.dir.path().join("settings.json"), r#"{"metadata_sidecar_enabled": false}"#).unwrap();
+    let ed = lib.user("ed", Role::Editor);
+    let root = lib.dir.path().join("archives");
+    write_zip(&root.join("Sub").join("One.zip"));
+    run(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy()})).await;
+    let id: i64 = lib.state.db.with(|c| c.query_row("SELECT id FROM libraries", [], |r| r.get(0))).unwrap();
+    let set = async |folder: &str, pattern: &str| {
+        call(&lib.state, "PATCH", &format!("/api/libraries/folders/{id}"), Some(&ed), Some(json!({"subfolder": {"folder": folder, "pattern": pattern}}))).await
+    };
+    let r = set("Sub", "{title}").await;
+    assert_eq!(r.json()["subfolder_patterns"], json!([{"folder": "Sub", "pattern": "{title}"}]));
+    let r = set("Sub", "{sculptor}/{title}").await;
+    assert_eq!(r.json()["subfolder_patterns"][0]["pattern"], "{sculptor}/{title}");
+    let r = set("Sub", "").await;
+    assert_eq!(r.json()["subfolder_patterns"], json!([]));
+    assert_eq!(set("../Sub", "x").await.status, axum::http::StatusCode::BAD_REQUEST);
+}

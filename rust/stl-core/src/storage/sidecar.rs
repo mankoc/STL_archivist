@@ -79,6 +79,9 @@ struct SidecarFile {
     generated_at: String,
     models: Vec<SidecarModel>,
     pattern: Json,
+    /// The pattern of this folder, when it is a sub-folder with one of its own.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    folder_pattern: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -234,11 +237,18 @@ fn snapshot(conn: &Connection, folder: &str, include_thumbnails: bool) -> SResul
         Some(id) => conn.query_row("SELECT pattern FROM libraries WHERE id = ?1", [id], |r| r.get(0)).optional()?,
         None => None,
     };
+    let folder_pattern = match roots.locate_folder(folder) {
+        Some((id, rel)) if !rel.is_empty() => conn
+            .query_row("SELECT pattern FROM folder_patterns WHERE library_id = ?1 AND rel_folder = ?2", params![id, rel], |r| r.get(0))
+            .optional()?,
+        _ => None,
+    };
     let data = SidecarFile {
         version: SCHEMA_VERSION,
         generated_at: format!("{}+00:00", utc_now_text().replacen(' ', "T", 1)),
         models,
         pattern: value_json(pattern.unwrap_or(Value::Null))?,
+        folder_pattern,
     };
     Ok(Some(Snapshot { data, thumbs }))
 }
@@ -534,6 +544,10 @@ pub fn import(tx: &Transaction, store: &ThumbStore, folder: &str, sidecar: Sidec
         Some(v) if truthy(v) => opt_text(Some(v), "pattern")?,
         _ => None,
     };
+    let folder_pattern = match data.get("folder_pattern") {
+        Some(v) if truthy(v) => opt_text(Some(v), "folder_pattern")?,
+        _ => None,
+    };
     // Plan every model first: refusals happen before any write.
     let mut plans = Vec::new();
     for m in list(data.get("models"), "models")? {
@@ -651,6 +665,11 @@ pub fn import(tx: &Transaction, store: &ThumbStore, folder: &str, sidecar: Sidec
             }
         }
     }
+    if let Some(pattern) = folder_pattern
+        && let Some((id, rel)) = Roots::load(tx)?.locate_folder(folder).filter(|(_, rel)| !rel.is_empty())
+    {
+        tx.execute("INSERT OR IGNORE INTO folder_patterns (library_id, rel_folder, pattern) VALUES (?1, ?2, ?3)", params![id, rel, pattern])?;
+    }
     Ok(imported)
 }
 
@@ -658,6 +677,47 @@ pub fn import(tx: &Transaction, store: &ThumbStore, folder: &str, sidecar: Sidec
 mod tests {
     use super::*;
     use crate::storage::{Vectors, migrate, open};
+
+    /// A sub-folder's pattern comes back with its sidecar, unless it has one by then.
+    #[test]
+    fn a_sidecar_keeps_its_folders_pattern() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("models");
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::write(folder.join("a.zip"), b"x").unwrap();
+        let folder_s = crate::winpath::native(&folder.to_string_lossy());
+        let root = crate::winpath::native(&dir.path().to_string_lossy());
+        let store = ThumbStore::open(&dir.path().join("thumbs")).unwrap();
+        let library = |name: &str| {
+            let path = dir.path().join(name);
+            migrate(&path, &Vectors::default()).unwrap();
+            let conn = open(&path).unwrap();
+            conn.execute("INSERT INTO libraries (uuid, name, root) VALUES ('u1', 'lib', ?1)", [&root]).unwrap();
+            conn
+        };
+        let src = library("src.db");
+        src.execute(
+            "INSERT INTO models (title, library_id, rel_path, rel_folder, archive_hash, is_missing, to_print) VALUES ('A', 1, 'models/a.zip', 'models', 'h', 0, 0)",
+            [],
+        )
+        .unwrap();
+        src.execute("INSERT INTO folder_patterns (library_id, rel_folder, pattern) VALUES (1, 'models', '{title}')", []).unwrap();
+        assert!(export(&src, Some(&store), &folder_s, false).unwrap());
+
+        let pattern = |c: &Connection| -> String { c.query_row("SELECT pattern FROM folder_patterns", [], |r| r.get(0)).unwrap() };
+        let mut empty = library("empty.db");
+        let tx = empty.transaction().unwrap();
+        import(&tx, &store, &folder_s, read(&folder_s).unwrap()).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(pattern(&empty), "{title}");
+
+        let mut own = library("own.db");
+        own.execute("INSERT INTO folder_patterns (library_id, rel_folder, pattern) VALUES (1, 'models', 'mine')", []).unwrap();
+        let tx = own.transaction().unwrap();
+        import(&tx, &store, &folder_s, read(&folder_s).unwrap()).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(pattern(&own), "mine");
+    }
 
     #[test]
     fn export_then_import() {

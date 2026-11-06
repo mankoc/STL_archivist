@@ -59,7 +59,8 @@ pub struct LibraryFolder {
 }
 
 /// A folder's own path pattern.
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SubfolderPattern {
     /// Relative to the library folder's root (`/` separators).
     pub folder: String,
@@ -198,6 +199,8 @@ pub struct FolderChange {
     pub library: Option<i64>,
     /// Move the folder (with its records) to a new library with this name.
     pub new_library: Option<String>,
+    /// Set the pattern of a folder below the root; `""` forgets it.
+    pub subfolder: Option<SubfolderPattern>,
 }
 
 /// Set a library folder's pattern, monitor it, or move it with its records
@@ -220,6 +223,9 @@ pub async fn change_folder(State(lib): State<AppState>, me: CurrentUser, Path(id
             if let Some(g) = req.library {
                 library(lib, g)?;
             }
+            if let Some(s) = &req.subfolder {
+                stl_core::relpath::RelPath::parse(&s.folder).map_err(ApiError::bad_request)?;
+            }
             lib.db.with_tx(|tx| {
                 let to = match new_library {
                     Some(name) => Some(libraries::new_group(tx, name)?),
@@ -234,11 +240,19 @@ pub async fn change_folder(State(lib): State<AppState>, me: CurrentUser, Path(id
                 if let Some(m) = req.monitored {
                     libraries::set_monitored(tx, id, m)?;
                 }
+                if let Some(s) = &req.subfolder {
+                    libraries::set_folder_pattern(tx, id, &s.folder, s.pattern.trim())?;
+                }
                 Ok::<_, rusqlite::Error>(())
             })?;
-            Ok(LibraryFolder::from(folder_exists(lib, id)?))
+            let folder = folder_exists(lib, id)?;
+            // That folder's sidecar holds the pattern: anything inside it queues the folder.
+            let touched = req.subfolder.map(|s| stl_core::relpath::join(&folder.root, &format!("{}/_", s.folder)));
+            Ok((LibraryFolder::from(folder), touched))
         })
         .await?;
+    let (info, touched) = info;
+    lib.schedule_sidecars(touched);
     Ok(Json(info))
 }
 
