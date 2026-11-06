@@ -134,6 +134,9 @@ export function LibrariesCard({ editor, onCrawl, start }: {
                       ))}
                     </Group>
                     {f.pattern && <Text size="xs" c="dimmed">{f.pattern}</Text>}
+                    {f.subfolder_patterns.map((s) => (
+                      <Text key={s.folder} size="xs" c="dimmed">{s.folder}: {s.pattern}</Text>
+                    ))}
                   </Table.Td>
                   {editor && (
                     <Table.Td w={220}>

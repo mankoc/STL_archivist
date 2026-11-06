@@ -40,6 +40,24 @@ export const SAVED_PATTERNS = "sort_patterns";
 /** Patterns that parse values out of paths (mass edit). */
 export const PARSE_PATTERNS = "parse_patterns";
 
+interface PatternFolder {
+  root: string;
+  pattern?: string | null;
+  subfolder_patterns: { folder: string; pattern: string }[];
+}
+
+/** The pattern a crawl of `folder` uses: the deepest one kept for it, else its library folder's. */
+export function folderPattern(folder: string, libraries: { folders: PatternFolder[] }[]): string {
+  const plain = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "");
+  const target = plain(folder);
+  const holds = (base: string) => target === base || target.startsWith(`${base}/`);
+  const deepest = <T,>(items: T[], path: (item: T) => string) => items.filter((i) => holds(path(i))).sort((a, b) => path(b).length - path(a).length)[0];
+  const holder = deepest(libraries.flatMap((l) => l.folders).filter((f) => f.root), (f) => plain(f.root));
+  if (!holder) return "";
+  const own = deepest(holder.subfolder_patterns, (s) => `${plain(holder.root)}/${s.folder}`);
+  return own?.pattern ?? holder.pattern ?? "";
+}
+
 /** The saved patterns in a settings value (anything else: none). */
 export function savedPatterns(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((p): p is string => typeof p === "string" && p.trim() !== "") : [];

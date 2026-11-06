@@ -1,4 +1,24 @@
-import { missingChoice, missingValue, savedPatterns, withoutPattern, withPattern } from "./patterns";
+import { folderPattern, missingChoice, missingValue, savedPatterns, withoutPattern, withPattern } from "./patterns";
+
+describe("folderPattern", () => {
+  const libraries = [
+    {
+      folders: [
+        { root: "D:\\STL", pattern: "{creator}/{title}", subfolder_patterns: [{ folder: "Packs", pattern: "{release}/{title}" }, { folder: "Packs/Old", pattern: "{title}" }] },
+        { root: "D:/STL/Inner", pattern: null, subfolder_patterns: [] },
+      ],
+    },
+  ];
+
+  it("takes the deepest pattern kept, else the library folder's", () => {
+    expect(folderPattern("D:/STL/Other", libraries)).toBe("{creator}/{title}");
+    expect(folderPattern("D:/STL/Packs/2024", libraries)).toBe("{release}/{title}");
+    expect(folderPattern("D:/STL/Packs/Old/x", libraries)).toBe("{title}");
+    expect(folderPattern("D:/STL/Packs2", libraries)).toBe("{creator}/{title}");
+    expect(folderPattern("D:/STL/Inner/a", libraries)).toBe("");
+    expect(folderPattern("E:/elsewhere", libraries)).toBe("");
+  });
+});
 
 describe("saved sort patterns", () => {
   it("reads only text patterns", () => {

@@ -1,7 +1,7 @@
 import { folderAt, folderBadges, folderMoveText, folderRemovalText, libraryRemovalText, moveTargets, outerFolder, relocationText, type LibraryFolder, type LibraryInfo } from "./libraries";
 
 const folder = (id: number, root: string, over: Partial<LibraryFolder> = {}): LibraryFolder => ({
-  id, uuid: `f${id}`, name: `F${id}`, root, models: 2, monitored: false, reachable: true, ...over,
+  id, uuid: `f${id}`, name: `F${id}`, root, models: 2, monitored: false, subfolder_patterns: [], reachable: true, ...over,
 });
 
 const library = (id: number, folders: LibraryFolder[], over: Partial<LibraryInfo> = {}): LibraryInfo => ({

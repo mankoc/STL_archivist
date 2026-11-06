@@ -194,6 +194,7 @@ export const TOPICS: Topic[] = [
     title: "Path patterns",
     summary: "Describe how your folders are named so fields fill themselves.",
     blocks: [
+      { p: "The pattern a folder was crawled with is kept: later crawls, monitoring and Rescan use it. Part of a library laid out differently can have its own: right-click the folder in the filter pane's Path section and choose **Crawl with a pattern…**." },
       { p: "A path pattern tells crawls and Mass edit how to read fields from folder names, and tells Sort files how to build folders from fields. Each `{token}` matches one folder level (the last one the file name); `*` matches a level to ignore." },
       { table: { head: ["Token", "Aliases", "Field"], rows: [
         ["`{source}`", "`{type}`", "Type (shop or platform)"],

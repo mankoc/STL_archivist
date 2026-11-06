@@ -1,6 +1,6 @@
 # StlArchivist API
 
-Version 2026.45.26. Generated from `web/openapi.json` by `tools/api_doc.py`; the
+Version 2026.45.28. Generated from `web/openapi.json` by `tools/api_doc.py`; the
 running server serves the same document at `GET /api/openapi.json`. Do not edit by hand:
 run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after changing routes.
 
@@ -848,6 +848,7 @@ One folder of a library.
 | `pattern` (optional) | string \| null | Path pattern its crawls use. |
 | `reachable` | boolean | Its root is a folder on the server (else it must be relocated). |
 | `root` | string | Where the folder is on the server. |
+| `subfolder_patterns` | [SubfolderPattern](#subfolderpattern)[] | Folders below the root crawled with a pattern of their own, which their archives keep using. |
 | `uuid` | string | The same on every instance (export, sync). |
 
 ### LibraryInfo
@@ -1380,6 +1381,15 @@ The settings, with their effective values (defaults filled in).
 | `filename` | string |  |
 | `hash` (optional) | string \| null | The file's content hash, when the crawl stored one. |
 | `size` (optional) | integer \| null |  |
+
+### SubfolderPattern
+
+A folder's own path pattern.
+
+| Field | Type | Description |
+|---|---|---|
+| `folder` | string | Relative to the library folder's root (`/` separators). |
+| `pattern` | string |  |
 
 ### SyncPreview
 

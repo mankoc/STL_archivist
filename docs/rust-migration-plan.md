@@ -1729,6 +1729,11 @@ the path is visible. No business logic and no Tauri commands for data.
   takes `tag` and `scale` (`merge_links`).
 - 2026.45.27: `ArchiveInfo`'s file tree reads `/api/models/{id}/warnings` (the Warning details query) when the model
   has warnings; `warnings.ts`'s `warningsByFile` turns its sections into member name → warnings. `fileTree` no longer carries the CRC.
+- 2026.45.28: new table `folder_patterns` (`create_missing_tables` adds it to older databases; a delta covers it like
+  any table). `libraries::FolderPatterns` resolves the deepest pattern; `Run::pattern_of` prefers it to `cfg.pattern`
+  per archive, and `CrawlConfig.keep_pattern` stores what a crawl of a part of a library was given. A library
+  folder's own pattern stays in `libraries.pattern`. `crawler::match_pattern` and `crawl::reapply_pattern`
+  serve Rescan (`archive_tools::apply_folder_pattern`).
 
 ### Phase 8: Retire Python (small)
 

@@ -434,6 +434,14 @@ fn apply_pattern(tx: &Transaction, row: &mut ModelRow, ex: &Extracted) -> Result
     Ok(())
 }
 
+/// Fill the record's empty fields from a pattern's match.
+pub fn reapply_pattern(tx: &Transaction, id: i64, ex: &Extracted) -> Result<()> {
+    let old = load(tx, id)?;
+    let mut row = old.clone();
+    apply_pattern(tx, &mut row, ex)?;
+    store_model(tx, id, &old, &row)
+}
+
 /// Python's `round(x, 4)`: correctly rounded, ties to even on the exact value.
 pub(crate) fn round4(x: f64) -> f64 {
     format!("{x:.4}").parse().unwrap_or(x)
@@ -473,10 +481,7 @@ fn upsert<'a>(
     let Some(ch) = &input.changed else {
         // Unchanged: re-apply the pattern without overwriting.
         if let (Some(id), Some(ex)) = (input.existing, &input.extracted) {
-            let old = load(tx, id)?;
-            let mut row = old.clone();
-            apply_pattern(tx, &mut row, ex)?;
-            store_model(tx, id, &old, &row)?;
+            reapply_pattern(tx, id, ex)?;
         }
         return Ok(Upserted::default());
     };

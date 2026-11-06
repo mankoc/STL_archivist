@@ -7,7 +7,7 @@
       "name": "CC-BY-NC-SA-4.0",
       "identifier": "CC-BY-NC-SA-4.0"
     },
-    "version": "2026.45.27"
+    "version": "2026.45.28"
   },
   "paths": {
     "/api/ai/commit/{id}": {
@@ -6927,6 +6927,7 @@
           "uuid",
           "name",
           "root",
+          "subfolder_patterns",
           "monitored",
           "models",
           "reachable"
@@ -6983,6 +6984,13 @@
           "root": {
             "type": "string",
             "description": "Where the folder is on the server."
+          },
+          "subfolder_patterns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SubfolderPattern"
+            },
+            "description": "Folders below the root crawled with a pattern of their own, which their\narchives keep using."
           },
           "uuid": {
             "type": "string",
@@ -8805,6 +8813,23 @@
               "null"
             ],
             "format": "int64"
+          }
+        }
+      },
+      "SubfolderPattern": {
+        "type": "object",
+        "description": "A folder's own path pattern.",
+        "required": [
+          "folder",
+          "pattern"
+        ],
+        "properties": {
+          "folder": {
+            "type": "string",
+            "description": "Relative to the library folder's root (`/` separators)."
+          },
+          "pattern": {
+            "type": "string"
           }
         }
       },

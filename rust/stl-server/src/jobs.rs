@@ -1914,7 +1914,9 @@ fn crawl_folder(
         return Err(format!("{folder} is not a folder the server can read"));
     }
     let settings = LibrarySettings::load(&lib.config.data_dir);
-    let pattern = match pattern {
+    let keep_pattern = pattern.clone().filter(|_| library_root.is_some());
+    // No pattern for a part of a library folder: the folder's own.
+    let pattern = match pattern.filter(|p| !p.is_empty() || library_root.is_none()) {
         Some(p) => p,
         None => lib
             .db
@@ -1928,6 +1930,7 @@ fn crawl_folder(
     let unrar = lib.config.unrar_tool();
     let cfg = CrawlConfig {
         source_dir: folder.clone(),
+        keep_pattern,
         library_root,
         pattern,
         recurse: recurse.unwrap_or_else(|| settings.recurse_subdirs()),
