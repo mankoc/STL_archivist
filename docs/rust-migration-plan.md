@@ -1691,6 +1691,8 @@ the path is visible. No business logic and no Tauri commands for data.
   under `viewCube.ts`'s `CLICK_SLOP` is a click on the face it started on).
 - 2026.45.17: `meshpeek-core` and `meshpeek-render` are no longer vendored: they come from the MeshPeek
   repository by release tag, which `.github/workflows/meshpeek.yml` moves to each new release.
+- 2026.45.18: the table sorts by Date: `release_date` in `library::SORT_COLUMNS` is not a view column;
+  `table_ids` orders it by `release_year`, then `release_month`.
 
 ### Phase 8: Retire Python (small)
 

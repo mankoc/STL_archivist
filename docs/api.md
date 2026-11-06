@@ -1,6 +1,6 @@
 # StlArchivist API
 
-Version 2026.45.16. Generated from `web/openapi.json` by `tools/api_doc.py`; the
+Version 2026.45.18. Generated from `web/openapi.json` by `tools/api_doc.py`; the
 running server serves the same document at `GET /api/openapi.json`. Do not edit by hand:
 run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after changing routes.
 
@@ -1326,7 +1326,7 @@ The settings, with their effective values (defaults filled in).
 
 | Field | Type | Description |
 |---|---|---|
-| `column` | string | One of `title`, `creator`, `source`, `sculptor_name`, `collection_name`, `subcollection_name`, `sequence`, `release_name`, `archive_path`, `presupports`, `created_at`, `archive_size`, `compression_rate`, `category_name`. |
+| `column` | string | One of `title`, `creator`, `source`, `sculptor_name`, `collection_name`, `subcollection_name`, `sequence`, `release_name`, `archive_path`, `presupports`, `created_at`, `archive_size`, `compression_rate`, `category_name`, `library_name`, `release_date` (the release year, then its month). |
 | `descending` (optional) | boolean |  |
 
 ### SortRequest

@@ -51,11 +51,12 @@ const ID_FACETS: &[(&str, &str)] = &[
     ("release", "release_id"),
 ];
 
-/// `models_view` columns the table can sort by (`SORT_COLUMNS`).
+/// What the table can sort by: `models_view` columns, and `release_date` (the
+/// release year, then its month).
 pub const SORT_COLUMNS: &[&str] = &[
     "title", "creator", "source", "sculptor_name", "collection_name", "subcollection_name", "sequence",
     "release_name", "archive_path", "presupports", "created_at", "archive_size", "compression_rate",
-    "category_name", "library_name",
+    "category_name", "library_name", "release_date",
 ];
 
 /// One selected value: text, a lookup id, or a `(year, month)` date.
@@ -447,7 +448,11 @@ pub fn table_ids(conn: &Connection, spec: &FilterSpec, search: &Search, sort: Op
             return Err(rusqlite::Error::InvalidParameterName(format!("not a sortable column: {column}")));
         }
         let dir = if descending { "DESC" } else { "ASC" };
-        sql.push_str(&format!(" ORDER BY models_view.{column} {dir} NULLS LAST, models_view.id"));
+        let order = match column {
+            "release_date" => format!("models_view.release_year {dir} NULLS LAST, models_view.release_month {dir} NULLS LAST"),
+            _ => format!("models_view.{column} {dir} NULLS LAST"),
+        };
+        sql.push_str(&format!(" ORDER BY {order}, models_view.id"));
     }
     let mut st = conn.prepare(&sql)?;
     st.query_map(params_from_iter(params), |r| r.get(0))?.collect()
@@ -1458,6 +1463,16 @@ mod tests {
         assert_eq!(find("ann drgon", &[], true), vec![1]); // creator and tag together
         assert_eq!(find("ben", &["creator"], true), vec![3]);
         assert!(pool.with(|c| table_ids(c, &FilterSpec::default(), &Search { text: "x".into(), fields: vec!["nope".into()], fuzzy: false }, None)).is_err());
+    }
+
+    #[test]
+    fn sorts_by_release_date() {
+        let (_dir, pool) = sample();
+        // Red 2024-03, Blue 2023-03, Knight 2024-11, Loose no date.
+        pool.with_tx(|tx| tx.execute("UPDATE models SET release_year = 2024, release_month = 11 WHERE id = 3", [])).unwrap();
+        let sorted = |descending| pool.with(|c| table_ids(c, &FilterSpec::default(), &Search::default(), Some(("release_date", descending)))).unwrap();
+        assert_eq!(sorted(false), vec![2, 1, 3, 4]);
+        assert_eq!(sorted(true), vec![3, 1, 2, 4]); // no date stays last
     }
 
     #[test]

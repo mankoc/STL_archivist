@@ -70,7 +70,7 @@ export const COLUMNS: Column[] = [
   { id: "title", header: "Title", size: 280, sortKey: "title", render: (r) => r.title ?? baseName(r.archive_path), field: "title", text: text("title") },
   { id: "creator", header: "Creator", size: 140, sortKey: "creator", render: (r) => r.creator, field: "creator", text: text("creator") },
   { id: "source", header: "Type", size: 110, sortKey: "source", render: (r) => r.source, field: "source", text: text("source") },
-  { id: "date", header: "Date", size: 80, render: (r) => formatDate(r.release_year, r.release_month), field: "date", text: (r) => formatDate(r.release_year, r.release_month) },
+  { id: "date", header: "Date", size: 80, sortKey: "release_date", render: (r) => formatDate(r.release_year, r.release_month), field: "date", text: (r) => formatDate(r.release_year, r.release_month) },
   { id: "sculptor", header: "Sculptor", size: 130, sortKey: "sculptor_name", render: (r) => r.sculptor, field: "sculptor", text: text("sculptor") },
   { id: "collection", header: "Collection", size: 130, sortKey: "collection_name", render: (r) => r.collection, field: "collection", text: text("collection") },
   { id: "subcollection", header: "Subcollection", size: 130, sortKey: "subcollection_name", render: (r) => r.subcollection, field: "subcollection", text: text("subcollection") },

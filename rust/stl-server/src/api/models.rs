@@ -25,7 +25,8 @@ pub const MAX_ROWS: usize = 2000;
 pub struct Sort {
     /// One of `title`, `creator`, `source`, `sculptor_name`, `collection_name`,
     /// `subcollection_name`, `sequence`, `release_name`, `archive_path`,
-    /// `presupports`, `created_at`, `archive_size`, `compression_rate`, `category_name`.
+    /// `presupports`, `created_at`, `archive_size`, `compression_rate`, `category_name`,
+    /// `library_name`, `release_date` (the release year, then its month).
     pub column: String,
     #[serde(default)]
     pub descending: bool,
