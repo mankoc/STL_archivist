@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026.45.25 — 2026-11-06
+
+- The README no longer lists the limit on custom presupport patterns that 2026.45.24 removed.
+
 ## 2026.45.24 — 2026-11-06
 
 - **Custom presupport patterns can be any regular expression**, not only the subset the old Python app

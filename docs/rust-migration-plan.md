@@ -1722,6 +1722,7 @@ the path is visible. No business logic and no Tauri commands for data.
   equal ids. Comments that promised a Python fallback now say what happens; names of Python functions
   that only describe a behaviour (`str.strip`, `zipfile`) stay. The readers' name handling stays too:
   it decides `archive_hash`.
+- 2026.45.25: README: the pattern limit left over from 2026.45.24.
 
 ### Phase 8: Retire Python (small)
 
