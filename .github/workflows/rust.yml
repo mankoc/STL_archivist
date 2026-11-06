@@ -25,9 +25,8 @@ jobs:
           npm test
           npm run build
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
+      - name: Rust (rust-toolchain.toml)
+        run: rustup toolchain install
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -40,3 +39,40 @@ jobs:
       - name: Clippy
         working-directory: rust
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # What the Docker image ships. The desktop shell stays on Windows: it needs WebKitGTK here.
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Rust (rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Rust tests
+        working-directory: rust
+        run: cargo test -p stl-core -p stl-server -p stl-proc
+
+  # Known advisories, reported without failing the run.
+  audit:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: Rust dependencies
+        working-directory: rust
+        run: cargo audit
+
+      - name: Web dependencies
+        if: always()
+        working-directory: web
+        run: npm audit --audit-level=high

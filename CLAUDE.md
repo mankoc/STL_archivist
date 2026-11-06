@@ -35,6 +35,9 @@ cd rust && cargo test --workspace && cargo clippy --workspace --all-targets -- -
 cd web && npm test && npx tsc --noEmit -p .
 ```
 
+`rust-toolchain.toml` pins the Rust version for development and CI; `RUST_VERSION` in
+`docker/Dockerfile` must match it. CI also runs the server's tests on Linux.
+
 ## Architecture
 
 ```text
@@ -196,3 +199,4 @@ previous version's when the year and week are unchanged, else 0. The version is 
 version`, which the server reports), `rust/stl-desktop/tauri.bundle.json` (the installer),
 `web/package.json`, and the `Version:` line of `README.md`. Each version gets a
 `## <version> — <date>` section in `CHANGELOG.md` with that commit's changes.
+`python tools/version.py NOTES.md` does all of this. `web/openapi.json` carries no version.

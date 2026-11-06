@@ -304,8 +304,11 @@ async fn openapi() -> Json<utoipa::openapi::OpenApi> {
 }
 
 /// The OpenAPI document, pretty-printed with a final newline (what
-/// `web/openapi.json` must hold).
+/// `web/openapi.json` must hold). It names no version, so that the file changes
+/// only with the API; a running server's `/api/openapi.json` has its own.
 pub fn openapi_json() -> String {
-    ApiDoc::openapi().to_pretty_json().expect("the document serialises") + "
+    let mut doc = ApiDoc::openapi();
+    doc.info.version = "current".to_string();
+    doc.to_pretty_json().expect("the document serialises") + "
 "
 }

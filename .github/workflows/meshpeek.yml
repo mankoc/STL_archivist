@@ -50,11 +50,9 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Rust (rust-toolchain.toml)
         if: steps.release.outputs.tag
-        with:
-          components: clippy
-          targets: wasm32-unknown-unknown
+        run: rustup toolchain install
 
       - uses: Swatinem/rust-cache@v2
         if: steps.release.outputs.tag
