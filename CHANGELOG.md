@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026.45.23 — 2026-11-06
+
+- **Crawls use far less memory.** Only the images that become thumbnails are read (the first *Thumbnails
+  per archive*, in catalog order), and their bytes are let go once the thumbnails are made, instead of
+  every image of a batch of 50 archives staying in memory: 3 GB down to under 80 MB on a test batch.
+  A solid 7z also stops decompressing sooner.
+- **Images beside archives are decoded once per folder**, in parallel, instead of again for every archive:
+  200 archives sharing 5 images went from 54 s to under half a second.
+- **Filtering is much faster**: a click no longer recomputes the counts over the whole library, which are
+  kept, and the sections are read at once. On 100,000 models a creator went from 880 ms to 13 ms, a tag
+  from 1,060 ms to 240 ms and a folder from 700 ms to 130 ms.
+
 ## 2026.45.22 — 2026-11-06
 
 - **Sort files no longer overwrites files.** Two moves with one destination (archives with the same

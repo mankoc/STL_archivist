@@ -50,7 +50,7 @@ pub fn rescan(path: &str, old_size: Option<i64>, old_mtime: Option<i64>, old_has
         None => fallback_fingerprint(path),
     };
     let pats = patterns(&opts.presupport_patterns)?;
-    let extracted = extract_native(path, &opts.unrar).ok_or("the server cannot read this archive; left unchanged")?;
+    let extracted = extract_native(path, &opts.unrar, Some(0)).ok_or("the server cannot read this archive; left unchanged")?;
     if extracted.names.is_empty() {
         return Err("Could not read archive contents — left unchanged".into());
     }
@@ -116,7 +116,7 @@ pub fn thumbnails(path: &str, max_thumbnails: usize, max_size: u32, opts: &Optio
         return Err("archive not found".into());
     }
     let pats = patterns(&opts.presupport_patterns)?;
-    let extracted = extract_native(path, &opts.unrar).ok_or("the server cannot read this archive")?;
+    let extracted = extract_native(path, &opts.unrar, None).ok_or("the server cannot read this archive")?;
     if let Some(why) = &extracted.unread {
         return Err(format!("the archive's images cannot be read ({why})"));
     }

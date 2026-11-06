@@ -66,6 +66,24 @@ async fn an_exclusion_keeps_models_without_a_value() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_filtered_tree_has_the_library_s_counts_and_its_own() {
+    let (lib, ed) = fixture();
+    let tree = |filter: Value| {
+        let body = json!({"filter": filter, "show": ["author", "path"], "counts": true});
+        let state = lib.state.clone();
+        let token = ed.clone();
+        async move { call(&state, "POST", "/api/filter-tree", Some(&token), Some(body)).await.json() }
+    };
+    let all = tree(json!({})).await;
+    let filtered = tree(json!({"include": {"date": [{"year": 2024}]}})).await;
+    assert_eq!(filtered["counts"], all["counts"], "over the whole library, under any filter");
+    assert_eq!(filtered["path_counts"], all["path_counts"]);
+    assert_eq!(filtered["scoped"], true);
+    assert_eq!(filtered["scoped_counts"]["creator"], json!({"ALICE": 1, "Alice": 1}));
+    assert_eq!(filtered["creators"], json!(["ALICE", "Alice"]));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn creators_match_exactly_as_the_pane_lists_them() {
     let (lib, ed) = fixture();
     assert_eq!(titles(&lib, &ed, json!({"include": {"creator": ["Élan Vital"]}})).await, ["no images"]);

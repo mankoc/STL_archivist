@@ -32,7 +32,7 @@ pub const GROUPS: &[&str] = &[
     "release", "scale", "presupports", "warning", "path",
 ];
 
-/// Sections `filter_tree` can be asked to show (`Show`).
+/// Sections the filter tree can be asked to show (`Show`).
 pub const SHOW: &[&str] = &[
     "library", "author", "tags", "source", "date", "sculptor", "collection", "subcollection", "category", "release",
     "scale", "presupports", "path",
@@ -699,38 +699,16 @@ fn add_ancestors(out: &mut HashMap<String, i64>, direct: &HashMap<String, i64>) 
     }
 }
 
-/// `filter_tree_data(spec, show, show_counts)`: every section in turn on `conn`.
-pub fn filter_tree(conn: &Connection, spec: Option<&FilterSpec>, show: &Show, show_counts: bool) -> Result<FilterTree> {
-    let mut ft = FilterTree::default();
-    let spec = spec.filter(|s| !s.is_empty());
-    let scopes = match spec {
-        Some(spec) => {
-            ft.scoped = true;
-            scopes_of(conn, spec)?
-        }
-        None => Scopes::default(),
-    };
-    for section in SECTIONS {
-        section(conn, &scopes, show, show_counts, &mut ft)?;
-    }
-    if show_counts && spec.is_some() {
-        scoped_counts(conn, &scopes, &mut ft)?;
-    }
-    Ok(ft)
-}
-
-/// The unfiltered tree with its sections read at once, each on a connection of
-/// `pool`: on a hard disk the reads of several indexes queue together instead of
-/// one after the other. The same tree as [`filter_tree`] without a filter.
-pub fn filter_tree_parallel(pool: &super::pool::Pool, show: &Show, show_counts: bool) -> Result<FilterTree> {
+/// The sections of `show` at once, each on a connection of `pool`: on a hard disk
+/// the reads of several indexes queue together instead of one after the other.
+fn sections_parallel(pool: &super::pool::Pool, scopes: &Scopes, show: &Show, counts: bool) -> Result<FilterTree> {
     use rayon::prelude::*;
-    let none = Scopes::default();
     let parts = SECTIONS
         .par_iter()
         .map(|section| {
             let conn = pool.get()?;
             let mut ft = FilterTree::default();
-            section(&conn, &none, show, show_counts, &mut ft)?;
+            section(&conn, scopes, show, counts, &mut ft)?;
             Ok(ft)
         })
         .collect::<Result<Vec<_>>>()?;
@@ -738,6 +716,47 @@ pub fn filter_tree_parallel(pool: &super::pool::Pool, show: &Show, show_counts: 
     for part in parts {
         ft.absorb(part);
     }
+    Ok(ft)
+}
+
+/// The tree without a filter.
+pub fn filter_tree_parallel(pool: &super::pool::Pool, show: &Show, show_counts: bool) -> Result<FilterTree> {
+    sections_parallel(pool, &Scopes::default(), show, show_counts)
+}
+
+/// The tree under a filter: each section's values, and with `show_counts` the
+/// scoped counts. The `counts` over the whole library do not depend on the
+/// filter, so they are left to the unfiltered tree, which is kept.
+pub fn scoped_tree(pool: &super::pool::Pool, spec: &FilterSpec, show: &Show, show_counts: bool) -> Result<FilterTree> {
+    let conn = pool.get()?;
+    let scopes = scopes_of(&conn, spec)?;
+    let mut ft = if spec.facet_active("path") {
+        // The folders' temporary table lives on this connection.
+        let mut ft = FilterTree::default();
+        for section in SECTIONS {
+            section(&conn, &scopes, show, false, &mut ft)?;
+        }
+        if show_counts {
+            scoped_counts(&conn, &scopes, &mut ft)?;
+        }
+        ft
+    } else {
+        drop(conn);
+        let (sections, counts) = rayon::join(
+            || sections_parallel(pool, &scopes, show, false),
+            || {
+                let mut ft = FilterTree::default();
+                if show_counts {
+                    scoped_counts(&*pool.get()?, &scopes, &mut ft)?;
+                }
+                Ok::<_, rusqlite::Error>(ft)
+            },
+        );
+        let mut ft = sections?;
+        ft.absorb(counts?);
+        ft
+    };
+    ft.scoped = true;
     Ok(ft)
 }
 
@@ -1477,10 +1496,26 @@ mod tests {
     fn parallel_tree_is_the_sequential_one() {
         let (_dir, pool) = sample();
         let all = Show(SHOW.iter().map(|s| s.to_string()).collect());
+        let sequential = |scopes: &Scopes, show: &Show, counts: bool, ft: &mut FilterTree| {
+            pool.with(|c| SECTIONS.iter().try_for_each(|section| section(c, scopes, show, counts, ft))).unwrap()
+        };
         for (show, counts) in [(&all, true), (&all, false), (&Show::default(), true)] {
-            let sequential = pool.with(|c| filter_tree(c, None, show, counts)).unwrap();
-            assert_eq!(filter_tree_parallel(&pool, show, counts).unwrap(), sequential, "counts: {counts}");
+            let mut expected = FilterTree::default();
+            sequential(&Scopes::default(), show, counts, &mut expected);
+            assert_eq!(filter_tree_parallel(&pool, show, counts).unwrap(), expected, "counts: {counts}");
         }
+        // The same under a filter, by way of the connection that holds the folders' table or not.
+        let mut by_creator = FilterSpec::default();
+        by_creator.include.insert("creator".into(), vec![FilterValue::Text("Ann".into())]);
+        let scopes = pool.with(|c| scopes_of(c, &by_creator)).unwrap();
+        let mut expected = FilterTree { scoped: true, ..Default::default() };
+        sequential(&scopes, &all, false, &mut expected);
+        pool.with(|c| scoped_counts(c, &scopes, &mut expected)).unwrap();
+        assert_eq!(scoped_tree(&pool, &by_creator, &all, true).unwrap(), expected);
+        let mut by_folder = FilterSpec::default();
+        by_folder.include.insert("path".into(), vec![FilterValue::Text("F:/lib/A".into())]);
+        let tree = scoped_tree(&pool, &by_folder, &all, true).unwrap();
+        assert!(tree.scoped && tree.counts.is_empty() && !tree.scoped_counts.is_empty(), "{tree:?}");
         let tree = filter_tree_parallel(&pool, &all, true).unwrap();
         assert_eq!(tree.counts[&Key::Text("warning".into(), "Nested archives".into())], 2);
         assert!(tree.creators.contains(&"Ann".to_string()) && tree.creators.contains(&"Ben".to_string()), "{:?}", tree.creators);
