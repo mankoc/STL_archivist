@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.45.19 — 2026-11-06
+
+- **Sort files can choose what missing fields become**: *Missing fields* writes *unknown* as before,
+  leaves them empty, or uses your own text. Left empty, a folder level is left out and an empty file
+  name keeps the archive's name.
+- **Security:** a `..` segment in a pattern or a field's value could move archives outside the target
+  folder. Segments of only dots now count as empty.
+
 ## 2026.45.18 — 2026-11-06
 
 - **The table can be sorted by Date**: click the *Date* header to order models by release year, then

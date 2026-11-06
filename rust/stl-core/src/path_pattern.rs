@@ -231,15 +231,15 @@ pub fn parse_path(pattern: &str, path: &str) -> Fields {
 }
 
 /// The substitution of `render_path_pattern`: each `{token}` / `{token:n}` becomes
-/// `values[token]` (`"_unknown"` when absent), cut to `n` characters, with
+/// `values[token]` (`missing` when absent), cut to `n` characters, with
 /// `\ / : * ? " < > |` replaced by `_`.
-pub fn render(pattern: &str, values: &HashMap<String, String>) -> String {
+pub fn render(pattern: &str, values: &HashMap<String, String>, missing: &str) -> String {
     static TOKEN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{(\w+(?::\d+)?)\}").unwrap());
     TOKEN
         .replace_all(pattern, |c: &regex::Captures| {
             let mut parts = c[1].splitn(2, ':');
             let token = parts.next().unwrap_or("").to_lowercase();
-            let raw = values.get(&token).map(String::as_str).unwrap_or("_unknown");
+            let raw = values.get(&token).map(String::as_str).unwrap_or(missing);
             let raw: String = match parts.next().and_then(py_int) {
                 Some(n) => raw.chars().take(n.max(0) as usize).collect(),
                 None => raw.to_string(),
@@ -285,6 +285,7 @@ mod tests {
     #[test]
     fn rendering() {
         let v: HashMap<String, String> = map(&[("creator", "Sa/nix"), ("title", "Dragon")]).into_iter().collect();
-        assert_eq!(render("{creator:1}/{creator}/{title}/{url}", &v), "S/Sa_nix/Dragon/_unknown");
+        assert_eq!(render("{creator:1}/{creator}/{title}/{url}", &v, "_unknown"), "S/Sa_nix/Dragon/_unknown");
+        assert_eq!(render("{title}/{url}", &v, ""), "Dragon/");
     }
 }

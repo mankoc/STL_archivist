@@ -1,6 +1,6 @@
 # StlArchivist API
 
-Version 2026.45.18. Generated from `web/openapi.json` by `tools/api_doc.py`; the
+Version 2026.45.19. Generated from `web/openapi.json` by `tools/api_doc.py`; the
 running server serves the same document at `GET /api/openapi.json`. Do not edit by hand:
 run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after changing routes.
 
@@ -795,7 +795,7 @@ One of:
 - `kind: "remove_components"` — `components`: Delete downloaded components (administrators).
 - `kind: "rescan"` — `ids`: Re-read the models' archives: metadata, presupports, warnings, scales, hash (Rescan).
 - `kind: "generate_thumbnails"` — `ids`, `max_thumbnails`: Replace the models' images with ones from their archives, at most `max_thumbnails` each (default: the library setting).
-- `kind: "sort_files"` — `ids`, `pattern`, `target_dir`: Move the models' archives into a folder tree under `target_dir` built from `pattern` (Sort Files). Needs *file sorting* in the settings.
+- `kind: "sort_files"` — `ids`, `missing`, `pattern`, `target_dir`: Move the models' archives into a folder tree under `target_dir` built from `pattern` (Sort Files), fields without a value becoming `missing` (default `_unknown`; `""` leaves them empty). Needs *file sorting* in the settings.
 - `kind: "relocate_library"` — `apply`, `fix_case`, `id`, `root`: Move a library's folder to a new root: check every archive there and, with `apply`, set the root (and those of the folders inside it). With `fix_case`, paths found only with another letter case take the spelling on disk. Nothing is re-read.
 - `kind: "delete_files"` — `ids`: Move the models' archive files to the trash folder (or delete them, without one) and remove the records. Needs *allow file delete*.
 - `kind: "ai_suggest"` — `id`, `ignore_meta`, `max_tags`: Ask the AI tagger for one model's tags and metadata; nothing is saved (save the reviewed result with `/api/ai/commit/{id}`).
@@ -1334,6 +1334,7 @@ The settings, with their effective values (defaults filled in).
 | Field | Type | Description |
 |---|---|---|
 | `ids` | integer[] |  |
+| `missing` (optional) | string \| null | What fields without a value become; `""` leaves them empty (a folder level is left out, a file name is the archive's). Default: `_unknown`. |
 | `pattern` | string | `{collection}/{creator}/{title}`: folders, then the file name. |
 | `target_dir` | string | The folder the tree is built in (a server folder). |
 

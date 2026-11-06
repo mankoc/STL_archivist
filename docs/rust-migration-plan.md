@@ -1693,6 +1693,9 @@ the path is visible. No business logic and no Tauri commands for data.
   repository by release tag, which `.github/workflows/meshpeek.yml` moves to each new release.
 - 2026.45.18: the table sorts by Date: `release_date` in `library::SORT_COLUMNS` is not a view column;
   `table_ids` orders it by `release_year`, then `release_month`.
+- 2026.45.19: `missing` on `/api/sort/preview` and the `sort_files` job (`sort_files::UNKNOWN` when
+  left out) reaches `values`, `path_pattern::render` and `target`. `sanitise_segment` now gives `""`
+  for nothing or only dots (no more `..` out of the target folder), and `target` decides what fills it.
 
 ### Phase 8: Retire Python (small)
 

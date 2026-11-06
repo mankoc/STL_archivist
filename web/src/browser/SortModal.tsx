@@ -1,15 +1,22 @@
 // Sort files: move the selected archives into a folder tree built from a path
 // pattern, after a preview (the desktop's Sort / Organise Files dialog).
-import { Alert, Badge, Button, Group, Modal, Stack, Table, Text, TextInput } from "@mantine/core";
+import { Alert, Badge, Button, Group, Modal, Select, Stack, Table, Text, TextInput } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useState } from "react";
 
 import { api, type Schemas, unwrap } from "../api/client";
 import { FolderPicker } from "../jobs/FolderPicker";
+import { type MissingChoice, type MissingMode, missingChoice, missingValue } from "./patterns";
 import { PatternTools } from "./PatternTools";
 import classes from "./SortModal.module.css";
 
 const PATTERN_KEY = "stl.sort.pattern";
+const MISSING_KEY = "stl.sort.missing";
+const MISSING_MODES: { value: MissingMode; label: string }[] = [
+  { value: "unknown", label: "Write “unknown”" },
+  { value: "empty", label: "Leave empty" },
+  { value: "text", label: "Replace with text" },
+];
 /** The size the dialog was resized to, remembered in this browser. */
 const SIZE_KEY = "stl.sort.size";
 const STATUS_COLOR: Record<string, string> = { OK: "green", COLLISION: "yellow", MISS: "red", SKIP: "gray", ERROR: "red", FILE: "blue" };
@@ -19,6 +26,14 @@ function stored(): string {
     return localStorage.getItem(PATTERN_KEY) ?? "{collection}/{creator}/{title}";
   } catch {
     return "{collection}/{creator}/{title}";
+  }
+}
+
+function storedMissing(): MissingChoice {
+  try {
+    return missingChoice(JSON.parse(localStorage.getItem(MISSING_KEY) ?? "null"));
+  } catch {
+    return missingChoice(null);
   }
 }
 
@@ -51,6 +66,7 @@ function rememberSize(stack: HTMLDivElement | null) {
 export function SortModal({ ids, opened, onClose }: { ids: number[]; opened: boolean; onClose: () => void }) {
   const [target, setTarget] = useState("");
   const [pattern, setPattern] = useState(stored);
+  const [missing, setMissing] = useState(storedMissing);
   const [picker, setPicker] = useState(false);
   const [rows, setRows] = useState<Schemas["SortRow"][] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -59,13 +75,18 @@ export function SortModal({ ids, opened, onClose }: { ids: number[]; opened: boo
     setPattern(p);
     setRows(null);
   };
+  const changeMissing = (m: MissingChoice) => {
+    setMissing(m);
+    setRows(null);
+  };
 
   const preview = async () => {
     setError(null);
     try {
-      setRows(unwrap(await api.POST("/api/sort/preview", { body: { ids, target_dir: target, pattern } })));
+      setRows(unwrap(await api.POST("/api/sort/preview", { body: { ids, target_dir: target, pattern, missing: missingValue(missing) } })));
       try {
         localStorage.setItem(PATTERN_KEY, pattern);
+        localStorage.setItem(MISSING_KEY, JSON.stringify(missing));
       } catch {
         /* per-viewer convenience only */
       }
@@ -76,7 +97,7 @@ export function SortModal({ ids, opened, onClose }: { ids: number[]; opened: boo
   };
   const move = async () => {
     try {
-      unwrap(await api.POST("/api/jobs", { body: { kind: "sort_files", ids, target_dir: target, pattern } }));
+      unwrap(await api.POST("/api/jobs", { body: { kind: "sort_files", ids, target_dir: target, pattern, missing: missingValue(missing) } }));
       notifications.show({ message: "Moving the archives: follow it on the Jobs page" });
       onClose();
     } catch (err) {
@@ -108,6 +129,28 @@ export function SortModal({ ids, opened, onClose }: { ids: number[]; opened: boo
             data-testid="sort-pattern"
           />
           <PatternTools pattern={pattern} onChange={changePattern} mode="sort" />
+        </Group>
+        <Group align="flex-end" gap="xs">
+          <Select
+            label="Missing fields"
+            description="An empty folder level is left out; an empty file name keeps the archive’s name"
+            data={MISSING_MODES}
+            value={missing.mode}
+            onChange={(v) => v && changeMissing({ ...missing, mode: v as MissingMode })}
+            allowDeselect={false}
+            style={{ flex: 1 }}
+            data-testid="sort-missing"
+          />
+          {missing.mode === "text" && (
+            <TextInput
+              aria-label="Text for missing fields"
+              placeholder="Text"
+              value={missing.text}
+              onChange={(e) => changeMissing({ ...missing, text: e.currentTarget.value })}
+              style={{ flex: 1 }}
+              data-testid="sort-missing-text"
+            />
+          )}
         </Group>
         {error && <Alert color="red">{error}</Alert>}
         <Group>

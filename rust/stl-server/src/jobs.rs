@@ -194,8 +194,15 @@ pub enum JobRequest {
         max_thumbnails: Option<usize>,
     },
     /// Move the models' archives into a folder tree under `target_dir` built
-    /// from `pattern` (Sort Files). Needs *file sorting* in the settings.
-    SortFiles { ids: Vec<i64>, target_dir: String, pattern: String },
+    /// from `pattern` (Sort Files), fields without a value becoming `missing`
+    /// (default `_unknown`; `""` leaves them empty). Needs *file sorting* in the settings.
+    SortFiles {
+        ids: Vec<i64>,
+        target_dir: String,
+        pattern: String,
+        #[serde(default)]
+        missing: Option<String>,
+    },
     /// Move a library's folder to a new root: check every archive there and,
     /// with `apply`, set the root (and those of the folders inside it). With
     /// `fix_case`, paths found only with another letter case take the
@@ -808,7 +815,9 @@ fn run(lib: &Library, job: &Job) -> Result<String, String> {
         JobRequest::Rescan { ids } => rescan(lib, job, &ids),
         JobRequest::GenerateThumbnails { ids, max_thumbnails } => generate_thumbnails(lib, job, &ids, max_thumbnails),
         JobRequest::DeleteFiles { ids } => delete_files(lib, job, &ids),
-        JobRequest::SortFiles { ids, target_dir, pattern } => sort_files(lib, job, &ids, &target_dir, &pattern),
+        JobRequest::SortFiles { ids, target_dir, pattern, missing } => {
+            sort_files(lib, job, &ids, &target_dir, &pattern, missing.as_deref().unwrap_or(stl_core::sort_files::UNKNOWN))
+        }
         JobRequest::RelocateLibrary { id, root, apply, fix_case } => relocate_library(lib, job, id, &root, apply, fix_case),
         JobRequest::AiSuggest { id, max_tags, ignore_meta } => ai_suggest(lib, job, id, max_tags, ignore_meta),
         JobRequest::AiTag { ids, overwrite, ignore_meta, max_tags } => ai_tag(lib, job, &ids, overwrite, ignore_meta, max_tags),
@@ -927,12 +936,12 @@ fn relocate_library(lib: &Library, job: &Job, id: i64, root: &str, apply: bool, 
     Ok(summary)
 }
 
-fn sort_files(lib: &Library, job: &Job, ids: &[i64], target_dir: &str, pattern: &str) -> Result<String, String> {
+fn sort_files(lib: &Library, job: &Job, ids: &[i64], target_dir: &str, pattern: &str, missing: &str) -> Result<String, String> {
     if !LibrarySettings::load(&lib.config.data_dir).file_sorting_enabled() {
         return Err("sorting files is disabled in the library settings (file sorting)".into());
     }
     let sources = lib.db.with(|c| storage::browser::sort_sources(c, ids)).map_err(db_err)?;
-    let rows = stl_core::sort_files::preview(&sources, ids, std::path::Path::new(target_dir), pattern);
+    let rows = stl_core::sort_files::preview(&sources, ids, std::path::Path::new(target_dir), pattern, missing);
     for r in rows.iter().filter(|r| !r.moves()) {
         lib.job_log(job, format!("{}: {} ({})", r.status, r.from, r.to));
     }

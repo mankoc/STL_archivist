@@ -22,6 +22,10 @@ pub struct SortRequest {
     pub target_dir: String,
     /// `{collection}/{creator}/{title}`: folders, then the file name.
     pub pattern: String,
+    /// What fields without a value become; `""` leaves them empty (a folder level
+    /// is left out, a file name is the archive's). Default: `_unknown`.
+    #[serde(default)]
+    pub missing: Option<String>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -46,7 +50,8 @@ pub async fn preview(State(lib): State<AppState>, me: CurrentUser, Json(req): Js
         .run(move |lib| {
             super::files::check_access(lib, &me, &PathBuf::from(&req.target_dir))?;
             let sources = lib.db.with(|c| browser::sort_sources(c, &req.ids))?;
-            Ok::<_, ApiError>(sort_files::preview(&sources, &req.ids, &PathBuf::from(&req.target_dir), &req.pattern))
+            let missing = req.missing.as_deref().unwrap_or(sort_files::UNKNOWN);
+            Ok::<_, ApiError>(sort_files::preview(&sources, &req.ids, &PathBuf::from(&req.target_dir), &req.pattern, missing))
         })
         .await?;
     Ok(Json(rows.into_iter().map(|r| SortRow { id: r.id, status: r.status.into(), from: r.from, to: r.to }).collect()))
