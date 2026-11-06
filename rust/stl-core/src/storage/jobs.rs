@@ -1,11 +1,7 @@
-//! Archive jobs outside the crawl: a port of `app/services/archive_jobs.py`
-//! (the browser's Generate Thumbnails and Rescan, and Update Crawled Folders'
-//! cross-folder reconciliation and deferred-deletion clean-up).
-//!
-//! Image rows follow the ORM's operation order (see `crawl.rs`): a deleted
-//! row stays until the next flush, which runs after that flush's inserts.
+//! Archive jobs outside the crawl: the browser's Generate Thumbnails and Rescan,
+//! and Update Folders' cross-folder reconciliation and deferred-deletion clean-up.
 
-#![allow(clippy::type_complexity)] // row tuples mirror the Python records
+#![allow(clippy::type_complexity)] // row tuples
 
 use std::collections::{HashMap, HashSet};
 
@@ -27,18 +23,6 @@ pub fn rescan_state(conn: &Connection, model_id: i64) -> Result<Option<(Option<S
     .optional()
 }
 
-fn thumb_ids(refs: &[String]) -> Vec<u64> {
-    refs.iter()
-        .filter_map(|r| {
-            if !r.is_empty() && r.bytes().all(|b| b.is_ascii_digit()) {
-                r.parse().ok()
-            } else {
-                WinPath::new(r).stem().parse().ok()
-            }
-        })
-        .collect()
-}
-
 /// Generate Thumbnails for one model: drop its images (and their thumbnails),
 /// then store `thumbs` (`(member name, JPEG or None for a failed conversion)`)
 /// and set the warning. Returns the number stored, or `None` without the model.
@@ -57,32 +41,22 @@ pub fn replace_thumbnails(
     drop(st);
     let refs: Vec<String> = old.iter().filter_map(|(_, t)| t.clone()).filter(|t| !t.is_empty()).collect();
     if let Some(s) = store {
-        let _ = s.delete_many(&thumb_ids(&refs));
+        let _ = s.delete_many(&super::crawl::ref_ids(&refs));
     }
     for (id, _) in &old {
         tx.execute("DELETE FROM images WHERE id = ?1", [id])?;
     }
-    let mut pending: Option<i64> = None;
     let mut count = 0;
     for (name, jpeg) in thumbs {
+        let (Some(j), Some(s)) = (jpeg.as_ref().filter(|j| !j.is_empty()), store) else { continue };
         tx.execute("INSERT INTO images (model_id, filename) VALUES (?1, ?2)", params![model_id, name])?;
         let id = tx.last_insert_rowid();
-        if let Some(p) = pending.take() {
-            tx.execute("DELETE FROM images WHERE id = ?1", [p])?;
-        }
-        let stored = match (jpeg.as_ref().filter(|j| !j.is_empty()), store) {
-            (Some(j), Some(s)) => s.put_many(&[(id as u64, j.as_slice())]).is_ok(),
-            _ => false,
-        };
-        if stored {
+        if s.put_many(&[(id as u64, j.as_slice())]).is_ok() {
             tx.execute("UPDATE images SET thumbnail_path = ?2 WHERE id = ?1", params![id, id.to_string()])?;
             count += 1;
         } else {
-            pending = Some(id);
+            tx.execute("DELETE FROM images WHERE id = ?1", [id])?;
         }
-    }
-    if let Some(p) = pending {
-        tx.execute("DELETE FROM images WHERE id = ?1", [p])?;
     }
     tx.execute(
         "UPDATE models SET warning = ?2, updated_at = ?3 WHERE id = ?1 AND warning IS NOT ?2",
@@ -91,7 +65,7 @@ pub fn replace_thumbnails(
     Ok(Some(count))
 }
 
-/// What the browser's Rescan writes for one model (computed in Python).
+/// What the browser's Rescan writes for one model.
 #[derive(Debug, Clone, Default)]
 pub struct Rescan {
     pub archive_hash: String,
@@ -118,7 +92,7 @@ pub struct Rescan {
 }
 
 /// Rescan for one model; `Ok(false)` without the model. A file listed twice
-/// raises (as the ORM's flush does) before anything is written.
+/// is an error, before anything is written.
 pub fn apply_rescan(tx: &Transaction, model_id: i64, r: &Rescan) -> std::result::Result<bool, String> {
     let db = |e: rusqlite::Error| e.to_string();
     let mut seen = HashSet::new();

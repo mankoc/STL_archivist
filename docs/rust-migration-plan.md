@@ -1714,6 +1714,14 @@ the path is visible. No business logic and no Tauri commands for data.
   only (archives come in path order). `library::filter_tree` gave way to `filter_tree_parallel` and
   `scoped_tree`, which leaves `counts` and `path_counts` to the server's `TreeCache`; its sections run in
   parallel except under a folder filter, whose temporary table lives on one connection.
+- 2026.45.24: the rest of Python goes (Phase 8 removed the app, not the code shaped by it). `crawler::Host` is
+  `pdf_thumbnail`, `embed`, `emit` and `should_stop`; `Request`, `Response` and the events nobody read are
+  gone, as are `UpsertConfig`'s `force_*`, `CrawlConfig.log_unchanged` and `pyjson.rs` (typed `Serialize`
+  structs in `sidecar`). `rules::compile_pattern` replaces the portable grammar. `upsert` and
+  `replace_thumbnails` no longer insert rows only to delete them, which copied SQLAlchemy's flush order for
+  equal ids. Comments that promised a Python fallback now say what happens; names of Python functions
+  that only describe a behaviour (`str.strip`, `zipfile`) stay. The readers' name handling stays too:
+  it decides `archive_hash`.
 
 ### Phase 8: Retire Python (small)
 

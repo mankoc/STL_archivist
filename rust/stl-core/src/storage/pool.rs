@@ -1,6 +1,6 @@
 //! A small pool of library connections, each opened by [`super::open`] (same
-//! pragmas, sqlite-vec and the vec0 delete trigger). Shared by the PyO3
-//! bindings and the server; connections are reused, not shared between threads.
+//! pragmas, sqlite-vec and the vec0 delete trigger). Connections are reused, not
+//! shared between threads.
 
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};

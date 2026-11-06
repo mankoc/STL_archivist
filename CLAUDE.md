@@ -78,13 +78,17 @@ stl_database/
   process without it. One `ThumbStore` per process (LMDB).
 - **Logic lives in `stl-core`;** the server converts JSON and calls it. Long operations take a
   `Control` (progress, stop).
-- **Archive readers** (`stl-core/src/archive/`) return exactly what the original Python
-  readers returned, or raise `Unsupported`; callers then fall back (a size/mtime fingerprint
-  in the crawler, "cannot read" in rescans). `zip.rs` ports CPython's `zipfile`; never use
+- **Archive readers** (`stl-core/src/archive/`) must keep the names and CRCs that give the
+  stored `archive_hash`es, or return `Unsupported`; callers then fall back (a size/mtime
+  fingerprint in the crawler, "cannot read" in rescans). A catalog read stays when reading
+  members fails (`Extracted.unread`). `zip.rs` ports CPython's `zipfile`; never use
   `sevenz-rust2`'s `BlockDecoder` on a block with an empty entry (it drops that block's last
   files). Decode JPEGs with `jpeg-decoder`, not the `image` crate (zune-jpeg misreads the
   core encoder's output).
-- **Rules:** custom presupport patterns run only when `rules::portable_pattern` accepts them.
+- **Rules:** custom presupport patterns are any regular expression `rules::compile_pattern` accepts.
+- **Missing records:** a crawl never treats what it could not see as gone: records below an
+  unreadable folder are not judged, a library that lists empty is flagged, not deleted
+  (`Summary.listing_incomplete`), and a flagged archive found again is unflagged.
 - **Model viewer:** `stl_core::view` loads an archive member with `meshpeek-core` and
   encodes it with `meshpeek_core::wire`, which `stl-viewer` (wasm) decodes; change both ends
   together (and its version). `meshpeek-core` and `meshpeek-render` live in the MeshPeek repository

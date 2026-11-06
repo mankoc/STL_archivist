@@ -27,7 +27,7 @@ fn value_text(v: &Value) -> Option<String> {
     match v {
         Value::Null => None,
         Value::Integer(i) => Some(i.to_string()),
-        Value::Real(f) => Some(crate::pyjson::float_repr(*f)),
+        Value::Real(f) => Some(f.to_string()),
         Value::Text(s) => Some(s.clone()),
         Value::Blob(_) => None,
     }

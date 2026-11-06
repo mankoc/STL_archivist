@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026.45.24 — 2026-11-06
+
+- **Custom presupport patterns can be any regular expression**, not only the subset the old Python app
+  could also read. The messages that sent you to "the desktop app" for such patterns are gone.
+- **Problems with sidecars are reported.** A `METADATA.7z` that cannot be imported or written now shows
+  as a warning in the crawl's log; it used to pass silently, or log *Updated* regardless.
+- The crawl no longer carries the fallbacks to the retired Python app: its host is two calls (PDF
+  thumbnails, CLIP vectors) instead of a request protocol, and the options nothing set are gone. Presupport
+  patterns are compiled once per crawl instead of once per archive, and an invalid one now costs only
+  the presupport warning, not the archive's presupport value and scales too.
+- `metadata.json` in sidecars is written by `serde_json` instead of a copy of Python's JSON layout. The file
+  reads the same; older versions read it as before.
+
 ## 2026.45.23 — 2026-11-06
 
 - **Crawls use far less memory.** Only the images that become thumbnails are read (the first *Thumbnails

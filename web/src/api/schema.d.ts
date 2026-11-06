@@ -2915,7 +2915,7 @@ export interface components {
              * @description Monitored folders are checked this often (minutes, 1 to 1440).
              */
             monitor_interval_minutes: number;
-            /** @description Regular expressions for presupported STL file names (the portable subset). */
+            /** @description Regular expressions for presupported STL file names (case-insensitive). */
             presupport_patterns: string[];
             recurse_subdirs: boolean;
             trash_folder_path: string;

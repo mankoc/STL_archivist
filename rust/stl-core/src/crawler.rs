@@ -1,18 +1,13 @@
-//! The crawl pipeline: a port of `CrawlerWorker.run` (`app/crawler/crawler.py`).
+//! The crawl pipeline.
 //!
-//! Phases per batch of 50 archives, as in Python: 1 hash (parallel, reusing
-//! stored hashes when size and mtime match), 2 diff with early moves, 3 extract
-//! and precompute thumbnails (parallel), 4 upsert; then sidecars, move
-//! reconciliation, missing records, the crawled-folder record and lookup
-//! pruning. The database phases are `storage::crawl`.
+//! Phases per batch of 50 archives: 1 hash (parallel, reusing stored hashes when
+//! size and mtime match), 2 diff with early moves, 3 extract and precompute
+//! thumbnails (parallel), 4 upsert; then sidecars, move reconciliation, missing
+//! records, the crawled-folder record and lookup pruning. The database phases
+//! are `storage::crawl`.
 //!
-//! What this crate cannot do exactly as the Python app does goes to the
-//! [`Host`] as a [`Request`]: archives the native readers refuse, images only
-//! Pillow decodes, PDF pages (PyMuPDF), CLIP vectors, metadata or rules the
-//! native ports leave to Python, sidecars the native
-//! port refuses. The Python host answers them on its own thread; a host
-//! without Python answers `Response::None` and the crawl continues without
-//! that piece (a later native implementation can answer instead).
+//! What needs the server's optional libraries (PDF previews, CLIP vectors) goes
+//! to the [`Host`]; without them the crawl continues without that piece.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -55,7 +50,6 @@ pub struct CrawlConfig {
     pub warn: Checks,
     pub presupport_patterns: Vec<String>,
     pub embed: bool,
-    pub log_unchanged: bool,
     pub defer_missing_deletion: bool,
     pub upsert: db::UpsertConfig,
 }
@@ -65,23 +59,6 @@ impl CrawlConfig {
     fn root(&self) -> &str {
         self.library_root.as_deref().unwrap_or(&self.source_dir)
     }
-}
-
-/// Work the host does for the crawl (see the module docs).
-#[derive(Debug)]
-pub enum Request {
-    /// `archive_hash(path)`.
-    Hash(String),
-    /// `extract_archive_contents(path)` with names, STL sizes, uncompressed total.
-    Extract(String),
-    /// `make_thumbnail` (Pillow) of an image, or of a PDF's first page.
-    Thumbnail { data: Vec<u8>, pdf: bool },
-    /// CLIP vectors (float32 blobs) of JPEGs.
-    Embed(Vec<Vec<u8>>),
-    /// `detect_presupport`, `detect_warnings`, `detect_scale([name] + names)`.
-    Rules { archive_name: String, names: Vec<String> },
-    SidecarImport(String),
-    SidecarExport(String),
 }
 
 #[derive(Debug, Default)]
@@ -95,35 +72,23 @@ pub struct Extracted {
     pub unread: Option<String>,
 }
 
-#[derive(Debug)]
-pub enum Response {
-    None,
-    Hash(String),
-    Extracted(Extracted),
-    Thumbnail(Option<Vec<u8>>),
-    Vectors(Vec<Option<Vec<u8>>>),
-    Rules { presupports: String, warnings: String, scales: Vec<String> },
-    Imported(usize),
-}
-
-/// What the crawl reports, in order (the Python worker's signals).
+/// What the crawl reports, in order.
 #[derive(Debug, Clone)]
 pub enum Event {
     Log(String),
     Phase(String),
     Warning(String),
     Progress(usize, usize),
-    Counts(usize, usize, usize),
     /// Archive path, `"new"` or `"updated"`.
     Result(String, String),
-    Moved(String, String),
     Deleted(String),
-    /// A record outside the crawled folder flagged missing (kept).
-    Marked(String),
 }
 
 pub trait Host: Sync {
-    fn call(&self, request: Request) -> Response;
+    /// A thumbnail of a PDF's first page; `None` without a PDF library.
+    fn pdf_thumbnail(&self, pdf: &[u8]) -> Option<Vec<u8>>;
+    /// CLIP vectors (float32 blobs) of JPEGs; `None` when none can be computed.
+    fn embed(&self, jpegs: &[Vec<u8>]) -> Option<Vec<Option<Vec<u8>>>>;
     fn emit(&self, event: Event);
     fn should_stop(&self) -> bool;
 }
@@ -275,13 +240,10 @@ pub(crate) fn fallback_fingerprint(path: &str) -> String {
 
 /// The fingerprint, and the catalog it came from when the native readers
 /// read it (stored as the record's file list).
-fn hash_one(path: &str, host: &dyn Host) -> (String, Option<Vec<archive::ArchiveMember>>) {
+fn hash_one(path: &str) -> (String, Option<Vec<archive::ArchiveMember>>) {
     match archive::list_members(Path::new(path)) {
         Ok(members) => (archive::fingerprint_of(&members), Some(members)),
-        Err(_) => match host.call(Request::Hash(path.to_string())) {
-            Response::Hash(h) => (h, None),
-            _ => (fallback_fingerprint(path), None),
-        },
+        Err(_) => (fallback_fingerprint(path), None),
     }
 }
 
@@ -379,13 +341,13 @@ pub fn link_files(path: &str, unrar: &str) -> Option<Vec<(String, Vec<u8>)>> {
     Some(read.into_iter().filter(|(_, b)| b.len() as u64 <= SIZE_LIMIT_META).collect())
 }
 
-/// `{name: size}` for the printable members, as a Python dict builds it:
-/// a repeated name keeps its first position and its last size.
 /// The STL file list (printable files: name, size) of an archive's catalog.
 pub fn stl_list(members: &[archive::ArchiveMember]) -> Vec<(String, Option<i64>)> {
     stl_dict(members.iter().map(|m| (m.name.clone(), m.size.map(|s| s as i64))))
 }
 
+/// `{name: size}` for the printable members: a repeated name keeps its first
+/// position and its last size.
 fn stl_dict(members: impl Iterator<Item = (String, Option<i64>)>) -> Vec<(String, Option<i64>)> {
     let mut out: Vec<(String, Option<i64>)> = Vec::new();
     let mut index: HashMap<String, usize> = HashMap::new();
@@ -408,15 +370,9 @@ fn dhash_text(jpeg: &[u8]) -> Option<String> {
     crate::dhash::dhash(jpeg).ok().map(|h| format!("2:{h:032x}"))
 }
 
-/// `make_thumbnail(raw, size)`: native, else the host's Pillow (or PDF render).
+/// A thumbnail of an image, or through the host of a PDF.
 fn thumbnail(raw: &[u8], size: u32, pdf: bool, host: &dyn Host) -> Option<Vec<u8>> {
-    if !pdf && let Ok(j) = crate::thumbnail::make_thumbnail(raw, size, true) {
-        return Some(j);
-    }
-    match host.call(Request::Thumbnail { data: raw.to_vec(), pdf }) {
-        Response::Thumbnail(t) => t,
-        _ => None,
-    }
+    if pdf { host.pdf_thumbnail(raw) } else { crate::thumbnail::make_thumbnail(raw, size, true).ok() }
 }
 
 struct Prepared {
@@ -426,10 +382,7 @@ struct Prepared {
 }
 
 fn prepare(path: &str, cfg: &CrawlConfig, host: &dyn Host) -> Prepared {
-    let mut extracted = extract_native(path, &cfg.unrar, Some(cfg.max_thumbnails)).unwrap_or_else(|| match host.call(Request::Extract(path.to_string())) {
-        Response::Extracted(x) => x,
-        _ => Extracted::default(),
-    });
+    let mut extracted = extract_native(path, &cfg.unrar, Some(cfg.max_thumbnails)).unwrap_or_default();
     if let Some(why) = &extracted.unread {
         host.emit(Event::Warning(format!("{}: images not read ({why}); its file list is kept", WinPath::new(path).name())));
     }
@@ -453,15 +406,6 @@ fn prepare(path: &str, cfg: &CrawlConfig, host: &dyn Host) -> Prepared {
 }
 
 // ── phase 4 inputs ───────────────────────────────────────────────────────────
-
-fn parse_date(s: &str, _host: &dyn Host) -> (Option<i64>, Option<i64>) {
-    path_pattern::parse_release_date(s)
-}
-
-/// Python's `int(s)` (it strips surrounding whitespace itself).
-fn parse_int(s: &str, _host: &dyn Host) -> Option<i64> {
-    crate::pyunicode::py_int(crate::storage::edit::py_strip(s))
-}
 
 /// `"/" + str(path.relative_to(source)).replace("\\", "/")`, or the path itself.
 fn rel_path(path: &str, source: &str) -> String {
@@ -493,7 +437,7 @@ fn result_line(idx: usize, total: usize, status: &str, name: &str, thumbnails: u
     format!("[{idx}/{total}] {status}: {name} ({stored})")
 }
 
-fn pattern_match(cfg: &CrawlConfig, path: &str, host: &dyn Host) -> Option<db::Extracted> {
+fn pattern_match(cfg: &CrawlConfig, path: &str) -> Option<db::Extracted> {
     if cfg.pattern.is_empty() {
         return None;
     }
@@ -502,32 +446,17 @@ fn pattern_match(cfg: &CrawlConfig, path: &str, host: &dyn Host) -> Option<db::E
         return None;
     }
     let get = |k: &str| fields.iter().find(|(f, _)| f == k).map(|(_, v)| v.clone());
-    let sequence = get("sequence").filter(|v| !v.is_empty()).and_then(|v| parse_int(&v, host));
-    let release_date = get("release_date").filter(|v| !v.is_empty()).map(|v| parse_date(&v, host));
+    let sequence = get("sequence").filter(|v| !v.is_empty()).and_then(|v| crate::pyunicode::py_int(edit::py_strip(&v)));
+    let release_date = get("release_date").filter(|v| !v.is_empty()).map(|v| path_pattern::parse_release_date(&v));
     Some(db::Extracted { fields, release_date, sequence })
 }
 
-fn rules_for(cfg: &CrawlConfig, archive_name: &str, names: &[String], host: &dyn Host) -> (String, Option<String>, Vec<String>) {
-    let native = (|| {
-        let defaults: Vec<String> = rules::DEFAULT_PRESUPPORT_PATTERNS.iter().map(|s| s.to_string()).collect();
-        let pats = if cfg.presupport_patterns == defaults {
-            PresupportPatterns::new::<String>(None).ok()?
-        } else {
-            PresupportPatterns::new(Some(&cfg.presupport_patterns)).ok()?
-        };
-        let warnings = rules::detect_warnings(names, cfg.warn, &pats).ok()?;
-        let mut all = vec![archive_name.to_string()];
-        all.extend(names.iter().cloned());
-        Some((rules::detect_presupport(names).to_string(), warnings, rules::detect_scale(&all)))
-    })();
-    let (presupports, warnings, scales) = match native {
-        Some(r) => r,
-        None => match host.call(Request::Rules { archive_name: archive_name.to_string(), names: names.to_vec() }) {
-            Response::Rules { presupports, warnings, scales } => (presupports, warnings, scales),
-            _ => ("No".to_string(), String::new(), Vec::new()),
-        },
-    };
-    (presupports, Some(warnings).filter(|w| !w.is_empty()), scales)
+/// Presupports, warnings and scales from an archive's member names.
+fn rules_for(patterns: &PresupportPatterns, checks: Checks, archive_name: &str, names: &[String]) -> (String, Option<String>, Vec<String>) {
+    let warnings = rules::detect_warnings(names, checks, patterns).unwrap_or_default();
+    let mut all = vec![archive_name.to_string()];
+    all.extend(names.iter().cloned());
+    (rules::detect_presupport(names).to_string(), Some(warnings).filter(|w| !w.is_empty()), rules::detect_scale(&all))
 }
 
 /// An image beside an archive: its path, thumbnail and dHash.
@@ -578,8 +507,11 @@ struct Run<'a> {
     pool: rayon::ThreadPool,
     summary: Summary,
     failures: usize,
+    /// The presupport patterns, compiled once, and the checks they run under.
+    patterns: PresupportPatterns,
+    checks: Checks,
     candidates: HashMap<String, i64>,
-    names: HashMap<i64, (String, String)>, // missing id -> (path, file name)
+    names: HashMap<i64, String>, // missing id -> file name
     early_moved: HashSet<i64>,
     moved_new_paths: HashSet<String>,
     existing_hashes: HashMap<String, String>,
@@ -616,7 +548,6 @@ impl Run<'_> {
         for (p, (h, ..)) in &existing {
             self.existing_hashes.insert(p.clone(), h.clone());
         }
-        let host = self.host;
         let force = self.cfg.force_rescan;
         let size_only = self.cfg.size_only;
         let from_sidecar = &self.from_sidecar;
@@ -641,7 +572,7 @@ impl Run<'_> {
                             return (h.clone(), None, true);
                         }
                     }
-                    let (h, members) = hash_one(p, host);
+                    let (h, members) = hash_one(p);
                     (h, members, false)
                 })
                 .collect()
@@ -697,9 +628,8 @@ impl Run<'_> {
             if let Some((_, _, new_path)) = diff.moved.iter().find(|(mh, _, _)| mh == h) {
                 self.early_moved.insert(id);
                 self.moved_new_paths.insert(new_path.clone());
-                let (old_path, name) = self.names.get(&id).cloned().unwrap_or_default();
+                let name = self.names.get(&id).cloned().unwrap_or_default();
                 self.log(format!("Moved: {name} → {new_path}"));
-                self.host.emit(Event::Moved(old_path, new_path.clone()));
             }
         }
         if !diff.to_extract.is_empty() && start == 0 {
@@ -731,7 +661,7 @@ impl Run<'_> {
                 path: p.clone(),
                 hash: h.clone(),
                 existing: existing_id,
-                extracted: pattern_match(cfg, p, host),
+                extracted: pattern_match(cfg, p),
                 changed,
             });
             if host.should_stop() {
@@ -773,9 +703,6 @@ impl Run<'_> {
                         modified.insert(WinPath::new(&input.path).parent().as_posix());
                     } else {
                         self.summary.unchanged += 1;
-                        if cfg.log_unchanged {
-                            self.log(format!("[{idx}/{total}] unchanged: {}", rel_name(&input.path, &cfg.source_dir)));
-                        }
                         if self.moved_new_paths.contains(&input.path) {
                             modified.insert(WinPath::new(&input.path).parent().as_posix());
                         }
@@ -785,7 +712,6 @@ impl Run<'_> {
             self.host.emit(Event::Progress(idx, total));
         }
         self.store_files(lists)?;
-        self.host.emit(Event::Counts(self.summary.new, self.summary.updated, self.summary.unchanged));
         Ok(host.should_stop())
     }
 
@@ -823,14 +749,14 @@ impl Run<'_> {
         let x = &prep.extracted;
         let meta = metadata_for(path, &x.contents, cfg);
         let archive_name = WinPath::new(path).name().to_string();
-        let (presupports, warnings, scales) = rules_for(cfg, &archive_name, &x.names, host);
-        let (year, month) = parse_date(meta.release_date.as_deref().unwrap_or(""), host);
+        let (presupports, warnings, scales) = rules_for(&self.patterns, self.checks, &archive_name, &x.names);
+        let (year, month) = path_pattern::parse_release_date(meta.release_date.as_deref().unwrap_or(""));
         let mut thumbs: Vec<db::Thumb> =
             prep.precomp.iter().map(|(n, j, d)| (n.clone(), j.clone(), if j.is_some() { d.clone() } else { None }, None)).collect();
         if cfg.embed {
             let resolved: Vec<usize> = (0..thumbs.len()).filter(|&i| thumbs[i].1.is_some()).collect();
-            let jpegs = resolved.iter().map(|&i| thumbs[i].1.clone().unwrap_or_default()).collect();
-            if let Response::Vectors(v) = host.call(Request::Embed(jpegs)) {
+            let jpegs: Vec<Vec<u8>> = resolved.iter().map(|&i| thumbs[i].1.clone().unwrap_or_default()).collect();
+            if let Some(v) = host.embed(&jpegs) {
                 for (i, vec) in resolved.into_iter().zip(v) {
                     thumbs[i].3 = vec;
                 }
@@ -858,9 +784,17 @@ impl Run<'_> {
     }
 }
 
-/// `CrawlerWorker.run` for the database at `db_path`.
+/// Crawl `cfg.source_dir` into the database at `db_path`.
 pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host: &dyn Host) -> Result<Summary, CrawlError> {
     let conn = storage::open(db_path)?;
+    let (patterns, checks) = match PresupportPatterns::new(Some(&cfg.presupport_patterns)) {
+        Ok(patterns) => (patterns, cfg.warn),
+        Err(e) => {
+            host.emit(Event::Warning(format!("{e}: presupport warnings are skipped in this crawl.")));
+            let patterns = PresupportPatterns::new::<&str>(None).map_err(|e| CrawlError::Io(std::io::Error::other(e.to_string())))?;
+            (patterns, Checks { presupported: false, ..cfg.warn })
+        }
+    };
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(cfg.max_workers.max(1))
         .build()
@@ -873,6 +807,8 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
         pool,
         summary: Summary::default(),
         failures: 0,
+        patterns,
+        checks,
         candidates: HashMap::new(),
         names: HashMap::new(),
         early_moved: HashSet::new(),
@@ -936,8 +872,8 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
     }
     // moves.index_by_hash
     let mut shared = HashSet::new();
-    for (id, path, h, name, _) in &missing {
-        run.names.insert(*id, (path.clone(), name.clone()));
+    for (id, _, h, name, _) in &missing {
+        run.names.insert(*id, name.clone());
         if h.is_empty() || h.starts_with("fallback:") {
             continue;
         }
@@ -997,12 +933,10 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
                         run.from_sidecar.extend(v.iter().map(|p| crate::relpath::path_key(p)));
                         v.len()
                     }
-                    Err(_) => {
+                    Err(e) => {
                         drop(t);
-                        match host.call(Request::SidecarImport(folder.clone())) {
-                            Response::Imported(n) => n,
-                            _ => 0,
-                        }
+                        host.emit(Event::Warning(format!("cannot import METADATA.7z in {folder}: {e}")));
+                        0
                     }
                 }
             };
@@ -1035,12 +969,9 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
                 break;
             }
             match sidecar::export(&run.conn, store, &folder, cfg.sidecar_thumbnails) {
-                Ok(_) | Err(sidecar::SidecarError::Io(_)) => {}
-                Err(_) => {
-                    host.call(Request::SidecarExport(folder.clone()));
-                }
+                Ok(_) => run.log(format!("  Updated METADATA.7z in {}", WinPath::new(&folder).name())),
+                Err(e) => host.emit(Event::Warning(format!("cannot write METADATA.7z in {folder}: {e}"))),
             }
-            run.log(format!("  Updated METADATA.7z in {}", WinPath::new(&folder).name()));
         }
     }
 
@@ -1093,10 +1024,7 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
 }
 
 fn delete_refs(store: Option<&ThumbStore>, refs: &[String]) {
-    let ids: Vec<u64> = refs
-        .iter()
-        .filter_map(|r| if r.bytes().all(|b| b.is_ascii_digit()) && !r.is_empty() { r.parse().ok() } else { WinPath::new(r).stem().parse().ok() })
-        .collect();
+    let ids = db::ref_ids(refs);
     if let Some(s) = store
         && !ids.is_empty()
     {
@@ -1123,11 +1051,10 @@ fn reconcile(run: &mut Run<'_>, missing: Vec<db::Missing>) -> Result<(), CrawlEr
         for name in skipped {
             run.log(format!("  Skipped ambiguous name+size match for {name} — multiple candidates"));
         }
-        for (id, old_path, new_path) in moves {
+        for (id, _, new_path) in moves {
             matched.insert(id);
-            let name = run.names.get(&id).map(|(_, n)| n.clone()).unwrap_or_default();
+            let name = run.names.get(&id).cloned().unwrap_or_default();
             run.log(format!("Moved: {name} → {new_path}"));
-            run.host.emit(Event::Moved(old_path, new_path));
         }
         delete_refs(run.store, &refs);
         if !matched.is_empty() {
@@ -1152,7 +1079,6 @@ fn reconcile(run: &mut Run<'_>, missing: Vec<db::Missing>) -> Result<(), CrawlEr
     }
     for p in &marked {
         run.log(format!("Not found on disk (record kept, marked missing): {p}"));
-        run.host.emit(Event::Marked(p.clone()));
     }
     (run.summary.deleted, run.summary.marked) = (deleted.len(), marked.len() + deferred);
     delete_refs(run.store, &refs);

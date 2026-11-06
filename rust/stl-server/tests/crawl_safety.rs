@@ -171,6 +171,19 @@ async fn records_below_an_unreadable_folder_are_not_judged() {
     assert!(scan.missing.is_empty() && scan.back.is_empty(), "{scan:?}");
 }
 
+/// A sidecar that cannot be imported says so, and the crawl goes on.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_broken_sidecar_is_reported() {
+    let lib = empty_library();
+    let ed = lib.user("ed", Role::Editor);
+    let root = lib.dir.path().join("archives");
+    write_zip(&root.join("One.zip"), "one.stl");
+    std::fs::write(root.join("METADATA.7z"), b"not a 7z file").unwrap();
+    let v = crawl(&lib, &ed, &root).await;
+    assert!(v["log"].to_string().contains("cannot import METADATA.7z"), "{v}");
+    assert_eq!(scalar(&lib, "SELECT count(*) FROM models"), 1);
+}
+
 /// One member that cannot be read (here flagged encrypted; the same goes for a
 /// RAR without UnRAR or a ZIP method the reader lacks) must not cost the file list.
 #[tokio::test(flavor = "multi_thread")]

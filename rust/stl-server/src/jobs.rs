@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use stl_core::control::Control;
-use stl_core::crawler::{self, CrawlConfig, Event, Host, Request, Response};
+use stl_core::crawler::{self, CrawlConfig, Event, Host};
 use stl_core::storage::{self, crawl as crawl_db, duplicates, maintenance};
 use tokio::sync::{Notify, broadcast};
 use utoipa::ToSchema;
@@ -1728,10 +1728,8 @@ fn find_metadata(lib: &Library, job: &Job, columns: &[String], method: &str, max
 
 // ── crawl ────────────────────────────────────────────────────────────────────
 
-/// The crawl's host on the server. There is no Python: PDF previews and CLIP
-/// vectors come from [`crate::tools`] when their libraries are present; every
-/// other request gets `Response::None` and the crawl goes on without that
-/// piece (see `stl_core::crawler`).
+/// The crawl's host on the server: PDF previews and CLIP vectors come from
+/// [`crate::tools`] when their libraries are present (see `stl_core::crawler`).
 struct ServerHost<'a> {
     lib: &'a Library,
     job: &'a Job,
@@ -1741,23 +1739,15 @@ struct ServerHost<'a> {
 }
 
 impl Host for ServerHost<'_> {
-    fn call(&self, request: Request) -> Response {
-        let config = &self.lib.config;
-        match request {
-            Request::Thumbnail { data, pdf: true } => match self.lib.tools.pdf(config) {
-                Some(r) => Response::Thumbnail(r.thumbnail(&data, self.max_thumb_size)),
-                None => Response::None,
-            },
-            Request::Embed(images) => match self.lib.embed(&images) {
-                Ok(Some(v)) => Response::Vectors(v),
-                Ok(None) => Response::None,
-                Err(e) => {
-                    self.lib.job_log(self.job, format!("Warning: {e}"));
-                    Response::None
-                }
-            },
-            _ => Response::None,
-        }
+    fn pdf_thumbnail(&self, pdf: &[u8]) -> Option<Vec<u8>> {
+        self.lib.tools.pdf(&self.lib.config)?.thumbnail(pdf, self.max_thumb_size)
+    }
+
+    fn embed(&self, jpegs: &[Vec<u8>]) -> Option<Vec<Option<Vec<u8>>>> {
+        self.lib.embed(jpegs).unwrap_or_else(|e| {
+            self.lib.job_log(self.job, format!("Warning: {e}"));
+            None
+        })
     }
 
     fn emit(&self, event: Event) {
@@ -1781,7 +1771,6 @@ impl Host for ServerHost<'_> {
             }
             Event::Result(path, _) => self.job.record(Change::Updated, [path]),
             Event::Deleted(path) => self.job.record(Change::Deleted, [path]),
-            Event::Counts(..) | Event::Moved(..) | Event::Marked(..) => {}
         }
     }
 
@@ -1936,12 +1925,6 @@ fn crawl_folder(
             .and_then(|(_, pat)| pat)
             .unwrap_or_default(),
     };
-    let patterns = settings.presupport_patterns();
-    if patterns.iter().any(|p| stl_core::rules::portable_pattern(p).is_err()) {
-        lib.job_log(job, "Warning: the custom presupport patterns use syntax only the desktop app reads; \
-                          presupport warnings are skipped in this crawl."
-            .into());
-    }
     let unrar = lib.config.unrar_tool();
     let cfg = CrawlConfig {
         source_dir: folder.clone(),
@@ -1957,15 +1940,13 @@ fn crawl_folder(
         sidecars: settings.sidecars_enabled(),
         sidecar_thumbnails: settings.sidecar_thumbnails(),
         warn: settings.checks(),
-        presupport_patterns: patterns,
+        presupport_patterns: settings.presupport_patterns(),
         embed: settings.embed_during_crawl() && lib.can_embed(),
-        log_unchanged: false,
         defer_missing_deletion,
         upsert: crawl_db::UpsertConfig {
             warn_low_compression: settings.warn_low_compression(),
             low_compression_threshold: settings.low_compression_threshold(),
             embed_dim: storage::schema_sql::EMBED_DIM as usize,
-            ..Default::default()
         },
     };
     let host = ServerHost { lib, job, max_thumb_size: cfg.max_thumb_size, new_paths };

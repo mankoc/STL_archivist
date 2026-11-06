@@ -247,9 +247,7 @@ pub fn recheck_warnings(lib: &Library, ctl: &Control, log: &dyn Fn(String), whic
     };
     let patterns = if which == Recheck::Presupported {
         let custom = settings.presupport_patterns();
-        PresupportPatterns::new(Some(&custom)).map_err(|e| {
-            format!("the presupport patterns use syntax only the desktop app reads ({e}); run this check there")
-        })?
+        PresupportPatterns::new(Some(&custom)).map_err(|e| e.to_string())?
     } else {
         PresupportPatterns::new::<&str>(None).map_err(|e| e.to_string())?
     };
