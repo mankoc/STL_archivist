@@ -1696,6 +1696,7 @@ the path is visible. No business logic and no Tauri commands for data.
 - 2026.45.19: `missing` on `/api/sort/preview` and the `sort_files` job (`sort_files::UNKNOWN` when
   left out) reaches `values`, `path_pattern::render` and `target`. `sanitise_segment` now gives `""`
   for nothing or only dots (no more `..` out of the target folder), and `target` decides what fills it.
+- 2026.45.20: `SortModal` keeps the target folder in `localStorage` (`stl.sort.target`), saved on a preview.
 
 ### Phase 8: Retire Python (small)
 

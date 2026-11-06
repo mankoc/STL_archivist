@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026.45.20 — 2026-11-06
+
+- **Sort files remembers the last target folder** in this browser, as it does the pattern.
+
 ## 2026.45.19 — 2026-11-06
 
 - **Sort files can choose what missing fields become**: *Missing fields* writes *unknown* as before,
