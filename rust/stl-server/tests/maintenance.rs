@@ -175,21 +175,28 @@ async fn warning_rechecks() {
     let knight: Option<String> = scalar(&lib, "SELECT warning FROM models WHERE title = 'Knight'");
     assert_eq!(knight.as_deref(), Some("Archive without images"));
 
-    // An image added by hand (a relative name) leaves the warning; one beside the archive clears it.
+    // An image added by hand (a name the archive's file list lacks) clears it, as one beside
+    // the archive does; one from inside the archive does not.
     let add = |name: &str| {
         lib.state
             .db
             .with(|c| c.execute("INSERT INTO images (model_id, filename) SELECT id, ?1 FROM models WHERE title = 'Knight'", [name]))
             .unwrap()
     };
-    add("Knight view.png");
+    let member: String = scalar(&lib, "SELECT a.name FROM archive_files a JOIN models m ON m.id = a.model_id WHERE m.title = 'Knight' LIMIT 1");
+    add(&member);
     let v = run(&lib, &ed, json!({"kind": "recheck_warnings", "warning": "no_images"})).await;
-    assert_eq!(v["job"]["message"], "0 cleared, 0 added, 0 skipped (missing or unreadable)");
-    add("D:\\minis\\Studio\\cover.jpg");
+    assert_eq!(v["job"]["message"], "0 cleared, 0 added, 0 skipped (missing or unreadable)", "an image from inside the archive");
+    add("Knight view.png");
     let v = run(&lib, &ed, json!({"kind": "recheck_warnings", "warning": "no_images"})).await;
     assert_eq!(v["job"]["message"], "1 cleared, 0 added, 0 skipped (missing or unreadable)");
     let knight: Option<String> = scalar(&lib, "SELECT warning FROM models WHERE title = 'Knight'");
     assert_eq!(knight, None);
+    lib.state.db.with(|c| c.execute("UPDATE models SET warning = 'Archive without images' WHERE title = 'Knight'", [])).unwrap();
+    lib.state.db.with(|c| c.execute("DELETE FROM images WHERE filename = 'Knight view.png'", [])).unwrap();
+    add("D:\\minis\\Studio\\cover.jpg");
+    let v = run(&lib, &ed, json!({"kind": "recheck_warnings", "warning": "no_images"})).await;
+    assert_eq!(v["job"]["message"], "1 cleared, 0 added, 0 skipped (missing or unreadable)", "one beside the archive");
 
     for bad in [json!({"kind": "recheck_warnings", "warning": "colour"}), json!({"kind": "find_moved", "ids": []})] {
         let r = call(&lib.state, "POST", "/api/jobs", Some(&ed), Some(bad.clone())).await;

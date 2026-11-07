@@ -331,12 +331,26 @@ async fn connect(app: AppHandle, url: String) -> Result<(), String> {
     Ok(())
 }
 
-/// The `stl-server` program: beside this one (an install, or `target/<profile>`).
+/// The `stl-server` program: beside this one (the Windows installer, or
+/// `target/<profile>`), else among the Linux package's resources.
 fn server_exe() -> Result<PathBuf, String> {
-    let name = if cfg!(windows) { "stl-server.exe" } else { "stl-server" };
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let beside = exe.parent().map(|d| d.join(name)).filter(|p| p.is_file());
-    beside.ok_or_else(|| format!("{name} was not found beside {}", exe.display()))
+    server_candidates(&exe)
+        .into_iter()
+        .find(|p| p.is_file())
+        .ok_or_else(|| format!("stl-server was not found beside {}", exe.display()))
+}
+
+/// Where `stl-server` may be for the program at `exe`. The .deb puts this program in
+/// `/usr/bin` and its resources (the server and the web client) in `/usr/lib/<product>`.
+fn server_candidates(exe: &Path) -> Vec<PathBuf> {
+    let name = if cfg!(windows) { "stl-server.exe" } else { "stl-server" };
+    let dir = exe.parent().unwrap_or(Path::new("."));
+    let mut out = vec![dir.join(name)];
+    if !cfg!(windows) {
+        out.push(dir.join("../lib/StlArchivist").join(name));
+    }
+    out
 }
 
 fn free_port() -> Result<u16, String> {
@@ -1112,6 +1126,14 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_server_is_looked_for_beside_the_program_first() {
+        let exe = std::path::Path::new("/usr/bin/stl-desktop");
+        let found = super::server_candidates(exe);
+        assert_eq!(found[0], std::path::Path::new("/usr/bin").join(if cfg!(windows) { "stl-server.exe" } else { "stl-server" }));
+        assert_eq!(found.len(), if cfg!(windows) { 1 } else { 2 });
+    }
+
     #[test]
     fn write_atomic_replaces_the_file_and_leaves_nothing_else() {
         let dir = std::env::temp_dir().join(format!("stl-desktop-atomic-{}", std::process::id()));
