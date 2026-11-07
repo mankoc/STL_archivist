@@ -545,6 +545,26 @@ export interface paths {
         patch: operations["patch_libraries_folders_by_id"];
         trace?: never;
     };
+    "/api/libraries/folders/{id}/folders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every folder of a library folder that holds archives, with its own pattern (Settings →
+         *     Patterns).
+         */
+        get: operations["get_libraries_folders_by_id_folders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/libraries/folders/{id}/remove": {
         parameters: {
             query?: never;
@@ -574,8 +594,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * What a crawl of the folder with this pattern would read from its first
-         *     archives (editors). Nothing is changed.
+         * What a crawl with this pattern would read from a few archives directly in the folder,
+         *     picked at random (editors). Nothing is changed.
          */
         get: operations["get_libraries_pattern_sample"];
         put?: never;
@@ -1954,6 +1974,18 @@ export interface components {
             /** @description A path pattern; `""` clears it. */
             pattern?: string | null;
             subfolder?: null | components["schemas"]["SubfolderPattern"];
+        };
+        /** @description A folder below a library folder's root that holds archives. */
+        FolderPatternRow: {
+            /**
+             * Format: int64
+             * @description Archives directly in it.
+             */
+            archives: number;
+            /** @description Relative to the root (`/` separators). */
+            folder: string;
+            /** @description Its own pattern; none: the library folder's. */
+            pattern?: string | null;
         };
         FolderRequest: {
             /** @description A folder from `/api/folders`. */
@@ -4259,6 +4291,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_libraries_folders_by_id_folders: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FolderPatternRow"][];
                 };
             };
             404: {

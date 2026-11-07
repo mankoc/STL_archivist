@@ -18,6 +18,13 @@
 - The model details (`GET /api/models/{id}`) also carry `presupports`, `compression_rate`, `sequence`, `created_at`,
   `to_print`, `url`, `description`, `scales`, `file_count` and `stl_count`.
 - The archive's file tree fits a narrow pane.
+- **A folder's path pattern is for the archives directly in it.** Its sub-folders keep their own, or the library
+  folder's when they have none. **Changed:** a sub-folder used to take the nearest pattern above it. A folder whose
+  archives sit in sub-folders now needs a pattern on each of those sub-folders, in Settings → Patterns.
+- **Settings → Patterns lists every folder holding archives,** with how many it holds directly and the pattern it uses, to
+  set, change or forget one (with a filter for big libraries; `GET /api/libraries/folders/{id}/folders`).
+- **Pattern samples are picked at random** among the archives directly in the folder, with **Other samples** for more,
+  in the crawl dialog and while editing a pattern in Settings.
 
 ## 2026.45.41 — 2026-11-06
 
