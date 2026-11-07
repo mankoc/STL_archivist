@@ -55,46 +55,55 @@ async fn a_folder_keeps_the_pattern_it_was_crawled_with() {
     let root = lib.dir.path().join("archives");
     let special = root.join("Special");
     write_zip(&root.join("Studio").join("A.zip"));
-    write_zip(&special.join("Set1").join("B.zip"));
+    write_zip(&special.join("B.zip"));
     let folder = root.to_string_lossy().into_owned();
     run(&lib, &ed, json!({"kind": "crawl", "folder": folder, "pattern": "{sculptor}/{title}"})).await;
 
-    // Part of the library has another layout: it gets a pattern of its own.
-    write_zip(&special.join("Set1").join("C.zip"));
+    // One folder has another layout: it gets a pattern of its own, for its own archives.
+    write_zip(&special.join("C.zip"));
+    write_zip(&special.join("Set1").join("D.zip"));
     let sub = special.to_string_lossy().into_owned();
     let v = run(&lib, &ed, json!({"kind": "crawl", "folder": sub, "in_library": true, "pattern": "{collection}/{title}"})).await;
-    assert!(v["job"]["message"].as_str().unwrap().starts_with("1 new"), "{v}");
-    assert_eq!(fields(&lib, "C.zip"), (None, Some("Set1".to_string())));
+    assert!(v["job"]["message"].as_str().unwrap().starts_with("2 new"), "{v}");
+    assert_eq!(fields(&lib, "C.zip"), (None, Some("Special".to_string())));
+    assert_eq!(fields(&lib, "D.zip"), (Some("Set1".to_string()), None), "its sub-folder keeps the library's");
     let libs = call(&lib.state, "GET", "/api/libraries", Some(&ed), None).await.json();
     assert_eq!(libs[0]["folders"][0]["pattern"], "{sculptor}/{title}", "the library's stays");
     assert_eq!(libs[0]["folders"][0]["subfolder_patterns"], json!([{"folder": "Special", "pattern": "{collection}/{title}"}]));
 
+    // Every folder with archives, with its own pattern or none.
+    let id = libs[0]["folders"][0]["id"].as_i64().unwrap();
+    let list = call(&lib.state, "GET", &format!("/api/libraries/folders/{id}/folders"), Some(&ed), None).await.json();
+    assert_eq!(
+        list,
+        json!([
+            {"folder": "Special", "archives": 2, "pattern": "{collection}/{title}"},
+            {"folder": "Special/Set1", "archives": 1, "pattern": null},
+            {"folder": "Studio", "archives": 1, "pattern": null},
+        ])
+    );
+
     // A crawl of the whole library, as a monitored one, names no pattern: each
     // folder's is used.
-    write_zip(&special.join("Set2").join("D.zip"));
-    write_zip(&root.join("Studio").join("E.zip"));
+    write_zip(&special.join("E.zip"));
+    write_zip(&root.join("Studio").join("F.zip"));
     run(&lib, &ed, json!({"kind": "crawl", "folder": folder, "keep_missing": true})).await;
-    assert_eq!(fields(&lib, "D.zip"), (None, Some("Set2".to_string())));
-    assert_eq!(fields(&lib, "E.zip"), (Some("Studio".to_string()), None));
-
-    // So does a crawl of the folder without a pattern.
-    write_zip(&special.join("Set2").join("F.zip"));
-    run(&lib, &ed, json!({"kind": "crawl", "folder": sub, "in_library": true})).await;
-    assert_eq!(fields(&lib, "F.zip"), (None, Some("Set2".to_string())));
+    assert_eq!(fields(&lib, "E.zip"), (None, Some("Special".to_string())));
+    assert_eq!(fields(&lib, "F.zip"), (Some("Studio".to_string()), None));
 
     // A rescan fills the fields the pattern gives, and keeps the others.
-    lib.state.db.with(|c| c.execute("UPDATE models SET collection_id = NULL WHERE rel_path LIKE '%D.zip'", [])).unwrap();
-    let id: i64 = lib.state.db.with(|c| c.query_row("SELECT id FROM models WHERE rel_path LIKE '%D.zip'", [], |r| r.get(0))).unwrap();
+    lib.state.db.with(|c| c.execute("UPDATE models SET collection_id = NULL WHERE rel_path LIKE '%E.zip'", [])).unwrap();
+    let id: i64 = lib.state.db.with(|c| c.query_row("SELECT id FROM models WHERE rel_path LIKE '%E.zip'", [], |r| r.get(0))).unwrap();
     run(&lib, &ed, json!({"kind": "rescan", "ids": [id]})).await;
-    assert_eq!(fields(&lib, "D.zip"), (None, Some("Set2".to_string())));
+    assert_eq!(fields(&lib, "E.zip"), (None, Some("Special".to_string())));
 
     // An empty pattern goes back to the library's.
     run(&lib, &ed, json!({"kind": "crawl", "folder": sub, "in_library": true, "pattern": ""})).await;
     let libs = call(&lib.state, "GET", "/api/libraries", Some(&ed), None).await.json();
     assert_eq!(libs[0]["folders"][0]["subfolder_patterns"], json!([]));
-    write_zip(&special.join("Set2").join("G.zip"));
+    write_zip(&special.join("G.zip"));
     run(&lib, &ed, json!({"kind": "crawl", "folder": folder})).await;
-    assert_eq!(fields(&lib, "G.zip"), (Some("Set2".to_string()), None));
+    assert_eq!(fields(&lib, "G.zip"), (Some("Special".to_string()), None));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -105,20 +114,24 @@ async fn a_pattern_can_be_tried_on_a_folders_archives() {
     let viewer = lib.user("vi", Role::Viewer);
     let root = lib.dir.path().join("archives");
     write_zip(&root.join("Studio").join("Dragon").join("One.zip"));
-    write_zip(&root.join("Other").join("Two.zip"));
+    write_zip(&root.join("Studio").join("Dragon").join("Two.zip"));
+    write_zip(&root.join("Studio").join("Dragon").join("Deeper").join("Three.zip"));
     run(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy()})).await;
 
-    let folder = root.join("Studio").to_string_lossy().replace('\\', "/");
+    let folder = root.join("Studio").join("Dragon").to_string_lossy().replace('\\', "/");
     let uri = |pattern: &str| format!("/api/libraries/pattern-sample?folder={}&pattern={}", enc(&folder), enc(pattern));
-    let r = call(&lib.state, "GET", &uri("{sculptor}/{collection}/{title}"), Some(&ed), None).await;
+    let r = call(&lib.state, "GET", &uri("{sculptor}/{collection}/{title}"), Some(&ed), None).await.json();
+    // The archives directly in the folder, in any order: not those of its sub-folder.
+    let mut paths: Vec<&str> = r.as_array().unwrap().iter().map(|s| s["path"].as_str().unwrap()).collect();
+    paths.sort();
+    assert_eq!(paths, ["Studio/Dragon/One.zip", "Studio/Dragon/Two.zip"]);
+    let one = r.as_array().unwrap().iter().find(|s| s["path"] == "Studio/Dragon/One.zip").unwrap();
     assert_eq!(
-        r.json(),
-        json!([{"path": "Studio/Dragon/One.zip", "fields": [
-            {"field": "sculptor_name", "value": "Studio"}, {"field": "collection_name", "value": "Dragon"}, {"field": "title", "value": "One"},
-        ]}])
+        one["fields"],
+        json!([{"field": "sculptor_name", "value": "Studio"}, {"field": "collection_name", "value": "Dragon"}, {"field": "title", "value": "One"}])
     );
-    let r = call(&lib.state, "GET", &uri(""), Some(&ed), None).await;
-    assert_eq!(r.json(), json!([{"path": "Studio/Dragon/One.zip", "fields": []}]));
+    let r = call(&lib.state, "GET", &uri(""), Some(&ed), None).await.json();
+    assert!(r.as_array().unwrap().iter().all(|s| s["fields"] == json!([])), "{r}");
     let r = call(&lib.state, "GET", &uri("{title}"), Some(&viewer), None).await;
     assert_eq!(r.status, axum::http::StatusCode::FORBIDDEN);
 }

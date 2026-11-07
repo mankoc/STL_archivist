@@ -90,8 +90,9 @@ stl_database/
   files). Decode JPEGs with `jpeg-decoder`, not the `image` crate (zune-jpeg misreads the
   core encoder's output).
 - **Rules:** custom presupport patterns are any regular expression `rules::compile_pattern` accepts.
-- **Path patterns:** a library folder's is `libraries.pattern`; a sub-folder crawled with its own
-  is in `folder_patterns` (`libraries::FolderPatterns`, deepest first), and crawls and Rescan use it.
+- **Path patterns:** a library folder's is `libraries.pattern`; a folder below its root may have
+  its own in `folder_patterns` (`libraries::FolderPatterns`), for the archives directly in it
+  only: sub-folders use theirs or the library folder's. Crawls and Rescan use them.
 - **Missing records:** a crawl never treats what it could not see as gone: records below an
   unreadable folder are not judged, a library that lists empty is flagged, not deleted
   (`Summary.listing_incomplete`), and a flagged archive found again is unflagged.
