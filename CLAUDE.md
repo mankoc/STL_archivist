@@ -197,7 +197,10 @@ Always update the README and the changelog with the changes that are made.
 it directly. All work goes into `development`: each new feature (and any change beyond a small
 fix) on its own branch from `development` (`feature/<short-name>`, `fix/<short-name>`), pushed,
 and offered as a pull request into `development` when finished, with what changed, how it was
-checked and its `## Unreleased` notes. Leave the merge to the maintainer unless asked to merge.
+checked and its `## Unreleased` notes. Then merge it yourself (`gh pr merge --merge
+--delete-branch`) once its checks pass (the `audit` job only reports), first merging
+`development` into the branch and resolving conflicts (usually the `## Unreleased` notes, which
+keep both sides) when it has moved on.
 
 **Versions:** `<year>.<ISO week>.<N>`: the ISO year and week of the release, and `N` counting
 that week's releases from 0 (`2026.45.0`, `2026.45.1`, … then `2026.46.0`). Commits do not change
