@@ -90,8 +90,9 @@ stl_database/
   files). Decode JPEGs with `jpeg-decoder`, not the `image` crate (zune-jpeg misreads the
   core encoder's output).
 - **Rules:** custom presupport patterns are any regular expression `rules::compile_pattern` accepts.
-- **Path patterns:** a library folder's is `libraries.pattern`; a sub-folder crawled with its own
-  is in `folder_patterns` (`libraries::FolderPatterns`, deepest first), and crawls and Rescan use it.
+- **Path patterns:** a library folder's is `libraries.pattern`; a folder below its root may have
+  its own in `folder_patterns` (`libraries::FolderPatterns`), for the archives directly in it
+  only: sub-folders use theirs or the library folder's. Crawls and Rescan use them.
 - **Missing records:** a crawl never treats what it could not see as gone: records below an
   unreadable folder are not judged, a library that lists empty is flagged, not deleted
   (`Summary.listing_incomplete`), and a flagged archive found again is unflagged.
@@ -196,7 +197,10 @@ Always update the README and the changelog with the changes that are made.
 it directly. All work goes into `development`: each new feature (and any change beyond a small
 fix) on its own branch from `development` (`feature/<short-name>`, `fix/<short-name>`), pushed,
 and offered as a pull request into `development` when finished, with what changed, how it was
-checked and its `## Unreleased` notes. Leave the merge to the maintainer unless asked to merge.
+checked and its `## Unreleased` notes. Then merge it yourself (`gh pr merge --merge
+--delete-branch`) once its checks pass (the `audit` job only reports), first merging
+`development` into the branch and resolving conflicts (usually the `## Unreleased` notes, which
+keep both sides) when it has moved on.
 
 **Versions:** `<year>.<ISO week>.<N>`: the ISO year and week of the release, and `N` counting
 that week's releases from 0 (`2026.45.0`, `2026.45.1`, … then `2026.46.0`). Commits do not change

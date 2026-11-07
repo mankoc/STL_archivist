@@ -194,8 +194,8 @@ export const TOPICS: Topic[] = [
     title: "Path patterns",
     summary: "Describe how your folders are named so fields fill themselves.",
     blocks: [
-      { p: "While you type a pattern in a crawl dialog, a **sample** shows what it reads from the folder's first archives. **Settings → Patterns** lists the stored patterns, to change or forget them." },
-      { p: "The pattern a folder was crawled with is kept: later crawls, monitoring and Rescan use it. Part of a library laid out differently can have its own: right-click the folder in the filter pane's Path section and choose **Crawl with a pattern…**." },
+      { p: "The pattern a folder was crawled with is kept: later crawls, monitoring and Rescan use it. A folder laid out differently can have its own, for the archives **directly in it**: its sub-folders keep theirs, or the library's when they have none. Right-click the folder in the filter pane's Path section and choose **Crawl with a pattern…**, or set it in **Settings → Patterns**, which lists every folder holding archives with the pattern it uses." },
+      { p: "While you type a pattern, in a crawl dialog or in Settings → Patterns, a **sample** shows what it reads from a few archives directly in that folder, picked at random; **Other samples** shows others." },
       { p: "A path pattern tells crawls and Mass edit how to read fields from folder names, and tells Sort files how to build folders from fields. Each `{token}` matches one folder level (the last one the file name); `*` matches a level to ignore." },
       { table: { head: ["Token", "Aliases", "Field"], rows: [
         ["`{source}`", "`{type}`", "Type (shop or platform)"],
@@ -238,6 +238,7 @@ export const TOPICS: Topic[] = [
         ["No printable files", "No printable model file inside"],
         ["Low compression", "The archive's compression rate is above the threshold (default 0.95)"],
       ] } },
+      { p: "**Archive without images** is not raised, and goes, when the model has an image of its own: one beside the archive, a view added from the model viewer, or an image dropped on the details pane." },
       { p: "Which warnings are raised is set in **Settings → Library → Warnings**. In the details pane, the **Files** tab (marked ⚠ when the model has warnings) names each warning and why it is raised, and highlights the files behind it, and the folders holding them, in the archive's tree. After changing the settings, **Settings → Maintenance → Check images warning / Check presupport warning** fixes those warnings quickly without a full rescan." },
     ],
   },

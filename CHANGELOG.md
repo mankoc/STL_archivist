@@ -18,6 +18,21 @@
 - The model details (`GET /api/models/{id}`) also carry `presupports`, `compression_rate`, `sequence`, `created_at`,
   `to_print`, `url`, `description`, `scales`, `file_count` and `stl_count`.
 - The archive's file tree fits a narrow pane.
+- **The cover image in the details pane fits the pane's width** at the image's own proportions, up to twice as tall as
+  wide: only a taller image is cropped (from its top). It used to be cut to 170 pixels high.
+- **A folder's path pattern is for the archives directly in it.** Its sub-folders keep their own, or the library
+  folder's when they have none. **Changed:** a sub-folder used to take the nearest pattern above it. A folder whose
+  archives sit in sub-folders now needs a pattern on each of those sub-folders, in Settings → Patterns.
+- **Settings → Patterns lists every folder holding archives,** with how many it holds directly and the pattern it uses, to
+  set, change or forget one (with a filter for big libraries; `GET /api/libraries/folders/{id}/folders`).
+- **Pattern samples are picked at random** among the archives directly in the folder, with **Other samples** for more,
+  in the crawl dialog and while editing a pattern in Settings.
+- **Adding an image to a model clears "Archive without images"**, whether a view captured in the model viewer or an
+  image dropped on the details pane. Rescan, crawls and *Check images warning* count such images too (an image whose
+  name the archive's file list lacks), as they already did images beside the archive, so the warning doesn't come back.
+- **The library keeps its state while you visit another page:** filters, open folders in the filter pane, the selection,
+  the detail pane and the scroll position are as you left them when you come back from Settings or any other page.
+  Leaving it closes its drawers, dialogs and menus, and Ctrl+A on another page no longer selects models.
 - **Linux packages:** each release, and the nightly, has two .deb packages (amd64; Debian 12, Ubuntu 22.04 and newer).
   `stlarchivist-server` installs the server and its web client as the `stlarchivist` systemd service (port 8770, library
   in `/var/lib/stlarchivist`, settings in `/etc/default/stlarchivist`); the desktop app's package has the server and the
