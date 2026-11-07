@@ -90,5 +90,8 @@ pub(super) fn find_images(lib: &Library, job: &Job, method: &str, max_distance: 
 pub(super) fn find_metadata(lib: &Library, job: &Job, columns: &[String], method: &str, max_distance: u32) -> Result<String, String> {
     lib.job_log(job, format!("Comparing {} column(s) ({method})…", columns.len()));
     let r = crate::dupes::metadata(lib, &job.ctl, columns, method, max_distance)?;
+    if r.len() >= crate::dupes::MAX_RESULTS {
+        lib.job_log(job, format!("Only the first {} groups are kept: compare fewer columns or allow fewer edits.", crate::dupes::MAX_RESULTS));
+    }
     Ok(finder_done(job, r, "group(s) found"))
 }

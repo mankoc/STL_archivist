@@ -19,11 +19,21 @@ impl Host for ServerHost<'_> {
         self.lib.tools.pdf(&self.lib.config)?.thumbnail(pdf, self.max_thumb_size)
     }
 
+    /// A batch's thumbnails come at once: they go on in the chunks of the embedding
+    /// job, and a chunk that fails costs only its own vectors.
     fn embed(&self, jpegs: &[Vec<u8>]) -> Option<Vec<Option<Vec<u8>>>> {
-        self.lib.embed(jpegs).unwrap_or_else(|e| {
-            self.lib.job_log(self.job, format!("Warning: {e}"));
-            None
-        })
+        let mut out = Vec::with_capacity(jpegs.len());
+        for chunk in jpegs.chunks(crate::tools::BATCH * 4) {
+            match self.lib.embed(chunk) {
+                Ok(Some(v)) => out.extend(v),
+                Ok(None) => out.extend(std::iter::repeat_n(None, chunk.len())),
+                Err(e) => {
+                    self.lib.job_log(self.job, format!("Warning: {e}"));
+                    out.extend(std::iter::repeat_n(None, chunk.len()));
+                }
+            }
+        }
+        Some(out)
     }
 
     fn emit(&self, event: Event) {

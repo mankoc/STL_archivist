@@ -447,6 +447,25 @@ mod tests {
     }
 
     #[test]
+    fn tags_and_scales_are_found_through_an_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("lib.db");
+        migrate(&path, &Vectors::default()).unwrap();
+        let conn = open(&path).unwrap();
+        let plan = |sql: &str| -> String {
+            let mut st = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+            st.query_map([], |r| r.get::<_, String>(3)).unwrap().map(|r| r.unwrap()).collect::<Vec<_>>().join("; ")
+        };
+        for (sql, index) in [
+            ("SELECT model_id FROM model_tags WHERE tag_id = 1", "ix_model_tags_tag"),
+            ("SELECT model_id FROM model_scales WHERE scale_id = 1", "ix_model_scales_scale"),
+        ] {
+            let p = plan(sql);
+            assert!(p.contains(index), "{sql}: {p}");
+        }
+    }
+
+    #[test]
     fn vector_ddl_matches_the_generated_one() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("lib.db");

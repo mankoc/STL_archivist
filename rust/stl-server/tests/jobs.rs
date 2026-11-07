@@ -576,3 +576,36 @@ async fn clearing_finished_jobs_keeps_results() {
     assert_eq!(call(&lib.state, "GET", &format!("/api/jobs/{crawl}"), Some(&ed), None).await.status, StatusCode::NOT_FOUND);
     assert_eq!(call(&lib.state, "DELETE", "/api/jobs", Some(&ed), None).await.json()["count"], 0);
 }
+
+/// When the server stops, the running job is asked to stop and the queued ones never
+/// start: tokio waits for a running job however long it takes.
+#[tokio::test(flavor = "multi_thread")]
+async fn stopping_the_server_stops_its_jobs() {
+    // With compute workers only and none connected, computing embeddings waits until stopped.
+    let lib = common::library_with(|c| c.compute = stl_server::config::Compute::Workers);
+    let ed = lib.user("ed", Role::Editor);
+    let waiting = submit(&lib, &ed, json!({"kind": "compute_embeddings"})).await;
+    let queued = submit(&lib, &ed, json!({"kind": "verify_archives"})).await;
+    let state = |id: u64| {
+        let lib = &lib;
+        let ed = ed.clone();
+        async move { call(&lib.state, "GET", &format!("/api/jobs/{id}"), Some(&ed), None).await.json()["job"].clone() }
+    };
+    for _ in 0..100 {
+        if state(waiting).await["state"] == "running" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(state(waiting).await["state"], "running");
+
+    assert!(lib.state.stop_jobs(Duration::from_secs(10)).await, "the running job stopped in time");
+    assert_eq!(state(waiting).await["state"], "cancelled");
+    let q = state(queued).await;
+    assert_eq!((q["state"].clone(), q["started_at"].clone()), (json!("cancelled"), Value::Null), "{q}");
+
+    // Nothing starts any more.
+    let late = submit(&lib, &ed, json!({"kind": "verify_archives"})).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(state(late).await["state"], "queued");
+}

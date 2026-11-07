@@ -126,7 +126,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 
 | Endpoint | Description | Request | Response | Errors |
 |---|---|---|---|---|
-| `GET /api/images/{id}/original` | An image at full size: the original the thumbnail was made from, read from the archive (or from the file beside it). 404 when it cannot be had (an image added by hand, a moved archive): show the thumbnail instead. | path `id`: integer | 200 `image/jpeg` | 404 |
+| `GET /api/images/{id}/original` | An image at full size: the original the thumbnail was made from, read from the archive (or from the file beside it, in the model's library folder). 404 when it cannot be had (an image added by hand, a moved archive, one larger than a crawl reads): show the thumbnail instead. | path `id`: integer | 200 `image/jpeg` | 404 |
 | `GET /api/images/{id}/thumbnail` | An image's thumbnail: a redirect to its content address. | path `id`: integer | 200 `image/jpeg` | 308, 404 |
 | `GET /api/thumb/{digest}` | A thumbnail by content address. | path `digest`: string | 200 `image/jpeg` | 404 |
 

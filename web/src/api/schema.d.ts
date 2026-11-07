@@ -389,8 +389,9 @@ export interface paths {
         };
         /**
          * An image at full size: the original the thumbnail was made from, read from
-         *     the archive (or from the file beside it). 404 when it cannot be had (an
-         *     image added by hand, a moved archive): show the thumbnail instead.
+         *     the archive (or from the file beside it, in the model's library folder). 404
+         *     when it cannot be had (an image added by hand, a moved archive, one larger
+         *     than a crawl reads): show the thumbnail instead.
          */
         get: operations["get_images_by_id_original"];
         put?: never;

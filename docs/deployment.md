@@ -210,6 +210,11 @@ docker exec -it stlarchivist stl-server create-admin admin
 To build the image yourself instead: `docker build -f docker/Dockerfile -t stlarchivist .` at
 the root of the repository (then `STLARCHIVIST_IMAGE=stlarchivist docker compose up -d`).
 
+`docker stop` (and `docker compose down` or an update) stops the server cleanly within a few
+seconds: it stops the running job, cancels queued ones and writes the sidecars of the latest
+edits. Versions up to 2026.45.41 ignored the signal, and Docker killed the server after ten
+seconds.
+
 **Publishing (maintainers).** `.github/workflows/docker.yml` builds the image; the Release
 workflow pushes `<version>` and `latest`, the Nightly workflow `nightly` and `nightly-<commit>`
 (development builds, not for everyday use). It needs, under *Settings → Secrets and variables → Actions* of the

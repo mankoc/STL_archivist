@@ -878,7 +878,7 @@
         "tags": [
           "thumbnails"
         ],
-        "summary": "An image at full size: the original the thumbnail was made from, read from\nthe archive (or from the file beside it). 404 when it cannot be had (an\nimage added by hand, a moved archive): show the thumbnail instead.",
+        "summary": "An image at full size: the original the thumbnail was made from, read from\nthe archive (or from the file beside it, in the model's library folder). 404\nwhen it cannot be had (an image added by hand, a moved archive, one larger\nthan a crawl reads): show the thumbnail instead.",
         "operationId": "get_images_by_id_original",
         "parameters": [
           {
