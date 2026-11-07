@@ -37,6 +37,8 @@
   `stlarchivist-server` installs the server and its web client as the `stlarchivist` systemd service (port 8770, library
   in `/var/lib/stlarchivist`, settings in `/etc/default/stlarchivist`); the desktop app's package has the server and the
   web client inside. The server package is installed and started in CI as a check.
+- **Vitest 5:** the web client's test runner moves from 3.2 to 5.1, which clears the audit's advisories (2 critical,
+  1 moderate, in `tinypool` and `@vitest/mocker`, test tooling only). It needs Node 22.12 or newer to run the tests.
 
 ## 2026.45.41 — 2026-11-06
 
