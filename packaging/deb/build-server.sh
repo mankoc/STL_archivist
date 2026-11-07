@@ -51,5 +51,5 @@ EOF
 
 mkdir -p "$out"
 file="$out/stlarchivist-server_${version}_${arch}.deb"
-dpkg-deb --root-owner-group --build "$pkg" "$file" > /dev/null
+dpkg-deb --root-owner-group -Zxz --build "$pkg" "$file" > /dev/null
 echo "$file"
