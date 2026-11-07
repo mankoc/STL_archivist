@@ -34,7 +34,8 @@ import classes from "./BrowserPage.module.css";
 
 const SHOW = ["library", "author", "tags", "source", "date", "sculptor", "collection", "subcollection", "category", "release", "scale", "presupports", "path"];
 
-export function BrowserPage() {
+/** `active`: shown. The page stays mounted while another one shows (Shell). */
+export function BrowserPage({ active = true }: { active?: boolean }) {
   const [filter, setFilter] = useState<FilterSpec>(EMPTY);
   const [searchText, setSearchText] = useState("");
   const [search] = useDebouncedValue(searchText, 250);
@@ -126,6 +127,24 @@ export function BrowserPage() {
   const [folderMenu, setFolderMenu] = useState<{ x: number; y: number; folder: string } | null>(null);
   // *Crawl with a pattern…*: the folder, and the pattern being typed.
   const [patternCrawl, setPatternCrawl] = useState<{ folder: string; pattern: string } | null>(null);
+  // Leaving the page closes what floats over it (drawers, dialogs, menus): they are
+  // portals, so hiding the page would leave them over the next one.
+  useEffect(() => {
+    if (active) {
+      // Text selected on the other page (Ctrl+A there) would cover this one too.
+      window.getSelection()?.removeAllRanges();
+      return;
+    }
+    setEditing(null);
+    setMassEdit(false);
+    setAiTagger(false);
+    setConfirmRemove(false);
+    setConfirmDelete(false);
+    setSorting(false);
+    setMenu(null);
+    setFolderMenu(null);
+    setPatternCrawl(null);
+  }, [active]);
   const libraries = useQuery({ queryKey: ["libraries"], queryFn: async () => unwrap(await api.GET("/api/libraries")) });
   const selectedIds = () => order.filter((i) => selection.ids.has(i));
   const queueJob = async (body: JobRequest, what: string) => {
@@ -145,7 +164,7 @@ export function BrowserPage() {
   useEffect(() => setSelection((s) => prune(s, order)), [order]);
   const covered = coverage(selection, order);
   const selectEvery = (all: boolean) => setSelection((s) => (all ? selectAll(s, order) : NONE));
-  useHotkeys([["mod+A", () => selectEvery(true)]]);
+  useHotkeys(active ? [["mod+A", () => selectEvery(true)]] : []);
   // The right-click menu of a row or image: editors act on the selection it
   // makes, viewers on the clicked model (its archive).
   const openMenu = (id: number, e: React.MouseEvent) => {
