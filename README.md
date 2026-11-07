@@ -222,6 +222,10 @@ before exposing it beyond `127.0.0.1`.
 A library can be open in one process at a time: a second server (or the desktop app's local
 server) on the same data directory is refused.
 
+Ctrl-C, or SIGTERM (`docker stop`, `systemctl stop`), stops the server within a few seconds:
+the running job stops at its next checkpoint (the next crawl goes on from there), queued jobs
+are cancelled, and the `METADATA.7z` sidecars of the latest edits are written first.
+
 ### First steps
 
 1. **Libraries → Add library**: browse to your archive folder, set a path pattern if your folders

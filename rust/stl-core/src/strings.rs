@@ -56,21 +56,36 @@ pub fn levenshtein(a: &[char], b: &[char]) -> u32 {
 ///
 /// Distance 0 (equal strings) is included; callers filter as they need.
 pub fn levenshtein_pairs(values: &[String], max: u32) -> Vec<(u32, u32, u32)> {
+    levenshtein_pairs_until(values, max, &|| false).unwrap_or_default()
+}
+
+/// [`levenshtein_pairs`], or `None` once `stop` says so: the pairs of 100,000 values
+/// take a while on every core, and a job must be able to stop meanwhile.
+pub fn levenshtein_pairs_until(values: &[String], max: u32, stop: &(dyn Fn() -> bool + Sync)) -> Option<Vec<(u32, u32, u32)>> {
+    use std::sync::atomic::{AtomicBool, Ordering};
     let chars: Vec<Vec<char>> = values.iter().map(|s| s.chars().collect()).collect();
-    (0..chars.len())
+    let stopped = AtomicBool::new(false);
+    let pairs = (0..chars.len())
         .into_par_iter()
         .flat_map_iter(|i| {
+            // Each value is compared with every later one: asked between values.
+            if stopped.load(Ordering::Relaxed) || stop() {
+                stopped.store(true, Ordering::Relaxed);
+                return Vec::new();
+            }
             let a = &chars[i];
-            let chars = &chars;
-            (i + 1..chars.len()).filter_map(move |j| {
-                let b = &chars[j];
-                if a.len().abs_diff(b.len()) as u64 > max as u64 {
-                    return None;
-                }
-                levenshtein_bounded(a, b, max).map(|d| (i as u32, j as u32, d))
-            })
+            (i + 1..chars.len())
+                .filter_map(|j| {
+                    let b = &chars[j];
+                    if a.len().abs_diff(b.len()) as u64 > max as u64 {
+                        return None;
+                    }
+                    levenshtein_bounded(a, b, max).map(|d| (i as u32, j as u32, d))
+                })
+                .collect()
         })
-        .collect()
+        .collect();
+    (!stopped.into_inner()).then_some(pairs)
 }
 
 /// How names are compared by [`similar_pairs`].
@@ -249,5 +264,15 @@ mod tests {
             levenshtein_pairs(&v, 1),
             vec![(0, 1, 1), (0, 3, 1), (0, 4, 0), (1, 4, 1), (3, 4, 1)]
         );
+    }
+
+    #[test]
+    fn pairs_can_be_stopped() {
+        let v: Vec<String> = (0..2000).map(|i| format!("model {i}")).collect();
+        let asked = std::sync::atomic::AtomicUsize::new(0);
+        let stop = || asked.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= 10;
+        assert_eq!(levenshtein_pairs_until(&v, 1, &stop), None);
+        assert!(asked.into_inner() < v.len(), "it stopped early");
+        assert_eq!(levenshtein_pairs_until(&v[..5], 1, &|| false).map(|p| p.len()), Some(10), "model 0 to model 4: all one edit apart");
     }
 }

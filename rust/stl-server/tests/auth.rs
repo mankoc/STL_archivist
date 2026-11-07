@@ -70,6 +70,31 @@ async fn repeated_failures_lock_the_name_out() {
     assert_eq!(r.status, StatusCode::UNAUTHORIZED, "other names are unaffected");
 }
 
+/// Attempts sent together all passed the lockout check before the first of them failed,
+/// so the lockout counted nothing: the check is made again when a password check may run.
+#[tokio::test(flavor = "multi_thread")]
+async fn attempts_sent_together_do_not_pass_the_lockout() {
+    let lib = empty_library();
+    lib.user("eve", Role::Viewer);
+    let attempts: Vec<_> = (0..16)
+        .map(|_| {
+            let s = lib.state.clone();
+            tokio::spawn(async move { call(&s, "POST", "/api/auth/login", None, Some(json!({"name": "eve", "password": "wrong-password"}))).await.status })
+        })
+        .collect();
+    let mut checked = 0;
+    for a in attempts {
+        match a.await.unwrap() {
+            StatusCode::UNAUTHORIZED => checked += 1,
+            StatusCode::TOO_MANY_REQUESTS => {}
+            other => panic!("{other}"),
+        }
+    }
+    // Five failures lock the name out; the checks already running then (three at most,
+    // with four at a time) still finish.
+    assert!((5..=8).contains(&checked), "{checked} of 16 passwords were checked");
+}
+
 #[tokio::test]
 async fn only_admins_manage_users() {
     let lib = empty_library();

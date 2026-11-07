@@ -102,35 +102,57 @@ fn image_type(name: &str) -> Option<&'static str> {
 }
 
 /// An image at full size: the original the thumbnail was made from, read from
-/// the archive (or from the file beside it). 404 when it cannot be had (an
-/// image added by hand, a moved archive): show the thumbnail instead.
+/// the archive (or from the file beside it, in the model's library folder). 404
+/// when it cannot be had (an image added by hand, a moved archive, one larger
+/// than a crawl reads): show the thumbnail instead.
 #[utoipa::path(get, path = "/api/images/{id}/original", tag = "thumbnails",
     params(("id" = i64, Path, description = "Image id")),
     responses((status = 200, description = "The image file", content_type = "image/jpeg"),
               (status = 404, body = crate::error::ErrorBody)))]
 pub async fn image_original(State(lib): State<AppState>, _me: CurrentUser, Path(id): Path<i64>) -> Result<Response, ApiError> {
+    // Reading an original can mean decompressing much of an archive: a few at a time.
+    let _permit = lib.image_loads.acquire().await.map_err(|e| ApiError::internal(e.to_string()))?;
     let found = lib
         .run(move |lib| {
-            let Some((archive, Some(name))) = lib.db.with(|c| stl_core::storage::model_views::image_source(c, id))? else {
-                return Ok(None);
-            };
+            let Some(src) = lib.db.with(|c| stl_core::storage::model_views::image_source(c, id))? else { return Ok(None) };
+            let Some(name) = src.name else { return Ok(None) };
             let Some(ct) = image_type(&name) else { return Ok(None) };
             let file = std::path::Path::new(&name);
             let data = if file.is_absolute() {
-                std::fs::read(file).ok()
+                // An image beside the archive, which a crawl found in the library folder. The
+                // name can also come from a sidecar or another server: nothing outside is read.
+                src.root.filter(|root| inside(root, file)).and_then(|_| read_image(file))
             } else {
-                archive.and_then(|a| {
-                    stl_core::archive::read_members_with(std::path::Path::new(&stl_core::relpath::on_disk(&a)), std::slice::from_ref(&name), &lib.config.unrar_tool())
-                        .ok()
-                        .and_then(|mut v| v.pop())
-                        .map(|(_, b)| b)
-                })
+                src.archive.and_then(|a| archive_image(std::path::Path::new(&stl_core::relpath::on_disk(&a)), &name, &lib.config.unrar_tool()))
             };
             Ok::<_, ApiError>(data.map(|d| (ct, d)))
         })
         .await?;
     let (ct, data) = found.ok_or_else(|| ApiError::not_found("the original image is not available"))?;
     Ok(([(header::CONTENT_TYPE, ct), (header::CACHE_CONTROL, "private, max-age=3600")], data).into_response())
+}
+
+/// Whether `file` is below the folder `root`, links and `..` resolved.
+fn inside(root: &str, file: &std::path::Path) -> bool {
+    match (std::fs::canonicalize(root), std::fs::canonicalize(file)) {
+        (Ok(root), Ok(file)) => file != root && file.starts_with(&root),
+        _ => false,
+    }
+}
+
+/// A file at most as large as a crawl reads images.
+fn read_image(file: &std::path::Path) -> Option<Vec<u8>> {
+    std::fs::metadata(file).ok().filter(|m| m.len() <= stl_core::crawler::SIZE_LIMIT_IMAGE)?;
+    std::fs::read(file).ok()
+}
+
+/// The archive member `name`, when its catalog size is at most what a crawl reads.
+fn archive_image(archive: &std::path::Path, name: &str, unrar: &str) -> Option<Vec<u8>> {
+    let member = stl_core::archive::list_members(archive).ok()?.into_iter().find(|m| m.name == name)?;
+    if member.size.is_some_and(|s| s > stl_core::crawler::SIZE_LIMIT_IMAGE) {
+        return None;
+    }
+    stl_core::archive::read_members_with(archive, &[member.name], unrar).ok()?.pop().map(|(_, b)| b)
 }
 
 #[cfg(test)]

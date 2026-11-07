@@ -13,7 +13,7 @@ use serde_json::json;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::accounts::Role;
-use crate::auth::CurrentUser;
+use crate::auth::{Admin, CurrentUser};
 use crate::sync::{self, Direction, PathRule, Remote, RemoteInfo, Sent, SyncPreview};
 use crate::{ApiError, AppState};
 
@@ -90,8 +90,7 @@ pub struct HaveId {
 #[utoipa::path(post, path = "/api/sync/thumbnails", tag = "sync",
     request_body(content_type = "application/octet-stream", description = "Thumbnail keys"),
     responses((status = 200, body = HaveId), (status = 400, body = crate::error::ErrorBody), (status = 403, body = crate::error::ErrorBody)))]
-pub async fn have(State(lib): State<AppState>, me: CurrentUser, body: Bytes) -> Result<Response, ApiError> {
-    me.require(Role::Admin)?;
+pub async fn have(State(lib): State<AppState>, _admin: Admin, body: Bytes) -> Result<Response, ApiError> {
     let id = lib.run(move |lib| sync::store_have(&lib.config.data_dir, &body).map_err(ApiError::bad_request)).await?;
     let mut resp = Json(HaveId { id }).into_response();
     instance_header(&lib, &mut resp);
@@ -125,8 +124,7 @@ pub async fn blocks(State(lib): State<AppState>, me: CurrentUser) -> Result<Resp
 #[utoipa::path(post, path = "/api/sync/blocks", tag = "sync",
     request_body(content_type = "application/octet-stream", description = "Database fingerprints"),
     responses((status = 200, body = HaveId), (status = 400, body = crate::error::ErrorBody), (status = 403, body = crate::error::ErrorBody)))]
-pub async fn post_blocks(State(lib): State<AppState>, me: CurrentUser, body: Bytes) -> Result<Response, ApiError> {
-    me.require(Role::Admin)?;
+pub async fn post_blocks(State(lib): State<AppState>, _admin: Admin, body: Bytes) -> Result<Response, ApiError> {
     let id = lib.run(move |lib| sync::store_blocks(&lib.config.data_dir, &body).map_err(ApiError::bad_request)).await?;
     let mut resp = Json(HaveId { id }).into_response();
     instance_header(&lib, &mut resp);

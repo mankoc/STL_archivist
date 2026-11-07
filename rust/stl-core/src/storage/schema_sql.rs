@@ -382,6 +382,11 @@ pub const ENSURE_INDEXES: &[&str] = &[
     r#"CREATE INDEX IF NOT EXISTS ix_models_presupports ON models (presupports) WHERE presupports IS NOT NULL"#,
     // The filter pane's warning counts read this instead of every row of `models`.
     r#"CREATE INDEX IF NOT EXISTS ix_models_warning ON models (warning) WHERE warning IS NOT NULL"#,
+    // The models of a tag or scale. The primary keys start with `model_id`, so without these
+    // a tag filter, merge or delete read the whole link table, and so did the foreign-key
+    // check of every deleted tag (deleting 1,000 unused tags of 100,000 models took a minute).
+    r#"CREATE INDEX IF NOT EXISTS ix_model_tags_tag ON model_tags (tag_id, model_id)"#,
+    r#"CREATE INDEX IF NOT EXISTS ix_model_scales_scale ON model_scales (scale_id, model_id)"#,
 ];
 
 /// `db.MODELS_VIEW_SQL`, recreated on every start.
