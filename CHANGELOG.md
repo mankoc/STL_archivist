@@ -18,6 +18,9 @@
 - The model details (`GET /api/models/{id}`) also carry `presupports`, `compression_rate`, `sequence`, `created_at`,
   `to_print`, `url`, `description`, `scales`, `file_count` and `stl_count`.
 - The archive's file tree fits a narrow pane.
+- **Adding an image to a model clears "Archive without images"**, whether a view captured in the model viewer or an
+  image dropped on the details pane. Rescan, crawls and *Check images warning* count such images too (an image whose
+  name the archive's file list lacks), as they already did images beside the archive, so the warning doesn't come back.
 
 ## 2026.45.41 — 2026-11-06
 
