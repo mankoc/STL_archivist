@@ -256,6 +256,31 @@ pub async fn change_folder(State(lib): State<AppState>, me: CurrentUser, Path(id
     Ok(Json(info))
 }
 
+/// A folder below a library folder's root that holds archives.
+#[derive(Serialize, ToSchema)]
+pub struct FolderPatternRow {
+    /// Relative to the root (`/` separators).
+    pub folder: String,
+    /// Archives directly in it.
+    pub archives: i64,
+    /// Its own pattern; none: the library folder's.
+    pub pattern: Option<String>,
+}
+
+/// Every folder of a library folder that holds archives, with its own pattern (Settings →
+/// Patterns).
+#[utoipa::path(get, path = "/api/libraries/folders/{id}/folders", tag = "libraries", params(("id" = i64, Path)),
+    responses((status = 200, body = Vec<FolderPatternRow>), (status = 404, body = crate::error::ErrorBody)))]
+pub async fn folder_patterns(State(lib): State<AppState>, _me: CurrentUser, Path(id): Path<i64>) -> Result<Json<Vec<FolderPatternRow>>, ApiError> {
+    let rows = lib
+        .run(move |lib| {
+            folder_exists(lib, id)?;
+            Ok(lib.db.with(|c| libraries::folders_with_archives(c, id))?)
+        })
+        .await?;
+    Ok(Json(rows.into_iter().map(|(folder, archives, pattern)| FolderPatternRow { folder, archives, pattern }).collect()))
+}
+
 /// Archives shown as a pattern's sample.
 const SAMPLES: i64 = 3;
 
@@ -283,8 +308,8 @@ pub struct PatternSample {
     pub fields: Vec<SampleField>,
 }
 
-/// What a crawl of the folder with this pattern would read from its first
-/// archives (editors). Nothing is changed.
+/// What a crawl with this pattern would read from a few archives directly in the folder,
+/// picked at random (editors). Nothing is changed.
 #[utoipa::path(get, path = "/api/libraries/pattern-sample", tag = "libraries", params(SampleQuery),
     responses((status = 200, body = Vec<PatternSample>), (status = 403, body = crate::error::ErrorBody)))]
 pub async fn pattern_sample(State(lib): State<AppState>, me: CurrentUser, Query(q): Query<SampleQuery>) -> Result<Json<Vec<PatternSample>>, ApiError> {

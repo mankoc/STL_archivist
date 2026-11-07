@@ -104,8 +104,11 @@ can be one library. **Add library** makes a new one from a folder; **Add folder*
 button on a library) adds another folder to it. Each folder has its root and its own path
 pattern, and is crawled, monitored and moved on its own. Part of a folder laid out differently
 can have a pattern of its own: right-click it in the filter pane's Path section, **Crawl with a
-pattern…**. It is kept (the Libraries page lists it), and crawls, monitoring and Rescan use it for
-the archives below that folder. Records store their archive's path
+pattern…**, or set it in *Settings → Patterns*, which lists every folder holding archives with
+the pattern it uses. A folder's pattern is for the archives directly in it: its sub-folders keep
+their own, or the library folder's when they have none. While you type one, a sample shows what
+it reads from a few of the folder's archives, picked at random (*Other samples* shows others).
+Crawls, monitoring and Rescan use it. Records store their archive's path
 relative to their folder, the same on every operating system. When a folder moves (another
 disk, a new mount point, a new server, from Windows to Linux), click **Move** on it, choose
 the new place, **Check** (every archive is looked up there) and **Move**: records, edits,

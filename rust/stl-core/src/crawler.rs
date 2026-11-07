@@ -467,15 +467,14 @@ pub fn match_pattern(pattern: &str, path: &str, root: &str) -> Option<db::Extrac
 /// An archive (its path below the library's root), and the fields and values read from it.
 pub type PatternSample = (String, Vec<(String, String)>);
 
-/// What `pattern` reads from the first `limit` recorded archives in `folder`, as a crawl
-/// would.
+/// What `pattern` reads from `limit` recorded archives directly in `folder` (not in its
+/// sub-folders, whose patterns are their own), picked at random, as a crawl would.
 pub fn pattern_samples(conn: &rusqlite::Connection, folder: &str, pattern: &str, limit: i64) -> rusqlite::Result<Vec<PatternSample>> {
     let roots = storage::libraries::Roots::load(conn)?;
     let Some((library, rel)) = roots.locate_folder(folder) else { return Ok(Vec::new()) };
     let Some(root) = roots.root(library) else { return Ok(Vec::new()) };
     let mut st = conn.prepare(
-        "SELECT rel_path FROM models WHERE library_id = ?1 \
-         AND (?2 = '' OR rel_folder = ?2 OR substr(rel_folder, 1, length(?2) + 1) = ?2 || '/') ORDER BY rel_path LIMIT ?3",
+        "SELECT rel_path FROM models WHERE library_id = ?1 AND rel_folder = ?2 ORDER BY random() LIMIT ?3",
     )?;
     let paths = st.query_map(rusqlite::params![library, rel, limit], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(paths
@@ -590,10 +589,15 @@ impl Run<'_> {
         }
     }
 
-    /// The pattern for the archive at `path`.
+    /// The pattern for the archive at `path`: its folder's own, else the library folder's,
+    /// which a crawl of the whole library folder is given (and keeps once it is done).
     fn pattern_of(&self, path: &str) -> &str {
-        let own = crate::relpath::RelPath::from_abs(self.cfg.root(), path).and_then(|r| self.folder_patterns.below(r.folder()));
-        own.unwrap_or(&self.cfg.pattern)
+        let own = crate::relpath::RelPath::from_abs(self.cfg.root(), path).and_then(|r| self.folder_patterns.own(r.folder()));
+        match own {
+            Some(own) => own,
+            None if self.cfg.library_root.is_some() => self.folder_patterns.library().unwrap_or(""),
+            None => &self.cfg.pattern,
+        }
     }
 
     fn log(&self, s: impl Into<String>) {
