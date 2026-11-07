@@ -149,6 +149,9 @@ async fn a_models_details_carry_its_warnings() {
 
     let details = call(&lib.state, "GET", &format!("/api/models/{id}"), Some(&ed), None).await.json();
     assert_eq!(details["fields"]["warning"], "Models with presupported stl", "{details}");
+    for (field, value) in [("file_count", json!(3)), ("stl_count", json!(2)), ("to_print", json!(0)), ("url", json!(null))] {
+        assert_eq!(details["fields"][field], value, "{field}: {details}");
+    }
     let why = call(&lib.state, "GET", &format!("/api/models/{id}/warnings"), Some(&ed), None).await.json();
     assert_eq!(why["sections"][0]["members"][0]["name"], "SONJA/SONJA_SFW_pre_supported/ARM.stl", "{why}");
     assert_eq!(why["sections"][0]["members"].as_array().map(Vec::len), Some(1), "only the presupported file");

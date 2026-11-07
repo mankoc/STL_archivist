@@ -7489,7 +7489,7 @@
           },
           "fields": {
             "type": "object",
-            "description": "`title`, `creator`, `source`, `sculptor_name`, `collection_name`,\n`subcollection_name`, `category_name`, `release_name`, `release_year`,\n`release_month`, `archive_path`, `archive_size`, `is_missing`, `warning`,\n`tags` (comma-separated) and `image_count`."
+            "description": "`title`, `creator`, `source`, `sculptor_name`, `collection_name`,\n`subcollection_name`, `category_name`, `release_name`, `release_year`,\n`release_month`, `archive_path`, `archive_size`, `is_missing`, `warning`,\n`presupports`, `compression_rate`, `sequence`, `created_at`, `to_print`, `url`,\n`description`, `tags` and `scales` (comma-separated), `image_count`, `file_count`\n(the stored file list) and `stl_count`."
           },
           "id": {
             "type": "integer",

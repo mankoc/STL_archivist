@@ -1,97 +1,19 @@
-// The detail pane's archive section: the stored warnings with the members that
-// trigger them (Warning Details), and the files in the archive (Show Files, as a
-// folder tree, those behind a warning highlighted), as the last crawl or rescan
-// read the archive's catalog. The model files the server can show (`/viewable`, read
-// from the archive now) open in the model viewer.
-import { ActionIcon, Alert, Badge, Button, getTreeExpandedState, Group, Loader, Modal, Stack, Table, Text, Tooltip, Tree, useTree } from "@mantine/core";
-import { IconAlertTriangle, IconChevronRight, IconCube, IconFile, IconFiles, IconFolder } from "@tabler/icons-react";
+// The archive's files, as the last crawl or rescan read its catalog: the model's
+// warnings and why each is raised, then a folder tree with the files behind them and the
+// folders holding them highlighted. The
+// model files the server can show (`/viewable`, read from the archive now) open in the
+// model viewer. The detail pane's Files tab.
+import { ActionIcon, Alert, Button, getTreeExpandedState, Group, Loader, Stack, Text, Tooltip, Tree, useTree } from "@mantine/core";
+import { IconAlertTriangle, IconChevronRight, IconCube, IconFile, IconFolder } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 
 import { api, unwrap } from "../api/client";
 import { formatSize } from "../format";
 import { fileTree } from "./fileTree";
 import { warningsByFile } from "./warnings";
 
-export function ArchiveInfo({ id, warning, onView }: { id: number; warning: string | null; onView: (file: string) => void }) {
-  const [open, setOpen] = useState<"warnings" | "files" | null>(null);
-  const lines = (warning ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
-  return (
-    <Stack gap={6}>
-      {lines.length > 0 && (
-        <Group gap={4}>
-          {lines.map((l) => (
-            <Badge key={l} color="orange" variant="light" size="sm" tt="none" leftSection={<IconAlertTriangle size={12} />}>
-              {l}
-            </Badge>
-          ))}
-        </Group>
-      )}
-      <Group gap="xs">
-        {lines.length > 0 && (
-          <Button size="compact-xs" variant="subtle" onClick={() => setOpen("warnings")} data-testid="warning-details">
-            Warning details
-          </Button>
-        )}
-        <Button size="compact-xs" variant="subtle" leftSection={<IconFiles size={12} />} onClick={() => setOpen("files")} data-testid="show-files">
-          Files
-        </Button>
-      </Group>
-      <Modal opened={open === "warnings"} onClose={() => setOpen(null)} title="Warning details" size="lg">
-        {open === "warnings" && <WarningDetails id={id} />}
-      </Modal>
-      <Modal opened={open === "files"} onClose={() => setOpen(null)} title="Files in the archive" size="lg">
-        {open === "files" && (
-          <FileList
-            id={id}
-            warned={lines.length > 0}
-            onView={(file) => {
-              setOpen(null);
-              onView(file);
-            }}
-          />
-        )}
-      </Modal>
-    </Stack>
-  );
-}
-
-function WarningDetails({ id }: { id: number }) {
-  const q = useQuery({
-    queryKey: ["model-warnings", id],
-    queryFn: async () => unwrap(await api.GET("/api/models/{id}/warnings", { params: { path: { id } } })),
-  });
-  if (q.isPending) return <Loader size="sm" />;
-  if (q.isError) return <Alert color="red">{q.error.message}</Alert>;
-  return (
-    <Stack data-testid="warning-sections">
-      {q.data.error && <Alert color="orange">{q.data.error}</Alert>}
-      {q.data.sections.map((s) => (
-        <div key={s.warning}>
-          <Text fw={600} size="sm">{s.warning}</Text>
-          {s.members.length ? (
-            <Table fz="xs" verticalSpacing={2}>
-              <Table.Tbody>
-                {s.members.map((m) => (
-                  <Table.Tr key={m.name}>
-                    <Table.Td style={{ wordBreak: "break-all" }}>{m.name}</Table.Td>
-                    <Table.Td w={90} ta="right">{formatSize(m.size)}</Table.Td>
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
-          ) : (
-            <Text size="xs" c="dimmed">
-              No file triggers it: it is raised by something missing, or no longer applies.
-            </Text>
-          )}
-        </div>
-      ))}
-    </Stack>
-  );
-}
-
-function FileList({ id, warned, onView }: { id: number; warned: boolean; onView: (file: string) => void }) {
+export function FileList({ id, warned, onView }: { id: number; warned: boolean; onView: (file: string) => void }) {
   const q = useQuery({
     queryKey: ["model-files", id],
     queryFn: async () => unwrap(await api.GET("/api/models/{id}/archive-files", { params: { path: { id } } })),
@@ -120,7 +42,40 @@ function FileList({ id, warned, onView }: { id: number; warned: boolean; onView:
       </Text>
     );
   }
-  return <FileTreeView files={q.data} viewable={viewable} warnings={warnings} onView={onView} />;
+  return (
+    <Stack gap="sm">
+      {details.data && details.data.sections.length > 0 && (
+        <Stack gap={4} data-testid="warning-sections">
+          {details.data.sections.map((s) => (
+            <Group key={s.warning} gap={6} wrap="nowrap" align="flex-start">
+              <IconAlertTriangle size={14} color="var(--mantine-color-orange-text)" style={{ flexShrink: 0, marginTop: 2 }} />
+              <Text size="xs">
+                <Text span size="xs" fw={600} c="orange">
+                  {s.warning}
+                </Text>
+                <Text span size="xs" c="dimmed">
+                  {" — "}
+                  {whyText(s.members.length)}
+                </Text>
+              </Text>
+            </Group>
+          ))}
+          {details.data.error && (
+            <Text size="xs" c="dimmed">
+              {details.data.error}
+            </Text>
+          )}
+        </Stack>
+      )}
+      <FileTreeView files={q.data} viewable={viewable} warnings={warnings} onView={onView} />
+    </Stack>
+  );
+}
+
+/** Why a warning is raised, from the number of files that trigger it. */
+export function whyText(files: number): string {
+  if (files === 0) return "raised by something the archive lacks, not by a file";
+  return `${files} file${files === 1 ? "" : "s"}, marked below`;
 }
 
 /** The archive's folders and files, all folders open; model files have a view button, and files behind a warning stand out. */
@@ -149,14 +104,14 @@ function FileTreeView({ files, viewable, warnings, onView }: {
       <Tree
         data={tree.data}
         tree={controller}
-        levelOffset={18}
+        levelOffset={12}
         renderNode={({ node, expanded, hasChildren, elementProps }) => {
           const info = tree.info.get(node.value)!;
           const reasons = info.kind === "file" ? warnings.get(info.name!) : undefined;
           // A folder stands out too, so a closed one does not hide its files.
           const warned = reasons != null || (info.files ?? []).some((f) => warnings.has(f));
           const color = warned ? "orange" : undefined;
-          const name = <Text size="xs" c={color} fw={reasons ? 600 : undefined} style={{ flex: 1, minWidth: 0, wordBreak: "break-all" }}>{node.label}</Text>;
+          const name = <Text size="xs" c={color} fw={reasons ? 600 : undefined} style={{ flex: 1, minWidth: 60, overflowWrap: "anywhere" }}>{node.label}</Text>;
           return (
             <Group gap={6} wrap="nowrap" {...elementProps} style={{ ...elementProps.style, minHeight: 24 }}>
               {hasChildren ? (
@@ -173,11 +128,11 @@ function FileTreeView({ files, viewable, warnings, onView }: {
               )}
               {reasons ? <Tooltip label={reasons.join(", ")}>{name}</Tooltip> : name}
               {info.kind === "folder" ? (
-                <Text size="xs" c="dimmed" w={170} ta="right">{info.files!.length} file{info.files!.length === 1 ? "" : "s"} · {formatSize(info.size)}</Text>
+                <Text size="xs" c="dimmed" ta="right" style={{ flexShrink: 0, whiteSpace: "nowrap" }}>{info.files!.length} · {formatSize(info.size)}</Text>
               ) : (
-                <Text size="xs" w={80} ta="right">{formatSize(info.size)}</Text>
+                <Text size="xs" ta="right" style={{ flexShrink: 0, whiteSpace: "nowrap" }}>{formatSize(info.size)}</Text>
               )}
-              <span style={{ width: 28, flexShrink: 0 }}>
+              <span style={{ width: 24, flexShrink: 0 }}>
                 {info.kind === "file" && viewable.has(info.name!) && (
                   <Tooltip label="View">
                     <ActionIcon

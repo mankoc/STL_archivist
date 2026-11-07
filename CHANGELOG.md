@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026.45.42 — 2026-11-07
+
+- **The detail pane is reorganised:** the title, one row of actions that all look alike (View model, Download, Files, an
+  **Open** menu for MeshPeek, the archive program and the folder, and copy path), then three tabs. **Images** is the one it
+  opens on, and the last tab chosen stays chosen. **Details** lists every field with a value, now with scales,
+  compression, file and STL counts, presupports, the date added, the description and the source link. **Files** takes the
+  place of the Files window: it names each warning and why it is raised, above the tree that highlights the files behind
+  them. On Details and Files the first image shows as the cover.
+- The model details (`GET /api/models/{id}`) also carry `presupports`, `compression_rate`, `sequence`, `created_at`,
+  `to_print`, `url`, `description`, `scales`, `file_count` and `stl_count`.
+- The archive's file tree fits a narrow pane.
+
 ## 2026.45.41 — 2026-11-06
 
 - **Warnings show in the detail pane, and the Files window highlights by them.** A model's details never carried its

@@ -192,7 +192,9 @@ pub struct ModelDetail {
     /// `title`, `creator`, `source`, `sculptor_name`, `collection_name`,
     /// `subcollection_name`, `category_name`, `release_name`, `release_year`,
     /// `release_month`, `archive_path`, `archive_size`, `is_missing`, `warning`,
-    /// `tags` (comma-separated) and `image_count`.
+    /// `presupports`, `compression_rate`, `sequence`, `created_at`, `to_print`, `url`,
+    /// `description`, `tags` and `scales` (comma-separated), `image_count`, `file_count`
+    /// (the stored file list) and `stl_count`.
     #[schema(value_type = Object)]
     pub fields: BTreeMap<String, serde_json::Value>,
     pub images: Vec<ImageRef>,
