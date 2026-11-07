@@ -1,0 +1,15 @@
+# StlArchivist server settings, read by its systemd service (stlarchivist.service).
+# After a change: sudo systemctl restart stlarchivist
+
+# Where it listens. The default answers only on this machine; to reach it from the
+# network, listen on all addresses (and put HTTPS in front: see docs/deployment.md).
+#STL_BIND=0.0.0.0:8770
+
+# The UnRAR program, for compressed RAR archives (also settable in Settings → Components).
+#STL_UNRAR_PATH=/usr/bin/unrar
+
+# An OpenAI-compatible server for the AI tagger, instead of a local model.
+#STL_AI_URL=http://127.0.0.1:8080
+
+# Log detail: error, warn, info, debug.
+#STL_LOG=info

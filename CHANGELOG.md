@@ -21,6 +21,10 @@
 - **The library keeps its state while you visit another page:** filters, open folders in the filter pane, the selection,
   the detail pane and the scroll position are as you left them when you come back from Settings or any other page.
   Leaving it closes its drawers, dialogs and menus, and Ctrl+A on another page no longer selects models.
+- **Linux packages:** each release, and the nightly, has two .deb packages (amd64; Debian 12, Ubuntu 22.04 and newer).
+  `stlarchivist-server` installs the server and its web client as the `stlarchivist` systemd service (port 8770, library
+  in `/var/lib/stlarchivist`, settings in `/etc/default/stlarchivist`); the desktop app's package has the server and the
+  web client inside. The server package is installed and started in CI as a check.
 
 ## 2026.45.41 — 2026-11-06
 
