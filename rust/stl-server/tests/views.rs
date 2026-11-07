@@ -98,3 +98,31 @@ async fn original_images() {
     assert_eq!(r.status, StatusCode::NOT_FOUND);
     assert_eq!(call(&lib.state, "GET", "/api/images/999/original", Some(&ed), None).await.status, StatusCode::NOT_FOUND);
 }
+
+/// An original beside the archive is read from the library folder only: an image's name
+/// can come from an upload, a sidecar or another server.
+#[tokio::test(flavor = "multi_thread")]
+async fn originals_beside_the_archive_stay_inside_the_library() {
+    let lib = empty_library();
+    let ed = lib.user("ed", Role::Editor);
+    let root = lib.dir.path().join("archives");
+    write_zip(&root.join("A").join("Dragon.zip"), &[("d.stl", b"solid\nendsolid\n"), ("r.png", &png())]);
+    crawl(&lib, &ed, &root).await;
+    let image: i64 = lib.state.db.with(|c| c.query_row("SELECT id FROM images", [], |r| r.get(0))).unwrap();
+    let cover = png();
+    let beside = root.join("A").join("cover.png");
+    std::fs::write(&beside, &cover).unwrap();
+    let outside = lib.dir.path().join("private.png");
+    std::fs::write(&outside, b"not the library's").unwrap();
+    let uri = format!("/api/images/{image}/original");
+    let original = |file: &Path| {
+        let name = file.to_string_lossy().into_owned();
+        lib.state.db.with(|c| c.execute("UPDATE images SET filename = ?1", [name])).unwrap();
+        call(&lib.state, "GET", &uri, Some(&ed), None)
+    };
+    let r = original(&beside).await;
+    assert_eq!((r.status, r.body), (StatusCode::OK, cover), "an image in the archive's folder");
+    assert_eq!(original(&outside).await.status, StatusCode::NOT_FOUND, "outside the library folder");
+    let dotted = root.join("A").join("..").join("..").join("private.png");
+    assert_eq!(original(&dotted).await.status, StatusCode::NOT_FOUND, "nor by way of ..");
+}

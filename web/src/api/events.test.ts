@@ -1,6 +1,68 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { coalesced, LIBRARY_KEYS, staleKeys } from "./events";
+import { coalesced, followEvents, LIBRARY_KEYS, staleKeys } from "./events";
+
+/** Enough of a WebSocket for `followEvents`: the test opens, sends and drops it. */
+class FakeSocket {
+  static made: FakeSocket[] = [];
+  onopen: (() => void) | null = null;
+  onmessage: ((m: { data: string }) => void) | null = null;
+  onclose: (() => void) | null = null;
+  closed = false;
+  constructor(readonly url: string) {
+    FakeSocket.made.push(this);
+  }
+  close() {
+    this.closed = true;
+  }
+}
+
+describe("followEvents", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    FakeSocket.made = [];
+  });
+  afterEach(() => void vi.useRealTimers());
+
+  const follow = () => {
+    const on = { event: vi.fn(), reconnected: vi.fn() };
+    const stop = followEvents("ws://x/api/events", on, (url) => new FakeSocket(url) as unknown as WebSocket);
+    return { on, stop };
+  };
+
+  it("passes events on, and reports a reconnection but not the first connection", () => {
+    const { on } = follow();
+    const first = FakeSocket.made[0];
+    first.onopen?.();
+    expect(on.reconnected).not.toHaveBeenCalled();
+    first.onmessage?.({ data: JSON.stringify({ type: "jobs_cleared" }) });
+    first.onmessage?.({ data: "not JSON" });
+    expect(on.event).toHaveBeenCalledTimes(1);
+    expect(on.event).toHaveBeenCalledWith({ type: "jobs_cleared" });
+
+    first.onclose?.();
+    vi.advanceTimersByTime(1000);
+    expect(FakeSocket.made).toHaveLength(2);
+    FakeSocket.made[1].onopen?.();
+    expect(on.reconnected).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits longer after each failed attempt, and stops for good when told", () => {
+    const { stop } = follow();
+    FakeSocket.made[0].onclose?.();
+    vi.advanceTimersByTime(1000);
+    FakeSocket.made[1].onclose?.();
+    vi.advanceTimersByTime(1999);
+    expect(FakeSocket.made).toHaveLength(2);
+    vi.advanceTimersByTime(1);
+    expect(FakeSocket.made).toHaveLength(3);
+    stop();
+    expect(FakeSocket.made[2].closed).toBe(true);
+    FakeSocket.made[2].onclose?.();
+    vi.advanceTimersByTime(60000);
+    expect(FakeSocket.made).toHaveLength(3);
+  });
+});
 
 describe("coalesced", () => {
   beforeEach(() => void vi.useFakeTimers());

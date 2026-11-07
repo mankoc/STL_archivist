@@ -28,15 +28,31 @@ pub fn archive_files(conn: &Connection, model_id: i64) -> Result<Vec<(String, Op
     st.query_map([model_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect()
 }
 
-/// `(archive path, image file name)` of one image: where its original is
-/// (an archive member, or a file beside the archive given by its full path).
-pub fn image_source(conn: &Connection, image_id: i64) -> Result<Option<(Option<String>, Option<String>)>> {
+/// Where one image's original is: an archive member, or a file beside the
+/// archive given by its full path.
+pub fn image_source(conn: &Connection, image_id: i64) -> Result<Option<ImageSource>> {
     conn.query_row(
-        &format!("SELECT {}, i.filename FROM images i JOIN models m ON m.id = i.model_id WHERE i.id = ?1", archive_path_sql("m")),
+        &format!(
+            "SELECT {}, l.root, i.filename FROM images i JOIN models m ON m.id = i.model_id \
+             LEFT JOIN libraries l ON l.id = m.library_id WHERE i.id = ?1",
+            archive_path_sql("m")
+        ),
         [image_id],
-        |r| Ok((r.get(0)?, r.get(1)?)),
+        |r| Ok(ImageSource { archive: r.get(0)?, root: r.get(1)?, name: r.get(2)? }),
     )
     .optional()
+}
+
+/// Where an image's original is ([`image_source`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImageSource {
+    /// The model's archive (absolute).
+    pub archive: Option<String>,
+    /// The root of the model's library folder.
+    pub root: Option<String>,
+    /// The image's name: a member of the archive, or the absolute path of an image
+    /// beside it (one found in its folders by a crawl).
+    pub name: Option<String>,
 }
 
 /// `(archive_path, warning)` of one model (Warning Details).

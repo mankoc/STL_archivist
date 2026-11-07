@@ -24,7 +24,8 @@ use crate::winpath::WinPath;
 
 const BATCH_SIZE: usize = 50;
 const MAX_CONSECUTIVE_FAILURES: usize = 50;
-pub(crate) const SIZE_LIMIT_IMAGE: u64 = 50 * 1024 * 1024;
+/// The largest image (or PDF) a crawl reads, and the server serves at full size.
+pub const SIZE_LIMIT_IMAGE: u64 = 50 * 1024 * 1024;
 const SIZE_LIMIT_META: u64 = 1024 * 1024;
 
 /// The crawl settings (`CrawlerConfig` plus the source folder and pattern).
@@ -523,6 +524,31 @@ fn images_in(dir: &str, pool: &rayon::ThreadPool, cfg: &CrawlConfig, host: &dyn 
     })
 }
 
+/// The CLIP vectors of a batch's new thumbnails, asked of the host in one call: per
+/// archive (3 to 5 images), each call to a compute worker was a round trip, and a GPU
+/// ran a fraction of its batch.
+fn embed_batch(host: &dyn Host, inputs: &mut [db::UpsertInput]) {
+    let mut slots: Vec<(usize, usize)> = Vec::new();
+    let mut jpegs: Vec<Vec<u8>> = Vec::new();
+    for (i, input) in inputs.iter().enumerate() {
+        for (t, thumb) in input.changed.iter().flat_map(|c| c.thumbs.iter().enumerate()) {
+            if let Some(j) = &thumb.jpeg {
+                slots.push((i, t));
+                jpegs.push(j.clone());
+            }
+        }
+    }
+    if jpegs.is_empty() {
+        return;
+    }
+    let Some(vectors) = host.embed(&jpegs) else { return };
+    for ((i, t), v) in slots.into_iter().zip(vectors) {
+        if let Some(c) = inputs[i].changed.as_mut() {
+            c.thumbs[t].vector = v;
+        }
+    }
+}
+
 fn metadata_for(path: &str, contents: &[(String, Vec<u8>)], cfg: &CrawlConfig) -> Metadata {
     let files: Vec<(String, Vec<u8>)> = contents
         .iter()
@@ -744,6 +770,9 @@ impl Run<'_> {
                 break;
             }
         }
+        if cfg.embed {
+            embed_batch(host, &mut inputs);
+        }
         let results = {
             let t = tx(&mut self.conn)?;
             let r = db::upsert_batch(&t, self.store, &cfg.upsert, &inputs, self.failures, MAX_CONSECUTIVE_FAILURES)?;
@@ -821,26 +850,18 @@ impl Run<'_> {
     }
 
     fn changed(&mut self, path: &str, hash: &str, existing_id: Option<i64>, prep: &Prepared) -> db::Changed {
-        let (cfg, host) = (self.cfg, self.host);
+        let cfg = self.cfg;
         let x = &prep.extracted;
         let meta = metadata_for(path, &x.contents, cfg);
         let archive_name = WinPath::new(path).name().to_string();
         let (presupports, warnings, scales) = rules_for(&self.patterns, self.checks, &archive_name, &x.names);
         let (year, month) = path_pattern::parse_release_date(meta.release_date.as_deref().unwrap_or(""));
-        let mut thumbs: Vec<db::Thumb> = prep
+        // Their CLIP vectors come later, for the whole batch at once (`embed_batch`).
+        let thumbs: Vec<db::Thumb> = prep
             .precomp
             .iter()
             .map(|(n, j, d)| db::Thumb { name: n.clone(), jpeg: j.clone(), dhash: d.clone().filter(|_| j.is_some()), vector: None })
             .collect();
-        if cfg.embed {
-            let resolved: Vec<usize> = (0..thumbs.len()).filter(|&i| thumbs[i].jpeg.is_some()).collect();
-            let jpegs: Vec<Vec<u8>> = resolved.iter().map(|&i| thumbs[i].jpeg.clone().unwrap_or_default()).collect();
-            if let Some(v) = host.embed(&jpegs) {
-                for (i, vec) in resolved.into_iter().zip(v) {
-                    thumbs[i].vector = vec;
-                }
-            }
-        }
         let fresh = existing_id.is_none() || self.existing_hashes.get(path).map(String::as_str) != Some(hash);
         db::Changed {
             title: meta.title,
@@ -1275,6 +1296,68 @@ mod tests {
         assert_eq!(read(Some(2)), ["1.jpg", "2.png", "info.json", "link.url"]);
         assert_eq!(read(Some(0)), ["info.json", "link.url"]);
         assert_eq!(read(None).len(), 6);
+    }
+
+    /// A host that records the embedding requests it gets.
+    #[derive(Default)]
+    struct Recorder {
+        embeds: std::sync::Mutex<Vec<usize>>,
+    }
+
+    impl Host for Recorder {
+        fn pdf_thumbnail(&self, _: &[u8]) -> Option<Vec<u8>> {
+            None
+        }
+        fn embed(&self, jpegs: &[Vec<u8>]) -> Option<Vec<Option<Vec<u8>>>> {
+            self.embeds.lock().unwrap().push(jpegs.len());
+            let unit: Vec<u8> = (0..512).flat_map(|i| if i == 0 { 1f32 } else { 0f32 }.to_le_bytes()).collect();
+            Some(vec![Some(unit); jpegs.len()])
+        }
+        fn emit(&self, _: Event) {}
+        fn should_stop(&self) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    fn a_batch_of_archives_is_embedded_in_one_request() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("archives");
+        std::fs::create_dir(&folder).unwrap();
+        let png = |shade: u8| {
+            let mut out = std::io::Cursor::new(Vec::new());
+            image::RgbImage::from_pixel(32, 24, image::Rgb([shade, 0, 0])).write_to(&mut out, image::ImageFormat::Png).unwrap();
+            out.into_inner()
+        };
+        for a in 0..3u8 {
+            let mut z = zip::ZipWriter::new(std::fs::File::create(folder.join(format!("m{a}.zip"))).unwrap());
+            let o = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+            for (name, data) in [("model.stl".to_string(), b"solid\nendsolid\n".to_vec()), ("1.png".into(), png(a * 2)), ("2.png".into(), png(a * 2 + 1))] {
+                z.start_file(name, o).unwrap();
+                z.write_all(&data).unwrap();
+            }
+            z.finish().unwrap();
+        }
+        let db = dir.path().join("lib.db");
+        storage::migrate(&db, &storage::Vectors::default()).unwrap();
+        let store = ThumbStore::open(&dir.path().join("thumbs")).unwrap();
+        let cfg = CrawlConfig {
+            source_dir: crate::winpath::native(&folder.to_string_lossy()),
+            recurse: true,
+            max_thumbnails: 5,
+            max_thumb_size: 64,
+            max_workers: 2,
+            embed: true,
+            upsert: db::UpsertConfig { embed_dim: 512, ..Default::default() },
+            ..Default::default()
+        };
+        let host = Recorder::default();
+        let summary = crawl(&db, Some(&store), &cfg, &host).unwrap();
+        assert_eq!(summary.new, 3);
+        assert_eq!(*host.embeds.lock().unwrap(), [6], "the three archives' six thumbnails in one request");
+        let vectors: i64 = storage::open(&db).unwrap().query_row("SELECT count(*) FROM image_vec", [], |r| r.get(0)).unwrap();
+        assert_eq!(vectors, 6);
     }
 
     #[test]

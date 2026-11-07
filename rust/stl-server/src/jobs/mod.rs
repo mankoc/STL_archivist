@@ -211,6 +211,8 @@ pub struct Jobs {
     next_id: AtomicU64,
     wake: Arc<Notify>,
     started: OnceLock<()>,
+    /// The server is stopping: no job starts any more ([`Jobs::close`]).
+    closed: AtomicBool,
     pub events: broadcast::Sender<ServerEvent>,
 }
 
@@ -221,6 +223,7 @@ impl Default for Jobs {
             next_id: AtomicU64::new(1),
             wake: Arc::new(Notify::new()),
             started: OnceLock::new(),
+            closed: AtomicBool::new(false),
             events: broadcast::channel(1024).0,
         }
     }
@@ -245,6 +248,9 @@ impl Jobs {
     }
 
     fn next_queued(&self) -> Option<Arc<Job>> {
+        if self.is_closed() {
+            return None;
+        }
         self.list
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -300,6 +306,35 @@ impl Jobs {
             }
             _ => false,
         }
+    }
+
+    /// The server is stopping: no job starts any more, the queued ones are cancelled
+    /// and the running one is asked to stop at its next checkpoint.
+    pub fn close(&self) {
+        self.closed.store(true, Ordering::SeqCst);
+        let jobs: Vec<Arc<Job>> = self.list.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        for job in jobs {
+            match job.info().state {
+                JobState::Queued => {
+                    finish(&job, JobState::Cancelled, Some("the server stopped before it started".into()));
+                    self.publish(&job);
+                }
+                JobState::Running => {
+                    job.stop.store(true, Ordering::Relaxed);
+                    job.ctl.request_stop();
+                }
+                _ => {}
+            }
+        }
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::SeqCst)
+    }
+
+    /// A job is running.
+    pub fn running(&self) -> bool {
+        self.list.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|j| j.info().state == JobState::Running)
     }
 
     /// Pause or resume a queued or running job. `false` when it has already finished.
@@ -379,6 +414,21 @@ impl Library {
         self.jobs.send(ServerEvent::LibraryChanged { what: what.to_string() });
     }
 
+    /// When the server stops: no job starts any more, queued ones are cancelled and the
+    /// running one is asked to stop. Waits until it has, at most `grace`; `false` when it
+    /// is still running (it then ends with the process).
+    pub async fn stop_jobs(&self, grace: Duration) -> bool {
+        self.jobs.close();
+        let deadline = tokio::time::Instant::now() + grace;
+        while self.jobs.running() {
+            if tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        true
+    }
+
     fn job_log(&self, job: &Job, line: String) {
         {
             let mut log = job.log.lock().unwrap_or_else(|e| e.into_inner());
@@ -406,10 +456,18 @@ async fn worker(lib: Weak<Library>, wake: Arc<Notify>) {
             continue;
         };
         let Some(l) = lib.upgrade() else { return };
+        // Only a job still queued starts: one cancelled since it was picked stays cancelled.
+        let mut starts = false;
         update(&job, |i| {
-            i.state = JobState::Running;
-            i.started_at = Some(accounts::now());
+            if i.state == JobState::Queued {
+                i.state = JobState::Running;
+                i.started_at = Some(accounts::now());
+                starts = true;
+            }
         });
+        if !starts {
+            continue;
+        }
         l.jobs.publish(&job);
         // Publish progress while the job runs.
         let ticker = {

@@ -50,6 +50,36 @@ fn scalar(lib: &TestLib, sql: &str) -> i64 {
     lib.state.db.with(|c| c.query_row(sql, [], |r| r.get(0))).unwrap()
 }
 
+/// The background pass may queue the first job since the server started. It used to
+/// run on a thread of its own, where starting the job worker panicked: monitoring
+/// ended there, and the crawl it had queued waited for another job to start it.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_first_job_can_come_from_the_background_pass() {
+    let lib = empty_library();
+    std::fs::write(lib.dir.path().join("settings.json"), r#"{"metadata_sidecar_enabled": false}"#).unwrap();
+    let root = lib.dir.path().join("archives");
+    write_zip(&root.join("Studio").join("Dragon.zip"), "dragon.stl");
+    // A monitored library folder, made without any job.
+    let folder = root.to_string_lossy().into_owned();
+    lib.state
+        .db
+        .with_tx(|tx| {
+            let id = stl_core::storage::libraries::create(tx, &folder, stl_core::storage::libraries::Target::Around, None, None)?;
+            tx.execute("UPDATE libraries SET monitored = 1 WHERE id = ?1", [id])
+        })
+        .unwrap();
+    stl_server::monitor::start_every(&lib.state, Duration::from_millis(50));
+    for _ in 0..300 {
+        let jobs = lib.state.jobs.list();
+        if jobs.iter().any(|j| j.user == stl_server::monitor::USER && j.state == stl_server::jobs::JobState::Done) {
+            assert_eq!(scalar(&lib, "SELECT count(*) FROM models"), 1);
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("the monitor's crawl did not run: {:?}", lib.state.jobs.list());
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn monitored_folders_are_crawled_when_they_change() {
     let lib = empty_library();

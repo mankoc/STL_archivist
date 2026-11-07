@@ -1,13 +1,13 @@
 // The browser: filter pane, table and detail pane (the desktop's main window).
 import {
-  ActionIcon, Anchor, Box, Button, Center, Checkbox, CloseButton, Group, Loader, Menu, Modal, Popover, SegmentedControl, SimpleGrid, Stack, Switch, Text,
+  ActionIcon, Box, Button, Center, Checkbox, CloseButton, Group, Loader, Menu, Modal, SegmentedControl, Stack, Text,
   TextInput, Tooltip, VisuallyHidden,
 } from "@mantine/core";
-import { useDebouncedValue, useHotkeys } from "@mantine/hooks";
+import { useHotkeys } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconAdjustmentsHorizontal, IconChevronDown, IconColumns, IconEdit, IconFilterOff, IconPhoto, IconRefresh, IconSearch, IconTable } from "@tabler/icons-react";
+import { IconChevronDown, IconColumns, IconEdit, IconFilterOff, IconPhoto, IconRefresh, IconTable } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, unwrap } from "../api/client";
 import { hasRole, useUser } from "../auth/user";
@@ -25,7 +25,8 @@ import { MassEditDrawer } from "./MassEditDrawer";
 import { EMPTY, type FilterSpec, isEmpty } from "./filters";
 import { ALWAYS_SHOWN, choiceFrom, COLUMN_ORDER_KEY, HIDDEN_COLUMNS_KEY, isShown, moveColumn, SHOWN_COLUMNS_KEY, toggle } from "./columns";
 import { COLUMNS, ModelTable, type Sort, useModelIds } from "./ModelTable";
-import { customised, DEFAULT_OPTIONS, loadOptions, placeholder, saveOptions, SEARCH_FIELDS, type SearchOptions } from "./search";
+import { loadOptions, saveOptions, type SearchOptions } from "./search";
+import { SearchBox } from "./SearchBox";
 import { NONE, click, contextClick, coverage, prune, selectAll, type Selection } from "./selection";
 import { HIGHLIGHT_WARNINGS } from "./warnings";
 import { RELATIVE_PATHS } from "./cells";
@@ -37,8 +38,8 @@ const SHOW = ["library", "author", "tags", "source", "date", "sculptor", "collec
 /** `active`: shown. The page stays mounted while another one shows (Shell). */
 export function BrowserPage({ active = true }: { active?: boolean }) {
   const [filter, setFilter] = useState<FilterSpec>(EMPTY);
-  const [searchText, setSearchText] = useState("");
-  const [search] = useDebouncedValue(searchText, 250);
+  // The search text once typing pauses (the box keeps what is being typed).
+  const [search, setSearch] = useState("");
   const [searchOptions, setSearchOptionsState] = useState<SearchOptions>(loadOptions);
   const setSearchOptions = (o: SearchOptions) => {
     setSearchOptionsState(o);
@@ -64,22 +65,29 @@ export function BrowserPage({ active = true }: { active?: boolean }) {
     target.setPointerCapture(e.pointerId);
     setDragging(pane);
     let width = pane === "filter" ? filterWidth : detailWidth;
+    // While dragging, only the layout's width variable changes: the panes are laid out
+    // again, but not rendered again on every move. The state follows on release.
     const move = (ev: PointerEvent) => {
       const box = layout.getBoundingClientRect();
       if (pane === "filter") {
         width = clampWidth(ev.clientX - box.left, box.width, FILTER_PANE.maxShare, FILTER_PANE.min);
-        setFilterWidth(width);
+        layout.style.setProperty("--filter-width", `${width}px`);
       } else {
         width = clampWidth(box.right - ev.clientX, box.width);
-        setDetailWidth(width);
+        layout.style.setProperty("--detail-width", `${width}px`);
       }
     };
     const up = () => {
       target.removeEventListener("pointermove", move);
       target.removeEventListener("pointerup", up);
       setDragging(null);
-      if (pane === "filter") saveWidth(width, FILTER_PANE.key);
-      else saveWidth(width);
+      if (pane === "filter") {
+        setFilterWidth(width);
+        saveWidth(width, FILTER_PANE.key);
+      } else {
+        setDetailWidth(width);
+        saveWidth(width);
+      }
     };
     target.addEventListener("pointermove", move);
     target.addEventListener("pointerup", up);
@@ -146,7 +154,6 @@ export function BrowserPage({ active = true }: { active?: boolean }) {
     setPatternCrawl(null);
   }, [active]);
   const libraries = useQuery({ queryKey: ["libraries"], queryFn: async () => unwrap(await api.GET("/api/libraries")) });
-  const selectedIds = () => order.filter((i) => selection.ids.has(i));
   const queueJob = async (body: JobRequest, what: string) => {
     try {
       unwrap(await api.POST("/api/jobs", { body }));
@@ -162,6 +169,9 @@ export function BrowserPage({ active = true }: { active?: boolean }) {
   const ids = useModelIds(query);
   const order = ids.data ?? [];
   useEffect(() => setSelection((s) => prune(s, order)), [order]);
+  // The selected models in table order, worked out again only when either changes
+  // (the table can hold every model of the library).
+  const selected = useMemo(() => order.filter((i) => selection.ids.has(i)), [order, selection.ids]);
   const covered = coverage(selection, order);
   const selectEvery = (all: boolean) => setSelection((s) => (all ? selectAll(s, order) : NONE));
   useHotkeys(active ? [["mod+A", () => selectEvery(true)]] : []);
@@ -250,55 +260,7 @@ export function BrowserPage({ active = true }: { active?: boolean }) {
       </Box>
       <Box className={classes.table}>
         <Group px="xs" py={6} className={classes.toolbar}>
-          <TextInput
-            size="xs"
-            placeholder={placeholder(searchOptions)}
-            leftSection={<IconSearch size={14} />}
-            value={searchText}
-            onChange={(e) => setSearchText(e.currentTarget.value)}
-            w={320}
-            rightSectionPointerEvents="all"
-            rightSection={
-              <Popover position="bottom-end" shadow="md" withArrow>
-                <Popover.Target>
-                  <Tooltip label="Search options" openDelay={400}>
-                    <ActionIcon size="sm" variant={customised(searchOptions) ? "light" : "subtle"} color={customised(searchOptions) ? undefined : "gray"}
-                      aria-label="Search options" data-testid="search-options">
-                      <IconAdjustmentsHorizontal size={14} />
-                    </ActionIcon>
-                  </Tooltip>
-                </Popover.Target>
-                <Popover.Dropdown>
-                  <Stack gap="xs">
-                    <Text size="xs" fw={600}>Search in</Text>
-                    <SimpleGrid cols={2} spacing="xs" verticalSpacing={6}>
-                      {SEARCH_FIELDS.map((f) => {
-                        const on = searchOptions.fields.includes(f.value);
-                        return (
-                          <Checkbox key={f.value} size="xs" label={f.label} checked={on}
-                            disabled={on && searchOptions.fields.length === 1}
-                            onChange={() => setSearchOptions({
-                              ...searchOptions,
-                              fields: SEARCH_FIELDS.map((x) => x.value).filter((v) => (v === f.value ? !on : searchOptions.fields.includes(v))),
-                            })} />
-                        );
-                      })}
-                    </SimpleGrid>
-                    <Switch size="xs" label="Fuzzy: ignore accents, allow typos" checked={searchOptions.fuzzy}
-                      onChange={(e) => setSearchOptions({ ...searchOptions, fuzzy: e.currentTarget.checked })} />
-                    <Text size="xs" c="dimmed" maw={260}>
-                      {searchOptions.fuzzy
-                        ? "Every word must appear in one of the fields; words of four letters or more may have a typo (two from seven letters)."
-                        : "Finds the text as typed inside any of the fields."}
-                    </Text>
-                    {customised(searchOptions) && (
-                      <Anchor size="xs" component="button" onClick={() => setSearchOptions(DEFAULT_OPTIONS)}>Reset</Anchor>
-                    )}
-                  </Stack>
-                </Popover.Dropdown>
-              </Popover>
-            }
-          />
+          <SearchBox options={searchOptions} onOptions={setSearchOptions} onSearch={setSearch} />
           <Group gap={4} wrap="nowrap">
             <Text size="xs" c="dimmed">
               {ids.data ? `${ids.data.length.toLocaleString()} model${ids.data.length === 1 ? "" : "s"}` : ""}
@@ -321,7 +283,7 @@ export function BrowserPage({ active = true }: { active?: boolean }) {
                     </Button>
                   </Menu.Target>
                   <Menu.Dropdown>
-                    <ModelActionItems ids={selectedIds()} where="toolbar" editor={editor} on={actions} />
+                    <ModelActionItems ids={selected} where="toolbar" editor={editor} on={actions} />
                   </Menu.Dropdown>
                 </Menu>
               </>
@@ -400,8 +362,8 @@ export function BrowserPage({ active = true }: { active?: boolean }) {
         <DetailPane id={selection.current} onEdit={setEditing} />
       </Box>
       <EditorDrawer id={editing} onClose={() => setEditing(null)} />
-      <MassEditDrawer ids={order.filter((i) => selection.ids.has(i))} opened={massEdit} onClose={() => setMassEdit(false)} />
-      <AiTaggerDrawer ids={order.filter((i) => selection.ids.has(i))} opened={aiTagger} onClose={() => setAiTagger(false)} />
+      <MassEditDrawer ids={selected} opened={massEdit} onClose={() => setMassEdit(false)} />
+      <AiTaggerDrawer ids={selected} opened={aiTagger} onClose={() => setAiTagger(false)} />
       <Menu opened={menu != null} onChange={(o) => !o && setMenu(null)} position="bottom-start" withinPortal>
         <Menu.Target>
           <div style={{ position: "fixed", left: menu?.x ?? 0, top: menu?.y ?? 0, width: 0, height: 0 }} />
@@ -463,7 +425,7 @@ export function BrowserPage({ active = true }: { active?: boolean }) {
           </Stack>
         )}
       </Modal>
-      {sorting && <SortModal ids={selectedIds()} opened onClose={() => setSorting(false)} />}
+      {sorting && <SortModal ids={selected} opened onClose={() => setSorting(false)} />}
       <Modal opened={confirmDelete} onClose={() => setConfirmDelete(false)} title="Delete archive files">
         <Text size="sm">
           Delete the archive files of {selection.ids.size} model(s) and remove them from the library? With a trash folder set in
@@ -471,7 +433,7 @@ export function BrowserPage({ active = true }: { active?: boolean }) {
         </Text>
         <Group justify="flex-end" mt="md">
           <Button variant="default" onClick={() => setConfirmDelete(false)}>Cancel</Button>
-          <Button color="red" onClick={() => { setConfirmDelete(false); void queueJob({ kind: "delete_files", ids: selectedIds() }, "Deleting files"); }}>
+          <Button color="red" onClick={() => { setConfirmDelete(false); void queueJob({ kind: "delete_files", ids: selected }, "Deleting files"); }}>
             Delete files
           </Button>
         </Group>

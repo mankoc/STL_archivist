@@ -416,13 +416,15 @@ fn search_condition(search: &Search) -> Result<Sql> {
         return Ok(Sql::with(format!("fuzzy_match({text}, ?)"), vec![Value::Text(search.text.clone())]));
     }
     let pat = format!("%{}%", search.text);
+    // `LIKE` ignores the case of ASCII letters, and that is all SQLite's `lower()` folds
+    // (no ICU in this build): `lower()` on both sides found the same rows in twice the time.
     let parts: Vec<String> = fields
         .iter()
         .zip(&cols)
         .map(|(f, c)| match *f {
-            // Through the index of tag names rather than joining them per model.
-            "tags" => format!("models_view.id IN ({TAGGED} WHERE lower(tags.name) LIKE lower(?))"),
-            _ => format!("lower({c}) LIKE lower(?)"),
+            // Through the tag names (a small table) rather than joining them per model.
+            "tags" => format!("models_view.id IN ({TAGGED} WHERE tags.name LIKE ?)"),
+            _ => format!("{c} LIKE ?"),
         })
         .collect();
     let n = parts.len();

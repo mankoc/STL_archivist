@@ -100,15 +100,22 @@ pub async fn login(State(lib): State<AppState>, headers: HeaderMap, Json(c): Jso
     if c.name.trim().chars().count() > accounts::MAX_NAME {
         return Err(ApiError::new(StatusCode::UNAUTHORIZED, "wrong name or password"));
     }
-    if let Some(left) = lib.logins.locked_for(&c.name, accounts::now()) {
-        return Err(ApiError::new(
-            StatusCode::TOO_MANY_REQUESTS,
-            format!("too many failed sign-ins; try again in {} minutes", (left + 59) / 60),
-        ));
+    let locked = |lib: &AppState, name: &str| {
+        lib.logins.locked_for(name, accounts::now()).map(|left| {
+            ApiError::new(StatusCode::TOO_MANY_REQUESTS, format!("too many failed sign-ins; try again in {} minutes", (left + 59) / 60))
+        })
+    };
+    if let Some(e) = locked(&lib, &c.name) {
+        return Err(e);
     }
     let name = c.name.clone();
     // Each check takes about 19 MB, and anyone can ask for one.
     let _permit = lib.password_checks.acquire().await.map_err(|e| ApiError::internal(e.to_string()))?;
+    // Again: attempts sent together all waited here, and the failures of those before
+    // them may have locked the name meanwhile.
+    if let Some(e) = locked(&lib, &name) {
+        return Err(e);
+    }
     let found = lib
         .run(move |lib| {
             Ok(lib.accounts.with(|db| {

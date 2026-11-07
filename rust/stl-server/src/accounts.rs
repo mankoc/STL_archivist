@@ -271,12 +271,15 @@ fn token_hash(token: &str) -> Vec<u8> {
     Sha256::digest(token.as_bytes()).to_vec()
 }
 
-/// Start a session; returns the token (only its hash is stored).
+/// Start a session; returns the token (only its hash is stored). Sessions idle for
+/// too long go meanwhile: one is otherwise deleted only when presented again, and
+/// a browser that lost its cookie never presents it.
 pub fn create_session(conn: &Connection, user_id: i64) -> Result<String> {
     let mut bytes = [0u8; 32];
     OsRng.fill_bytes(&mut bytes);
     let token: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
     let t = now();
+    conn.execute("DELETE FROM sessions WHERE last_used < ?1", [t - SESSION_IDLE_SECS])?;
     conn.execute(
         "INSERT INTO sessions (token_hash, user_id, created_at, last_used) VALUES (?1, ?2, ?3, ?3)",
         params![token_hash(&token), user_id, t],
@@ -413,6 +416,17 @@ mod tests {
         update_user(&c, u.id, None, Some(true), None).unwrap();
         assert_eq!(session_user(&c, &t).unwrap(), None, "disabling ends sessions");
         assert_eq!(authenticate(&c, "u", "password2").unwrap(), None, "disabled users cannot log in");
+    }
+
+    #[test]
+    fn idle_sessions_go_when_another_starts() {
+        let c = db();
+        let u = create_user(&c, "u", "password1", Role::Editor).unwrap();
+        let (old, recent) = (create_session(&c, u.id).unwrap(), create_session(&c, u.id).unwrap());
+        c.execute("UPDATE sessions SET last_used = last_used - ?1 WHERE token_hash = ?2", params![SESSION_IDLE_SECS + 1, token_hash(&old)]).unwrap();
+        create_session(&c, u.id).unwrap();
+        let count = |token: &str| -> i64 { c.query_row("SELECT count(*) FROM sessions WHERE token_hash = ?1", [token_hash(token)], |r| r.get(0)).unwrap() };
+        assert_eq!((count(&old), count(&recent)), (0, 1), "never presented again, the idle one is gone anyway");
     }
 
     #[test]

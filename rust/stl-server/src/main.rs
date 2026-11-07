@@ -1,6 +1,8 @@
 //! `stl-server [--data-dir DIR] [--bind ADDR:PORT]`: run the server (see `stl_server::config`).
-//! It stops on Ctrl-C and, with `STL_STOP_WITH_STDIN` set, when its standard input closes
-//! (how the desktop app asks its local server to stop).
+//! It stops on Ctrl-C, on SIGTERM (`docker stop`, `systemctl stop`) and, with
+//! `STL_STOP_WITH_STDIN` set, when its standard input closes (how the desktop app asks its
+//! local server to stop). Stopping takes a few seconds at most: requests still running are
+//! cut off, the running job is asked to stop, and the sidecars of the latest edits are written.
 //! `stl-server create-admin NAME [--data-dir DIR]`: create the first administrator
 //! (password from `STL_ADMIN_PASSWORD` or the first line of standard input), for
 //! installs where `POST /api/auth/setup` cannot come from the server's own machine
@@ -21,16 +23,41 @@
 //! embeddings and AI tags for a remote server (see `stl_server::worker`); it ends
 //! with exit code 2 when it cannot work (a refused token, nothing installed).
 
+use std::future::IntoFuture;
 use std::sync::Arc;
+use std::time::Duration;
 
 use stl_server::{Config, Library, accounts, app};
+use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
-#[tokio::main]
-async fn main() {
+/// How long requests still running when the server stops are waited for (a long
+/// download is cut off).
+const REQUEST_GRACE: Duration = Duration::from_secs(3);
+/// How long the running job has to reach a checkpoint and stop.
+const JOB_GRACE: Duration = Duration::from_secs(5);
+/// Blocking work still running after that (a job that did not stop) is left behind
+/// rather than waited for: tokio would wait for it however long it takes.
+const RUNTIME_GRACE: Duration = Duration::from_secs(1);
+
+fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_env("STL_LOG").unwrap_or_else(|_| EnvFilter::new("info")))
         .init();
+    let runtime = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("cannot start: {e}");
+            std::process::exit(1);
+        }
+    };
+    let code = runtime.block_on(command());
+    runtime.shutdown_timeout(RUNTIME_GRACE);
+    std::process::exit(code);
+}
+
+/// Run the command line's command; the process's exit code.
+async fn command() -> i32 {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("create-admin") => create_admin(&args[1..]),
@@ -40,7 +67,7 @@ async fn main() {
         Some("worker") => {
             if let Err(e) = stl_server::worker::run(&args[1..]).await {
                 tracing::error!("{e}");
-                std::process::exit(2);
+                return 2;
             }
             Ok(())
         }
@@ -50,9 +77,12 @@ async fn main() {
         }
         _ => run(&args).await,
     };
-    if let Err(e) = result {
-        tracing::error!("{e}");
-        std::process::exit(1);
+    match result {
+        Ok(()) => 0,
+        Err(e) => {
+            tracing::error!("{e}");
+            1
+        }
     }
 }
 
@@ -68,12 +98,31 @@ async fn run(args: &[String]) -> Result<(), String> {
     // Read the filter pane while the web client loads (seconds on a cold hard disk).
     let warm = Arc::clone(&library);
     tokio::task::spawn_blocking(move || stl_server::api::filter::warm_tree(&warm));
-    axum::serve(listener, app(Arc::clone(&library)).into_make_service_with_connect_info::<std::net::SocketAddr>())
-        .with_graceful_shutdown(stop_requested())
-        .await
-        .map_err(|e| e.to_string())?;
-    // Edits made just before shutdown still get their sidecars.
-    tokio::task::spawn_blocking(move || library.export_pending_sidecars()).await.map_err(|e| e.to_string())
+    let stop = CancellationToken::new();
+    tokio::spawn({
+        let stop = stop.clone();
+        async move {
+            stop_requested().await;
+            stop.cancel();
+        }
+    });
+    let server = axum::serve(listener, app(Arc::clone(&library)).into_make_service_with_connect_info::<std::net::SocketAddr>())
+        .with_graceful_shutdown(stop.clone().cancelled_owned())
+        .into_future();
+    let cut_off = async {
+        stop.cancelled().await;
+        tokio::time::sleep(REQUEST_GRACE).await;
+    };
+    tokio::select! {
+        served = server => served.map_err(|e| e.to_string())?,
+        () = cut_off => tracing::info!("requests still running are cut off"),
+    }
+    if !library.stop_jobs(JOB_GRACE).await {
+        tracing::warn!("the running job did not stop in time; it ends with the server");
+    }
+    // Edits made just before shutdown (and those of the stopped job) still get their sidecars.
+    let lib = Arc::clone(&library);
+    tokio::task::spawn_blocking(move || lib.export_pending_sidecars()).await.map_err(|e| e.to_string())
 }
 
 async fn stop_requested() {
@@ -89,9 +138,21 @@ async fn stop_requested() {
         });
         let _ = wait.await;
     };
+    // What `docker stop` and `systemctl stop` send. In a container the server is process 1,
+    // which ignores a signal it does not handle: Docker then killed it after 10 seconds,
+    // before the sidecars of the latest edits were written.
+    let terminated = async {
+        #[cfg(unix)]
+        if let Ok(mut term) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            term.recv().await;
+            return;
+        }
+        std::future::pending::<()>().await
+    };
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {}
         () = stdin_closed => {}
+        () = terminated => {}
     }
     tracing::info!("shutting down");
 }

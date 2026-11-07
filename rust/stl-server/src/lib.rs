@@ -57,6 +57,8 @@ pub struct Library {
     pub monitor: monitor::Monitor,
     /// Model viewer loads running at once (`POST /api/models/{id}/view`).
     pub view_loads: tokio::sync::Semaphore,
+    /// Full-size images read at once (`GET /api/images/{id}/original`).
+    pub image_loads: tokio::sync::Semaphore,
     /// Password checks running at once (`POST /api/auth/login`).
     pub password_checks: tokio::sync::Semaphore,
     /// An imported library is replacing this one (`import_library`): writes wait.
@@ -138,6 +140,7 @@ impl Library {
             workers: workers::Workers::default(),
             monitor: monitor::Monitor::default(),
             view_loads: tokio::sync::Semaphore::new(2),
+            image_loads: tokio::sync::Semaphore::new(4),
             password_checks: tokio::sync::Semaphore::new(4),
             importing: Default::default(),
             instance: sync::new_instance(),

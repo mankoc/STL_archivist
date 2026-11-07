@@ -39,6 +39,29 @@
   web client inside. The server package is installed and started in CI as a check.
 - **Vitest 5:** the web client's test runner moves from 3.2 to 5.1, which clears the audit's advisories (2 critical,
   1 moderate, in `tinypool` and `@vitest/mocker`, test tooling only). It needs Node 22.12 or newer to run the tests.
+- **Tags and scales are deleted, merged and filtered much faster on big libraries:** their links to models get an
+  index. On 100,000 models, deleting 1,000 unused tags took a minute, during which edits failed with "database is
+  locked"; it takes milliseconds. A tag merge or a tag filter is about a hundred times faster.
+- **Monitored folders keep being checked.** When the monitor queued the first job since the server started, it stopped
+  for good, and its crawl waited until another job started.
+- **The server stops cleanly within a few seconds:** also on SIGTERM (`docker stop` and Docker updates, which used to
+  kill it after ten seconds without writing the sidecars of the latest edits), and also while a job runs: the job is
+  asked to stop and queued ones are cancelled, where stopping used to wait until the job ended.
+- **Security:** full-size images (`GET /api/images/{id}/original`) are read only from inside the model's library
+  folder: an image's file name, from an upload or a `METADATA.7z`, could name any image file on the server. Uploaded
+  images keep only their file name. Full-size images are read four at a time, and not past the 50 MB a crawl reads.
+- **Security:** the sync routes that take a body of any size refuse anyone but an administrator before reading it (a
+  viewer could make the server hold whatever it sent), and sign-in attempts sent all at once no longer get past the
+  lockout after five failures.
+- **Two exports of one folder's sidecar no longer overlap** (a crawl's and the one after an edit wrote the same file at
+  once): exports run one at a time.
+- **The web client catches up after its connection to the server breaks** (a server restart, sleep, the network): it
+  reloads what it shows and the job list, which missed the changes meanwhile.
+- **Faster:** the search box (about twice as fast), embeddings during a crawl (one request per 50 archives instead of
+  one per archive), and the library page (typing in the search box and dragging a pane's edge no longer redraw the
+  whole page).
+- **Find duplicates by metadata (Levenshtein)** can be stopped while it compares, and keeps at most 100,000 groups.
+  Idle sign-in sessions are deleted when a new one starts, not only when presented again.
 
 ## 2026.45.41 — 2026-11-06
 
