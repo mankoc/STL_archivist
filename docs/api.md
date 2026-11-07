@@ -977,7 +977,7 @@ Models with equal or similar values in one column.
 | Field | Type | Description |
 |---|---|---|
 | `client_path` (optional) | string \| null | The archive's path as this client sees it, when it can open it there (a client on the server's machine, or a `path_map` entry); otherwise offer `/api/models/{id}/archive`. |
-| `fields` | object | `title`, `creator`, `source`, `sculptor_name`, `collection_name`, `subcollection_name`, `category_name`, `release_name`, `release_year`, `release_month`, `archive_path`, `archive_size`, `is_missing`, `warning`, `tags` (comma-separated) and `image_count`. |
+| `fields` | object | `title`, `creator`, `source`, `sculptor_name`, `collection_name`, `subcollection_name`, `category_name`, `release_name`, `release_year`, `release_month`, `archive_path`, `archive_size`, `is_missing`, `warning`, `presupports`, `compression_rate`, `sequence`, `created_at`, `to_print`, `url`, `description`, `tags` and `scales` (comma-separated), `image_count`, `file_count` (the stored file list) and `stl_count`. |
 | `id` | integer |  |
 | `images` | [ImageRef](#imageref)[] |  |
 

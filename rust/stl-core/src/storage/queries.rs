@@ -597,10 +597,15 @@ pub fn model_summary(conn: &Connection, model_id: i64) -> Result<Option<Vec<(Str
         "SELECT v.id, v.title, v.creator, v.source, v.sculptor_name, v.collection_name, \
          v.subcollection_name, v.category_name, v.release_name, v.release_year, \
          v.release_month, v.archive_path, v.archive_size, v.is_missing, v.warning, \
+         v.presupports, v.compression_rate, v.sequence, v.created_at, v.to_print, m.url, m.description, \
          (SELECT group_concat(t.name, ', ') FROM model_tags mt \
             JOIN tags t ON t.id = mt.tag_id WHERE mt.model_id = v.id) AS tags, \
-         (SELECT count(*) FROM images i WHERE i.model_id = v.id) AS image_count \
-         FROM models_view v WHERE v.id = ?1",
+         (SELECT group_concat(s.name, ', ') FROM model_scales ms \
+            JOIN scales s ON s.id = ms.scale_id WHERE ms.model_id = v.id) AS scales, \
+         (SELECT count(*) FROM images i WHERE i.model_id = v.id) AS image_count, \
+         (SELECT count(*) FROM archive_files a WHERE a.model_id = v.id) AS file_count, \
+         (SELECT count(*) FROM stl_files f WHERE f.model_id = v.id) AS stl_count \
+         FROM models_view v JOIN models m ON m.id = v.id WHERE v.id = ?1",
     )?;
     let names: Vec<String> = st.column_names().iter().map(|s| s.to_string()).collect();
     let mut rows = st.query([model_id])?;

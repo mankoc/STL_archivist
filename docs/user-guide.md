@@ -175,14 +175,22 @@ Drag the filter pane's right edge to resize it (a double-click resets it).
 
 ### Details pane
 
-The selected model's fields, tags, warnings, archive path and images. Drag the pane's left
-edge to make it wider or narrower (double-click the edge to reset); the width is remembered
-in this browser.
+The selected model's title, one row of actions, and three tabs: **Images** (the pane opens on
+it), **Details** and **Files**; the tab chosen last stays chosen. Drag the pane's left edge to
+make it wider or narrower (double-click the edge to reset); the width is remembered in this
+browser.
 
-- **Download** the archive; **Copy path** (when the server's path makes sense on your
-  computer); **Open folder** in the desktop app shows the archive in the file manager.
-- **Files** shows the archive's folders and files as a tree (a chain of single folders is one
-  row), with each file's size and each folder's file count, the files behind a warning highlighted, as the last crawl or
+- The actions: **View model**, **Download** the archive, **Files** (the Files tab), **Open**
+  (desktop app: in MeshPeek, in the archive program, or its folder in the file manager) and
+  the copy button for the archive's path (as it makes sense on your computer).
+- **Images** shows the model's images, with the drop zone that adds more (editors remove one
+  with its ✕). On the other tabs the first image shows above as the cover.
+- **Details** lists every field with a value: creator, type, sculptor, collection, category,
+  release, date, scales, size and compression, the file and STL counts, presupports and when
+  it was added; then tags, the description, the source link and the path.
+- **Files** (marked ⚠ when the model has warnings) names each warning and why it is raised,
+  then shows the archive's folders and files as a tree (a chain of single folders is one
+  row), with each file's size and each folder's file count, the files behind a warning and the folders holding them highlighted, as the last crawl or
   rescan read the archive's catalog (a crawl reads only new and changed archives: a record
   without a list gets it from *Rescan* or *Settings → Maintenance → Read missing file
   lists*). The cube beside a model file opens it in the model viewer.
@@ -213,7 +221,7 @@ in this browser.
   plate or the buttons), become one of the model's images, made into a thumbnail of the
   library's *Model viewer captures* size (handy for archives without renders: turn the
   model, pick a material, then click).
-- **Open in MeshPeek** (desktop app) opens the archive in the
+- **Open → In MeshPeek** (desktop app) opens the archive in the
   [MeshPeek](https://github.com/mankoc/meshpeek) viewer, when it is installed (`meshpeek` on
   the `PATH`, or in Program Files) and the archive is reachable from your computer; in the
   model viewer it opens the file shown. When MeshPeek is elsewhere, **Settings → Account →
