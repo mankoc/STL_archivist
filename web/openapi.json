@@ -8570,6 +8570,13 @@
           "models"
         ],
         "properties": {
+          "build": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Beside the version for a development build (\"nightly 9940de4\"); none for a release."
+          },
           "models": {
             "type": "integer",
             "format": "int64",

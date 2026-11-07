@@ -36,5 +36,13 @@ pub mod winpath;
 
 /// Version of the core library.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// What the build is, beside the version: "nightly 9940de4" for a development build
+/// (`STL_BUILD` when it was compiled), none for a release.
+pub const BUILD: Option<&str> = option_env!("STL_BUILD");
+
+/// [`BUILD`], or none when it was set empty.
+pub fn build() -> Option<&'static str> {
+    BUILD.map(str::trim).filter(|b| !b.is_empty())
+}
 
 

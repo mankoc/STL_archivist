@@ -1,0 +1,78 @@
+name: Windows installer
+
+# Builds StlArchivist_<version>_x64-setup.exe (the desktop app with the server and the web
+# client) and keeps it as the run's artifact "installer" for a week. The Release and Nightly
+# workflows call it and publish the file; started by hand (Actions → Windows installer → Run
+# workflow) it only builds, from the branch chosen there.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit, branch or tag to build
+        type: string
+        required: true
+      build_label:
+        description: Shown beside the version (STL_BUILD), e.g. "nightly 9940de4"; empty for a release
+        type: string
+        default: ''
+  workflow_dispatch:
+    inputs:
+      build_label:
+        description: Shown beside the version, e.g. "test"; empty for none
+        type: string
+        default: ''
+
+concurrency:
+  group: installer-${{ inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  TAURI_CLI_VERSION: 2.12.3
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Rust (rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      # The Tauri CLI takes minutes to compile: keep it between runs.
+      - name: Cache the Tauri CLI
+        id: tauri-cli
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-tauri.exe
+          key: tauri-cli-${{ env.TAURI_CLI_VERSION }}-${{ runner.os }}
+
+      - name: Install the Tauri CLI
+        if: steps.tauri-cli.outputs.cache-hit != 'true'
+        run: cargo install tauri-cli --version ${{ env.TAURI_CLI_VERSION }} --locked
+
+      - name: Build
+        shell: pwsh
+        env:
+          STL_BUILD: ${{ inputs.build_label }}
+        run: ./build.ps1 -Installer
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: rust/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 7

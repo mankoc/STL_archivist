@@ -1295,6 +1295,7 @@ One of:
 
 | Field | Type | Description |
 |---|---|---|
+| `build` (optional) | string \| null | Beside the version for a development build ("nightly 9940de4"); none for a release. |
 | `models` | integer | Models in the library. |
 | `name` | string | Always `"stlLibrary"`. |
 | `update` (optional) | null \| [UpdateInfo](#updateinfo) |  |

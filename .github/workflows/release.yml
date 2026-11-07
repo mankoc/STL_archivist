@@ -1,83 +1,91 @@
-name: Windows installer
+name: Release
 
-# Builds StlArchivist_<version>_x64-setup.exe (the desktop app with the server and
-# the web client) when a version tag is pushed (git tag v2026.43.0 && git push
-# origin v2026.43.0), and publishes it on a GitHub release. It can also be started
-# by hand (Actions → Windows installer → Run workflow): then the installer is only
-# kept as a run artifact. Ordinary pushes do not run it.
+# Actions → Release → Run workflow. From development: raises the version
+# (tools/version.py release: "## Unreleased" in CHANGELOG.md becomes its section),
+# commits that to development, merges development into main, tags v<version>, builds
+# the installer and the Docker image, and publishes the GitHub release (its notes are
+# the version's changelog section) with the installer, and <image>:<version> and
+# <image>:latest. A tag pushed by a workflow starts no other workflow, so this one runs
+# the builds itself.
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
 
-concurrency:
-  group: installer-${{ github.ref }}
-  cancel-in-progress: true
+concurrency: release
 
-env:
-  TAURI_CLI_VERSION: 2.12.3
+permissions:
+  contents: write
 
 jobs:
-  installer:
-    runs-on: windows-latest
-    permissions:
-      contents: write
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release.outputs.version }}
     steps:
       - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v5
         with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          ref: development
+          fetch-depth: 0
 
       - name: Rust (rust-toolchain.toml)
         run: rustup toolchain install
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: rust
-
-      # The Tauri CLI takes minutes to compile: keep it between runs.
-      - name: Cache the Tauri CLI
-        id: tauri-cli
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin/cargo-tauri.exe
-          key: tauri-cli-${{ env.TAURI_CLI_VERSION }}-${{ runner.os }}
-
-      - name: Install the Tauri CLI
-        if: steps.tauri-cli.outputs.cache-hit != 'true'
-        run: cargo install tauri-cli --version ${{ env.TAURI_CLI_VERSION }} --locked
-
-      - name: Version
-        id: version
-        shell: pwsh
+      - name: Version, changelog, merge and tag
+        id: release
         run: |
-          $v = (Get-Content rust/stl-desktop/tauri.bundle.json -Raw | ConvertFrom-Json).version
-          "value=$v" >> $env:GITHUB_OUTPUT
-          if ($env:GITHUB_REF -like 'refs/tags/v*' -and $env:GITHUB_REF_NAME -ne "v$v") {
-            throw "tag $env:GITHUB_REF_NAME does not match the version $v in tauri.bundle.json"
-          }
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git merge-base --is-ancestor origin/main HEAD; then
+            echo "::error::main has commits development lacks: merge main into development first"
+            exit 1
+          fi
+          version=$(python tools/version.py release)
+          (cd rust && cargo metadata --format-version 1 > /dev/null) # Cargo.lock takes the version
+          python tools/version.py notes "$version" > "$RUNNER_TEMP/notes.md"
+          git add -A
+          git commit -m "release: $version"
+          git push origin HEAD:development
+          git push origin HEAD:main
+          git tag "v$version"
+          git push origin "v$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Build
-        shell: pwsh
-        run: ./build.ps1 -Installer
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: gh release create "v$VERSION" --draft --title "StlArchivist $VERSION" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag
 
-      # A run started by hand keeps the installer as an artifact, for a week; a tag
-      # puts it on the release instead (artifacts count against the account's storage).
-      - uses: actions/upload-artifact@v4
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+  installer:
+    needs: prepare
+    uses: ./.github/workflows/installer.yml
+    with:
+      ref: v${{ needs.prepare.outputs.version }}
+
+  docker:
+    needs: prepare
+    uses: ./.github/workflows/docker.yml
+    with:
+      ref: v${{ needs.prepare.outputs.version }}
+      tags: |
+        ${{ needs.prepare.outputs.version }}
+        latest
+      publish: true
+    secrets: inherit
+
+  publish:
+    needs: [prepare, installer]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
         with:
-          name: StlArchivist-${{ steps.version.outputs.value }}-installer
-          path: rust/target/release/bundle/nsis/*.exe
-          if-no-files-found: error
-          retention-days: 7
+          name: installer
+          path: installer
 
-      - name: Publish the release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          name: StlArchivist ${{ steps.version.outputs.value }}
-          files: rust/target/release/bundle/nsis/*.exe
-          generate_release_notes: true
+      - name: Publish the release with the installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          gh release upload "v$VERSION" installer/*.exe --clobber
+          gh release edit "v$VERSION" --draft=false --latest

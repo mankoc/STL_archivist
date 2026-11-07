@@ -1,7 +1,14 @@
 # Changelog
 
-## 2026.45.42 — 2026-11-07
+## Unreleased
 
+- **Development happens on the `development` branch; `main` only receives releases.** A release (Actions → Release)
+  raises the version, merges development into main, tags it and publishes the installer and the Docker image. The version
+  no longer rises with every commit: notes gather here until then.
+- **Nightly builds:** every night when development changed, or by hand (Actions → Nightly): the installer on the rolling
+  `nightly` pre-release, and the Docker image as `:nightly` and `:nightly-<commit>`. They show "nightly <commit>" beside
+  the version in About, and the app's update check never offers them.
+- `tools/version.py` has `note`, `release`, `current` and `notes`; `GET /api/system/info` carries `build`.
 - **The detail pane is reorganised:** the title, one row of actions that all look alike (View model, Download, Files, an
   **Open** menu for MeshPeek, the archive program and the folder, and copy path), then three tabs. **Images** is the one it
   opens on, and the last tab chosen stays chosen. **Details** lists every field with a value, now with scales,

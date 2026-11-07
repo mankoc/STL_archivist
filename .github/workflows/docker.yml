@@ -1,32 +1,45 @@
 name: Docker image
 
-# Builds the server image (docker/Dockerfile: the server, the web client, pdfium
-# and ONNX Runtime) when a version tag is pushed (the same tags that publish the
-# release in release.yml) and pushes it to Docker Hub as <image>:<version> and
-# <image>:latest. Started by hand (Actions → Docker image → Run workflow) it
-# only builds, to check the image without publishing it.
-#
-# A release made in the GitHub interface or with `gh release create` pushes its
-# tag too, so it runs this as well. A release published by another workflow
-# would not (GitHub starts no workflow from the workflow token's events), which
-# is why this listens to tags rather than to releases.
+# Builds the server image (docker/Dockerfile: the server, the web client, pdfium and ONNX
+# Runtime). The Release workflow calls it to push <image>:<version> and <image>:latest, the
+# Nightly workflow <image>:nightly and <image>:nightly-<commit>. Started by hand (Actions →
+# Docker image → Run workflow) it only builds, to check the image without publishing it.
 #
 # Setup (Settings → Secrets and variables → Actions):
 #   variable DOCKERHUB_USERNAME  the Docker Hub account
 #   secret   DOCKERHUB_TOKEN     a Docker Hub access token with Read & Write
 #   variable DOCKERHUB_IMAGE     optional; default <DOCKERHUB_USERNAME>/stlarchivist
 on:
-  push:
-    tags: ['v*']
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit, branch or tag to build
+        type: string
+        required: true
+      tags:
+        description: The image's tags, one per line (without the image name)
+        type: string
+        required: true
+      build_label:
+        description: Shown beside the version (STL_BUILD); empty for a release
+        type: string
+        default: ''
+      publish:
+        description: Push the image to Docker Hub
+        type: boolean
+        default: false
+    secrets:
+      DOCKERHUB_TOKEN:
+        required: false
   workflow_dispatch:
 
 concurrency:
-  group: docker-${{ github.ref }}
+  group: docker-${{ inputs.ref || github.ref }}
   cancel-in-progress: true
 
 env:
   IMAGE: ${{ vars.DOCKERHUB_IMAGE || (vars.DOCKERHUB_USERNAME && format('{0}/stlarchivist', vars.DOCKERHUB_USERNAME)) || 'stlarchivist' }}
-  PUBLISH: ${{ startsWith(github.ref, 'refs/tags/v') }}
+  PUBLISH: ${{ inputs.publish == true }}
 
 jobs:
   image:
@@ -35,16 +48,21 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.ref }}
 
-      - name: Version
+      - name: Version and tags
         id: version
+        env:
+          TAGS: ${{ inputs.tags }}
         run: |
           v=$(jq -r .version rust/stl-desktop/tauri.bundle.json)
           echo "value=$v" >> "$GITHUB_OUTPUT"
-          if [[ "$GITHUB_REF" == refs/tags/v* && "$GITHUB_REF_NAME" != "v$v" ]]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match the version $v in tauri.bundle.json"
-            exit 1
-          fi
+          {
+            echo 'tags<<EOF'
+            if [ -n "$TAGS" ]; then printf '%s\n' "$TAGS" | sed '/^$/d; s/^/type=raw,value=/'; else echo "type=raw,value=$v"; fi
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
 
       - name: Docker Hub settings
         if: env.PUBLISH == 'true'
@@ -69,13 +87,11 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE }}
-          tags: |
-            type=raw,value=${{ steps.version.outputs.value }}
-            type=raw,value=latest
+          tags: ${{ steps.version.outputs.tags }}
           labels: |
             org.opencontainers.image.title=StlArchivist server
             org.opencontainers.image.description=Catalogue of 3D-printable model archives: the server and its web client
-            org.opencontainers.image.version=${{ steps.version.outputs.value }}
+            org.opencontainers.image.version=${{ steps.version.outputs.value }}${{ inputs.build_label && format(' {0}', inputs.build_label) || '' }}
 
       # The image downloads x86-64 builds of pdfium and ONNX Runtime: amd64 only.
       - uses: docker/build-push-action@v6
@@ -84,6 +100,8 @@ jobs:
           file: docker/Dockerfile
           platforms: linux/amd64
           push: ${{ env.PUBLISH == 'true' }}
+          build-args: |
+            STL_BUILD=${{ inputs.build_label }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

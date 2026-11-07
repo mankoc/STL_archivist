@@ -225,7 +225,7 @@ function AboutModal({ opened, onClose }: { opened: boolean; onClose: () => void 
           StlArchivist catalogues collections of 3D-printable model archives (.zip, .7z, .rar): metadata, thumbnails,
           tags, duplicates and AI tagging, in a server that this web client and the desktop app share.
         </Text>
-        <Text size="sm">Version: {info.data?.version ?? "…"} (this server)</Text>
+        <Text size="sm">Version: {info.data?.version ?? "…"}{info.data?.build ? ` ${info.data.build}` : ""} (this server)</Text>
         <Text size="sm">
           Created by MrIxolite ·{" "}
           <Anchor href="https://github.com/mankoc/STL_archivist" target="_blank" rel="noreferrer">

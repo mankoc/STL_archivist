@@ -1,0 +1,117 @@
+name: Nightly
+
+# A development build: the installer on the rolling "nightly" pre-release (its file
+# replaced each time) and the Docker image as <image>:nightly and <image>:nightly-<commit>.
+# Both carry the label "nightly <commit>" beside the version (STL_BUILD, shown in About).
+# Every night when development has commits the last nightly lacks, or by hand (Actions →
+# Nightly → Run workflow). The app's update check ignores pre-releases, so nobody on a
+# release is offered this one.
+on:
+  schedule:
+    - cron: '30 2 * * *'
+  workflow_dispatch:
+
+concurrency: nightly
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.check.outputs.build }}
+      sha: ${{ steps.check.outputs.sha }}
+      short: ${{ steps.check.outputs.short }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: development
+          fetch-depth: 0
+
+      - name: Anything new?
+        id: check
+        run: |
+          sha=$(git rev-parse HEAD)
+          last=$(git rev-parse -q --verify "refs/tags/nightly^{commit}" || true)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "short=${sha:0:7}" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$sha" = "$last" ]; then
+            echo "development has nothing new since the last nightly"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  installer:
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    uses: ./.github/workflows/installer.yml
+    with:
+      ref: ${{ needs.check.outputs.sha }}
+      build_label: nightly ${{ needs.check.outputs.short }}
+
+  docker:
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    uses: ./.github/workflows/docker.yml
+    with:
+      ref: ${{ needs.check.outputs.sha }}
+      tags: |
+        nightly
+        nightly-${{ needs.check.outputs.short }}
+      build_label: nightly ${{ needs.check.outputs.short }}
+      publish: true
+    secrets: inherit
+
+  publish:
+    needs: [check, installer]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.check.outputs.sha }}
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: installer
+          path: installer
+
+      - name: Move the nightly pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ needs.check.outputs.sha }}
+          SHORT: ${{ needs.check.outputs.short }}
+        run: |
+          file="installer/StlArchivist_nightly_${SHORT}_x64-setup.exe"
+          mv installer/*.exe "$file"
+          version=$(python tools/version.py current)
+          {
+            echo "A development build of \`$SHORT\` from the development branch, $(date -u +%Y-%m-%d): for trying what comes next, not for everyday use."
+            echo "It reports the version of the last release, $version, with \"nightly $SHORT\" beside it. Docker: \`<image>:nightly\` or \`<image>:nightly-$SHORT\`."
+            echo
+            echo "## Since $version"
+            echo
+            python - <<'EOF'
+          import re
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          m = re.search(r"^## Unreleased[ \t]*\r?\n", text, re.M)
+          body = ""
+          if m:
+              end = re.search(r"^## ", text[m.end():], re.M)
+              body = text[m.end():m.end() + end.start() if end else len(text)].strip()
+          print(body or "Nothing noted yet.")
+          EOF
+          } > "$RUNNER_TEMP/notes.md"
+          git tag -f nightly "$SHA"
+          git push -f origin refs/tags/nightly
+          if gh release view nightly > /dev/null 2>&1; then
+            for asset in $(gh release view nightly --json assets --jq '.assets[].name'); do
+              gh release delete-asset nightly "$asset" --yes
+            done
+            gh release edit nightly --title "Nightly (development)" --notes-file "$RUNNER_TEMP/notes.md" --prerelease --latest=false
+          else
+            gh release create nightly --title "Nightly (development)" --notes-file "$RUNNER_TEMP/notes.md" --prerelease --latest=false --verify-tag
+          fi
+          gh release upload nightly "$file"

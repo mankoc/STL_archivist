@@ -1,7 +1,8 @@
 name: Follow MeshPeek releases
 
 # Every day: when MeshPeek has a newer release, move the crates to its tag, rebuild the viewer's WebAssembly, run the
-# checks of rust.yml and push the result to main. If a check fails nothing is pushed, and the run shows the failure.
+# checks of rust.yml and push the result to development, with a note under "## Unreleased" in CHANGELOG.md (the next
+# release takes it to main). If a check fails nothing is pushed, and the run shows the failure.
 
 on:
   schedule:
@@ -26,6 +27,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: development
 
       - name: Latest release
         id: release
@@ -64,7 +67,7 @@ jobs:
         shell: bash
         run: |
           python tools/update_meshpeek.py set "${{ steps.release.outputs.tag }}"
-          python tools/update_meshpeek.py release "${{ steps.release.outputs.tag }}" | tee version.txt
+          python tools/update_meshpeek.py note "${{ steps.release.outputs.tag }}"
           cd rust && cargo metadata --format-version 1 > /dev/null # updates Cargo.lock
 
       - name: Rebuild the viewer
@@ -97,10 +100,8 @@ jobs:
         shell: bash
         run: |
           tag="${{ steps.release.outputs.tag }}"
-          version=$(cat version.txt)
-          rm version.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "feat: MeshPeek ${tag#v} in the model viewer ($version)"
-          git push
+          git commit -m "feat: MeshPeek ${tag#v} in the model viewer"
+          git push origin HEAD:development

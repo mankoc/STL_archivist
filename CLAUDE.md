@@ -192,12 +192,26 @@ builds need neither the web client nor the server built.
 Always update the README and the changelog with the changes that are made.
 `docs/rust-migration-plan.md` is frozen history: only its compatibility rules still apply. Commit messages carry no co-author lines.
 
-**Every commit raises the version**, which is `<year>.<ISO week>.<N>`: the year and ISO week
-of the commit date, and `N` counting the commits of that week from 0 (`2026.43.0`,
-`2026.43.1`, … then `2026.44.0` in the next week; a new year restarts at its own week). Take
-the ISO year and week of the commit date (`date +%G.%V`), and the last part one above the
-previous version's when the year and week are unchanged, else 0. The version is the same in four places: `rust/Cargo.toml` (`[workspace.package]
-version`, which the server reports), `rust/stl-desktop/tauri.bundle.json` (the installer),
-`web/package.json`, and the `Version:` line of `README.md`. Each version gets a
-`## <version> — <date>` section in `CHANGELOG.md` with that commit's changes.
-`python tools/version.py NOTES.md` does all of this. `web/openapi.json` carries no version.
+**Branches:** `main` only receives releases, so it is always the latest release; never commit to
+it directly. All work goes into `development`: each new feature (and any change beyond a small
+fix) on its own branch from `development` (`feature/<short-name>`, `fix/<short-name>`), pushed,
+and offered as a pull request into `development` when finished, with what changed, how it was
+checked and its `## Unreleased` notes. Leave the merge to the maintainer unless asked to merge.
+
+**Versions:** `<year>.<ISO week>.<N>`: the ISO year and week of the release, and `N` counting
+that week's releases from 0 (`2026.45.0`, `2026.45.1`, … then `2026.46.0`). Commits do not change
+the version: each adds its changes under `## Unreleased` at the top of `CHANGELOG.md`
+(`python tools/version.py note NOTES.md`). The version is the same in four places, which only
+`tools/version.py release` changes: `rust/Cargo.toml` (`[workspace.package] version`, which the
+server reports), `rust/stl-desktop/tauri.bundle.json` (the installer), `web/package.json`, and the
+`Version:` line of `README.md`. `web/openapi.json` carries no version.
+
+**Releases:** *Actions → Release → Run workflow* (`.github/workflows/release.yml`) raises the
+version, turns `## Unreleased` into `## <version> — <date>`, commits that to development, merges
+development into main, tags `v<version>`, builds the installer (`installer.yml`) and the Docker
+image (`docker.yml`), and publishes the GitHub release (the version's changelog section as notes)
+and `<image>:<version>` / `<image>:latest`. **Nightly** (`nightly.yml`, every night when
+development changed, or by hand): the installer on the rolling `nightly` pre-release and
+`<image>:nightly` / `<image>:nightly-<commit>`, built with `STL_BUILD="nightly <commit>"`
+(`stl_core::BUILD`, shown beside the version). The app's update check reads GitHub's latest
+release, which skips pre-releases.

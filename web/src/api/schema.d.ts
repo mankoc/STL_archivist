@@ -2918,6 +2918,8 @@ export interface components {
             type: "jobs_cleared";
         };
         ServerInfo: {
+            /** @description Beside the version for a development build ("nightly 9940de4"); none for a release. */
+            build?: string | null;
             /**
              * Format: int64
              * @description Models in the library.
