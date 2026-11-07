@@ -331,6 +331,24 @@ async fn images_upload_and_delete() {
     assert_eq!(l.call("GET", &format!("/api/images/{image_id}/thumbnail"), None).await.status, StatusCode::NOT_FOUND);
 }
 
+/// A view captured in the model viewer, or any image added by hand, is the model's own:
+/// it is no longer "without images".
+#[tokio::test]
+async fn an_added_image_clears_the_no_images_warning() {
+    let l = library();
+    let id = l.ids[0];
+    l.lib.state.db.with(|c| c.execute("UPDATE models SET warning = 'Archive without images\nNested archives' WHERE id = ?1", [id])).unwrap();
+    let (ct, body) = multipart(&[("view.png", &png())]);
+    let req = Request::post(format!("/api/models/{id}/images?view=true"))
+        .header(header::AUTHORIZATION, format!("Bearer {}", l.editor))
+        .header(header::CONTENT_TYPE, ct)
+        .body(Body::from(body))
+        .unwrap();
+    assert_eq!(send_from(&l.lib.state, LOCAL, req).await.status, StatusCode::OK);
+    let warning: Option<String> = l.scalar(&format!("SELECT warning FROM models WHERE id = {id}"));
+    assert_eq!(warning.as_deref(), Some("Nested archives"), "only that warning goes");
+}
+
 #[tokio::test]
 async fn view_captures_take_their_own_thumbnail_size() {
     let l = library();
