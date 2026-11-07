@@ -142,8 +142,8 @@ export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: num
   return (
     <Stack gap="sm" p="sm" style={{ height: "100%", overflowY: "auto" }} data-testid="detail-pane">
       {tab !== "images" && cover && (
-        <UnstyledButton onClick={() => openImage(cover.id)} style={{ cursor: "zoom-in" }} aria-label="View the cover image">
-          <Image src={cover.thumbnail} radius="md" alt="" h={170} fit="cover" />
+        <UnstyledButton onClick={() => openImage(cover.id)} className={classes.cover} aria-label="View the cover image" data-testid="detail-cover">
+          <Image src={cover.thumbnail} radius="md" alt="" />
         </UnstyledButton>
       )}
       <Group justify="space-between" wrap="nowrap" align="flex-start">

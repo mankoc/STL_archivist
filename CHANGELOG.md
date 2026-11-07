@@ -18,6 +18,8 @@
 - The model details (`GET /api/models/{id}`) also carry `presupports`, `compression_rate`, `sequence`, `created_at`,
   `to_print`, `url`, `description`, `scales`, `file_count` and `stl_count`.
 - The archive's file tree fits a narrow pane.
+- **The cover image in the details pane fits the pane's width** at the image's own proportions, up to twice as tall as
+  wide: only a taller image is cropped (from its top). It used to be cut to 170 pixels high.
 
 ## 2026.45.41 — 2026-11-06
 
