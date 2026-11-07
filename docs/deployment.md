@@ -138,7 +138,7 @@ UnRAR: *Settings → Components* downloads it (RARLab's 7.23), or `sudo apt inst
 ## Option C: Docker
 
 Every release is published on Docker Hub as `mankoc/stlarchivist:<version>` and
-`mankoc/stlarchivist:latest` (linux/amd64): the server, its web client, pdfium (PDF previews)
+`mankoc/stlarchivist:latest` (development builds as `:nightly`) (linux/amd64): the server, its web client, pdfium (PDF previews)
 and ONNX Runtime (AI embeddings). The container runs as uid 1000, listens on port 8770,
 keeps everything it stores in `/data`, and reads the archives where you mount them.
 
@@ -201,9 +201,9 @@ docker exec -it stlarchivist stl-server create-admin admin
 To build the image yourself instead: `docker build -f docker/Dockerfile -t stlarchivist .` at
 the root of the repository (then `STLARCHIVIST_IMAGE=stlarchivist docker compose up -d`).
 
-**Publishing (maintainers).** `.github/workflows/docker.yml` builds the image whenever a
-version tag (`v<version>`) is pushed — the same tags that publish the installer release — and
-pushes it to Docker Hub. It needs, under *Settings → Secrets and variables → Actions* of the
+**Publishing (maintainers).** `.github/workflows/docker.yml` builds the image; the Release
+workflow pushes `<version>` and `latest`, the Nightly workflow `nightly` and `nightly-<commit>`
+(development builds, not for everyday use). It needs, under *Settings → Secrets and variables → Actions* of the
 GitHub repository, the variable `DOCKERHUB_USERNAME`, the secret `DOCKERHUB_TOKEN` (a Docker
 Hub access token with *Read & Write*), and optionally the variable `DOCKERHUB_IMAGE` (default
 `<DOCKERHUB_USERNAME>/stlarchivist`). *Actions → Docker image → Run workflow* builds the image

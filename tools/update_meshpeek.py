@@ -2,28 +2,25 @@
 
     update_meshpeek.py current        prints the tag in use
     update_meshpeek.py set <tag>      sets it in the three manifests
-    update_meshpeek.py release <tag>  raises the version and adds the changelog section
+    update_meshpeek.py note <tag>     adds its note under "## Unreleased" in CHANGELOG.md
 
 The version rule is in CLAUDE.md (Documentation and versions).
 """
 
-import datetime
 import re
 import sys
 
-from version import raise_version, read, write
+from version import add_note, read, write
 
 MANIFESTS = ["rust/stl-core/Cargo.toml", "rust/stl-server/Cargo.toml", "rust/stl-viewer/Cargo.toml"]
 TAG = re.compile(r'(git = "https://github\.com/mankoc/meshpeek", tag = ")([^"]+)(")')
 
 
-def release(tag):
-    today = datetime.datetime.now(datetime.timezone.utc).date()
-    notes = (
+def note(tag):
+    add_note(
         f"- **The model viewer has MeshPeek {tag.lstrip('v')}'s loaders and renderer**: see its "
         f"[release notes](https://github.com/mankoc/meshpeek/releases/tag/{tag})."
     )
-    print(raise_version(notes, today))
 
 
 def main():
@@ -36,8 +33,8 @@ def main():
             if count == 0:
                 sys.exit(f"{manifest}: no MeshPeek tag")
             write(manifest, text)
-    elif command == "release":
-        release(sys.argv[2])
+    elif command == "note":
+        note(sys.argv[2])
     else:
         sys.exit(__doc__)
 

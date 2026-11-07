@@ -13,6 +13,8 @@ pub struct ServerInfo {
     /// Always `"stlLibrary"`.
     pub name: &'static str,
     pub version: &'static str,
+    /// Beside the version for a development build ("nightly 9940de4"); none for a release.
+    pub build: Option<&'static str>,
     /// Models in the library.
     pub models: i64,
     /// Update information (if available).
@@ -31,5 +33,5 @@ pub async fn info(State(lib): State<AppState>, me: CurrentUser) -> Result<Json<S
             Ok((models, enabled.then(|| lib.updates.check(stl_core::VERSION))))
         })
         .await?;
-    Ok(Json(ServerInfo { name: "stlLibrary", version: stl_core::VERSION, models, update }))
+    Ok(Json(ServerInfo { name: "stlLibrary", version: stl_core::VERSION, build: stl_core::build(), models, update }))
 }

@@ -13,7 +13,7 @@ can open a library on your computer without setting up a server.
 [the HTTP API](docs/api.md) ·
 and in the interface, the **?** button: searchable in-depth help on every feature
 
-Version: 2026.45.42
+Version: 2026.45.41
 
 > The earlier PyQt6 desktop application lives on in the repository's history (and on its
 > own branch). This version opens its data directory and, since 2026.43.7, converts it once
@@ -371,6 +371,17 @@ For users: [docs/user-guide.md](docs/user-guide.md). For installing a server (Li
 Docker, Windows, HTTPS, configuration, backups): [docs/deployment.md](docs/deployment.md).
 Developer notes are in [CLAUDE.md](CLAUDE.md) and
 [docs/rust-migration-plan.md](docs/rust-migration-plan.md).
+
+## Development and releases
+
+Work happens on the `development` branch: each feature on its own branch, merged into
+`development` through a pull request. `main` only receives releases. A release (*Actions →
+Release*) raises the version, merges `development` into `main`, tags it and publishes the
+Windows installer on GitHub and the Docker image (`<version>` and `latest`). **Nightly builds**
+of `development` (every night when it changed, or *Actions → Nightly*) are on the rolling
+[`nightly` pre-release](https://github.com/mankoc/STL_archivist/releases/tag/nightly) and on
+Docker Hub as `:nightly`; they show "nightly <commit>" beside the version and are never
+offered as updates.
 
 ## License
 

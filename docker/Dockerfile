@@ -18,7 +18,9 @@ ARG RUST_VERSION=1.99.0
 FROM rust:${RUST_VERSION}-trixie AS build
 WORKDIR /src
 COPY rust/ rust/
-RUN cd rust && cargo build --release -p stl-server
+# "nightly <commit>" for a development build (shown beside the version); empty for a release.
+ARG STL_BUILD=
+RUN cd rust && STL_BUILD="$STL_BUILD" cargo build --release -p stl-server
 
 # The web client (its API types are committed, so no Rust is needed here).
 FROM node:24-trixie-slim AS web
