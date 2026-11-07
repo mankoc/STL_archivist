@@ -97,10 +97,21 @@ The [Releases](../../releases) page has `StlArchivist_<version>_x64-setup.exe`: 
 app with the server and the web client. It installs for the current user and needs no
 administrator rights (Windows 10 and 11 ship the WebView2 runtime it uses).
 
-Releases are built by GitHub Actions: push a tag named after the version
-(`git tag v2026.26.0 && git push origin v2026.26.0`) and the *Windows installer* workflow
-publishes `StlArchivist_<version>_x64-setup.exe` on a release. It can also be run by hand from
-the Actions tab.
+### Linux packages (.deb)
+
+Each release also has two Debian packages (amd64; Debian 12, Ubuntu 22.04 and newer):
+
+- `stlarchivist-server_<version>_amd64.deb`: the server and its web client, run as the
+  `stlarchivist` systemd service on port 8770, with its library in `/var/lib/stlarchivist`.
+  `sudo apt install ./stlarchivist-server_<version>_amd64.deb`, then open
+  http://127.0.0.1:8770 on that machine to create the first administrator. Settings such as
+  `STL_BIND=0.0.0.0:8770` (to reach it from the network) go in `/etc/default/stlarchivist`.
+  The service runs as the `stlarchivist` user, which needs read access to your archive folders.
+- The desktop app's package, with the server and the web client inside (it needs WebKitGTK,
+  which `apt` installs with it).
+
+Releases, the installer and the packages are built by GitHub Actions (see *Development and
+releases* below).
 
 ### From source
 

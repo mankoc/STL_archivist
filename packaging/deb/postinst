@@ -1,0 +1,26 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "configure" ]; then
+    if ! getent passwd stlarchivist > /dev/null; then
+        adduser --system --group --home /var/lib/stlarchivist --no-create-home --gecos "StlArchivist server" stlarchivist > /dev/null
+    fi
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload
+        systemctl enable stlarchivist.service > /dev/null 2>&1 || true
+        if [ -n "$2" ]; then
+            systemctl try-restart stlarchivist.service || true
+        else
+            systemctl start stlarchivist.service || true
+            cat <<'EOF'
+
+StlArchivist is running at http://127.0.0.1:8770 (set STL_BIND in /etc/default/stlarchivist
+to reach it from the network). Open it in a browser on this machine to create the first
+administrator, or: sudo -u stlarchivist stl-server create-admin NAME --data-dir /var/lib/stlarchivist
+The service runs as the user "stlarchivist": give it read access to your archive folders.
+EOF
+        fi
+    fi
+fi
+
+exit 0

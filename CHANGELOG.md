@@ -18,6 +18,10 @@
 - The model details (`GET /api/models/{id}`) also carry `presupports`, `compression_rate`, `sequence`, `created_at`,
   `to_print`, `url`, `description`, `scales`, `file_count` and `stl_count`.
 - The archive's file tree fits a narrow pane.
+- **Linux packages:** each release, and the nightly, has two .deb packages (amd64; Debian 12, Ubuntu 22.04 and newer).
+  `stlarchivist-server` installs the server and its web client as the `stlarchivist` systemd service (port 8770, library
+  in `/var/lib/stlarchivist`, settings in `/etc/default/stlarchivist`); the desktop app's package has the server and the
+  web client inside. The server package is installed and started in CI as a check.
 
 ## 2026.45.41 — 2026-11-06
 
