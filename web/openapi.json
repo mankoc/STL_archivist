@@ -1384,6 +1384,51 @@
         }
       }
     },
+    "/api/libraries/folders/{id}/folders": {
+      "get": {
+        "tags": [
+          "libraries"
+        ],
+        "summary": "Every folder of a library folder that holds archives, with its own pattern (Settings →\nPatterns).",
+        "operationId": "get_libraries_folders_by_id_folders",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FolderPatternRow"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/libraries/folders/{id}/remove": {
       "post": {
         "tags": [
@@ -1431,7 +1476,7 @@
         "tags": [
           "libraries"
         ],
-        "summary": "What a crawl of the folder with this pattern would read from its first\narchives (editors). Nothing is changed.",
+        "summary": "What a crawl with this pattern would read from a few archives directly in the folder,\npicked at random (editors). Nothing is changed.",
         "operationId": "get_libraries_pattern_sample",
         "parameters": [
           {
@@ -5495,6 +5540,32 @@
           }
         },
         "additionalProperties": false
+      },
+      "FolderPatternRow": {
+        "type": "object",
+        "description": "A folder below a library folder's root that holds archives.",
+        "required": [
+          "folder",
+          "archives"
+        ],
+        "properties": {
+          "archives": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Archives directly in it."
+          },
+          "folder": {
+            "type": "string",
+            "description": "Relative to the root (`/` separators)."
+          },
+          "pattern": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its own pattern; none: the library folder's."
+          }
+        }
       },
       "FolderRequest": {
         "type": "object",

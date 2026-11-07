@@ -42,39 +42,52 @@ pub struct Folder {
     pub subfolder_patterns: Vec<(String, String)>,
 }
 
-/// The path patterns of a library folder: its own, and those of the folders below
-/// its root that were crawled with one of their own. Patterns read paths from the root.
+/// The path patterns of a library folder: its own, and those of folders below its root
+/// that have one. A folder's pattern is for the archives directly in it, not those of
+/// its sub-folders, which have theirs or the library folder's. Patterns read paths from
+/// the root.
 #[derive(Debug, Clone, Default)]
 pub struct FolderPatterns {
     library: Option<String>,
-    /// The deepest first.
-    below: Vec<(String, String)>,
+    /// `relpath::path_key` of the folder → its pattern.
+    own: std::collections::HashMap<String, String>,
 }
 
 impl FolderPatterns {
     pub fn load(conn: &Connection, id: i64) -> Result<FolderPatterns> {
         let library = conn.query_row("SELECT pattern FROM libraries WHERE id = ?1", [id], |r| r.get(0)).optional()?.flatten();
-        let mut st = conn.prepare("SELECT rel_folder, pattern FROM folder_patterns WHERE library_id = ?1 ORDER BY length(rel_folder) DESC")?;
-        let below = st.query_map([id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_>>()?;
-        Ok(FolderPatterns { library, below })
+        let mut st = conn.prepare("SELECT rel_folder, pattern FROM folder_patterns WHERE library_id = ?1")?;
+        let own = st
+            .query_map([id], |r| Ok((path_key(&r.get::<_, String>(0)?), r.get(1)?)))?
+            .collect::<Result<_>>()?;
+        Ok(FolderPatterns { library, own })
     }
 
-    /// The pattern of the deepest folder holding `rel_folder` that has one of its own.
-    pub fn below(&self, rel_folder: &str) -> Option<&str> {
-        let key = path_key(rel_folder);
-        self.below
-            .iter()
-            .find(|(folder, _)| {
-                let folder = path_key(folder);
-                key == folder || key.strip_prefix(folder.as_str()).is_some_and(|rest| rest.starts_with('/'))
-            })
-            .map(|(_, pattern)| pattern.as_str())
+    /// The pattern `rel_folder` has of its own.
+    pub fn own(&self, rel_folder: &str) -> Option<&str> {
+        self.own.get(&path_key(rel_folder)).map(String::as_str)
     }
 
-    /// The pattern for archives in `rel_folder`.
+    /// The library folder's pattern.
+    pub fn library(&self) -> Option<&str> {
+        self.library.as_deref().filter(|p| !p.is_empty())
+    }
+
+    /// The pattern for archives directly in `rel_folder`.
     pub fn of(&self, rel_folder: &str) -> Option<&str> {
-        self.below(rel_folder).or(self.library.as_deref()).filter(|p| !p.is_empty())
+        self.own(rel_folder).or(self.library.as_deref()).filter(|p| !p.is_empty())
     }
+}
+
+/// The folders of library folder `id` that hold archives (below its root, so not the
+/// root itself), with how many archives each holds directly and its own pattern.
+pub fn folders_with_archives(conn: &Connection, id: i64) -> Result<Vec<(String, i64, Option<String>)>> {
+    let mut st = conn.prepare(
+        "SELECT m.rel_folder, count(*), p.pattern FROM models m \
+         LEFT JOIN folder_patterns p ON p.library_id = m.library_id AND p.rel_folder = m.rel_folder \
+         WHERE m.library_id = ?1 AND m.rel_folder <> '' GROUP BY m.rel_folder ORDER BY m.rel_folder",
+    )?;
+    st.query_map([id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect()
 }
 
 /// Keep `pattern` for the folder `rel_folder` of library `id`; `""` forgets it.

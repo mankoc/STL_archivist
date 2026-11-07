@@ -442,7 +442,7 @@ export function BrowserPage({ active = true }: { active?: boolean }) {
             <Text size="sm" style={{ overflowWrap: "anywhere" }}>{patternCrawl.folder}</Text>
             <TextInput
               label="Path pattern"
-              description="Kept for this folder: later crawls and rescans use it. Read from the library folder's root; empty goes back to the library's pattern."
+              description="Kept for the archives directly in this folder (its sub-folders keep their own, or the library's): later crawls and rescans use it. Read from the library folder's root; empty goes back to the library's pattern."
               value={patternCrawl.pattern}
               onChange={(e) => setPatternCrawl({ ...patternCrawl, pattern: e.currentTarget.value })}
               data-autofocus
