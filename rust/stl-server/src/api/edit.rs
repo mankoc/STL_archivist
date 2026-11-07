@@ -517,7 +517,14 @@ pub async fn add_images(
                 return Err(e.into());
             }
             let refs: Vec<(i64, String)> = ids.iter().map(|&i| (i, i.to_string())).collect();
-            lib.db.with_tx(|tx| model_files::set_image_thumbnails(tx, &refs))?;
+            lib.db.with_tx(|tx| {
+                model_files::set_image_thumbnails(tx, &refs)?;
+                // An image of its own: the model is no longer "without images".
+                if !ids.is_empty() {
+                    maintenance::clear_no_images(tx, id)?;
+                }
+                Ok::<_, rusqlite::Error>(())
+            })?;
             let digests: HashMap<u64, Option<Vec<u8>>> =
                 lib.thumbs.digests(&ids.iter().map(|&i| i as u64).collect::<Vec<_>>())?.into_iter().collect();
             let added = ids

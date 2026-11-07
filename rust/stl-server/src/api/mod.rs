@@ -99,6 +99,7 @@ pub const DOWNLOAD_CHUNK: usize = 256 * 1024;
         jobs::events,
         libraries::list,
         libraries::pattern_sample,
+        libraries::folder_patterns,
         libraries::add,
         libraries::change,
         libraries::remove,
@@ -231,6 +232,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/libraries/{id}/remove", post(libraries::remove))
         .route("/api/libraries/folders/{id}", patch(libraries::change_folder))
         .route("/api/libraries/folders/{id}/remove", post(libraries::remove_folder))
+        .route("/api/libraries/folders/{id}/folders", get(libraries::folder_patterns))
         .route("/api/files/browse", get(files::browse))
         .route("/api/files/folder", post(files::create_folder))
         .route("/api/models/{id}/archive", get(files::download))
