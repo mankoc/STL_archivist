@@ -89,6 +89,22 @@ fn unauthorized() -> ApiError {
     ApiError::new(StatusCode::UNAUTHORIZED, "sign in first")
 }
 
+/// A signed-in administrator. Unlike `me.require(Role::Admin)` in the handler, the
+/// role is checked before a body extractor reads the body: for routes without a body
+/// limit, so that anyone else is refused before the server takes in what they send.
+#[derive(Debug, Clone)]
+pub struct Admin(pub CurrentUser);
+
+impl FromRequestParts<AppState> for Admin {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, lib: &AppState) -> Result<Self, ApiError> {
+        let me = CurrentUser::from_request_parts(parts, lib).await?;
+        me.require(Role::Admin)?;
+        Ok(Admin(me))
+    }
+}
+
 /// Failed logins per (lower-cased) name: `(failures, time of the last one)`.
 #[derive(Default)]
 pub struct LoginThrottle {

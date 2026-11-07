@@ -488,7 +488,7 @@ pub async fn add_images(
     editor(&me)?;
     let mut files: Vec<(String, Vec<u8>)> = Vec::new();
     while let Some(field) = form.next_field().await? {
-        let name = field.file_name().unwrap_or("image").to_string();
+        let name = base_name(field.file_name().unwrap_or_default()).to_string();
         let data = field.bytes().await?;
         if data.len() > MAX_IMAGE_BYTES {
             return Err(ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, format!("{name} is larger than 64 MB")));
@@ -536,6 +536,13 @@ pub async fn add_images(
         .await?;
     lib.schedule_sidecars([path]);
     Ok(Json(result))
+}
+
+/// The last part of an uploaded file's name. Browsers send no folders, and nothing
+/// else may be stored: an absolute name would make the image's original a file on
+/// the server.
+fn base_name(name: &str) -> &str {
+    name.rsplit(['/', '\\', ':']).next().map(str::trim).filter(|n| !n.is_empty()).unwrap_or("image")
 }
 
 /// Remove one image and its thumbnail.

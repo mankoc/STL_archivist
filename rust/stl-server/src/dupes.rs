@@ -345,8 +345,9 @@ pub fn metadata(lib: &Library, ctl: &Control, columns: &[String], method: &str, 
                     });
                     rows_of.get_mut(&lower).expect("inserted").push(k);
                 }
+                let Some(pairs) = stl_core::strings::levenshtein_pairs_until(&keys, max_distance, &|| ctl.stop_requested()) else { break };
                 let mut hits = Vec::new();
-                for (a, b, d) in stl_core::strings::levenshtein_pairs(&keys, max_distance) {
+                for (a, b, d) in pairs {
                     if d == 0 {
                         continue;
                     }
@@ -357,7 +358,9 @@ pub fn metadata(lib: &Library, ctl: &Control, columns: &[String], method: &str, 
                     }
                 }
                 hits.sort_unstable();
-                for (x, y, d) in hits {
+                // Numbered series pair with each other: 1,000 "Base" and 1,000 "Bases" alone
+                // make a million pairs, which the job would keep and send whole.
+                for (x, y, d) in hits.into_iter().take(MAX_RESULTS.saturating_sub(groups.len())) {
                     groups.push(group(format!("Levenshtein: {d}"), vec![model(vals[x].0, &vals[x].1), model(vals[y].0, &vals[y].1)]));
                 }
             }
@@ -387,5 +390,6 @@ pub fn metadata(lib: &Library, ctl: &Control, columns: &[String], method: &str, 
         }
         ctl.advance(1);
     }
+    groups.truncate(MAX_RESULTS);
     Ok(JobResult::Metadata { groups })
 }

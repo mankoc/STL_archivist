@@ -253,12 +253,19 @@ fn snapshot(conn: &Connection, folder: &str, include_thumbnails: bool) -> SResul
     Ok(Some(Snapshot { data, thumbs }))
 }
 
+/// Exports run one at a time in a process. A crawl's and the after-edit exporter's can
+/// meet in the same folder: both wrote `METADATA.7z.tmp` at once, and the one renamed
+/// last could hold the older records. In turn, the export that reads the records last
+/// writes last.
+static EXPORTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Write `folder/METADATA.7z` for the archives directly in `folder`.
 /// `Ok(false)`: no records. A write failure is [`SidecarError::Io`].
 pub fn export(conn: &Connection, store: Option<&ThumbStore>, folder: &str, include_thumbnails: bool) -> SResult<bool> {
     if include_thumbnails && store.is_none() {
         return unsupported("thumbnails requested without a native thumbnail store");
     }
+    let _one_at_a_time = EXPORTS.lock().unwrap_or_else(|e| e.into_inner());
     let Some(snap) = snapshot(conn, folder, include_thumbnails)? else { return Ok(false) };
     let json = serde_json::to_vec_pretty(&snap.data).expect("the sidecar serialises");
     let blobs: HashMap<i64, Vec<u8>> = match store {
@@ -759,5 +766,45 @@ mod tests {
         assert_eq!((title.as_str(), rate), ("A", 0.5));
         let thumb: String = conn.query_row("SELECT thumbnail_path FROM images", [], |r| r.get(0)).unwrap();
         assert_eq!(store.get_many(&[thumb.parse().unwrap()]).unwrap()[0].1, b"jpeg");
+    }
+
+    /// A crawl and the after-edit exporter can write the same folder's sidecar at once.
+    #[test]
+    fn exports_of_one_folder_at_once_all_succeed() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("models");
+        std::fs::create_dir(&folder).unwrap();
+        let folder_s = crate::winpath::native(&folder.to_string_lossy());
+        let store = ThumbStore::open(&dir.path().join("thumbs")).unwrap();
+        let db = dir.path().join("lib.db");
+        migrate(&db, &Vectors::default()).unwrap();
+        let conn = open(&db).unwrap();
+        conn.execute("INSERT INTO libraries (uuid, name, root) VALUES ('u1', 'lib', ?1)", [crate::winpath::native(&dir.path().to_string_lossy())])
+            .unwrap();
+        for i in 0..40 {
+            std::fs::write(folder.join(format!("m{i}.zip")), b"x").unwrap();
+            conn.execute(
+                "INSERT INTO models (title, library_id, rel_path, rel_folder, archive_hash, is_missing, to_print) \
+                 VALUES (?1, 1, ?2, 'models', ?1, 0, 0)",
+                params![format!("model {i}"), format!("models/m{i}.zip")],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO images (model_id, filename, thumbnail_path) VALUES (?1, 'i.jpg', ?1)", [i + 1]).unwrap();
+            store.put_many(&[((i + 1) as u64, vec![i as u8; 20_000].as_slice())]).unwrap();
+        }
+        std::thread::scope(|s| {
+            for _ in 0..6 {
+                s.spawn(|| {
+                    let conn = open(&db).unwrap();
+                    for _ in 0..3 {
+                        export(&conn, Some(&store), &folder_s, true).unwrap();
+                    }
+                });
+            }
+        });
+        let (data, thumbs) = read_sidecar(&folder.join(METADATA_FILENAME)).unwrap();
+        assert_eq!(data["models"].as_array().unwrap().len(), 40);
+        assert_eq!(thumbs.len(), 40);
+        assert!(!folder.join(format!("{METADATA_FILENAME}.tmp")).exists());
     }
 }

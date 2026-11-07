@@ -331,6 +331,25 @@ async fn images_upload_and_delete() {
     assert_eq!(l.call("GET", &format!("/api/images/{image_id}/thumbnail"), None).await.status, StatusCode::NOT_FOUND);
 }
 
+/// Only the file's own name is kept: a path would make the image's original a file of
+/// the server (`/api/images/{id}/original` reads absolute names from disk).
+#[tokio::test]
+async fn uploaded_images_keep_only_their_file_name() {
+    let l = library();
+    let id = l.ids[0];
+    let (ct, body) = multipart(&[("/home/someone/private/render.png", &png())]);
+    let req = Request::post(format!("/api/models/{id}/images"))
+        .header(header::AUTHORIZATION, format!("Bearer {}", l.editor))
+        .header(header::CONTENT_TYPE, ct)
+        .body(Body::from(body))
+        .unwrap();
+    let r = send_from(&l.lib.state, LOCAL, req).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    let image_id = r.json()["added"][0]["id"].as_i64().unwrap();
+    let name: String = l.scalar(&format!("SELECT filename FROM images WHERE id = {image_id}"));
+    assert_eq!(name, "render.png");
+}
+
 /// A view captured in the model viewer, or any image added by hand, is the model's own:
 /// it is no longer "without images".
 #[tokio::test]

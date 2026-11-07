@@ -209,3 +209,26 @@ async fn pull_and_push_mirror_the_library() {
     assert_eq!(v["job"]["state"], "failed");
     assert!(v["job"]["message"].as_str().unwrap().contains("is this server itself"), "{v}");
 }
+
+/// These routes take bodies of any size, so anyone but an administrator is refused
+/// before the body is read: a viewer could otherwise make the server hold whatever it sent.
+#[tokio::test(flavor = "multi_thread")]
+async fn sync_bodies_are_read_only_from_administrators() {
+    use futures_util::StreamExt;
+    let lib = empty_library();
+    let viewer = lib.user("vi", Role::Viewer);
+    for uri in ["/api/sync/thumbnails", "/api/sync/blocks"] {
+        // One chunk, then nothing: reading the body would wait for ever.
+        let chunks = futures_util::stream::once(async { Ok::<_, std::io::Error>(axum::body::Bytes::from_static(b"x")) })
+            .chain(futures_util::stream::pending());
+        let req = axum::http::Request::post(uri)
+            .header(axum::http::header::AUTHORIZATION, format!("Bearer {viewer}"))
+            .header(axum::http::header::CONTENT_TYPE, "application/octet-stream")
+            .body(axum::body::Body::from_stream(chunks))
+            .unwrap();
+        let r = tokio::time::timeout(Duration::from_secs(10), common::send_from(&lib.state, common::LOCAL, req))
+            .await
+            .unwrap_or_else(|_| panic!("{uri}: the body was waited for"));
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{uri}");
+    }
+}

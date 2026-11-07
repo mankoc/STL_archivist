@@ -47,28 +47,68 @@ export function useServerEvent(handler: (e: ServerEvent) => void): void {
   }, [handler]);
 }
 
+/** What following the event stream reports. */
+export interface StreamHandlers {
+  event: (e: ServerEvent) => void;
+  /** The stream is back after a break (a server restart, sleep, the network): what
+   * happened meanwhile was missed. */
+  reconnected: () => void;
+}
+
+/**
+ * Follow the event stream at `url`, reconnecting with backoff. Returns what stops
+ * following it. `open` makes the socket (tests give a fake one).
+ */
+export function followEvents(url: string, on: StreamHandlers, open: (url: string) => WebSocket = (u) => new WebSocket(u)): () => void {
+  let socket: WebSocket | undefined;
+  let retry = 1000;
+  let stopped = false;
+  let opened = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const connect = () => {
+    socket = open(url);
+    socket.onopen = () => {
+      retry = 1000;
+      if (opened) on.reconnected();
+      opened = true;
+    };
+    socket.onmessage = (msg) => {
+      let event: ServerEvent;
+      try {
+        event = JSON.parse(msg.data as string) as ServerEvent;
+      } catch {
+        return;
+      }
+      on.event(event);
+    };
+    socket.onclose = () => {
+      if (!stopped) {
+        timer = setTimeout(connect, retry);
+        retry = Math.min(retry * 2, 30000);
+      }
+    };
+  };
+  connect();
+  return () => {
+    stopped = true;
+    clearTimeout(timer);
+    socket?.close();
+  };
+}
+
 /** Connect to the event stream (once, in the signed-in shell). */
 export function useServerEvents(onEvent?: (e: ServerEvent) => void): void {
   const queryClient = useQueryClient();
   useEffect(() => {
-    let socket: WebSocket | undefined;
-    let retry = 1000;
-    let closed = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
     // A burst of changes (a mass edit, another client typing) is one reload.
     const whats = new Set<string>();
     const reload = coalesced(() => {
       for (const key of staleKeys(whats)) void queryClient.invalidateQueries({ queryKey: [key] });
       whats.clear();
     }, RELOAD_DELAY);
-    const connect = () => {
-      const proto = location.protocol === "https:" ? "wss" : "ws";
-      socket = new WebSocket(`${proto}://${location.host}/api/events`);
-      socket.onopen = () => {
-        retry = 1000;
-      };
-      socket.onmessage = (msg) => {
-        const event = JSON.parse(msg.data as string) as ServerEvent;
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    const stop = followEvents(`${proto}://${location.host}/api/events`, {
+      event: (event) => {
         if (event.type === "library_changed" || event.type === "resync") {
           whats.add(event.type === "resync" ? "resync" : event.what);
           reload.call();
@@ -83,20 +123,18 @@ export function useServerEvents(onEvent?: (e: ServerEvent) => void): void {
         if (event.type === "resync" || event.type === "jobs_cleared") void queryClient.invalidateQueries({ queryKey: ["jobs"] });
         onEvent?.(event);
         bus.dispatchEvent(new CustomEvent("event", { detail: event }));
-      };
-      socket.onclose = () => {
-        if (!closed) {
-          timer = setTimeout(connect, retry);
-          retry = Math.min(retry * 2, 30000);
-        }
-      };
-    };
-    connect();
+      },
+      // As for a resync: everything shown may be stale, and a restarted server
+      // numbers its jobs from 1 again.
+      reconnected: () => {
+        whats.add("resync");
+        reload.call();
+        void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      },
+    });
     return () => {
-      closed = true;
-      clearTimeout(timer);
+      stop();
       reload.cancel();
-      socket?.close();
     };
   }, [queryClient, onEvent]);
 }

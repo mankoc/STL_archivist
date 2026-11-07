@@ -44,6 +44,9 @@ fn busy(jobs: &[JobInfo], folder: &str) -> bool {
 /// Check the monitored folders that are due (all of them with `force`), and
 /// queue a crawl for each that changed. Returns the queued jobs.
 pub fn check(lib: &Arc<Library>, force: bool) -> Vec<JobInfo> {
+    if lib.jobs.is_closed() {
+        return Vec::new(); // the server is stopping
+    }
     let settings = LibrarySettings::load(&lib.config.data_dir);
     let every = Duration::from_secs(60 * u64::from(settings.monitor_interval_minutes()));
     let folders = match lib.db.with(libraries::list) {
@@ -84,12 +87,22 @@ pub fn check(lib: &Arc<Library>, force: bool) -> Vec<JobInfo> {
 
 /// Check monitored folders in the background for the server's lifetime.
 pub fn start(lib: &Arc<Library>) {
+    start_every(lib, TICK);
+}
+
+/// [`start`], looking every `tick` (tests use a short one). Call it within the tokio
+/// runtime: each pass runs on its blocking pool, where queueing a job can start the job
+/// worker. (From a thread of its own, the first job queued since the server started
+/// panicked, which ended the monitor and left the crawl waiting.)
+pub fn start_every(lib: &Arc<Library>, tick: Duration) {
     let weak = Arc::downgrade(lib);
-    std::thread::spawn(move || {
+    tokio::spawn(async move {
         loop {
-            std::thread::sleep(TICK);
+            tokio::time::sleep(tick).await;
             let Some(lib) = weak.upgrade() else { return };
-            check(&lib, false);
+            if tokio::task::spawn_blocking(move || check(&lib, false)).await.is_err() {
+                tracing::error!("the check of monitored folders failed");
+            }
         }
     });
 }
