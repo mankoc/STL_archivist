@@ -1,0 +1,20 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "active": true,
+    "targets": ["deb"],
+    "publisher": "StlArchivist",
+    "shortDescription": "Catalogue and browse collections of 3D-printable model archives",
+    "longDescription": "StlArchivist catalogues collections of 3D-printable model archives (.zip, .7z, .rar): metadata, thumbnails, tags, duplicates and AI tagging. The desktop app shows a server's web client in a window and can run a local server.",
+    "category": "Graphics and Design",
+    "resources": {
+      "../target/release/stl-server": "stl-server",
+      "../../web/dist/": "web/"
+    },
+    "linux": {
+      "deb": {
+        "section": "graphics"
+      }
+    }
+  }
+}

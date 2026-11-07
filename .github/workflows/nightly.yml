@@ -1,7 +1,7 @@
 name: Nightly
 
-# A development build: the installer on the rolling "nightly" pre-release (its file
-# replaced each time) and the Docker image as <image>:nightly and <image>:nightly-<commit>.
+# A development build: the installer and the two .deb packages on the rolling "nightly"
+# pre-release (its files replaced each time) and the Docker image as <image>:nightly and <image>:nightly-<commit>.
 # Both carry the label "nightly <commit>" beside the version (STL_BUILD, shown in About).
 # Every night when development has commits the last nightly lacks, or by hand (Actions →
 # Nightly → Run workflow). The app's update check ignores pre-releases, so nobody on a
@@ -51,6 +51,15 @@ jobs:
       ref: ${{ needs.check.outputs.sha }}
       build_label: nightly ${{ needs.check.outputs.short }}
 
+  deb:
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    uses: ./.github/workflows/deb.yml
+    with:
+      ref: ${{ needs.check.outputs.sha }}
+      build_label: nightly ${{ needs.check.outputs.short }}
+      deb_suffix: ~nightly.${{ needs.check.outputs.short }}
+
   docker:
     needs: check
     if: needs.check.outputs.build == 'true'
@@ -65,7 +74,7 @@ jobs:
     secrets: inherit
 
   publish:
-    needs: [check, installer]
+    needs: [check, installer, deb]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -78,6 +87,12 @@ jobs:
           name: installer
           path: installer
 
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: deb-*
+          merge-multiple: true
+          path: deb
+
       - name: Move the nightly pre-release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -86,10 +101,17 @@ jobs:
         run: |
           file="installer/StlArchivist_nightly_${SHORT}_x64-setup.exe"
           mv installer/*.exe "$file"
+          for deb in deb/*.deb; do
+            case "$(basename "$deb")" in
+              stlarchivist-server_*) mv "$deb" "deb/stlarchivist-server_nightly_${SHORT}_amd64.deb" ;;
+              *) mv "$deb" "deb/StlArchivist-desktop_nightly_${SHORT}_amd64.deb" ;;
+            esac
+          done
           version=$(python tools/version.py current)
           {
             echo "A development build of \`$SHORT\` from the development branch, $(date -u +%Y-%m-%d): for trying what comes next, not for everyday use."
             echo "It reports the version of the last release, $version, with \"nightly $SHORT\" beside it. Docker: \`<image>:nightly\` or \`<image>:nightly-$SHORT\`."
+            echo "On Linux: the server package (\`sudo apt install ./stlarchivist-server_nightly_${SHORT}_amd64.deb\`) or the desktop app's."
             echo
             echo "## Since $version"
             echo
@@ -114,4 +136,4 @@ jobs:
           else
             gh release create nightly --title "Nightly (development)" --notes-file "$RUNNER_TEMP/notes.md" --prerelease --latest=false --verify-tag
           fi
-          gh release upload nightly "$file"
+          gh release upload nightly "$file" deb/*.deb

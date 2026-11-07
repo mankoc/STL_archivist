@@ -495,7 +495,7 @@ fn new_values(tx: &Transaction, cfg: &UpsertConfig, input: &UpsertInput, ch: &Ch
     // Images beside the archive count as its images: the new ones read now, else those it has.
     let beside = ch.folder_images.iter().any(|(_, j, _)| j.as_ref().is_some_and(|j| !j.is_empty()))
         || match input.existing {
-            Some(id) if !hash_changed => super::maintenance::has_folder_images(tx, id)?,
+            Some(id) if !hash_changed => super::maintenance::has_outside_images(tx, id)?,
             _ => false,
         };
     if beside {
