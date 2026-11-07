@@ -6,3 +6,5 @@ docker/* text eol=lf
 *.sh text eol=lf
 # Batch files run in cmd, which needs CRLF (labels and goto break with LF).
 *.bat text eol=crlf
+# Debian package files (maintainer scripts, the service, its settings) run on Linux.
+packaging/deb/* text eol=lf

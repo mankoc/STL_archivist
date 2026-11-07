@@ -4,8 +4,8 @@ name: Release
 # (tools/version.py release: "## Unreleased" in CHANGELOG.md becomes its section),
 # commits that to development, merges development into main, tags v<version>, builds
 # the installer and the Docker image, and publishes the GitHub release (its notes are
-# the version's changelog section) with the installer, and <image>:<version> and
-# <image>:latest. A tag pushed by a workflow starts no other workflow, so this one runs
+# the version's changelog section) with the installer and the two .deb packages, and
+# <image>:<version> and <image>:latest. A tag pushed by a workflow starts no other workflow, so this one runs
 # the builds itself.
 on:
   workflow_dispatch:
@@ -61,6 +61,12 @@ jobs:
     with:
       ref: v${{ needs.prepare.outputs.version }}
 
+  deb:
+    needs: prepare
+    uses: ./.github/workflows/deb.yml
+    with:
+      ref: v${{ needs.prepare.outputs.version }}
+
   docker:
     needs: prepare
     uses: ./.github/workflows/docker.yml
@@ -73,7 +79,7 @@ jobs:
     secrets: inherit
 
   publish:
-    needs: [prepare, installer]
+    needs: [prepare, installer, deb]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -81,11 +87,17 @@ jobs:
           name: installer
           path: installer
 
-      - name: Publish the release with the installer
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: deb-*
+          merge-multiple: true
+          path: installer
+
+      - name: Publish the release with the installer and the packages
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          gh release upload "v$VERSION" installer/*.exe --clobber
+          gh release upload "v$VERSION" installer/*.exe installer/*.deb --clobber
           gh release edit "v$VERSION" --draft=false --latest
