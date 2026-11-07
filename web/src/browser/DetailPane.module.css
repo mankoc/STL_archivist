@@ -13,3 +13,20 @@
 .remove:focus-visible {
   opacity: 1;
 }
+
+/* The cover: the pane's width, as tall as the image is, up to twice the width (cqw:
+   the button's own width); only a taller image is cropped, at its top. */
+.cover {
+  display: block;
+  cursor: zoom-in;
+  container-type: inline-size;
+  flex-shrink: 0;
+}
+
+.cover img {
+  width: 100%;
+  height: auto;
+  max-height: 200cqw;
+  object-fit: cover;
+  object-position: top;
+}
