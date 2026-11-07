@@ -281,7 +281,7 @@ pub fn recheck_warnings(lib: &Library, ctl: &Control, log: &dyn Fn(String), whic
     };
     // Images beside the archive count as its images.
     let beside = match which {
-        Recheck::NoImages => lib.db.with(maintenance::models_with_folder_images).map_err(db)?,
+        Recheck::NoImages => lib.db.with(maintenance::models_with_outside_images).map_err(db)?,
         Recheck::Presupported => Default::default(),
     };
     ctl.set_total(records.len() as u64);
