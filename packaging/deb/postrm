@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+fi
+if [ "$1" = "purge" ]; then
+    # The library stays: it is the user's catalogue, edits and backups.
+    echo "StlArchivist's library is kept in /var/lib/stlarchivist: delete it by hand if you no longer need it."
+fi
+
+exit 0

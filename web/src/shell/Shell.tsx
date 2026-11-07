@@ -149,6 +149,11 @@ export function Shell({ user }: { user: Schemas["User"] }) {
         </AppShell.Header>
         <AppShell.Main style={{ height: "100vh", paddingTop: 48, paddingBottom: STATUS_BAR_HEIGHT, display: "flex", flexDirection: "column" }}>
           <UpdateBanner enabled={prefs.data?.[CHECK_UPDATES] === true} />
+          {/* The library stays mounted while another page shows: its filters, open folders,
+              selection and scroll position are there when it comes back. */}
+          <div style={{ display: page === "library" ? "contents" : "none" }} data-testid="library-page">
+            <BrowserPage active={page === "library"} />
+          </div>
           <Suspense fallback={null}>
           {page === "help" ? (
             <HelpPage />
@@ -168,9 +173,7 @@ export function Shell({ user }: { user: Schemas["User"] }) {
             <DuplicatesPage />
           ) : page === "find" ? (
             <FindByImagePage />
-          ) : (
-            <BrowserPage />
-          )}
+          ) : null}
           </Suspense>
         </AppShell.Main>
         <AppShell.Footer>
