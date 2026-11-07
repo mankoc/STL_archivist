@@ -1,0 +1,25 @@
+[Unit]
+Description=StlArchivist server (catalogue of 3D-printable model archives)
+Documentation=https://github.com/mankoc/STL_archivist
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=stlarchivist
+Group=stlarchivist
+# Its library: the database, thumbnails, settings and backups.
+StateDirectory=stlarchivist
+Environment=STL_DATA_DIR=/var/lib/stlarchivist
+Environment=STL_WEB_DIR=/usr/share/stlarchivist/web
+# STL_BIND and the rest: /etc/default/stlarchivist.
+EnvironmentFile=-/etc/default/stlarchivist
+ExecStart=/usr/bin/stl-server
+# Ctrl-C is the server's clean stop: pending sidecars are written before it ends.
+KillSignal=SIGINT
+TimeoutStopSec=60
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
