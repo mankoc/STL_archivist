@@ -58,6 +58,15 @@ the desktop app to it under **Servers**.
 
 ## Option B: a Linux server
 
+**The quickest way:** install the release's Debian package (amd64; Debian 12, Ubuntu 22.04 and
+newer): `sudo apt install ./stlarchivist-server_<version>_amd64.deb`. It installs `stl-server`
+and the web client, creates the `stlarchivist` user and starts the `stlarchivist` systemd
+service on 127.0.0.1:8770, with its library in `/var/lib/stlarchivist`. Settings (`STL_BIND`,
+`STL_UNRAR_PATH`, …) go in `/etc/default/stlarchivist`, then `sudo systemctl restart
+stlarchivist`. Give the `stlarchivist` user read access to the archive folders (for example
+with a group, or `setfacl -R -m u:stlarchivist:rX /srv/STL`). Removing the package keeps the
+library. The steps below build and install it by hand instead.
+
 > The Linux build has not been tested yet. Report build or runtime errors.
 
 ### Build
