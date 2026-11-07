@@ -1,0 +1,169 @@
+name: Debian packages
+
+# Builds two .deb packages (amd64, on Ubuntu 22.04 so they install on Debian 12, Ubuntu
+# 22.04 and newer) and keeps them as the run's artifacts "deb-server" and "deb-desktop":
+#   stlarchivist-server   stl-server, the web client, a systemd service and a system user
+#                         (packaging/deb); the server package is installed and started here
+#                         as a check
+#   the desktop app       Tauri's .deb (rust/stl-desktop/tauri.deb.json), with stl-server
+#                         and the web client inside
+# The Release and Nightly workflows call it and publish the files; a pull request that
+# changes the packaging builds them as a check; started by hand it only builds.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit, branch or tag to build
+        type: string
+        required: true
+      build_label:
+        description: Shown beside the version (STL_BUILD), e.g. "nightly 9940de4"; empty for a release
+        type: string
+        default: ''
+      deb_suffix:
+        description: Added to the Debian version, e.g. "~nightly.9940de4" (sorts before the release)
+        type: string
+        default: ''
+  workflow_dispatch:
+  pull_request:
+    branches: [development]
+    paths:
+      - packaging/deb/**
+      - rust/stl-desktop/**
+      - .github/workflows/deb.yml
+
+concurrency:
+  group: deb-${{ inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  TAURI_CLI_VERSION: 2.12.3
+
+jobs:
+  server:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Web client
+        working-directory: web
+        run: |
+          npm ci --no-fund --no-audit
+          npm run build
+
+      - name: Rust (rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          key: deb-server
+
+      - name: Server
+        working-directory: rust
+        env:
+          STL_BUILD: ${{ inputs.build_label }}
+        run: cargo build --release -p stl-server
+
+      - name: Package
+        id: package
+        run: |
+          version="$(jq -r .version rust/stl-desktop/tauri.bundle.json)${{ inputs.deb_suffix }}"
+          file=$(bash packaging/deb/build-server.sh "$version" dist)
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+          dpkg-deb --info "$file"
+          dpkg-deb --contents "$file" | head -20
+
+      - name: Install it and ask the service
+        run: |
+          sudo apt-get install -y "./${{ steps.package.outputs.file }}"
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8770/api/auth/status && break
+            sleep 1
+          done
+          echo
+          systemctl status stlarchivist --no-pager
+          curl -fsS http://127.0.0.1:8770/ | grep -q '<div id="root">'
+          sudo systemctl stop stlarchivist
+          sudo apt-get remove -y stlarchivist-server
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-server
+          path: dist/*.deb
+          if-no-files-found: error
+          retention-days: 7
+
+  desktop:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Tauri's system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Web client
+        working-directory: web
+        run: |
+          npm ci --no-fund --no-audit
+          npm run build
+
+      - name: Rust (rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          key: deb-desktop
+
+      - name: Cache the Tauri CLI
+        id: tauri-cli
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-tauri
+          key: tauri-cli-${{ env.TAURI_CLI_VERSION }}-${{ runner.os }}-22.04
+
+      - name: Install the Tauri CLI
+        if: steps.tauri-cli.outputs.cache-hit != 'true'
+        run: cargo install tauri-cli --version ${{ env.TAURI_CLI_VERSION }} --locked
+
+      - name: Desktop app
+        working-directory: rust
+        env:
+          STL_BUILD: ${{ inputs.build_label }}
+        run: |
+          cargo build --release -p stl-server -p stl-desktop
+          cd stl-desktop && cargo tauri build --config tauri.deb.json --bundles deb
+
+      - name: Show it
+        run: |
+          for f in rust/target/release/bundle/deb/*.deb; do dpkg-deb --info "$f"; dpkg-deb --contents "$f"; done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-desktop
+          path: rust/target/release/bundle/deb/*.deb
+          if-no-files-found: error
+          retention-days: 7

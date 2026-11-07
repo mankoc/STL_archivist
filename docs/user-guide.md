@@ -230,8 +230,10 @@ browser.
   model viewer it opens the file shown. When MeshPeek is elsewhere, **Settings → Account →
   MeshPeek on this computer → Choose program…** picks it (kept by the desktop app for this
   computer); **Find automatically** goes back to looking for it.
-- Warnings (for example *Archive without images*) show as orange badges; **Warning
-  details** lists the files that trigger each one.
+- Warnings (for example *Archive without images*) show on the **Files** tab (marked ⚠), with
+  the files that trigger each one. *Archive without images* goes once the model has an image
+  of its own: one beside the archive, a view added from the model viewer, or an image dropped
+  on the pane.
 - Click an image to view it full screen at full resolution: the original is read from the
   archive (the thumbnail shows meanwhile, and stays when the original cannot be read, for
   example for an image added by hand). **←** / **→** or the side arrows step through the
