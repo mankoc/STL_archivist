@@ -18,6 +18,9 @@
 - The model details (`GET /api/models/{id}`) also carry `presupports`, `compression_rate`, `sequence`, `created_at`,
   `to_print`, `url`, `description`, `scales`, `file_count` and `stl_count`.
 - The archive's file tree fits a narrow pane.
+- **Adding an image to a model clears "Archive without images"**, whether a view captured in the model viewer or an
+  image dropped on the details pane. Rescan, crawls and *Check images warning* count such images too (an image whose
+  name the archive's file list lacks), as they already did images beside the archive, so the warning doesn't come back.
 - **The library keeps its state while you visit another page:** filters, open folders in the filter pane, the selection,
   the detail pane and the scroll position are as you left them when you come back from Settings or any other page.
   Leaving it closes its drawers, dialogs and menus, and Ctrl+A on another page no longer selects models.

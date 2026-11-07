@@ -238,6 +238,7 @@ export const TOPICS: Topic[] = [
         ["No printable files", "No printable model file inside"],
         ["Low compression", "The archive's compression rate is above the threshold (default 0.95)"],
       ] } },
+      { p: "**Archive without images** is not raised, and goes, when the model has an image of its own: one beside the archive, a view added from the model viewer, or an image dropped on the details pane." },
       { p: "Which warnings are raised is set in **Settings → Library → Warnings**. In the details pane, the **Files** tab (marked ⚠ when the model has warnings) names each warning and why it is raised, and highlights the files behind it, and the folders holding them, in the archive's tree. After changing the settings, **Settings → Maintenance → Check images warning / Check presupport warning** fixes those warnings quickly without a full rescan." },
     ],
   },

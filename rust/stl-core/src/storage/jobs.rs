@@ -125,7 +125,7 @@ pub fn apply_rescan(tx: &Transaction, model_id: i64, r: &Rescan) -> std::result:
     };
     let pick = |new: &Option<String>, old: Option<String>| new.clone().filter(|s| !s.is_empty()).or(old);
     // Images beside the archive count as its images.
-    let warning = if super::maintenance::has_folder_images(tx, model_id).map_err(db)? {
+    let warning = if super::maintenance::has_outside_images(tx, model_id).map_err(db)? {
         super::maintenance::without_warning(r.warning.as_deref(), crate::rules::WARNING_NO_IMAGES)
     } else {
         r.warning.clone()

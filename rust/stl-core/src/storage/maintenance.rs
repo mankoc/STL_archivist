@@ -257,17 +257,34 @@ pub(crate) fn folder_image_sql(col: &str) -> String {
     format!("({col} LIKE '/%' OR {col} LIKE '\\%' OR (substr({col}, 2, 1) = ':' AND substr({col}, 3, 1) IN ('/', '\\')))")
 }
 
-/// The models with an image from beside their archive: such an archive is
-/// not "without images".
-pub fn models_with_folder_images(conn: &Connection) -> Result<std::collections::HashSet<i64>> {
-    let mut st = conn.prepare(&format!("SELECT DISTINCT model_id FROM images WHERE {}", folder_image_sql("filename")))?;
+/// SQL: image row `i` comes from outside its archive: a file beside it, or one added by
+/// hand (a model viewer capture, a dropped file), which its name does not find in the
+/// archive's stored file list (when there is one).
+fn outside_image_sql(i: &str) -> String {
+    format!(
+        "({} OR (EXISTS (SELECT 1 FROM archive_files a WHERE a.model_id = {i}.model_id) \
+         AND NOT EXISTS (SELECT 1 FROM archive_files a WHERE a.model_id = {i}.model_id AND a.name = {i}.filename)))",
+        folder_image_sql(&format!("{i}.filename"))
+    )
+}
+
+/// The models with an image from outside their archive: such a model is not "without
+/// images", whatever its archive holds.
+pub fn models_with_outside_images(conn: &Connection) -> Result<std::collections::HashSet<i64>> {
+    let mut st = conn.prepare(&format!("SELECT DISTINCT i.model_id FROM images i WHERE {}", outside_image_sql("i")))?;
     st.query_map([], |r| r.get(0))?.collect()
 }
 
-/// Whether model `id` has an image from beside its archive.
-pub fn has_folder_images(conn: &Connection, id: i64) -> Result<bool> {
-    let sql = format!("SELECT EXISTS (SELECT 1 FROM images WHERE model_id = ?1 AND {})", folder_image_sql("filename"));
+/// Whether model `id` has an image from outside its archive.
+pub fn has_outside_images(conn: &Connection, id: i64) -> Result<bool> {
+    let sql = format!("SELECT EXISTS (SELECT 1 FROM images i WHERE i.model_id = ?1 AND {})", outside_image_sql("i"));
     conn.query_row(&sql, [id], |r| r.get(0))
+}
+
+/// Take "Archive without images" off model `id` (an image was added to it).
+pub fn clear_no_images(tx: &Transaction, id: i64) -> Result<()> {
+    let warning: Option<String> = tx.query_row("SELECT warning FROM models WHERE id = ?1", [id], |r| r.get(0))?;
+    set_warnings(tx, &[(id, without_warning(warning.as_deref(), crate::rules::WARNING_NO_IMAGES))])
 }
 
 /// `warning` without the line `line` (`None` when nothing is left).
