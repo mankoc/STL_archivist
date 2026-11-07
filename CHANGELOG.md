@@ -18,6 +18,9 @@
 - The model details (`GET /api/models/{id}`) also carry `presupports`, `compression_rate`, `sequence`, `created_at`,
   `to_print`, `url`, `description`, `scales`, `file_count` and `stl_count`.
 - The archive's file tree fits a narrow pane.
+- **The library keeps its state while you visit another page:** filters, open folders in the filter pane, the selection,
+  the detail pane and the scroll position are as you left them when you come back from Settings or any other page.
+  Leaving it closes its drawers, dialogs and menus, and Ctrl+A on another page no longer selects models.
 
 ## 2026.45.41 — 2026-11-06
 
