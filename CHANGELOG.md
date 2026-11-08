@@ -63,6 +63,7 @@
 - **Find duplicates by metadata (Levenshtein)** can be stopped while it compares, and keeps at most 100,000 groups.
   Idle sign-in sessions are deleted when a new one starts, not only when presented again.
 - **Nightly and release builds retry GitHub downloads** that answer 504: the installer's NSIS (bundling is tried up to three times) and the Docker image's pdfium and ONNX Runtime. Two nightlies failed on them.
+- **A new icon: the dragon,** half scales and half wireframe, on a transparent background: the desktop app, its installer and Linux package, the start page, the web client's tab and the README.
 
 ## 2026.45.41 — 2026-11-06
 
