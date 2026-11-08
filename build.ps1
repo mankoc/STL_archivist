@@ -36,8 +36,15 @@ try {
         # tauri.bundle.json adds the server and the web client (installed beside the
         # shell, where it looks for them); kept apart so plain builds need neither.
         Push-Location "stl-desktop"
-        cargo tauri build --config tauri.bundle.json
-        if ($LASTEXITCODE) { throw "installer build failed" }
+        # Tauri downloads NSIS from GitHub, which sometimes answers 504: try again
+        # (the binaries are built by then, so a retry only bundles).
+        foreach ($attempt in 1..3) {
+            cargo tauri build --config tauri.bundle.json
+            if (-not $LASTEXITCODE) { break }
+            if ($attempt -eq 3) { throw "installer build failed" }
+            Write-Host "Installer build failed (attempt $attempt of 3); trying again in 30 s"
+            Start-Sleep -Seconds 30
+        }
         Pop-Location
         Get-ChildItem "target\release\bundle\nsis\*.exe" | ForEach-Object { Write-Host "Installer: $($_.FullName)" }
     }
