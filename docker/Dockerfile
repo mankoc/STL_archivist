@@ -36,9 +36,9 @@ ARG ORT_VERSION=1.22.0
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl \
  && mkdir -p /opt/pdfium \
- && curl -fsSL "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/${PDFIUM_BUILD}/pdfium-linux-x64.tgz" \
+ && curl -fsSL --retry 5 --retry-all-errors --retry-delay 15 "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/${PDFIUM_BUILD}/pdfium-linux-x64.tgz" \
     | tar -xz -C /opt/pdfium \
- && curl -fsSL "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-${ORT_VERSION}.tgz" \
+ && curl -fsSL --retry 5 --retry-all-errors --retry-delay 15 "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-${ORT_VERSION}.tgz" \
     | tar -xz -C /opt \
  && mv "/opt/onnxruntime-linux-x64-${ORT_VERSION}" /opt/onnxruntime \
  && apt-get purge -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/* \
