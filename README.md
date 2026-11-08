@@ -1,5 +1,7 @@
 # StlArchivist
 
+<p align="center"><img src="resources/logo.png" alt="StlArchivist" width="256" /></p>
+
 **StlArchivist** manages local collections of 3D-printable model archives. It scans folders of
 `.zip`, `.7z` and `.rar` files, extracts metadata and thumbnails, and stores everything in a
 library database so you can browse, search, tag and de-duplicate your collection without
@@ -376,7 +378,7 @@ stl_database/
 │   ├── stl-proc/            # Child processes that end with their parent
 │   └── stl-viewer/          # The web client's model viewer: meshpeek-render in WebAssembly
 ├── web/                     # Web client (React, TypeScript, Mantine, TanStack)
-├── resources/               # Application icon (the STL Archivist emblem; copies in rust/stl-desktop/icons, rust/stl-desktop/ui and web/public)
+├── resources/               # Application icon (the dragon; copies in rust/stl-desktop/icons, rust/stl-desktop/ui and web/public) and logo.png (the README's)
 ├── tools/api_doc.py         # Writes docs/api.md (the API reference) from web/openapi.json
 ├── tools/version.py         # Raises the version everywhere and adds its changelog section
 └── docs/                    # Migration plan and design notes
