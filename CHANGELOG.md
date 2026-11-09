@@ -64,6 +64,8 @@
   Idle sign-in sessions are deleted when a new one starts, not only when presented again.
 - **Nightly and release builds retry GitHub downloads** that answer 504: the installer's NSIS (bundling is tried up to three times) and the Docker image's pdfium and ONNX Runtime. Two nightlies failed on them.
 - **A new icon: the dragon,** half scales and half wireframe, on a transparent background: the desktop app, its installer and Linux package, the start page, the web client's tab and the README.
+- **`.jfif` images are read like `.jpg`:** in archives and beside them, for thumbnails, Rescan, *Archive without images* and full-size viewing (as `image/jpeg`).
+- **A PDF that gave the thumbnail counts as the archive's image:** an archive whose only picture is a PDF's first page no longer gets *Archive without images*, in crawls, Rescan and *Check images warning*. Without the PDF library (no thumbnail) the warning stays.
 
 ## 2026.45.41 — 2026-11-06
 
