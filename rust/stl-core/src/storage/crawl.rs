@@ -492,8 +492,11 @@ fn new_values(tx: &Transaction, cfg: &UpsertConfig, input: &UpsertInput, ch: &Ch
     // _detect_rules
     row.presupports = Some(ch.presupports.clone());
     row.warning = ch.warnings.clone().filter(|w| !w.is_empty());
-    // Images beside the archive count as its images: the new ones read now, else those it has.
-    let beside = ch.folder_images.iter().any(|(_, j, _)| j.as_ref().is_some_and(|j| !j.is_empty()))
+    // Images beside the archive count as its images, and so do the thumbnails of its PDFs:
+    // the new ones made now, else those it has.
+    let made = |j: &Option<Vec<u8>>| j.as_ref().is_some_and(|j| !j.is_empty());
+    let beside = ch.folder_images.iter().any(|(_, j, _)| made(j))
+        || ch.thumbs.iter().any(|t| t.name.to_lowercase().ends_with(".pdf") && made(&t.jpeg))
         || match input.existing {
             Some(id) if !hash_changed => super::maintenance::has_outside_images(tx, id)?,
             _ => false,

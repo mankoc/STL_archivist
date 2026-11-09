@@ -1294,6 +1294,7 @@ mod tests {
             x.contents.into_iter().map(|(n, _)| n).collect::<Vec<_>>()
         };
         assert_eq!(read(Some(2)), ["1.jpg", "2.png", "info.json", "link.url"]);
+        assert!(is_image_or_pdf("renders/Cover.JFIF"), "JFIF is JPEG under another name");
         assert_eq!(read(Some(0)), ["info.json", "link.url"]);
         assert_eq!(read(None).len(), 6);
     }
@@ -1302,11 +1303,13 @@ mod tests {
     #[derive(Default)]
     struct Recorder {
         embeds: std::sync::Mutex<Vec<usize>>,
+        /// What a PDF's first page gives (`None`: no PDF library).
+        pdf: Option<Vec<u8>>,
     }
 
     impl Host for Recorder {
         fn pdf_thumbnail(&self, _: &[u8]) -> Option<Vec<u8>> {
-            None
+            self.pdf.clone()
         }
         fn embed(&self, jpegs: &[Vec<u8>]) -> Option<Vec<Option<Vec<u8>>>> {
             self.embeds.lock().unwrap().push(jpegs.len());
@@ -1358,6 +1361,44 @@ mod tests {
         assert_eq!(*host.embeds.lock().unwrap(), [6], "the three archives' six thumbnails in one request");
         let vectors: i64 = storage::open(&db).unwrap().query_row("SELECT count(*) FROM image_vec", [], |r| r.get(0)).unwrap();
         assert_eq!(vectors, 6);
+    }
+
+    /// A PDF whose first page became the thumbnail gives the archive its images.
+    #[test]
+    fn a_pdf_made_into_a_thumbnail_is_an_image() {
+        use std::io::Write;
+        let warning_with = |pdf: Option<Vec<u8>>| {
+            let dir = tempfile::tempdir().unwrap();
+            let folder = dir.path().join("archives");
+            std::fs::create_dir(&folder).unwrap();
+            let mut z = zip::ZipWriter::new(std::fs::File::create(folder.join("m.zip")).unwrap());
+            let o = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+            for (name, data) in [("model.stl", &b"solid
+endsolid
+"[..]), ("guide.pdf", b"%PDF-1.4")] {
+                z.start_file(name, o).unwrap();
+                z.write_all(data).unwrap();
+            }
+            z.finish().unwrap();
+            let db = dir.path().join("lib.db");
+            storage::migrate(&db, &storage::Vectors::default()).unwrap();
+            let store = ThumbStore::open(&dir.path().join("thumbs")).unwrap();
+            let cfg = CrawlConfig {
+                source_dir: crate::winpath::native(&folder.to_string_lossy()),
+                recurse: true,
+                max_thumbnails: 5,
+                max_thumb_size: 64,
+                max_workers: 1,
+                ..Default::default()
+            };
+            crawl(&db, Some(&store), &cfg, &Recorder { pdf, ..Default::default() }).unwrap();
+            storage::open(&db).unwrap().query_row("SELECT warning FROM models", [], |r| r.get::<_, Option<String>>(0)).unwrap().unwrap_or_default()
+        };
+        let mut page = std::io::Cursor::new(Vec::new());
+        image::RgbImage::from_pixel(8, 8, image::Rgb([9, 9, 9])).write_to(&mut page, image::ImageFormat::Png).unwrap();
+        let page = crate::thumbnail::make_thumbnail(&page.into_inner(), 8, false).unwrap();
+        assert!(!warning_with(Some(page)).contains(rules::WARNING_NO_IMAGES));
+        assert!(warning_with(None).contains(rules::WARNING_NO_IMAGES), "no PDF library, no thumbnail: still without images");
     }
 
     #[test]

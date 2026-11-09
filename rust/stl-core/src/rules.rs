@@ -15,7 +15,7 @@ use std::sync::LazyLock;
 
 use fancy_regex::{Regex, RegexBuilder};
 
-pub const IMAGE_SUFFIXES: &[&str] = &[".jpg", ".jpeg", ".png", ".webp", ".bmp", ".avif", ".gif"];
+pub const IMAGE_SUFFIXES: &[&str] = &[".jpg", ".jpeg", ".jfif", ".png", ".webp", ".bmp", ".avif", ".gif"];
 pub const ARCHIVE_SUFFIXES: &[&str] = &[".7z", ".zip", ".rar"];
 const PRINTABLE_SUFFIXES: &[&str] = &[".stl", ".obj", ".lys", ".lyt", ".chitubox", ".ctp", ".ags"];
 
