@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026.46.0 — 2026-11-09
 
 - **Development happens on the `development` branch; `main` only receives releases.** A release (Actions → Release)
   raises the version, merges development into main, tags it and publishes the installer and the Docker image. The version
