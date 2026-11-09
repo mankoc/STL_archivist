@@ -90,7 +90,7 @@ pub async fn image_thumbnail(State(lib): State<AppState>, _me: CurrentUser, Path
 fn image_type(name: &str) -> Option<&'static str> {
     let ext = name.rsplit_once('.')?.1.to_ascii_lowercase();
     Some(match ext.as_str() {
-        "jpg" | "jpeg" => "image/jpeg",
+        "jpg" | "jpeg" | "jfif" => "image/jpeg",
         "png" => "image/png",
         "gif" => "image/gif",
         "webp" => "image/webp",
@@ -169,6 +169,7 @@ mod tests {
         assert_eq!(thumbnail_url(5, None), "/api/images/5/thumbnail");
         assert_eq!(thumbnail_url(5, Some(&[0xab])), "/api/thumb/ab");
         assert_eq!(image_type("renders/A.JPG"), Some("image/jpeg"));
+        assert_eq!(image_type("cover.jfif"), Some("image/jpeg"));
         assert_eq!(image_type("preview.pdf"), None);
         assert_eq!(image_type("noext"), None);
     }

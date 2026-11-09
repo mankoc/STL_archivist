@@ -257,12 +257,13 @@ pub(crate) fn folder_image_sql(col: &str) -> String {
     format!("({col} LIKE '/%' OR {col} LIKE '\\%' OR (substr({col}, 2, 1) = ':' AND substr({col}, 3, 1) IN ('/', '\\')))")
 }
 
-/// SQL: image row `i` comes from outside its archive: a file beside it, or one added by
-/// hand (a model viewer capture, a dropped file), which its name does not find in the
-/// archive's stored file list (when there is one).
+/// SQL: image row `i` is an image the archive's file names do not show: a file beside
+/// it, one added by hand (a model viewer capture, a dropped file), which its name does
+/// not find in the archive's stored file list (when there is one), or the first page of
+/// a PDF in it (a row exists only when that thumbnail was made).
 fn outside_image_sql(i: &str) -> String {
     format!(
-        "({} OR (EXISTS (SELECT 1 FROM archive_files a WHERE a.model_id = {i}.model_id) \
+        "({} OR lower({i}.filename) LIKE '%.pdf' OR (EXISTS (SELECT 1 FROM archive_files a WHERE a.model_id = {i}.model_id) \
          AND NOT EXISTS (SELECT 1 FROM archive_files a WHERE a.model_id = {i}.model_id AND a.name = {i}.filename)))",
         folder_image_sql(&format!("{i}.filename"))
     )
