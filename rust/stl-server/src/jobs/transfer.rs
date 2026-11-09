@@ -37,7 +37,7 @@ pub(super) fn stage_package(lib: &Library, job: &Job, src: &std::path::Path, nam
         // A smart sync's package: this library with the changes it carries.
         let built = (|| {
             let base = dir.join(backup::DB_FILE);
-            lib.db.with(|c| c.backup(rusqlite::MAIN_DB, &base, None)).map_err(db_err)?;
+            lib.db.with(|c| c.backup(rusqlite::MAIN_DB, &base, None::<fn(rusqlite::backup::Progress)>)).map_err(db_err)?;
             storage::delta::apply_delta(&base, &delta).map_err(|e| e.to_string())
         })();
         let _ = std::fs::remove_file(&delta);

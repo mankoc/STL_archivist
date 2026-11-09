@@ -23,7 +23,7 @@ jpeg-encoder = { version = "0.7.1", features = ["simd"] }
 meshpeek-core = { git = "https://github.com/mankoc/meshpeek", tag = "v0.5.9" }
 rayon = "1.12.0"
 regex = "1.13.1"
-rusqlite = { version = "0.40.2", features = ["backup", "bundled", "functions"] }
+rusqlite = { version = "0.41.1", features = ["backup", "bundled", "functions"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.140"
 sevenz-rust2 = "0.24.0"
