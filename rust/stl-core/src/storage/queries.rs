@@ -609,7 +609,7 @@ pub fn model_summary(conn: &Connection, model_id: i64) -> Result<Option<Vec<(Str
          (SELECT count(*) FROM stl_files f WHERE f.model_id = v.id) AS stl_count \
          FROM models_view v JOIN models m ON m.id = v.id WHERE v.id = ?1",
     )?;
-    let names: Vec<String> = st.column_names().iter().map(|s| s.to_string()).collect();
+    let names: Vec<String> = st.column_names().map(str::to_string).collect();
     let mut rows = st.query([model_id])?;
     let Some(r) = rows.next()? else { return Ok(None) };
     let mut out = Vec::with_capacity(names.len());
