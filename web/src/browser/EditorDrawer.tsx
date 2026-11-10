@@ -3,9 +3,10 @@
 import { Autocomplete, Button, Drawer, Group, Loader, NumberInput, SimpleGrid, Stack, TagsInput, Text, Textarea, TextInput } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { api, type Schemas, unwrap } from "../api/client";
+import { mergeAiFields } from "./aiFields";
 
 type Form = Required<Schemas["EditorSave"]>;
 
@@ -47,6 +48,40 @@ export function EditorDrawer({ id, onClose }: { id: number | null; onClose: () =
       unwrap(await api.GET("/api/editor/subcollections", { params: { query: { collection: form.collection } } })),
     enabled: id != null && form.collection !== "",
   });
+  // "AI data": an `ai_fields` job; its answer fills the empty fields for review.
+  const [aiJob, setAiJob] = useState<number | null>(null);
+  const formRef = useRef(form);
+  formRef.current = form;
+  const jobs = useQuery({ queryKey: ["jobs"], queryFn: async () => unwrap(await api.GET("/api/jobs")), enabled: aiJob != null });
+  const job = (jobs.data ?? []).find((j) => j.id === aiJob);
+  const aiResult = useQuery({
+    queryKey: ["job-result", aiJob],
+    queryFn: async () => unwrap(await api.GET("/api/jobs/{id}", { params: { path: { id: aiJob! } } })),
+    enabled: job?.state === "done",
+  });
+  useEffect(() => {
+    if (job?.state === "failed" || job?.state === "cancelled") {
+      notifications.show({ color: "red", title: "AI data", message: job.message ?? job.state });
+      setAiJob(null);
+    }
+  }, [job?.state, job?.message]);
+  useEffect(() => {
+    const r = aiResult.data?.result;
+    if (r?.type !== "ai_fields" || r.model_id !== id) return;
+    const { form: merged, filled } = mergeAiFields(formRef.current, r);
+    setForm(merged);
+    notifications.show({ title: "AI data", message: filled.length ? `Filled: ${filled.join(", ")}. Review and save.` : "Nothing new to fill." });
+    setAiJob(null);
+  }, [aiResult.data, id]);
+  const askAi = async () => {
+    try {
+      setAiJob(unwrap(await api.POST("/api/jobs", { body: { kind: "ai_fields", id: id! } })).id);
+    } catch (err) {
+      notifications.show({ color: "red", title: "AI data", message: (err as Error).message });
+    }
+  };
+  useEffect(() => setAiJob(null), [id]);
+
   const set = <K extends keyof Form>(k: K) => (v: Form[K]) => setForm((f) => ({ ...f, [k]: v }));
   const list = (k: string) => choices.data?.[k] ?? [];
 
@@ -105,6 +140,16 @@ export function EditorDrawer({ id, onClose }: { id: number | null; onClose: () =
           <TextInput label="URL" value={form.url} onChange={(e) => set("url")(e.currentTarget.value)} />
           <Textarea label="Description" autosize minRows={2} maxRows={8} value={form.description} onChange={(e) => set("description")(e.currentTarget.value)} />
           <Group justify="flex-end">
+            <Button
+              variant="light"
+              mr="auto"
+              onClick={askAi}
+              loading={aiJob != null}
+              title="Ask the AI model to infer the empty fields from the images, path and file names"
+              data-testid="editor-ai-data"
+            >
+              AI data
+            </Button>
             <Button variant="default" onClick={onClose}>
               Cancel
             </Button>

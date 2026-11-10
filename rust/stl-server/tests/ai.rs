@@ -39,7 +39,15 @@ type Seen = Arc<Mutex<Vec<Value>>>;
 async fn completions(State(seen): State<Seen>, Json(body): Json<Value>) -> Json<Value> {
     let prompt = body["messages"][0]["content"].as_array().unwrap().last().unwrap()["text"].as_str().unwrap().to_string();
     seen.lock().unwrap().push(body);
-    let reply = if prompt.contains("EXACT format") {
+    let reply = if prompt.contains("Output ONLY these 12 lines") {
+        "TITLE: Red Dragon
+CREATOR: studio
+DATE: 2024-3
+SCULPTOR: n/a
+CATEGORY: Monster
+SCALE: 75mm
+TAGS: dragon, dragon with wings"
+    } else if prompt.contains("EXACT format") {
         "TITLE: The Dark Knight\nCREATOR: n/a\nSCULPTOR: Alice\nCOLLECTION: comics\nSUBCOLLECTION: DC\nSCALE: 54mm\nSOURCE: Patreon\nYEAR: 2023\nDESCRIPTION: A caped hero."
     } else {
         "Batman, batman with cape, DC Comics"
@@ -144,6 +152,35 @@ async fn suggest_commit_and_batch() {
     assert_eq!(sculptor, "Studio", "filled fields are kept");
     let collections: i64 = scalar(&lib, &format!("SELECT count(collection_id) FROM models WHERE id IN ({dragon}, {knight})"));
     assert_eq!(collections, 0, "the tagger never fills collections");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ai_data_infers_editor_fields() {
+    let seen: Seen = Arc::default();
+    let url = fake_model(Arc::clone(&seen)).await;
+    let lib = library_with(|c| c.ai.url = Some(url.clone()));
+    let ed = lib.user("ed", Role::Editor);
+    let root = lib.dir.path().join("archives");
+    write_zip(&root.join("Studio").join("Dragon.zip"), &[("dragon 32mm.stl", b"solid d
+endsolid
+"), ("render.png", &png())]);
+    run(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy(), "pattern": "{creator}/{title}"})).await;
+    let dragon: i64 = scalar(&lib, "SELECT id FROM models WHERE title = 'Dragon'");
+
+    let v = run(&lib, &ed, json!({"kind": "ai_fields", "id": dragon})).await;
+    let f = &v["result"];
+    assert_eq!(f["type"], "ai_fields", "{v}");
+    assert_eq!(f["title"], "Red Dragon");
+    assert_eq!(f["creator"], "Studio", "snapped to the library's spelling");
+    assert_eq!(f["date"], "2024-03");
+    assert_eq!(f["sculptor"], "");
+    assert_eq!(f["category"], "Monster");
+    assert_eq!(f["scales"], json!(["32 mm"]), "scales come from the text");
+    assert_eq!(f["tags"], json!(["dragon", "wings"]));
+    let prompt = seen.lock().unwrap()[0]["messages"][0]["content"].as_array().unwrap().last().unwrap()["text"].as_str().unwrap().to_string();
+    assert!(prompt.contains("- CREATOR: Studio
+"), "the library's names are offered: {prompt}");
+    assert_eq!(scalar::<String>(&lib, &format!("SELECT title FROM models WHERE id = {dragon}")), "Dragon", "nothing saved");
 }
 
 #[tokio::test(flavor = "multi_thread")]

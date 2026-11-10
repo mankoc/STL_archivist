@@ -546,6 +546,7 @@ fn run(lib: &Library, job: &Job) -> Result<String, String> {
         }
         JobRequest::RelocateLibrary { id, root, apply, fix_case } => relocate_library(lib, job, id, &root, apply, fix_case),
         JobRequest::AiSuggest { id, max_tags, ignore_meta } => ai_suggest(lib, job, id, max_tags, ignore_meta),
+        JobRequest::AiFields { id } => ai_fields(lib, job, id),
         JobRequest::AiTag { ids, overwrite, ignore_meta, max_tags } => ai_tag(lib, job, &ids, overwrite, ignore_meta, max_tags),
         JobRequest::GenerateSidecars => generate_sidecars(lib, job),
         JobRequest::RemoveSidecars => remove_sidecars(lib, job),
