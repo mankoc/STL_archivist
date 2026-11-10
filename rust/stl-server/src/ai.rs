@@ -563,9 +563,16 @@ fn still(bytes: Vec<u8>) -> Vec<u8> {
     }
 }
 
-/// `_generate_suggestions`: tags and metadata for one model. Output that looks
-/// corrupted restarts the model server and is asked for once more.
-pub fn suggest(lib: &Library, ctl: &Control, log: &dyn Fn(String), model_id: i64, max_tags: usize, ignore_meta: bool) -> Result<AiSuggestion, String> {
+/// One model's inputs and the images sent about it (their thumbnails).
+struct Asking {
+    inputs: AiInputs,
+    images: Vec<Vec<u8>>,
+    stems: Vec<String>,
+    image_ids: Vec<i64>,
+    title: String,
+}
+
+fn prepare(lib: &Library, model_id: i64) -> Result<Asking, String> {
     use stl_core::ai_tagging as T;
     let inputs: AiInputs = lib
         .db
@@ -582,41 +589,117 @@ pub fn suggest(lib: &Library, ctl: &Control, log: &dyn Fn(String), model_id: i64
             image_ids.push(*id);
         }
     }
-    let known = if ignore_meta { Vec::new() } else { T::known_meta(&inputs) };
-    let temperature = LibrarySettings::load(&lib.config.data_dir).ai_temperature();
     let title = inputs.title.clone().filter(|t| !t.is_empty()).unwrap_or_else(|| stl_core::rules::MemberPath::new(&inputs.archive_path).stem().to_string());
+    Ok(Asking { inputs, images, stems, image_ids, title })
+}
 
-    // OpenRouter when chosen; else a compute worker when there is one (see
-    // `workers`), else this server's model.
-    let provider = Provider::of(lib);
-    let ask = |text: &str, max_tokens: u32| -> Result<String, String> {
-        let p = Prompt { images: &images, text, max_tokens, temperature };
-        match &provider {
-            Provider::OpenRouter { model } => return ask_openrouter(lib, model, p),
-            Provider::OpenAi { model } => return ask_openai(lib, model, p),
-            Provider::Local => {}
-        }
-        match lib.workers.chat(lib.config.compute, ctl, log, p) {
-            Some(reply) => reply,
-            None => lib.ai.ask(&lib.config, ctl, log, p),
-        }
-    };
-    log(format!("{title}: generating tags…"));
-    let raw_tags = ask(&T::build_tags_prompt(&stems, &inputs.archive_path, &known), 120)?;
+/// Ask the library's model: OpenRouter or an OpenAI-compatible endpoint when
+/// chosen; else a compute worker when there is one (see `workers`), else this
+/// server's model.
+fn ask_model(lib: &Library, ctl: &Control, log: &dyn Fn(String), images: &[Vec<u8>], text: &str, max_tokens: u32) -> Result<String, String> {
+    let temperature = LibrarySettings::load(&lib.config.data_dir).ai_temperature();
+    let p = Prompt { images, text, max_tokens, temperature };
+    match Provider::of(lib) {
+        Provider::OpenRouter { model } => return ask_openrouter(lib, &model, p),
+        Provider::OpenAi { model } => return ask_openai(lib, &model, p),
+        Provider::Local => {}
+    }
+    match lib.workers.chat(lib.config.compute, ctl, log, p) {
+        Some(reply) => reply,
+        None => lib.ai.ask(&lib.config, ctl, log, p),
+    }
+}
+
+/// `_generate_suggestions`: tags and metadata for one model. Output that looks
+/// corrupted restarts the model server and is asked for once more.
+pub fn suggest(lib: &Library, ctl: &Control, log: &dyn Fn(String), model_id: i64, max_tags: usize, ignore_meta: bool) -> Result<AiSuggestion, String> {
+    use stl_core::ai_tagging as T;
+    let a = prepare(lib, model_id)?;
+    let known = if ignore_meta { Vec::new() } else { T::known_meta(&a.inputs) };
+    let ask = |text: &str, max_tokens: u32| ask_model(lib, ctl, log, &a.images, text, max_tokens);
+    log(format!("{}: generating tags…", a.title));
+    let raw_tags = ask(&T::build_tags_prompt(&a.stems, &a.inputs.archive_path, &known), 120)?;
     let tags = T::clean_tags(&raw_tags, max_tags);
     if ctl.is_stopped() {
         return Err("stopped".into());
     }
-    log(format!("{title}: extracting metadata…"));
-    let raw_meta = ask(&T::build_meta_prompt(&inputs.archive_path, &known), 200)?;
-    let meta = T::parse_meta(&raw_meta, &inputs.archive_path, &stems, &inputs.files);
+    log(format!("{}: extracting metadata…", a.title));
+    let raw_meta = ask(&T::build_meta_prompt(&a.inputs.archive_path, &known), 200)?;
+    let meta = T::parse_meta(&raw_meta, &a.inputs.archive_path, &a.stems, &a.inputs.files);
     Ok(AiSuggestion {
         model_id,
-        title,
-        archive_path: inputs.archive_path,
-        image_ids,
+        title: a.title,
+        archive_path: a.inputs.archive_path,
+        image_ids: a.image_ids,
         tags,
         fields: T::normalize_meta(&meta).into(),
+    })
+}
+
+/// What the model infers for the editor's fields ("AI data"); empty when unknown.
+#[derive(Debug, Clone, Default, Serialize, ToSchema)]
+pub struct AiEditorFields {
+    pub model_id: i64,
+    pub title: String,
+    pub creator: String,
+    /// The editor's *Type*.
+    pub source: String,
+    /// `YYYY-MM` or `YYYY`.
+    pub date: String,
+    pub sculptor: String,
+    pub release: String,
+    pub collection: String,
+    pub subcollection: String,
+    pub category: String,
+    /// Only scales written in the path, file names or metadata.
+    pub scales: Vec<String>,
+    pub description: String,
+    pub tags: Vec<String>,
+}
+
+/// Library names shown in the "AI data" prompt per list, at most.
+const VOCAB_CAP: usize = 40;
+
+/// "AI data": as many of the editor's fields as the model can infer from the
+/// images, path, file names and catalogued metadata, reusing the library's
+/// names (creators, sculptors, collections, scales…). Nothing is saved.
+pub fn infer_fields(lib: &Library, ctl: &Control, log: &dyn Fn(String), model_id: i64) -> Result<AiEditorFields, String> {
+    use stl_core::ai_tagging as T;
+    let a = prepare(lib, model_id)?;
+    let choices = lib.db.with(stl_core::storage::model_editor::editor_choices).map_err(|e| format!("database: {e}"))?;
+    let list = |name: &str| choices.iter().find(|(n, _)| *n == name).map(|(_, v)| v.as_slice()).unwrap_or_default();
+    let lists: [(&str, &[String]); 8] = [
+        ("CREATOR", list("creators")),
+        ("TYPE", list("sources")),
+        ("SCULPTOR", list("sculptors")),
+        ("RELEASE", list("releases")),
+        ("COLLECTION", list("collections")),
+        ("SUBCOLLECTION", list("subcollections")),
+        ("CATEGORY", list("categories")),
+        ("SCALE", list("scales")),
+    ];
+    let context = std::iter::once(a.inputs.archive_path.as_str()).chain(a.inputs.files.iter().map(String::as_str)).collect::<Vec<_>>().join(" ");
+    let vocab: Vec<(&str, Vec<&str>)> = lists.iter().map(|(k, names)| (*k, T::relevant_names(names, &context, VOCAB_CAP))).collect();
+    log(format!("{}: inferring metadata…", a.title));
+    let prompt = T::build_fields_prompt(&a.inputs.archive_path, &T::known_meta(&a.inputs), &vocab);
+    let raw = ask_model(lib, ctl, log, &a.images, &prompt, 400)?;
+    let parsed = T::parse_fields(&raw, &a.inputs.archive_path, &a.stems, &a.inputs.files, &lists);
+    let get = |k: &str| parsed.iter().find(|(key, _)| key == k).map(|(_, v)| v.clone()).unwrap_or_default();
+    let split = |k: &str| get(k).split(", ").filter(|s| !s.is_empty()).map(str::to_string).collect();
+    Ok(AiEditorFields {
+        model_id,
+        title: get("TITLE"),
+        creator: get("CREATOR"),
+        source: get("TYPE"),
+        date: get("DATE"),
+        sculptor: get("SCULPTOR"),
+        release: get("RELEASE"),
+        collection: get("COLLECTION"),
+        subcollection: get("SUBCOLLECTION"),
+        category: get("CATEGORY"),
+        scales: split("SCALE"),
+        description: get("DESCRIPTION"),
+        tags: split("TAGS"),
     })
 }
 
