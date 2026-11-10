@@ -22,6 +22,17 @@ describe("mass edit request", () => {
     expect(r.presupports).toBe("");
   });
 
+  it("clears tags when ticked, with or without new ones", () => {
+    const f = emptyForm();
+    f.clearTags = true;
+    expect(toRequest(f, [1]).clearing).toEqual(["tags"]);
+    f.clear.title = true;
+    f.tags = "a, b";
+    const r = toRequest(f, [1]);
+    expect(r.clearing).toEqual(["title", "tags"]);
+    expect(r.tags).toBe("a, b");
+  });
+
   it("sends find & replace only with a find text and fields", () => {
     const f = emptyForm();
     f.find = "x";

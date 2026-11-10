@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Mass edit can clear tags:** a **Clear** box beside *Tags* removes the selected models' tags; with tags typed too,
+  they replace the old ones. Typed tags without it are now **added** to each model's tags, as the field always said
+  (they used to replace them).
+
 ## 2026.46.0 — 2026-11-09
 
 - **Development happens on the `development` branch; `main` only receives releases.** A release (Actions → Release)

@@ -278,7 +278,7 @@ pub struct MassEdit {
     /// `source`, `creator`, `release_date`, `url`, `title` → template
     /// (`{token}`s from the path pattern and file name), or null to clear.
     pub manual: BTreeMap<String, Option<String>>,
-    /// Fields to clear.
+    /// Fields to clear (`tags` removes the models' tags before `tags` are added).
     pub clearing: Vec<String>,
     pub scale: String,
     /// Null: no change; empty: clear.

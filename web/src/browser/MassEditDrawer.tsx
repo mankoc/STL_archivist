@@ -197,7 +197,19 @@ export function MassEditDrawer({ ids, opened, onClose }: { ids: number[]; opened
           <SuggestInput label="Subcollection" value={form.subcollection} onChange={(v) => set("subcollection", v)} options={list("subcollections")} />
           <SuggestInput label="Category" value={form.category} onChange={(v) => set("category", v)} options={list("categories")} />
           <SuggestInput label="Scale" description="Comma-separated, added" value={form.scale} onChange={(v) => set("scale", v)} options={list("scales")} commaList />
-          <SuggestInput label="Tags" description="Comma-separated, added" value={form.tags} onChange={(v) => set("tags", v)} options={list("tags")} commaList data-testid="mass-tags" />
+          <Group align="flex-end" wrap="nowrap" gap="xs">
+            <SuggestInput
+              label="Tags"
+              description={form.clearTags ? (form.tags.trim() ? "Comma-separated, replace the models' tags" : "The models' tags are removed") : "Comma-separated, added"}
+              value={form.tags}
+              onChange={(v) => set("tags", v)}
+              options={list("tags")}
+              commaList
+              flex={1}
+              data-testid="mass-tags"
+            />
+            <Checkbox label="Clear" mb={8} checked={form.clearTags} onChange={(e) => set("clearTags", e.currentTarget.checked)} data-testid="mass-clear-tags" />
+          </Group>
         </SimpleGrid>
         <Divider label="Find & replace" labelPosition="left" />
         <SimpleGrid cols={2} spacing="xs">
