@@ -404,7 +404,7 @@ pub fn ai_status(lib: &Library) -> AiStatus {
         Compute::Workers => AiStatus {
             available: true,
             running: false,
-            model: crate::ai::MODEL_LABEL.into(),
+            model: crate::ai::model_label(&lib.config),
             detail: "runs on a compute worker; none is connected, so requests wait for one".into(),
         },
         Compute::Local => lib.ai.status(&lib.config),

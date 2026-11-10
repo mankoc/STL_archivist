@@ -1,4 +1,4 @@
-import { defaultVariants, installable, sameFolder, sizeOf, totalBytes, variantLabel, type ComponentStatus, type ComponentsInfo } from "./components";
+import { defaultVariants, installable, needsAcceptance, sameFolder, sizeOf, totalBytes, variantLabel, type ComponentStatus, type ComponentsInfo } from "./components";
 
 const comp = (id: string, state: string, sizes: [string, number][], variant: string | null = null, def: string | null = null): ComponentStatus =>
   ({
@@ -19,6 +19,7 @@ describe("components", () => {
     expect(defaultVariants(info([runtime, onnx, pdf]))).toEqual({ ai_runtime: "cuda", onnxruntime: "directml" });
     expect(defaultVariants(info([comp("ai_runtime", "missing", [["cpu", 10]])]))).toEqual({ ai_runtime: "cpu" });
     expect(variantLabel("directml")).toBe("GPU (DirectML)");
+    expect(variantLabel("qwen3-vl-4b")).toBe("Qwen3-VL 4B");
   });
 
   it("sums what will be downloaded", () => {
@@ -48,5 +49,11 @@ describe("the worker's folder", () => {
     expect(sameFolder("/srv/stl", "/srv/STL")).toBe(false);
     expect(sameFolder("D:\\lib", "D:\\lib\\worker")).toBe(false);
     expect(sameFolder(undefined, "/srv/stl")).toBe(false);
+  });
+
+  it("asks to accept the licence only for the Qwen2.5-VL model", () => {
+    expect(needsAcceptance("ai_model", "qwen2.5-vl-3b")).toBe(true);
+    expect(needsAcceptance("ai_model", "qwen3-vl-4b")).toBe(false);
+    expect(needsAcceptance("pdfium", undefined)).toBe(false);
   });
 });

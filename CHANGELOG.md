@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **The AI tagger can use Qwen3-VL 4B, now the default**, which is better at recognising models and reading text in
+  pictures, and is Apache-2.0 (Qwen2.5-VL 3B's licence limits commercial use). *Settings → Components* lets you
+  choose the model: both can be installed, and choosing one that is already downloaded switches to it without
+  downloading (`ai/models/selected.txt`). Existing Qwen2.5-VL installs keep working until you switch. Only Qwen2.5-VL
+  still asks you to accept its licence. The AI status and compute workers report the model in use.
+
 ## 2026.46.0 — 2026-11-09
 
 - **Development happens on the `development` branch; `main` only receives releases.** A release (Actions → Release)
