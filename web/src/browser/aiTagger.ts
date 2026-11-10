@@ -32,6 +32,11 @@ export function removeTag(tags: string[], tag: string): string[] {
 }
 
 /** The newest `ai_suggest` job for a model. */
+/** Whether a model needs a suggestion asked for: none was, or the last one failed or was cancelled. */
+export function needsSuggestion(job: Schemas["JobInfo"] | undefined): boolean {
+  return job == null || job.state === "failed" || job.state === "cancelled";
+}
+
 export function suggestJob(jobs: Schemas["JobInfo"][] | undefined, modelId: number): Schemas["JobInfo"] | undefined {
   return (jobs ?? [])
     .filter((j) => j.kind === "ai_suggest" && (j.request as { id?: number }).id === modelId)
