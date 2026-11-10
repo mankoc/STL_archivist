@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **AI metadata check:** *Actions → AI metadata check…* asks the AI model to check the selected models' catalogued
+  fields against their paths, file names and the library's names (implausible or contradicted scales, misspelled names,
+  titles that do not match, values in the wrong field, impossible years) and lists each problem with a suggested value;
+  nothing is changed, and *Edit* opens the model (job `ai_check`, read-only, text only).
 - **Infer the path pattern with AI when crawling:** *Infer with AI* in the crawl dialogs (*Libraries → Crawl* and
   *Crawl with a pattern…*) sends up to 40 archive paths below the folder, spread over its sub-folders, with the
   library's creators, sculptors, releases and collections found in them, to the AI model and fills the pattern field

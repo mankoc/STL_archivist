@@ -548,6 +548,7 @@ fn run(lib: &Library, job: &Job) -> Result<String, String> {
         JobRequest::AiSuggest { id, max_tags, ignore_meta } => ai_suggest(lib, job, id, max_tags, ignore_meta),
         JobRequest::AiFields { id } => ai_fields(lib, job, id),
         JobRequest::AiPattern { folder } => ai_pattern(lib, job, &folder),
+        JobRequest::AiCheck { ids } => ai_check(lib, job, &ids),
         JobRequest::AiTag { ids, overwrite, ignore_meta, max_tags } => ai_tag(lib, job, &ids, overwrite, ignore_meta, max_tags),
         JobRequest::GenerateSidecars => generate_sidecars(lib, job),
         JobRequest::RemoveSidecars => remove_sidecars(lib, job),

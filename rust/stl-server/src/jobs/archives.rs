@@ -151,6 +151,40 @@ pub(super) fn ai_pattern(lib: &Library, job: &Job, folder: &str) -> Result<Strin
     Ok(msg)
 }
 
+/// Check each model's metadata with the model; the problems go in the result.
+/// A failure on the first model (most likely the setup) or a rate limit ends
+/// the job with what was found so far; other failures are logged and skipped.
+pub(super) fn ai_check(lib: &Library, job: &Job, ids: &[i64]) -> Result<String, String> {
+    let log = |line: String| lib.job_log(job, line);
+    job.ctl.set_total(ids.len() as u64);
+    let mut rows = Vec::new();
+    let mut checked = 0usize;
+    for (k, &id) in ids.iter().enumerate() {
+        if job.stopped() {
+            break;
+        }
+        match crate::ai::check(lib, &job.ctl, &log, id) {
+            Ok(found) => {
+                for i in &found {
+                    log(format!("{}: {} — {}", i.title, i.field, i.problem));
+                }
+                rows.extend(found);
+                checked += 1;
+            }
+            Err(e) if e.starts_with(crate::ai::RATE_LIMITED) || k == 0 => {
+                log_rate_limit(lib, job, &e);
+                job.set_result(crate::jobs::JobResult::AiIssues { rows });
+                return Err(e);
+            }
+            Err(e) => log(format!("Error: model #{id}: {e}")),
+        }
+        job.ctl.advance(1);
+    }
+    let msg = format!("{} problem(s) in {checked} of {} model(s)", rows.len(), ids.len());
+    job.set_result(crate::jobs::JobResult::AiIssues { rows });
+    Ok(msg)
+}
+
 /// An error line (`Error: `, shown in red) when the model's rate limit was hit.
 fn log_rate_limit(lib: &Library, job: &Job, e: &str) {
     if e.starts_with(crate::ai::RATE_LIMITED) {

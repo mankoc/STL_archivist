@@ -394,6 +394,61 @@ pub fn parse_pattern(raw: &str) -> Option<String> {
     (tokens_ok && crate::path_pattern::compile(&p).is_some()).then_some(p)
 }
 
+/// The catalogued fields the metadata check judges (the labels of `AiInputs.meta`).
+pub const CHECK_FIELDS: [&str; 10] = ["Title", "Creator", "Sculptor", "Category", "Collection", "Subcollection", "Scale", "Source", "Year", "Description"];
+
+/// A metadata problem the model found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Issue {
+    /// One of [`CHECK_FIELDS`].
+    pub field: String,
+    pub problem: String,
+    /// The value it proposes instead (empty: none, or clear it).
+    pub suggestion: String,
+}
+
+/// The prompt that asks the model to check a model's catalogued metadata
+/// (`meta`, from [`known_meta`]) against its path and file names and the
+/// library's names (`vocab`: a field label and its names).
+pub fn build_check_prompt(archive_path: &str, meta: &[(String, String)], vocab: &[(&str, Vec<&str>)]) -> String {
+    let lines: Vec<String> = meta.iter().map(|(k, v)| format!("- {k}: {v}")).collect();
+    let known: Vec<String> = vocab.iter().filter(|(_, v)| !v.is_empty()).map(|(k, v)| format!("- {k}: {}", v.join(" | "))).collect();
+    let known = if known.is_empty() { String::new() } else { format!("Names already used in this library:\n{}\n", known.join("\n")) };
+    format!(
+        "You check the catalogue of 3D printable miniature models for metadata problems. Full archive path: \
+         \"{archive_path}\".\nCatalogued metadata:\n{}\n{known}Look for: a scale that is implausible for a miniature or \
+         contradicts the path or file names (miniature scales look like 28mm, 32mm, 54mm, 75mm, 1/10, 1/35); names \
+         that look misspelled, especially when a library name above is close; a title that does not match the path \
+         or file names; values in the wrong field (for example a sculptor's name as the title); a year that is \
+         impossible. Do not report missing values or matters of taste. Output one problem per line in this EXACT \
+         format: FIELD | problem | suggested value (FIELD is one of {}; leave the suggestion empty if unsure). \
+         Output NONE if there is no problem.",
+        if lines.is_empty() { "(none)".to_string() } else { lines.join("\n") },
+        CHECK_FIELDS.join(", ")
+    )
+}
+
+/// The problems in the model's reply: `FIELD | problem | suggestion` lines
+/// whose field is one of [`CHECK_FIELDS`] (any case; spelled as there) and
+/// whose suggestion is not the current value; other lines are ignored.
+pub fn parse_issues(raw: &str, meta: &[(String, String)]) -> Vec<Issue> {
+    let mut out = Vec::new();
+    for line in py_splitlines(raw) {
+        let parts: Vec<&str> = line.split('|').map(|p| py_strip(p).trim_matches(['*', '`', '-', ' '])).collect();
+        if parts.len() < 2 || parts[1].is_empty() {
+            continue;
+        }
+        let Some(field) = CHECK_FIELDS.iter().find(|f| f.eq_ignore_ascii_case(parts[0])) else { continue };
+        let suggestion = parts.get(2).copied().unwrap_or_default().to_string();
+        let current = meta.iter().find(|(k, _)| k == field).map(|(_, v)| v.as_str()).unwrap_or_default();
+        if !suggestion.is_empty() && squash(&suggestion) == squash(current) {
+            continue;
+        }
+        out.push(Issue { field: field.to_string(), problem: parts[1].to_string(), suggestion });
+    }
+    out
+}
+
 /// Printable file names shown in the prompt, at most.
 const FILE_CAP: usize = 60;
 
@@ -497,6 +552,16 @@ mod tests {
         assert_eq!(parse_pattern("Sure!\n\"*\\{Creator}/{title}\"").as_deref(), Some("*/{Creator}/{title}"));
         assert_eq!(parse_pattern("{author}/{title}"), None, "only the offered tokens");
         assert_eq!(parse_pattern("no pattern here"), None);
+    }
+
+    #[test]
+    fn metadata_checks_are_asked_and_parsed() {
+        let meta = vec![("Title".to_string(), "Orc".to_string()), ("Scale".to_string(), "280 mm".to_string())];
+        let p = build_check_prompt("D:/Loot/Orc 28mm.zip", &meta, &[("Creator", vec!["Loot Studios"])]);
+        assert!(p.contains("- Scale: 280 mm\n") && p.contains("- Creator: Loot Studios\n") && p.ends_with("Output NONE if there is no problem."), "{p}");
+        let raw = "**Scale** | 280 mm is not a miniature scale | 28 mm\nTitle | fine | Orc\ncreator | misspelled | Loot Studios\nTags | x | y\nNONE";
+        let s = |f: &str, p: &str, v: &str| Issue { field: f.into(), problem: p.into(), suggestion: v.into() };
+        assert_eq!(parse_issues(raw, &meta), vec![s("Scale", "280 mm is not a miniature scale", "28 mm"), s("Creator", "misspelled", "Loot Studios")]);
     }
 
     #[test]
