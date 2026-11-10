@@ -7,6 +7,17 @@
   choose the model: both can be installed, and choosing one that is already downloaded switches to it without
   downloading (`ai/models/selected.txt`). Existing Qwen2.5-VL installs keep working until you switch. Only Qwen2.5-VL
   still asks you to accept its licence. The AI status and compute workers report the model in use.
+- **The AI tagger can use a free OpenRouter model** instead of the local model: *Settings → Library → AI tagger*
+  chooses **OpenRouter**, a model (its free models that read images are suggested from openrouter.ai; any other
+  model's slug, or its openrouter.ai page, can be pasted) and its API key. The
+  prompts and tag cleaning are the same as with the local model. The key is kept in `server.db` (never in
+  `settings.json`, which travels in backups and syncs) and is never sent back to clients. New library settings
+  `ai_provider` (`local` or `openrouter`) and `openrouter_model`; `GET`/`PUT /api/ai/openrouter` (whether a key is set,
+  set or remove it, administrators); `server.json` `ai.openrouter_url` for a proxy. Errors a model server puts in its
+  reply (a rate limit, a bad key) are shown as they are, with OpenRouter's reason.
+- **A rate limit stops the AI tagger's batch job** at once (the models done so far stay saved), with the reason as a red
+  line in the job's log. Lines of any job's log that start with `Error:` are shown in red; models the batch skips
+  for other errors are logged that way.
 
 ## 2026.46.0 — 2026-11-09
 

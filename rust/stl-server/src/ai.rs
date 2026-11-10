@@ -3,6 +3,9 @@
 //! the desktop's install (`<data dir>/ai/bin`, `<data dir>/ai/models`) or the
 //! paths in `server.json`, stops it after [`IDLE`] without requests and when
 //! the server exits; or it talks to one already running (`ai.url`).
+//! With the library setting `ai_provider: openrouter` the tagger asks an
+//! OpenRouter model instead (its API key in `server.db`, never `settings.json`,
+//! which travels in backups and syncs).
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -79,6 +82,64 @@ pub struct AiConfig {
     pub mmproj: Option<String>,
     /// Layers to offload to the GPU (`-ngl`); default: all for a CUDA install.
     pub gpu_layers: Option<u32>,
+    /// OpenRouter's API base (default [`OPENROUTER_URL`]; for tests or a proxy).
+    pub openrouter_url: Option<String>,
+}
+
+pub const OPENROUTER_URL: &str = "https://openrouter.ai/api";
+
+const SECRETS_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS server_secrets (name TEXT PRIMARY KEY, value TEXT NOT NULL);";
+const OPENROUTER_KEY: &str = "openrouter_api_key";
+const NO_KEY: &str = "no OpenRouter API key is set (Settings, AI tagger)";
+
+/// `server.db`'s `server_secrets`.
+pub fn ensure_schema(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(SECRETS_SCHEMA)
+}
+
+/// The OpenRouter API key, when one is set.
+pub fn openrouter_key(conn: &rusqlite::Connection) -> rusqlite::Result<Option<String>> {
+    use rusqlite::OptionalExtension;
+    conn.query_row("SELECT value FROM server_secrets WHERE name = ?1", [OPENROUTER_KEY], |r| r.get(0)).optional()
+}
+
+/// Set the OpenRouter API key; an empty one removes it.
+pub fn set_openrouter_key(conn: &rusqlite::Connection, key: &str) -> rusqlite::Result<()> {
+    if key.is_empty() {
+        conn.execute("DELETE FROM server_secrets WHERE name = ?1", [OPENROUTER_KEY])?;
+    } else {
+        conn.execute("INSERT OR REPLACE INTO server_secrets (name, value) VALUES (?1, ?2)", [OPENROUTER_KEY, key])?;
+    }
+    Ok(())
+}
+
+/// Where the tagger's model runs, from the library settings.
+pub enum Provider {
+    Local,
+    OpenRouter { model: String },
+}
+
+impl Provider {
+    pub fn of(lib: &Library) -> Provider {
+        let s = LibrarySettings::load(&lib.config.data_dir);
+        if s.ai_provider() == "openrouter" { Provider::OpenRouter { model: s.openrouter_model() } } else { Provider::Local }
+    }
+}
+
+/// `/api/ai/status` with `ai_provider: openrouter`.
+pub fn openrouter_status(lib: &Library, model: String) -> AiStatus {
+    match lib.accounts.with(openrouter_key) {
+        Ok(Some(_)) => AiStatus { available: true, running: false, model, detail: "on OpenRouter".into() },
+        Ok(None) => AiStatus { available: false, running: false, model, detail: NO_KEY.into() },
+        Err(e) => AiStatus { available: false, running: false, model, detail: format!("server.db: {e}") },
+    }
+}
+
+/// One answer from an OpenRouter model.
+fn ask_openrouter(lib: &Library, model: &str, p: Prompt) -> Result<String, String> {
+    let key = lib.accounts.with(openrouter_key).map_err(|e| format!("server.db: {e}"))?.ok_or(NO_KEY)?;
+    let base = lib.config.ai.openrouter_url.as_deref().unwrap_or(OPENROUTER_URL).trim_end_matches('/');
+    complete(base, Some((&key, model)), p)
 }
 
 /// One question for the model.
@@ -282,44 +343,77 @@ impl AiRuntime {
     /// corrupted restarts a started model server and is asked for once more.
     pub fn ask(self: &Arc<Self>, config: &Config, ctl: &Control, log: &dyn Fn(String), p: Prompt) -> Result<String, String> {
         let base = self.ensure(config, ctl, log)?;
-        let reply = self.chat(&base, p.images, p.text, p.max_tokens, p.temperature)?;
+        let reply = self.chat(&base, p)?;
         if stl_core::ai_tagging::is_corrupted_output(&reply) && config.ai.url.is_none() {
             log("The model is in a bad state: reloading it…".into());
             self.restart();
             let base = self.ensure(config, ctl, log)?;
-            return self.chat(&base, p.images, p.text, p.max_tokens, p.temperature);
+            return self.chat(&base, p);
         }
         Ok(reply)
     }
 
-    /// `chat`: images and a prompt in, the reply text out.
-    fn chat(&self, base: &str, images: &[Vec<u8>], prompt: &str, max_tokens: u32, temperature: f64) -> Result<String, String> {
+    fn chat(&self, base: &str, p: Prompt) -> Result<String, String> {
         *self.last_used.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
-        let b64 = base64::engine::general_purpose::STANDARD;
-        let mut content: Vec<Value> = images
-            .iter()
-            .map(|b| json!({"type": "image_url", "image_url": {"url": format!("data:image/jpeg;base64,{}", b64.encode(b))}}))
-            .collect();
-        content.push(json!({"type": "text", "text": prompt}));
-        let body = json!({
-            "messages": [{"role": "user", "content": content}],
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "stream": false,
-        });
-        let mut resp = agent(REQUEST_TIMEOUT)
-            .post(&format!("{base}/v1/chat/completions"))
-            .content_type("application/json")
-            .send(body.to_string())
-            .map_err(|e| format!("AI server request failed: {e}"))?;
-        let text = resp.body_mut().read_to_string().map_err(|e| format!("AI server reply: {e}"))?;
-        parse_chat_response(&text)
+        complete(base, None, p)
     }
 }
 
-/// `_parse_chat_response`: the assistant message of a chat-completions body.
+/// `chat`: images and a prompt in, the reply text out, from an OpenAI-compatible
+/// server at `base`; `remote` is OpenRouter's (API key, model).
+fn complete(base: &str, remote: Option<(&str, &str)>, p: Prompt) -> Result<String, String> {
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let mut content: Vec<Value> = p
+        .images
+        .iter()
+        .map(|b| json!({"type": "image_url", "image_url": {"url": format!("data:image/jpeg;base64,{}", b64.encode(b))}}))
+        .collect();
+    content.push(json!({"type": "text", "text": p.text}));
+    let mut body = json!({
+        "messages": [{"role": "user", "content": content}],
+        "max_tokens": p.max_tokens,
+        "temperature": p.temperature,
+        "stream": false,
+    });
+    // Error statuses carry their reason in the body (rate limits, a bad key).
+    let client: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(REQUEST_TIMEOUT)).http_status_as_error(false).build().into();
+    let mut req = client.post(&format!("{base}/v1/chat/completions")).content_type("application/json");
+    if let Some((key, model)) = remote {
+        body["model"] = model.into();
+        // The short answers asked for leave no room for thinking.
+        body["reasoning"] = json!({"enabled": false});
+        req = req.header("Authorization", &format!("Bearer {key}")).header("X-Title", "StlArchivist");
+    }
+    let mut resp = req.send(body.to_string()).map_err(|e| format!("AI server request failed: {e}"))?;
+    let status = resp.status();
+    let text = resp.body_mut().read_to_string().map_err(|e| format!("AI server reply: {e}"))?;
+    parse_chat_response(&text).map_err(|e| {
+        let code = serde_json::from_str::<Value>(&text).ok().and_then(|v| v["error"]["code"].as_u64());
+        if status.as_u16() == 429 || code == Some(429) {
+            format!("{RATE_LIMITED}: {e}")
+        } else if status.is_success() {
+            e
+        } else {
+            format!("{e} (HTTP {status})")
+        }
+    })
+}
+
+/// How a rate-limited request's error starts (OpenRouter's free models have
+/// per-minute and daily limits): the batch job stops on it.
+pub const RATE_LIMITED: &str = "Rate limit reached";
+
+/// `_parse_chat_response`: the assistant message of a chat-completions body
+/// (or the error an OpenAI-compatible server put there).
 pub fn parse_chat_response(raw: &str) -> Result<String, String> {
     let v: Value = serde_json::from_str(raw).map_err(|e| format!("AI server returned malformed JSON: {e}"))?;
+    if let Some(msg) = v["error"]["message"].as_str() {
+        // OpenRouter puts the provider's own reason (what to do) in `metadata.raw`.
+        return Err(match v["error"]["metadata"]["raw"].as_str() {
+            Some(raw) => format!("AI server: {msg}: {raw}"),
+            None => format!("AI server: {msg}"),
+        });
+    }
     let content = v["choices"].get(0).ok_or_else(|| format!("AI server returned no choices: {v}"))?["message"]["content"]
         .as_str()
         .ok_or("AI server response missing message content.")?;
@@ -420,9 +514,14 @@ pub fn suggest(lib: &Library, ctl: &Control, log: &dyn Fn(String), model_id: i64
     let temperature = LibrarySettings::load(&lib.config.data_dir).ai_temperature();
     let title = inputs.title.clone().filter(|t| !t.is_empty()).unwrap_or_else(|| stl_core::rules::MemberPath::new(&inputs.archive_path).stem().to_string());
 
-    // A compute worker when there is one (see `workers`), else this server's model.
+    // OpenRouter when chosen; else a compute worker when there is one (see
+    // `workers`), else this server's model.
+    let provider = Provider::of(lib);
     let ask = |text: &str, max_tokens: u32| -> Result<String, String> {
         let p = Prompt { images: &images, text, max_tokens, temperature };
+        if let Provider::OpenRouter { model } = &provider {
+            return ask_openrouter(lib, model, p);
+        }
         match lib.workers.chat(lib.config.compute, ctl, log, p) {
             Some(reply) => reply,
             None => lib.ai.ask(&lib.config, ctl, log, p),
@@ -472,5 +571,10 @@ mod tests {
         assert!(parse_chat_response(r#"{"choices":[]}"#).unwrap_err().contains("no choices"));
         assert!(parse_chat_response("nope").unwrap_err().contains("malformed"));
         assert!(parse_chat_response(r#"{"choices":[{"message":{}}]}"#).is_err());
+        assert_eq!(parse_chat_response(r#"{"error":{"message":"Rate limit exceeded","code":429}}"#).unwrap_err(), "AI server: Rate limit exceeded");
+        assert_eq!(
+            parse_chat_response(r#"{"error":{"message":"Provider returned error","code":429,"metadata":{"raw":"m is rate-limited upstream"}}}"#).unwrap_err(),
+            "AI server: Provider returned error: m is rate-limited upstream"
+        );
     }
 }

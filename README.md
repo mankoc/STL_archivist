@@ -62,10 +62,10 @@ Version: 2026.46.0
   metadata (exact, Levenshtein, Soundex), with side-by-side comparison and a button
   before each archive that deletes its file (to the trash folder when one is set)
 - **Find by Image** — drop a picture to find models whose thumbnails look like it
-- **AI tagger** — a vision model through llama.cpp (Qwen3-VL 4B by default, or Qwen2.5-VL 3B; chosen in
-  *Settings → Components*, any GGUF via `ai.model`) suggests tags, title, creator, sculptor,
-  scale, source, year and description (never collection or subcollection); review one by one or tag a selection in
-  one job
+- **AI tagger** — a local vision model through llama.cpp (Qwen3-VL 4B by default, or Qwen2.5-VL 3B; chosen in
+  *Settings → Components*, any GGUF via `ai.model`), or a free OpenRouter vision model, suggests tags, title,
+  creator, sculptor, scale, source, year and description (never collection or subcollection); review one by one or
+  tag a selection in one job
 - **Monitored folders** — crawled automatically when their archives change (checked by size
   and date at an interval); archives that vanish are marked missing, and unmarked if they return
 - **Maintenance** (*Settings* tabs) — verify archives, re-read links and `info.json`, find moved and duplicate records, search a folder for
@@ -276,6 +276,7 @@ line:
 | `onnxruntime` | `ORT_DYLIB_PATH` | ONNX Runtime 1.17+ for AI image embeddings |
 | `web_dir` | `STL_WEB_DIR` | The built web client |
 | `ai.url` | `STL_AI_URL` | A running OpenAI-compatible model server for the AI tagger |
+| `ai.openrouter_url` | | OpenRouter's API base for the AI tagger (default `https://openrouter.ai/api`; for a proxy) |
 
 Library settings (thumbnails per model and size, crawler warnings, sidecars, file deletion
 and sorting, AI temperature, …) live in `<data dir>/settings.json` and are edited on the
@@ -296,6 +297,12 @@ and cuDNN 9 must be installed). To install by hand:
   Put them in `<data dir>/ai/bin` and `<data dir>/ai/models` (the layout the earlier desktop
   app's AI setup created) or point `"ai"` at them. The server starts `llama-server` on first
   use and stops it after ten idle minutes.
+- **AI tagger on OpenRouter** — instead of a local model: *Settings → Library → AI tagger → OpenRouter*,
+  pick a model (the free ones that read images are suggested from openrouter.ai; paste any other model's slug,
+  such as `qwen/qwen2.5-vl-72b-instruct`, or its page address; paid models are charged to the key) and save an
+  [OpenRouter API key](https://openrouter.ai/keys). The key is kept in `<data dir>/server.db`, never in
+  `settings.json` (which travels in backups and syncs), and is never shown again. The thumbnails and prompts go to
+  OpenRouter and its model provider; free models have daily request limits. Compute workers are not used then.
 - **AI image embeddings (CLIP)** — needs ONNX Runtime and the CLIP image encoder at
   `<data dir>/models/clip_image_encoder.onnx` (or `STLLIBRARY_CLIP_MODEL`): `onnx/vision_model.onnx`
   from [Xenova/clip-vit-base-patch32](https://huggingface.co/Xenova/clip-vit-base-patch32).

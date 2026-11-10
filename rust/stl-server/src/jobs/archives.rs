@@ -124,15 +124,23 @@ pub(super) fn sort_files(lib: &Library, job: &Job, ids: &[i64], target_dir: &str
 pub(super) fn ai_suggest(lib: &Library, job: &Job, id: i64, max_tags: usize, ignore_meta: bool) -> Result<String, String> {
     let log = |line: String| lib.job_log(job, line);
     job.ctl.set_total(1);
-    let s = crate::ai::suggest(lib, &job.ctl, &log, id, max_tags, ignore_meta)?;
+    let s = crate::ai::suggest(lib, &job.ctl, &log, id, max_tags, ignore_meta).inspect_err(|e| log_rate_limit(lib, job, e))?;
     job.ctl.advance(1);
     let msg = format!("{}: {} tag(s) suggested", s.title, s.tags.len());
     job.set_result(crate::jobs::JobResult::AiSuggestion(Box::new(s)));
     Ok(msg)
 }
 
+/// An error line (`Error: `, shown in red) when the model's rate limit was hit.
+fn log_rate_limit(lib: &Library, job: &Job, e: &str) {
+    if e.starts_with(crate::ai::RATE_LIMITED) {
+        lib.job_log(job, format!("Error: {e}. Stopped; try again later."));
+    }
+}
+
 /// `_BatchThread`: suggest and save each model in turn. A failure on the first
-/// model (most likely the setup) ends the job; later ones are logged and skipped.
+/// model (most likely the setup) or a rate limit ends the job; other failures
+/// are logged and skipped.
 pub(super) fn ai_tag(lib: &Library, job: &Job, ids: &[i64], overwrite: bool, ignore_meta: bool, max_tags: usize) -> Result<String, String> {
     let log = |line: String| lib.job_log(job, line);
     job.ctl.set_total(ids.len() as u64);
@@ -148,8 +156,12 @@ pub(super) fn ai_tag(lib: &Library, job: &Job, ids: &[i64], overwrite: bool, ign
                     job.touch_sidecars([path]);
                 }
             }
+            Err(e) if e.starts_with(crate::ai::RATE_LIMITED) => {
+                log_rate_limit(lib, job, &e);
+                return Err(format!("{e} (saved {saved} of {} model(s))", ids.len()));
+            }
             Err(e) if k == 0 => return Err(e),
-            Err(e) => lib.job_log(job, format!("Model #{id}: {e}")),
+            Err(e) => lib.job_log(job, format!("Error: model #{id}: {e}")),
         }
         job.ctl.advance(1);
     }
