@@ -156,3 +156,106 @@ async fn unavailable_without_a_model() {
     let r = call(&lib.state, "POST", "/api/jobs", Some(&ed), Some(json!({"kind": "ai_tag", "ids": []}))).await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST);
 }
+
+/// `ai_provider: openrouter`: the key is write-only, and requests name the
+/// model and carry the key.
+#[tokio::test(flavor = "multi_thread")]
+async fn openrouter_provider() {
+    let seen: Seen = Arc::default();
+    let auth: Arc<Mutex<Vec<String>>> = Arc::default();
+    let url = fake_model(Arc::clone(&seen)).await;
+    // A proxy in front of the stand-in that records the Authorization header.
+    let proxy = {
+        let (auth, url) = (Arc::clone(&auth), url.clone());
+        let app = axum::Router::new().route(
+            "/v1/chat/completions",
+            axum::routing::post(move |headers: axum::http::HeaderMap, body: String| async move {
+                auth.lock().unwrap().push(headers.get("authorization").map(|v| v.to_str().unwrap().to_string()).unwrap_or_default());
+                let reply = tokio::task::spawn_blocking(move || {
+                    ureq::post(&format!("{url}/v1/chat/completions")).content_type("application/json").send(body).unwrap().body_mut().read_to_string().unwrap()
+                });
+                reply.await.unwrap()
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        proxy
+    };
+    let lib = library_with(|c| c.ai.openrouter_url = Some(proxy.clone()));
+    let admin = lib.user("ad", Role::Admin);
+    let ed = lib.user("ed", Role::Editor);
+    let root = lib.dir.path().join("archives");
+    write_zip(&root.join("Studio").join("Dragon.zip"), &[("dragon.stl", b"solid d\nendsolid\n"), ("render.png", &png())]);
+    run(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy(), "pattern": "{sculptor}/{title}"})).await;
+    let dragon: i64 = scalar(&lib, "SELECT id FROM models WHERE title = 'Dragon'");
+
+    let mut settings = call(&lib.state, "GET", "/api/settings/library", Some(&admin), None).await.json();
+    assert_eq!(settings["ai_provider"], "local");
+    settings["ai_provider"] = json!("cloud");
+    let r = call(&lib.state, "PUT", "/api/settings/library", Some(&admin), Some(settings.clone())).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    settings["ai_provider"] = json!("openrouter");
+    settings["openrouter_model"] = json!("vendor/vision:free");
+    let r = call(&lib.state, "PUT", "/api/settings/library", Some(&admin), Some(settings)).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+
+    let status = call(&lib.state, "GET", "/api/ai/status", Some(&ed), None).await.json();
+    assert_eq!(status["available"], false, "no key yet: {status}");
+    assert_eq!(status["model"], "vendor/vision:free");
+    assert_eq!(call(&lib.state, "GET", "/api/ai/openrouter", Some(&ed), None).await.json(), json!({"key_set": false}));
+    let r = call(&lib.state, "PUT", "/api/ai/openrouter", Some(&ed), Some(json!({"key": "sk-or-1"}))).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    let r = call(&lib.state, "PUT", "/api/ai/openrouter", Some(&admin), Some(json!({"key": "has space"}))).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    let r = call(&lib.state, "PUT", "/api/ai/openrouter", Some(&admin), Some(json!({"key": " sk-or-1 "}))).await;
+    assert_eq!(r.json(), json!({"key_set": true}));
+    assert_eq!(call(&lib.state, "GET", "/api/ai/status", Some(&ed), None).await.json()["available"], true);
+
+    let v = run(&lib, &ed, json!({"kind": "ai_suggest", "id": dragon})).await;
+    assert_eq!(v["result"]["tags"], json!(["Batman", "cape", "DC Comics"]), "{v}");
+    assert_eq!(seen.lock().unwrap()[0]["model"], "vendor/vision:free");
+    assert_eq!(auth.lock().unwrap().as_slice(), ["Bearer sk-or-1", "Bearer sk-or-1"]);
+
+    let r = call(&lib.state, "PUT", "/api/ai/openrouter", Some(&admin), Some(json!({"key": ""}))).await;
+    assert_eq!(r.json(), json!({"key_set": false}));
+}
+
+/// A rate limit ends the batch at once, with an `Error:` line in its log.
+#[tokio::test(flavor = "multi_thread")]
+async fn rate_limit_stops_the_batch() {
+    let hits: Arc<Mutex<usize>> = Arc::default();
+    let limited = {
+        let hits = Arc::clone(&hits);
+        let app = axum::Router::new().route(
+            "/v1/chat/completions",
+            axum::routing::post(move || async move {
+                *hits.lock().unwrap() += 1;
+                let body = json!({"error": {"message": "Provider returned error", "code": 429, "metadata": {"raw": "m is rate-limited upstream"}}});
+                (StatusCode::TOO_MANY_REQUESTS, Json(body))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        url
+    };
+    let lib = library_with(|c| c.ai.openrouter_url = Some(limited.clone()));
+    std::fs::write(lib.dir.path().join("settings.json"), r#"{"ai_provider": "openrouter"}"#).unwrap();
+    let admin = lib.user("ad", Role::Admin);
+    call(&lib.state, "PUT", "/api/ai/openrouter", Some(&admin), Some(json!({"key": "sk-or-1"}))).await;
+    let root = lib.dir.path().join("archives");
+    write_zip(&root.join("Studio").join("A.zip"), &[("a.stl", b"solid a\nendsolid\n")]);
+    write_zip(&root.join("Studio").join("B.zip"), &[("b.stl", b"solid b\nendsolid\n")]);
+    run(&lib, &admin, json!({"kind": "crawl", "folder": root.to_string_lossy(), "pattern": "{sculptor}/{title}"})).await;
+    let a: i64 = scalar(&lib, "SELECT id FROM models WHERE title = 'A'");
+    let b: i64 = scalar(&lib, "SELECT id FROM models WHERE title = 'B'");
+
+    let r = call(&lib.state, "POST", "/api/jobs", Some(&admin), Some(json!({"kind": "ai_tag", "ids": [a, b]}))).await;
+    let v = wait(&lib, &admin, r.json()["id"].as_u64().unwrap()).await;
+    assert_eq!(v["job"]["state"], "failed", "{v}");
+    assert!(v["job"]["message"].as_str().unwrap().starts_with("Rate limit reached"), "{v}");
+    let log: Vec<&str> = v["log"].as_array().unwrap().iter().map(|l| l.as_str().unwrap()).collect();
+    assert!(log.iter().any(|l| l.starts_with("Error: Rate limit reached") && l.contains("rate-limited upstream")), "{log:?}");
+    assert_eq!(*hits.lock().unwrap(), 1, "nothing is asked after the limit");
+}
