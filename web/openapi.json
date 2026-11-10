@@ -4534,6 +4534,42 @@
         },
         "additionalProperties": false
       },
+      "AiPattern": {
+        "type": "object",
+        "description": "A path pattern the model inferred for a folder (`ai_pattern`).",
+        "required": [
+          "folder",
+          "pattern",
+          "samples",
+          "fits",
+          "sampled"
+        ],
+        "properties": {
+          "fits": {
+            "type": "integer",
+            "description": "Sampled archives it reads something from…",
+            "minimum": 0
+          },
+          "folder": {
+            "type": "string"
+          },
+          "pattern": {
+            "type": "string"
+          },
+          "sampled": {
+            "type": "integer",
+            "description": "…of this many.",
+            "minimum": 0
+          },
+          "samples": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PatternSample"
+            },
+            "description": "What it reads from a few of the sampled archives (paths below the folder)."
+          }
+        }
+      },
       "AiSaved": {
         "type": "object",
         "required": [
@@ -6952,6 +6988,25 @@
           },
           {
             "type": "object",
+            "description": "Ask the model for a path pattern for crawling a folder, from the\narchive paths below it; nothing is saved.",
+            "required": [
+              "folder",
+              "kind"
+            ],
+            "properties": {
+              "folder": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "ai_pattern"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
             "description": "Tag every model with the AI tagger and save the results: empty fields\nonly, unless `overwrite`; tags are merged.",
             "required": [
               "ids",
@@ -7236,6 +7291,29 @@
               }
             ],
             "description": "The editor fields the model inferred for one model (`ai_fields`)."
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AiPattern",
+                "description": "The path pattern the model inferred for a folder (`ai_pattern`)."
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "ai_pattern"
+                    ]
+                  }
+                }
+              }
+            ],
+            "description": "The path pattern the model inferred for a folder (`ai_pattern`)."
           },
           {
             "allOf": [

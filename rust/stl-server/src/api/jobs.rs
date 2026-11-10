@@ -55,6 +55,7 @@ pub async fn submit(
     request.validate().map_err(ApiError::bad_request)?;
     // A searched folder is read and records may point into it: the same access as a crawl.
     if let JobRequest::SearchFolder { folder, .. }
+    | JobRequest::AiPattern { folder }
     | JobRequest::SortFiles { target_dir: folder, .. }
     | JobRequest::RelocateLibrary { root: folder, .. } = &request
     {

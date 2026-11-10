@@ -12,6 +12,7 @@ import { addJob, type Job, type JobRequest } from "./jobs";
 import { JobLog } from "./JobsPage";
 import classes from "./JobsPage.module.css";
 import { LibrariesCard } from "./LibrariesCard";
+import { AiPatternButton } from "../browser/AiPatternButton";
 import { PatternSample } from "../browser/PatternSample";
 
 export function LibrariesPage() {
@@ -64,6 +65,7 @@ export function LibrariesPage() {
               value={crawl.pattern}
               onChange={(e) => setCrawl({ ...crawl, pattern: e.currentTarget.value })}
             />
+            <AiPatternButton folder={crawl.folder} onPattern={(pattern) => setCrawl((c) => c && { ...c, pattern })} />
             <PatternSample folder={crawl.folder} pattern={crawl.pattern} />
             <Checkbox label="Re-extract archives whose content did not change" checked={crawl.force} onChange={(e) => setCrawl({ ...crawl, force: e.currentTarget.checked })} />
             <Group justify="flex-end">

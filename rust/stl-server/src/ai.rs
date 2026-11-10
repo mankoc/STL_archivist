@@ -703,6 +703,60 @@ pub fn infer_fields(lib: &Library, ctl: &Control, log: &dyn Fn(String), model_id
     })
 }
 
+/// A path pattern the model inferred for a folder (`ai_pattern`).
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct AiPattern {
+    pub folder: String,
+    pub pattern: String,
+    /// What it reads from a few of the sampled archives (paths below the folder).
+    pub samples: Vec<crate::api::libraries::PatternSample>,
+    /// Sampled archives it reads something from…
+    pub fits: usize,
+    /// …of this many.
+    pub sampled: usize,
+}
+
+/// Archive paths shown to the model when inferring a pattern, at most.
+const PATTERN_SAMPLES: usize = 40;
+
+/// The path pattern for crawling `folder`, inferred by the model from archive
+/// paths below it (spread over its sub-folders) and the library's known names.
+pub fn infer_pattern(lib: &Library, ctl: &Control, log: &dyn Fn(String), folder: &str) -> Result<AiPattern, String> {
+    use stl_core::ai_tagging as T;
+    let root = folder.trim_end_matches(['/', '\\']);
+    let rel: Vec<String> = stl_core::crawler::list_archives(root, true, &[])
+        .into_iter()
+        .filter_map(|p| p.get(root.len()..).map(|r| r.trim_start_matches(['/', '\\']).replace('\\', "/")))
+        .collect();
+    if rel.is_empty() {
+        return Err(format!("no archives below {folder}"));
+    }
+    let samples = T::spread(&rel, PATTERN_SAMPLES);
+    let choices = lib.db.with(stl_core::storage::model_editor::editor_choices).map_err(|e| format!("database: {e}"))?;
+    let context = samples.join(" ");
+    let vocab: Vec<(&str, Vec<&str>)> = [("creator", "creators"), ("sculptor", "sculptors"), ("release", "releases"), ("collection", "collections"), ("subcollection", "subcollections")]
+        .into_iter()
+        .map(|(token, list)| {
+            let names = choices.iter().find(|(n, _)| *n == list).map(|(_, v)| v.as_slice()).unwrap_or_default();
+            (token, T::relevant_names(names, &context, VOCAB_CAP))
+        })
+        .collect();
+    log(format!("Asking the model about {} of {} archive path(s)…", samples.len(), rel.len()));
+    let raw = ask_model(lib, ctl, log, &[], &T::build_pattern_prompt(&samples, &vocab), 100)?;
+    let pattern = T::parse_pattern(&raw).ok_or_else(|| format!("the model's answer is not a usable pattern: {raw}"))?;
+    let reads: Vec<(String, stl_core::path_pattern::Fields)> = samples.iter().map(|p| (p.clone(), stl_core::path_pattern::parse_path(&pattern, p))).collect();
+    let fits = reads.iter().filter(|(_, f)| !f.is_empty()).count();
+    log(format!("Pattern: {pattern} (reads {fits} of {} sampled paths)", reads.len()));
+    let shown = T::spread(&reads, 5)
+        .into_iter()
+        .map(|(path, fields)| crate::api::libraries::PatternSample {
+            path,
+            fields: fields.into_iter().map(|(field, value)| crate::api::libraries::SampleField { field, value }).collect(),
+        })
+        .collect();
+    Ok(AiPattern { folder: folder.to_string(), pattern, samples: shown, fits, sampled: reads.len() })
+}
+
 /// `ai_commit`: write the fields (only empty ones unless `overwrite`) and merge
 /// the tags. Returns the archive path, or `None` when the model is gone.
 pub fn commit(lib: &Library, model_id: i64, fields: AiFieldValues, tags: &[String], overwrite: bool) -> Result<Option<String>, String> {
