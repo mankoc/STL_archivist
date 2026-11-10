@@ -30,6 +30,8 @@ export interface MassForm {
   category: string;
   sculptor: string;
   tags: string;
+  /** Remove the models' tags first (the typed ones are then added). */
+  clearTags: boolean;
   find: string;
   replace: string;
   findCase: boolean;
@@ -45,7 +47,7 @@ export function emptyForm(): MassForm {
   const off = Object.fromEntries(MANUAL.map(([k]) => [k, false])) as Record<ManualField, boolean>;
   return {
     pattern: "", overwrite: false, manual: blank, clear: off, scale: "", presupports: "", release: "",
-    collection: "", subcollection: "", category: "", sculptor: "", tags: "", find: "", replace: "",
+    collection: "", subcollection: "", category: "", sculptor: "", tags: "", clearTags: false, find: "", replace: "",
     findCase: false, findRegex: false, findFields: [], trim: false,
   };
 }
@@ -65,7 +67,7 @@ export function toRequest(form: MassForm, ids: number[]): MassEdit {
     pattern: form.pattern.trim(),
     overwrite: form.overwrite,
     manual,
-    clearing: MANUAL.filter(([k]) => form.clear[k]).map(([k]) => k),
+    clearing: [...MANUAL.filter(([k]) => form.clear[k]).map(([k]) => k as string), ...(form.clearTags ? ["tags"] : [])],
     scale: form.scale.trim(),
     presupports: form.presupports === "" ? null : form.presupports === CLEAR_PRESUPPORTS ? "" : form.presupports,
     release: form.release.trim(),
