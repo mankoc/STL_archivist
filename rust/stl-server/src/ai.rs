@@ -4,8 +4,11 @@
 //! paths in `server.json`, stops it after [`IDLE`] without requests and when
 //! the server exits; or it talks to one already running (`ai.url`).
 //! With the library setting `ai_provider: openrouter` the tagger asks an
-//! OpenRouter model instead (its API key in `server.db`, never `settings.json`,
-//! which travels in backups and syncs).
+//! OpenRouter model instead, and with `ai_provider: openai` any
+//! OpenAI-compatible endpoint (Gemini's by default). API keys, and that
+//! endpoint's address, are kept in `server.db`, never `settings.json`, which
+//! travels in backups and syncs: a key only ever goes to the address an
+//! administrator set beside it.
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -91,39 +94,97 @@ pub const OPENROUTER_URL: &str = "https://openrouter.ai/api";
 const SECRETS_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS server_secrets (name TEXT PRIMARY KEY, value TEXT NOT NULL);";
 const OPENROUTER_KEY: &str = "openrouter_api_key";
 const NO_KEY: &str = "no OpenRouter API key is set (Settings, AI tagger)";
+const OPENAI_KEY: &str = "openai_api_key";
+const OPENAI_URL_KEY: &str = "openai_url";
+const NO_OPENAI_KEY: &str = "no API key is set for the OpenAI-compatible endpoint (Settings, AI tagger)";
+/// The OpenAI-compatible endpoint when none is set: Google's for Gemini.
+pub const OPENAI_URL_DEFAULT: &str = "https://generativelanguage.googleapis.com/v1beta/openai";
 
 /// `server.db`'s `server_secrets`.
 pub fn ensure_schema(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
     conn.execute_batch(SECRETS_SCHEMA)
 }
 
+fn secret(conn: &rusqlite::Connection, name: &str) -> rusqlite::Result<Option<String>> {
+    use rusqlite::OptionalExtension;
+    conn.query_row("SELECT value FROM server_secrets WHERE name = ?1", [name], |r| r.get(0)).optional()
+}
+
+/// Set a `server_secrets` value; an empty one removes it.
+fn set_secret(conn: &rusqlite::Connection, name: &str, value: &str) -> rusqlite::Result<()> {
+    if value.is_empty() {
+        conn.execute("DELETE FROM server_secrets WHERE name = ?1", [name])?;
+    } else {
+        conn.execute("INSERT OR REPLACE INTO server_secrets (name, value) VALUES (?1, ?2)", [name, value])?;
+    }
+    Ok(())
+}
+
 /// The OpenRouter API key, when one is set.
 pub fn openrouter_key(conn: &rusqlite::Connection) -> rusqlite::Result<Option<String>> {
-    use rusqlite::OptionalExtension;
-    conn.query_row("SELECT value FROM server_secrets WHERE name = ?1", [OPENROUTER_KEY], |r| r.get(0)).optional()
+    secret(conn, OPENROUTER_KEY)
 }
 
 /// Set the OpenRouter API key; an empty one removes it.
 pub fn set_openrouter_key(conn: &rusqlite::Connection, key: &str) -> rusqlite::Result<()> {
-    if key.is_empty() {
-        conn.execute("DELETE FROM server_secrets WHERE name = ?1", [OPENROUTER_KEY])?;
-    } else {
-        conn.execute("INSERT OR REPLACE INTO server_secrets (name, value) VALUES (?1, ?2)", [OPENROUTER_KEY, key])?;
+    set_secret(conn, OPENROUTER_KEY, key)
+}
+
+/// The OpenAI-compatible endpoint: its base address (requests go to
+/// `<url>/chat/completions`) and API key.
+pub struct Endpoint {
+    pub url: String,
+    pub key: Option<String>,
+}
+
+pub fn openai_endpoint(conn: &rusqlite::Connection) -> rusqlite::Result<Endpoint> {
+    let url = secret(conn, OPENAI_URL_KEY)?.unwrap_or_else(|| OPENAI_URL_DEFAULT.into());
+    Ok(Endpoint { url, key: secret(conn, OPENAI_KEY)? })
+}
+
+/// Set the endpoint's address (empty: the default) and, when given, its key
+/// (empty removes it).
+pub fn set_openai_endpoint(conn: &rusqlite::Connection, url: &str, key: Option<&str>) -> rusqlite::Result<()> {
+    set_secret(conn, OPENAI_URL_KEY, if url == OPENAI_URL_DEFAULT { "" } else { url })?;
+    match key {
+        Some(k) => set_secret(conn, OPENAI_KEY, k),
+        None => Ok(()),
     }
-    Ok(())
 }
 
 /// Where the tagger's model runs, from the library settings.
 pub enum Provider {
     Local,
     OpenRouter { model: String },
+    OpenAi { model: String },
 }
 
 impl Provider {
     pub fn of(lib: &Library) -> Provider {
         let s = LibrarySettings::load(&lib.config.data_dir);
-        if s.ai_provider() == "openrouter" { Provider::OpenRouter { model: s.openrouter_model() } } else { Provider::Local }
+        match s.ai_provider().as_str() {
+            "openrouter" => Provider::OpenRouter { model: s.openrouter_model() },
+            "openai" => Provider::OpenAi { model: s.openai_model() },
+            _ => Provider::Local,
+        }
     }
+}
+
+/// `/api/ai/status` with `ai_provider: openai`.
+pub fn openai_status(lib: &Library, model: String) -> AiStatus {
+    match lib.accounts.with(openai_endpoint) {
+        Ok(Endpoint { key: Some(_), url }) => AiStatus { available: true, running: false, model, detail: format!("on {url}") },
+        Ok(Endpoint { key: None, .. }) => AiStatus { available: false, running: false, model, detail: NO_OPENAI_KEY.into() },
+        Err(e) => AiStatus { available: false, running: false, model, detail: format!("server.db: {e}") },
+    }
+}
+
+/// One answer from the OpenAI-compatible endpoint.
+fn ask_openai(lib: &Library, model: &str, p: Prompt) -> Result<String, String> {
+    let ep = lib.accounts.with(openai_endpoint).map_err(|e| format!("server.db: {e}"))?;
+    let key = ep.key.ok_or(NO_OPENAI_KEY)?;
+    let url = format!("{}/chat/completions", ep.url.trim_end_matches('/'));
+    complete(&url, Some(Remote { key: &key, model, openrouter: false }), p)
 }
 
 /// `/api/ai/status` with `ai_provider: openrouter`.
@@ -139,7 +200,7 @@ pub fn openrouter_status(lib: &Library, model: String) -> AiStatus {
 fn ask_openrouter(lib: &Library, model: &str, p: Prompt) -> Result<String, String> {
     let key = lib.accounts.with(openrouter_key).map_err(|e| format!("server.db: {e}"))?.ok_or(NO_KEY)?;
     let base = lib.config.ai.openrouter_url.as_deref().unwrap_or(OPENROUTER_URL).trim_end_matches('/');
-    complete(base, Some((&key, model)), p)
+    complete(&format!("{base}/v1/chat/completions"), Some(Remote { key: &key, model, openrouter: true }), p)
 }
 
 /// One question for the model.
@@ -355,13 +416,20 @@ impl AiRuntime {
 
     fn chat(&self, base: &str, p: Prompt) -> Result<String, String> {
         *self.last_used.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
-        complete(base, None, p)
+        complete(&format!("{base}/v1/chat/completions"), None, p)
     }
 }
 
 /// `chat`: images and a prompt in, the reply text out, from an OpenAI-compatible
 /// server at `base`; `remote` is OpenRouter's (API key, model).
-fn complete(base: &str, remote: Option<(&str, &str)>, p: Prompt) -> Result<String, String> {
+/// A remote model: its API key and name; OpenRouter also gets its own fields.
+struct Remote<'a> {
+    key: &'a str,
+    model: &'a str,
+    openrouter: bool,
+}
+
+fn complete(url: &str, remote: Option<Remote>, p: Prompt) -> Result<String, String> {
     let b64 = base64::engine::general_purpose::STANDARD;
     let mut content: Vec<Value> = p
         .images
@@ -377,12 +445,16 @@ fn complete(base: &str, remote: Option<(&str, &str)>, p: Prompt) -> Result<Strin
     });
     // Error statuses carry their reason in the body (rate limits, a bad key).
     let client: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(REQUEST_TIMEOUT)).http_status_as_error(false).build().into();
-    let mut req = client.post(&format!("{base}/v1/chat/completions")).content_type("application/json");
-    if let Some((key, model)) = remote {
-        body["model"] = model.into();
-        // The short answers asked for leave no room for thinking.
-        body["reasoning"] = json!({"enabled": false});
-        req = req.header("Authorization", &format!("Bearer {key}")).header("X-Title", "StlArchivist");
+    let mut req = client.post(url).content_type("application/json");
+    if let Some(r) = remote {
+        body["model"] = r.model.into();
+        if r.openrouter {
+            // The short answers asked for leave no room for thinking. (Other
+            // servers may refuse fields they do not know, such as Gemini's.)
+            body["reasoning"] = json!({"enabled": false});
+            req = req.header("X-Title", "StlArchivist");
+        }
+        req = req.header("Authorization", &format!("Bearer {}", r.key));
     }
     let mut resp = req.send(body.to_string()).map_err(|e| format!("AI server request failed: {e}"))?;
     let status = resp.status();
@@ -519,8 +591,10 @@ pub fn suggest(lib: &Library, ctl: &Control, log: &dyn Fn(String), model_id: i64
     let provider = Provider::of(lib);
     let ask = |text: &str, max_tokens: u32| -> Result<String, String> {
         let p = Prompt { images: &images, text, max_tokens, temperature };
-        if let Provider::OpenRouter { model } = &provider {
-            return ask_openrouter(lib, model, p);
+        match &provider {
+            Provider::OpenRouter { model } => return ask_openrouter(lib, model, p),
+            Provider::OpenAi { model } => return ask_openai(lib, model, p),
+            Provider::Local => {}
         }
         match lib.workers.chat(lib.config.compute, ctl, log, p) {
             Some(reply) => reply,

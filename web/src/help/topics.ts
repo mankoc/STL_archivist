@@ -356,11 +356,11 @@ export const TOPICS: Topic[] = [
     title: "AI tagger",
     summary: "A vision model suggests tags and fields from the images and names.",
     blocks: [
-      { p: "The AI tagger uses Qwen2.5-VL (through llama.cpp) to look at a model's thumbnails, archive path, file names and catalogued metadata, and suggests tags, title, creator, sculptor, collection, scale, source, year and description." },
+      { p: "The AI tagger uses a vision model (a local Qwen3-VL or Qwen2.5-VL through llama.cpp, an OpenRouter model, or any OpenAI-compatible endpoint such as Gemini's) to look at a model's thumbnails, archive path, file names and catalogued metadata, and suggests tags, title, creator, sculptor, collection, scale, source, year and description." },
       { h: "Using it" },
       { list: [
         "Select models, then **Actions → AI tagger…** (or right-click them). If the model is not available the drawer says what is missing.",
-        "**Review one by one** — **Suggest** asks about the current model (the first request also loads the model, which takes a while). Edit the tags and fields, then **Save & next** or **Skip**.",
+        "**Review one by one** — **Suggest** asks about the current model (the first request also loads the model, which takes a while). Edit the tags and fields, then **Save & next** (which asks about the next model at once) or **Skip**.",
         "**Process all** — tags every selected model in one job and saves the results.",
         "Options: **Max tags**; **Ignore catalogued metadata** (images and names only); **Overwrite filled fields** (by default only empty fields are filled; tags are always added).",
       ] },
@@ -368,9 +368,10 @@ export const TOPICS: Topic[] = [
       { list: [
         "On the server, when an administrator installed the runtime and the model (**Settings → Components**). The server starts the model on first use and stops it after ten idle minutes. The CUDA runtime uses an NVIDIA GPU.",
         "Or on a [compute worker](compute-workers): a desktop app on a computer with a GPU.",
+        "Or on **OpenRouter** or an **OpenAI-compatible endpoint** (*Settings → Library → AI tagger*): an administrator sets the model and the API key (for the endpoint also its address: empty means Google's, with `gemini-flash-lite-latest`). The thumbnails and prompts are sent there.",
       ] },
       { p: "*Settings → Library → AI tagger temperature* sets how literal suggestions are (lower is more literal; default 0.2)." },
-      { tip: "The model's licence (Qwen Research License) limits commercial use; it must be accepted when downloading it." },
+      { tip: "Qwen3-VL is Apache-2.0; Qwen2.5-VL's licence (Qwen Research License) limits commercial use and must be accepted when downloading it." },
     ],
   },
   {

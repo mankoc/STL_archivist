@@ -63,7 +63,8 @@ Version: 2026.46.0
   before each archive that deletes its file (to the trash folder when one is set)
 - **Find by Image** — drop a picture to find models whose thumbnails look like it
 - **AI tagger** — a local vision model through llama.cpp (Qwen3-VL 4B by default, or Qwen2.5-VL 3B; chosen in
-  *Settings → Components*, any GGUF via `ai.model`), or a free OpenRouter vision model, suggests tags, title,
+  *Settings → Components*, any GGUF via `ai.model`), a free OpenRouter vision model, or any OpenAI-compatible
+  endpoint (Gemini's `gemini-flash-lite-latest` by default), suggests tags, title,
   creator, sculptor, scale, source, year and description (never collection or subcollection); review one by one or
   tag a selection in one job
 - **Monitored folders** — crawled automatically when their archives change (checked by size
@@ -303,6 +304,13 @@ and cuDNN 9 must be installed). To install by hand:
   [OpenRouter API key](https://openrouter.ai/keys). The key is kept in `<data dir>/server.db`, never in
   `settings.json` (which travels in backups and syncs), and is never shown again. The thumbnails and prompts go to
   OpenRouter and its model provider; free models have daily request limits. Compute workers are not used then.
+- **AI tagger on an OpenAI-compatible endpoint** — *Settings → Library → AI tagger → OpenAI-compatible endpoint*:
+  a model name (default `gemini-flash-lite-latest`), the endpoint's base address (requests go to
+  `<address>/chat/completions`; empty means Google's `https://generativelanguage.googleapis.com/v1beta/openai`, or
+  use e.g. `https://api.openai.com/v1` or a local server's) and its API key (for Gemini from
+  [Google AI Studio](https://aistudio.google.com/apikey)). The address and key are kept together in
+  `<data dir>/server.db` and only administrators set them, so a key only ever goes to the address saved with it.
+  The thumbnails and prompts are sent there; compute workers are not used then.
 - **AI image embeddings (CLIP)** — needs ONNX Runtime and the CLIP image encoder at
   `<data dir>/models/clip_image_encoder.onnx` (or `STLLIBRARY_CLIP_MODEL`): `onnx/vision_model.onnx`
   from [Xenova/clip-vit-base-patch32](https://huggingface.co/Xenova/clip-vit-base-patch32).

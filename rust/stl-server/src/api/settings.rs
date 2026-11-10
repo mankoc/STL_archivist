@@ -53,10 +53,13 @@ pub struct Settings {
     /// The AI tagger's sampling temperature (0 to 2; lower is more literal).
     pub ai_temperature: f64,
     /// Where the AI tagger's model runs: `local` (this server's llama-server or
-    /// a compute worker) or `openrouter` (its key: `PUT /api/ai/openrouter`).
+    /// a compute worker), `openrouter` (its key: `PUT /api/ai/openrouter`) or
+    /// `openai`, an OpenAI-compatible endpoint (its address and key: `PUT /api/ai/openai`).
     pub ai_provider: String,
     /// The OpenRouter model id (for example `nvidia/nemotron-3.5-super-vl:free`).
     pub openrouter_model: String,
+    /// The model asked at the OpenAI-compatible endpoint (for example `gemini-flash-lite-latest`).
+    pub openai_model: String,
     /// Monitored folders are checked this often (minutes, 1 to 1440).
     pub monitor_interval_minutes: u32,
 }
@@ -89,6 +92,7 @@ impl Settings {
             ai_temperature: s.ai_temperature(),
             ai_provider: s.ai_provider(),
             openrouter_model: s.openrouter_model(),
+            openai_model: s.openai_model(),
             monitor_interval_minutes: s.monitor_interval_minutes(),
         }
     }
@@ -116,11 +120,15 @@ impl Settings {
             return Err(ApiError::bad_request("ai_temperature is between 0 and 2"));
         }
         if !crate::library_settings::AI_PROVIDERS.contains(&self.ai_provider.as_str()) {
-            return Err(ApiError::bad_request("ai_provider is local or openrouter"));
+            return Err(ApiError::bad_request("ai_provider is local, openrouter or openai"));
         }
         let m = &self.openrouter_model;
         if m.is_empty() || m.len() > 200 || m.chars().any(|c| c.is_whitespace() || c.is_control()) {
             return Err(ApiError::bad_request("openrouter_model is a model id such as nvidia/nemotron-3.5-super-vl:free"));
+        }
+        let m = &self.openai_model;
+        if m.is_empty() || m.len() > 200 || m.chars().any(|c| c.is_whitespace() || c.is_control()) {
+            return Err(ApiError::bad_request("openai_model is a model name such as gemini-flash-lite-latest"));
         }
         for p in &self.presupport_patterns {
             stl_core::rules::compile_pattern(p).map_err(|e| ApiError::bad_request(format!("pattern {p:?}: {e}")))?;
