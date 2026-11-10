@@ -364,6 +364,7 @@ export const TOPICS: Topic[] = [
         "**Review one by one** — **Suggest** asks about the current model (the first request also loads the model, which takes a while). Edit the tags and fields, then **Save & next** (which asks about the next model at once) or **Skip**.",
         "**Process all** — tags every selected model in one job and saves the results.",
         "**AI data** in the model editor (*Edit*) asks about that one model for every field it can infer — title, creator, type, date, sculptor, release, collection, subcollection, category, scales, description, tags — reusing the names already in the library (creators, sculptors, collections…). It fills only empty fields and adds new scales and tags; review them and **Save**. Scales are only taken when written in the path or file names.",
+        "**Actions → AI metadata check…** asks the model to check the selected models' catalogued fields against their paths, file names and the library's names: implausible or contradicted scales, misspelled names, titles that do not match, values in the wrong field, impossible years. It lists each problem with a suggestion and changes nothing; **Edit** opens the model to fix it.",
         "Options: **Max tags**; **Ignore catalogued metadata** (images and names only); **Overwrite filled fields** (by default only empty fields are filled; tags are always added).",
       ] },
       { h: "Where it runs" },

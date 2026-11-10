@@ -295,6 +295,20 @@ The metadata fields the tagger fills (`normalize_meta`).
 | `title` (optional) | string |  |
 | `year` (optional) | integer \| null |  |
 
+### AiIssue
+
+A metadata problem the model found in one model (`ai_check`).
+
+| Field | Type | Description |
+|---|---|---|
+| `archive_path` | string |  |
+| `field` | string | `Title`, `Creator`, `Sculptor`, `Category`, `Collection`, `Subcollection`, `Scale`, `Source`, `Year` or `Description`. |
+| `model_id` | integer |  |
+| `problem` | string |  |
+| `suggestion` | string | What the model proposes instead (empty: nothing). |
+| `title` | string |  |
+| `value` | string | The catalogued value. |
+
 ### AiPattern
 
 A path pattern the model inferred for a folder (`ai_pattern`).
@@ -852,6 +866,7 @@ One of:
 - `kind: "ai_suggest"` — `id`, `ignore_meta`, `max_tags`: Ask the AI tagger for one model's tags and metadata; nothing is saved (save the reviewed result with `/api/ai/commit/{id}`).
 - `kind: "ai_fields"` — `id`: "AI data": ask the model for as many of one model's editor fields as it can infer; nothing is saved (the editor shows them for review).
 - `kind: "ai_pattern"` — `folder`: Ask the model for a path pattern for crawling a folder, from the archive paths below it; nothing is saved.
+- `kind: "ai_check"` — `ids`: Ask the model to check each model's catalogued metadata for problems (implausible scales, misspelled names…); nothing is changed.
 - `kind: "ai_tag"` — `ids`, `ignore_meta`, `max_tags`, `overwrite`: Tag every model with the AI tagger and save the results: empty fields only, unless `overwrite`; tags are merged.
 - `kind: "find_duplicate_entries"`: Records cataloguing the same archive more than once (same content hash, else same file name and size).
 - `kind: "find_moved"` — `ids`: For each record, another record with the same content whose archive is on disk (Find Moved in DB); merge them with `/api/maintenance/merge-moved`.
@@ -872,6 +887,7 @@ One of:
 - variant: The AI tagger's suggestion for one model (`ai_suggest`).
 - variant: The editor fields the model inferred for one model (`ai_fields`).
 - variant: The path pattern the model inferred for a folder (`ai_pattern`).
+- `type: "ai_issues"` — `rows`: The metadata problems the model found (`ai_check`).
 - variant: What moving a library to a new root found (`relocate_library`).
 - variant: A package's folders and where their archives are here (`import_library`).
 

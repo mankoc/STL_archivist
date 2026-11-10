@@ -4534,6 +4534,46 @@
         },
         "additionalProperties": false
       },
+      "AiIssue": {
+        "type": "object",
+        "description": "A metadata problem the model found in one model (`ai_check`).",
+        "required": [
+          "model_id",
+          "title",
+          "archive_path",
+          "field",
+          "value",
+          "problem",
+          "suggestion"
+        ],
+        "properties": {
+          "archive_path": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string",
+            "description": "`Title`, `Creator`, `Sculptor`, `Category`, `Collection`, `Subcollection`, `Scale`, `Source`, `Year` or `Description`."
+          },
+          "model_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "problem": {
+            "type": "string"
+          },
+          "suggestion": {
+            "type": "string",
+            "description": "What the model proposes instead (empty: nothing)."
+          },
+          "title": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string",
+            "description": "The catalogued value."
+          }
+        }
+      },
       "AiPattern": {
         "type": "object",
         "description": "A path pattern the model inferred for a folder (`ai_pattern`).",
@@ -7007,6 +7047,29 @@
           },
           {
             "type": "object",
+            "description": "Ask the model to check each model's catalogued metadata for problems\n(implausible scales, misspelled names…); nothing is changed.",
+            "required": [
+              "ids",
+              "kind"
+            ],
+            "properties": {
+              "ids": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int64"
+                }
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "ai_check"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
             "description": "Tag every model with the AI tagger and save the results: empty fields\nonly, unless `overwrite`; tags are merged.",
             "required": [
               "ids",
@@ -7314,6 +7377,28 @@
               }
             ],
             "description": "The path pattern the model inferred for a folder (`ai_pattern`)."
+          },
+          {
+            "type": "object",
+            "description": "The metadata problems the model found (`ai_check`).",
+            "required": [
+              "rows",
+              "type"
+            ],
+            "properties": {
+              "rows": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AiIssue"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ai_issues"
+                ]
+              }
+            }
           },
           {
             "allOf": [

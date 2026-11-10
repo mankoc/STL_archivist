@@ -208,6 +208,9 @@ pub enum JobRequest {
     /// Ask the model for a path pattern for crawling a folder, from the
     /// archive paths below it; nothing is saved.
     AiPattern { folder: String },
+    /// Ask the model to check each model's catalogued metadata for problems
+    /// (implausible scales, misspelled names…); nothing is changed.
+    AiCheck { ids: Vec<i64> },
     /// Tag every model with the AI tagger and save the results: empty fields
     /// only, unless `overwrite`; tags are merged.
     AiTag {
@@ -274,6 +277,7 @@ impl JobRequest {
             | JobRequest::SortFiles { ids, .. }
             | JobRequest::DeleteFiles { ids }
             | JobRequest::AiTag { ids, .. }
+            | JobRequest::AiCheck { ids }
             | JobRequest::FindMoved { ids }
             | JobRequest::SearchFolder { ids, .. } => ids.clear(),
             _ => {}
@@ -304,6 +308,7 @@ impl JobRequest {
             JobRequest::AiTag { .. } => "ai_tag",
             JobRequest::AiFields { .. } => "ai_fields",
             JobRequest::AiPattern { .. } => "ai_pattern",
+            JobRequest::AiCheck { .. } => "ai_check",
             JobRequest::GenerateSidecars => "generate_sidecars",
             JobRequest::RemoveSidecars => "remove_sidecars",
             JobRequest::CleanSidecars => "clean_sidecars",
@@ -330,6 +335,7 @@ impl JobRequest {
                 | JobRequest::AiSuggest { .. }
                 | JobRequest::AiFields { .. }
                 | JobRequest::AiPattern { .. }
+                | JobRequest::AiCheck { .. }
                 | JobRequest::GenerateSidecars
                 | JobRequest::RemoveSidecars
                 | JobRequest::CleanSidecars
@@ -369,6 +375,7 @@ impl JobRequest {
             JobRequest::FindMoved { ids }
             | JobRequest::SearchFolder { ids, .. }
             | JobRequest::AiTag { ids, .. }
+            | JobRequest::AiCheck { ids }
             | JobRequest::Rescan { ids }
             | JobRequest::GenerateThumbnails { ids, .. }
             | JobRequest::DeleteFiles { ids }

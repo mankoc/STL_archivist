@@ -39,7 +39,9 @@ type Seen = Arc<Mutex<Vec<Value>>>;
 async fn completions(State(seen): State<Seen>, Json(body): Json<Value>) -> Json<Value> {
     let prompt = body["messages"][0]["content"].as_array().unwrap().last().unwrap()["text"].as_str().unwrap().to_string();
     seen.lock().unwrap().push(body);
-    let reply = if prompt.contains("Write ONE path pattern") {
+    let reply = if prompt.contains("metadata problems") {
+        "Scale | 280 mm is not a miniature scale | 28 mm\nTitle | matches | Dragon 280mm\nNONE"
+    } else if prompt.contains("Write ONE path pattern") {
         "Pattern: `{creator}/{title}`"
     } else if prompt.contains("Output ONLY these 12 lines") {
         "TITLE: Red Dragon
@@ -208,6 +210,29 @@ async fn ai_infers_a_path_pattern() {
     // A folder outside the library's roots is refused for editors.
     let r = call(&lib.state, "POST", "/api/jobs", Some(&ed), Some(json!({"kind": "ai_pattern", "folder": std::env::temp_dir().to_string_lossy()}))).await;
     assert_eq!(r.status, StatusCode::FORBIDDEN, "{:?}", r.json());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ai_checks_metadata() {
+    let seen: Seen = Arc::default();
+    let url = fake_model(Arc::clone(&seen)).await;
+    let lib = library_with(|c| c.ai.url = Some(url.clone()));
+    let ed = lib.user("ed", Role::Editor);
+    let root = lib.dir.path().join("archives");
+    write_zip(&root.join("Studio").join("Dragon 280mm.zip"), &[("dragon.stl", b"solid d\nendsolid\n")]);
+    run(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy(), "pattern": "{creator}/{title}"})).await;
+    let dragon: i64 = scalar(&lib, "SELECT id FROM models");
+
+    let v = run(&lib, &ed, json!({"kind": "ai_check", "ids": [dragon]})).await;
+    assert_eq!(v["result"]["type"], "ai_issues", "{v}");
+    let rows = v["result"]["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 1, "a suggestion equal to the value is dropped: {v}");
+    assert_eq!(rows[0]["model_id"], dragon);
+    assert_eq!((rows[0]["field"].as_str(), rows[0]["value"].as_str(), rows[0]["suggestion"].as_str()), (Some("Scale"), Some("280 mm"), Some("28 mm")));
+    let prompt = seen.lock().unwrap()[0]["messages"][0]["content"].as_array().unwrap().last().unwrap()["text"].as_str().unwrap().to_string();
+    assert!(prompt.contains("- Scale: 280 mm"), "{prompt}");
+    let r = call(&lib.state, "POST", "/api/jobs", Some(&ed), Some(json!({"kind": "ai_check", "ids": []}))).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test(flavor = "multi_thread")]
