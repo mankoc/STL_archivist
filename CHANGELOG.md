@@ -5,6 +5,14 @@
 - **Mass edit can clear tags:** a **Clear** box beside *Tags* removes the selected models' tags; with tags typed too,
   they replace the old ones. Typed tags without it are now **added** to each model's tags, as the field always said
   (they used to replace them).
+- **The AI tagger can use any OpenAI-compatible endpoint**, by default Google's for **`gemini-flash-lite-latest`**:
+  *Settings → Library → AI tagger → OpenAI-compatible endpoint* sets the model (library setting `openai_model`), the
+  endpoint's base address (requests go to `<address>/chat/completions`; OpenAI's, a local server's or any other) and its
+  API key. The address and key are kept together in `server.db` and only administrators change them
+  (`GET`/`PUT /api/ai/openai`), so a key is only ever sent to the address saved with it. `ai_provider` takes `openai`.
+- **Save & next in the AI tagger asks about the next model at once** (unless its suggestion is already there or
+  coming).
+- The AI tagger's help describes the current models and providers.
 - **The AI tagger can use Qwen3-VL 4B, now the default**, which is better at recognising models and reading text in
   pictures, and is Apache-2.0 (Qwen2.5-VL 3B's licence limits commercial use). *Settings → Components* lets you
   choose the model: both can be installed, and choosing one that is already downloaded switches to it without

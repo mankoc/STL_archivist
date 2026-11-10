@@ -259,3 +259,75 @@ async fn rate_limit_stops_the_batch() {
     assert!(log.iter().any(|l| l.starts_with("Error: Rate limit reached") && l.contains("rate-limited upstream")), "{log:?}");
     assert_eq!(*hits.lock().unwrap(), 1, "nothing is asked after the limit");
 }
+
+/// `ai_provider: openai`: an OpenAI-compatible endpoint (Gemini's by default)
+/// whose address and key only administrators set; requests go to
+/// `<url>/chat/completions` with the key and the model, without OpenRouter's fields.
+#[tokio::test(flavor = "multi_thread")]
+async fn openai_compatible_endpoint() {
+    let seen: Seen = Arc::default();
+    let auth: Arc<Mutex<Vec<String>>> = Arc::default();
+    let url = fake_model(Arc::clone(&seen)).await;
+    // The endpoint lives below a path, as Gemini's does (`…/v1beta/openai`).
+    let endpoint = {
+        let (auth, url) = (Arc::clone(&auth), url.clone());
+        let app = axum::Router::new().route(
+            "/compat/chat/completions",
+            axum::routing::post(move |headers: axum::http::HeaderMap, body: String| async move {
+                auth.lock().unwrap().push(headers.get("authorization").map(|v| v.to_str().unwrap().to_string()).unwrap_or_default());
+                let reply = tokio::task::spawn_blocking(move || {
+                    ureq::post(&format!("{url}/v1/chat/completions")).content_type("application/json").send(body).unwrap().body_mut().read_to_string().unwrap()
+                });
+                reply.await.unwrap()
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/compat", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        base
+    };
+    let lib = empty_library();
+    let admin = lib.user("ad", Role::Admin);
+    let ed = lib.user("ed", Role::Editor);
+    let root = lib.dir.path().join("archives");
+    write_zip(&root.join("Studio").join("Dragon.zip"), &[("dragon.stl", b"solid d\nendsolid\n"), ("render.png", &png())]);
+    run(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy(), "pattern": "{sculptor}/{title}"})).await;
+    let dragon: i64 = scalar(&lib, "SELECT id FROM models WHERE title = 'Dragon'");
+
+    let mut settings = call(&lib.state, "GET", "/api/settings/library", Some(&admin), None).await.json();
+    assert_eq!(settings["openai_model"], "gemini-flash-lite-latest");
+    settings["ai_provider"] = json!("openai");
+    settings["openai_model"] = json!("bad model");
+    let r = call(&lib.state, "PUT", "/api/settings/library", Some(&admin), Some(settings.clone())).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    settings["openai_model"] = json!("vision-lite");
+    let r = call(&lib.state, "PUT", "/api/settings/library", Some(&admin), Some(settings)).await;
+    assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+
+    let state = call(&lib.state, "GET", "/api/ai/openai", Some(&ed), None).await.json();
+    assert_eq!(state, json!({"url": "https://generativelanguage.googleapis.com/v1beta/openai", "key_set": false}));
+    let status = call(&lib.state, "GET", "/api/ai/status", Some(&ed), None).await.json();
+    assert_eq!((status["available"].clone(), status["model"].clone()), (json!(false), json!("vision-lite")), "no key yet: {status}");
+    let r = call(&lib.state, "PUT", "/api/ai/openai", Some(&ed), Some(json!({"url": endpoint, "key": "k"}))).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "editors cannot redirect the key");
+    for bad in [json!({"url": "ftp://x"}), json!({"url": "https://"}), json!({"url": "", "key": "has space"}), json!({"url": "", "model": "m"})] {
+        let r = call(&lib.state, "PUT", "/api/ai/openai", Some(&admin), Some(bad.clone())).await;
+        assert!(r.status.is_client_error(), "{bad}");
+    }
+    let r = call(&lib.state, "PUT", "/api/ai/openai", Some(&admin), Some(json!({"url": format!("{endpoint}/"), "key": " sk-1 "}))).await;
+    assert_eq!(r.json(), json!({"url": endpoint, "key_set": true}));
+    // Changing only the address keeps the key.
+    let r = call(&lib.state, "PUT", "/api/ai/openai", Some(&admin), Some(json!({"url": endpoint}))).await;
+    assert_eq!(r.json()["key_set"], true);
+    assert_eq!(call(&lib.state, "GET", "/api/ai/status", Some(&ed), None).await.json()["available"], true);
+
+    let v = run(&lib, &ed, json!({"kind": "ai_suggest", "id": dragon})).await;
+    assert_eq!(v["result"]["tags"], json!(["Batman", "cape", "DC Comics"]), "{v}");
+    let first = seen.lock().unwrap()[0].clone();
+    assert_eq!(first["model"], "vision-lite");
+    assert!(first.get("reasoning").is_none(), "no OpenRouter fields: {first}");
+    assert_eq!(auth.lock().unwrap().as_slice(), ["Bearer sk-1", "Bearer sk-1"]);
+
+    let r = call(&lib.state, "PUT", "/api/ai/openai", Some(&admin), Some(json!({"url": "", "key": ""}))).await;
+    assert_eq!(r.json(), json!({"url": "https://generativelanguage.googleapis.com/v1beta/openai", "key_set": false}));
+}
