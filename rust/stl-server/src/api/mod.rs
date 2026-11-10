@@ -121,6 +121,8 @@ pub const DOWNLOAD_CHUNK: usize = 256 * 1024;
         archive::warnings,
         ai::status,
         ai::commit,
+        ai::openrouter_get,
+        ai::openrouter_put,
         backups::list,
         components::status,
         backups::download,
@@ -248,6 +250,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/models/{id}/warnings", get(archive::warnings))
         .route("/api/ai/status", get(ai::status))
         .route("/api/ai/commit/{id}", post(ai::commit))
+        .route("/api/ai/openrouter", get(ai::openrouter_get).put(ai::openrouter_put))
         .route("/api/backups", get(backups::list))
         .route("/api/components", get(components::status))
         .route("/api/backups/upload", post(backups::upload).layer(DefaultBodyLimit::disable()))
