@@ -388,10 +388,12 @@ impl Library {
     }
 }
 
-/// `/api/ai/status`: OpenRouter when chosen, a connected worker, or this server's model.
+/// `/api/ai/status`: OpenRouter or the OpenAI-compatible endpoint when chosen, a connected worker, or this server's model.
 pub fn ai_status(lib: &Library) -> AiStatus {
-    if let crate::ai::Provider::OpenRouter { model } = crate::ai::Provider::of(lib) {
-        return crate::ai::openrouter_status(lib, model);
+    match crate::ai::Provider::of(lib) {
+        crate::ai::Provider::OpenRouter { model } => return crate::ai::openrouter_status(lib, model),
+        crate::ai::Provider::OpenAi { model } => return crate::ai::openai_status(lib, model),
+        crate::ai::Provider::Local => {}
     }
     let workers = lib.workers.lock();
     if let Some(w) = workers.workers.iter().find(|w| w.chat) {

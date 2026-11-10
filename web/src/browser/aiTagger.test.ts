@@ -1,5 +1,5 @@
 import type { Schemas } from "../api/client";
-import { addTag, fieldsOf, removeTag, suggestJob } from "./aiTagger";
+import { addTag, fieldsOf, needsSuggestion, removeTag, suggestJob } from "./aiTagger";
 
 const job = (id: number, kind: string, request: object): Schemas["JobInfo"] =>
   ({ id, kind, request: { kind, ...request }, state: "done", user: "ed", done: 0, total: 0, created_at: id }) as Schemas["JobInfo"];
@@ -22,5 +22,15 @@ describe("aiTagger", () => {
     const jobs = [job(1, "ai_suggest", { id: 5 }), job(3, "ai_suggest", { id: 5 }), job(4, "ai_suggest", { id: 6 }), job(5, "crawl", {})];
     expect(suggestJob(jobs, 5)?.id).toBe(3);
     expect(suggestJob(jobs, 7)).toBeUndefined();
+  });
+
+  it("asks again after Save & next only when no answer is coming", () => {
+    const at = (state: string) => ({ ...job(1, "ai_suggest", { id: 5 }), state }) as Schemas["JobInfo"];
+    expect(needsSuggestion(undefined)).toBe(true);
+    expect(needsSuggestion(at("failed"))).toBe(true);
+    expect(needsSuggestion(at("cancelled"))).toBe(true);
+    expect(needsSuggestion(at("running"))).toBe(false);
+    expect(needsSuggestion(at("queued"))).toBe(false);
+    expect(needsSuggestion(at("done"))).toBe(false);
   });
 });
