@@ -2,7 +2,12 @@
 
 ## Unreleased
 
-- **The AI tagger can use a free OpenRouter model** instead of the local Qwen2.5-VL: *Settings → Library → AI tagger*
+- **The AI tagger can use Qwen3-VL 4B, now the default**, which is better at recognising models and reading text in
+  pictures, and is Apache-2.0 (Qwen2.5-VL 3B's licence limits commercial use). *Settings → Components* lets you
+  choose the model: both can be installed, and choosing one that is already downloaded switches to it without
+  downloading (`ai/models/selected.txt`). Existing Qwen2.5-VL installs keep working until you switch. Only Qwen2.5-VL
+  still asks you to accept its licence. The AI status and compute workers report the model in use.
+- **The AI tagger can use a free OpenRouter model** instead of the local model: *Settings → Library → AI tagger*
   chooses **OpenRouter**, a model (its free models that read images are suggested from openrouter.ai; any other
   model's slug, or its openrouter.ai page, can be pasted) and its API key. The
   prompts and tag cleaning are the same as with the local model. The key is kept in `server.db` (never in
