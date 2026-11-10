@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **AI data in the model editor:** a button that asks the AI model about the model being edited for every field it can
+  infer (title, creator, type, date, sculptor, release, collection, subcollection, category, scales, description and
+  tags) from its images, archive path, file names and catalogued metadata. The prompt offers the library's existing
+  names (those written in the path, or the whole list when it is short) and replies are matched to their spelling. It
+  fills only empty fields and adds new scales and tags, for review before saving (job `ai_fields`, read-only).
 - **Mass edit can clear tags:** a **Clear** box beside *Tags* removes the selected models' tags; with tags typed too,
   they replace the old ones. Typed tags without it are now **added** to each model's tags, as the field always said
   (they used to replace them).

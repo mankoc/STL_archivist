@@ -202,6 +202,9 @@ pub enum JobRequest {
         #[serde(default)]
         ignore_meta: bool,
     },
+    /// "AI data": ask the model for as many of one model's editor fields as
+    /// it can infer; nothing is saved (the editor shows them for review).
+    AiFields { id: i64 },
     /// Tag every model with the AI tagger and save the results: empty fields
     /// only, unless `overwrite`; tags are merged.
     AiTag {
@@ -296,6 +299,7 @@ impl JobRequest {
             JobRequest::RelocateLibrary { .. } => "relocate_library",
             JobRequest::AiSuggest { .. } => "ai_suggest",
             JobRequest::AiTag { .. } => "ai_tag",
+            JobRequest::AiFields { .. } => "ai_fields",
             JobRequest::GenerateSidecars => "generate_sidecars",
             JobRequest::RemoveSidecars => "remove_sidecars",
             JobRequest::CleanSidecars => "clean_sidecars",
@@ -320,6 +324,7 @@ impl JobRequest {
             JobRequest::RelocateLibrary { apply: false, .. }
                 | JobRequest::FindDuplicateEntries
                 | JobRequest::AiSuggest { .. }
+                | JobRequest::AiFields { .. }
                 | JobRequest::GenerateSidecars
                 | JobRequest::RemoveSidecars
                 | JobRequest::CleanSidecars

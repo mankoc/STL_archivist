@@ -261,6 +261,26 @@ The request and response bodies named above.
 | `overwrite` (optional) | boolean | Replace values already set (default: fill empty fields only). Tags are merged. |
 | `tags` (optional) | string[] |  |
 
+### AiEditorFields
+
+What the model infers for the editor's fields ("AI data"); empty when unknown.
+
+| Field | Type | Description |
+|---|---|---|
+| `category` | string |  |
+| `collection` | string |  |
+| `creator` | string |  |
+| `date` | string | `YYYY-MM` or `YYYY`. |
+| `description` | string |  |
+| `model_id` | integer |  |
+| `release` | string |  |
+| `scales` | string[] | Only scales written in the path, file names or metadata. |
+| `sculptor` | string |  |
+| `source` | string | The editor's *Type*. |
+| `subcollection` | string |  |
+| `tags` | string[] |  |
+| `title` | string |  |
+
 ### AiFieldValues
 
 The metadata fields the tagger fills (`normalize_meta`).
@@ -818,6 +838,7 @@ One of:
 - `kind: "relocate_library"` — `apply`, `fix_case`, `id`, `root`: Move a library's folder to a new root: check every archive there and, with `apply`, set the root (and those of the folders inside it). With `fix_case`, paths found only with another letter case take the spelling on disk. Nothing is re-read.
 - `kind: "delete_files"` — `ids`: Move the models' archive files to the trash folder (or delete them, without one) and remove the records. Needs *allow file delete*.
 - `kind: "ai_suggest"` — `id`, `ignore_meta`, `max_tags`: Ask the AI tagger for one model's tags and metadata; nothing is saved (save the reviewed result with `/api/ai/commit/{id}`).
+- `kind: "ai_fields"` — `id`: "AI data": ask the model for as many of one model's editor fields as it can infer; nothing is saved (the editor shows them for review).
 - `kind: "ai_tag"` — `ids`, `ignore_meta`, `max_tags`, `overwrite`: Tag every model with the AI tagger and save the results: empty fields only, unless `overwrite`; tags are merged.
 - `kind: "find_duplicate_entries"`: Records cataloguing the same archive more than once (same content hash, else same file name and size).
 - `kind: "find_moved"` — `ids`: For each record, another record with the same content whose archive is on disk (Find Moved in DB); merge them with `/api/maintenance/merge-moved`.
@@ -836,6 +857,7 @@ One of:
 - `type: "metadata"` — `groups`
 - `type: "records"` — `rows`: Records of a maintenance list (Verify, duplicate entries, moved, found).
 - variant: The AI tagger's suggestion for one model (`ai_suggest`).
+- variant: The editor fields the model inferred for one model (`ai_fields`).
 - variant: What moving a library to a new root found (`relocate_library`).
 - variant: A package's folders and where their archives are here (`import_library`).
 

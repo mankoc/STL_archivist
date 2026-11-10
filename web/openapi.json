@@ -4431,6 +4431,76 @@
         },
         "additionalProperties": false
       },
+      "AiEditorFields": {
+        "type": "object",
+        "description": "What the model infers for the editor's fields (\"AI data\"); empty when unknown.",
+        "required": [
+          "model_id",
+          "title",
+          "creator",
+          "source",
+          "date",
+          "sculptor",
+          "release",
+          "collection",
+          "subcollection",
+          "category",
+          "scales",
+          "description",
+          "tags"
+        ],
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "collection": {
+            "type": "string"
+          },
+          "creator": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string",
+            "description": "`YYYY-MM` or `YYYY`."
+          },
+          "description": {
+            "type": "string"
+          },
+          "model_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "release": {
+            "type": "string"
+          },
+          "scales": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Only scales written in the path, file names or metadata."
+          },
+          "sculptor": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "description": "The editor's *Type*."
+          },
+          "subcollection": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
       "AiFieldValues": {
         "type": "object",
         "description": "The metadata fields the tagger fills (`normalize_meta`).",
@@ -6862,6 +6932,26 @@
           },
           {
             "type": "object",
+            "description": "\"AI data\": ask the model for as many of one model's editor fields as\nit can infer; nothing is saved (the editor shows them for review).",
+            "required": [
+              "id",
+              "kind"
+            ],
+            "properties": {
+              "id": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "ai_fields"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
             "description": "Tag every model with the AI tagger and save the results: empty fields\nonly, unless `overwrite`; tags are merged.",
             "required": [
               "ids",
@@ -7123,6 +7213,29 @@
               }
             ],
             "description": "The AI tagger's suggestion for one model (`ai_suggest`)."
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AiEditorFields",
+                "description": "The editor fields the model inferred for one model (`ai_fields`)."
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "ai_fields"
+                    ]
+                  }
+                }
+              }
+            ],
+            "description": "The editor fields the model inferred for one model (`ai_fields`)."
           },
           {
             "allOf": [
