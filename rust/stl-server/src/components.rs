@@ -90,7 +90,8 @@ impl Asset {
 }
 
 const LLAMA: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b9789/";
-const QWEN: &str = "https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/resolve/5037fcf163dd95d1e41d1974465f0898ed108ca2/";
+const QWEN25: &str = "https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/resolve/5037fcf163dd95d1e41d1974465f0898ed108ca2/";
+const QWEN3: &str = "https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/1cd86afb9a95c410a6038ab3b40d8b578c892266/";
 const ORT: &str = "https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/";
 const ORT_DML: &str = "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime.directml/1.22.0/";
 const DIRECTML: &str = "https://api.nuget.org/v3-flatcontainer/microsoft.ai.directml/1.15.4/";
@@ -132,6 +133,8 @@ pub fn variants(id: &str) -> &'static [&'static str] {
         ("ai_runtime", Some(_)) => &["cpu"],
         ("onnxruntime", Some("windows-x64")) => &["cpu", "directml"],
         ("onnxruntime", Some(_)) => &["cpu", "cuda"],
+        // The AI tagger's model: the ids of `ai::MODELS` (the first is the default).
+        ("ai_model", Some(_)) => &["qwen3-vl-4b", "qwen2.5-vl-3b"],
         _ => &[],
     }
 }
@@ -165,9 +168,13 @@ pub fn assets(id: &str, variant: &str) -> Vec<Asset> {
         "ai_runtime" if linux => vec![asset!(
             LLAMA, "llama-b9789-bin-ubuntu-x64.tar.gz", "549fad25d7dc09cdea17e8c410251bae93ac5451dafce100624c665daceee978", 15_634_777, Unpack::Tar { strip: 1 }, "ai/bin"
         )],
+        "ai_model" if (windows || linux) && variant == "qwen2.5-vl-3b" => vec![
+            asset!(QWEN25, "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf", "d02fe9b69ad8cadbbd228e387667af66612c44bed29ffc8eb1e7caf9ac486c12", 1_929_901_056, Unpack::File, "ai/models/Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf"),
+            asset!(QWEN25, "mmproj-Qwen2.5-VL-3B-Instruct-f16.gguf", "b9160fe9d814d1fadf68395677468534778b39ac33c2e7561b7b218626e60d5e", 1_338_428_128, Unpack::File, "ai/models/mmproj-Qwen2.5-VL-3B-Instruct-f16.gguf"),
+        ],
         "ai_model" if windows || linux => vec![
-            asset!(QWEN, "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf", "d02fe9b69ad8cadbbd228e387667af66612c44bed29ffc8eb1e7caf9ac486c12", 1_929_901_056, Unpack::File, "ai/models/Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf"),
-            asset!(QWEN, "mmproj-Qwen2.5-VL-3B-Instruct-f16.gguf", "b9160fe9d814d1fadf68395677468534778b39ac33c2e7561b7b218626e60d5e", 1_338_428_128, Unpack::File, "ai/models/mmproj-Qwen2.5-VL-3B-Instruct-f16.gguf"),
+            asset!(QWEN3, "Qwen3VL-4B-Instruct-Q4_K_M.gguf", "66358cb18bb6b3b1b6675aa412c7a88ef01d228f481184d13668e5201c730a0a", 2_497_281_664, Unpack::File, "ai/models/Qwen3VL-4B-Instruct-Q4_K_M.gguf"),
+            asset!(QWEN3, "mmproj-Qwen3VL-4B-Instruct-F16.gguf", "256f3a43bd4205ffef48d6b92715e1e70b5b0e9aef06522584967513a9985331", 836_180_256, Unpack::File, "ai/models/mmproj-Qwen3VL-4B-Instruct-F16.gguf"),
         ],
         "clip_model" if windows || linux => vec![Asset {
             file: "vision_model.onnx",
@@ -251,10 +258,10 @@ fn info(id: &str) -> Info {
             license_url: "https://github.com/ggml-org/llama.cpp/blob/master/LICENSE",
         },
         "ai_model" => Info {
-            label: "AI tagger model (Qwen2.5-VL-3B-Instruct, GGUF)",
+            label: "AI tagger model (GGUF)",
             enables: "AI tagger",
-            license: "Qwen Research License",
-            license_url: "https://huggingface.co/Qwen/Qwen2.5-VL-3B-Instruct/blob/main/LICENSE",
+            license: "Apache-2.0 (Qwen3-VL) / Qwen Research License (Qwen2.5-VL)",
+            license_url: "https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct/blob/main/LICENSE",
         },
         "clip_model" => Info {
             label: "CLIP image encoder (ViT-B/32, ONNX)",
@@ -436,16 +443,38 @@ fn beside_server(name: &str) -> Option<String> {
     p.is_file().then(|| format!("{} (beside the server)", p.display()))
 }
 
-/// A component's installed variant: the AI runtime's `variant.txt`; for ONNX
-/// Runtime, the variant whose extra files (DirectML, the CUDA provider) are
-/// present; `cpu` otherwise.
+/// A component's installed variant: the AI runtime's `variant.txt`; the AI
+/// model in use; for ONNX Runtime, the variant whose extra files (DirectML,
+/// the CUDA provider) are present; `cpu` otherwise.
 fn installed_variant(data: &Path, id: &str) -> String {
+    if id == "ai_model" {
+        return installed_ai_model(data).unwrap_or_default().to_string();
+    }
     if id == "ai_runtime" {
         return fs::read_to_string(data.join("ai").join("bin").join("variant.txt")).map(|v| v.trim().to_string()).unwrap_or_else(|_| "cpu".into());
     }
     let main = lib_name("onnxruntime");
     let has_extra = |v: &&str| assets(id, v).iter().flat_map(|a| a.outputs()).any(|f| f != main && data.join(f).is_file());
     variants(id).iter().filter(|v| **v != "cpu").find(|v| has_extra(v)).unwrap_or(&"cpu").to_string()
+}
+
+/// Whether all of an AI model variant's files are in the data directory.
+fn has_ai_model(data: &Path, variant: &str) -> bool {
+    let files = assets("ai_model", variant);
+    !files.is_empty() && files.iter().all(|a| data.join(a.to).is_file())
+}
+
+/// Which AI model is chosen (`ai/models/selected.txt`, written on install).
+fn selected_ai_model(data: &Path) -> PathBuf {
+    data.join("ai").join("models").join("selected.txt")
+}
+
+/// The AI model the tagger uses: the chosen one when its files are there,
+/// else the first variant that is installed. Several can be installed.
+pub fn installed_ai_model(data: &Path) -> Option<&'static str> {
+    let chosen = fs::read_to_string(selected_ai_model(data)).unwrap_or_default();
+    let vs = variants("ai_model");
+    vs.iter().copied().find(|v| *v == chosen.trim() && has_ai_model(data, v)).or_else(|| vs.iter().copied().find(|v| has_ai_model(data, v)))
 }
 
 /// Delete the files every variant of a component puts in the data directory.
@@ -468,11 +497,7 @@ fn installed(at: &Place, id: &str) -> Option<String> {
     };
     match id {
         "ai_runtime" => crate::ai::find_exe(&data.join("ai").join("bin")).map(|p| p.display().to_string()),
-        "ai_model" => {
-            let files = assets(id, "");
-            let all = !files.is_empty() && files.iter().all(|a| data.join(a.to).is_file());
-            all.then(|| data.join("ai").join("models").display().to_string())
-        }
+        "ai_model" => installed_ai_model(data).map(|_| data.join("ai").join("models").display().to_string()),
         "clip_model" => file("models/clip_image_encoder.onnx"),
         "onnxruntime" => file(&lib_name("onnxruntime")),
         "pdfium" => file(&lib_name("pdfium")),
@@ -492,7 +517,9 @@ pub fn status(at: &Place) -> ComponentsInfo {
             let sizes: Vec<VariantSize> = if variants(id).is_empty() {
                 vec![VariantSize { variant: "default".into(), bytes: assets(id, "").iter().map(|a| a.size).sum() }]
             } else {
-                variants(id).iter().map(|v| VariantSize { variant: v.to_string(), bytes: assets(id, v).iter().map(|a| a.size).sum() }).collect()
+                // An AI model already downloaded only needs choosing.
+                let bytes = |v: &str| if id == "ai_model" && has_ai_model(data, v) { 0 } else { assets(id, v).iter().map(|a| a.size).sum() };
+                variants(id).iter().map(|v| VariantSize { variant: v.to_string(), bytes: bytes(v) }).collect()
             };
             let (state, detail) = if let Some(where_) = external(at, id) {
                 ("external", where_)
@@ -862,6 +889,15 @@ pub fn install(at: &Place, ctl: &Control, log: &dyn Fn(String), ids: &[String], 
             continue;
         }
         let variant = chosen.get(id).map(String::as_str).or(default_variant(id, &gpus)).unwrap_or("").to_string();
+        if id == "ai_model" && has_ai_model(data, &variant) {
+            // Already downloaded: only switch to it.
+            if let Some(ai) = at.ai {
+                ai.stop();
+            }
+            fs::write(selected_ai_model(data), &variant).map_err(|e| e.to_string())?;
+            log(format!("{}: using {variant}", info(id).label));
+            continue;
+        }
         let present = installed(at, id).is_some();
         if present && (variants(id).is_empty() || installed_variant(data, id) == variant) {
             log(format!("{}: already installed", info(id).label));
@@ -892,14 +928,16 @@ pub fn install(at: &Place, ctl: &Control, log: &dyn Fn(String), ids: &[String], 
             v => format!("{} ({v})", info(id).label),
         };
         log(format!("{label}: downloading {} MB…", assets.iter().map(|a| a.size).sum::<u64>() / 1_000_000));
+        if id.starts_with("ai_")
+            && let Some(ai) = at.ai
+        {
+            ai.stop(); // a running llama-server keeps its files locked
+        }
         if id == "ai_runtime" {
-            if let Some(ai) = at.ai {
-                ai.stop(); // a running llama-server keeps its files locked
-            }
             if installed(at, id).is_some() {
                 let _ = fs::remove_dir_all(data.join("ai").join("bin"));
             }
-        } else if installed(at, id).is_some() {
+        } else if id != "ai_model" && installed(at, id).is_some() {
             // Another variant: none of its files may stay (they decide the variant).
             remove_outputs(data, id).map_err(|e| format!("{label}: {e} (it is in use; restart the server and try again)"))?;
         }
@@ -908,6 +946,9 @@ pub fn install(at: &Place, ctl: &Control, log: &dyn Fn(String), ids: &[String], 
         }
         if id == "ai_runtime" {
             fs::write(data.join("ai").join("bin").join("variant.txt"), variant).map_err(|e| e.to_string())?;
+        }
+        if id == "ai_model" {
+            fs::write(selected_ai_model(data), variant).map_err(|e| e.to_string())?;
         }
         log(format!("{label}: installed"));
         if id == "onnxruntime" && at.tools.is_some_and(Tools::ort_loaded) {
@@ -934,6 +975,12 @@ pub fn remove(at: &Place, log: &dyn Fn(String), ids: &[String]) -> Result<usize,
                     ai.stop();
                 }
                 fs::remove_dir_all(data.join("ai").join("bin"))
+            }
+            "ai_model" => {
+                if let Some(ai) = at.ai {
+                    ai.stop();
+                }
+                remove_outputs(data, id)
             }
             _ => remove_outputs(data, id),
         };
@@ -1169,6 +1216,35 @@ mod tests {
         assert_eq!(installed_variant(data, "onnxruntime"), gpu);
         remove_outputs(data, "onnxruntime").unwrap();
         assert_eq!(fs::read_dir(data).unwrap().count(), 0, "every variant's files are removed");
+    }
+
+    #[test]
+    fn ai_models_are_chosen_among_the_installed() {
+        if platform().is_none() {
+            return;
+        }
+        let names = |v: &str| assets("ai_model", v).iter().map(|a| a.to.rsplit('/').next().unwrap()).collect::<Vec<_>>();
+        assert_eq!(variants("ai_model"), crate::ai::MODELS.map(|m| m.id), "the runtime knows every model");
+        for m in &crate::ai::MODELS {
+            assert_eq!(names(m.id), [m.file, m.mmproj], "{}", m.id);
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path();
+        fs::create_dir_all(data.join("ai/models")).unwrap();
+        assert_eq!(installed_ai_model(data), None);
+        let put = |v: &str| assets("ai_model", v).iter().for_each(|a| fs::write(data.join(a.to), b"x").unwrap());
+        put("qwen2.5-vl-3b");
+        assert_eq!(installed_ai_model(data), Some("qwen2.5-vl-3b"), "an older install keeps working");
+        put("qwen3-vl-4b");
+        assert_eq!(installed_ai_model(data), Some("qwen3-vl-4b"), "without a choice: the default");
+        // Choosing a downloaded model downloads nothing and switches to it.
+        let config = Config::resolve(&[], |k: &str| (k == "STL_DATA_DIR").then(|| data.display().to_string())).unwrap();
+        let at = Place { config: &config, ai: None, tools: None };
+        let chosen = BTreeMap::from([("ai_model".to_string(), "qwen2.5-vl-3b".to_string())]);
+        assert_eq!(install(&at, &Control::new(), &|_| {}, &["ai_model".into()], &chosen).unwrap(), 0);
+        assert_eq!(installed_ai_model(data), Some("qwen2.5-vl-3b"));
+        assert_eq!(installed_variant(data, "ai_model"), "qwen2.5-vl-3b");
+        assert!(status(&at).components.iter().find(|c| c.id == "ai_model").unwrap().sizes.iter().all(|s| s.bytes == 0));
     }
 
     #[test]
