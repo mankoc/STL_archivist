@@ -21,6 +21,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ai/openrouter": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether the AI tagger has an OpenRouter API key. */
+        get: operations["get_ai_openrouter"];
+        /** Set or remove the OpenRouter API key (administrators). Kept in `server.db`. */
+        put: operations["put_ai_openrouter"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ai/status": {
         parameters: {
             query?: never;
@@ -2702,6 +2720,14 @@ export interface components {
             password: string;
             role: components["schemas"]["Role"];
         };
+        /** @description A new OpenRouter API key; empty removes it. */
+        OpenRouterKey: {
+            key: string;
+        };
+        /** @description Whether an OpenRouter API key is set (the key itself is never sent back). */
+        OpenRouterKeyState: {
+            key_set: boolean;
+        };
         ParseRequest: {
             ids: number[];
             pattern: string;
@@ -2973,6 +2999,11 @@ export interface components {
             ai_embeddings_during_crawl: boolean;
             ai_embeddings_enabled: boolean;
             /**
+             * @description Where the AI tagger's model runs: `local` (this server's llama-server or
+             *     a compute worker) or `openrouter` (its key: `PUT /api/ai/openrouter`).
+             */
+            ai_provider: string;
+            /**
              * Format: double
              * @description The AI tagger's sampling temperature (0 to 2; lower is more literal).
              */
@@ -3009,6 +3040,8 @@ export interface components {
              * @description Monitored folders are checked this often (minutes, 1 to 1440).
              */
             monitor_interval_minutes: number;
+            /** @description The OpenRouter model id (for example `google/gemma-4-31b-it:free`). */
+            openrouter_model: string;
             /** @description Regular expressions for presupported STL file names (case-insensitive). */
             presupport_patterns: string[];
             recurse_subdirs: boolean;
@@ -3253,6 +3286,64 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_ai_openrouter: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenRouterKeyState"];
+                };
+            };
+        };
+    };
+    put_ai_openrouter: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenRouterKey"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenRouterKeyState"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

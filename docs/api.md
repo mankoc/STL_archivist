@@ -18,7 +18,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
   or `GET /api/jobs/{id}`.
 - Writes that change the library are announced on `/api/events` as `library_changed`.
 
-## Endpoints (102)
+## Endpoints (104)
 
 - [Sign-in and sessions](#sign-in-and-sessions) (5)
 - [Users and preferences](#users-and-preferences) (7)
@@ -35,7 +35,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 - [Search](#search) (1)
 - [Statistics](#statistics) (2)
 - [Library settings](#library-settings) (2)
-- [AI tagger](#ai-tagger) (2)
+- [AI tagger](#ai-tagger) (4)
 - [Compute workers](#compute-workers) (3)
 - [Optional components](#optional-components) (1)
 - [Sync](#sync) (11)
@@ -206,6 +206,8 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 | Endpoint | Description | Request | Response | Errors |
 |---|---|---|---|---|
 | `POST /api/ai/commit/{id}` | Save a reviewed suggestion to a model. | path `id`: integer<br>body: [AiCommit](#aicommit) | 200 [AiSaved](#aisaved) | 404 |
+| `GET /api/ai/openrouter` | Whether the AI tagger has an OpenRouter API key. |  | 200 [OpenRouterKeyState](#openrouterkeystate) |  |
+| `PUT /api/ai/openrouter` | Set or remove the OpenRouter API key (administrators). Kept in `server.db`. | body: [OpenRouterKey](#openrouterkey) | 200 [OpenRouterKeyState](#openrouterkeystate) | 400, 403 |
 | `GET /api/ai/status` | Whether the AI tagger can run, and with what. |  | 200 [AiStatus](#aistatus) |  |
 
 ### Compute workers
@@ -1057,6 +1059,22 @@ Models with equal or similar values in one column.
 | `password` | string |  |
 | `role` | [Role](#role) |  |
 
+### OpenRouterKey
+
+A new OpenRouter API key; empty removes it.
+
+| Field | Type | Description |
+|---|---|---|
+| `key` | string |  |
+
+### OpenRouterKeyState
+
+Whether an OpenRouter API key is set (the key itself is never sent back).
+
+| Field | Type | Description |
+|---|---|---|
+| `key_set` | boolean |  |
+
 ### ParseRequest
 
 | Field | Type | Description |
@@ -1327,6 +1345,7 @@ The settings, with their effective values (defaults filled in).
 |---|---|---|
 | `ai_embeddings_during_crawl` | boolean |  |
 | `ai_embeddings_enabled` | boolean |  |
+| `ai_provider` | string | Where the AI tagger's model runs: `local` (this server's llama-server or a compute worker) or `openrouter` (its key: `PUT /api/ai/openrouter`). |
 | `ai_temperature` | number | The AI tagger's sampling temperature (0 to 2; lower is more literal). |
 | `allow_file_delete` | boolean | *Delete files* may remove archives from disk. |
 | `detect_changes_by_size` | boolean | Crawls and monitored folders take an archive of the stored size as unchanged, whatever its modification time. |
@@ -1338,6 +1357,7 @@ The settings, with their effective values (defaults filled in).
 | `metadata_sidecar_enabled` | boolean | Write `METADATA.7z` sidecars into archive folders. |
 | `metadata_thumbnails` | boolean | Include thumbnails in sidecars. |
 | `monitor_interval_minutes` | integer | Monitored folders are checked this often (minutes, 1 to 1440). |
+| `openrouter_model` | string | The OpenRouter model id (for example `google/gemma-4-31b-it:free`). |
 | `presupport_patterns` | string[] | Regular expressions for presupported STL file names (case-insensitive). |
 | `recurse_subdirs` | boolean |  |
 | `trash_folder_path` | string |  |
