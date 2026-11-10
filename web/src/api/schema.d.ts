@@ -21,6 +21,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ai/openai": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The AI tagger's OpenAI-compatible endpoint. */
+        get: operations["get_ai_openai"];
+        /**
+         * Set the OpenAI-compatible endpoint's address and key (administrators).
+         *     Both are kept in `server.db`, so the key only goes to the address set here.
+         */
+        put: operations["put_ai_openai"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ai/openrouter": {
         parameters: {
             query?: never;
@@ -2720,6 +2741,22 @@ export interface components {
             password: string;
             role: components["schemas"]["Role"];
         };
+        /**
+         * @description A new address for the OpenAI-compatible endpoint (empty: Gemini's) and,
+         *     when given, its API key (empty removes it).
+         */
+        OpenAiEndpoint: {
+            key?: string | null;
+            url: string;
+        };
+        /**
+         * @description The OpenAI-compatible endpoint: its address, and whether a key is set (the
+         *     key itself is never sent back).
+         */
+        OpenAiEndpointState: {
+            key_set: boolean;
+            url: string;
+        };
         /** @description A new OpenRouter API key; empty removes it. */
         OpenRouterKey: {
             key: string;
@@ -3000,7 +3037,8 @@ export interface components {
             ai_embeddings_enabled: boolean;
             /**
              * @description Where the AI tagger's model runs: `local` (this server's llama-server or
-             *     a compute worker) or `openrouter` (its key: `PUT /api/ai/openrouter`).
+             *     a compute worker), `openrouter` (its key: `PUT /api/ai/openrouter`) or
+             *     `openai`, an OpenAI-compatible endpoint (its address and key: `PUT /api/ai/openai`).
              */
             ai_provider: string;
             /**
@@ -3040,6 +3078,8 @@ export interface components {
              * @description Monitored folders are checked this often (minutes, 1 to 1440).
              */
             monitor_interval_minutes: number;
+            /** @description The model asked at the OpenAI-compatible endpoint (for example `gemini-flash-lite-latest`). */
+            openai_model: string;
             /** @description The OpenRouter model id (for example `nvidia/nemotron-3.5-super-vl:free`). */
             openrouter_model: string;
             /** @description Regular expressions for presupported STL file names (case-insensitive). */
@@ -3286,6 +3326,64 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_ai_openai: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenAiEndpointState"];
+                };
+            };
+        };
+    };
+    put_ai_openai: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenAiEndpoint"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenAiEndpointState"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

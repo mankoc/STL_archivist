@@ -7,7 +7,9 @@ use serde_json::Value;
 
 pub const FILE: &str = "settings.json";
 pub const MAX_THUMB_SIZE_DEFAULT: u32 = 512;
-pub const AI_PROVIDERS: [&str; 2] = ["local", "openrouter"];
+pub const AI_PROVIDERS: [&str; 3] = ["local", "openrouter", "openai"];
+/// The model asked at the OpenAI-compatible endpoint (Gemini's by default).
+pub const OPENAI_MODEL_DEFAULT: &str = "gemini-flash-lite-latest";
 /// A free vision model; the settings page lists the current free ones.
 pub const OPENROUTER_MODEL_DEFAULT: &str = "nvidia/nemotron-3.5-super-vl:free";
 
@@ -127,7 +129,7 @@ impl LibrarySettings {
     }
 
     /// Where the AI tagger's model runs: `local` (llama-server or a compute
-    /// worker) or `openrouter`.
+    /// worker), `openrouter` or `openai` (an OpenAI-compatible endpoint).
     pub fn ai_provider(&self) -> String {
         self.0.get("ai_provider").and_then(Value::as_str).filter(|p| AI_PROVIDERS.contains(p)).unwrap_or("local").to_string()
     }
@@ -140,6 +142,17 @@ impl LibrarySettings {
             .map(str::trim)
             .filter(|m| !m.is_empty())
             .unwrap_or(OPENROUTER_MODEL_DEFAULT)
+            .to_string()
+    }
+
+    /// The model the AI tagger asks with `ai_provider: openai`.
+    pub fn openai_model(&self) -> String {
+        self.0
+            .get("openai_model")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+            .unwrap_or(OPENAI_MODEL_DEFAULT)
             .to_string()
     }
 

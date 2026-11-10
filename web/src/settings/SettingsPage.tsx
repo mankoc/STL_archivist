@@ -400,10 +400,14 @@ function LibrarySettingsForm({ editable }: { editable: boolean }) {
             data={[
               { value: "local", label: "Local model (Settings → Components)" },
               { value: "openrouter", label: "OpenRouter" },
+              { value: "openai", label: "OpenAI-compatible endpoint" },
             ]}
           />
           {form.ai_provider === "openrouter" && (
             <OpenRouterSettings model={form.openrouter_model} editable={editable} onModel={(m) => set("openrouter_model", m)} />
+          )}
+          {form.ai_provider === "openai" && (
+            <OpenAiSettings model={form.openai_model} editable={editable} onModel={(m) => set("openai_model", m.trim())} />
           )}
           <NumberInput
             label="Temperature"
@@ -486,6 +490,80 @@ function OpenRouterSettings({ model, editable, onModel }: { model: string; edita
     </>
   );
 }
+
+// The model asked at the OpenAI-compatible endpoint (part of the library
+// settings form), and the endpoint's address and key (saved at once, in
+// server.db; the key is never shown again).
+function OpenAiSettings({ model, editable, onModel }: { model: string; editable: boolean; onModel: (m: string) => void }) {
+  const queryClient = useQueryClient();
+  const endpoint = useQuery({ queryKey: ["openai-endpoint"], queryFn: async () => unwrap(await api.GET("/api/ai/openai")) });
+  const [url, setUrl] = useState<string | null>(null);
+  const [key, setKey] = useState("");
+  const shownUrl = url ?? endpoint.data?.url ?? "";
+  const saveEndpoint = async (body: Schemas["OpenAiEndpoint"], message: string) => {
+    try {
+      queryClient.setQueryData(["openai-endpoint"], unwrap(await api.PUT("/api/ai/openai", { body })));
+      queryClient.invalidateQueries({ queryKey: ["ai-status"] });
+      setUrl(null);
+      setKey("");
+      notifications.show({ message });
+    } catch (err) {
+      fail(err);
+    }
+  };
+  return (
+    <>
+      <Autocomplete
+        label="Model"
+        description="The model's name at the endpoint; it must read images"
+        placeholder="gemini-flash-lite-latest"
+        w={420}
+        data={OPENAI_MODELS}
+        value={model}
+        disabled={!editable}
+        onChange={onModel}
+      />
+      <Autocomplete
+        label="Endpoint"
+        description="Base address of an OpenAI-compatible API (requests go to …/chat/completions). Empty: Google's, for Gemini"
+        w={420}
+        data={OPENAI_ENDPOINTS}
+        value={shownUrl}
+        disabled={!editable}
+        onChange={setUrl}
+        data-testid="openai-url"
+      />
+      <Group align="flex-end">
+        <PasswordInput
+          label="API key"
+          description={endpoint.data?.key_set ? "A key is set; enter a new one to replace it" : "No key is set (for Gemini: aistudio.google.com, Get API key)"}
+          w={420}
+          value={key}
+          disabled={!editable}
+          onChange={(e) => setKey(e.currentTarget.value)}
+          data-testid="openai-key"
+        />
+        {editable && (
+          <Button
+            variant="default"
+            disabled={!key.trim() && url === null}
+            onClick={() => saveEndpoint(key.trim() ? { url: shownUrl, key: key.trim() } : { url: shownUrl }, "Endpoint saved.")}
+          >
+            Save endpoint
+          </Button>
+        )}
+        {editable && endpoint.data?.key_set && (
+          <Button variant="subtle" color="red" onClick={() => saveEndpoint({ url: shownUrl, key: "" }, "API key removed.")}>
+            Remove key
+          </Button>
+        )}
+      </Group>
+    </>
+  );
+}
+
+const OPENAI_MODELS = ["gemini-flash-lite-latest", "gemini-flash-latest", "gpt-4.1-mini", "gpt-4o-mini"];
+const OPENAI_ENDPOINTS = ["https://generativelanguage.googleapis.com/v1beta/openai", "https://api.openai.com/v1"];
 
 function Users() {
   const queryClient = useQueryClient();

@@ -10,7 +10,7 @@ import { useEffect, useState } from "react";
 
 import { api, unwrap } from "../api/client";
 import { addJob, isActive, type Job, type JobRequest, percent, progressText } from "../jobs/jobs";
-import { addTag, EMPTY_FIELDS, type Fields, fieldsOf, removeTag, SOURCES, suggestJob } from "./aiTagger";
+import { addTag, EMPTY_FIELDS, type Fields, fieldsOf, needsSuggestion, removeTag, SOURCES, suggestJob } from "./aiTagger";
 
 const MAX_TAGS_KEY = "stl.ai.maxTags";
 
@@ -115,9 +115,9 @@ function Review({ ids, maxTags, ignoreMeta, overwrite, onDone }: { ids: number[]
   const modelTitle = (m.title as string | null) || "";
 
   const next = () => (index + 1 < ids.length ? setIndex(index + 1) : onDone());
-  const suggest = async () => {
+  const suggest = async (target = id) => {
     try {
-      await submit(queryClient, { kind: "ai_suggest", id, max_tags: maxTags, ignore_meta: ignoreMeta });
+      await submit(queryClient, { kind: "ai_suggest", id: target, max_tags: maxTags, ignore_meta: ignoreMeta });
     } catch (err) {
       notifications.show({ color: "red", message: (err as Error).message });
     }
@@ -127,7 +127,10 @@ function Review({ ids, maxTags, ignoreMeta, overwrite, onDone }: { ids: number[]
     try {
       unwrap(await api.POST("/api/ai/commit/{id}", { params: { path: { id } }, body: { fields, tags, overwrite } }));
       notifications.show({ message: `Saved ${fields.title || modelTitle || `#${id}`}` });
+      // The next model is asked about at once, unless it is being or was answered.
+      const following = ids[index + 1];
       next();
+      if (following != null && needsSuggestion(suggestJob(jobs.data, following))) void suggest(following);
     } catch (err) {
       notifications.show({ color: "red", message: (err as Error).message });
     } finally {
@@ -151,7 +154,7 @@ function Review({ ids, maxTags, ignoreMeta, overwrite, onDone }: { ids: number[]
         <JobProgress job={job} />
       ) : (
         <Group gap="xs">
-          <Button onClick={suggest} data-testid="ai-suggest">{suggestion ? "Suggest again" : "Suggest"}</Button>
+          <Button onClick={() => suggest()} data-testid="ai-suggest">{suggestion ? "Suggest again" : "Suggest"}</Button>
           {job?.state === "failed" && <Text size="sm" c="red">{job.message}</Text>}
         </Group>
       )}

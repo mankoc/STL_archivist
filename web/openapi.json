@@ -62,6 +62,76 @@
         }
       }
     },
+    "/api/ai/openai": {
+      "get": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "The AI tagger's OpenAI-compatible endpoint.",
+        "operationId": "get_ai_openai",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenAiEndpointState"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "Set the OpenAI-compatible endpoint's address and key (administrators).\nBoth are kept in `server.db`, so the key only goes to the address set here.",
+        "operationId": "put_ai_openai",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenAiEndpoint"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenAiEndpointState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/ai/openrouter": {
       "get": {
         "tags": [
@@ -7853,6 +7923,41 @@
         },
         "additionalProperties": false
       },
+      "OpenAiEndpoint": {
+        "type": "object",
+        "description": "A new address for the OpenAI-compatible endpoint (empty: Gemini's) and,\nwhen given, its API key (empty removes it).",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "OpenAiEndpointState": {
+        "type": "object",
+        "description": "The OpenAI-compatible endpoint: its address, and whether a key is set (the\nkey itself is never sent back).",
+        "required": [
+          "url",
+          "key_set"
+        ],
+        "properties": {
+          "key_set": {
+            "type": "boolean"
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
       "OpenRouterKey": {
         "type": "object",
         "description": "A new OpenRouter API key; empty removes it.",
@@ -8812,6 +8917,7 @@
           "ai_temperature",
           "ai_provider",
           "openrouter_model",
+          "openai_model",
           "monitor_interval_minutes"
         ],
         "properties": {
@@ -8823,7 +8929,7 @@
           },
           "ai_provider": {
             "type": "string",
-            "description": "Where the AI tagger's model runs: `local` (this server's llama-server or\na compute worker) or `openrouter` (its key: `PUT /api/ai/openrouter`)."
+            "description": "Where the AI tagger's model runs: `local` (this server's llama-server or\na compute worker), `openrouter` (its key: `PUT /api/ai/openrouter`) or\n`openai`, an OpenAI-compatible endpoint (its address and key: `PUT /api/ai/openai`)."
           },
           "ai_temperature": {
             "type": "number",
@@ -8876,6 +8982,10 @@
             "format": "int32",
             "description": "Monitored folders are checked this often (minutes, 1 to 1440).",
             "minimum": 0
+          },
+          "openai_model": {
+            "type": "string",
+            "description": "The model asked at the OpenAI-compatible endpoint (for example `gemini-flash-lite-latest`)."
           },
           "openrouter_model": {
             "type": "string",
