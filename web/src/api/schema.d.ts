@@ -3040,7 +3040,7 @@ export interface components {
              * @description Monitored folders are checked this often (minutes, 1 to 1440).
              */
             monitor_interval_minutes: number;
-            /** @description The OpenRouter model id (for example `google/gemma-4-31b-it:free`). */
+            /** @description The OpenRouter model id (for example `nvidia/nemotron-3.5-super-vl:free`). */
             openrouter_model: string;
             /** @description Regular expressions for presupported STL file names (case-insensitive). */
             presupport_patterns: string[];

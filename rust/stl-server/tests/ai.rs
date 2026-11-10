@@ -220,3 +220,42 @@ async fn openrouter_provider() {
     let r = call(&lib.state, "PUT", "/api/ai/openrouter", Some(&admin), Some(json!({"key": ""}))).await;
     assert_eq!(r.json(), json!({"key_set": false}));
 }
+
+/// A rate limit ends the batch at once, with an `Error:` line in its log.
+#[tokio::test(flavor = "multi_thread")]
+async fn rate_limit_stops_the_batch() {
+    let hits: Arc<Mutex<usize>> = Arc::default();
+    let limited = {
+        let hits = Arc::clone(&hits);
+        let app = axum::Router::new().route(
+            "/v1/chat/completions",
+            axum::routing::post(move || async move {
+                *hits.lock().unwrap() += 1;
+                let body = json!({"error": {"message": "Provider returned error", "code": 429, "metadata": {"raw": "m is rate-limited upstream"}}});
+                (StatusCode::TOO_MANY_REQUESTS, Json(body))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        url
+    };
+    let lib = library_with(|c| c.ai.openrouter_url = Some(limited.clone()));
+    std::fs::write(lib.dir.path().join("settings.json"), r#"{"ai_provider": "openrouter"}"#).unwrap();
+    let admin = lib.user("ad", Role::Admin);
+    call(&lib.state, "PUT", "/api/ai/openrouter", Some(&admin), Some(json!({"key": "sk-or-1"}))).await;
+    let root = lib.dir.path().join("archives");
+    write_zip(&root.join("Studio").join("A.zip"), &[("a.stl", b"solid a\nendsolid\n")]);
+    write_zip(&root.join("Studio").join("B.zip"), &[("b.stl", b"solid b\nendsolid\n")]);
+    run(&lib, &admin, json!({"kind": "crawl", "folder": root.to_string_lossy(), "pattern": "{sculptor}/{title}"})).await;
+    let a: i64 = scalar(&lib, "SELECT id FROM models WHERE title = 'A'");
+    let b: i64 = scalar(&lib, "SELECT id FROM models WHERE title = 'B'");
+
+    let r = call(&lib.state, "POST", "/api/jobs", Some(&admin), Some(json!({"kind": "ai_tag", "ids": [a, b]}))).await;
+    let v = wait(&lib, &admin, r.json()["id"].as_u64().unwrap()).await;
+    assert_eq!(v["job"]["state"], "failed", "{v}");
+    assert!(v["job"]["message"].as_str().unwrap().starts_with("Rate limit reached"), "{v}");
+    let log: Vec<&str> = v["log"].as_array().unwrap().iter().map(|l| l.as_str().unwrap()).collect();
+    assert!(log.iter().any(|l| l.starts_with("Error: Rate limit reached") && l.contains("rate-limited upstream")), "{log:?}");
+    assert_eq!(*hits.lock().unwrap(), 1, "nothing is asked after the limit");
+}

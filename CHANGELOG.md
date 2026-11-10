@@ -8,7 +8,10 @@
   `settings.json`, which travels in backups and syncs) and is never sent back to clients. New library settings
   `ai_provider` (`local` or `openrouter`) and `openrouter_model`; `GET`/`PUT /api/ai/openrouter` (whether a key is set,
   set or remove it, administrators); `server.json` `ai.openrouter_url` for a proxy. Errors a model server puts in its
-  reply (a rate limit, a bad key) are shown as they are.
+  reply (a rate limit, a bad key) are shown as they are, with OpenRouter's reason.
+- **A rate limit stops the AI tagger's batch job** at once (the models done so far stay saved), with the reason as a red
+  line in the job's log. Lines of any job's log that start with `Error:` are shown in red; models the batch skips
+  for other errors are logged that way.
 
 ## 2026.46.0 — 2026-11-09
 
