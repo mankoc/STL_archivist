@@ -54,7 +54,7 @@ Version: 2026.46.0
   rescanned from their right-click menu, an
   image grid, a detail pane with thumbnails, downloads and image drag-and-drop, and a
   folder-by-folder archive browser
-- **Editing** — model editor, mass editor (path patterns with a preview, find & replace,
+- **Editing** — model editor, mass editor (path patterns with a preview, find & replace, tags added or cleared,
   trimming), lookup editors for tags, categories, collections, subcollections, scales, sculptors, releases and
   creators, with *Merge similar* to find and join near-duplicate names
 - **Duplicates** — archives sharing STL files, archives with similar images (perceptual hash

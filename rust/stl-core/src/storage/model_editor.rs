@@ -717,19 +717,20 @@ pub fn mass_save(tx: &Transaction, plan: &MassPlan) -> EResult<()> {
         if apply_presupports {
             row.presupports = presupports_value.clone().filter(|v| !v.is_empty());
         }
+        // Tags are added; `clearing` "tags" removes the model's tags first.
         if apply_tags {
-            tx.execute("DELETE FROM model_tags WHERE model_id = ?1", [mid])?;
-            if !(clearing("tags") && py_strip(&plan.tags).is_empty()) {
-                let resolved = resolve_tokens(&plan.tags, &ctx);
-                let names: Vec<&str> = resolved.split(',').map(py_strip).filter(|s| !s.is_empty()).collect();
-                let mut seen = std::collections::HashSet::new();
-                for name in names {
-                    if !seen.insert(py_strip(name).to_lowercase()) {
-                        continue; // a tag listed twice is linked once
-                    }
-                    let id = tag(tx, name)?;
-                    tx.execute("INSERT INTO model_tags (model_id, tag_id) VALUES (?1, ?2)", params![mid, id])?;
+            if clearing("tags") {
+                tx.execute("DELETE FROM model_tags WHERE model_id = ?1", [mid])?;
+            }
+            let resolved = resolve_tokens(&plan.tags, &ctx);
+            let names: Vec<&str> = resolved.split(',').map(py_strip).filter(|s| !s.is_empty()).collect();
+            let mut seen = std::collections::HashSet::new();
+            for name in names {
+                if !seen.insert(py_strip(name).to_lowercase()) {
+                    continue; // a tag listed twice is linked once
                 }
+                let id = tag(tx, name)?;
+                tx.execute("INSERT OR IGNORE INTO model_tags (model_id, tag_id) VALUES (?1, ?2)", params![mid, id])?;
             }
         }
 

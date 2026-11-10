@@ -280,6 +280,27 @@ async fn mass_edit_with_pattern_and_regex() {
     assert_eq!(r.status, StatusCode::BAD_REQUEST);
 }
 
+#[tokio::test]
+async fn mass_edit_adds_and_clears_tags() {
+    let l = library();
+    let tags = |id: i64| -> String {
+        l.scalar(&format!(
+            "SELECT coalesce(group_concat(name, ','), '') FROM (SELECT t.name FROM model_tags mt JOIN tags t ON t.id = mt.tag_id WHERE mt.model_id = {id} ORDER BY t.name)"
+        ))
+    };
+    async fn mass(l: &Lib, body: Value) {
+        let r = l.call("POST", "/api/models/mass-edit", Some(body)).await;
+        assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    }
+    mass(&l, json!({"ids": [l.ids[0]], "tags": "old"})).await;
+    mass(&l, json!({"ids": l.ids, "tags": "new, old"})).await;
+    assert_eq!((tags(l.ids[0]), tags(l.ids[1])), ("new,old".into(), "new,old".into()), "added, never twice");
+    mass(&l, json!({"ids": [l.ids[0]], "clearing": ["tags"], "tags": "only"})).await;
+    assert_eq!(tags(l.ids[0]), "only", "cleared first, then added");
+    mass(&l, json!({"ids": l.ids, "clearing": ["tags"]})).await;
+    assert_eq!((tags(l.ids[0]), tags(l.ids[1])), (String::new(), String::new()));
+}
+
 fn png() -> Vec<u8> {
     let img = image::RgbImage::from_pixel(64, 48, image::Rgb([200, 30, 30]));
     let mut out = std::io::Cursor::new(Vec::new());

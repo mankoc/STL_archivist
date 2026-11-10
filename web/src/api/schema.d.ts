@@ -2494,7 +2494,7 @@ export interface components {
             /** @default  */
             category: string;
             /**
-             * @description Fields to clear.
+             * @description Fields to clear (`tags` removes the models' tags before `tags` are added).
              * @default []
              */
             clearing: string[];
