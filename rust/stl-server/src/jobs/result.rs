@@ -20,6 +20,8 @@ pub enum JobResult {
     AiFields(Box<crate::ai::AiEditorFields>),
     /// The path pattern the model inferred for a folder (`ai_pattern`).
     AiPattern(Box<crate::ai::AiPattern>),
+    /// The metadata problems the model found (`ai_check`).
+    AiIssues { rows: Vec<crate::ai::AiIssue> },
     /// What moving a library to a new root found (`relocate_library`).
     Relocation(Relocation),
     /// A package's folders and where their archives are here (`import_library`).
@@ -92,6 +94,7 @@ impl JobResult {
             JobResult::Metadata { groups } => groups.len(),
             JobResult::Records { rows } => rows.len(),
             JobResult::AiSuggestion(_) | JobResult::AiFields(_) | JobResult::AiPattern(_) => 1,
+            JobResult::AiIssues { rows } => rows.len(),
             JobResult::Relocation(r) => r.total,
             JobResult::Import(r) => r.folders.len(),
         }

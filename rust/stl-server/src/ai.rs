@@ -757,6 +757,56 @@ pub fn infer_pattern(lib: &Library, ctl: &Control, log: &dyn Fn(String), folder:
     Ok(AiPattern { folder: folder.to_string(), pattern, samples: shown, fits, sampled: reads.len() })
 }
 
+/// A metadata problem the model found in one model (`ai_check`).
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct AiIssue {
+    pub model_id: i64,
+    pub title: String,
+    pub archive_path: String,
+    /// `Title`, `Creator`, `Sculptor`, `Category`, `Collection`, `Subcollection`, `Scale`, `Source`, `Year` or `Description`.
+    pub field: String,
+    /// The catalogued value.
+    pub value: String,
+    pub problem: String,
+    /// What the model proposes instead (empty: nothing).
+    pub suggestion: String,
+}
+
+/// The metadata problems the model finds in one model's catalogued fields,
+/// judged against its path, file names and the library's names (text only).
+pub fn check(lib: &Library, ctl: &Control, log: &dyn Fn(String), model_id: i64) -> Result<Vec<AiIssue>, String> {
+    use stl_core::ai_tagging as T;
+    let a = prepare(lib, model_id)?;
+    let choices = lib.db.with(stl_core::storage::model_editor::editor_choices).map_err(|e| format!("database: {e}"))?;
+    let context = std::iter::once(a.inputs.archive_path.as_str())
+        .chain(a.inputs.files.iter().map(String::as_str))
+        .chain(a.inputs.meta.iter().map(|(_, v)| v.as_str()))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let vocab: Vec<(&str, Vec<&str>)> = [("Creator", "creators"), ("Sculptor", "sculptors"), ("Category", "categories"), ("Collection", "collections"), ("Subcollection", "subcollections"), ("Scale", "scales")]
+        .into_iter()
+        .map(|(label, list)| {
+            let names = choices.iter().find(|(n, _)| *n == list).map(|(_, v)| v.as_slice()).unwrap_or_default();
+            (label, T::relevant_names(names, &context, VOCAB_CAP))
+        })
+        .collect();
+    log(format!("{}: checking metadata…", a.title));
+    let raw = ask_model(lib, ctl, log, &[], &T::build_check_prompt(&a.inputs.archive_path, &T::known_meta(&a.inputs), &vocab), 300)?;
+    let value = |f: &str| a.inputs.meta.iter().find(|(k, _)| k == f).map(|(_, v)| v.clone()).unwrap_or_default();
+    Ok(T::parse_issues(&raw, &a.inputs.meta)
+        .into_iter()
+        .map(|i| AiIssue {
+            model_id,
+            title: a.title.clone(),
+            archive_path: a.inputs.archive_path.clone(),
+            value: value(&i.field),
+            field: i.field,
+            problem: i.problem,
+            suggestion: i.suggestion,
+        })
+        .collect())
+}
+
 /// `ai_commit`: write the fields (only empty ones unless `overwrite`) and merge
 /// the tags. Returns the archive path, or `None` when the model is gone.
 pub fn commit(lib: &Library, model_id: i64, fields: AiFieldValues, tags: &[String], overwrite: bool) -> Result<Option<String>, String> {

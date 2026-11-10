@@ -21,6 +21,7 @@ import { AiPatternButton } from "./AiPatternButton";
 import { PatternSample } from "./PatternSample";
 import { folderPattern } from "./patterns";
 import { SortModal } from "./SortModal";
+import { AiCheckDrawer } from "./AiCheckDrawer";
 import { AiTaggerDrawer } from "./AiTaggerDrawer";
 import { MassEditDrawer } from "./MassEditDrawer";
 import { EMPTY, type FilterSpec, isEmpty } from "./filters";
@@ -52,6 +53,7 @@ export function BrowserPage({ active = true }: { active?: boolean }) {
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [massEdit, setMassEdit] = useState(false);
   const [aiTagger, setAiTagger] = useState(false);
+  const [aiCheck, setAiCheck] = useState(false);
   const [view, setView] = useState<"table" | "grid">("table");
   // The side panes' widths, dragged by their inner edges.
   const layoutRef = useRef<HTMLDivElement>(null);
@@ -210,6 +212,7 @@ export function BrowserPage({ active = true }: { active?: boolean }) {
     edit: setEditing,
     massEdit: () => setMassEdit(true),
     aiTagger: () => setAiTagger(true),
+    aiCheck: () => setAiCheck(true),
     clearWarnings: (ids) => void clearWarnings(ids),
     queueJob: (body, what) => void queueJob(body, what),
     sortFiles: () => setSorting(true),
@@ -362,6 +365,7 @@ export function BrowserPage({ active = true }: { active?: boolean }) {
         />
         <DetailPane id={selection.current} onEdit={setEditing} />
       </Box>
+      <AiCheckDrawer ids={selected} opened={aiCheck} onClose={() => setAiCheck(false)} onEdit={setEditing} />
       <EditorDrawer id={editing} onClose={() => setEditing(null)} />
       <MassEditDrawer ids={selected} opened={massEdit} onClose={() => setMassEdit(false)} />
       <AiTaggerDrawer ids={selected} opened={aiTagger} onClose={() => setAiTagger(false)} />
