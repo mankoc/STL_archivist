@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Infer the path pattern with AI when crawling:** *Infer with AI* in the crawl dialogs (*Libraries → Crawl* and
+  *Crawl with a pattern…*) sends up to 40 archive paths below the folder, spread over its sub-folders, with the
+  library's creators, sculptors, releases and collections found in them, to the AI model and fills the pattern field
+  with its answer (only the pattern tokens are accepted), with how many sampled paths it reads (job `ai_pattern`,
+  read-only, the same folder access as a crawl).
 - **AI data in the model editor:** a button that asks the AI model about the model being edited for every field it can
   infer (title, creator, type, date, sculptor, release, collection, subcollection, category, scales, description and
   tags) from its images, archive path, file names and catalogued metadata. The prompt offers the library's existing

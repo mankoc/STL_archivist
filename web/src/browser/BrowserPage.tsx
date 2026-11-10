@@ -17,6 +17,7 @@ import { EditorDrawer } from "./EditorDrawer";
 import { FilterPane } from "./FilterPane";
 import { GridView } from "./GridView";
 import { clampWidth, DEFAULT_WIDTH, FILTER_PANE, loadWidth, saveWidth } from "./paneWidth";
+import { AiPatternButton } from "./AiPatternButton";
 import { PatternSample } from "./PatternSample";
 import { folderPattern } from "./patterns";
 import { SortModal } from "./SortModal";
@@ -409,6 +410,7 @@ export function BrowserPage({ active = true }: { active?: boolean }) {
               onChange={(e) => setPatternCrawl({ ...patternCrawl, pattern: e.currentTarget.value })}
               data-autofocus
             />
+            <AiPatternButton folder={patternCrawl.folder} onPattern={(pattern) => setPatternCrawl((c) => c && { ...c, pattern })} />
             <PatternSample folder={patternCrawl.folder} pattern={patternCrawl.pattern} />
             <Group justify="flex-end">
               <Button variant="default" onClick={() => setPatternCrawl(null)}>Cancel</Button>
