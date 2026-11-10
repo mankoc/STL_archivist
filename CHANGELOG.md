@@ -5,7 +5,6 @@
 - **Mass edit can clear tags:** a **Clear** box beside *Tags* removes the selected models' tags; with tags typed too,
   they replace the old ones. Typed tags without it are now **added** to each model's tags, as the field always said
   (they used to replace them).
-- **The AI tagger can use a free OpenRouter model** instead of the local Qwen2.5-VL: *Settings → Library → AI tagger*
 - **The AI tagger can use Qwen3-VL 4B, now the default**, which is better at recognising models and reading text in
   pictures, and is Apache-2.0 (Qwen2.5-VL 3B's licence limits commercial use). *Settings → Components* lets you
   choose the model: both can be installed, and choosing one that is already downloaded switches to it without
