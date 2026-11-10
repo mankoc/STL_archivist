@@ -13,8 +13,8 @@ crate-type = ["cdylib", "rlib"]
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook = "0.1.7"
 glam = "0.34.1"
-meshpeek-core = { git = "https://github.com/mankoc/meshpeek", tag = "v0.5.9", default-features = false }
-meshpeek-render = { git = "https://github.com/mankoc/meshpeek", tag = "v0.5.9" }
+meshpeek-core = { git = "https://github.com/mankoc/meshpeek", tag = "v0.5.10", default-features = false }
+meshpeek-render = { git = "https://github.com/mankoc/meshpeek", tag = "v0.5.10" }
 wasm-bindgen = "=0.2.129" # = the wasm-bindgen CLI gen:viewer runs
 wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = ["HtmlCanvasElement"] }
