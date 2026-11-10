@@ -8879,7 +8879,7 @@
           },
           "openrouter_model": {
             "type": "string",
-            "description": "The OpenRouter model id (for example `google/gemma-4-31b-it:free`)."
+            "description": "The OpenRouter model id (for example `nvidia/nemotron-3.5-super-vl:free`)."
           },
           "presupport_patterns": {
             "type": "array",

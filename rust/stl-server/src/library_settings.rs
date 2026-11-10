@@ -9,7 +9,7 @@ pub const FILE: &str = "settings.json";
 pub const MAX_THUMB_SIZE_DEFAULT: u32 = 512;
 pub const AI_PROVIDERS: [&str; 2] = ["local", "openrouter"];
 /// A free vision model; the settings page lists the current free ones.
-pub const OPENROUTER_MODEL_DEFAULT: &str = "google/gemma-4-31b-it:free";
+pub const OPENROUTER_MODEL_DEFAULT: &str = "nvidia/nemotron-3.5-super-vl:free";
 
 pub struct LibrarySettings(Value);
 

@@ -1357,7 +1357,7 @@ The settings, with their effective values (defaults filled in).
 | `metadata_sidecar_enabled` | boolean | Write `METADATA.7z` sidecars into archive folders. |
 | `metadata_thumbnails` | boolean | Include thumbnails in sidecars. |
 | `monitor_interval_minutes` | integer | Monitored folders are checked this often (minutes, 1 to 1440). |
-| `openrouter_model` | string | The OpenRouter model id (for example `google/gemma-4-31b-it:free`). |
+| `openrouter_model` | string | The OpenRouter model id (for example `nvidia/nemotron-3.5-super-vl:free`). |
 | `presupport_patterns` | string[] | Regular expressions for presupported STL file names (case-insensitive). |
 | `recurse_subdirs` | boolean |  |
 | `trash_folder_path` | string |  |

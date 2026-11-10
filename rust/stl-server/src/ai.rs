@@ -350,15 +350,32 @@ fn complete(base: &str, remote: Option<(&str, &str)>, p: Prompt) -> Result<Strin
     let mut resp = req.send(body.to_string()).map_err(|e| format!("AI server request failed: {e}"))?;
     let status = resp.status();
     let text = resp.body_mut().read_to_string().map_err(|e| format!("AI server reply: {e}"))?;
-    parse_chat_response(&text).map_err(|e| if status.is_success() { e } else { format!("{e} (HTTP {status})") })
+    parse_chat_response(&text).map_err(|e| {
+        let code = serde_json::from_str::<Value>(&text).ok().and_then(|v| v["error"]["code"].as_u64());
+        if status.as_u16() == 429 || code == Some(429) {
+            format!("{RATE_LIMITED}: {e}")
+        } else if status.is_success() {
+            e
+        } else {
+            format!("{e} (HTTP {status})")
+        }
+    })
 }
+
+/// How a rate-limited request's error starts (OpenRouter's free models have
+/// per-minute and daily limits): the batch job stops on it.
+pub const RATE_LIMITED: &str = "Rate limit reached";
 
 /// `_parse_chat_response`: the assistant message of a chat-completions body
 /// (or the error an OpenAI-compatible server put there).
 pub fn parse_chat_response(raw: &str) -> Result<String, String> {
     let v: Value = serde_json::from_str(raw).map_err(|e| format!("AI server returned malformed JSON: {e}"))?;
     if let Some(msg) = v["error"]["message"].as_str() {
-        return Err(format!("AI server: {msg}"));
+        // OpenRouter puts the provider's own reason (what to do) in `metadata.raw`.
+        return Err(match v["error"]["metadata"]["raw"].as_str() {
+            Some(raw) => format!("AI server: {msg}: {raw}"),
+            None => format!("AI server: {msg}"),
+        });
     }
     let content = v["choices"].get(0).ok_or_else(|| format!("AI server returned no choices: {v}"))?["message"]["content"]
         .as_str()
@@ -518,5 +535,9 @@ mod tests {
         assert!(parse_chat_response("nope").unwrap_err().contains("malformed"));
         assert!(parse_chat_response(r#"{"choices":[{"message":{}}]}"#).is_err());
         assert_eq!(parse_chat_response(r#"{"error":{"message":"Rate limit exceeded","code":429}}"#).unwrap_err(), "AI server: Rate limit exceeded");
+        assert_eq!(
+            parse_chat_response(r#"{"error":{"message":"Provider returned error","code":429,"metadata":{"raw":"m is rate-limited upstream"}}}"#).unwrap_err(),
+            "AI server: Provider returned error: m is rate-limited upstream"
+        );
     }
 }

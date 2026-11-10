@@ -55,7 +55,7 @@ pub struct Settings {
     /// Where the AI tagger's model runs: `local` (this server's llama-server or
     /// a compute worker) or `openrouter` (its key: `PUT /api/ai/openrouter`).
     pub ai_provider: String,
-    /// The OpenRouter model id (for example `google/gemma-4-31b-it:free`).
+    /// The OpenRouter model id (for example `nvidia/nemotron-3.5-super-vl:free`).
     pub openrouter_model: String,
     /// Monitored folders are checked this often (minutes, 1 to 1440).
     pub monitor_interval_minutes: u32,
@@ -120,7 +120,7 @@ impl Settings {
         }
         let m = &self.openrouter_model;
         if m.is_empty() || m.len() > 200 || m.chars().any(|c| c.is_whitespace() || c.is_control()) {
-            return Err(ApiError::bad_request("openrouter_model is a model id such as google/gemma-4-31b-it:free"));
+            return Err(ApiError::bad_request("openrouter_model is a model id such as nvidia/nemotron-3.5-super-vl:free"));
         }
         for p in &self.presupport_patterns {
             stl_core::rules::compile_pattern(p).map_err(|e| ApiError::bad_request(format!("pattern {p:?}: {e}")))?;
