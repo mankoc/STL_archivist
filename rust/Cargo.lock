@@ -3170,8 +3170,8 @@ dependencies = [
 
 [[package]]
 name = "meshpeek-core"
-version = "0.5.9"
-source = "git+https://github.com/mankoc/meshpeek?tag=v0.5.9#7dd88e9ea573ea845bb9b84a0808363127fca0eb"
+version = "0.5.10"
+source = "git+https://github.com/mankoc/meshpeek?tag=v0.5.10#aa577389e256f3b8fa0bb6250830bfb06dc63738"
 dependencies = [
  "aes 0.8.4",
  "base64 0.22.1",
@@ -3190,8 +3190,8 @@ dependencies = [
 
 [[package]]
 name = "meshpeek-render"
-version = "0.5.9"
-source = "git+https://github.com/mankoc/meshpeek?tag=v0.5.9#7dd88e9ea573ea845bb9b84a0808363127fca0eb"
+version = "0.5.10"
+source = "git+https://github.com/mankoc/meshpeek?tag=v0.5.10#aa577389e256f3b8fa0bb6250830bfb06dc63738"
 dependencies = [
  "bytemuck",
  "glam",

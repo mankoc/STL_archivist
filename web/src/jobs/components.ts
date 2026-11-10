@@ -15,7 +15,15 @@ export function defaultVariants(info: ComponentsInfo): Record<string, string> {
 
 /** How a variant is shown. */
 export function variantLabel(v: string): string {
-  return { cpu: "CPU", cuda: "NVIDIA GPU (CUDA)", directml: "GPU (DirectML)" }[v] ?? v;
+  return (
+    {
+      cpu: "CPU",
+      cuda: "NVIDIA GPU (CUDA)",
+      directml: "GPU (DirectML)",
+      "qwen3-vl-4b": "Qwen3-VL 4B",
+      "qwen2.5-vl-3b": "Qwen2.5-VL 3B",
+    }[v] ?? v
+  );
 }
 
 /** Download size of a component in `variant` (ignored without variants). */
@@ -36,8 +44,11 @@ export function totalBytes(components: ComponentStatus[], chosen: string[], vari
     .reduce((sum, c) => sum + sizeOf(c, variants[c.id]), 0);
 }
 
-/** Components whose licence must be accepted before downloading. */
-export const NEEDS_ACCEPTANCE = ["ai_model"];
+/** Whether a component's licence must be accepted before downloading it in `variant`
+ *  (the Qwen Research License of Qwen2.5-VL; Qwen3-VL is Apache-2.0). */
+export function needsAcceptance(id: string, variant: string | undefined): boolean {
+  return id === "ai_model" && variant === "qwen2.5-vl-3b";
+}
 
 /** Whether the compute worker's folder on this computer is the server's data
  * directory (a local library): then one list of components serves both. */

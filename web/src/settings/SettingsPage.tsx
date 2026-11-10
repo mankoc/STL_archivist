@@ -398,7 +398,7 @@ function LibrarySettingsForm({ editable }: { editable: boolean }) {
             disabled={!editable}
             onChange={(v) => set("ai_provider", v)}
             data={[
-              { value: "local", label: "Local model (Qwen2.5-VL)" },
+              { value: "local", label: "Local model (Settings → Components)" },
               { value: "openrouter", label: "OpenRouter" },
             ]}
           />

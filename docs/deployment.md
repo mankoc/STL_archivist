@@ -339,7 +339,9 @@ Each is enabled by making its files available; without them the rest works. On W
 and Linux x64 the easiest way is *Settings → Components* (administrators),
 which downloads pinned versions from their official sources into the data directory and
 checks each file's SHA-256: llama.cpp build b9789 (`ai/bin/`; CPU, or CUDA 12.4 with its
-runtime on Windows — Linux gets the CPU build), the Qwen2.5-VL model (`ai/models/`), the CLIP
+runtime on Windows — Linux gets the CPU build), the AI tagger's model (`ai/models/`: Qwen3-VL 4B
+by default or Qwen2.5-VL 3B; both can be installed, and choosing an installed one only switches to
+it, recorded in `ai/models/selected.txt`), the CLIP
 encoder (`models/clip_image_encoder.onnx`, exported from `openai/clip-vit-base-patch32` by
 Xenova/clip-vit-base-patch32), ONNX Runtime 1.22.0 (the data directory; CPU, DirectML on
 Windows with DirectML 1.15.4 beside it, or CUDA on Linux) and pdfium 7881 (the data
@@ -390,16 +392,19 @@ the others. On a GPU, embeddings are several times faster (an RTX 3070 with Dire
 **AI tagger:** llama.cpp's `llama-server`
 ([releases](https://github.com/ggml-org/llama.cpp/releases): a CPU build, or CUDA for an
 NVIDIA GPU) and the two model files from
-[ggml-org/Qwen2.5-VL-3B-Instruct-GGUF](https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF):
-`Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf` and `mmproj-Qwen2.5-VL-3B-Instruct-f16.gguf`
-(about 3.3 GB). Either use the layout the earlier desktop app's AI setup created —
+[Qwen/Qwen3-VL-4B-Instruct-GGUF](https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF):
+`Qwen3VL-4B-Instruct-Q4_K_M.gguf` and `mmproj-Qwen3VL-4B-Instruct-F16.gguf` (about 3.3 GB,
+Apache-2.0), or the older
+[ggml-org/Qwen2.5-VL-3B-Instruct-GGUF](https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF)
+pair (Qwen Research License). Any other vision GGUF llama.cpp supports works through
+`ai.model` / `ai.mmproj`. Either use the layout the earlier desktop app's AI setup created —
 `<data dir>/ai/bin/llama-server[.exe]` and `<data dir>/ai/models/` (a `variant.txt` with
 `cuda` in `bin/` offloads to the GPU) — or point the server at them:
 
 ```json
 {"ai": {"llama_server": "/opt/llama/llama-server",
-        "model": "/opt/llama/models/Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf",
-        "mmproj": "/opt/llama/models/mmproj-Qwen2.5-VL-3B-Instruct-f16.gguf",
+        "model": "/opt/llama/models/Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+        "mmproj": "/opt/llama/models/mmproj-Qwen3VL-4B-Instruct-F16.gguf",
         "gpu_layers": 99}}
 ```
 

@@ -16,7 +16,7 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::{self, Message};
 
 use crate::Config;
-use crate::ai::{AiRuntime, MODEL_LABEL, Prompt};
+use crate::ai::{AiRuntime, Prompt};
 use crate::tools::Tools;
 use crate::workers::{ChatInfo, ClipInfo, Hello, MAX_MESSAGE, ToServer, ToWorker, b64, unb64, sha256_file};
 
@@ -56,7 +56,7 @@ impl Engines {
         if !status.available {
             tracing::info!("AI tagger unavailable here: {}", status.detail);
         }
-        let chat = status.available.then(|| ChatInfo { model: MODEL_LABEL.into() });
+        let chat = status.available.then(|| ChatInfo { model: status.model.clone() });
         let hello = Hello { name, version: stl_core::VERSION.to_string(), clip, chat };
         Engines { config, tools, ai, hello }
     }
