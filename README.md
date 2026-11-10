@@ -62,7 +62,8 @@ Version: 2026.46.0
   metadata (exact, Levenshtein, Soundex), with side-by-side comparison and a button
   before each archive that deletes its file (to the trash folder when one is set)
 - **Find by Image** — drop a picture to find models whose thumbnails look like it
-- **AI tagger** — Qwen2.5-VL through llama.cpp, or a free OpenRouter vision model, suggests tags, title,
+- **AI tagger** — a local vision model through llama.cpp (Qwen3-VL 4B by default, or Qwen2.5-VL 3B; chosen in
+  *Settings → Components*, any GGUF via `ai.model`), or a free OpenRouter vision model, suggests tags, title,
   creator, sculptor, scale, source, year and description (never collection or subcollection); review one by one or
   tag a selection in one job
 - **Monitored folders** — crawled automatically when their archives change (checked by size
@@ -289,9 +290,10 @@ picks the default from the GPUs it finds: the AI tagger's runtime with CUDA (Win
 and ONNX Runtime with DirectML (Windows, any DirectX 12 GPU) or CUDA (Linux, NVIDIA; CUDA 12
 and cuDNN 9 must be installed). To install by hand:
 
-- **AI tagger** — needs llama.cpp's `llama-server` and the Qwen2.5-VL GGUF model
-  (`Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf` and `mmproj-Qwen2.5-VL-3B-Instruct-f16.gguf`, from
-  [ggml-org/Qwen2.5-VL-3B-Instruct-GGUF](https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF)).
+- **AI tagger** — needs llama.cpp's `llama-server` and a vision GGUF model with its mmproj
+  (`Qwen3VL-4B-Instruct-Q4_K_M.gguf` and `mmproj-Qwen3VL-4B-Instruct-F16.gguf`, from
+  [Qwen/Qwen3-VL-4B-Instruct-GGUF](https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF), or the older
+  Qwen2.5-VL-3B files). *Settings → Components* can keep both installed and switches between them.
   Put them in `<data dir>/ai/bin` and `<data dir>/ai/models` (the layout the earlier desktop
   app's AI setup created) or point `"ai"` at them. The server starts `llama-server` on first
   use and stops it after ten idle minutes.

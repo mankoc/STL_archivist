@@ -1,5 +1,5 @@
 //! The AI tagger's model: an OpenAI-compatible `llama-server` (llama.cpp) with
-//! Qwen2.5-VL, as in the desktop app. The server starts it on first use from
+//! a vision model (Qwen3-VL by default, see [`MODELS`]). The server starts it on first use from
 //! the desktop's install (`<data dir>/ai/bin`, `<data dir>/ai/models`) or the
 //! paths in `server.json`, stops it after [`IDLE`] without requests and when
 //! the server exits; or it talks to one already running (`ai.url`).
@@ -22,10 +22,45 @@ use utoipa::ToSchema;
 use crate::library_settings::LibrarySettings;
 use crate::{Config, Library};
 
-/// The desktop's model files (`app/utils/ai_runtime.py`).
-pub const MODEL_FILE: &str = "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf";
-pub const MMPROJ_FILE: &str = "mmproj-Qwen2.5-VL-3B-Instruct-f16.gguf";
-pub const MODEL_LABEL: &str = "Qwen2.5-VL-3B-Instruct (GGUF)";
+/// A model the `ai_model` component can install (its variant `id`).
+pub struct Model {
+    pub id: &'static str,
+    pub label: &'static str,
+    /// File names in `<data dir>/ai/models`.
+    pub file: &'static str,
+    pub mmproj: &'static str,
+}
+
+/// The models to choose from; the first is the default.
+pub const MODELS: [Model; 2] = [
+    Model {
+        id: "qwen3-vl-4b",
+        label: "Qwen3-VL-4B-Instruct (GGUF)",
+        file: "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+        mmproj: "mmproj-Qwen3VL-4B-Instruct-F16.gguf",
+    },
+    Model {
+        id: "qwen2.5-vl-3b",
+        label: "Qwen2.5-VL-3B-Instruct (GGUF)",
+        file: "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf",
+        mmproj: "mmproj-Qwen2.5-VL-3B-Instruct-f16.gguf",
+    },
+];
+
+/// The model to use: the installed one, else the default.
+fn local_model(config: &Config) -> &'static Model {
+    let id = crate::components::installed_ai_model(&config.data_dir);
+    MODELS.iter().find(|m| Some(m.id) == id).unwrap_or(&MODELS[0])
+}
+
+/// The name of the model this server's tagger uses (`ai.model`'s file name
+/// when one is configured).
+pub fn model_label(config: &Config) -> String {
+    match &config.ai.model {
+        Some(p) => Path::new(p).file_name().map_or_else(|| p.clone(), |n| n.to_string_lossy().into_owned()),
+        None => local_model(config).label.into(),
+    }
+}
 /// Context window: several downscaled images plus the prompt and reply.
 const N_CTX: u32 = 8192;
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(240);
@@ -185,8 +220,9 @@ fn launch_spec(config: &Config) -> Result<Launch, String> {
             format!("llama-server was not found in {} (install the AI components from the desktop app, or set ai.llama_server in server.json)", ai_dir.join("bin").display())
         })?,
     };
-    let model = cfg.model.clone().map_or_else(|| ai_dir.join("models").join(MODEL_FILE), PathBuf::from);
-    let mmproj = cfg.mmproj.clone().map_or_else(|| ai_dir.join("models").join(MMPROJ_FILE), PathBuf::from);
+    let m = local_model(config);
+    let model = cfg.model.clone().map_or_else(|| ai_dir.join("models").join(m.file), PathBuf::from);
+    let mmproj = cfg.mmproj.clone().map_or_else(|| ai_dir.join("models").join(m.mmproj), PathBuf::from);
     for p in [&exe, &model, &mmproj] {
         if !p.is_file() {
             return Err(format!("{} is missing", p.display()));
@@ -208,12 +244,13 @@ fn free_port() -> Result<u16, String> {
 impl AiRuntime {
     pub fn status(&self, config: &Config) -> AiStatus {
         let running = self.running.lock().unwrap_or_else(|e| e.into_inner()).is_some();
+        let model = model_label(config);
         if let Some(url) = &config.ai.url {
-            return AiStatus { available: true, running: false, model: MODEL_LABEL.into(), detail: format!("using {url}") };
+            return AiStatus { available: true, running: false, model, detail: format!("using {url}") };
         }
         match launch_spec(config) {
-            Ok(l) => AiStatus { available: true, running, model: MODEL_LABEL.into(), detail: format!("{}", l.exe.display()) },
-            Err(e) => AiStatus { available: false, running, model: MODEL_LABEL.into(), detail: e },
+            Ok(l) => AiStatus { available: true, running, model, detail: format!("{}", l.exe.display()) },
+            Err(e) => AiStatus { available: false, running, model, detail: e },
         }
     }
 

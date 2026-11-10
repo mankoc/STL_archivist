@@ -124,7 +124,7 @@ impl Config {
         Self::resolve(args, |k| std::env::var(k).ok())
     }
 
-    fn resolve(args: &[String], env: impl Fn(&str) -> Option<String>) -> Result<Config, String> {
+    pub(crate) fn resolve(args: &[String], env: impl Fn(&str) -> Option<String>) -> Result<Config, String> {
         let mut data_dir: Option<PathBuf> = env("STL_DATA_DIR").map(PathBuf::from);
         let mut bind_arg: Option<String> = None;
         let mut it = args.iter();
