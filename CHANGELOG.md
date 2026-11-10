@@ -3,7 +3,8 @@
 ## Unreleased
 
 - **The AI tagger can use a free OpenRouter model** instead of the local Qwen2.5-VL: *Settings → Library → AI tagger*
-  chooses **OpenRouter**, one of its free models that read images (listed from openrouter.ai), and its API key. The
+  chooses **OpenRouter**, a model (its free models that read images are suggested from openrouter.ai; any other
+  model's slug, or its openrouter.ai page, can be pasted) and its API key. The
   prompts and tag cleaning are the same as with the local model. The key is kept in `server.db` (never in
   `settings.json`, which travels in backups and syncs) and is never sent back to clients. New library settings
   `ai_provider` (`local` or `openrouter`) and `openrouter_model`; `GET`/`PUT /api/ai/openrouter` (whether a key is set,

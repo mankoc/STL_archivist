@@ -4,7 +4,7 @@
 // downloadable components, and user administration. A tab is addressed as
 // `#/settings/<tab>`.
 import {
-  ActionIcon, Badge, Button, Card, Checkbox, ColorSwatch, Group, Modal, NumberInput, PasswordInput, SegmentedControl, Select, SimpleGrid,
+  ActionIcon, Autocomplete, Badge, Button, Card, Checkbox, ColorSwatch, Group, Modal, NumberInput, PasswordInput, SegmentedControl, Select, SimpleGrid,
   Stack, Switch, Table, Tabs, Text, Textarea, TextInput, Title, Tooltip, useMantineColorScheme,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
@@ -22,7 +22,7 @@ import { MaintenanceTab } from "../jobs/MaintenanceTab";
 import { BackupsTab, SidecarsTab, WorkersTab } from "../jobs/SettingsTabs";
 import { CHECK_UPDATES } from "../shell/updates";
 import { type LibrarySettings, SETTINGS_QUERY } from "./librarySettings";
-import { fetchFreeVisionModels } from "./openrouter";
+import { fetchFreeVisionModels, modelSlug } from "./openrouter";
 import { settingsTab } from "./tabs";
 import { PatternsTab } from "./PatternsTab";
 
@@ -447,31 +447,21 @@ function OpenRouterSettings({ model, editable, onModel }: { model: string; edita
       fail(err);
     }
   };
-  const options = models.data ?? [];
-  const data = options.some((o) => o.value === model) ? options : [{ value: model, label: model }, ...options];
   return (
     <>
-      {models.isError ? (
-        <TextInput
-          label="Model"
-          description="OpenRouter's model list could not be read; enter a model id"
-          w={420}
-          value={model}
-          disabled={!editable}
-          onChange={(e) => onModel(e.currentTarget.value.trim())}
-        />
-      ) : (
-        <Select
-          label="Model"
-          description="OpenRouter's free models that read images (free models have daily request limits)"
-          searchable
-          w={420}
-          data={data}
-          value={model}
-          disabled={!editable}
-          onChange={(v) => v && onModel(v)}
-        />
-      )}
+      <Autocomplete
+        label="Model"
+        description={
+          (models.isError ? "OpenRouter's model list could not be read. " : "Suggestions: OpenRouter's free models that read images. ") +
+          "Or paste any model slug from openrouter.ai (it must read images; paid models are charged to the key)."
+        }
+        placeholder="vendor/model:free"
+        w={420}
+        data={models.data ?? []}
+        value={model}
+        disabled={!editable}
+        onChange={(v) => onModel(modelSlug(v))}
+      />
       <Group align="flex-end">
         <PasswordInput
           label="API key"

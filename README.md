@@ -296,7 +296,8 @@ and cuDNN 9 must be installed). To install by hand:
   app's AI setup created) or point `"ai"` at them. The server starts `llama-server` on first
   use and stops it after ten idle minutes.
 - **AI tagger on OpenRouter** — instead of a local model: *Settings → Library → AI tagger → OpenRouter*,
-  pick one of the free models that read images (the list comes from openrouter.ai) and save an
+  pick a model (the free ones that read images are suggested from openrouter.ai; paste any other model's slug,
+  such as `qwen/qwen2.5-vl-72b-instruct`, or its page address; paid models are charged to the key) and save an
   [OpenRouter API key](https://openrouter.ai/keys). The key is kept in `<data dir>/server.db`, never in
   `settings.json` (which travels in backups and syncs), and is never shown again. The thumbnails and prompts go to
   OpenRouter and its model provider; free models have daily request limits. Compute workers are not used then.
