@@ -363,7 +363,8 @@ Compared with the earlier desktop application, which could fall back to Python l
 ## Path Patterns
 
 Crawls, the mass editor and *Sort files* read and write folder paths with `{token}`
-placeholders.
+placeholders. **Infer with AI** in the crawl dialogs asks the AI model for a pattern from the archive paths
+below the folder and the library's known names.
 
 | Placeholder | Aliases | Maps to |
 |---|---|---|

@@ -295,6 +295,18 @@ The metadata fields the tagger fills (`normalize_meta`).
 | `title` (optional) | string |  |
 | `year` (optional) | integer \| null |  |
 
+### AiPattern
+
+A path pattern the model inferred for a folder (`ai_pattern`).
+
+| Field | Type | Description |
+|---|---|---|
+| `fits` | integer | Sampled archives it reads something from… |
+| `folder` | string |  |
+| `pattern` | string |  |
+| `sampled` | integer | …of this many. |
+| `samples` | [PatternSample](#patternsample)[] | What it reads from a few of the sampled archives (paths below the folder). |
+
 ### AiSaved
 
 | Field | Type | Description |
@@ -839,6 +851,7 @@ One of:
 - `kind: "delete_files"` — `ids`: Move the models' archive files to the trash folder (or delete them, without one) and remove the records. Needs *allow file delete*.
 - `kind: "ai_suggest"` — `id`, `ignore_meta`, `max_tags`: Ask the AI tagger for one model's tags and metadata; nothing is saved (save the reviewed result with `/api/ai/commit/{id}`).
 - `kind: "ai_fields"` — `id`: "AI data": ask the model for as many of one model's editor fields as it can infer; nothing is saved (the editor shows them for review).
+- `kind: "ai_pattern"` — `folder`: Ask the model for a path pattern for crawling a folder, from the archive paths below it; nothing is saved.
 - `kind: "ai_tag"` — `ids`, `ignore_meta`, `max_tags`, `overwrite`: Tag every model with the AI tagger and save the results: empty fields only, unless `overwrite`; tags are merged.
 - `kind: "find_duplicate_entries"`: Records cataloguing the same archive more than once (same content hash, else same file name and size).
 - `kind: "find_moved"` — `ids`: For each record, another record with the same content whose archive is on disk (Find Moved in DB); merge them with `/api/maintenance/merge-moved`.
@@ -858,6 +871,7 @@ One of:
 - `type: "records"` — `rows`: Records of a maintenance list (Verify, duplicate entries, moved, found).
 - variant: The AI tagger's suggestion for one model (`ai_suggest`).
 - variant: The editor fields the model inferred for one model (`ai_fields`).
+- variant: The path pattern the model inferred for a folder (`ai_pattern`).
 - variant: What moving a library to a new root found (`relocate_library`).
 - variant: A package's folders and where their archives are here (`import_library`).
 

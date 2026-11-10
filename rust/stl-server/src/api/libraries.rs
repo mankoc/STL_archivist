@@ -293,14 +293,14 @@ pub struct SampleQuery {
     pub pattern: String,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct SampleField {
     pub field: String,
     pub value: String,
 }
 
 /// One archive, and what the pattern reads from its path.
-#[derive(Serialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct PatternSample {
     /// Below the library folder's root.
     pub path: String,

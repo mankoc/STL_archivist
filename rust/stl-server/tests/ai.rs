@@ -39,7 +39,9 @@ type Seen = Arc<Mutex<Vec<Value>>>;
 async fn completions(State(seen): State<Seen>, Json(body): Json<Value>) -> Json<Value> {
     let prompt = body["messages"][0]["content"].as_array().unwrap().last().unwrap()["text"].as_str().unwrap().to_string();
     seen.lock().unwrap().push(body);
-    let reply = if prompt.contains("Output ONLY these 12 lines") {
+    let reply = if prompt.contains("Write ONE path pattern") {
+        "Pattern: `{creator}/{title}`"
+    } else if prompt.contains("Output ONLY these 12 lines") {
         "TITLE: Red Dragon
 CREATOR: studio
 DATE: 2024-3
@@ -181,6 +183,31 @@ endsolid
     assert!(prompt.contains("- CREATOR: Studio
 "), "the library's names are offered: {prompt}");
     assert_eq!(scalar::<String>(&lib, &format!("SELECT title FROM models WHERE id = {dragon}")), "Dragon", "nothing saved");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ai_infers_a_path_pattern() {
+    let seen: Seen = Arc::default();
+    let url = fake_model(Arc::clone(&seen)).await;
+    let lib = library_with(|c| c.ai.url = Some(url.clone()));
+    let ed = lib.user("ed", Role::Editor);
+    let root = lib.dir.path().join("archives");
+    write_zip(&root.join("Studio").join("Dragon.zip"), &[("dragon.stl", b"solid d\nendsolid\n")]);
+    write_zip(&root.join("Other").join("Knight.zip"), &[("knight.stl", b"solid k\nendsolid\n")]);
+
+    let v = run(&lib, &ed, json!({"kind": "ai_pattern", "folder": root.to_string_lossy()})).await;
+    let p = &v["result"];
+    assert_eq!(p["type"], "ai_pattern", "{v}");
+    assert_eq!(p["pattern"], "{creator}/{title}");
+    assert_eq!((p["fits"].as_u64(), p["sampled"].as_u64()), (Some(2), Some(2)));
+    assert_eq!(p["samples"][0]["path"], "Other/Knight.zip");
+    assert_eq!(p["samples"][0]["fields"][0], json!({"field": "creator", "value": "Other"}));
+    let prompt = seen.lock().unwrap()[0]["messages"][0]["content"].as_array().unwrap().last().unwrap()["text"].as_str().unwrap().to_string();
+    assert!(prompt.contains("- Studio/Dragon.zip"), "{prompt}");
+
+    // A folder outside the library's roots is refused for editors.
+    let r = call(&lib.state, "POST", "/api/jobs", Some(&ed), Some(json!({"kind": "ai_pattern", "folder": std::env::temp_dir().to_string_lossy()}))).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{:?}", r.json());
 }
 
 #[tokio::test(flavor = "multi_thread")]

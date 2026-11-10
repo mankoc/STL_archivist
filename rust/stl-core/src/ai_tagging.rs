@@ -348,6 +348,52 @@ pub fn parse_fields(raw: &str, archive_path: &str, stems: &[String], files: &[St
     out
 }
 
+/// The tokens a path pattern inferred by the model may use (besides `*`).
+pub const PATTERN_TOKENS: [&str; 9] = ["creator", "sculptor", "release", "date", "collection", "subcollection", "title", "source", "sequence"];
+
+/// At most `n` of `paths`, spread evenly over the (sorted) list so several folders show.
+pub fn spread<T: Clone>(items: &[T], n: usize) -> Vec<T> {
+    if items.len() <= n {
+        return items.to_vec();
+    }
+    (0..n).map(|i| items[i * items.len() / n].clone()).collect()
+}
+
+/// The prompt that asks for a folder's path pattern from sample archive paths
+/// (relative to the folder) and the library's known names (`vocab`: a token and its names).
+pub fn build_pattern_prompt(samples: &[String], vocab: &[(&str, Vec<&str>)]) -> String {
+    let known: Vec<String> = vocab.iter().filter(|(_, v)| !v.is_empty()).map(|(k, v)| format!("- {{{k}}}: {}", v.join(" | "))).collect();
+    let known = if known.is_empty() {
+        String::new()
+    } else {
+        format!("Names already catalogued in this library, which help to tell what each folder level holds:\n{}\n", known.join("\n"))
+    };
+    format!(
+        "These are archive paths of 3D printable models, relative to a library folder:\n{}\n{known}Write ONE path \
+         pattern that reads metadata from these paths. A pattern is the path's folder levels and file name joined \
+         with '/', where a placeholder captures a value: {}. Use '*' for a folder level that holds nothing useful. \
+         Text between placeholders inside one level is matched literally (for example '{{date}} {{release}}' for \
+         '2023-05 Orcs'). The pattern is matched against the END of each path, so it does not have to cover \
+         levels above the useful ones. The last level is the archive file name: use {{title}} for it (its extension \
+         is dropped). {{date}} is a YYYY-MM or YYYY date. Choose the pattern that fits most paths. Output ONLY the \
+         pattern, on one line, for example: {{creator}}/{{release}}/{{title}}",
+        samples.iter().map(|s| format!("- {s}")).collect::<Vec<_>>().join("\n"),
+        PATTERN_TOKENS.iter().map(|t| format!("{{{t}}}")).collect::<Vec<_>>().join(", ")
+    )
+}
+
+/// The pattern in the model's reply: the first line with a placeholder,
+/// without quotes, backticks or a `Pattern:` label, when it compiles and only
+/// uses [`PATTERN_TOKENS`].
+pub fn parse_pattern(raw: &str) -> Option<String> {
+    static TOKEN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{(\w+)(?::\d+)?\}").expect("valid pattern"));
+    let line = py_splitlines(raw).into_iter().map(py_strip).find(|l| l.contains('{'))?;
+    let line = line.split_once(':').filter(|(k, _)| !k.contains('{')).map_or(line, |(_, v)| v);
+    let p = line.trim_matches(|c: char| py_isspace(c) || "`\"'".contains(c)).replace('\\', "/");
+    let tokens_ok = TOKEN.captures_iter(&p).all(|c| PATTERN_TOKENS.contains(&c[1].to_lowercase().as_str()));
+    (tokens_ok && crate::path_pattern::compile(&p).is_some()).then_some(p)
+}
+
 /// Printable file names shown in the prompt, at most.
 const FILE_CAP: usize = 60;
 
@@ -439,6 +485,18 @@ mod tests {
             vec![s("TITLE", "Orc Warlord"), s("CREATOR", "Loot Studios"), s("DATE", "2023-05"), s("CATEGORY", "Bust"), s("SCALE", "32 mm"), s("TAGS", "orc, axe")]
         );
         assert!(parse_fields("DATE: 1850\nTITLE: x", "a.zip", &[], &[], &[]).iter().all(|(k, _)| k != "DATE"));
+    }
+
+    #[test]
+    fn path_patterns_are_asked_and_parsed() {
+        assert_eq!(spread(&[1, 2, 3, 4, 5, 6], 3), vec![1, 3, 5]);
+        assert_eq!(spread(&[1, 2], 3), vec![1, 2]);
+        let p = build_pattern_prompt(&v(&["Loot/2023-05 Orcs/Orc.zip"]), &[("creator", vec!["Loot"]), ("sculptor", vec![])]);
+        assert!(p.contains("- Loot/2023-05 Orcs/Orc.zip\n") && p.contains("\n- {creator}: Loot\n") && !p.contains("- {sculptor}"), "{p}");
+        assert_eq!(parse_pattern("Pattern: `{creator}/{date} {release}/{title}`").as_deref(), Some("{creator}/{date} {release}/{title}"));
+        assert_eq!(parse_pattern("Sure!\n\"*\\{Creator}/{title}\"").as_deref(), Some("*/{Creator}/{title}"));
+        assert_eq!(parse_pattern("{author}/{title}"), None, "only the offered tokens");
+        assert_eq!(parse_pattern("no pattern here"), None);
     }
 
     #[test]
