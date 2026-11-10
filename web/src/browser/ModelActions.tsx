@@ -29,6 +29,7 @@ export interface ModelActionHandlers {
   edit: (id: number) => void;
   massEdit: () => void;
   aiTagger: () => void;
+  aiCheck: () => void;
   clearWarnings: (ids: number[]) => void;
   queueJob: (body: JobRequest, what: string) => void;
   sortFiles: () => void;
@@ -58,6 +59,7 @@ export function ModelActionItems({ ids, where, editor, on }: { ids: number[]; wh
         <>
           <Menu.Label>Metadata</Menu.Label>
           <Menu.Item leftSection={<IconSparkles size={14} />} onClick={on.aiTagger}>AI tagger…</Menu.Item>
+          <Menu.Item leftSection={<IconSparkles size={14} />} onClick={on.aiCheck}>AI metadata check…</Menu.Item>
           <Menu.Item leftSection={<IconAlertTriangleOff size={14} />} onClick={() => on.clearWarnings(ids)}>Clear warnings</Menu.Item>
           <Menu.Label>Archive files</Menu.Label>
           <Menu.Item leftSection={<IconRefresh size={14} />} onClick={() => on.queueJob({ kind: "rescan", ids }, "Rescan")}>

@@ -1634,6 +1634,20 @@ export interface components {
             /** Format: int64 */
             year?: number | null;
         };
+        /** @description A metadata problem the model found in one model (`ai_check`). */
+        AiIssue: {
+            archive_path: string;
+            /** @description `Title`, `Creator`, `Sculptor`, `Category`, `Collection`, `Subcollection`, `Scale`, `Source`, `Year` or `Description`. */
+            field: string;
+            /** Format: int64 */
+            model_id: number;
+            problem: string;
+            /** @description What the model proposes instead (empty: nothing). */
+            suggestion: string;
+            title: string;
+            /** @description The catalogued value. */
+            value: string;
+        };
         /** @description A path pattern the model inferred for a folder (`ai_pattern`). */
         AiPattern: {
             /** @description Sampled archives it reads something from… */
@@ -2404,6 +2418,10 @@ export interface components {
             kind: "ai_pattern";
         } | {
             ids: number[];
+            /** @enum {string} */
+            kind: "ai_check";
+        } | {
+            ids: number[];
             ignore_meta?: boolean;
             /** @enum {string} */
             kind: "ai_tag";
@@ -2466,7 +2484,11 @@ export interface components {
         }) | (components["schemas"]["AiPattern"] & {
             /** @enum {string} */
             type: "ai_pattern";
-        }) | (components["schemas"]["Relocation"] & {
+        }) | {
+            rows: components["schemas"]["AiIssue"][];
+            /** @enum {string} */
+            type: "ai_issues";
+        } | (components["schemas"]["Relocation"] & {
             /** @enum {string} */
             type: "relocation";
         }) | (components["schemas"]["ImportPreview"] & {
