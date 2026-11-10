@@ -1634,6 +1634,17 @@ export interface components {
             /** Format: int64 */
             year?: number | null;
         };
+        /** @description A path pattern the model inferred for a folder (`ai_pattern`). */
+        AiPattern: {
+            /** @description Sampled archives it reads something from… */
+            fits: number;
+            folder: string;
+            pattern: string;
+            /** @description …of this many. */
+            sampled: number;
+            /** @description What it reads from a few of the sampled archives (paths below the folder). */
+            samples: components["schemas"]["PatternSample"][];
+        };
         AiSaved: {
             saved: boolean;
         };
@@ -2388,6 +2399,10 @@ export interface components {
             /** @enum {string} */
             kind: "ai_fields";
         } | {
+            folder: string;
+            /** @enum {string} */
+            kind: "ai_pattern";
+        } | {
             ids: number[];
             ignore_meta?: boolean;
             /** @enum {string} */
@@ -2448,6 +2463,9 @@ export interface components {
         }) | (components["schemas"]["AiEditorFields"] & {
             /** @enum {string} */
             type: "ai_fields";
+        }) | (components["schemas"]["AiPattern"] & {
+            /** @enum {string} */
+            type: "ai_pattern";
         }) | (components["schemas"]["Relocation"] & {
             /** @enum {string} */
             type: "relocation";

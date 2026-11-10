@@ -141,6 +141,16 @@ pub(super) fn ai_fields(lib: &Library, job: &Job, id: i64) -> Result<String, Str
     Ok(msg)
 }
 
+pub(super) fn ai_pattern(lib: &Library, job: &Job, folder: &str) -> Result<String, String> {
+    let log = |line: String| lib.job_log(job, line);
+    job.ctl.set_total(1);
+    let p = crate::ai::infer_pattern(lib, &job.ctl, &log, folder).inspect_err(|e| log_rate_limit(lib, job, e))?;
+    job.ctl.advance(1);
+    let msg = format!("pattern {} (reads {} of {} sampled paths)", p.pattern, p.fits, p.sampled);
+    job.set_result(crate::jobs::JobResult::AiPattern(Box::new(p)));
+    Ok(msg)
+}
+
 /// An error line (`Error: `, shown in red) when the model's rate limit was hit.
 fn log_rate_limit(lib: &Library, job: &Job, e: &str) {
     if e.starts_with(crate::ai::RATE_LIMITED) {

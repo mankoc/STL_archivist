@@ -196,6 +196,7 @@ export const TOPICS: Topic[] = [
     blocks: [
       { p: "The pattern a folder was crawled with is kept: later crawls, monitoring and Rescan use it. A folder laid out differently can have its own, for the archives **directly in it**: its sub-folders keep theirs, or the library's when they have none. Right-click the folder in the filter pane's Path section and choose **Crawl with a pattern…**, or set it in **Settings → Patterns**, which lists every folder holding archives with the pattern it uses." },
       { p: "While you type a pattern, in a crawl dialog or in Settings → Patterns, a **sample** shows what it reads from a few archives directly in that folder, picked at random; **Other samples** shows others." },
+      { p: "**Infer with AI** in a crawl dialog asks the [AI model](ai-tagger) for a pattern: it reads up to 40 archive paths below the folder (spread over its sub-folders) and the names already in the library (creators, sculptors, releases, collections) and writes a pattern into the field, saying how many of the sampled paths it reads. Check the sample before starting the crawl." },
       { p: "A path pattern tells crawls and Mass edit how to read fields from folder names, and tells Sort files how to build folders from fields. Each `{token}` matches one folder level (the last one the file name); `*` matches a level to ignore." },
       { table: { head: ["Token", "Aliases", "Field"], rows: [
         ["`{source}`", "`{type}`", "Type (shop or platform)"],
