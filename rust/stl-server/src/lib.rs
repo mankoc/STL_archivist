@@ -126,7 +126,7 @@ impl Library {
         let accounts_path = config.data_dir.join(accounts::DB_FILE);
         let accounts = Pool::new(&accounts_path);
         accounts
-            .with(|c| accounts::ensure_schema(c).and_then(|_| sync::ensure_schema(c)))
+            .with(|c| accounts::ensure_schema(c).and_then(|_| sync::ensure_schema(c)).and_then(|_| ai::ensure_schema(c)))
             .map_err(|e| format!("accounts {}: {e}", accounts_path.display()))?;
         Ok(Library {
             db: Pool::new(&config.db_path()),
