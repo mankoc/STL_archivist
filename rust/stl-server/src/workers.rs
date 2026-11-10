@@ -388,8 +388,11 @@ impl Library {
     }
 }
 
-/// `/api/ai/status`: a connected worker, or this server's model.
+/// `/api/ai/status`: OpenRouter when chosen, a connected worker, or this server's model.
 pub fn ai_status(lib: &Library) -> AiStatus {
+    if let crate::ai::Provider::OpenRouter { model } = crate::ai::Provider::of(lib) {
+        return crate::ai::openrouter_status(lib, model);
+    }
     let workers = lib.workers.lock();
     if let Some(w) = workers.workers.iter().find(|w| w.chat) {
         return AiStatus {

@@ -197,7 +197,12 @@ export function JobLog({ id, job }: { id: number; job: Job | undefined }) {
             changesText(counts, changes.data)
           ) : (
             <>
-              {lines.join("\n")}
+              {lines.map((line, i) => (
+                <span key={i} style={line.startsWith("Error:") ? { color: "var(--mantine-color-red-text)" } : undefined}>
+                  {i ? "\n" : ""}
+                  {line}
+                </span>
+              ))}
               {job?.message && !isActive(job) ? `\n\n${job.message}` : ""}
             </>
           )}
