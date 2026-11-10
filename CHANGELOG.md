@@ -13,6 +13,7 @@
 - **A rate limit stops the AI tagger's batch job** at once (the models done so far stay saved), with the reason as a red
   line in the job's log. Lines of any job's log that start with `Error:` are shown in red; models the batch skips
   for other errors are logged that way.
+- **The model viewer has MeshPeek 0.5.10's loaders and renderer**: see its [release notes](https://github.com/mankoc/meshpeek/releases/tag/v0.5.10).
 
 ## 2026.46.0 — 2026-11-09
 
