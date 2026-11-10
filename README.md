@@ -67,6 +67,8 @@ Version: 2026.46.0
   endpoint (Gemini's `gemini-flash-lite-latest` by default), suggests tags, title,
   creator, sculptor, scale, source, year and description (never collection or subcollection); review one by one or
   tag a selection in one job
+- **AI data** — in the model editor, the same model infers every field it can (also type, date, release,
+  collection, subcollection and category), reusing the library's names, for review before saving
 - **Monitored folders** — crawled automatically when their archives change (checked by size
   and date at an interval); archives that vanish are marked missing, and unmarked if they return
 - **Maintenance** (*Settings* tabs) — verify archives, re-read links and `info.json`, find moved and duplicate records, search a folder for

@@ -131,6 +131,16 @@ pub(super) fn ai_suggest(lib: &Library, job: &Job, id: i64, max_tags: usize, ign
     Ok(msg)
 }
 
+pub(super) fn ai_fields(lib: &Library, job: &Job, id: i64) -> Result<String, String> {
+    let log = |line: String| lib.job_log(job, line);
+    job.ctl.set_total(1);
+    let f = crate::ai::infer_fields(lib, &job.ctl, &log, id).inspect_err(|e| log_rate_limit(lib, job, e))?;
+    job.ctl.advance(1);
+    let msg = format!("{}: metadata inferred", if f.title.is_empty() { format!("#{id}") } else { f.title.clone() });
+    job.set_result(crate::jobs::JobResult::AiFields(Box::new(f)));
+    Ok(msg)
+}
+
 /// An error line (`Error: `, shown in red) when the model's rate limit was hit.
 fn log_rate_limit(lib: &Library, job: &Job, e: &str) {
     if e.starts_with(crate::ai::RATE_LIMITED) {

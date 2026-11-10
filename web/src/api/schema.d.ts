@@ -1602,6 +1602,26 @@ export interface components {
             overwrite?: boolean;
             tags?: string[];
         };
+        /** @description What the model infers for the editor's fields ("AI data"); empty when unknown. */
+        AiEditorFields: {
+            category: string;
+            collection: string;
+            creator: string;
+            /** @description `YYYY-MM` or `YYYY`. */
+            date: string;
+            description: string;
+            /** Format: int64 */
+            model_id: number;
+            release: string;
+            /** @description Only scales written in the path, file names or metadata. */
+            scales: string[];
+            sculptor: string;
+            /** @description The editor's *Type*. */
+            source: string;
+            subcollection: string;
+            tags: string[];
+            title: string;
+        };
         /** @description The metadata fields the tagger fills (`normalize_meta`). */
         AiFieldValues: {
             creator?: string;
@@ -2363,6 +2383,11 @@ export interface components {
             /** @description At most this many tags (0: no limit). */
             max_tags?: number;
         } | {
+            /** Format: int64 */
+            id: number;
+            /** @enum {string} */
+            kind: "ai_fields";
+        } | {
             ids: number[];
             ignore_meta?: boolean;
             /** @enum {string} */
@@ -2420,6 +2445,9 @@ export interface components {
         } | (components["schemas"]["AiSuggestion"] & {
             /** @enum {string} */
             type: "ai_suggestion";
+        }) | (components["schemas"]["AiEditorFields"] & {
+            /** @enum {string} */
+            type: "ai_fields";
         }) | (components["schemas"]["Relocation"] & {
             /** @enum {string} */
             type: "relocation";

@@ -256,6 +256,98 @@ pub fn normalize_meta(meta: &[(String, String)]) -> AiFields {
     }
 }
 
+/// The editor fields the "AI data" request asks for: the reply's key and what it means.
+pub const FIELD_KEYS: [(&str, &str); 12] = [
+    ("TITLE", "<model title>"),
+    ("CREATOR", "<publisher, brand or author name>"),
+    ("TYPE", "<distribution type, such as patreon, kickstarter, myminifactory>"),
+    ("DATE", "<release date as YYYY-MM or YYYY>"),
+    ("SCULPTOR", "<artist or sculptor name>"),
+    ("RELEASE", "<the release or monthly pack it belongs to>"),
+    ("COLLECTION", "<series, franchise or collection>"),
+    ("SUBCOLLECTION", "<a group within the collection>"),
+    ("CATEGORY", "<kind of model, such as bust, figure, terrain, vehicle>"),
+    ("SCALE", "<ONLY a scale such as 28mm, 32mm, 1/35 or 75mm written in the path, filenames or metadata — never guessed from images>"),
+    ("DESCRIPTION", "<one sentence describing the model>"),
+    ("TAGS", "<comma-separated descriptive tags>"),
+];
+
+/// Lowercase letters and digits only, for comparing names with paths.
+fn squash(s: &str) -> String {
+    s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
+}
+
+/// The names of a library list worth showing the model: all of them when
+/// there are at most `cap`, else those written in `context` (the path and
+/// file names, compared without case, spaces or punctuation), at most `cap`.
+pub fn relevant_names<'a>(names: &'a [String], context: &str, cap: usize) -> Vec<&'a str> {
+    if names.len() <= cap {
+        return names.iter().map(String::as_str).collect();
+    }
+    let ctx = squash(context);
+    names.iter().filter(|n| squash(n).chars().count() >= 3 && ctx.contains(&squash(n))).take(cap).map(String::as_str).collect()
+}
+
+/// The "AI data" prompt: every editor field in `KEY: value` lines, with the
+/// library's known names (`vocab`: a field key and its names) to reuse.
+pub fn build_fields_prompt(archive_path: &str, meta: &[(String, String)], vocab: &[(&str, Vec<&str>)]) -> String {
+    let fields: Vec<String> = FIELD_KEYS.iter().map(|(k, d)| format!("{k}: {d}")).collect();
+    let known: Vec<String> = vocab.iter().filter(|(_, v)| !v.is_empty()).map(|(k, v)| format!("- {k}: {}", v.join(" | "))).collect();
+    let known = if known.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "Values already used in this library (reuse the exact spelling when one fits; a new value is fine \
+             when none does):\n{}\n",
+            known.join("\n")
+        )
+    };
+    format!(
+        "This is a 3D printable miniature model. Full archive path: \"{archive_path}\". {}{known}The archive may \
+         contain several images; base the metadata on the main miniature. The folder structure usually encodes \
+         creator, sculptor, release, collection and similar fields. Using the images, the full path, the file \
+         names and the hints above, fill in as many fields as you can, in this EXACT format (one line per field, \
+         leave the value empty if unknown, no extra text):\n{}\nOutput ONLY these {} lines.",
+        format_known_meta(meta),
+        fields.join("\n"),
+        FIELD_KEYS.len()
+    )
+}
+
+/// `value` in a library list's spelling when it matches a name there without
+/// case, spaces or punctuation; else as given.
+pub fn snap<'a>(value: &'a str, names: &'a [String]) -> &'a str {
+    let s = squash(value);
+    names.iter().find(|n| !s.is_empty() && squash(n) == s).map_or(value, String::as_str)
+}
+
+/// The "AI data" reply as field values: [`parse_meta`] (so `SCALE` only holds
+/// scales written in the text), names snapped to the library's spelling
+/// (`vocab`: a field key and its names), a `DATE` that is not `YYYY[-MM]`
+/// dropped and `TAGS` cleaned. Keys in [`FIELD_KEYS`] order.
+pub fn parse_fields(raw: &str, archive_path: &str, stems: &[String], files: &[String], vocab: &[(&str, &[String])]) -> Vec<(String, String)> {
+    let meta = parse_meta(raw, archive_path, stems, files);
+    let mut out = Vec::new();
+    for (key, _) in FIELD_KEYS {
+        let Some((_, v)) = meta.iter().find(|(k, _)| k == key) else { continue };
+        let v = match key {
+            "DATE" => match crate::path_pattern::parse_release_date(v) {
+                (Some(y), m) if (1900..=2100).contains(&y) && m.is_none_or(|m| (1..=12).contains(&m)) => {
+                    crate::path_pattern::format_release_date(Some(y), m)
+                }
+                _ => continue,
+            },
+            "TAGS" => clean_tags(v, 0).join(", "),
+            "SCALE" => v.split(',').map(|s| py_strip(s).to_string()).filter(|s| !s.is_empty()).collect::<Vec<_>>().join(", "),
+            _ => vocab.iter().find(|(k, _)| *k == key).map_or(v.as_str(), |(_, names)| snap(v, names)).to_string(),
+        };
+        if !v.is_empty() {
+            out.push((key.to_string(), v));
+        }
+    }
+    out
+}
+
 /// Printable file names shown in the prompt, at most.
 const FILE_CAP: usize = 60;
 
@@ -327,6 +419,26 @@ mod tests {
         assert_eq!((f.title.as_str(), f.source.as_str(), f.year, f.creator.as_str()), ("Batman", "patreon", Some(2023), ""));
         // No scale in the text: the model's guess is dropped.
         assert!(parse_meta("SCALE: 28mm", "D:/a/b.zip", &[], &[]).is_empty());
+    }
+
+    #[test]
+    fn editor_fields_are_asked_and_parsed() {
+        let creators = v(&["Loot Studios", "Titan Forge", "Abc", "Xyz"]);
+        assert_eq!(relevant_names(&creators, "D:/STL/loot-studios/2023-05/Orc.zip", 3), vec!["Loot Studios"]);
+        assert_eq!(relevant_names(&creators, "anything", 4).len(), 4, "short lists go in whole");
+        let p = build_fields_prompt("D:/x.zip", &[], &[("CREATOR", vec!["Loot Studios"]), ("SCULPTOR", vec![])]);
+        assert!(p.contains("- CREATOR: Loot Studios\n") && !p.contains("- SCULPTOR"), "{p}");
+        assert!(p.contains("\nCATEGORY: <") && p.ends_with("Output ONLY these 12 lines."), "{p}");
+
+        let raw = "TITLE: Orc Warlord\nCREATOR: loot studios\nDATE: 2023-5\nSCALE: 75mm\nCATEGORY: Bust\nTAGS: orc, orc with axe\nYEAR: 2020\nRELEASE: none";
+        let vocab: [(&str, &[String]); 1] = [("CREATOR", &creators)];
+        let f = parse_fields(raw, "D:/STL/Loot/Orc 32mm.zip", &[], &[], &vocab);
+        let s = |k: &str, val: &str| (k.to_string(), val.to_string());
+        assert_eq!(
+            f,
+            vec![s("TITLE", "Orc Warlord"), s("CREATOR", "Loot Studios"), s("DATE", "2023-05"), s("CATEGORY", "Bust"), s("SCALE", "32 mm"), s("TAGS", "orc, axe")]
+        );
+        assert!(parse_fields("DATE: 1850\nTITLE: x", "a.zip", &[], &[], &[]).iter().all(|(k, _)| k != "DATE"));
     }
 
     #[test]
