@@ -46,3 +46,38 @@ pub async fn commit(State(lib): State<AppState>, me: CurrentUser, Path(id): Path
     lib.schedule_sidecars([path]);
     Ok(Json(AiSaved { saved: true }))
 }
+
+/// Whether an OpenRouter API key is set (the key itself is never sent back).
+#[derive(Serialize, ToSchema)]
+pub struct OpenRouterKeyState {
+    pub key_set: bool,
+}
+
+/// A new OpenRouter API key; empty removes it.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct OpenRouterKey {
+    pub key: String,
+}
+
+/// Whether the AI tagger has an OpenRouter API key.
+#[utoipa::path(get, path = "/api/ai/openrouter", tag = "ai", responses((status = 200, body = OpenRouterKeyState)))]
+pub async fn openrouter_get(State(lib): State<AppState>, _me: CurrentUser) -> Result<Json<OpenRouterKeyState>, ApiError> {
+    let key = lib.accounts.with(crate::ai::openrouter_key).map_err(|e| ApiError::internal(e.to_string()))?;
+    Ok(Json(OpenRouterKeyState { key_set: key.is_some() }))
+}
+
+/// Set or remove the OpenRouter API key (administrators). Kept in `server.db`.
+#[utoipa::path(put, path = "/api/ai/openrouter", tag = "ai", request_body = OpenRouterKey,
+    responses((status = 200, body = OpenRouterKeyState), (status = 400, body = crate::error::ErrorBody),
+              (status = 403, body = crate::error::ErrorBody)))]
+pub async fn openrouter_put(State(lib): State<AppState>, me: CurrentUser, Json(req): Json<OpenRouterKey>) -> Result<Json<OpenRouterKeyState>, ApiError> {
+    me.require(Role::Admin)?;
+    let key = req.key.trim();
+    if key.len() > 500 || !key.chars().all(|c| c.is_ascii_graphic()) {
+        return Err(ApiError::bad_request("the key is printable ASCII without spaces"));
+    }
+    lib.accounts.with(|c| crate::ai::set_openrouter_key(c, key)).map_err(|e| ApiError::internal(e.to_string()))?;
+    tracing::info!(by = %me.user.name, set = !key.is_empty(), "OpenRouter API key changed");
+    Ok(Json(OpenRouterKeyState { key_set: !key.is_empty() }))
+}

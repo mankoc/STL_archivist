@@ -22,6 +22,7 @@ import { MaintenanceTab } from "../jobs/MaintenanceTab";
 import { BackupsTab, SidecarsTab, WorkersTab } from "../jobs/SettingsTabs";
 import { CHECK_UPDATES } from "../shell/updates";
 import { type LibrarySettings, SETTINGS_QUERY } from "./librarySettings";
+import { fetchFreeVisionModels } from "./openrouter";
 import { settingsTab } from "./tabs";
 import { PatternsTab } from "./PatternsTab";
 
@@ -390,18 +391,33 @@ function LibrarySettingsForm({ editable }: { editable: boolean }) {
         <Title order={5} mb="sm">
           AI tagger
         </Title>
-        <NumberInput
-          label="Temperature"
-          description="Lower keeps suggestions literal and grounded in the images; higher is more creative"
-          min={0}
-          max={2}
-          step={0.05}
-          decimalScale={2}
-          w={220}
-          value={form.ai_temperature}
-          disabled={!editable}
-          onChange={(v) => set("ai_temperature", Number(v) || 0)}
-        />
+        <Stack gap="xs">
+          <SegmentedControl
+            w="fit-content"
+            value={form.ai_provider}
+            disabled={!editable}
+            onChange={(v) => set("ai_provider", v)}
+            data={[
+              { value: "local", label: "Local model (Qwen2.5-VL)" },
+              { value: "openrouter", label: "OpenRouter" },
+            ]}
+          />
+          {form.ai_provider === "openrouter" && (
+            <OpenRouterSettings model={form.openrouter_model} editable={editable} onModel={(m) => set("openrouter_model", m)} />
+          )}
+          <NumberInput
+            label="Temperature"
+            description="Lower keeps suggestions literal and grounded in the images; higher is more creative"
+            min={0}
+            max={2}
+            step={0.05}
+            decimalScale={2}
+            w={220}
+            value={form.ai_temperature}
+            disabled={!editable}
+            onChange={(v) => set("ai_temperature", Number(v) || 0)}
+          />
+        </Stack>
       </Card>
       {editable && (
         <Group>
@@ -411,6 +427,73 @@ function LibrarySettingsForm({ editable }: { editable: boolean }) {
         </Group>
       )}
     </Stack>
+  );
+}
+
+// The OpenRouter model (part of the library settings form) and its API key
+// (saved at once, never shown again).
+function OpenRouterSettings({ model, editable, onModel }: { model: string; editable: boolean; onModel: (m: string) => void }) {
+  const queryClient = useQueryClient();
+  const models = useQuery({ queryKey: ["openrouter-models"], queryFn: fetchFreeVisionModels, staleTime: 3_600_000, retry: false });
+  const keyState = useQuery({ queryKey: ["openrouter-key"], queryFn: async () => unwrap(await api.GET("/api/ai/openrouter")) });
+  const [key, setKey] = useState("");
+  const saveKey = async (value: string) => {
+    try {
+      queryClient.setQueryData(["openrouter-key"], unwrap(await api.PUT("/api/ai/openrouter", { body: { key: value } })));
+      queryClient.invalidateQueries({ queryKey: ["ai-status"] });
+      setKey("");
+      notifications.show({ message: value ? "OpenRouter API key saved." : "OpenRouter API key removed." });
+    } catch (err) {
+      fail(err);
+    }
+  };
+  const options = models.data ?? [];
+  const data = options.some((o) => o.value === model) ? options : [{ value: model, label: model }, ...options];
+  return (
+    <>
+      {models.isError ? (
+        <TextInput
+          label="Model"
+          description="OpenRouter's model list could not be read; enter a model id"
+          w={420}
+          value={model}
+          disabled={!editable}
+          onChange={(e) => onModel(e.currentTarget.value.trim())}
+        />
+      ) : (
+        <Select
+          label="Model"
+          description="OpenRouter's free models that read images (free models have daily request limits)"
+          searchable
+          w={420}
+          data={data}
+          value={model}
+          disabled={!editable}
+          onChange={(v) => v && onModel(v)}
+        />
+      )}
+      <Group align="flex-end">
+        <PasswordInput
+          label="API key"
+          description={keyState.data?.key_set ? "A key is set; enter a new one to replace it" : "No key is set (openrouter.ai, Keys)"}
+          w={420}
+          value={key}
+          disabled={!editable}
+          onChange={(e) => setKey(e.currentTarget.value)}
+          data-testid="openrouter-key"
+        />
+        {editable && (
+          <Button variant="default" disabled={!key.trim()} onClick={() => saveKey(key.trim())}>
+            Save key
+          </Button>
+        )}
+        {editable && keyState.data?.key_set && (
+          <Button variant="subtle" color="red" onClick={() => saveKey("")}>
+            Remove key
+          </Button>
+        )}
+      </Group>
+    </>
   );
 }
 

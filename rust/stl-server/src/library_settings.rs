@@ -7,6 +7,9 @@ use serde_json::Value;
 
 pub const FILE: &str = "settings.json";
 pub const MAX_THUMB_SIZE_DEFAULT: u32 = 512;
+pub const AI_PROVIDERS: [&str; 2] = ["local", "openrouter"];
+/// A free vision model; the settings page lists the current free ones.
+pub const OPENROUTER_MODEL_DEFAULT: &str = "google/gemma-4-31b-it:free";
 
 pub struct LibrarySettings(Value);
 
@@ -121,6 +124,23 @@ impl LibrarySettings {
     /// The AI tagger's sampling temperature (`get_ai_temperature`).
     pub fn ai_temperature(&self) -> f64 {
         self.0.get("ai_temperature").and_then(Value::as_f64).unwrap_or(0.2)
+    }
+
+    /// Where the AI tagger's model runs: `local` (llama-server or a compute
+    /// worker) or `openrouter`.
+    pub fn ai_provider(&self) -> String {
+        self.0.get("ai_provider").and_then(Value::as_str).filter(|p| AI_PROVIDERS.contains(p)).unwrap_or("local").to_string()
+    }
+
+    /// The OpenRouter model the AI tagger uses with `ai_provider: openrouter`.
+    pub fn openrouter_model(&self) -> String {
+        self.0
+            .get("openrouter_model")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+            .unwrap_or(OPENROUTER_MODEL_DEFAULT)
+            .to_string()
     }
 
     /// How often monitored folders are checked (minutes).

@@ -62,6 +62,76 @@
         }
       }
     },
+    "/api/ai/openrouter": {
+      "get": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "Whether the AI tagger has an OpenRouter API key.",
+        "operationId": "get_ai_openrouter",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenRouterKeyState"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "Set or remove the OpenRouter API key (administrators). Kept in `server.db`.",
+        "operationId": "put_ai_openrouter",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenRouterKey"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenRouterKeyState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/ai/status": {
       "get": {
         "tags": [
@@ -7783,6 +7853,31 @@
         },
         "additionalProperties": false
       },
+      "OpenRouterKey": {
+        "type": "object",
+        "description": "A new OpenRouter API key; empty removes it.",
+        "required": [
+          "key"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "OpenRouterKeyState": {
+        "type": "object",
+        "description": "Whether an OpenRouter API key is set (the key itself is never sent back).",
+        "required": [
+          "key_set"
+        ],
+        "properties": {
+          "key_set": {
+            "type": "boolean"
+          }
+        }
+      },
       "ParseRequest": {
         "type": "object",
         "required": [
@@ -8715,6 +8810,8 @@
           "trash_folder_path",
           "file_sorting_enabled",
           "ai_temperature",
+          "ai_provider",
+          "openrouter_model",
           "monitor_interval_minutes"
         ],
         "properties": {
@@ -8723,6 +8820,10 @@
           },
           "ai_embeddings_enabled": {
             "type": "boolean"
+          },
+          "ai_provider": {
+            "type": "string",
+            "description": "Where the AI tagger's model runs: `local` (this server's llama-server or\na compute worker) or `openrouter` (its key: `PUT /api/ai/openrouter`)."
           },
           "ai_temperature": {
             "type": "number",
@@ -8775,6 +8876,10 @@
             "format": "int32",
             "description": "Monitored folders are checked this often (minutes, 1 to 1440).",
             "minimum": 0
+          },
+          "openrouter_model": {
+            "type": "string",
+            "description": "The OpenRouter model id (for example `google/gemma-4-31b-it:free`)."
           },
           "presupport_patterns": {
             "type": "array",
