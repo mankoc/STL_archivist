@@ -917,7 +917,7 @@ One folder of a library.
 | Field | Type | Description |
 |---|---|---|
 | `category` (optional) | string |  |
-| `clearing` (optional) | string[] | Fields to clear. |
+| `clearing` (optional) | string[] | Fields to clear (`tags` removes the models' tags before `tags` are added). |
 | `collection` (optional) | string |  |
 | `find` (optional) | null \| [FindReplace](#findreplace) |  |
 | `ids` (optional) | integer[] |  |

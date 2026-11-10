@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Mass edit can clear tags:** a **Clear** box beside *Tags* removes the selected models' tags; with tags typed too,
+  they replace the old ones. Typed tags without it are now **added** to each model's tags, as the field always said
+  (they used to replace them).
 - **The AI tagger can use any OpenAI-compatible endpoint**, by default Google's for **`gemini-flash-lite-latest`**:
   *Settings → Library → AI tagger → OpenAI-compatible endpoint* sets the model (library setting `openai_model`), the
   endpoint's base address (requests go to `<address>/chat/completions`; OpenAI's, a local server's or any other) and its
