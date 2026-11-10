@@ -5,7 +5,7 @@ import { Alert, Anchor, Badge, Button, Checkbox, Group, SegmentedControl, Table,
 import { useEffect, useMemo, useState } from "react";
 
 import { formatSize } from "../format";
-import { type ComponentsInfo, defaultVariants, installable, NEEDS_ACCEPTANCE, sizeOf, totalBytes, variantLabel } from "./components";
+import { type ComponentsInfo, defaultVariants, installable, needsAcceptance, sizeOf, totalBytes, variantLabel } from "./components";
 
 const GPU: Record<string, string> = { nvidia: "NVIDIA", amd: "AMD", intel: "Intel" };
 
@@ -44,7 +44,7 @@ export function ComponentsTable({ info, busy, onInstall, onRemove }: {
   const toInstall = chosen.filter((id) => components.some((c) => c.id === id && installable(c, vs[id])));
   const toRemove = chosen.filter((id) => components.some((c) => c.id === id && c.state === "installed"));
   const total = totalBytes(components, chosen, vs);
-  const needsLicence = toInstall.some((id) => NEEDS_ACCEPTANCE.includes(id));
+  const needsLicence = toInstall.some((id) => needsAcceptance(id, vs[id]));
   const toggle = (id: string) => setChosen((c) => (c.includes(id) ? c.filter((x) => x !== id) : [...c, id]));
 
   return (
@@ -86,7 +86,7 @@ export function ComponentsTable({ info, busy, onInstall, onRemove }: {
       {needsLicence && (
         <Alert mt="xs" color="yellow">
           <Checkbox size="xs" checked={accepted} onChange={(e) => setAccepted(e.currentTarget.checked)} data-testid="accept-licence"
-            label={<>I accept the <Anchor href={components.find((c) => c.id === "ai_model")?.license_url} target="_blank" size="xs">Qwen Research License</Anchor> of the AI tagger model (it limits commercial use).</>} />
+            label={<>I accept the <Anchor href="https://huggingface.co/Qwen/Qwen2.5-VL-3B-Instruct/blob/main/LICENSE" target="_blank" size="xs">Qwen Research License</Anchor> of the AI tagger model (it limits commercial use).</>} />
         </Alert>
       )}
       <Group mt="xs" gap="xs">
@@ -96,7 +96,7 @@ export function ComponentsTable({ info, busy, onInstall, onRemove }: {
             setChosen([]);
             setAccepted(false);
           }}>
-          Download {toInstall.length ? `(${formatSize(total)})` : ""}
+          {toInstall.length && !total ? "Use" : `Download ${toInstall.length ? `(${formatSize(total)})` : ""}`}
         </Button>
         <Button size="xs" variant="light" color="red" disabled={busy || !toRemove.length}
           onClick={() => { onRemove(toRemove); setChosen([]); }}>
