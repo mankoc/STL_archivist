@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applySuggestion, suggestions, typedPart } from "./suggest";
+import { applySuggestion, suggestions, typedPart, uniqueOptions } from "./suggest";
 
 const SCULPTORS = ["Bestiarum", "Artisan Guild", "Ghamak", "Mammoth Factory", "Artisan Guild", ""];
 
@@ -38,5 +38,12 @@ describe("applySuggestion", () => {
     expect(applySuggestion("kn", "knight", true)).toBe("knight");
     expect(applySuggestion("knight,dw", "dwarf", true)).toBe("knight, dwarf");
     expect(applySuggestion("knight, ", "dwarf", true)).toBe("knight, dwarf");
+  });
+});
+
+describe("uniqueOptions", () => {
+  it("keeps each value once, in order, without empty ones", () => {
+    expect(uniqueOptions(["Halloween", "Orcs", "", "Halloween"])).toEqual(["Halloween", "Orcs"]);
+    expect(uniqueOptions(undefined)).toEqual([]);
   });
 });

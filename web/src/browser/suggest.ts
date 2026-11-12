@@ -61,3 +61,9 @@ export function applySuggestion(value: string, option: string, list = false): st
   const comma = value.lastIndexOf(",");
   return comma < 0 ? option : `${value.slice(0, comma + 1)} ${option}`;
 }
+
+/** A list for an Autocomplete/TagsInput: each value once, empty ones dropped
+ *  (Mantine throws on duplicate options, e.g. subcollections of different collections). */
+export function uniqueOptions(values: readonly string[] | undefined): string[] {
+  return [...new Set((values ?? []).filter((v) => v !== ""))];
+}
