@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **A page error no longer leaves a black window:** the client shows the error with *Reload* and *Try to go on*
+  instead of an empty page.
+- *AI metadata check…* in a right-click menu checks the right-clicked models (it used to take the selection).
 - **AI metadata check:** *Actions → AI metadata check…* asks the AI model to check the selected models' catalogued
   fields against their paths, file names and the library's names (implausible or contradicted scales, misspelled names,
   titles that do not match, values in the wrong field, impossible years) and lists each problem with a suggested value;
