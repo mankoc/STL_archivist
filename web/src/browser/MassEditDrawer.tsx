@@ -10,6 +10,7 @@ import { type PointerEvent as ReactPointerEvent, useEffect, useState } from "rea
 import { api, unwrap } from "../api/client";
 import { CLEAR_PRESUPPORTS, emptyForm, FIND_FIELDS, MANUAL, type ManualField, type MassForm, toRequest } from "./massEdit";
 import { clampWidth, loadWidth, MASS_EDIT, saveWidth } from "./paneWidth";
+import { AiPatternButton } from "./AiPatternButton";
 import { PatternTools } from "./PatternTools";
 import { SuggestInput } from "./SuggestInput";
 import classes from "./MassEditDrawer.module.css";
@@ -56,6 +57,15 @@ export function MassEditDrawer({ ids, opened, onClose }: { ids: number[]; opened
       setAll(false);
     }
   }, [opened]);
+  const [aiOverwrite, setAiOverwrite] = useState(false);
+  const aiFill = async () => {
+    try {
+      const job = unwrap(await api.POST("/api/jobs", { body: { kind: "ai_fill", ids, overwrite: aiOverwrite } }));
+      notifications.show({ title: "AI fill", message: `Queued for ${ids.length} model(s) (job #${job.id}); follow it on the Jobs page.` });
+    } catch (err) {
+      notifications.show({ color: "red", title: "AI fill", message: (err as Error).message });
+    }
+  };
   const [pattern] = useDebouncedValue(form.pattern.trim(), 300);
   const parsedIds = all ? ids : ids.slice(0, PREVIEW_ROWS);
   const parsed = useQuery({
@@ -117,6 +127,7 @@ export function MassEditDrawer({ ids, opened, onClose }: { ids: number[]; opened
           />
           <PatternTools pattern={form.pattern} onChange={(p) => set("pattern", p)} mode="parse" />
         </Group>
+        <AiPatternButton ids={ids} onPattern={(p) => set("pattern", p)} />
         {parsed.isError && pattern && (
           <Text size="xs" c="red">
             {parsed.error.message}
@@ -161,6 +172,17 @@ export function MassEditDrawer({ ids, opened, onClose }: { ids: number[]; opened
           </>
         )}
         <Switch label="Parsed and typed values replace existing ones (otherwise they fill empty fields)" checked={form.overwrite} onChange={(e) => set("overwrite", e.currentTarget.checked)} />
+        <Divider label="AI fill" labelPosition="left" />
+        <Text size="xs" c="dimmed">
+          Ask the AI model about each selected model (images, path, file names) for every field it can infer, and save the
+          answers in one job; new tags are added. Follow it on the Jobs page.
+        </Text>
+        <Group gap="sm">
+          <Checkbox label="Replace filled fields" checked={aiOverwrite} onChange={(e) => setAiOverwrite(e.currentTarget.checked)} />
+          <Button size="xs" variant="light" onClick={aiFill} disabled={!ids.length} data-testid="mass-ai-fill">
+            AI fill {ids.length} model(s)
+          </Button>
+        </Group>
         <Divider label="Fields" labelPosition="left" />
         <Text size="xs" c="dimmed">
           Empty fields are left alone. Values may use {"{tokens}"} from the pattern and {"{filename}"}, {"{folder}"}.

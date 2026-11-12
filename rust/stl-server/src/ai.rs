@@ -703,6 +703,62 @@ pub fn infer_fields(lib: &Library, ctl: &Control, log: &dyn Fn(String), model_id
     })
 }
 
+/// The editor form with the inferred fields written in: empty fields only,
+/// unless `overwrite`; scales when it has none (replaced with `overwrite`);
+/// new tags added. The labels of the fields that changed.
+pub fn fill_form(form: &mut stl_core::storage::model_editor::EditorForm, f: &AiEditorFields, overwrite: bool) -> Vec<&'static str> {
+    let mut changed = Vec::new();
+    let pairs: [(&'static str, &mut String, &str); 10] = [
+        ("title", &mut form.title, &f.title),
+        ("creator", &mut form.creator, &f.creator),
+        ("type", &mut form.source, &f.source),
+        ("date", &mut form.date, &f.date),
+        ("sculptor", &mut form.sculptor, &f.sculptor),
+        ("release", &mut form.release, &f.release),
+        ("collection", &mut form.collection, &f.collection),
+        ("subcollection", &mut form.subcollection, &f.subcollection),
+        ("category", &mut form.category, &f.category),
+        ("description", &mut form.description, &f.description),
+    ];
+    for (label, field, value) in pairs {
+        let v = value.trim();
+        if !v.is_empty() && (overwrite || field.trim().is_empty()) && field.trim() != v {
+            *field = v.to_string();
+            changed.push(label);
+        }
+    }
+    if !f.scales.is_empty() && (overwrite || form.scales.is_empty()) && form.scales != f.scales {
+        form.scales = f.scales.clone();
+        changed.push("scales");
+    }
+    let have: std::collections::HashSet<String> = form.tags.iter().map(|t| t.to_lowercase()).collect();
+    let new: Vec<String> = f.tags.iter().filter(|t| !t.is_empty() && !have.contains(&t.to_lowercase())).cloned().collect();
+    if !new.is_empty() {
+        form.tags.extend(new);
+        changed.push("tags");
+    }
+    changed
+}
+
+/// "AI fill" for one model: infer its fields and save them ([`fill_form`]).
+/// The archive path when something was saved.
+pub fn fill(lib: &Library, ctl: &Control, log: &dyn Fn(String), model_id: i64, overwrite: bool) -> Result<Option<String>, String> {
+    use stl_core::storage::model_editor as E;
+    let f = infer_fields(lib, ctl, log, model_id)?;
+    let Some(model) = lib.db.with(|c| E::model_for_editor(c, model_id)).map_err(|e| format!("database: {e}"))? else {
+        return Ok(None);
+    };
+    let mut form = model.form();
+    let changed = fill_form(&mut form, &f, overwrite);
+    if changed.is_empty() {
+        log(format!("#{model_id}: nothing new"));
+        return Ok(None);
+    }
+    let saved = lib.db.with_tx(|tx| E::save_model_editor(tx, model_id, &form)).map_err(|e| e.to_string())?;
+    log(format!("{}: {}", if form.title.is_empty() { format!("#{model_id}") } else { form.title.clone() }, changed.join(", ")));
+    Ok(saved.flatten())
+}
+
 /// A path pattern the model inferred for a folder (`ai_pattern`).
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct AiPattern {
@@ -721,15 +777,27 @@ const PATTERN_SAMPLES: usize = 40;
 
 /// The path pattern for crawling `folder`, inferred by the model from archive
 /// paths below it (spread over its sub-folders) and the library's known names.
-pub fn infer_pattern(lib: &Library, ctl: &Control, log: &dyn Fn(String), folder: &str) -> Result<AiPattern, String> {
+pub fn infer_pattern(lib: &Library, ctl: &Control, log: &dyn Fn(String), folder: &str, ids: &[i64]) -> Result<AiPattern, String> {
     use stl_core::ai_tagging as T;
-    let root = folder.trim_end_matches(['/', '\\']);
-    let rel: Vec<String> = stl_core::crawler::list_archives(root, true, &[])
-        .into_iter()
-        .filter_map(|p| p.get(root.len()..).map(|r| r.trim_start_matches(['/', '\\']).replace('\\', "/")))
-        .collect();
+    let mut rel: Vec<String> = if ids.is_empty() {
+        let root = folder.trim_end_matches(['/', '\\']);
+        stl_core::crawler::list_archives(root, true, &[])
+            .into_iter()
+            .filter_map(|p| p.get(root.len()..).map(|r| r.trim_start_matches(['/', '\\']).replace('\\', "/")))
+            .collect()
+    } else {
+        // The models' paths below their library folders (what a mass edit pattern reads the end of).
+        let json = serde_json::to_string(ids).map_err(|e| e.to_string())?;
+        lib.db
+            .with(|c| {
+                let mut st = c.prepare("SELECT rel_path FROM models WHERE id IN (SELECT value FROM json_each(?1))")?;
+                st.query_map([json], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .map_err(|e| format!("database: {e}"))?
+    };
+    rel.sort();
     if rel.is_empty() {
-        return Err(format!("no archives below {folder}"));
+        return Err(if ids.is_empty() { format!("no archives below {folder}") } else { "none of the models exist".into() });
     }
     let samples = T::spread(&rel, PATTERN_SAMPLES);
     let choices = lib.db.with(stl_core::storage::model_editor::editor_choices).map_err(|e| format!("database: {e}"))?;

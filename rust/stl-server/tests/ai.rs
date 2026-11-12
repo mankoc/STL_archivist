@@ -236,6 +236,36 @@ async fn ai_checks_metadata() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn ai_fill_saves_inferred_fields_and_patterns_come_from_models() {
+    let seen: Seen = Arc::default();
+    let url = fake_model(Arc::clone(&seen)).await;
+    let lib = library_with(|c| c.ai.url = Some(url.clone()));
+    let ed = lib.user("ed", Role::Editor);
+    let root = lib.dir.path().join("archives");
+    write_zip(&root.join("Studio").join("Dragon 32mm.zip"), &[("dragon.stl", b"solid d\nendsolid\n")]);
+    run(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy(), "pattern": "{creator}/{title}"})).await;
+    let dragon: i64 = scalar(&lib, "SELECT id FROM models");
+
+    // Empty fields only: the title stays, the category and date are filled, tags added.
+    let v = run(&lib, &ed, json!({"kind": "ai_fill", "ids": [dragon]})).await;
+    assert_eq!(v["job"]["message"], "filled 1 of 1 model(s)", "{v}");
+    assert_eq!(scalar::<String>(&lib, "SELECT title FROM models"), "Dragon 32mm");
+    assert_eq!(scalar::<i64>(&lib, "SELECT release_year FROM models"), 2024);
+    assert_eq!(scalar::<String>(&lib, "SELECT categories.name FROM models JOIN categories ON categories.id = models.category_id"), "Monster");
+    assert_eq!(scalar::<i64>(&lib, "SELECT count(*) FROM model_tags"), 2);
+    // With overwrite the title is replaced too.
+    run(&lib, &ed, json!({"kind": "ai_fill", "ids": [dragon], "overwrite": true})).await;
+    assert_eq!(scalar::<String>(&lib, "SELECT title FROM models"), "Red Dragon");
+
+    // A pattern from the models' own paths.
+    let v = run(&lib, &ed, json!({"kind": "ai_pattern", "ids": [dragon]})).await;
+    assert_eq!(v["result"]["pattern"], "{creator}/{title}", "{v}");
+    assert_eq!(v["result"]["samples"][0]["path"], "Studio/Dragon 32mm.zip");
+    let r = call(&lib.state, "POST", "/api/jobs", Some(&ed), Some(json!({"kind": "ai_pattern"}))).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "a folder or ids");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn unavailable_without_a_model() {
     let lib = empty_library();
     let ed = lib.user("ed", Role::Editor);

@@ -7030,18 +7030,52 @@
             "type": "object",
             "description": "Ask the model for a path pattern for crawling a folder, from the\narchive paths below it; nothing is saved.",
             "required": [
-              "folder",
               "kind"
             ],
             "properties": {
               "folder": {
-                "type": "string"
+                "type": "string",
+                "description": "A folder to crawl: the archives below it."
+              },
+              "ids": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "description": "Or catalogued models: their paths (for a mass edit pattern)."
               },
               "kind": {
                 "type": "string",
                 "enum": [
                   "ai_pattern"
                 ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "\"AI fill\": infer each model's editor fields with the AI model and save\nthem: empty fields only unless `overwrite`; new tags added.",
+            "required": [
+              "ids",
+              "kind"
+            ],
+            "properties": {
+              "ids": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int64"
+                }
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "ai_fill"
+                ]
+              },
+              "overwrite": {
+                "type": "boolean"
               }
             }
           },
