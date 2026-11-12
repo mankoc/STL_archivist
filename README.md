@@ -68,7 +68,7 @@ Version: 2026.46.0
   creator, sculptor, scale, source, year and description (never collection or subcollection); review one by one or
   tag a selection in one job
 - **AI metadata check** — *Actions → AI metadata check…* lists problems the AI model sees in the selected models'
-  metadata (implausible scales, misspelled names, mismatched titles) with suggestions, to fix in the editor
+  metadata (implausible scales, misspelled names, mismatched titles) with the current and suggested values; ticked suggestions are applied in one click
 - **AI data** — in the model editor, the same model infers every field it can (also type, date, release,
   collection, subcollection and category), reusing the library's names, for review before saving
 - **Monitored folders** — crawled automatically when their archives change (checked by size
