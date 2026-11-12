@@ -172,6 +172,30 @@ fn set_named(tx: &Transaction, table: &str, name: &str) -> Result<Option<i64>> {
     clean(Some(name)).map(|n| lookup(tx, table, &n)).transpose()
 }
 
+impl EditorModel {
+    /// The editor form showing this model (what saving it unchanged writes back).
+    pub fn form(&self) -> EditorForm {
+        let s = |v: &Option<String>| v.clone().unwrap_or_default();
+        EditorForm {
+            title: s(&self.row.title),
+            creator: s(&self.row.creator),
+            source: s(&self.row.source),
+            date: format_release_date(self.row.release_year, self.row.release_month),
+            presupports: s(&self.row.presupports),
+            url: s(&self.row.url),
+            description: s(&self.row.description),
+            sequence: self.row.sequence.unwrap_or(0),
+            release: s(&self.release),
+            sculptor: s(&self.sculptor),
+            collection: s(&self.collection),
+            subcollection: s(&self.subcollection),
+            category: s(&self.category),
+            scales: self.scales.clone(),
+            tags: self.tags.clone(),
+        }
+    }
+}
+
 /// `save_model_editor`: returns the archive path (`None` when the model is gone).
 pub fn save_model_editor(tx: &Transaction, model_id: i64, f: &EditorForm) -> EResult<Option<Option<String>>> {
     let Some((old, archive_path)) = load_row(tx, model_id)? else { return Ok(None) };

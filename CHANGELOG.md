@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **AI fill in Mass edit:** asks the AI model about every selected model for the fields it can infer (as *AI data* in
+  the editor) and saves them in one job: empty fields only unless *Replace filled fields*, new tags added (job
+  `ai_fill`).
+- **Infer with AI in Mass edit:** proposes the path pattern from the selected models' paths (`ai_pattern` takes model
+  `ids` as well as a `folder`).
+- The Jobs page names the AI jobs (AI data, AI fill, Infer pattern, AI metadata check).
 - **Fixed: the model editor could crash** ("Duplicate options are not supported") when a suggestion list held a name
   twice, such as subcollections with the same name in different collections (listed together when the collection is
   new, for example after *AI data* filled it). The editor's lists now hold each value once.

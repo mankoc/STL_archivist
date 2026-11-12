@@ -865,7 +865,8 @@ One of:
 - `kind: "delete_files"` — `ids`: Move the models' archive files to the trash folder (or delete them, without one) and remove the records. Needs *allow file delete*.
 - `kind: "ai_suggest"` — `id`, `ignore_meta`, `max_tags`: Ask the AI tagger for one model's tags and metadata; nothing is saved (save the reviewed result with `/api/ai/commit/{id}`).
 - `kind: "ai_fields"` — `id`: "AI data": ask the model for as many of one model's editor fields as it can infer; nothing is saved (the editor shows them for review).
-- `kind: "ai_pattern"` — `folder`: Ask the model for a path pattern for crawling a folder, from the archive paths below it; nothing is saved.
+- `kind: "ai_pattern"` — `folder`, `ids`: Ask the model for a path pattern for crawling a folder, from the archive paths below it; nothing is saved.
+- `kind: "ai_fill"` — `ids`, `overwrite`: "AI fill": infer each model's editor fields with the AI model and save them: empty fields only unless `overwrite`; new tags added.
 - `kind: "ai_check"` — `ids`: Ask the model to check each model's catalogued metadata for problems (implausible scales, misspelled names…); nothing is changed.
 - `kind: "ai_tag"` — `ids`, `ignore_meta`, `max_tags`, `overwrite`: Tag every model with the AI tagger and save the results: empty fields only, unless `overwrite`; tags are merged.
 - `kind: "find_duplicate_entries"`: Records cataloguing the same archive more than once (same content hash, else same file name and size).
