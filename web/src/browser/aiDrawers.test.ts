@@ -8,7 +8,7 @@ import { createRoot } from "react-dom/client";
 
 const model = { id: 1, archive_path: "lib/Studio/Dragon.zip", title: "Dragon", date: "", scales: [], tags: [], images: [], to_print: false };
 const issues = { type: "ai_issues", rows: [{ model_id: 1, title: "Dragon", archive_path: "lib/Dragon.zip", field: "Scale", value: "280 mm", problem: "bad", suggestion: "28 mm" }] };
-const result = { type: "ai_fields", model_id: 1, title: "Red Dragon", creator: "Studio", source: "", date: "2024-03", sculptor: "", release: "", collection: "", subcollection: "", category: "Monster", description: "", scales: ["32 mm"], tags: ["dragon"] };
+const result = { type: "ai_fields", model_id: 1, title: "Red Dragon", creator: "Studio", source: "", date: "2024-03", sculptor: "", release: "", collection: "Seasonal", subcollection: "", category: "Monster", description: "", scales: ["32 mm"], tags: ["dragon"] };
 let state = "running";
 let kind = "ai_fields";
 const job = () => ({ id: 7, kind, state, request: { kind, id: 1 }, done: 0, total: 1, paused: false, created_at: 0, user: "ed" });
@@ -19,6 +19,7 @@ vi.mock("../api/client", () => ({
     GET: vi.fn(async (path: string) => {
       if (path === "/api/models/{id}/editor") return { data: model };
       if (path === "/api/editor/choices") return { data: {} };
+      if (path === "/api/editor/subcollections") return { data: ["Halloween", "Orcs", "Halloween"] };
       if (path === "/api/jobs") return { data: [job()] };
       if (path === "/api/jobs/{id}") return { data: { job: job(), log: [], result: job().kind === "ai_check" ? issues : result } };
       return { data: [] };
