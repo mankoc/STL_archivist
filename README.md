@@ -69,6 +69,8 @@ Version: 2026.46.0
   tag a selection in one job
 - **AI metadata check** — *Actions → AI metadata check…* lists problems the AI model sees in the selected models'
   metadata (implausible scales, misspelled names, mismatched titles) with the current and suggested values; ticked suggestions are applied in one click
+- **AI fill and pattern in Mass edit** — *AI fill* saves AI data for the whole selection in one job; *Infer with AI*
+  proposes the mass edit's path pattern from the selected models' paths
 - **AI data** — in the model editor, the same model infers every field it can (also type, date, release,
   collection, subcollection and category), reusing the library's names, for review before saving
 - **Monitored folders** — crawled automatically when their archives change (checked by size

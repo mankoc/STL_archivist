@@ -69,6 +69,10 @@ const KIND_LABEL: Record<string, string> = {
   sort_files: "Sort files",
   ai_suggest: "AI suggestion",
   ai_tag: "AI tagging",
+  ai_fields: "AI data",
+  ai_fill: "AI fill",
+  ai_pattern: "Infer pattern",
+  ai_check: "AI metadata check",
 };
 
 /** "Crawl D:/STL/Patreon", "Verify archives", … */

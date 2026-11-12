@@ -55,12 +55,20 @@ pub async fn submit(
     request.validate().map_err(ApiError::bad_request)?;
     // A searched folder is read and records may point into it: the same access as a crawl.
     if let JobRequest::SearchFolder { folder, .. }
-    | JobRequest::AiPattern { folder }
     | JobRequest::SortFiles { target_dir: folder, .. }
     | JobRequest::RelocateLibrary { root: folder, .. } = &request
     {
         let (lib2, me2, path) = (std::sync::Arc::clone(&lib), me.clone(), std::path::PathBuf::from(folder));
         lib2.run(move |lib| super::files::check_access(lib, &me2, &path)).await?;
+    }
+    if let JobRequest::AiPattern { folder, ids } = &request {
+        if folder.is_empty() == ids.is_empty() {
+            return Err(ApiError::bad_request("ai_pattern takes a folder or model ids"));
+        }
+        if !folder.is_empty() {
+            let (lib2, me2, path) = (std::sync::Arc::clone(&lib), me.clone(), std::path::PathBuf::from(folder));
+            lib2.run(move |lib| super::files::check_access(lib, &me2, &path)).await?;
+        }
     }
     if let JobRequest::UpdateFolders { folders } = &request {
         for folder in folders.clone() {
