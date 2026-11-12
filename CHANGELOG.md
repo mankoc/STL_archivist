@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **The AI metadata check applies its suggestions:** each problem shows the current and the new value with a checkbox
+  (ticked when the field can take the suggestion); *Apply selected* saves the ticked ones, one save per model (scales
+  replaced by the suggested list, a year keeping the date's month). *Edit* still opens a model.
 - **A page error no longer leaves a black window:** the client shows the error with *Reload* and *Try to go on*
   instead of an empty page.
 - *AI metadata check…* in a right-click menu checks the right-clicked models (it used to take the selection).

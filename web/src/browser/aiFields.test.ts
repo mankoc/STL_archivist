@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { type AiEditorFields, type EditorForm, mergeAiFields } from "./aiFields";
+import { type AiEditorFields, applyIssues, canApply, type EditorForm, mergeAiFields } from "./aiFields";
 
 const form: EditorForm = {
   title: "Dragon", creator: "", source: "", date: "", presupports: "", url: "", description: "", sequence: 0,
@@ -19,5 +19,21 @@ describe("mergeAiFields", () => {
     expect(f.scales).toEqual(["32 mm"]);
     expect(f.tags).toEqual(["Dragon", "wings"]);
     expect(filled).toEqual(["Creator", "Date", "Category", "Tags"]);
+  });
+});
+
+describe("applyIssues", () => {
+  const issue = (field: string, suggestion: string) => ({ model_id: 1, title: "", archive_path: "", field, value: "", problem: "", suggestion });
+  it("writes the suggestions into the form", () => {
+    const f = applyIssues({ ...form, date: "2020-05" }, [issue("Scale", "28 mm, 1/10"), issue("Year", "2023"), issue("Creator", " Studio "), issue("Title", "")]);
+    expect(f.scales).toEqual(["28 mm", "1/10"]);
+    expect(f.date).toBe("2023-05");
+    expect(f.creator).toBe("Studio");
+    expect(f.title).toBe("Dragon");
+  });
+  it("only applies known fields with a value", () => {
+    expect(canApply(issue("Year", "soon"))).toBe(false);
+    expect(canApply(issue("Tags", "x"))).toBe(false);
+    expect(canApply(issue("Sculptor", "Alice"))).toBe(true);
   });
 });
