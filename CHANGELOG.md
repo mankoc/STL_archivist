@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Fixed: the model editor could crash** ("Duplicate options are not supported") when a suggestion list held a name
+  twice, such as subcollections with the same name in different collections (listed together when the collection is
+  new, for example after *AI data* filled it). The editor's lists now hold each value once.
 - **The AI metadata check applies its suggestions:** each problem shows the current and the new value with a checkbox
   (ticked when the field can take the suggestion); *Apply selected* saves the ticked ones, one save per model (scales
   replaced by the suggested list, a year keeping the date's month). *Edit* still opens a model.

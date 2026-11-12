@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { api, type Schemas, unwrap } from "../api/client";
 import { formOf, mergeAiFields } from "./aiFields";
+import { uniqueOptions } from "./suggest";
 
 type Form = Required<Schemas["EditorSave"]>;
 
@@ -77,7 +78,7 @@ export function EditorDrawer({ id, onClose }: { id: number | null; onClose: () =
   useEffect(() => setAiJob(null), [id]);
 
   const set = <K extends keyof Form>(k: K) => (v: Form[K]) => setForm((f) => ({ ...f, [k]: v }));
-  const list = (k: string) => choices.data?.[k] ?? [];
+  const list = (k: string) => uniqueOptions(choices.data?.[k]);
 
   const save = async () => {
     setSaving(true);
@@ -117,7 +118,7 @@ export function EditorDrawer({ id, onClose }: { id: number | null; onClose: () =
               label="Subcollection"
               value={form.subcollection}
               onChange={set("subcollection")}
-              data={subs.data ?? []}
+              data={uniqueOptions(subs.data)}
               disabled={form.collection === ""}
               limit={LIMIT}
             />
