@@ -2413,9 +2413,17 @@ export interface components {
             /** @enum {string} */
             kind: "ai_fields";
         } | {
-            folder: string;
+            /** @description A folder to crawl: the archives below it. */
+            folder?: string;
+            /** @description Or catalogued models: their paths (for a mass edit pattern). */
+            ids?: number[];
             /** @enum {string} */
             kind: "ai_pattern";
+        } | {
+            ids: number[];
+            /** @enum {string} */
+            kind: "ai_fill";
+            overwrite?: boolean;
         } | {
             ids: number[];
             /** @enum {string} */

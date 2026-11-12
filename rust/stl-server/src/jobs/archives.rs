@@ -141,14 +141,43 @@ pub(super) fn ai_fields(lib: &Library, job: &Job, id: i64) -> Result<String, Str
     Ok(msg)
 }
 
-pub(super) fn ai_pattern(lib: &Library, job: &Job, folder: &str) -> Result<String, String> {
+pub(super) fn ai_pattern(lib: &Library, job: &Job, folder: &str, ids: &[i64]) -> Result<String, String> {
     let log = |line: String| lib.job_log(job, line);
     job.ctl.set_total(1);
-    let p = crate::ai::infer_pattern(lib, &job.ctl, &log, folder).inspect_err(|e| log_rate_limit(lib, job, e))?;
+    let p = crate::ai::infer_pattern(lib, &job.ctl, &log, folder, ids).inspect_err(|e| log_rate_limit(lib, job, e))?;
     job.ctl.advance(1);
     let msg = format!("pattern {} (reads {} of {} sampled paths)", p.pattern, p.fits, p.sampled);
     job.set_result(crate::jobs::JobResult::AiPattern(Box::new(p)));
     Ok(msg)
+}
+
+/// "AI fill" over a selection: infer and save each model's fields. A failure on
+/// the first model (most likely the setup) or a rate limit ends the job; other
+/// failures are logged and skipped.
+pub(super) fn ai_fill(lib: &Library, job: &Job, ids: &[i64], overwrite: bool) -> Result<String, String> {
+    let log = |line: String| lib.job_log(job, line);
+    job.ctl.set_total(ids.len() as u64);
+    let mut saved = 0usize;
+    for (k, &id) in ids.iter().enumerate() {
+        if job.stopped() {
+            break;
+        }
+        match crate::ai::fill(lib, &job.ctl, &log, id, overwrite) {
+            Ok(Some(path)) => {
+                saved += 1;
+                job.touch_sidecars([path]);
+            }
+            Ok(None) => {}
+            Err(e) if e.starts_with(crate::ai::RATE_LIMITED) => {
+                log_rate_limit(lib, job, &e);
+                return Err(format!("{e} (saved {saved} of {} model(s))", ids.len()));
+            }
+            Err(e) if k == 0 => return Err(e),
+            Err(e) => log(format!("Error: model #{id}: {e}")),
+        }
+        job.ctl.advance(1);
+    }
+    Ok(format!("filled {saved} of {} model(s)", ids.len()))
 }
 
 /// Check each model's metadata with the model; the problems go in the result.

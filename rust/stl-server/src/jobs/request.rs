@@ -207,7 +207,21 @@ pub enum JobRequest {
     AiFields { id: i64 },
     /// Ask the model for a path pattern for crawling a folder, from the
     /// archive paths below it; nothing is saved.
-    AiPattern { folder: String },
+    AiPattern {
+        /// A folder to crawl: the archives below it.
+        #[serde(default)]
+        folder: String,
+        /// Or catalogued models: their paths (for a mass edit pattern).
+        #[serde(default)]
+        ids: Vec<i64>,
+    },
+    /// "AI fill": infer each model's editor fields with the AI model and save
+    /// them: empty fields only unless `overwrite`; new tags added.
+    AiFill {
+        ids: Vec<i64>,
+        #[serde(default)]
+        overwrite: bool,
+    },
     /// Ask the model to check each model's catalogued metadata for problems
     /// (implausible scales, misspelled names…); nothing is changed.
     AiCheck { ids: Vec<i64> },
@@ -278,6 +292,7 @@ impl JobRequest {
             | JobRequest::DeleteFiles { ids }
             | JobRequest::AiTag { ids, .. }
             | JobRequest::AiCheck { ids }
+            | JobRequest::AiFill { ids, .. }
             | JobRequest::FindMoved { ids }
             | JobRequest::SearchFolder { ids, .. } => ids.clear(),
             _ => {}
@@ -309,6 +324,7 @@ impl JobRequest {
             JobRequest::AiFields { .. } => "ai_fields",
             JobRequest::AiPattern { .. } => "ai_pattern",
             JobRequest::AiCheck { .. } => "ai_check",
+            JobRequest::AiFill { .. } => "ai_fill",
             JobRequest::GenerateSidecars => "generate_sidecars",
             JobRequest::RemoveSidecars => "remove_sidecars",
             JobRequest::CleanSidecars => "clean_sidecars",
@@ -376,6 +392,7 @@ impl JobRequest {
             | JobRequest::SearchFolder { ids, .. }
             | JobRequest::AiTag { ids, .. }
             | JobRequest::AiCheck { ids }
+            | JobRequest::AiFill { ids, .. }
             | JobRequest::Rescan { ids }
             | JobRequest::GenerateThumbnails { ids, .. }
             | JobRequest::DeleteFiles { ids }
