@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026.46.1 — 2026-11-12
 
 - **AI fill in Mass edit:** asks the AI model about every selected model for the fields it can infer (as *AI data* in
   the editor) and saves them in one job: empty fields only unless *Replace filled fields*, new tags added (job
