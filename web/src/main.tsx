@@ -12,6 +12,7 @@ import { type Accent, AccentContext, rememberAccent, savedAccent } from "./accen
 import { ApiError } from "./api/client";
 import { theme } from "./theme";
 import { App } from "./App";
+import { ErrorBoundary } from "./ErrorBoundary";
 
 const queryClient = new QueryClient({
   queryCache: new QueryCache({
@@ -39,7 +40,9 @@ function Root() {
       <Notifications />
       <AccentContext.Provider value={change}>
         <QueryClientProvider client={queryClient}>
-          <App />
+          <ErrorBoundary>
+            <App />
+          </ErrorBoundary>
         </QueryClientProvider>
       </AccentContext.Provider>
     </MantineProvider>
