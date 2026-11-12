@@ -24,7 +24,7 @@ vi.mock("../api/client", () => ({
       return { data: [] };
     }),
     POST: vi.fn(async () => ({ data: job() })),
-    PUT: vi.fn(),
+    PUT: vi.fn(async () => ({ data: {} })),
   },
 }));
 
@@ -64,7 +64,7 @@ it("the AI check drawer shows its result", async () => {
   document.body.appendChild(el);
   const root = createRoot(el, { onUncaughtError: (e) => errors.push(e), onCaughtError: (e) => errors.push(e) });
   const qc = new QueryClient();
-  await act(async () => root.render(createElement(QueryClientProvider, { client: qc }, createElement(MantineProvider, null,
+  await act(async () => root.render(createElement(QueryClientProvider, { client: qc }, createElement(MantineProvider, null, createElement(Notifications),
     createElement(AiCheckDrawer, { ids: [1], opened: true, onClose: () => {}, onEdit: () => {} })))));
   await act(async () => new Promise((r) => setTimeout(r, 300)));
   await act(async () => (document.querySelector("[data-testid=ai-check-start]") as HTMLButtonElement).click());
@@ -74,4 +74,12 @@ it("the AI check drawer shows its result", async () => {
   await act(async () => new Promise((r) => setTimeout(r, 300)));
   expect(errors).toEqual([]);
   expect(document.querySelectorAll("[data-testid=ai-issue]").length).toBe(1);
+  await act(async () => (document.querySelector("[data-testid=ai-check-apply]") as HTMLButtonElement).click());
+  await act(async () => new Promise((r) => setTimeout(r, 300)));
+  const { api } = await import("../api/client");
+  const put = vi.mocked(api.PUT).mock.calls.at(-1) as unknown as [string, { body: { scales: string[]; title: string } }];
+  expect(put[0]).toBe("/api/models/{id}/editor");
+  expect(put[1].body.scales).toEqual(["28 mm"]);
+  expect(put[1].body.title).toBe("Dragon");
+  expect(document.body.textContent).toContain("Applied 1 change(s)");
 });

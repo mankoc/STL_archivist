@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
 import { api, type Schemas, unwrap } from "../api/client";
-import { mergeAiFields } from "./aiFields";
+import { formOf, mergeAiFields } from "./aiFields";
 
 type Form = Required<Schemas["EditorSave"]>;
 
@@ -34,13 +34,7 @@ export function EditorDrawer({ id, onClose }: { id: number | null; onClose: () =
   useEffect(() => {
     const m = model.data;
     if (!m) return;
-    setForm({
-      title: m.title ?? "", creator: m.creator ?? "", source: m.source ?? "", date: m.date,
-      presupports: m.presupports ?? "", url: m.url ?? "", description: m.description ?? "",
-      sequence: m.sequence ?? 0, release: m.release ?? "", sculptor: m.sculptor ?? "",
-      collection: m.collection ?? "", subcollection: m.subcollection ?? "", category: m.category ?? "",
-      scales: m.scales, tags: m.tags,
-    });
+    setForm(formOf(m));
   }, [model.data]);
   const subs = useQuery({
     queryKey: ["lookups", "subcollections", form.collection],
