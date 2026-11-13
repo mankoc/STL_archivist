@@ -43,7 +43,7 @@ Version: 2026.46.1
   once even when many archives share them; PDF previews with pdfium
 - **Scale, presupport and warning detection** — scales such as `28mm`, `32mm`, `1/35` (a model
   can have several); Lychee / Chitubox / presupported STL detection; warnings for archives
-  with presupported STLs, no images, no printable files or nested archives, with *Warning
+  with presupported STLs, no images, no printable files, nested archives or (optionally) low compression, with *Warning
   details* showing which files trigger each and *Files* highlighting them; *Clear warnings* (right-click a row) dismisses
   false positives until the archive is rescanned
 - **Browser** — faceted filters (include / exclude per value, has-value groups, counts, long

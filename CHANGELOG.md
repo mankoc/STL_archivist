@@ -6,6 +6,9 @@
   search field (those of the search options), `=`, a word or a quoted value (found inside the field), combined with
   `AND`, `OR`, `NOT` (in capitals) and parentheses. Terms side by side must all match; plain words side by side are
   still one phrase, and text that does not form a query is searched as typed, as before.
+- **Low compression warning everywhere:** *Archive with low compression rate* (*Settings → Library → Warnings*, off
+  by default: an archive at least the threshold, 0.95 by default, times the size of its files unpacked) is now a value
+  of the *Warnings* filter, and *Rescan* raises it too (it used to drop it).
 
 ## 2026.46.1 — 2026-11-12
 

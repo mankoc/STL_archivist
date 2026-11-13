@@ -5,7 +5,7 @@ use crate::crawler::{SIZE_LIMIT_IMAGE, extract_native, fallback_fingerprint};
 use crate::metadata;
 use crate::path_pattern;
 use crate::rules::{self, Checks, MemberPath, PresupportPatterns};
-use crate::storage::crawl::{round4, stat};
+use crate::storage::crawl::{WARNING_LOW_COMPRESSION, append_warning, round4, stat};
 use crate::storage::jobs::Rescan;
 use crate::winpath::WinPath;
 
@@ -15,6 +15,8 @@ pub struct Options {
     pub unrar: String,
     pub warn: Checks,
     pub presupport_patterns: Vec<String>,
+    /// Warn about a compression rate at or above this (`None`: off).
+    pub low_compression: Option<f64>,
 }
 
 /// The printable suffixes the rescan stores in the STL file list (the
@@ -68,6 +70,10 @@ pub fn rescan(path: &str, old_size: Option<i64>, old_mtime: Option<i64>, old_has
         (Some(s), Some(u)) if u > 0 => Some(round4(s as f64 / u as f64)),
         _ => None,
     };
+    let mut warning = Some(warnings).filter(|w| !w.is_empty());
+    if opts.low_compression.is_some_and(|t| compression_rate.is_some_and(|r| r >= t)) {
+        warning = append_warning(warning, WARNING_LOW_COMPRESSION);
+    }
     let stl_files = names
         .iter()
         .filter(|n| RESCAN_STL_EXTS.contains(&MemberPath::new(&n.replace('\\', "/")).suffix().to_lowercase().as_str()))
@@ -85,7 +91,7 @@ pub fn rescan(path: &str, old_size: Option<i64>, old_mtime: Option<i64>, old_has
         url: meta.url,
         description: meta.description,
         presupports: rules::detect_presupport(names).to_string(),
-        warning: Some(warnings).filter(|w| !w.is_empty()),
+        warning,
         scales: rules::detect_scale(&scale_names),
         stl_files,
         files: members,
@@ -185,6 +191,7 @@ mod tests {
             unrar: String::new(),
             warn: Checks::default(),
             presupport_patterns: rules::DEFAULT_PRESUPPORT_PATTERNS.iter().map(|s| s.to_string()).collect(),
+            low_compression: None,
         }
     }
 
@@ -203,6 +210,9 @@ mod tests {
         assert_eq!(r.stl_files, vec!["hero_supported.stl".to_string(), "parts/arm.obj".to_string()]);
         assert!(r.warning.as_deref().unwrap().contains(rules::WARNING_NO_IMAGES));
         assert!(r.compression_rate.is_some());
+        assert!(!r.warning.as_deref().unwrap().contains(WARNING_LOW_COMPRESSION), "off by default");
+        let low = Options { low_compression: Some(0.95), ..opts() }; // stored members: no compression
+        assert!(rescan(&path, None, None, "", &low).unwrap().warning.unwrap().ends_with(WARNING_LOW_COMPRESSION));
         // Unchanged size and time: the stored hash is kept.
         let (s, m) = stat(&path).unwrap();
         assert_eq!(rescan(&path, Some(s), Some(m), "kept", &opts()).unwrap().archive_hash, "kept");
