@@ -8070,7 +8070,7 @@
           },
           "search": {
             "type": "string",
-            "description": "Searched for in `search_fields` (case-insensitive).",
+            "description": "Searched for in `search_fields` (case-insensitive). May name fields and\ncombine terms: `title=\"batman\" OR creator=\"loot studios\"`, with `AND`,\n`NOT` and parentheses (terms side by side are ANDed; plain words side by\nside stay one phrase). Text that does not parse is searched as typed.",
             "default": ""
           },
           "search_fields": {
