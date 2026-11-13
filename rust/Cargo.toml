@@ -11,3 +11,8 @@ license = "CC-BY-NC-SA-4.0"
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# Line numbers in backtraces without full debug info: much smaller dev and test
+# binaries, so builds write far less to disk.
+[profile.dev]
+debug = "line-tables-only"

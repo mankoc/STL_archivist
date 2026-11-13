@@ -33,6 +33,10 @@ unicode-normalization = "0.1.26"
 uuid = { version = "1.28.0", features = ["v4"] }
 xxhash-rust = { version = "0.8.19", features = ["xxh3", "xxh64"] }
 
+[features]
+# Small LMDB maps for tests: on Windows data.mdb is allocated at the map size.
+small-maps = []
+
 [dev-dependencies]
 zip = { version = "9.0.5", default-features = false }
 tempfile = "3.27.0"
