@@ -24,6 +24,7 @@ fn options(lib: &Library, settings: &LibrarySettings) -> Options {
         unrar: lib.config.unrar_tool(),
         warn: settings.checks(),
         presupport_patterns: settings.presupport_patterns(),
+        low_compression: settings.warn_low_compression().then(|| settings.low_compression_threshold()),
     }
 }
 
