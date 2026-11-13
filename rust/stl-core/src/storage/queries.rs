@@ -400,22 +400,47 @@ fn search_column(field: &str) -> Option<String> {
     })
 }
 
+/// The search box's query (see [`super::search_query`]): each term in its fields.
 fn search_condition(search: &Search) -> Result<Sql> {
+    use super::search_query::{Query, parse};
     let fields: Vec<&str> = if search.fields.is_empty() {
         DEFAULT_SEARCH.to_vec()
     } else {
         search.fields.iter().map(String::as_str).collect()
     };
+    fn sql(q: &Query, fields: &[&str], fuzzy: bool) -> Result<Sql> {
+        let join = |parts: &[Query], op: &str| -> Result<Sql> {
+            let parts = parts.iter().map(|p| sql(p, fields, fuzzy)).collect::<Result<Vec<_>>>()?;
+            let text = parts.iter().map(|p| p.text.as_str()).collect::<Vec<_>>().join(op);
+            Ok(Sql::with(format!("({text})"), parts.into_iter().flat_map(|p| p.params).collect()))
+        };
+        match q {
+            Query::Text(t) => text_condition(t, fields, fuzzy),
+            Query::Field(f, t) => text_condition(t, &[f.as_str()], fuzzy),
+            // A field that is empty does not hold the text either.
+            Query::Not(q) => sql(q, fields, fuzzy).map(|s| Sql::with(format!("NOT coalesce({}, 0)", s.text), s.params)),
+            Query::And(parts) => join(parts, " AND "),
+            Query::Or(parts) => join(parts, " OR "),
+        }
+    }
+    match parse(&search.text) {
+        Some(q) => sql(&q, &fields, search.fuzzy),
+        None => Ok(Sql::new("1")),
+    }
+}
+
+/// `text` in any of `fields`, as a substring or fuzzy.
+fn text_condition(text: &str, fields: &[&str], fuzzy: bool) -> Result<Sql> {
     let mut cols = Vec::new();
-    for f in &fields {
+    for f in fields {
         cols.push(search_column(f).ok_or_else(|| rusqlite::Error::InvalidParameterName(format!("not a search field: {f}")))?);
     }
-    if search.fuzzy {
+    if fuzzy {
         // All the fields as one text, so the words may come from different fields.
-        let text = cols.iter().map(|c| format!("coalesce({c}, '')")).collect::<Vec<_>>().join(" || ' ' || ");
-        return Ok(Sql::with(format!("fuzzy_match({text}, ?)"), vec![Value::Text(search.text.clone())]));
+        let text_sql = cols.iter().map(|c| format!("coalesce({c}, '')")).collect::<Vec<_>>().join(" || ' ' || ");
+        return Ok(Sql::with(format!("fuzzy_match({text_sql}, ?)"), vec![Value::Text(text.to_string())]));
     }
-    let pat = format!("%{}%", search.text);
+    let pat = format!("%{text}%");
     // `LIKE` ignores the case of ASCII letters, and that is all SQLite's `lower()` folds
     // (no ICU in this build): `lower()` on both sides found the same rows in twice the time.
     let parts: Vec<String> = fields
@@ -1488,6 +1513,13 @@ mod tests {
         assert_eq!(find("ann drgon", &[], true), vec![1]); // creator and tag together
         assert_eq!(find("ben", &["creator"], true), vec![3]);
         assert!(pool.with(|c| table_ids(c, &FilterSpec::default(), &Search { text: "x".into(), fields: vec!["nope".into()], fuzzy: false }, None)).is_err());
+        // Fields and operators.
+        assert_eq!(find(r#"title="knight" OR creator=ann"#, &[], false), vec![2, 3, 1]);
+        assert_eq!(find("creator=ann NOT tags=knight", &[], false), vec![1]);
+        assert_eq!(find("NOT tags=knight", &[], false), vec![3, 1]);
+        assert_eq!(find("NOT description=x", &[], false), vec![2, 3, 4, 1], "no description: not x either");
+        assert_eq!(find("(red OR blue) AND tags=dragon", &["title"], false), vec![1]);
+        assert_eq!(find("tags=drgon", &["title"], true), vec![3, 1]);
     }
 
     #[test]

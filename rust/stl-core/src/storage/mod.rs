@@ -28,6 +28,7 @@ pub mod writes;
 pub mod jobs;
 pub mod libraries;
 pub mod queries;
+pub mod search_query;
 pub mod maintenance;
 pub mod model_editor;
 pub mod pool;
