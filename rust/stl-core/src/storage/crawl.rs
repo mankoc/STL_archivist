@@ -82,7 +82,7 @@ pub struct Diff {
     pub consumed: Vec<String>,
 }
 
-fn append_warning(current: Option<String>, text: &str) -> Option<String> {
+pub(crate) fn append_warning(current: Option<String>, text: &str) -> Option<String> {
     match current {
         Some(w) if !w.is_empty() => Some(if w.contains(text) { w } else { format!("{w}\n{text}") }),
         _ => Some(text.to_string()),

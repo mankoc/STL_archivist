@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Low compression warning everywhere:** *Archive with low compression rate* (*Settings → Library → Warnings*, off
+  by default: an archive at least the threshold, 0.95 by default, times the size of its files unpacked) is now a value
+  of the *Warnings* filter, and *Rescan* raises it too (it used to drop it).
+
 ## 2026.46.1 — 2026-11-12
 
 - **AI fill in Mass edit:** asks the AI model about every selected model for the fields it can infer (as *AI data* in

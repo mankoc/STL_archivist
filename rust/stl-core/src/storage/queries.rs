@@ -675,6 +675,7 @@ const WARNINGS_ALL: &[&str] = &[
     "Archive without images",
     "Nested archives",
     "Archive without printable files",
+    super::crawl::WARNING_LOW_COMPRESSION,
     "Unreadable archive",
 ];
 const PATH_TEMP: &str = "_native_filter_path_ids";
@@ -1287,7 +1288,7 @@ fn scoped_counts(conn: &Connection, scopes: &Scopes, ft: &mut FilterTree) -> Res
             &format!("SELECT models.warning FROM models WHERE {} AND models.warning IS NOT NULL", cond.text),
             &cond.params,
         )?;
-        for wt in &WARNINGS_ALL[..4] {
+        for wt in &WARNINGS_ALL[..5] {
             ft.scoped_counts
                 .insert(Key::Text("warning".into(), wt.to_string()), warnings.iter().filter(|w| w.contains(wt)).count() as i64);
         }
@@ -1448,7 +1449,7 @@ mod tests {
             for (i, (title, creator, rel, sculptor, warning, year)) in [
                 ("Red", "Ann", "A/red.7z", Some(1), Some("Nested archives"), Some(2024)),
                 ("Blue", "Ann", "A/sub/blue.zip", Some(1), None, Some(2023)),
-                ("Knight", "Ben", "B/knight.rar", Some(2), Some("Archive without images\nNested archives"), None),
+                ("Knight", "Ben", "B/knight.rar", Some(2), Some("Archive without images\nNested archives\nArchive with low compression rate"), None),
                 ("Loose", "", "loose.7z", None, None, None),
             ]
             .into_iter()
@@ -1525,6 +1526,7 @@ mod tests {
         assert!(tree.scoped && tree.counts.is_empty() && !tree.scoped_counts.is_empty(), "{tree:?}");
         let tree = filter_tree_parallel(&pool, &all, true).unwrap();
         assert_eq!(tree.counts[&Key::Text("warning".into(), "Nested archives".into())], 2);
+        assert_eq!(tree.counts[&Key::Text("warning".into(), super::super::crawl::WARNING_LOW_COMPRESSION.into())], 1);
         assert!(tree.creators.contains(&"Ann".to_string()) && tree.creators.contains(&"Ben".to_string()), "{:?}", tree.creators);
         assert_eq!(tree.path_counts.as_ref().unwrap()["F:/lib/A"], 2);
     }
