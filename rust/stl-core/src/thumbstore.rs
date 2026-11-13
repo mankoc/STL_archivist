@@ -31,10 +31,17 @@ use heed::{CompactionOption, Database, Env, EnvOpenOptions, MdbError, RwTxn};
 
 use crate::control::Control;
 
-/// Initial map size (address space, not disk: the file is sparse).
+/// Initial map size. Sparse on Linux, but on Windows LMDB allocates `data.mdb`
+/// at the map size, so tests (`small-maps`) use small maps.
+#[cfg(not(any(test, feature = "small-maps")))]
 pub const MAP_SIZE: usize = 10 * 1024 * 1024 * 1024;
+#[cfg(any(test, feature = "small-maps"))]
+pub const MAP_SIZE: usize = 8 * 1024 * 1024;
 /// How much the map grows each time a write fills it.
+#[cfg(not(any(test, feature = "small-maps")))]
 pub const GROW_STEP: usize = 2 * 1024 * 1024 * 1024;
+#[cfg(any(test, feature = "small-maps"))]
+pub const GROW_STEP: usize = 8 * 1024 * 1024;
 
 const REF_PREFIX: u8 = b'R';
 const BLOB_PREFIX: u8 = b'D';

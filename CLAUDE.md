@@ -1,5 +1,10 @@
 # StlArchivist — Developer Guide
-
+## Rust build rules
+- Verify changes with `cargo check --workspace`. Only run `cargo build` when a binary is actually needed.
+- Tests: `cargo test --workspace` or a targeted `cargo test -p <crate> <name>`. 
+- Never use `--release`, `--features`, `--target`, `+nightly`, or inline `RUSTFLAGS=` unless I ask.
+- Never set `CARGO_TARGET_DIR`.
+- Do not run cargo commands in parallel.
 ## Overview
 
 StlArchivist (formerly stlLibrary) catalogues local collections of 3D-printable model archives (`.zip`, `.7z`,

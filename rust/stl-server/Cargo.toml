@@ -41,6 +41,7 @@ windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Stora
 libc = "0.2.191"
 
 [dev-dependencies]
+stl-core = { path = "../stl-core", features = ["small-maps"] }
 http-body-util = "0.1.5"
 jpeg-decoder = "0.3.2"
 meshpeek-core = { git = "https://github.com/mankoc/meshpeek", tag = "v0.5.10", default-features = false }
