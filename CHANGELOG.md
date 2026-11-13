@@ -5,6 +5,10 @@
 - **Low compression warning everywhere:** *Archive with low compression rate* (*Settings → Library → Warnings*, off
   by default: an archive at least the threshold, 0.95 by default, times the size of its files unpacked) is now a value
   of the *Warnings* filter, and *Rescan* raises it too (it used to drop it).
+- **Excluded folders:** *Exclude a folder* on a library folder (*Libraries*) picks a folder inside it that crawls and
+  monitoring skip, with the folders inside it; the records of its archives are removed at once (the files stay). It is
+  listed as *Not crawled* with a button to include it again (`PATCH /api/libraries/folders/{id}` takes `exclude` and
+  `include`; folders list `excluded_folders`; new table `excluded_folders`).
 
 ## 2026.46.1 — 2026-11-12
 

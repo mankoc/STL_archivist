@@ -4,13 +4,17 @@
 import { Breadcrumbs, Button, Group, Loader, Modal, ScrollArea, Stack, Text, TextInput, UnstyledButton } from "@mantine/core";
 import { IconArchive, IconFolder, IconFolderPlus, IconFolderUp } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 
 import { api, unwrap } from "../api/client";
 import { formatSize } from "../format";
 
-export function FolderPicker(props: { opened: boolean; onClose: () => void; onPick: (path: string) => void; canCreate?: boolean }) {
+export function FolderPicker(props: { opened: boolean; onClose: () => void; onPick: (path: string) => void; canCreate?: boolean; start?: string }) {
   const [path, setPath] = useState("");
+  // With `start`, each opening begins there (else where it was left).
+  useEffect(() => {
+    if (props.opened && props.start) setPath(props.start);
+  }, [props.opened, props.start]);
   const [newName, setNewName] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
   const go = (p: string) => {

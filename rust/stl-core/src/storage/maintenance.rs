@@ -383,7 +383,7 @@ pub fn compact(conn: &Connection) -> Result<bool> {
 /// `clear_db`: delete every row of every table (children first), keeping the schema.
 pub fn clear_all(tx: &Transaction) -> Result<()> {
     for table in [
-        "folder_patterns", "model_tags", "model_scales", "stl_files", "archive_files", "images", "models", "subcollections", "collections", "sculptors",
+        "folder_patterns", "excluded_folders", "model_tags", "model_scales", "stl_files", "archive_files", "images", "models", "subcollections", "collections", "sculptors",
         "categories", "releases", "scales", "tags", "creators", "libraries", "library_groups",
     ] {
         tx.execute(&format!("DELETE FROM {table}"), [])?;

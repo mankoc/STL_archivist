@@ -23,6 +23,14 @@ export function pathKey(p: string): string {
   return windows ? s.toLowerCase() : s;
 }
 
+/** `path` relative to `root` (`/` separators), or null when it is not below it. */
+export function relativeTo(root: string, path: string): string | null {
+  const r = pathKey(root);
+  const p = path.replace(/\\/g, "/").replace(/\/+$/, "");
+  if (!pathKey(p).startsWith(`${r}/`)) return null;
+  return p.slice(r.length + 1);
+}
+
 /** Every folder of every library, with its library. */
 export function allFolders(libs: LibraryInfo[]): { folder: LibraryFolder; library: LibraryInfo }[] {
   return libs.flatMap((library) => library.folders.map((folder) => ({ folder, library })));
