@@ -237,7 +237,7 @@ export const TOPICS: Topic[] = [
         ["No images", "The archive has no preview image, and none was found beside it in its folder"],
         ["Nested archive", "The archive contains another archive"],
         ["No printable files", "No printable model file inside"],
-        ["Low compression", "The archive's compression rate is above the threshold (default 0.95)"],
+        ["Low compression", "Off by default. The archive's size is at least the threshold (default 0.95) times the size of its files unpacked; set when crawling and by Rescan, and listed under Warnings in the filters"],
       ] } },
       { p: "**Archive without images** is not raised, and goes, when the model has an image of its own: one beside the archive, a view added from the model viewer, or an image dropped on the details pane." },
       { p: "Which warnings are raised is set in **Settings → Library → Warnings**. In the details pane, the **Files** tab (marked ⚠ when the model has warnings) names each warning and why it is raised, and highlights the files behind it, and the folders holding them, in the archive's tree. After changing the settings, **Settings → Maintenance → Check images warning / Check presupport warning** fixes those warnings quickly without a full rescan." },
