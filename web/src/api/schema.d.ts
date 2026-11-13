@@ -578,9 +578,10 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * Set a library folder's pattern, monitor it, or move it with its records
-         *     to another library or a new one (editors). A library left without folders
-         *     goes.
+         * Set a library folder's pattern, monitor it, exclude a folder below its root
+         *     from crawls (deleting its records) or include it again, or move it with its
+         *     records to another library or a new one (editors). A library left without
+         *     folders goes.
          */
         patch: operations["patch_libraries_folders_by_id"];
         trace?: never;
@@ -2049,6 +2050,13 @@ export interface components {
         };
         FolderChange: {
             /**
+             * @description A folder below the root (relative, `/` separators) for crawls to skip: its
+             *     records are deleted (the files stay).
+             */
+            exclude?: string | null;
+            /** @description An excluded folder to crawl again (its archives come back with the next crawl). */
+            include?: string | null;
+            /**
              * Format: int64
              * @description Move the folder (with its records) to this library.
              */
@@ -2515,6 +2523,8 @@ export interface components {
              * @description Archives found by its last crawl.
              */
             archive_count?: number | null;
+            /** @description Folders below the root that crawls skip (`/` separators). */
+            excluded_folders: string[];
             /** Format: int64 */
             id: number;
             last_crawled_at?: string | null;
