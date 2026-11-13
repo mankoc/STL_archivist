@@ -62,6 +62,10 @@ export function SearchBox({ options, onOptions, onSearch }: {
                   ? "Every word must appear in one of the fields; words of four letters or more may have a typo (two from seven letters)."
                   : "Finds the text as typed inside any of the fields."}
               </Text>
+              <Text size="xs" c="dimmed" maw={260}>
+                Name fields and combine: <Text span ff="monospace" size="xs">title="batman" OR creator="loot studios"</Text>,
+                with AND, NOT and parentheses.
+              </Text>
               {customised(options) && (
                 <Anchor size="xs" component="button" onClick={() => onOptions(DEFAULT_OPTIONS)}>Reset</Anchor>
               )}

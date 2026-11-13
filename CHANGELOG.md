@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Search by field with boolean operators:** the search box takes `title="batman" OR creator="loot studios"`: a
+  search field (those of the search options), `=`, a word or a quoted value (found inside the field), combined with
+  `AND`, `OR`, `NOT` (in capitals) and parentheses. Terms side by side must all match; plain words side by side are
+  still one phrase, and text that does not form a query is searched as typed, as before.
+
 ## 2026.46.1 — 2026-11-12
 
 - **AI fill in Mass edit:** asks the AI model about every selected model for the fields it can infer (as *AI data* in
