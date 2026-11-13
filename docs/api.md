@@ -1055,7 +1055,7 @@ Models with equal or similar values in one column.
 |---|---|---|
 | `filter` (optional) | [FilterSpecDto](#filterspecdto) |  |
 | `fuzzy` (optional) | boolean | Match each word of `search` anywhere in the fields, ignoring accents and allowing a typo or two in longer words, instead of the text as a substring. |
-| `search` (optional) | string | Searched for in `search_fields` (case-insensitive). |
+| `search` (optional) | string | Searched for in `search_fields` (case-insensitive). May name fields and combine terms: `title="batman" OR creator="loot studios"`, with `AND`, `NOT` and parentheses (terms side by side are ANDed; plain words side by side stay one phrase). Text that does not parse is searched as typed. |
 | `search_fields` (optional) | string[] | Where to search: `title`, `creator`, `source`, `sculptor`, `collection`, `subcollection`, `category`, `release`, `path`, `tags`, `description`, `url`. Empty: title, creator, sculptor, collection, path and tags. |
 | `sort` (optional) | null \| [Sort](#sort) |  |
 

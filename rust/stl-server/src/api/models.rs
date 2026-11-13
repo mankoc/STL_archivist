@@ -36,7 +36,10 @@ pub struct Sort {
 #[serde(default, deny_unknown_fields)]
 pub struct ModelQuery {
     pub filter: FilterSpecDto,
-    /// Searched for in `search_fields` (case-insensitive).
+    /// Searched for in `search_fields` (case-insensitive). May name fields and
+    /// combine terms: `title="batman" OR creator="loot studios"`, with `AND`,
+    /// `NOT` and parentheses (terms side by side are ANDed; plain words side by
+    /// side stay one phrase). Text that does not parse is searched as typed.
     pub search: String,
     /// Where to search: `title`, `creator`, `source`, `sculptor`, `collection`,
     /// `subcollection`, `category`, `release`, `path`, `tags`, `description`,

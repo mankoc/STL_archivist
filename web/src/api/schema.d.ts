@@ -2751,7 +2751,10 @@ export interface components {
              */
             fuzzy: boolean;
             /**
-             * @description Searched for in `search_fields` (case-insensitive).
+             * @description Searched for in `search_fields` (case-insensitive). May name fields and
+             *     combine terms: `title="batman" OR creator="loot studios"`, with `AND`,
+             *     `NOT` and parentheses (terms side by side are ANDed; plain words side by
+             *     side stay one phrase). Text that does not parse is searched as typed.
              * @default
              */
             search: string;
