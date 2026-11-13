@@ -48,7 +48,7 @@ Version: 2026.46.1
   false positives until the archive is rescanned
 - **Browser** — faceted filters (include / exclude per value, has-value groups, counts, long
   lists grouped by first letter),
-  search in chosen fields (optionally fuzzy: accents ignored, typos tolerated), a sortable virtualised table with in-place editing (suggesting the values in the library), selectable columns and
+  search in chosen fields (optionally fuzzy: accents ignored, typos tolerated) or by field with boolean operators (`title="batman" OR creator="loot studios"`), a sortable virtualised table with in-place editing (suggesting the values in the library), selectable columns and
   (optionally) rows with warnings highlighted, paths relative to their library, links in the
   URL column, folders of the filter tree crawled or
   rescanned from their right-click menu, an
