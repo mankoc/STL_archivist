@@ -73,6 +73,8 @@ Version: 2026.46.1
   proposes the mass edit's path pattern from the selected models' paths
 - **AI data** — in the model editor, the same model infers every field it can (also type, date, release,
   collection, subcollection and category), reusing the library's names, for review before saving
+- **Excluded folders** — folders inside a library that crawls and monitoring skip; excluding one removes the
+  records of its archives (the files stay)
 - **Monitored folders** — crawled automatically when their archives change (checked by size
   and date at an interval); archives that vanish are marked missing, and unmarked if they return
 - **Maintenance** (*Settings* tabs) — verify archives, re-read links and `info.json`, find moved and duplicate records, search a folder for

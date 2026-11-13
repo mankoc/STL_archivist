@@ -102,6 +102,20 @@ CREATE TABLE folder_patterns (
         ],
     },
     TableDdl {
+        name: "excluded_folders",
+        create: r#"
+CREATE TABLE excluded_folders (
+	library_id INTEGER NOT NULL,
+	rel_folder TEXT NOT NULL,
+	PRIMARY KEY (library_id, rel_folder),
+	FOREIGN KEY(library_id) REFERENCES libraries (id) ON DELETE CASCADE
+)
+
+"#,
+        indexes: &[
+        ],
+    },
+    TableDdl {
         name: "creators",
         create: r#"
 CREATE TABLE creators (

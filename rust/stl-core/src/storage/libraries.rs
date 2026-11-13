@@ -40,6 +40,8 @@ pub struct Folder {
     pub group_id: Option<i64>,
     /// `(folder below the root, pattern)` of the folders with a pattern of their own.
     pub subfolder_patterns: Vec<(String, String)>,
+    /// Folders below the root that crawls skip (`/` separators).
+    pub excluded_folders: Vec<String>,
 }
 
 /// The path patterns of a library folder: its own, and those of folders below its root
@@ -104,9 +106,39 @@ pub fn set_folder_pattern(tx: &Transaction, id: i64, rel_folder: &str, pattern: 
     Ok(())
 }
 
+/// Exclude `rel_folder` (and what is below it) of library folder `id` from crawls, and
+/// delete its records (the files stay): their archive paths (for the sidecars) and what
+/// [`remove_records`](super::maintenance::remove_records) returns. Folders match as
+/// `LIKE` does: ignoring the case of ASCII letters.
+pub fn exclude_folder(tx: &Transaction, id: i64, rel_folder: &str) -> Result<(Vec<String>, super::maintenance::Removed)> {
+    tx.execute("INSERT OR IGNORE INTO excluded_folders (library_id, rel_folder) VALUES (?1, ?2)", params![id, rel_folder])?;
+    let escaped: String = rel_folder.chars().flat_map(|c| if matches!(c, '%' | '_' | '!') { vec!['!', c] } else { vec![c] }).collect();
+    let mut st = tx.prepare(&format!(
+        "SELECT id, {} FROM models WHERE library_id = ?1 AND (rel_folder LIKE ?2 ESCAPE '!' OR rel_folder LIKE ?3 ESCAPE '!')",
+        super::schema_sql::archive_path_sql("models")
+    ))?;
+    let rows: Vec<(i64, String)> = st.query_map(params![id, escaped, format!("{escaped}/%")], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_>>()?;
+    let (ids, paths): (Vec<i64>, Vec<String>) = rows.into_iter().unzip();
+    Ok((paths, super::maintenance::remove_records(tx, &ids)?))
+}
+
+/// Crawl `rel_folder` of library folder `id` again.
+pub fn include_folder(tx: &Transaction, id: i64, rel_folder: &str) -> Result<()> {
+    tx.execute("DELETE FROM excluded_folders WHERE library_id = ?1 AND rel_folder = ?2", params![id, rel_folder])?;
+    Ok(())
+}
+
+/// The excluded folders of library folder `id`, as absolute paths.
+pub fn excluded_roots(conn: &Connection, id: i64) -> Result<Vec<String>> {
+    let root: Option<String> = conn.query_row("SELECT root FROM libraries WHERE id = ?1", [id], |r| r.get(0)).optional()?;
+    let Some(root) = root else { return Ok(Vec::new()) };
+    let mut st = conn.prepare("SELECT rel_folder FROM excluded_folders WHERE library_id = ?1")?;
+    st.query_map([id], |r| Ok(relpath::join(&root, &r.get::<_, String>(0)?)))?.collect()
+}
+
 const COLUMNS: &str = "l.id, l.uuid, l.name, l.root, l.pattern, l.monitored, l.last_crawled_at, l.archive_count, \
      l.new_count, l.updated_count, l.origin, (SELECT count(*) FROM models m WHERE m.library_id = l.id), l.group_id, \
-     (SELECT json_group_array(json_array(p.rel_folder, p.pattern)) FROM folder_patterns p WHERE p.library_id = l.id)";
+     (SELECT json_group_array(json_array(p.rel_folder, p.pattern)) FROM folder_patterns p WHERE p.library_id = l.id),      (SELECT json_group_array(e.rel_folder) FROM (SELECT rel_folder FROM excluded_folders WHERE library_id = l.id ORDER BY rel_folder) e)";
 
 fn from_row(r: &rusqlite::Row) -> Result<Folder> {
     Ok(Folder {
@@ -124,6 +156,7 @@ fn from_row(r: &rusqlite::Row) -> Result<Folder> {
         models: r.get(11)?,
         group_id: r.get(12)?,
         subfolder_patterns: serde_json::from_str(&r.get::<_, String>(13)?).unwrap_or_default(),
+        excluded_folders: serde_json::from_str(&r.get::<_, String>(14)?).unwrap_or_default(),
     })
 }
 

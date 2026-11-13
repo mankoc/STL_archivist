@@ -945,6 +945,8 @@ impl Run<'_> {
             }
         };
         self.inner_roots = storage::libraries::Roots::load(&self.conn)?.inner(library).into_iter().map(|(_, r)| r).collect();
+        // Excluded folders are skipped like the libraries inside this one.
+        self.inner_roots.extend(storage::libraries::excluded_roots(&self.conn, library)?);
         if let Some(pattern) = &cfg.keep_pattern
             && let Some(rel) = crate::relpath::RelPath::from_abs(cfg.root(), &cfg.source_dir)
         {

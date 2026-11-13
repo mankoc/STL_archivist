@@ -1,7 +1,7 @@
-import { folderAt, folderBadges, folderMoveText, folderRemovalText, libraryRemovalText, moveTargets, outerFolder, relocationText, type LibraryFolder, type LibraryInfo } from "./libraries";
+import { folderAt, folderBadges, relativeTo, folderMoveText, folderRemovalText, libraryRemovalText, moveTargets, outerFolder, relocationText, type LibraryFolder, type LibraryInfo } from "./libraries";
 
 const folder = (id: number, root: string, over: Partial<LibraryFolder> = {}): LibraryFolder => ({
-  id, uuid: `f${id}`, name: `F${id}`, root, models: 2, monitored: false, subfolder_patterns: [], reachable: true, ...over,
+  id, uuid: `f${id}`, name: `F${id}`, root, models: 2, monitored: false, subfolder_patterns: [], excluded_folders: [], reachable: true, ...over,
 });
 
 const library = (id: number, folders: LibraryFolder[], over: Partial<LibraryInfo> = {}): LibraryInfo => ({
@@ -9,6 +9,14 @@ const library = (id: number, folders: LibraryFolder[], over: Partial<LibraryInfo
 });
 
 describe("libraries", () => {
+  it("makes a path relative to a root", () => {
+    expect(relativeTo("D:\\STL", "d:\\stl\\Packs\\Old")).toBe("Packs/Old");
+    expect(relativeTo("/srv/stl/", "/srv/stl/a/b")).toBe("a/b");
+    expect(relativeTo("/srv/stl", "/srv/stl")).toBeNull();
+    expect(relativeTo("/srv/stl", "/srv/stlx/a")).toBeNull();
+    expect(relativeTo("/srv/stl", "/srv/STL/a")).toBeNull();
+  });
+
   it("shows a folder's state", () => {
     expect(folderBadges(folder(1, "/a"))).toEqual([]);
     expect(folderBadges(folder(1, "/a", { reachable: false, monitored: true, origin: "migration" })).map((b) => b[1])).toEqual([

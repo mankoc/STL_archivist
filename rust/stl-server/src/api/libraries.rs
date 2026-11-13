@@ -45,6 +45,8 @@ pub struct LibraryFolder {
     /// Folders below the root crawled with a pattern of their own, which their
     /// archives keep using.
     pub subfolder_patterns: Vec<SubfolderPattern>,
+    /// Folders below the root that crawls skip (`/` separators).
+    pub excluded_folders: Vec<String>,
     pub monitored: bool,
     pub last_crawled_at: Option<String>,
     /// Archives found by its last crawl.
@@ -77,6 +79,7 @@ impl From<Folder> for LibraryFolder {
             root: l.root,
             pattern: l.pattern,
             subfolder_patterns: l.subfolder_patterns.into_iter().map(|(folder, pattern)| SubfolderPattern { folder, pattern }).collect(),
+            excluded_folders: l.excluded_folders,
             monitored: l.monitored,
             last_crawled_at: l.last_crawled_at,
             archive_count: l.archive_count,
@@ -201,11 +204,17 @@ pub struct FolderChange {
     pub new_library: Option<String>,
     /// Set the pattern of a folder below the root; `""` forgets it.
     pub subfolder: Option<SubfolderPattern>,
+    /// A folder below the root (relative, `/` separators) for crawls to skip: its
+    /// records are deleted (the files stay).
+    pub exclude: Option<String>,
+    /// An excluded folder to crawl again (its archives come back with the next crawl).
+    pub include: Option<String>,
 }
 
-/// Set a library folder's pattern, monitor it, or move it with its records
-/// to another library or a new one (editors). A library left without folders
-/// goes.
+/// Set a library folder's pattern, monitor it, exclude a folder below its root
+/// from crawls (deleting its records) or include it again, or move it with its
+/// records to another library or a new one (editors). A library left without
+/// folders goes.
 #[utoipa::path(patch, path = "/api/libraries/folders/{id}", tag = "libraries", request_body = FolderChange, params(("id" = i64, Path)),
     responses((status = 200, body = LibraryFolder), (status = 400, body = crate::error::ErrorBody), (status = 404, body = crate::error::ErrorBody)))]
 pub async fn change_folder(State(lib): State<AppState>, me: CurrentUser, Path(id): Path<i64>, Json(req): Json<FolderChange>) -> Result<Json<LibraryFolder>, ApiError> {
@@ -226,6 +235,13 @@ pub async fn change_folder(State(lib): State<AppState>, me: CurrentUser, Path(id
             if let Some(s) = &req.subfolder {
                 stl_core::relpath::RelPath::parse(&s.folder).map_err(ApiError::bad_request)?;
             }
+            for f in [&req.exclude, &req.include].into_iter().flatten() {
+                if f.trim().is_empty() {
+                    return Err(ApiError::bad_request("a folder below the root is needed"));
+                }
+                stl_core::relpath::RelPath::parse(f).map_err(ApiError::bad_request)?;
+            }
+            let mut excluded = None;
             lib.db.with_tx(|tx| {
                 let to = match new_library {
                     Some(name) => Some(libraries::new_group(tx, name)?),
@@ -243,11 +259,21 @@ pub async fn change_folder(State(lib): State<AppState>, me: CurrentUser, Path(id
                 if let Some(s) = &req.subfolder {
                     libraries::set_folder_pattern(tx, id, &s.folder, s.pattern.trim())?;
                 }
+                if let Some(f) = &req.include {
+                    libraries::include_folder(tx, id, f)?;
+                }
+                if let Some(f) = &req.exclude {
+                    excluded = Some(libraries::exclude_folder(tx, id, f)?);
+                }
                 Ok::<_, rusqlite::Error>(())
             })?;
             let folder = folder_exists(lib, id)?;
             // That folder's sidecar holds the pattern: anything inside it queues the folder.
-            let touched = req.subfolder.map(|s| stl_core::relpath::join(&folder.root, &format!("{}/_", s.folder)));
+            let mut touched: Vec<String> = req.subfolder.map(|s| stl_core::relpath::join(&folder.root, &format!("{}/_", s.folder))).into_iter().collect();
+            if let Some((paths, (refs, _))) = excluded {
+                lib.thumbs.delete_many(&stl_core::storage::crawl::ref_ids(&refs))?;
+                touched.extend(paths);
+            }
             Ok((LibraryFolder::from(folder), touched))
         })
         .await?;
