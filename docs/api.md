@@ -144,7 +144,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 |---|---|---|---|---|
 | `GET /api/libraries` | Every library with its folders, by name. |  | 200 [LibraryInfo](#libraryinfo)[] |  |
 | `POST /api/libraries` | Add a folder (editors, inside their roots) to a library, or as a new library: 201, or 200 with the folder already there (in that library). Records of folders around it below the folder move into it. | body: [NewLibrary](#newlibrary) | 200 [LibraryInfo](#libraryinfo)<br>201 [LibraryInfo](#libraryinfo) | 400, 403, 404 |
-| `PATCH /api/libraries/folders/{id}` | Set a library folder's pattern, monitor it, or move it with its records to another library or a new one (editors). A library left without folders goes. | path `id`: integer<br>body: [FolderChange](#folderchange) | 200 [LibraryFolder](#libraryfolder) | 400, 404 |
+| `PATCH /api/libraries/folders/{id}` | Set a library folder's pattern, monitor it, exclude a folder below its root from crawls (deleting its records) or include it again, or move it with its records to another library or a new one (editors). A library left without folders goes. | path `id`: integer<br>body: [FolderChange](#folderchange) | 200 [LibraryFolder](#libraryfolder) | 400, 404 |
 | `GET /api/libraries/folders/{id}/folders` | Every folder of a library folder that holds archives, with its own pattern (Settings → Patterns). | path `id`: integer | 200 [FolderPatternRow](#folderpatternrow)[] | 404 |
 | `POST /api/libraries/folders/{id}/remove` | Remove one folder of a library (editors): its records go to the folder around it, or are deleted with their images when there is none. A library left without folders goes too. Files are not touched. | path `id`: integer | 200 [LibraryRemoved](#libraryremoved) | 404 |
 | `GET /api/libraries/pattern-sample` | What a crawl with this pattern would read from a few archives directly in the folder, picked at random (editors). Nothing is changed. | query `folder`: string<br>query `pattern`: string | 200 [PatternSample](#patternsample)[] | 403 |
@@ -670,6 +670,8 @@ One of:
 
 | Field | Type | Description |
 |---|---|---|
+| `exclude` (optional) | string \| null | A folder below the root (relative, `/` separators) for crawls to skip: its records are deleted (the files stay). |
+| `include` (optional) | string \| null | An excluded folder to crawl again (its archives come back with the next crawl). |
 | `library` (optional) | integer \| null | Move the folder (with its records) to this library. |
 | `monitored` (optional) | boolean \| null |  |
 | `new_library` (optional) | string \| null | Move the folder (with its records) to a new library with this name. |
@@ -909,6 +911,7 @@ One folder of a library.
 | Field | Type | Description |
 |---|---|---|
 | `archive_count` (optional) | integer \| null | Archives found by its last crawl. |
+| `excluded_folders` | string[] | Folders below the root that crawls skip (`/` separators). |
 | `id` | integer |  |
 | `last_crawled_at` (optional) | string \| null |  |
 | `models` | integer | Records in it. |

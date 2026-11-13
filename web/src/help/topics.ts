@@ -125,6 +125,7 @@ export const TOPICS: Topic[] = [
       { list: [
         "**Update all** re-crawls every library with its saved pattern, matches archives moved between libraries, then removes the records of archives that are gone.",
         "Each library can be renamed, given another folder, or removed; each of its folders has buttons to **monitor** it, **crawl** it, [move it](libraries) to another place, or remove it.",
+        "**Exclude a folder** (the crossed-out folder button) picks a folder inside a library folder that crawls and monitoring skip, with the folders inside it: the records of its archives are removed at once (the files stay). It is listed under the library folder as *Not crawled*; its **×** includes it again, and the next crawl brings its archives back.",
         "Editors can only choose folders the administrator made available (`roots`); administrators can choose any folder on the server.",
       ] },
       { warn: "In the desktop app's *This computer* mode the server belongs to the window: closing the window stops a running crawl. The next crawl or Update all continues from there." },

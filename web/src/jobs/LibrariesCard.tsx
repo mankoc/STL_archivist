@@ -6,7 +6,7 @@
 // another library with its records, or removed.
 import { ActionIcon, Alert, Badge, Button, Card, Checkbox, Group, Modal, Select, Stack, Table, Text, TextInput, Title, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { IconArrowsExchange, IconArrowsMove, IconEye, IconEyeOff, IconFolderPlus, IconPencil, IconPlayerPlay, IconTrash } from "@tabler/icons-react";
+import { IconArrowsExchange, IconArrowsMove, IconEye, IconEyeOff, IconFolderOff, IconFolderPlus, IconPencil, IconPlayerPlay, IconTrash, IconX } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 
@@ -24,6 +24,7 @@ import {
   type LibraryInfo,
   libraryRemovalText,
   moveTargets,
+  relativeTo,
   type Relocation,
   relocationText,
 } from "./libraries";
@@ -51,6 +52,8 @@ export function LibrariesCard({ editor, onCrawl, start }: {
   const [renaming, setRenaming] = useState<{ lib: LibraryInfo; name: string } | null>(null);
   const [removing, setRemoving] = useState<Removal | null>(null);
   const [moving, setMoving] = useState<LibraryFolder | null>(null);
+  const [excluding, setExcluding] = useState<LibraryFolder | null>(null);
+  const [exclusion, setExclusion] = useState<{ folder: LibraryFolder; rel: string } | null>(null);
   const [transfer, setTransfer] = useState<{ lib: LibraryInfo; folder: LibraryFolder; to: string | null; name: string } | null>(null);
 
   const rename = async (id: number, name: string) => {
@@ -61,7 +64,7 @@ export function LibrariesCard({ editor, onCrawl, start }: {
     }
     await refresh();
   };
-  const patchFolder = async (id: number, body: { pattern?: string; monitored?: boolean; library?: number; new_library?: string; subfolder?: { folder: string; pattern: string } }) => {
+  const patchFolder = async (id: number, body: { pattern?: string; monitored?: boolean; library?: number; new_library?: string; subfolder?: { folder: string; pattern: string }; exclude?: string; include?: string }) => {
     try {
       unwrap(await api.PATCH("/api/libraries/folders/{id}", { params: { path: { id } }, body }));
     } catch (err) {
@@ -138,6 +141,18 @@ export function LibrariesCard({ editor, onCrawl, start }: {
                     {f.subfolder_patterns.map((s) => (
                       <StoredPattern key={s.folder} folder={s.folder} pattern={s.pattern} editor={editor} onSave={(pattern) => void patchFolder(f.id, { subfolder: { folder: s.folder, pattern } })} />
                     ))}
+                    {f.excluded_folders.map((x) => (
+                      <Group key={x} gap={4} data-testid="excluded-folder">
+                        <Text size="xs" c="dimmed">Not crawled: {x}</Text>
+                        {editor && (
+                          <Tooltip label="Crawl this folder again (its archives come back with the next crawl)">
+                            <ActionIcon size="xs" variant="subtle" color="gray" aria-label={`Include ${x}`} onClick={() => void patchFolder(f.id, { include: x })}>
+                              <IconX size={12} />
+                            </ActionIcon>
+                          </Tooltip>
+                        )}
+                      </Group>
+                    ))}
                   </Table.Td>
                   {editor && (
                     <Table.Td w={220}>
@@ -150,6 +165,11 @@ export function LibrariesCard({ editor, onCrawl, start }: {
                         <Tooltip label="Crawl">
                           <ActionIcon variant="subtle" aria-label="Crawl" disabled={!f.reachable} onClick={() => onCrawl(f.root, f.pattern ?? "")}>
                             <IconPlayerPlay size={16} />
+                          </ActionIcon>
+                        </Tooltip>
+                        <Tooltip label="Exclude a folder inside it from crawls (its records are removed)">
+                          <ActionIcon variant="subtle" aria-label="Exclude a folder" disabled={!f.reachable} onClick={() => setExcluding(f)}>
+                            <IconFolderOff size={16} />
                           </ActionIcon>
                         </Tooltip>
                         <Tooltip label="Move to another folder (after moving or re-mounting its files)">
@@ -185,6 +205,22 @@ export function LibrariesCard({ editor, onCrawl, start }: {
       )}
 
       <FolderPicker
+        opened={excluding !== null}
+        start={excluding?.root}
+        onClose={() => setExcluding(null)}
+        onPick={(path) => {
+          const f = excluding;
+          setExcluding(null);
+          if (!f) return;
+          const rel = relativeTo(f.root, path);
+          if (rel === null) {
+            fail("Exclude a folder")(new Error(`Choose a folder inside ${f.root}`));
+            return;
+          }
+          setExclusion({ folder: f, rel });
+        }}
+      />
+      <FolderPicker
         opened={adding !== undefined}
         onClose={() => setAdding(undefined)}
         onPick={async (path) => {
@@ -200,6 +236,30 @@ export function LibrariesCard({ editor, onCrawl, start }: {
           }
         }}
       />
+
+      <Modal opened={exclusion != null} onClose={() => setExclusion(null)} title={`Exclude ${exclusion?.rel ?? ""}`} size="sm">
+        {exclusion && (
+          <Stack>
+            <Text size="sm">
+              Crawls of {exclusion.folder.root} will skip {exclusion.rel} and the folders inside it, and the records of their archives
+              are removed now. The files stay; including the folder again brings them back with the next crawl.
+            </Text>
+            <Group justify="flex-end">
+              <Button variant="default" onClick={() => setExclusion(null)}>Cancel</Button>
+              <Button
+                color="red"
+                data-testid="confirm-exclude-folder"
+                onClick={() => {
+                  void patchFolder(exclusion.folder.id, { exclude: exclusion.rel });
+                  setExclusion(null);
+                }}
+              >
+                Exclude
+              </Button>
+            </Group>
+          </Stack>
+        )}
+      </Modal>
 
       <Modal opened={renaming != null} onClose={() => setRenaming(null)} title="Rename library" size="sm">
         {renaming && (

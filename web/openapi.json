@@ -1467,7 +1467,7 @@
         "tags": [
           "libraries"
         ],
-        "summary": "Set a library folder's pattern, monitor it, or move it with its records\nto another library or a new one (editors). A library left without folders\ngoes.",
+        "summary": "Set a library folder's pattern, monitor it, exclude a folder below its root\nfrom crawls (deleting its records) or include it again, or move it with its\nrecords to another library or a new one (editors). A library left without\nfolders goes.",
         "operationId": "patch_libraries_folders_by_id",
         "parameters": [
           {
@@ -5785,6 +5785,20 @@
       "FolderChange": {
         "type": "object",
         "properties": {
+          "exclude": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A folder below the root (relative, `/` separators) for crawls to skip: its\nrecords are deleted (the files stay)."
+          },
+          "include": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "An excluded folder to crawl again (its archives come back with the next crawl)."
+          },
           "library": {
             "type": [
               "integer",
@@ -7514,6 +7528,7 @@
           "name",
           "root",
           "subfolder_patterns",
+          "excluded_folders",
           "monitored",
           "models",
           "reachable"
@@ -7526,6 +7541,13 @@
             ],
             "format": "int64",
             "description": "Archives found by its last crawl."
+          },
+          "excluded_folders": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Folders below the root that crawls skip (`/` separators)."
           },
           "id": {
             "type": "integer",

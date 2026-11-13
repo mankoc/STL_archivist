@@ -38,7 +38,11 @@ fn under(folder: &str) -> String {
 /// What a crawl of `folder` (`recurse` and `size_only` as the crawl would) would find.
 pub fn changes(conn: &Connection, folder: &str, recurse: bool, size_only: bool) -> Result<Changes> {
     let roots = crate::storage::libraries::Roots::load(conn)?;
-    let inner: Vec<String> = roots.locate_root(folder).map(|id| roots.inner(id).into_iter().map(|(_, r)| r).collect()).unwrap_or_default();
+    let mut inner: Vec<String> = Vec::new();
+    if let Some(id) = roots.locate_root(folder) {
+        inner.extend(roots.inner(id).into_iter().map(|(_, r)| r));
+        inner.extend(crate::storage::libraries::excluded_roots(conn, id)?);
+    }
     // One listing gives the archives with their sizes and times; the rest is compared in memory.
     let crate::crawler::Listing { files: listing, unreadable } = crate::crawler::list_archives_stat(folder, recurse, &inner);
     let files: Vec<String> = listing.iter().map(|(p, _)| p.clone()).collect();
