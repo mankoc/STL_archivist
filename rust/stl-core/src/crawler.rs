@@ -1186,6 +1186,11 @@ impl Run<'_> {
 pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host: &dyn Host) -> Result<Summary, CrawlError> {
     let mut run = Run::open(db_path, store, cfg, host)?;
     let library = run.enter_library()?;
+    // Inside an excluded folder there is nothing to crawl (and nothing to judge gone).
+    if let Some(x) = storage::libraries::excluded_roots(&run.conn, library)?.into_iter().find(|x| storage::libraries::contains(x, &cfg.source_dir)) {
+        host.emit(Event::Warning(format!("{x} is excluded from crawls: {} is not crawled", cfg.source_dir)));
+        return Ok(run.finish());
+    }
     let (archives, unreadable) = run.list();
     let missing = run.scan_missing(library, &archives, &unreadable)?;
 
