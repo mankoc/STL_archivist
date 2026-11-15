@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026.46.2 — 2026-11-15
 
 - **Search by field with boolean operators:** the search box takes `title="batman" OR creator="loot studios"`: a
   search field (those of the search options), `=`, a word or a quoted value (found inside the field), combined with
