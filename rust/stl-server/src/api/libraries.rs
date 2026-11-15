@@ -235,11 +235,23 @@ pub async fn change_folder(State(lib): State<AppState>, me: CurrentUser, Path(id
             if let Some(s) = &req.subfolder {
                 stl_core::relpath::RelPath::parse(&s.folder).map_err(ApiError::bad_request)?;
             }
-            for f in [&req.exclude, &req.include].into_iter().flatten() {
-                if f.trim().is_empty() {
-                    return Err(ApiError::bad_request("a folder below the root is needed"));
+            // As stored: trimmed, NFC, `/` separators.
+            let rel = |f: &Option<String>| -> Result<Option<String>, ApiError> {
+                match f.as_deref().map(str::trim) {
+                    None => Ok(None),
+                    Some("") => Err(ApiError::bad_request("a folder below the root is needed")),
+                    Some(f) => Ok(Some(stl_core::relpath::RelPath::parse(f).map_err(ApiError::bad_request)?.as_str().to_string())),
                 }
-                stl_core::relpath::RelPath::parse(f).map_err(ApiError::bad_request)?;
+            };
+            let (exclude, include) = (rel(&req.exclude)?, rel(&req.include)?);
+            if let Some(x) = &exclude {
+                // A library folder inside it is crawled on its own: excluding it here would not stop that.
+                let root = folder_exists(lib, id)?.root;
+                let abs = stl_core::relpath::join(&root, x);
+                let roots = lib.db.with(libraries::Roots::load)?;
+                if let Some((_, inner)) = roots.inner(id).into_iter().find(|(_, r)| libraries::contains(&abs, r)) {
+                    return Err(ApiError::bad_request(format!("{inner} is a library folder of its own: remove it from its library instead")));
+                }
             }
             let mut excluded = None;
             lib.db.with_tx(|tx| {
@@ -259,20 +271,21 @@ pub async fn change_folder(State(lib): State<AppState>, me: CurrentUser, Path(id
                 if let Some(s) = &req.subfolder {
                     libraries::set_folder_pattern(tx, id, &s.folder, s.pattern.trim())?;
                 }
-                if let Some(f) = &req.include {
+                if let Some(f) = &include {
                     libraries::include_folder(tx, id, f)?;
                 }
-                if let Some(f) = &req.exclude {
+                if let Some(f) = &exclude {
                     excluded = Some(libraries::exclude_folder(tx, id, f)?);
                 }
                 Ok::<_, rusqlite::Error>(())
             })?;
             let folder = folder_exists(lib, id)?;
             // That folder's sidecar holds the pattern: anything inside it queues the folder.
-            let mut touched: Vec<String> = req.subfolder.map(|s| stl_core::relpath::join(&folder.root, &format!("{}/_", s.folder))).into_iter().collect();
-            if let Some((paths, (refs, _))) = excluded {
+            let touched = req.subfolder.map(|s| stl_core::relpath::join(&folder.root, &format!("{}/_", s.folder)));
+            // The excluded folders' sidecars stay as they are: their folders are not read any more,
+            // and they bring the records back if the folder is included again.
+            if let Some((refs, _)) = excluded {
                 lib.thumbs.delete_many(&stl_core::storage::crawl::ref_ids(&refs))?;
-                touched.extend(paths);
             }
             Ok((LibraryFolder::from(folder), touched))
         })

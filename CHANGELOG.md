@@ -12,7 +12,9 @@
 - **Excluded folders:** *Exclude a folder* on a library folder (*Libraries*) picks a folder inside it that crawls and
   monitoring skip, with the folders inside it; the records of its archives are removed at once (the files stay). It is
   listed as *Not crawled* with a button to include it again (`PATCH /api/libraries/folders/{id}` takes `exclude` and
-  `include`; folders list `excluded_folders`; new table `excluded_folders`).
+  `include`; folders list `excluded_folders`; new table `excluded_folders`). A crawl started inside an excluded folder
+  crawls nothing; folders compare as crawls compare them (letter case only on Windows); a folder holding another library
+  folder cannot be excluded (remove that folder from its library instead).
 
 ## 2026.46.1 — 2026-11-12
 

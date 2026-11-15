@@ -107,19 +107,24 @@ pub fn set_folder_pattern(tx: &Transaction, id: i64, rel_folder: &str, pattern: 
 }
 
 /// Exclude `rel_folder` (and what is below it) of library folder `id` from crawls, and
-/// delete its records (the files stay): their archive paths (for the sidecars) and what
-/// [`remove_records`](super::maintenance::remove_records) returns. Folders match as
-/// `LIKE` does: ignoring the case of ASCII letters.
-pub fn exclude_folder(tx: &Transaction, id: i64, rel_folder: &str) -> Result<(Vec<String>, super::maintenance::Removed)> {
+/// delete its records (the files stay): what [`remove_records`](super::maintenance::remove_records)
+/// returns. Folders compare as crawls compare them ([`path_key`]: ignoring case only
+/// where the file system does).
+pub fn exclude_folder(tx: &Transaction, id: i64, rel_folder: &str) -> Result<super::maintenance::Removed> {
     tx.execute("INSERT OR IGNORE INTO excluded_folders (library_id, rel_folder) VALUES (?1, ?2)", params![id, rel_folder])?;
-    let escaped: String = rel_folder.chars().flat_map(|c| if matches!(c, '%' | '_' | '!') { vec!['!', c] } else { vec![c] }).collect();
-    let mut st = tx.prepare(&format!(
-        "SELECT id, {} FROM models WHERE library_id = ?1 AND (rel_folder LIKE ?2 ESCAPE '!' OR rel_folder LIKE ?3 ESCAPE '!')",
-        super::schema_sql::archive_path_sql("models")
-    ))?;
-    let rows: Vec<(i64, String)> = st.query_map(params![id, escaped, format!("{escaped}/%")], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_>>()?;
-    let (ids, paths): (Vec<i64>, Vec<String>) = rows.into_iter().unzip();
-    Ok((paths, super::maintenance::remove_records(tx, &ids)?))
+    let key = path_key(rel_folder);
+    let below = format!("{key}/");
+    let mut st = tx.prepare("SELECT id, rel_folder FROM models WHERE library_id = ?1")?;
+    let rows: Vec<(i64, String)> = st.query_map([id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_>>()?;
+    let ids: Vec<i64> = rows
+        .into_iter()
+        .filter(|(_, f)| {
+            let k = path_key(f);
+            k == key || k.starts_with(&below)
+        })
+        .map(|(i, _)| i)
+        .collect();
+    super::maintenance::remove_records(tx, &ids)
 }
 
 /// Crawl `rel_folder` of library folder `id` again.
