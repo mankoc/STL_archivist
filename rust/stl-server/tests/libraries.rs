@@ -330,16 +330,25 @@ async fn an_excluded_folder_is_not_crawled_and_loses_its_records() {
     assert_eq!(call(&lib.state, "PATCH", &format!("/api/libraries/folders/{folder}"), Some(&viewer), Some(json!({"exclude": "Skip"}))).await.status, StatusCode::FORBIDDEN);
     assert_eq!(patch(json!({"exclude": "../Skip"})).await.status, StatusCode::BAD_REQUEST);
     assert_eq!(patch(json!({"exclude": " "})).await.status, StatusCode::BAD_REQUEST);
-    // Excluding deletes the records below the folder (not those of a folder named alike).
-    let r = patch(json!({"exclude": "Skip"})).await;
+    // A library folder inside it is crawled on its own: refused.
+    let r = call(&lib.state, "POST", "/api/libraries", Some(&ed), Some(json!({"path": root.join("Keep").to_string_lossy()}))).await;
+    let keep = r.json()["folders"][0]["id"].as_i64().unwrap();
+    let r = patch(json!({"exclude": "Keep"})).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{:?}", r.json());
+    call(&lib.state, "POST", &format!("/api/libraries/folders/{keep}/remove"), Some(&ed), None).await;
+    // Excluding deletes the records below the folder (not those of a folder named alike);
+    // the folder is stored as a relative path, trimmed.
+    let r = patch(json!({"exclude": " Skip "})).await;
     assert_eq!(r.json()["excluded_folders"], json!(["Skip"]), "{:?}", r.json());
     let titles = |lib: &TestLib| -> Vec<String> {
         lib.state.db.with(|c| c.prepare("SELECT title FROM models ORDER BY title")?.query_map([], |r| r.get(0))?.collect()).unwrap()
     };
     assert_eq!(titles(&lib), ["Dragon", "Mage"]);
     assert!(root.join("Skip").join("Knight.zip").exists(), "the files stay");
-    // Crawls skip it.
+    // Crawls skip it, also one started inside it.
     run(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy()})).await;
+    assert_eq!(titles(&lib), ["Dragon", "Mage"]);
+    run(&lib, &ed, json!({"kind": "crawl", "folder": root.join("Skip").join("Deep").to_string_lossy(), "in_library": true})).await;
     assert_eq!(titles(&lib), ["Dragon", "Mage"]);
     // Included again, the next crawl finds its archives.
     let r = patch(json!({"include": "Skip"})).await;
