@@ -44,6 +44,7 @@ fn library(ort: Option<PathBuf>, pdf: Option<PathBuf>) -> TestLib {
         web_dir: None,
         ai: Default::default(), components_mirror: None, compute: Default::default(),
     };
+    stl_core::thumbstore::use_small_maps();
     TestLib { state: Arc::new(Library::open(config).unwrap()), dir }
 }
 

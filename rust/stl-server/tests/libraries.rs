@@ -251,6 +251,7 @@ async fn a_library_from_before_libraries_is_backed_up_and_migrated() {
     let mut config = common::library_with(|_| {}).state.config.clone();
     config.data_dir = dir.path().to_path_buf();
     config.roots = vec![];
+    stl_core::thumbstore::use_small_maps();
     let state = Arc::new(Library::open(config.clone()).unwrap());
     let backups: Vec<String> = std::fs::read_dir(dir.path().join("backups"))
         .unwrap()

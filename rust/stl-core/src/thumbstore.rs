@@ -32,16 +32,29 @@ use heed::{CompactionOption, Database, Env, EnvOpenOptions, MdbError, RwTxn};
 use crate::control::Control;
 
 /// Initial map size. Sparse on Linux, but on Windows LMDB allocates `data.mdb`
-/// at the map size, so tests (`small-maps`) use small maps.
-#[cfg(not(any(test, feature = "small-maps")))]
+/// at the map size, so tests use [`SMALL_MAP`] (see [`use_small_maps`]).
 pub const MAP_SIZE: usize = 10 * 1024 * 1024 * 1024;
-#[cfg(any(test, feature = "small-maps"))]
-pub const MAP_SIZE: usize = 8 * 1024 * 1024;
 /// How much the map grows each time a write fills it.
-#[cfg(not(any(test, feature = "small-maps")))]
 pub const GROW_STEP: usize = 2 * 1024 * 1024 * 1024;
-#[cfg(any(test, feature = "small-maps"))]
-pub const GROW_STEP: usize = 8 * 1024 * 1024;
+/// Map size and growth step of stores opened after [`use_small_maps`] (and in this
+/// crate's unit tests).
+pub const SMALL_MAP: usize = 8 * 1024 * 1024;
+
+static SMALL_MAPS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(cfg!(test));
+
+/// Open every later store with small maps (tests: a runtime switch, not a feature, so
+/// no binary is ever built with them).
+pub fn use_small_maps() {
+    SMALL_MAPS.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn map_size() -> usize {
+    if SMALL_MAPS.load(std::sync::atomic::Ordering::Relaxed) { SMALL_MAP } else { MAP_SIZE }
+}
+
+fn grow_step() -> usize {
+    if SMALL_MAPS.load(std::sync::atomic::Ordering::Relaxed) { SMALL_MAP } else { GROW_STEP }
+}
 
 const REF_PREFIX: u8 = b'R';
 const BLOB_PREFIX: u8 = b'D';
@@ -126,7 +139,7 @@ fn open_env(dir: &Path) -> Result<Inner> {
     // SAFETY: the file is only modified through LMDB; rule 3 keeps py-lmdb
     // from opening the same environment in this process. LMDB raises the
     // map to the pages in use when it is smaller.
-    let env = unsafe { EnvOpenOptions::new().map_size(page_align(MAP_SIZE)).max_dbs(0).open(dir)? };
+    let env = unsafe { EnvOpenOptions::new().map_size(page_align(map_size())).max_dbs(0).open(dir)? };
     // The unnamed main database always exists; opening it needs no write.
     let rtxn = env.read_txn()?;
     let db = env.open_database(&rtxn, None)?;
@@ -143,9 +156,9 @@ fn open_env(dir: &Path) -> Result<Inner> {
     let rtxn = env.read_txn()?;
     let used = (env.info().last_page_number + 1) * db.stat(&rtxn)?.page_size as usize;
     rtxn.commit()?;
-    if env.info().map_size < used + GROW_STEP {
+    if env.info().map_size < used + grow_step() {
         // SAFETY: no transaction is open on this environment yet.
-        unsafe { env.resize(page_align(used + GROW_STEP))? };
+        unsafe { env.resize(page_align(used + grow_step()))? };
     }
     Ok(Inner { env, db })
 }
@@ -202,7 +215,7 @@ impl ThumbStore {
                 Err(heed::Error::Mdb(MdbError::MapFull)) => {
                     let mut exclusive = self.inner.write().unwrap_or_else(|e| e.into_inner());
                     let inner = exclusive.as_mut().ok_or_else(closed)?;
-                    let new_size = page_align(inner.env.info().map_size + GROW_STEP);
+                    let new_size = page_align(inner.env.info().map_size + grow_step());
                     // SAFETY: the exclusive lock means no transaction is open.
                     unsafe { inner.env.resize(new_size)? };
                 }

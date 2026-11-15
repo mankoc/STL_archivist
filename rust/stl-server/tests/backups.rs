@@ -128,6 +128,7 @@ async fn backups_and_restore() {
     assert!(restored.thumbnails);
     assert!(restored.previous.is_none(), "nothing was replaced in an empty directory");
     let config = Config { data_dir: data.clone(), roots: vec![], ..lib.state.config.clone() };
+    stl_core::thumbstore::use_small_maps();
     let opened = Arc::new(Library::open(config).unwrap());
     let n: i64 = opened.db.with(|c| c.query_row("SELECT count(*) FROM models", [], |r| r.get(0))).unwrap();
     assert_eq!(n, 2);
