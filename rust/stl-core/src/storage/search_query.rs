@@ -1,8 +1,9 @@
 //! The browser's search box language: `field=value` (a known search field; the
 //! value a word or `"quoted"`), `AND`, `OR`, `NOT` (upper case), parentheses.
 //! Terms side by side are ANDed, except plain words, which stay one phrase as
-//! before (`dark knight` finds "dark knight"). Text that does not parse is
-//! searched as typed.
+//! before (`dark knight` finds "dark knight"). Text without a field or an
+//! operator, and text that does not parse, is searched as typed (quotes,
+//! parentheses and spaces included).
 
 use super::queries::SEARCH_FIELDS;
 
@@ -143,7 +144,11 @@ impl Parser {
             Tok::Word(w) | Tok::Quoted(w) => Some(Query::Text(w)),
             Tok::Field(f) => match self.next()? {
                 Tok::Word(v) | Tok::Quoted(v) => Some(Query::Field(f, v)),
-                _ => None,
+                // `title=OR`: the word itself.
+                Tok::And => Some(Query::Field(f, "AND".into())),
+                Tok::Or => Some(Query::Field(f, "OR".into())),
+                Tok::Not => Some(Query::Field(f, "NOT".into())),
+                Tok::Open | Tok::Close | Tok::Field(_) => None,
             },
             Tok::And | Tok::Or | Tok::Close => None,
         }
@@ -155,10 +160,15 @@ pub fn parse(text: &str) -> Option<Query> {
     if text.trim().is_empty() {
         return None;
     }
-    let mut p = Parser { toks: tokens(text), at: 0 };
+    let toks = tokens(text);
+    let as_typed = Some(Query::Text(text.to_string()));
+    if !toks.iter().any(|t| matches!(t, Tok::Field(_) | Tok::And | Tok::Or | Tok::Not)) {
+        return as_typed;
+    }
+    let mut p = Parser { toks, at: 0 };
     match p.or() {
         Some(q) if p.at >= p.toks.len() => Some(q),
-        _ => Some(Query::Text(text.trim().to_string())),
+        _ => as_typed,
     }
 }
 
@@ -190,10 +200,19 @@ mod tests {
             Some(And(vec![t("dragon"), Not(Box::new(Or(vec![f("tags", "bust"), f("tags", "ter rain")])))]))
         );
         assert_eq!(parse("red AND dragon"), Some(And(vec![t("red"), t("dragon")])));
-        assert_eq!(parse("\"red\" dragon"), Some(And(vec![t("red"), t("dragon")])));
+        assert_eq!(parse("\"red\" AND dragon"), Some(And(vec![t("red"), t("dragon")])));
+        assert_eq!(parse("\"red\" tags=dragon"), Some(And(vec![t("red"), f("tags", "dragon")])), "a quoted term beside a field");
         assert_eq!(parse("url=https://x.com/?a=b"), Some(f("url", "https://x.com/?a=b")));
         assert_eq!(parse("a=b"), Some(t("a=b")), "not a field: a word");
         assert_eq!(parse("title=\"open quote"), Some(f("title", "open quote")));
+    }
+
+    #[test]
+    fn plain_text_is_searched_as_typed() {
+        for s in ["12\" bust", "Knight (Bust)", " ork", "a \"b\" c"] {
+            assert_eq!(parse(s), Some(t(s)), "{s}");
+        }
+        assert_eq!(parse("title=OR creator=NOT"), Some(And(vec![f("title", "OR"), f("creator", "NOT")])));
     }
 
     #[test]
