@@ -5,7 +5,8 @@
 - **Search by field with boolean operators:** the search box takes `title="batman" OR creator="loot studios"`: a
   search field (those of the search options), `=`, a word or a quoted value (found inside the field), combined with
   `AND`, `OR`, `NOT` (in capitals) and parentheses. Terms side by side must all match; plain words side by side are
-  still one phrase, and text that does not form a query is searched as typed, as before.
+  still one phrase. Text without a field or an operator, or that does not form a query, is searched exactly as typed
+  (quotes, parentheses and spaces included), as before.
 - **Low compression warning everywhere:** *Archive with low compression rate* (*Settings → Library → Warnings*, off
   by default: an archive at least the threshold, 0.95 by default, times the size of its files unpacked) is now a value
   of the *Warnings* filter, and *Rescan* raises it too (it used to drop it).

@@ -1313,7 +1313,8 @@ fn scoped_counts(conn: &Connection, scopes: &Scopes, ft: &mut FilterTree) -> Res
             &format!("SELECT models.warning FROM models WHERE {} AND models.warning IS NOT NULL", cond.text),
             &cond.params,
         )?;
-        for wt in &WARNINGS_ALL[..5] {
+        // Every warning but "Unreadable archive", which has no scoped count.
+        for wt in WARNINGS_ALL.iter().filter(|w| **w != super::crawl::WARNING_UNREADABLE) {
             ft.scoped_counts
                 .insert(Key::Text("warning".into(), wt.to_string()), warnings.iter().filter(|w| w.contains(wt)).count() as i64);
         }

@@ -42,6 +42,7 @@ pub fn library_with(adjust: impl FnOnce(&mut Config)) -> TestLib {
         ai: Default::default(), components_mirror: None, compute: Default::default(),
     };
     adjust(&mut config);
+    stl_core::thumbstore::use_small_maps();
     let state = Arc::new(Library::open(config).unwrap());
     TestLib { dir, state }
 }
