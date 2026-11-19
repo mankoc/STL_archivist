@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **No automatic workflows:** the checks and the Debian package build no longer start on pushes and pull requests,
+  only from *Actions*; the Nightly and MeshPeek schedules are disabled on GitHub.
+
 ## 2026.46.2 — 2026-11-15
 
 - **Search by field with boolean operators:** the search box takes `title="batman" OR creator="loot studios"`: a
