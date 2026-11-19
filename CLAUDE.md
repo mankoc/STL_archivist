@@ -203,7 +203,7 @@ it directly. All work goes into `development`: each new feature (and any change 
 fix) on its own branch from `development` (`feature/<short-name>`, `fix/<short-name>`), pushed,
 and offered as a pull request into `development` when finished, with what changed, how it was
 checked and its `## Unreleased` notes. Then merge it yourself (`gh pr merge --merge
---delete-branch`) once its checks pass (the `audit` job only reports), first merging
+--delete-branch`) once its checks pass (run them locally: no workflow starts by itself; the `audit` job only reports), first merging
 `development` into the branch and resolving conflicts (usually the `## Unreleased` notes, which
 keep both sides) when it has moved on.
 
@@ -219,8 +219,8 @@ server reports), `rust/stl-desktop/tauri.bundle.json` (the installer), `web/pack
 version, turns `## Unreleased` into `## <version> — <date>`, commits that to development, merges
 development into main, tags `v<version>`, builds the installer (`installer.yml`) and the Docker
 image (`docker.yml`), and publishes the GitHub release (the version's changelog section as notes)
-and `<image>:<version>` / `<image>:latest`. **Nightly** (`nightly.yml`, every night when
-development changed, or by hand): the installer on the rolling `nightly` pre-release and
+and `<image>:<version>` / `<image>:latest`. **Nightly** (`nightly.yml`, by hand: its schedule
+is disabled on GitHub, as is `meshpeek.yml`'s): the installer on the rolling `nightly` pre-release and
 `<image>:nightly` / `<image>:nightly-<commit>`, built with `STL_BUILD="nightly <commit>"`
 (`stl_core::BUILD`, shown beside the version). The app's update check reads GitHub's latest
 release, which skips pre-releases.
