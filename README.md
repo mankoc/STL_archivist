@@ -421,10 +421,13 @@ Work happens on the `development` branch: each feature on its own branch, merged
 `development` through a pull request. `main` only receives releases. A release (*Actions →
 Release*) raises the version, merges `development` into `main`, tags it and publishes the
 Windows installer on GitHub and the Docker image (`<version>` and `latest`). **Nightly builds**
-of `development` (every night when it changed, or *Actions → Nightly*) are on the rolling
+of `development` (*Actions → Nightly*) are on the rolling
 [`nightly` pre-release](https://github.com/mankoc/STL_archivist/releases/tag/nightly) and on
 Docker Hub as `:nightly`; they show "nightly <commit>" beside the version and are never
 offered as updates.
+
+No workflow runs by itself: the checks (*Server, web client and desktop shell*), Debian packages
+and Nightly run only from *Actions*, and the nightly and MeshPeek schedules are disabled on GitHub.
 
 ## License
 
