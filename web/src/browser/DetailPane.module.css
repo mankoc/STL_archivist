@@ -2,6 +2,14 @@
   position: relative;
 }
 
+.thumb[draggable="true"] {
+  cursor: grab;
+}
+
+.thumb[data-dragged] {
+  opacity: 0.4;
+}
+
 .remove {
   position: absolute;
   top: 4px;

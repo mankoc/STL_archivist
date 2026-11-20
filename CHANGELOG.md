@@ -4,6 +4,10 @@
 
 - **No automatic workflows:** the checks and the Debian package build no longer start on pushes and pull requests,
   only from *Actions*; the Nightly and MeshPeek schedules are disabled on GitHub.
+- **Image order and cover:** editors drag a model's images into order on the detail pane's *Images* tab, and
+  right-click an image → *Set as cover* to put it first; the first image is the cover everywhere (the pane, the
+  image grid, sidecars). The cover now shows above the tabs on the *Images* tab too. The order is a new
+  `images.position` column (older databases gain it on opening) and `PUT /api/models/{id}/images/order`.
 
 ## 2026.46.2 — 2026-11-15
 

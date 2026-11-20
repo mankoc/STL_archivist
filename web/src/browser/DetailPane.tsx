@@ -1,5 +1,6 @@
 // The selected model: a header (cover, title, status), one row of actions on its
-// archive, and three tabs: its images, its details, and the files in the archive.
+// archive, and three tabs: its images (editors drag them into order; the first, or
+// one chosen with right-click > Set as cover, is the cover), its details, and the files in the archive.
 import {
   ActionIcon,
   Anchor,
@@ -37,6 +38,7 @@ import {
   IconFolder,
   IconFolderOpen,
   IconPhotoPlus,
+  IconPhotoStar,
   IconTrash,
 } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -45,7 +47,7 @@ import { api, ApiError, type Schemas, unwrap } from "../api/client";
 import { hasRole, useUser } from "../auth/user";
 import { inDesktopShell, meshpeekState, openFolder, openInMeshPeek, openInPacker, packerState } from "../desktop";
 import { FileList } from "./ArchiveInfo";
-import { detailFacts, type Fields, loadTab, middlePath, saveTab, type Tab, webLink } from "./detail";
+import { detailFacts, type Fields, loadTab, middlePath, moveImage, saveTab, type Tab, webLink } from "./detail";
 import { ImageViewer, type ViewerImage } from "./ImageViewer";
 import { baseName } from "../format";
 import { ModelViewer } from "../viewer/ModelViewer";
@@ -68,6 +70,9 @@ export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: num
   const [viewing, setViewing] = useState<number | null>(null);
   // The model viewer, open on a file (null: the archive's first).
   const [modelView, setModelView] = useState<{ file: string | null } | null>(null);
+  // The image being dragged to a new place, and an image's right-click menu.
+  const [dragged, setDragged] = useState<number | null>(null);
+  const [imageMenu, setImageMenu] = useState<{ x: number; y: number; id: number } | null>(null);
   const [tab, setTabState] = useState<Tab>(loadTab);
   const setTab = (t: Tab) => {
     setTabState(t);
@@ -76,6 +81,7 @@ export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: num
   useEffect(() => {
     setViewing(null);
     setModelView(null);
+    setImageMenu(null);
   }, [id]);
   const meshpeek = useQuery({ queryKey: ["meshpeek"], queryFn: meshpeekState, enabled: inDesktopShell() });
   const packer = useQuery({ queryKey: ["packer"], queryFn: packerState, enabled: inDesktopShell() });
@@ -139,9 +145,19 @@ export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: num
     local && inDesktopShell() ? { label: "Its folder", icon: IconFolderOpen, run: () => openFolder(local) } : null,
   ].filter((o) => o != null);
   const openImage = (imageId: number) => setViewing(viewable.findIndex((v) => v.id === imageId));
+  // Save a new order of the images (the first is the cover).
+  const orderImages = async (ids: number[]) => {
+    try {
+      unwrap(await api.PUT("/api/models/{id}/images/order", { params: { path: { id } }, body: { ids } }));
+      await refresh();
+    } catch (err) {
+      notify((err as Error).message);
+    }
+  };
+  const imageIds = d.images.map((i) => i.id);
   return (
     <Stack gap="sm" p="sm" style={{ height: "100%", overflowY: "auto" }} data-testid="detail-pane">
-      {tab !== "images" && cover && (
+      {cover && (
         <UnstyledButton onClick={() => openImage(cover.id)} className={classes.cover} aria-label="View the cover image" data-testid="detail-cover">
           <Image src={cover.thumbnail} radius="md" alt="" />
         </UnstyledButton>
@@ -209,7 +225,30 @@ export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: num
               <SimpleGrid cols={2} spacing="xs">
                 {d.images.map((img) =>
                   img.thumbnail ? (
-                    <Box key={img.id} className={classes.thumb}>
+                    <Box
+                      key={img.id}
+                      className={classes.thumb}
+                      data-dragged={dragged === img.id || undefined}
+                      draggable={editor}
+                      onDragStart={editor ? () => setDragged(img.id) : undefined}
+                      onDragEnd={() => setDragged(null)}
+                      onDragOver={(e) => dragged != null && e.preventDefault()}
+                      onDrop={(e) => {
+                        if (dragged == null) return;
+                        e.preventDefault();
+                        const ids = moveImage(imageIds, dragged, img.id);
+                        setDragged(null);
+                        if (ids !== imageIds) void orderImages(ids);
+                      }}
+                      onContextMenu={
+                        editor
+                          ? (e) => {
+                              e.preventDefault();
+                              setImageMenu({ x: e.clientX, y: e.clientY, id: img.id });
+                            }
+                          : undefined
+                      }
+                    >
                       <UnstyledButton onClick={() => openImage(img.id)} display="block" style={{ cursor: "zoom-in" }} data-testid="detail-image">
                         <Image src={img.thumbnail} radius="md" alt="" loading="lazy" />
                       </UnstyledButton>
@@ -314,6 +353,20 @@ export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: num
           <FileList id={id} warned={warnings.length > 0} onView={(file) => setModelView({ file })} />
         </Tabs.Panel>
       </Tabs>
+      <Menu opened={imageMenu != null} onChange={(o) => !o && setImageMenu(null)} position="bottom-start" withinPortal>
+        <Menu.Target>
+          <div style={{ position: "fixed", left: imageMenu?.x ?? 0, top: imageMenu?.y ?? 0, width: 0, height: 0 }} />
+        </Menu.Target>
+        <Menu.Dropdown data-testid="image-menu">
+          <Menu.Item
+            leftSection={<IconPhotoStar size={14} />}
+            disabled={imageMenu?.id === imageIds[0]}
+            onClick={() => imageMenu && void orderImages([imageMenu.id, ...imageIds.filter((i) => i !== imageMenu.id)])}
+          >
+            Set as cover
+          </Menu.Item>
+        </Menu.Dropdown>
+      </Menu>
       <ImageViewer images={viewable} index={viewing} onIndex={setViewing} onClose={() => setViewing(null)} />
       {modelView && (
         <ModelViewer

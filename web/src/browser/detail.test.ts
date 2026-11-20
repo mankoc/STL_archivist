@@ -1,4 +1,4 @@
-import { detailFacts, loadTab, middlePath, saveTab, webLink } from "./detail";
+import { detailFacts, loadTab, middlePath, moveImage, saveTab, webLink } from "./detail";
 
 describe("detail facts", () => {
   it("lists what has a value, joined and formatted", () => {
@@ -43,5 +43,14 @@ describe("links and paths", () => {
     expect(short.endsWith("VintageVault - Orbiting Beauties.7z")).toBe(true);
     expect(short).toContain("…");
     expect(middlePath("C:\\a.7z")).toBe("C:\\a.7z");
+  });
+});
+
+describe("image order", () => {
+  it("moves an image to another's place", () => {
+    expect(moveImage([1, 2, 3, 4], 4, 1)).toEqual([4, 1, 2, 3]);
+    expect(moveImage([1, 2, 3, 4], 1, 3)).toEqual([2, 3, 1, 4]);
+    expect(moveImage([1, 2, 3], 2, 2)).toEqual([1, 2, 3]);
+    expect(moveImage([1, 2, 3], 9, 2)).toEqual([1, 2, 3]);
   });
 });
