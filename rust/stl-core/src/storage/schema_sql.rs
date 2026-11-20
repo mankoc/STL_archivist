@@ -268,6 +268,7 @@ CREATE TABLE images (
 	thumbnail_path VARCHAR(512), 
 	thumbnail BLOB, 
 	dhash VARCHAR(32), 
+	position INTEGER, 
 	PRIMARY KEY (id), 
 	FOREIGN KEY(model_id) REFERENCES models (id) ON DELETE CASCADE
 )
@@ -377,9 +378,14 @@ pub const ADD_COLUMNS: &[(&str, &str, &str)] = &[
     ("images", "thumbnail_path", r#"ALTER TABLE "images" ADD COLUMN "thumbnail_path" VARCHAR(512)"#),
     ("images", "thumbnail", r#"ALTER TABLE "images" ADD COLUMN "thumbnail" BLOB"#),
     ("images", "dhash", r#"ALTER TABLE "images" ADD COLUMN "dhash" VARCHAR(32)"#),
+    ("images", "position", r#"ALTER TABLE "images" ADD COLUMN "position" INTEGER"#),
     ("stl_files", "file_size", r#"ALTER TABLE "stl_files" ADD COLUMN "file_size" INTEGER"#),
     ("stl_files", "archive_hash", r#"ALTER TABLE "stl_files" ADD COLUMN "archive_hash" VARCHAR(64)"#),
 ];
+
+/// The order of a model's images: the ones given a `position` (by Reorder or Set as
+/// cover) first, then the rest as added. The first is the model's cover.
+pub const IMAGE_ORDER: &str = "position IS NULL, position, id";
 
 /// `db.ENSURE_INDEXES`: indexes added to existing databases as well.
 pub const ENSURE_INDEXES: &[&str] = &[

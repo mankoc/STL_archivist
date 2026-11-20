@@ -436,6 +436,20 @@ async fn images_upload_past_two_megabytes() {
 }
 
 #[tokio::test]
+async fn images_can_be_reordered() {
+    let l = library();
+    let id = l.ids[0];
+    l.lib.state.db.with(|c| c.execute("INSERT INTO images (id, model_id, filename) VALUES (60, ?1, 'a'), (61, ?1, 'b'), (62, ?1, 'c')", [id])).unwrap();
+    let r = l.call("PUT", &format!("/api/models/{id}/images/order"), Some(json!({"ids": [62, 60]}))).await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    let order = l.call("GET", &format!("/api/models/{id}"), None).await.json()["images"].as_array().unwrap().iter().map(|i| i["id"].as_i64().unwrap()).collect::<Vec<_>>();
+    assert_eq!(order, [62, 60, 61], "listed first (the cover), the rest after");
+    let r = l.call("PUT", &format!("/api/models/{}/images/order", l.ids[1]), Some(json!({"ids": [60]}))).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "a model without images");
+    assert_eq!(l.scalar::<i64>("SELECT position FROM images WHERE id = 60"), 1, "another model's call changes nothing");
+}
+
+#[tokio::test]
 async fn deleting_models_removes_their_thumbnails() {
     let l = library();
     let id = l.ids[0];
