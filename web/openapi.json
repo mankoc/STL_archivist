@@ -2947,6 +2947,62 @@
         }
       }
     },
+    "/api/models/{id}/images/order": {
+      "put": {
+        "tags": [
+          "editing"
+        ],
+        "summary": "Reorder a model's images (and so choose its cover, the first).",
+        "operationId": "put_models_by_id_images_order",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Model id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageOrder"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/models/{id}/view": {
       "post": {
         "tags": [
@@ -5939,6 +5995,23 @@
               "type": "integer",
               "format": "int64"
             }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ImageOrder": {
+        "type": "object",
+        "required": [
+          "ids"
+        ],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "The model's image ids in the new order; the first is the cover. Its images\nnot listed follow, as added."
           }
         },
         "additionalProperties": false

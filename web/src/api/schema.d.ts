@@ -1096,6 +1096,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/models/{id}/images/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Reorder a model's images (and so choose its cover, the first). */
+        put: operations["put_models_by_id_images_order"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/models/{id}/view": {
         parameters: {
             query?: never;
@@ -2097,6 +2114,13 @@ export interface components {
             ids: number[];
         };
         IdsRequest: {
+            ids: number[];
+        };
+        ImageOrder: {
+            /**
+             * @description The model's image ids in the new order; the first is the cover. Its images
+             *     not listed follow, as added.
+             */
             ids: number[];
         };
         /** @description Two archives with matching images. */
@@ -5573,6 +5597,46 @@ export interface operations {
                 };
             };
             413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    put_models_by_id_images_order: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Model id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImageOrder"];
+            };
+        };
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

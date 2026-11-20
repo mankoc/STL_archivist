@@ -75,6 +75,7 @@ pub const DOWNLOAD_CHUNK: usize = 256 * 1024;
         edit::clear_warnings,
         edit::add_images,
         edit::delete_image,
+        edit::order_images,
         lookups::list,
         lookups::add,
         lookups::info,
@@ -210,6 +211,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/models/delete", post(edit::delete_models))
         .route("/api/models/clear-warnings", post(edit::clear_warnings))
         .route("/api/models/{id}/images", post(edit::add_images).layer(DefaultBodyLimit::max(edit::MAX_IMAGES_REQUEST_BYTES)))
+        .route("/api/models/{id}/images/order", put(edit::order_images))
         .route("/api/images/{id}", delete(edit::delete_image))
         .route("/api/editor/choices", get(edit::choices))
         .route("/api/editor/subcollections", get(edit::subcollections))
