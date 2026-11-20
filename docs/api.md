@@ -18,13 +18,13 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
   or `GET /api/jobs/{id}`.
 - Writes that change the library are announced on `/api/events` as `library_changed`.
 
-## Endpoints (106)
+## Endpoints (107)
 
 - [Sign-in and sessions](#sign-in-and-sessions) (5)
 - [Users and preferences](#users-and-preferences) (7)
 - [System](#system) (1)
 - [Browsing the library](#browsing-the-library) (12)
-- [Editing models](#editing-models) (12)
+- [Editing models](#editing-models) (13)
 - [Lookups (sculptors, collections, tags…)](#lookups-sculptors-collections-tags) (14)
 - [Thumbnails and images](#thumbnails-and-images) (3)
 - [Files and folders](#files-and-folders) (3)
@@ -101,6 +101,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 | `GET /api/models/{id}/editor` | A model as the editor shows it. | path `id`: integer | 200 [EditorModel](#editormodel) | 404 |
 | `PUT /api/models/{id}/editor` | Save the editor's form for one model. | path `id`: integer<br>body: [EditorSave](#editorsave) | 204 | 400, 404 |
 | `POST /api/models/{id}/images` | Add images to a model (multipart form, one file per part). Each becomes a thumbnail (resized to the library's thumbnail size, or its view capture size with `view`); the original is not kept. | path `id`: integer<br>query `view`?: boolean<br>body: `multipart/form-data` | 200 [AddedImages](#addedimages) | 404, 413 |
+| `PUT /api/models/{id}/images/order` | Reorder a model's images (and so choose its cover, the first). | path `id`: integer<br>body: [ImageOrder](#imageorder) | 204 | 403, 404 |
 | `POST /api/sort/preview` | Where the archives would go (nothing is moved). | body: [SortRequest](#sortrequest) | 200 [SortRow](#sortrow)[] | 403 |
 
 ### Lookups (sculptors, collections, tags…)
@@ -718,6 +719,12 @@ A folder below a library folder's root that holds archives.
 | Field | Type | Description |
 |---|---|---|
 | `ids` | integer[] |  |
+
+### ImageOrder
+
+| Field | Type | Description |
+|---|---|---|
+| `ids` | integer[] | The model's image ids in the new order; the first is the cover. Its images not listed follow, as added. |
 
 ### ImagePair
 

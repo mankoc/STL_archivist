@@ -545,6 +545,39 @@ fn base_name(name: &str) -> &str {
     name.rsplit(['/', '\\', ':']).next().map(str::trim).filter(|n| !n.is_empty()).unwrap_or("image")
 }
 
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ImageOrder {
+    /// The model's image ids in the new order; the first is the cover. Its images
+    /// not listed follow, as added.
+    pub ids: Vec<i64>,
+}
+
+/// Reorder a model's images (and so choose its cover, the first).
+#[utoipa::path(put, path = "/api/models/{id}/images/order", tag = "editing", request_body = ImageOrder,
+    params(("id" = i64, Path, description = "Model id")),
+    responses((status = 204), (status = 403, body = crate::error::ErrorBody), (status = 404, body = crate::error::ErrorBody)))]
+pub async fn order_images(
+    State(lib): State<AppState>,
+    me: CurrentUser,
+    Path(id): Path<i64>,
+    Json(req): Json<ImageOrder>,
+) -> Result<StatusCode, ApiError> {
+    editor(&me)?;
+    let path = lib
+        .run(move |lib| {
+            let Some(path) = lib.db.with(|c| model_editor::archive_paths(c, &[id]))?.remove(&id) else { return Ok(None) };
+            if !lib.db.with_tx(|tx| model_files::order_images(tx, id, &req.ids))? {
+                return Ok(None);
+            }
+            Ok(Some(path))
+        })
+        .await?;
+    let path = path.ok_or_else(|| ApiError::not_found(format!("no images of model {id}")))?;
+    lib.schedule_sidecars([path]);
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// Remove one image and its thumbnail.
 #[utoipa::path(delete, path = "/api/images/{id}", tag = "editing",
     params(("id" = i64, Path, description = "Image id")),
