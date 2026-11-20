@@ -4,12 +4,25 @@ use rusqlite::types::Value;
 use rusqlite::{Connection, Transaction, params};
 
 use super::Result;
+use super::schema_sql::IMAGE_ORDER;
 use super::writes::{delete_model, utc_now_text};
 
-/// `(id, thumbnail_path)` of a model's images, in id order.
+/// `(id, thumbnail_path)` of a model's images, in [`IMAGE_ORDER`].
 pub fn model_images(conn: &Connection, model_id: i64) -> Result<Vec<(i64, Option<String>)>> {
-    let mut st = conn.prepare("SELECT id, thumbnail_path FROM images WHERE model_id = ?1 ORDER BY id")?;
+    let mut st = conn.prepare(&format!("SELECT id, thumbnail_path FROM images WHERE model_id = ?1 ORDER BY {IMAGE_ORDER}"))?;
     st.query_map([model_id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()
+}
+
+/// Put a model's images in the order of `ids` (the first is the cover); its images
+/// not listed follow, as added. Ids of other models' images are ignored. Returns
+/// whether the model has images.
+pub fn order_images(tx: &Transaction, model_id: i64, ids: &[i64]) -> Result<bool> {
+    let n = tx.execute("UPDATE images SET position = NULL WHERE model_id = ?1", [model_id])?;
+    let mut st = tx.prepare("UPDATE images SET position = ?1 WHERE id = ?2 AND model_id = ?3")?;
+    for (pos, id) in ids.iter().enumerate() {
+        st.execute(params![pos as i64, id, model_id])?;
+    }
+    Ok(n > 0)
 }
 
 /// Insert image records without thumbnails; returns their ids.
@@ -146,6 +159,13 @@ mod tests {
         assert_eq!(delete_models(&tx, &[3, 99]).unwrap(), Vec::<String>::new());
         tx.commit().unwrap();
         assert_eq!(model_images(&conn, 1).unwrap(), [(ids[0], Some(ids[0].to_string())), (ids[1], None)]);
+        let tx = conn.transaction().unwrap();
+        let more = add_images(&tx, 1, &["c.png".into()]).unwrap();
+        assert!(order_images(&tx, 1, &[ids[1], 999, ids[0]]).unwrap());
+        assert!(!order_images(&tx, 3, &[ids[0]]).unwrap(), "a deleted model has no images");
+        tx.commit().unwrap();
+        let order: Vec<i64> = model_images(&conn, 1).unwrap().into_iter().map(|(id, _)| id).collect();
+        assert_eq!(order, [ids[1], ids[0], more[0]], "listed first, the rest after");
         let sql = format!("SELECT {} FROM models WHERE id = 2", crate::storage::schema_sql::archive_folder_sql("models"));
         let folder: String = conn.query_row(&sql, [], |r| r.get(0)).unwrap();
         assert_eq!(folder, "G:/s", "moved into a library made at its folder");

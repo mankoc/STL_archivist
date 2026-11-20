@@ -73,16 +73,17 @@ pub fn archive_folders(conn: &Connection) -> Result<Vec<String>> {
     Ok(v.into_iter().filter(|f| !f.is_empty()).collect())
 }
 
-/// `{model_id: [thumbnail_path, ...]}` in image id order (every id present).
+/// `{model_id: [thumbnail_path, ...]}` in image order (every id present).
 fn thumbs(conn: &Connection, ids: &[i64]) -> Result<HashMap<i64, Vec<Option<String>>>> {
     let mut out: HashMap<i64, Vec<Option<String>>> = ids.iter().map(|&i| (i, Vec::new())).collect();
     if ids.is_empty() {
         return Ok(out);
     }
-    let mut st = conn.prepare(
+    let mut st = conn.prepare(&format!(
         "SELECT model_id, thumbnail_path FROM images \
-         WHERE model_id IN (SELECT value FROM json_each(?1)) ORDER BY id",
-    )?;
+         WHERE model_id IN (SELECT value FROM json_each(?1)) ORDER BY {}",
+        super::schema_sql::IMAGE_ORDER
+    ))?;
     let rows = st.query_map([id_json(ids)], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?)))?;
     for row in rows {
         let (mid, path) = row?;

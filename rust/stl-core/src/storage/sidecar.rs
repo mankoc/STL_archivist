@@ -181,7 +181,7 @@ fn snapshot(conn: &Connection, folder: &str, include_thumbnails: bool) -> SResul
         };
         let mut images = Vec::new();
         if include_thumbnails {
-            let mut st = conn.prepare_cached("SELECT id, filename, thumbnail_path FROM images WHERE model_id = ?1 ORDER BY id")?;
+            let mut st = conn.prepare_cached(&format!("SELECT id, filename, thumbnail_path FROM images WHERE model_id = ?1 ORDER BY {}", super::schema_sql::IMAGE_ORDER))?;
             let imgs: Vec<(i64, Option<String>, Option<String>)> =
                 st.query_map([id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<_>>()?;
             for (i_idx, (image_id, filename, thumb)) in imgs.into_iter().enumerate() {
