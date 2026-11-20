@@ -52,7 +52,8 @@ Version: 2026.46.2
   (optionally) rows with warnings highlighted, paths relative to their library, links in the
   URL column, folders of the filter tree crawled or
   rescanned from their right-click menu, an
-  image grid, a detail pane with thumbnails, downloads and image drag-and-drop, and a
+  image grid, a detail pane with thumbnails (dragged into order; the first, or one chosen with
+  right-click → *Set as cover*, is the cover), downloads and image drag-and-drop, and a
   folder-by-folder archive browser
 - **Editing** — model editor, mass editor (path patterns with a preview, find & replace, tags added or cleared,
   trimming), lookup editors for tags, categories, collections, subcollections, scales, sculptors, releases and
