@@ -64,3 +64,13 @@ export function middlePath(path: string, max = 64): string {
   const head = Math.max(8, max - name.length - 1);
   return name.length + 9 >= max ? `…${path.slice(-(max - 1))}` : `${path.slice(0, head)}…${path.slice(path.length - name.length - 1)}`;
 }
+
+/** `ids` with `id` moved to where `target` is (before it moving up, after it moving down). */
+export function moveImage(ids: number[], id: number, target: number): number[] {
+  const from = ids.indexOf(id);
+  const to = ids.indexOf(target);
+  if (from < 0 || to < 0 || from === to) return ids;
+  const out = ids.filter((i) => i !== id);
+  out.splice(to, 0, id);
+  return out;
+}
