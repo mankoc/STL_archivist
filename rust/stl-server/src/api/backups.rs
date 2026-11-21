@@ -73,8 +73,12 @@ pub struct BackupFile {
     responses((status = 200, body = Vec<BackupFile>), (status = 403, body = crate::error::ErrorBody)))]
 pub async fn list(State(lib): State<AppState>, me: CurrentUser) -> Result<Json<Vec<BackupFile>>, ApiError> {
     me.require(Role::Admin)?;
-    let folder = dir(&lib.config.data_dir);
-    let mut out: Vec<BackupFile> = std::fs::read_dir(&folder)
+    Ok(Json(lib.run(|lib| Ok(backup_files(&dir(&lib.config.data_dir)))).await?))
+}
+
+/// The backups in `folder`, newest first.
+fn backup_files(folder: &Path) -> Vec<BackupFile> {
+    let mut out: Vec<BackupFile> = std::fs::read_dir(folder)
         .map(|rd| {
             rd.flatten()
                 .filter_map(|e| {
@@ -91,7 +95,7 @@ pub async fn list(State(lib): State<AppState>, me: CurrentUser) -> Result<Json<V
         })
         .unwrap_or_default();
     out.sort_by(|a, b| b.name.cmp(&a.name));
-    Ok(Json(out))
+    out
 }
 
 /// Download a backup.
@@ -160,7 +164,7 @@ pub async fn upload(State(lib): State<AppState>, me: CurrentUser, body: Body) ->
 pub async fn delete(State(lib): State<AppState>, me: CurrentUser, UrlPath(name): UrlPath<String>) -> Result<StatusCode, ApiError> {
     me.require(Role::Admin)?;
     let path = path_of(&lib, &name)?;
-    std::fs::remove_file(path).map_err(|e| ApiError::internal(e.to_string()))?;
+    lib.run(move |_| std::fs::remove_file(path).map_err(|e| ApiError::internal(e.to_string()))).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
