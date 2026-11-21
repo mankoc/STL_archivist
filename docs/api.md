@@ -18,7 +18,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
   or `GET /api/jobs/{id}`.
 - Writes that change the library are announced on `/api/events` as `library_changed`.
 
-## Endpoints (107)
+## Endpoints (109)
 
 - [Sign-in and sessions](#sign-in-and-sessions) (5)
 - [Users and preferences](#users-and-preferences) (7)
@@ -36,7 +36,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 - [Statistics](#statistics) (2)
 - [Library settings](#library-settings) (2)
 - [AI tagger](#ai-tagger) (6)
-- [Compute workers](#compute-workers) (3)
+- [Compute workers](#compute-workers) (5)
 - [Optional components](#optional-components) (1)
 - [Sync](#sync) (11)
 - [Types](#types)
@@ -219,7 +219,9 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 |---|---|---|---|---|
 | `GET /api/workers` | The compute mode and the connected workers. |  | 200 [WorkersStatus](#workersstatus) |  |
 | `GET /api/workers/connect` | A compute worker's connection (editors): a WebSocket of JSON frames, the worker's `hello` first (see `crate::workers::ToServer` / `ToWorker`). |  | 101 | 403 |
-| `POST /api/workers/token` | A session token for a compute worker (editors): the web client asks for one and hands it to the desktop app, which starts the worker with it. |  | 200 [WorkerToken](#workertoken) | 403 |
+| `POST /api/workers/token` | A compute worker's token (editors): the web client asks for one and hands it to the desktop app, which starts the worker with it. |  | 200 [WorkerToken](#workertoken) | 403 |
+| `GET /api/workers/tokens` | The live compute worker sessions (editors: their own; administrators: everyone's). |  | 200 [WorkerSession](#workersession)[] | 403 |
+| `DELETE /api/workers/tokens/{id}` | End a compute worker session (editors: their own; administrators: anyone's). A worker connected with it is disconnected within a minute. | path `id`: string | 204 | 403, 404 |
 
 ### Optional components
 
@@ -1630,11 +1632,22 @@ A connected worker as users see it.
 | `user` | string | The user whose session it uses. |
 | `version` | string |  |
 
+### WorkerSession
+
+A compute worker's session, as listed (never its token).
+
+| Field | Type | Description |
+|---|---|---|
+| `created_at` | integer | Unix seconds. |
+| `id` | string | Names the session to end it (the hex of its token's hash). |
+| `last_used` | integer | Unix seconds; the session ends after 30 days unused. |
+| `user` | string |  |
+
 ### WorkerToken
 
 | Field | Type | Description |
 |---|---|---|
-| `token` | string | A new session of the signed-in user, for `stl-server worker` (`STL_WORKER_TOKEN`). Signing out elsewhere does not end it. |
+| `token` | string | A new compute worker session of the signed-in user, for `stl-server worker` (`STL_WORKER_TOKEN`): it opens `/api/workers/connect` and no other route. Signing out elsewhere does not end it; `DELETE /api/workers/tokens/{id}` does. |
 
 ### WorkersStatus
 

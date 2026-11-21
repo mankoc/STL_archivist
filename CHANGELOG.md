@@ -84,6 +84,11 @@
 - **Smaller browser and settings pages (no visible change):** the Settings page's Account, Library and Users tabs
   are files of their own, and the browser's pane resizing, Columns menu, folder menu and confirmations moved out
   of `BrowserPage.tsx` (482 → 328 lines; `SettingsPage.tsx` 682 → 85).
+- **Worker tokens connect only a worker:** `POST /api/workers/token` now makes a compute worker session that opens
+  `/api/workers/connect` and no other route (it was a full 30-day session of its user). *Settings → Workers →
+  Worker sessions* lists them (editors their own, administrators everyone's) and ends one, which disconnects its
+  worker within a minute (`GET /api/workers/tokens`, `DELETE /api/workers/tokens/{id}`). `server.db` gains
+  `sessions.worker` on opening; workers started with an older token keep connecting until it is ended.
 
 ## 2026.46.2 — 2026-11-15
 
