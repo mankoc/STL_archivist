@@ -355,6 +355,19 @@ pub fn stl_list(members: &[archive::ArchiveMember]) -> Vec<(String, Option<i64>)
     stl_dict(members.iter().map(|m| (m.name.clone(), m.size.map(|s| s as i64))))
 }
 
+/// The STL lists of the records that have none but whose catalog this batch read
+/// anyway (no archive is opened for them): `(path, hash, list)`.
+fn backfill_lists(paths: &[String], pairs: &[(String, String)], members_of: &HashMap<&str, &Vec<archive::ArchiveMember>>) -> Vec<db::StlList> {
+    let hash_of: HashMap<&str, &str> = pairs.iter().map(|(p, h)| (p.as_str(), h.as_str())).collect();
+    paths
+        .iter()
+        .filter_map(|p| {
+            let m = members_of.get(p.as_str())?;
+            Some((p.clone(), hash_of.get(p.as_str()).copied().unwrap_or_default().to_string(), stl_list(m)))
+        })
+        .collect()
+}
+
 /// `{name: size}` for the printable members: a repeated name keeps its first
 /// position and its last size.
 fn stl_dict(members: impl Iterator<Item = (String, Option<i64>)>) -> Vec<(String, Option<i64>)> {
@@ -704,13 +717,34 @@ impl Run<'_> {
         Ok(())
     }
 
+    /// One batch through the phases: hash, diff, extract, upsert, report. Whether to
+    /// stop here (asked to, or too many upserts failed in a row).
     fn batch(&mut self, batch: &[String], start: usize, modified: &mut HashSet<String>) -> Result<bool, CrawlError> {
         let (hashes, lists, trusted) = self.phase1(batch)?;
         if start == 0 {
             self.host.emit(Event::Phase("Checking database for changes…".into()));
         }
-        let pairs: Vec<(String, String)> = batch.iter().cloned().zip(hashes.iter().cloned()).collect();
-        for (p, h) in &pairs {
+        let pairs: Vec<(String, String)> = batch.iter().cloned().zip(hashes).collect();
+        let diff = self.diff(&pairs, &lists, trusted)?;
+        if !diff.to_extract.is_empty() && start == 0 {
+            self.host.emit(Event::Phase("Extracting new/changed archives…".into()));
+        }
+        let members_of: HashMap<&str, &Vec<archive::ArchiveMember>> = lists.iter().map(|(p, m)| (p.as_str(), m)).collect();
+        let prepared = self.prepare_all(&diff.to_extract, &members_of);
+        let stl_lists = backfill_lists(&diff.stl_backfill, &pairs, &members_of);
+        let inputs = self.upsert_inputs(&pairs, diff.existing, &prepared);
+        let results = self.upsert(&inputs, &stl_lists)?;
+        if self.report(start, &inputs, results, modified) {
+            return Ok(true);
+        }
+        self.store_files(lists)?;
+        Ok(self.host.should_stop())
+    }
+
+    /// Phase 2: the batch against the database (new, changed, moved and unreadable
+    /// archives), with the records gone from elsewhere that its hashes may be.
+    fn diff(&mut self, pairs: &[(String, String)], lists: &[FileList], trusted: Vec<String>) -> Result<db::Diff, CrawlError> {
+        for (p, h) in pairs {
             if self.existing_hashes.get(p) != Some(h) {
                 for m in self.outside.gone_with_hash(h) {
                     self.index_missing(&m);
@@ -720,12 +754,9 @@ impl Run<'_> {
         }
         let read: HashSet<String> = lists.iter().map(|(p, _)| p.clone()).collect();
         let trusted: HashSet<String> = trusted.into_iter().collect();
-        let diff = {
-            let t = tx(&mut self.conn)?;
-            let d = db::diff(&t, &pairs, self.cfg.force_rescan, &read, &trusted, &self.candidates)?;
-            t.commit()?;
-            d
-        };
+        let t = tx(&mut self.conn)?;
+        let diff = db::diff(&t, pairs, self.cfg.force_rescan, &read, &trusted, &self.candidates)?;
+        t.commit()?;
         for p in &diff.unreadable {
             self.host
                 .emit(Event::Warning(format!("cannot read archive (damaged, or in a format this server does not read): {}", WinPath::new(p).name())));
@@ -739,29 +770,22 @@ impl Run<'_> {
                 self.log(format!("Moved: {name} → {new_path}"));
             }
         }
-        if !diff.to_extract.is_empty() && start == 0 {
-            self.host.emit(Event::Phase("Extracting new/changed archives…".into()));
-        }
+        Ok(diff)
+    }
+
+    /// Phase 3: the archives to extract read and their thumbnails made, in parallel.
+    fn prepare_all(&self, paths: &[String], members_of: &HashMap<&str, &Vec<archive::ArchiveMember>>) -> HashMap<String, Prepared> {
         let (cfg, host) = (self.cfg, self.host);
-        let members_of: HashMap<&str, &Vec<archive::ArchiveMember>> = lists.iter().map(|(p, m)| (p.as_str(), m)).collect();
-        let prepared: HashMap<String, Prepared> = self
-            .pool
-            .install(|| diff.to_extract.par_iter().map(|p| (p.clone(), prepare(p, members_of.get(p.as_str()).copied(), cfg, host))).collect());
-        // Records without an STL list whose catalog was read anyway get it from that catalog
-        // (no archive is opened for it).
-        let hash_of: HashMap<&str, &str> = pairs.iter().map(|(p, h)| (p.as_str(), h.as_str())).collect();
-        let stl_lists: Vec<db::StlList> = diff
-            .stl_backfill
-            .iter()
-            .filter_map(|p| {
-                let m = members_of.get(p.as_str())?;
-                Some((p.clone(), hash_of.get(p.as_str()).copied().unwrap_or_default().to_string(), stl_list(m)))
-            })
-            .collect();
-        let existing: HashMap<String, i64> = diff.existing.into_iter().collect();
-        let total = self.summary.total;
+        self.pool.install(|| paths.par_iter().map(|p| (p.clone(), prepare(p, members_of.get(p.as_str()).copied(), cfg, host))).collect())
+    }
+
+    /// Phase 4's rows, one per archive of the batch (fewer when asked to stop), with
+    /// the CLIP vectors of their new thumbnails when the crawl computes them.
+    fn upsert_inputs(&mut self, pairs: &[(String, String)], existing: Vec<(String, i64)>, prepared: &HashMap<String, Prepared>) -> Vec<db::UpsertInput> {
+        let (cfg, host) = (self.cfg, self.host);
+        let existing: HashMap<String, i64> = existing.into_iter().collect();
         let mut inputs = Vec::new();
-        for (p, h) in pairs.iter() {
+        for (p, h) in pairs {
             let prep = prepared.get(p);
             let existing_id = existing.get(p).copied();
             let changed = prep.map(|prep| self.changed(p, h, existing_id, prep));
@@ -779,16 +803,26 @@ impl Run<'_> {
         if cfg.embed {
             embed_batch(host, &mut inputs);
         }
-        let results = {
-            let t = tx(&mut self.conn)?;
-            let (r, drops) = db::upsert_batch(&t, self.store, &cfg.upsert, &inputs, self.failures, MAX_CONSECUTIVE_FAILURES)?;
-            db::store_stl_lists(&t, &stl_lists)?;
-            t.commit()?;
-            if let Some(s) = self.store {
-                db::drop_unused_thumbs(&self.conn, s, &drops)?;
-            }
-            r
-        };
+        inputs
+    }
+
+    /// Phase 4: the rows and the backfilled STL lists in one transaction, then the
+    /// thumbnails nothing uses any more. Each row's outcome.
+    fn upsert(&mut self, inputs: &[db::UpsertInput], stl_lists: &[db::StlList]) -> Result<Vec<Result<db::Upserted, String>>, CrawlError> {
+        let t = tx(&mut self.conn)?;
+        let (results, drops) = db::upsert_batch(&t, self.store, &self.cfg.upsert, inputs, self.failures, MAX_CONSECUTIVE_FAILURES)?;
+        db::store_stl_lists(&t, stl_lists)?;
+        t.commit()?;
+        if let Some(s) = self.store {
+            db::drop_unused_thumbs(&self.conn, s, &drops)?;
+        }
+        Ok(results)
+    }
+
+    /// Log and count each row's outcome, noting the folders whose sidecars change.
+    /// Whether the crawl aborts (too many failures in a row).
+    fn report(&mut self, start: usize, inputs: &[db::UpsertInput], results: Vec<Result<db::Upserted, String>>, modified: &mut HashSet<String>) -> bool {
+        let (cfg, total) = (self.cfg, self.summary.total);
         for (k, (input, result)) in inputs.iter().zip(results).enumerate() {
             let idx = start + k + 1;
             match result {
@@ -797,7 +831,7 @@ impl Run<'_> {
                     self.failures += 1;
                     if self.failures >= MAX_CONSECUTIVE_FAILURES {
                         self.log(format!("Crawl aborted: {} consecutive upsert failures — last error: {e}", self.failures));
-                        return Ok(true);
+                        return true;
                     }
                 }
                 Ok(u) => {
@@ -825,8 +859,7 @@ impl Run<'_> {
             }
             self.host.emit(Event::Progress(idx, total));
         }
-        self.store_files(lists)?;
-        Ok(host.should_stop())
+        false
     }
 
     /// The images in the archive's folder and those above it, up to the library's root.
