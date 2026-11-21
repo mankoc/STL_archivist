@@ -343,6 +343,53 @@ impl JobRequest {
     }
 
     /// Whether the job only reads the library (no change announcement after it).
+    /// The role a job needs: administrators for whole-library operations
+    /// (compacting, backups, imports, sync, clearing, components), editors for
+    /// the rest. No `_` arm, so that a new kind must be placed here.
+    pub fn required_role(&self) -> crate::accounts::Role {
+        use crate::accounts::Role;
+        use JobRequest as J;
+        match self {
+            J::CompactDatabase
+            | J::Backup
+            | J::ImportLibrary { .. }
+            | J::Sync { .. }
+            | J::SyncExport { .. }
+            | J::ClearLibrary { .. }
+            | J::InstallComponents { .. }
+            | J::RemoveComponents { .. } => Role::Admin,
+            J::AiCheck { .. }
+            | J::AiFields { .. }
+            | J::AiFill { .. }
+            | J::AiPattern { .. }
+            | J::AiSuggest { .. }
+            | J::AiTag { .. }
+            | J::CleanSidecars
+            | J::ComputeEmbeddings { .. }
+            | J::Crawl { .. }
+            | J::DeleteFiles { .. }
+            | J::FindContentDuplicates { .. }
+            | J::FindDuplicateEntries
+            | J::FindImageDuplicates { .. }
+            | J::FindMetadataDuplicates { .. }
+            | J::FindMoved { .. }
+            | J::GenerateSidecars
+            | J::GenerateThumbnails { .. }
+            | J::PruneImages { .. }
+            | J::ReadFileLists
+            | J::RecheckWarnings { .. }
+            | J::RecomputeDhashes { .. }
+            | J::RelocateLibrary { .. }
+            | J::RemoveSidecars
+            | J::RereadLinks { .. }
+            | J::Rescan { .. }
+            | J::SearchFolder { .. }
+            | J::SortFiles { .. }
+            | J::UpdateFolders { .. }
+            | J::VerifyArchives => Role::Editor,
+        }
+    }
+
     pub fn read_only(&self) -> bool {
         matches!(
             self,

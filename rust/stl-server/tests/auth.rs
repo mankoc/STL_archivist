@@ -190,3 +190,24 @@ async fn long_connections_follow_account_changes() {
     s.accounts.with(|c| accounts::end_session(c, &other)).unwrap();
     assert!(!still_allowed(s, &other, Role::Viewer).await, "signed out");
 }
+
+/// A change made with the session cookie needs the web client's header, which no
+/// other site can send; reads and bearer tokens do not.
+#[tokio::test]
+async fn cookie_changes_need_the_client_header() {
+    let lib = empty_library();
+    let s = &lib.state;
+    let token = lib.user("gus", Role::Viewer);
+    let with_cookie = |method: &str, uri: &str, client: bool| {
+        let mut b = axum::http::Request::builder().method(method).uri(uri).header(header::COOKIE, format!("stl_session={token}"));
+        if client {
+            b = b.header("X-Requested-With", "stl-web");
+        }
+        b.header(header::CONTENT_TYPE, "application/json").body(axum::body::Body::from(r#""dark""#)).unwrap()
+    };
+    let put = "/api/me/settings/theme";
+    assert_eq!(send_from(s, LOCAL, with_cookie("PUT", put, false)).await.status, StatusCode::FORBIDDEN);
+    assert_eq!(send_from(s, LOCAL, with_cookie("PUT", put, true)).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(send_from(s, LOCAL, with_cookie("GET", "/api/me/settings", false)).await.status, StatusCode::OK, "reads need nothing");
+    assert_eq!(call(s, "PUT", put, Some(&token), Some(json!("light"))).await.status, StatusCode::NO_CONTENT, "nor bearer tokens");
+}

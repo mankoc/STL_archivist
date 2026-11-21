@@ -88,10 +88,29 @@ impl FromRequestParts<AppState> for CurrentUser {
 
     async fn from_request_parts(parts: &mut Parts, lib: &AppState) -> Result<Self, ApiError> {
         let token = request_token(&parts.headers).ok_or_else(unauthorized)?;
+        if !cross_site_safe(&parts.method, &parts.headers) {
+            return Err(ApiError::new(StatusCode::FORBIDDEN, format!("a change sent with the session cookie needs the {CLIENT_HEADER} header")));
+        }
         let t = token.clone();
         let user = lib.run(move |lib| Ok(lib.accounts.with(|c| accounts::session_user(c, &t))?)).await?;
         user.map(|user| CurrentUser { user, token }).ok_or_else(unauthorized)
     }
+}
+
+/// The header the web client sends with every request. A browser sends no
+/// custom header across sites without a CORS preflight, which this server never
+/// grants, so with it a cookie-authenticated change cannot come from another site
+/// (`SameSite=Strict` covers other sites, not other ports or subdomains).
+pub const CLIENT_HEADER: &str = "x-requested-with";
+
+/// Whether a request may act with its credentials: a read, a bearer token (the
+/// desktop app, workers, sync; no browser sends one by itself), or a cookie with
+/// [`CLIENT_HEADER`].
+fn cross_site_safe(method: &axum::http::Method, headers: &HeaderMap) -> bool {
+    use axum::http::Method;
+    matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS)
+        || headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()).is_some_and(|v| v.starts_with("Bearer "))
+        || headers.contains_key(CLIENT_HEADER)
 }
 
 fn unauthorized() -> ApiError {
