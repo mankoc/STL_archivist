@@ -125,10 +125,10 @@ pub struct EditorModel {
 /// `model_for_editor`.
 pub fn model_for_editor(tx: &Connection, model_id: i64) -> Result<Option<EditorModel>> {
     let Some((row, archive_path)) = load_row(tx, model_id)? else { return Ok(None) };
-    let mut st = tx.prepare(&format!("SELECT id, thumbnail_path FROM images WHERE model_id = ?1 ORDER BY {}", super::schema_sql::IMAGE_ORDER))?;
-    let images = st
-        .query_map([model_id], |r| Ok((r.get(0)?, r.get::<_, Option<String>>(1)?.is_some_and(|t| !t.is_empty()))))?
-        .collect::<Result<_>>()?;
+    let images = super::model_files::model_images(tx, model_id)?
+        .into_iter()
+        .map(|(id, thumb)| (id, thumb.is_some_and(|t| !t.is_empty())))
+        .collect();
     Ok(Some(EditorModel {
         release: lookup_name(tx, "releases", row.release_id)?,
         sculptor: lookup_name(tx, "sculptors", row.sculptor_id)?,
