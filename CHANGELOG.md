@@ -30,6 +30,8 @@
   crawled again and their patterns no longer lost.
 - **Link files are size-checked:** `.url` files over 1 MB, inside an archive or beside it, are no longer read when
   looking for a model's link, so a huge (or highly compressed) one cannot exhaust memory during crawls.
+- **The AI status answers while the model loads:** starting the local AI model server no longer blocks
+  `/api/ai/status` (or hangs it indefinitely when the AI job is paused meanwhile).
 
 ## 2026.46.2 — 2026-11-15
 
