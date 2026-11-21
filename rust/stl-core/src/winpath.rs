@@ -74,24 +74,33 @@ impl WinPath {
 
     /// `stem` (Python 3.14): the final part minus its last suffix.
     pub fn stem(&self) -> &str {
-        let name = self.name();
-        if let Some(i) = name.rfind('.') {
-            let stem = &name[..i];
-            if !stem.trim_start_matches('.').is_empty() {
-                return stem;
-            }
-        }
-        name
+        stem_of(self.name())
     }
 
     /// `suffix` (Python 3.14) of the final part.
     pub fn suffix(&self) -> &str {
-        let name = self.parts.last().map(String::as_str).unwrap_or("");
-        let stripped = name.trim_start_matches('.');
-        match stripped.rfind('.') {
-            Some(i) => &stripped[i..],
-            None => "",
+        suffix_of(self.name())
+    }
+}
+
+/// `PurePath.stem` (Python 3.14) of a final part `name`.
+pub(crate) fn stem_of(name: &str) -> &str {
+    if let Some(i) = name.rfind('.') {
+        let stem = &name[..i];
+        if !stem.trim_start_matches('.').is_empty() {
+            return stem;
         }
+    }
+    name
+}
+
+/// `PurePath.suffix` (Python 3.14) of a final part `name` (`"a."` has `"."`; a
+/// name of dots only has none).
+pub(crate) fn suffix_of(name: &str) -> &str {
+    let stripped = name.trim_start_matches('.');
+    match stripped.rfind('.') {
+        Some(i) => &stripped[i..],
+        None => "",
     }
 }
 

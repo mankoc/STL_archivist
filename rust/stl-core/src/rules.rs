@@ -91,22 +91,12 @@ impl MemberPath {
 
     /// `PurePath.suffix` (Python 3.14).
     pub fn suffix(&self) -> &str {
-        let stripped = self.name.trim_start_matches('.');
-        match stripped.rfind('.') {
-            Some(i) => &stripped[i..],
-            None => "",
-        }
+        crate::winpath::suffix_of(&self.name)
     }
 
     /// `PurePath.stem` (Python 3.14).
     pub fn stem(&self) -> &str {
-        if let Some(i) = self.name.rfind('.') {
-            let stem = &self.name[..i];
-            if !stem.trim_start_matches('.').is_empty() {
-                return stem;
-            }
-        }
-        &self.name
+        crate::winpath::stem_of(&self.name)
     }
 
     fn suffix_lower(&self) -> String {
@@ -301,10 +291,10 @@ pub fn detect_scale<S: AsRef<str>>(names: &[S]) -> Vec<String> {
     for name in names {
         let p = MemberPath::new(name.as_ref());
         let stem = p.stem();
-        for (rx, fmt) in [(&*SCALE_MM, 0u8), (&*SCALE_RATIO, 1u8)] {
+        for (rx, before, after) in [(&*SCALE_MM, "", " mm"), (&*SCALE_RATIO, "1/", "")] {
             for caps in rx.captures_iter(stem).flatten() {
                 let n = caps.get(1).map(|m| m.as_str()).unwrap_or_default();
-                let scale = if fmt == 0 { format!("{n} mm") } else { format!("1/{n}") };
+                let scale = format!("{before}{n}{after}");
                 if seen.insert(scale.clone()) {
                     found.push(scale);
                 }
