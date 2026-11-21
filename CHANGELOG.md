@@ -28,6 +28,8 @@
 - **Inner library folders keep their settings:** a library folder added inside another takes over the excluded
   folders and folder patterns below it (and gives them back when removed), so excluded folders are no longer
   crawled again and their patterns no longer lost.
+- **Link files are size-checked:** `.url` files over 1 MB, inside an archive or beside it, are no longer read when
+  looking for a model's link, so a huge (or highly compressed) one cannot exhaust memory during crawls.
 
 ## 2026.46.2 — 2026-11-15
 
