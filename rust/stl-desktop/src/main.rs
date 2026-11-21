@@ -121,6 +121,9 @@ struct SavedWorker {
 /// A running `stl-server worker`.
 struct WorkerProc {
     child: Child,
+    /// Its end of a pipe: the worker stops when it closes, so it ends with the app
+    /// even when the app is killed (`STL_STOP_WITH_STDIN`).
+    _stdin: Option<ChildStdin>,
     server: String,
     data_dir: String,
     log_path: PathBuf,
@@ -189,6 +192,10 @@ struct Shell {
     /// Held while a local server stops and starts (up to [`LOCAL_START_TIMEOUT`]),
     /// so that one start runs at a time without holding `local`.
     starting: Mutex<()>,
+    /// The app is closing: nothing starts the worker again.
+    exiting: std::sync::atomic::AtomicBool,
+    /// Computers whose network paths the user let server pages open (this run).
+    network_hosts: Mutex<HashSet<String>>,
     worker: Mutex<Option<WorkerProc>>,
     installing: Mutex<Option<Installing>>,
     launcher: Mutex<Option<Url>>,
@@ -444,13 +451,76 @@ fn run_worker(app: &AppHandle, server: &str, token: &str) -> Result<(), String> 
     cmd.args(["worker", "--server", server, "--data-dir", &data_dir])
         .env("STL_WORKER_TOKEN", token)
         .env("NO_COLOR", "1")
-        .stdin(Stdio::null())
+        .env("STL_STOP_WITH_STDIN", "1")
+        .stdin(Stdio::piped())
         .stdout(log.try_clone().map_err(|e| e.to_string())?)
         .stderr(log);
     stl_proc::no_window(&mut cmd);
-    let child = cmd.spawn().map_err(|e| format!("cannot start {}: {e}", exe.display()))?;
+    let mut child = cmd.spawn().map_err(|e| format!("cannot start {}: {e}", exe.display()))?;
     stl_proc::end_with_parent(&child);
-    *slot = Some(WorkerProc { child, server: server.to_string(), data_dir, log_path });
+    let stdin = child.stdin.take();
+    *slot = Some(WorkerProc { child, _stdin: stdin, server: server.to_string(), data_dir, log_path });
+    Ok(())
+}
+
+/// Refuse a change to the worker (its components, its folder) from another
+/// server's page than the one it works for: worker commands act for their caller.
+fn worker_is_callers(app: &AppHandle, webview: &tauri::Webview) -> Result<(), String> {
+    let origin = caller_origin(webview)?;
+    match load_saved(app).worker {
+        Some(w) if w.server != origin => Err(format!("the compute worker works for {}: change it from there", w.server)),
+        _ => Ok(()),
+    }
+}
+
+/// The computer a Windows network path names (`\\host\share`, `//host/share`,
+/// `\\?\UNC\host\share`); `Some("")` for a device path (`\\.\…`).
+fn unc_host(path: &str) -> Option<String> {
+    let p = path.replace('/', "\\");
+    let host = |rest: &str| rest.split('\\').next().unwrap_or("").to_string();
+    if let Some(rest) = p.strip_prefix(r"\\?\UNC\") {
+        return Some(host(rest));
+    }
+    if p.starts_with(r"\\?\") {
+        return None; // a local drive in long form
+    }
+    if p.starts_with(r"\\.\") {
+        return Some(String::new());
+    }
+    p.strip_prefix(r"\\").map(host)
+}
+
+/// Before a page's path is looked at: on Windows, checking a network path makes
+/// the system connect to that computer and offer the user's credentials. A path
+/// on the calling server's own computer passes; another computer needs the user's
+/// yes (remembered for this run); a device path never passes.
+fn allow_network_path(app: &AppHandle, webview: &tauri::Webview, path: &str) -> Result<(), String> {
+    if !cfg!(windows) {
+        return Ok(());
+    }
+    let Some(host) = unc_host(path) else { return Ok(()) };
+    if host.is_empty() {
+        return Err(format!("{path} is not a file or folder"));
+    }
+    let server = webview.url().ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default();
+    let key = host.to_lowercase();
+    let shell = app.state::<Shell>();
+    if key == server.to_lowercase() || shell.network_hosts.lock().unwrap_or_else(|e| e.into_inner()).contains(&key) {
+        return Ok(());
+    }
+    let agreed = app
+        .dialog()
+        .message(format!(
+            "The page of {server} asks to open {path}, on the computer {host}.\n\nWindows connects to {host} to find it, \
+             and may sign in there with your Windows account. Open it?"
+        ))
+        .title("Open a network folder")
+        .buttons(MessageDialogButtons::OkCancelCustom("Open".to_string(), "Cancel".to_string()))
+        .blocking_show();
+    if !agreed {
+        return Err(format!("{path} was not opened"));
+    }
+    shell.network_hosts.lock().unwrap_or_else(|e| e.into_inner()).insert(key);
     Ok(())
 }
 
@@ -551,31 +621,59 @@ async fn worker_components(app: AppHandle) -> Result<serde_json::Value, String> 
 /// or `remove`, `variants` maps a component to its variant. The worker stops
 /// meanwhile (it holds the libraries open) and starts again after.
 #[tauri::command]
-fn change_worker_components(app: AppHandle, action: String, components: Vec<String>, variants: BTreeMap<String, String>) -> Result<InstallState, String> {
+fn change_worker_components(
+    app: AppHandle,
+    webview: tauri::Webview,
+    action: String,
+    components: Vec<String>,
+    variants: BTreeMap<String, String>,
+) -> Result<InstallState, String> {
     let word = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
     if !matches!(action.as_str(), "install" | "remove") || components.is_empty() || !components.iter().all(|c| word(c)) || !variants.iter().all(|(k, v)| word(k) && word(v)) {
         return Err("not a components request".into());
     }
+    worker_is_callers(&app, &webview)?;
     let shell = app.state::<Shell>();
     let mut slot = shell.installing.lock().unwrap_or_else(|e| e.into_inner());
     if slot.as_ref().is_some_and(|i| i.progress.lock().unwrap_or_else(|e| e.into_inner()).running) {
         return Err("components are already being installed".into());
     }
     let had_worker = shell.worker.lock().unwrap_or_else(|e| e.into_inner()).take().is_some();
+    // Started again after the change, or now when the change cannot start.
+    let restart = {
+        let app = app.clone();
+        move || {
+            if had_worker
+                && !app.state::<Shell>().exiting.load(std::sync::atomic::Ordering::Relaxed)
+                && let Some(w) = load_saved(&app).worker
+            {
+                let _ = run_worker(&app, &w.server, &w.token);
+            }
+        }
+    };
     let dir = worker_data_dir(&app);
-    let mut cmd = Command::new(server_exe()?);
-    cmd.arg("components").arg(&action).args(&components);
-    for (k, v) in &variants {
-        cmd.arg("--variant").arg(format!("{k}={v}"));
-    }
-    cmd.args(["--data-dir", &dir]).env("NO_COLOR", "1").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
-    stl_proc::no_window(&mut cmd);
-    let mut child = cmd.spawn().map_err(|e| e.to_string())?;
-    stl_proc::end_with_parent(&child);
-    let stdout = child.stdout.take().ok_or("no output")?;
+    let spawned = (|| {
+        let mut cmd = Command::new(server_exe()?);
+        cmd.arg("components").arg(&action).args(&components);
+        for (k, v) in &variants {
+            cmd.arg("--variant").arg(format!("{k}={v}"));
+        }
+        cmd.args(["--data-dir", &dir]).env("NO_COLOR", "1").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+        stl_proc::no_window(&mut cmd);
+        let mut child = cmd.spawn().map_err(|e| e.to_string())?;
+        stl_proc::end_with_parent(&child);
+        let stdout = child.stdout.take().ok_or("no output")?;
+        Ok::<_, String>((child, stdout))
+    })();
+    let (child, stdout) = match spawned {
+        Ok(s) => s,
+        Err(e) => {
+            restart();
+            return Err(e);
+        }
+    };
     let progress = Arc::new(Mutex::new(InstallState { running: true, ..Default::default() }));
     let state = Arc::clone(&progress);
-    let app2 = app.clone();
     std::thread::spawn(move || {
         for line in std::io::BufReader::new(stdout).lines().map_while(Result::ok) {
             let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
@@ -597,9 +695,7 @@ fn change_worker_components(app: AppHandle, action: String, components: Vec<Stri
                 s.error = Some("stopped".into());
             }
         }
-        if had_worker && let Some(w) = load_saved(&app2).worker {
-            let _ = run_worker(&app2, &w.server, &w.token);
-        }
+        restart();
     });
     let snapshot = progress.lock().unwrap_or_else(|e| e.into_inner()).clone();
     *slot = Some(Installing { child, progress });
@@ -616,7 +712,8 @@ fn worker_install_state(app: AppHandle) -> InstallState {
 
 /// Choose the worker's folder (a dialog); the worker starts again with it.
 #[tauri::command]
-async fn pick_worker_folder(app: AppHandle) -> Result<Option<String>, String> {
+async fn pick_worker_folder(app: AppHandle, webview: tauri::Webview) -> Result<Option<String>, String> {
+    worker_is_callers(&app, &webview)?;
     let Some(dir) = pick_folder(app.clone()).await else { return Ok(None) };
     let mut saved = load_saved(&app);
     saved.worker_data_dir = Some(dir.clone());
@@ -727,12 +824,20 @@ async fn pick_folder(app: AppHandle) -> Option<String> {
 /// Show a folder (or the folder of a file) in the system's file manager. The
 /// path must be absolute and exist; nothing is opened or run.
 #[tauri::command]
-fn open_folder(path: String) -> Result<(), String> {
-    let p = PathBuf::from(&path);
+async fn open_folder(app: AppHandle, webview: tauri::Webview, path: String) -> Result<(), String> {
+    allow_network_path(&app, &webview, &path)?;
+    show_in_file_manager(&path)
+}
+
+/// [`open_folder`]'s work, once the path may be looked at.
+fn show_in_file_manager(path: &str) -> Result<(), String> {
+    let p = PathBuf::from(path);
     if !p.is_absolute() || !p.exists() {
         return Err(format!("{path} is not reachable from this computer"));
     }
-    if p.is_dir() {
+    // A folder that opening would run: a macOS app bundle, a Windows shell folder (`name.{CLSID}`).
+    let runs = p.extension().is_some_and(|e| e.eq_ignore_ascii_case("app")) || p.to_string_lossy().contains(".{");
+    if p.is_dir() && !runs {
         tauri_plugin_opener::open_path(&p, None::<&str>).map_err(|e| e.to_string())
     } else {
         tauri_plugin_opener::reveal_item_in_dir(&p).map_err(|e| e.to_string())
@@ -848,7 +953,8 @@ fn meshpeek_target(path: &str, entry: Option<&str>) -> Result<PathBuf, String> {
 /// Open an archive (MeshPeek shows its first model and lists the others), or
 /// one model file inside it, in MeshPeek.
 #[tauri::command]
-fn open_in_meshpeek(app: AppHandle, path: String, entry: Option<String>) -> Result<(), String> {
+async fn open_in_meshpeek(app: AppHandle, webview: tauri::Webview, path: String, entry: Option<String>) -> Result<(), String> {
+    allow_network_path(&app, &webview, &path)?;
     let target = meshpeek_target(&path, entry.as_deref())?;
     let chosen = load_saved(&app).meshpeek_path;
     let program = meshpeek_program(chosen.as_deref()).ok_or_else(|| match &chosen {
@@ -885,7 +991,8 @@ fn clear_packer(app: AppHandle) -> Result<ProgramState, String> {
 
 /// Open an archive in the archive program. Like MeshPeek, it runs on its own.
 #[tauri::command]
-fn open_in_packer(app: AppHandle, path: String) -> Result<(), String> {
+async fn open_in_packer(app: AppHandle, webview: tauri::Webview, path: String) -> Result<(), String> {
+    allow_network_path(&app, &webview, &path)?;
     let target = meshpeek_target(&path, None)?;
     let chosen = load_saved(&app).packer_path;
     let program = chosen_program(chosen.as_deref(), find_packer).ok_or_else(|| match &chosen {
@@ -1124,6 +1231,7 @@ fn main() {
         .expect("the StlArchivist shell could not start");
     app.run(|app, event| {
         if let RunEvent::Exit = event {
+            app.state::<Shell>().exiting.store(true, std::sync::atomic::Ordering::Relaxed);
             // Stop the local server (and with it the library lock) and the worker.
             *app.state::<Shell>().local.lock().unwrap_or_else(|e| e.into_inner()) = None;
             *app.state::<Shell>().worker.lock().unwrap_or_else(|e| e.into_inner()) = None;
@@ -1134,6 +1242,17 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn network_paths_name_their_computer() {
+        use super::unc_host;
+        assert_eq!(unc_host(r"\\nas\models\a.zip").as_deref(), Some("nas"));
+        assert_eq!(unc_host("//nas/models/a.zip").as_deref(), Some("nas"));
+        assert_eq!(unc_host(r"\\?\UNC\nas\models").as_deref(), Some("nas"));
+        assert_eq!(unc_host(r"\\.\pipe\x").as_deref(), Some(""), "a device");
+        assert_eq!(unc_host(r"\\?\C:\models"), None, "a local drive");
+        assert_eq!(unc_host(r"C:\models\a.zip"), None);
+    }
+
     #[test]
     fn the_server_is_looked_for_beside_the_program_first() {
         let exe = std::path::Path::new("/usr/bin/stl-desktop");
@@ -1213,8 +1332,8 @@ mod tests {
 
     #[test]
     fn open_folder_refuses_relative_and_missing_paths() {
-        assert!(open_folder("relative/dir".into()).is_err());
-        assert!(open_folder("C:/definitely/not/here/xyz".into()).is_err());
+        assert!(show_in_file_manager("relative/dir").is_err());
+        assert!(show_in_file_manager("C:/definitely/not/here/xyz").is_err());
     }
 
     #[test]

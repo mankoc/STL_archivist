@@ -65,6 +65,14 @@ async fn command() -> i32 {
         Some("components") => stl_server::components::cli(&args[1..]),
         Some("libraries") => libraries(&args[1..]),
         Some("worker") => {
+            // Started by the desktop app with a pipe for its input: it ends with the app,
+            // even when the app is killed (it holds no library to close).
+            if std::env::var_os("STL_STOP_WITH_STDIN").is_some() {
+                std::thread::spawn(|| {
+                    let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
+                    std::process::exit(0);
+                });
+            }
             if let Err(e) = stl_server::worker::run(&args[1..]).await {
                 tracing::error!("{e}");
                 return 2;
