@@ -1096,7 +1096,7 @@ impl Run<'_> {
     }
 
     /// Write the sidecars of the folders that changed.
-    fn export_sidecars(&mut self, modified: HashSet<String>) {
+    fn export_sidecars(&self, modified: HashSet<String>) {
         let (cfg, host, store) = (self.cfg, self.host, self.store);
         if modified.is_empty() || !cfg.sidecars || store.is_none() {
             return;
