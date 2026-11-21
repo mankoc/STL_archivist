@@ -157,14 +157,23 @@ fn set_paused(lib: &AppState, me: &CurrentUser, id: u64, paused: bool) -> Result
 /// for browsers, which cannot set headers on a WebSocket).
 #[utoipa::path(get, path = "/api/events", tag = "jobs",
     responses((status = 101, description = "WebSocket of ServerEvent frames", body = ServerEvent)))]
-pub async fn events(State(lib): State<AppState>, _me: CurrentUser, ws: WebSocketUpgrade) -> Response {
+pub async fn events(State(lib): State<AppState>, me: CurrentUser, ws: WebSocketUpgrade) -> Response {
     let rx = lib.jobs.events.subscribe();
-    ws.on_upgrade(move |socket| stream(socket, rx))
+    ws.on_upgrade(move |socket| stream(lib, me.token, socket, rx))
 }
 
-async fn stream(mut socket: WebSocket, mut rx: tokio::sync::broadcast::Receiver<ServerEvent>) {
+/// How often the event stream checks that its session still exists.
+const SESSION_CHECK: std::time::Duration = std::time::Duration::from_secs(60);
+
+async fn stream(lib: AppState, token: String, mut socket: WebSocket, mut rx: tokio::sync::broadcast::Receiver<ServerEvent>) {
+    let mut check = tokio::time::interval_at(tokio::time::Instant::now() + SESSION_CHECK, SESSION_CHECK);
     loop {
         tokio::select! {
+            _ = check.tick() => {
+                if !crate::auth::still_allowed(&lib, &token, Role::Viewer).await {
+                    return;
+                }
+            }
             event = rx.recv() => {
                 let event = match event {
                     Ok(e) => e,

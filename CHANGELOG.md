@@ -23,6 +23,8 @@
   or rolled-back write no longer leaves image records without thumbnails.
 - **Password changes are rate-limited:** changing your password takes the same memory-bounded check as signing in,
   and repeated wrong current passwords lock the name out like failed sign-ins (429).
+- **Account changes reach open connections:** a compute worker whose user is disabled, demoted below editor or
+  signed out is disconnected within 30 seconds, and the event stream of a session that ended closes within a minute.
 
 ## 2026.46.2 — 2026-11-15
 
