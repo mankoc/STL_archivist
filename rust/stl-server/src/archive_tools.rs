@@ -141,7 +141,8 @@ pub fn generate_thumbnails(lib: &Library, ctl: &Control, log: &dyn Fn(String), i
                 .db
                 .with_tx(|tx| jobs_db::replace_thumbnails(tx, Some(&lib.thumbs), id, &t.thumbs, t.warning.as_deref()))
                 .map_err(db)?;
-            if let Some(n) = stored {
+            if let Some((n, drops)) = stored {
+                lib.db.with(|c| stl_core::storage::crawl::drop_unused_thumbs(c, &lib.thumbs, &drops)).map_err(db)?;
                 log(format!("  {n} thumbnail(s) stored"));
                 out.done += 1;
                 out.touched.push(path);

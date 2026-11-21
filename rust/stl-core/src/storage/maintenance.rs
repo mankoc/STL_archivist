@@ -195,12 +195,13 @@ pub fn models_over(conn: &Connection, keep: i64) -> Result<Vec<i64>> {
 }
 
 /// `prune_images`, per batch: `(models pruned, image ids beyond the first `keep`
-/// of each model)`, lowest ids kept.
+/// of each model)`, the first in the model's order kept (the cover first).
 pub fn excess_images(conn: &Connection, model_ids: &[i64], keep: usize) -> Result<(usize, Vec<i64>)> {
     let json = format!("[{}]", model_ids.iter().map(i64::to_string).collect::<Vec<_>>().join(","));
-    let mut st = conn.prepare(
-        "SELECT id, model_id FROM images WHERE model_id IN (SELECT value FROM json_each(?1)) ORDER BY model_id, id",
-    )?;
+    let mut st = conn.prepare(&format!(
+        "SELECT id, model_id FROM images WHERE model_id IN (SELECT value FROM json_each(?1)) ORDER BY model_id, {}",
+        super::schema_sql::IMAGE_ORDER
+    ))?;
     let mut per_model: HashMap<i64, Vec<i64>> = HashMap::new();
     let mut rows = st.query([json])?;
     while let Some(r) = rows.next()? {
