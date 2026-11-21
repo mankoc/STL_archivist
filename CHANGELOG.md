@@ -52,6 +52,13 @@
   50 MB beside an archive are skipped like those inside it.
 - **Sort Files names match Windows:** trailing dots and spaces are dropped from folder and file names, as Windows does,
   so the stored path matches the file.
+- **The desktop app asks before opening network paths:** a server page asking to open a folder or archive on another
+  computer (`\host\share\…`) gets a confirmation first, since Windows connects there and may sign in with your
+  account; *Its folder* no longer runs macOS app bundles or Windows shell folders.
+- **Compute worker fixes:** another server's page cannot change the worker's components or folder; a components
+  install that cannot start restarts the worker; the worker ends with the app even when the app is killed.
+- **Verified downloads in the Docker image and the MeshPeek workflow:** the image checks pdfium's and ONNX Runtime's
+  SHA-256, and the MeshPeek update accepts only version tags.
 
 ## 2026.46.2 — 2026-11-15
 
