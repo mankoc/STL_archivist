@@ -36,10 +36,7 @@ pub fn rescan(path: &str, old_size: Option<i64>, old_mtime: Option<i64>, old_has
     if !p.exists() {
         return Err("Archive not found".into());
     }
-    let (fs_size, fs_mtime) = match stat(path) {
-        Some((s, m)) => (Some(s), Some(m)),
-        None => (None, None),
-    };
+    let (fs_size, fs_mtime) = stat(path).unzip();
     let unchanged = fs_size.is_some() && fs_mtime.is_some() && fs_size == old_size && fs_mtime == old_mtime;
     let members = crate::archive::list_members(p).ok();
     // An empty or size/mtime fingerprint is read again, as crawls do: the readers may list it now.
@@ -80,7 +77,7 @@ pub fn rescan(path: &str, old_size: Option<i64>, old_mtime: Option<i64>, old_has
     }
     let stl_files = names
         .iter()
-        .filter(|n| RESCAN_STL_EXTS.contains(&MemberPath::new(&n.replace('\\', "/")).suffix().to_lowercase().as_str()))
+        .filter(|n| RESCAN_STL_EXTS.contains(&MemberPath::new(n).suffix().to_lowercase().as_str()))
         .cloned()
         .collect();
     Ok(Rescan {
@@ -126,7 +123,7 @@ pub fn thumbnails(path: &str, max_thumbnails: usize, max_size: u32, opts: &Optio
     let mut images: Vec<String> = members
         .iter()
         .filter(|m| m.size.is_none_or(|s| s <= SIZE_LIMIT_IMAGE))
-        .filter(|m| rules::IMAGE_SUFFIXES.contains(&MemberPath::new(&m.name.replace('\\', "/")).suffix().to_lowercase().as_str()))
+        .filter(|m| rules::IMAGE_SUFFIXES.contains(&MemberPath::new(&m.name).suffix().to_lowercase().as_str()))
         .map(|m| m.name.clone())
         .collect();
     images.sort();
