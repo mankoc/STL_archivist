@@ -363,7 +363,8 @@ fn group_has_value(key: &str, t: &str) -> String {
         "path" => non_empty("rel_path"),
         k => match ID_FACETS.iter().find(|(f, _)| *f == k) {
             Some((_, col)) => format!("{} IS NOT NULL", column_of(t, col)),
-            None => non_empty(k), // creator, source, presupports, warning
+            None if matches!(k, "creator" | "source" | "presupports" | "warning") => non_empty(k),
+            None => "0".to_string(), // not a group: nothing has it (and no name reaches the SQL)
         },
     }
 }
@@ -1458,6 +1459,12 @@ fn column_ints(conn: &Connection, sql: &str, params: &[Value]) -> Result<Vec<i64
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unknown_groups_reach_no_sql() {
+        assert_eq!(group_has_value("title) OR (1", "m"), "0");
+        assert_eq!(group_has_value("creator", "m"), "(m.creator IS NOT NULL AND m.creator != '')");
+    }
 
     /// Four models in one library, with sculptors, tags and scales.
     fn sample() -> (tempfile::TempDir, crate::storage::pool::Pool) {
