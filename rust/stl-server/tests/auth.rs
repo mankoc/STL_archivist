@@ -170,3 +170,23 @@ async fn own_password_and_settings() {
     let r = call(s, "POST", "/api/auth/login", None, Some(json!({"name": "carol", "password": "brand new password"}))).await;
     assert_eq!(r.status, StatusCode::OK);
 }
+
+/// Long-lived connections check their session again: a demoted, disabled or
+/// signed-out user loses them.
+#[tokio::test]
+async fn long_connections_follow_account_changes() {
+    use stl_server::{accounts, auth::still_allowed};
+    let lib = empty_library();
+    let s = &lib.state;
+    let token = lib.user("erin", Role::Editor);
+    let id = s.accounts.with(|c| accounts::session_user(c, &token)).unwrap().unwrap().id;
+    assert!(still_allowed(s, &token, Role::Editor).await);
+    s.accounts.with(|c| accounts::update_user(c, id, Some(Role::Viewer), None, None)).unwrap();
+    assert!(!still_allowed(s, &token, Role::Editor).await, "demoted: no more worker");
+    assert!(still_allowed(s, &token, Role::Viewer).await, "but still events");
+    s.accounts.with(|c| accounts::update_user(c, id, None, Some(true), None)).unwrap();
+    assert!(!still_allowed(s, &token, Role::Viewer).await, "disabled");
+    let other = lib.user("fay", Role::Viewer);
+    s.accounts.with(|c| accounts::end_session(c, &other)).unwrap();
+    assert!(!still_allowed(s, &other, Role::Viewer).await, "signed out");
+}

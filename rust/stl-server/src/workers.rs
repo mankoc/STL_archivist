@@ -431,7 +431,7 @@ pub fn status(lib: &Library) -> WorkersStatus {
 
 /// Serve one worker's WebSocket: read its [`Hello`], register it, pass
 /// requests out and replies in until it disconnects.
-pub async fn serve(lib: Arc<Library>, user: String, mut socket: WebSocket) {
+pub async fn serve(lib: Arc<Library>, me: crate::auth::CurrentUser, mut socket: WebSocket) {
     let hello = match tokio::time::timeout(HELLO_TIMEOUT, socket.recv()).await {
         Ok(Some(Ok(Message::Text(t)))) => match serde_json::from_str::<ToServer>(&t) {
             Ok(ToServer::Hello(h)) => h,
@@ -463,7 +463,7 @@ pub async fn serve(lib: Arc<Library>, user: String, mut socket: WebSocket) {
     let info = WorkerInfo {
         id,
         name: hello.name.clone(),
-        user,
+        user: me.user.name.clone(),
         version: hello.version.clone(),
         clip_provider: if clip { hello.clip.as_ref().map(|c| c.provider.clone()) } else { None },
         chat_model: hello.chat.as_ref().map(|c| c.model.clone()),
@@ -493,6 +493,11 @@ pub async fn serve(lib: Arc<Library>, user: String, mut socket: WebSocket) {
                 Some(Ok(_)) => {}
             },
             _ = ping.tick() => {
+                // A user disabled, demoted or signed out since connecting gets no more work.
+                if !crate::auth::still_allowed(&lib, &me.token, crate::accounts::Role::Editor).await {
+                    tracing::info!(user = %me.user.name, "compute worker disconnected: its session no longer allows it");
+                    break;
+                }
                 if socket.send(Message::Ping(Default::default())).await.is_err() {
                     break;
                 }
