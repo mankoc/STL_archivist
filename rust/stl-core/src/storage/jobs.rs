@@ -35,7 +35,7 @@ pub fn replace_thumbnails(
     thumbs: &[(String, Option<Vec<u8>>)],
     warning: Option<&str>,
 ) -> Result<Option<(usize, Vec<u64>)>> {
-    if tx.query_row("SELECT 1 FROM models WHERE id = ?1", [model_id], |_| Ok(())).optional()?.is_none() {
+    if !super::model_exists(tx, model_id)? {
         return Ok(None);
     }
     let mut drops = Vec::new();
@@ -233,7 +233,7 @@ pub fn cross_folder(tx: &Transaction, new_paths: &[String]) -> Result<(Vec<(Stri
             continue;
         }
         let Some(&new_id) = new_ids.get(new_path) else { continue };
-        if tx.query_row("SELECT 1 FROM models WHERE id = ?1", [missing_id], |_| Ok(())).optional()?.is_none() {
+        if !super::model_exists(tx, *missing_id)? {
             continue;
         }
         refs.extend(merge_into_missing(tx, *missing_id, new_id)?);

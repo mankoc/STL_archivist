@@ -25,11 +25,10 @@ fn safe(v: Option<String>, missing: &str) -> String {
 
 fn value_text(v: &Value) -> Option<String> {
     match v {
-        Value::Null => None,
         Value::Integer(i) => Some(i.to_string()),
         Value::Real(f) => Some(f.to_string()),
         Value::Text(s) => Some(s.clone()),
-        Value::Blob(_) => None,
+        Value::Null | Value::Blob(_) => None,
     }
 }
 

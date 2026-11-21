@@ -162,14 +162,8 @@ fn snapshot(conn: &Connection, folder: &str, include_thumbnails: bool) -> SResul
     for row in rows {
         let mut row = row.into_iter();
         let mut next = || row.next().unwrap_or(Value::Null);
-        let id = match next() {
-            Value::Integer(i) => i,
-            _ => return unsupported("a model without an integer id"),
-        };
-        let path = match next() {
-            Value::Text(s) => s,
-            _ => return unsupported("a model without a text archive_path"),
-        };
+        let Value::Integer(id) = next() else { return unsupported("a model without an integer id") };
+        let Value::Text(path) = next() else { return unsupported("a model without a text archive_path") };
         if normcase(&WinPath::new(&path).parent().as_posix()) != want {
             continue;
         }

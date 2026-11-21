@@ -4,9 +4,7 @@ use super::*;
 
 // ── maintenance ──────────────────────────────────────────────────────────────
 
-pub(super) fn db_err(e: rusqlite::Error) -> String {
-    format!("database: {e}")
-}
+pub(super) use crate::error::db_err;
 
 pub(super) fn verify(lib: &Library, job: &Job) -> Result<String, String> {
     let v = lib.db.with(|c| maintenance::verify(c, &job.ctl)).map_err(db_err)?;

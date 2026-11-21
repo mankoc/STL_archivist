@@ -14,6 +14,7 @@ use stl_core::storage::{model_files, crawl as crawl_db, maintenance};
 use utoipa::ToSchema;
 
 use crate::Library;
+use crate::error::db_err;
 use crate::library_settings::LibrarySettings;
 
 pub const STATUS_MOVED: &str = "Moved (in DB)";
@@ -42,10 +43,6 @@ impl From<maintenance::ResultRow> for RecordRow {
     }
 }
 
-fn db(e: rusqlite::Error) -> String {
-    format!("database: {e}")
-}
-
 fn file_name(path: &str) -> &str {
     path.rsplit(['\\', '/']).next().unwrap_or(path)
 }
@@ -54,17 +51,17 @@ fn file_name(path: &str) -> &str {
 fn titles(lib: &Library, ids: &[i64]) -> Result<HashMap<i64, String>, String> {
     lib.db
         .with(|c| {
-            let json = format!("[{}]", ids.iter().map(i64::to_string).collect::<Vec<_>>().join(","));
+            let json = stl_core::storage::id_json(ids);
             let mut st = c.prepare("SELECT id, coalesce(title, '') FROM models WHERE id IN (SELECT value FROM json_each(?1))")?;
             st.query_map([json], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()
         })
-        .map_err(db)
+        .map_err(db_err)
 }
 
 /// Find Moved in DB: for each record, another record with the same content
 /// hash (else the same file name and size) whose archive is on disk.
 pub fn find_moved(lib: &Library, ctl: &Control, ids: &[i64]) -> Result<Vec<RecordRow>, String> {
-    let rows = lib.db.with(maintenance::location_rows).map_err(db)?;
+    let rows = lib.db.with(maintenance::location_rows).map_err(db_err)?;
     let mut by_hash: HashMap<&str, Vec<(&str, i64)>> = HashMap::new();
     let mut by_name_size: HashMap<(&str, i64), Vec<(&str, i64)>> = HashMap::new();
     for (id, path, hash, size) in &rows {
@@ -127,7 +124,7 @@ pub fn search_folder(
 ) -> Result<(Vec<RecordRow>, Vec<String>), String> {
     let wanted: HashSet<i64> = ids.iter().copied().collect();
     let mut targets: HashMap<String, (i64, Option<String>, Option<i64>)> = HashMap::new();
-    for (id, path, hash, size) in lib.db.with(maintenance::location_rows).map_err(db)? {
+    for (id, path, hash, size) in lib.db.with(maintenance::location_rows).map_err(db_err)? {
         if let (true, Some(h)) = (wanted.contains(&id), hash.filter(|h| !h.is_empty())) {
             targets.entry(h).or_insert((id, path, size));
         }
@@ -174,7 +171,7 @@ pub fn search_folder(
             }
         }
         if !moves.is_empty() {
-            lib.db.with_tx(|tx| model_files::set_archive_paths(tx, &moves, Some(folder))).map_err(db)?;
+            lib.db.with_tx(|tx| model_files::set_archive_paths(tx, &moves, Some(folder))).map_err(db_err)?;
         }
     }
     log(format!("Search complete: {} of {} missing archive(s) located.", found.len(), found.len() + targets.len()));
@@ -251,7 +248,7 @@ pub fn recheck_warnings(lib: &Library, ctl: &Control, log: &dyn Fn(String), whic
     } else {
         PresupportPatterns::new::<&str>(None).map_err(|e| e.to_string())?
     };
-    let records = lib.db.with(maintenance::warning_records).map_err(db)?;
+    let records = lib.db.with(maintenance::warning_records).map_err(db_err)?;
     if records.is_empty() {
         log("No records found in the database.".into());
         return Ok(Rechecked::default());
@@ -281,7 +278,7 @@ pub fn recheck_warnings(lib: &Library, ctl: &Control, log: &dyn Fn(String), whic
     };
     // Images beside the archive count as its images.
     let beside = match which {
-        Recheck::NoImages => lib.db.with(maintenance::models_with_outside_images).map_err(db)?,
+        Recheck::NoImages => lib.db.with(maintenance::models_with_outside_images).map_err(db_err)?,
         Recheck::Presupported => Default::default(),
     };
     ctl.set_total(records.len() as u64);
@@ -327,7 +324,7 @@ pub fn recheck_warnings(lib: &Library, ctl: &Control, log: &dyn Fn(String), whic
             out.touched.extend(path.clone());
         }
         if !pending.is_empty() {
-            lib.db.with_tx(|tx| maintenance::set_warnings(tx, &pending)).map_err(db)?;
+            lib.db.with_tx(|tx| maintenance::set_warnings(tx, &pending)).map_err(db_err)?;
         }
     }
     log(format!(
@@ -371,7 +368,7 @@ pub struct ReadLists {
 /// sidecar carries neither), stored as a crawl stores them. Nothing is
 /// decompressed; an archive that cannot be read is counted and left alone.
 pub fn read_file_lists(lib: &Library, ctl: &Control, log: &dyn Fn(String)) -> Result<ReadLists, String> {
-    let records = lib.db.with(crawl_db::lacking_lists).map_err(db)?;
+    let records = lib.db.with(crawl_db::lacking_lists).map_err(db_err)?;
     let mut out = ReadLists::default();
     if records.is_empty() {
         log("Every record has its file lists.".into());
@@ -398,7 +395,7 @@ pub fn read_file_lists(lib: &Library, ctl: &Control, log: &dyn Fn(String)) -> Re
                 crawl_db::store_files(tx, &lists)?;
                 crawl_db::store_stl_lists(tx, &stl)
             })
-            .map_err(db)?;
+            .map_err(db_err)?;
         out.touched.extend(catalogs.iter().map(|(p, ..)| (*p).clone()));
         ctl.advance(chunk.len() as u64);
     }
@@ -427,7 +424,7 @@ pub fn reread_links(lib: &Library, ctl: &Control, log: &dyn Fn(String), overwrit
             let mut st = c.prepare("SELECT id, archive_path FROM models_view WHERE NOT coalesce(is_missing, 0) ORDER BY id")?;
             st.query_map([], |r| Ok((r.get(0)?, r.get::<_, Option<String>>(1)?.unwrap_or_default())))?.collect()
         })
-        .map_err(db)?;
+        .map_err(db_err)?;
     let mut out = RereadLinks::default();
     log(format!(
         "Reading the links and info.json of {} archive(s); {}…",
@@ -461,7 +458,7 @@ pub fn reread_links(lib: &Library, ctl: &Control, log: &dyn Fn(String), overwrit
                 }
                 Ok::<_, rusqlite::Error>(changed)
             })
-            .map_err(db)?;
+            .map_err(db_err)?;
         for (_, path, meta) in &found {
             if meta.is_none() {
                 log(format!("Cannot read: {path}"));

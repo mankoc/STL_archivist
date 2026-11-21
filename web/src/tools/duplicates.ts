@@ -23,7 +23,9 @@ export function latestJob(jobs: Job[] | undefined, finder: Finder): Job | undefi
 
 /** "3 bits differ" / "similarity 0.962" / "100 %". */
 export function scoreLabel(method: string, best: number): string {
-  return method === "dhash" ? (best === 0 ? "identical" : best === 1 ? "1 bit differs" : `${best} bits differ`) : `similarity ${best.toFixed(3)}`;
+  if (method !== "dhash") return `similarity ${best.toFixed(3)}`;
+  if (best === 0) return "identical";
+  return best === 1 ? "1 bit differs" : `${best} bits differ`;
 }
 
 export function percentLabel(fraction: number): string {

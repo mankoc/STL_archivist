@@ -365,7 +365,7 @@ pub fn links_commit(tx: &Transaction, model_id: i64, m: &crate::metadata::Metada
 
 /// `archive_paths`: `{model_id: archive_path}` for the models that exist.
 pub fn archive_paths(conn: &Connection, ids: &[i64]) -> Result<HashMap<i64, String>> {
-    let json = format!("[{}]", ids.iter().map(i64::to_string).collect::<Vec<_>>().join(","));
+    let json = super::id_json(ids);
     let mut st =
         conn.prepare(&format!("SELECT id, {} FROM models WHERE id IN (SELECT value FROM json_each(?1))", super::schema_sql::archive_path_sql("models")))?;
     st.query_map([json], |r| Ok((r.get(0)?, r.get::<_, Option<String>>(1)?.unwrap_or_default())))?.collect()
