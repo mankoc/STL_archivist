@@ -245,6 +245,9 @@ impl Drop for Running {
 #[derive(Default)]
 pub struct AiRuntime {
     running: Mutex<Option<Running>>,
+    /// Held while a model server starts (minutes), so that only one starts;
+    /// `running` itself is held only briefly, for `status` and the idle watch.
+    starting: Mutex<()>,
     last_used: Mutex<Option<Instant>>,
 }
 
@@ -321,12 +324,21 @@ impl AiRuntime {
         if let Some(url) = &config.ai.url {
             return Ok(url.trim_end_matches('/').to_string());
         }
-        let mut guard = self.running.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(r) = guard.as_mut() {
+        let ready = || -> Option<String> {
+            let mut guard = self.running.lock().unwrap_or_else(|e| e.into_inner());
+            let r = guard.as_mut()?;
             if matches!(r.child.try_wait(), Ok(None)) {
-                return Ok(r.base.clone());
+                return Some(r.base.clone());
             }
             *guard = None; // it exited
+            None
+        };
+        if let Some(base) = ready() {
+            return Ok(base);
+        }
+        let _starting = self.starting.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(base) = ready() {
+            return Ok(base); // started by another job meanwhile
         }
         let spec = launch_spec(config)?;
         let port = free_port()?;
@@ -350,7 +362,8 @@ impl AiRuntime {
             if !matches!(running.child.try_wait(), Ok(None)) {
                 return Err("the AI model server exited during startup".into());
             }
-            if ctl.is_stopped() {
+            // Not a checkpoint: a paused job must not hold up the start.
+            if ctl.stop_requested() {
                 return Err("stopped".into());
             }
             let last = match client.get(&health).call() {
@@ -363,8 +376,7 @@ impl AiRuntime {
             std::thread::sleep(Duration::from_secs(1));
         }
         let base = running.base.clone();
-        *guard = Some(running);
-        drop(guard);
+        *self.running.lock().unwrap_or_else(|e| e.into_inner()) = Some(running);
         self.watch_idle();
         Ok(base)
     }
