@@ -21,7 +21,7 @@ use std::io::Cursor;
 
 use fast_image_resize::images::Image as FirImage;
 use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
-use image::{AnimationDecoder, ImageFormat};
+use image::{AnimationDecoder, ImageDecoder, ImageFormat};
 
 /// JPEG quality, as `THUMB_QUALITY` in `thumbnailer.py`.
 pub const QUALITY: u8 = 75;
@@ -29,6 +29,9 @@ pub const QUALITY: u8 = 75;
 pub const GIF_MAX_FRAMES: usize = 60;
 /// Animated thumbnails larger than this are stored as a still JPEG.
 pub const GIF_MAX_BYTES: usize = 2 * 1024 * 1024;
+/// An animated GIF whose screen is wider or taller stays a still image: every frame
+/// is decoded at the full screen size, and a tiny file may declare 65535×65535.
+pub const GIF_MAX_SIDE: u32 = 4096;
 
 #[derive(Debug)]
 pub enum ThumbError {
@@ -202,7 +205,13 @@ fn animated_gif(data: &[u8], max_size: u32) -> Result<Option<Vec<u8>>, ThumbErro
     use image::codecs::gif::{GifDecoder, GifEncoder, Repeat};
     use image::{Frame, RgbaImage};
 
-    let decoder = GifDecoder::new(Cursor::new(data)).map_err(decode_err)?;
+    let mut decoder = GifDecoder::new(Cursor::new(data)).map_err(decode_err)?;
+    let (w, h) = decoder.dimensions();
+    if w.max(h) > GIF_MAX_SIDE {
+        return Ok(None);
+    }
+    // GifDecoder alone has no limits (the still path's ImageReader does).
+    decoder.set_limits(image::Limits::default()).map_err(decode_err)?;
     let mut frames = Vec::new();
     for frame in decoder.into_frames() {
         if frames.len() >= GIF_MAX_FRAMES {
@@ -234,6 +243,26 @@ fn animated_gif(data: &[u8], max_size: u32) -> Result<Option<Vec<u8>>, ThumbErro
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Two 1×1 frames on a declared `side`×`side` screen.
+    fn gif_on_screen(side: u16) -> Vec<u8> {
+        let mut g = b"GIF89a".to_vec();
+        g.extend(side.to_le_bytes());
+        g.extend(side.to_le_bytes());
+        g.extend([0x80, 0, 0, 0, 0, 0, 255, 255, 255]); // a two-colour global table
+        for _ in 0..2 {
+            g.extend([0x2C, 0, 0, 0, 0, 1, 0, 1, 0, 0, 2, 2, 0x44, 0x01, 0]);
+        }
+        g.push(0x3B);
+        g
+    }
+
+    #[test]
+    fn a_gif_declaring_a_huge_screen_is_not_animated() {
+        assert!(animated_gif(&gif_on_screen(8), 64).unwrap().is_some(), "a small animation stays one");
+        assert_eq!(animated_gif(&gif_on_screen(u16::MAX), 64).unwrap(), None, "no 17 GB of frames");
+        assert!(make_thumbnail(&gif_on_screen(u16::MAX), 64, true).is_err(), "the still path's limits refuse it");
+    }
 
     #[test]
     fn fit_size_matches_pillow_thumbnail() {
