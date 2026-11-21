@@ -4,7 +4,7 @@ import { Dropzone, IMAGE_MIME_TYPE } from "@mantine/dropzone";
 import { IconPhotoSearch } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 
-import { ApiError, type Schemas } from "../api/client";
+import { postForm, type Schemas } from "../api/client";
 import { DetailPane } from "../browser/DetailPane";
 
 type Result = Schemas["SearchResult"];
@@ -13,10 +13,7 @@ async function search(file: File, method: string, value: number): Promise<Result
   const form = new FormData();
   form.append("file", file, file.name);
   const q = method === "dhash" ? `method=dhash&max_distance=${value}` : `method=clip&threshold=${value}`;
-  const resp = await fetch(`/api/search/image?${q}`, { method: "POST", body: form, credentials: "same-origin" });
-  const body = await resp.json();
-  if (!resp.ok) throw new ApiError(resp.status, body.error ?? resp.statusText);
-  return body;
+  return postForm(`/api/search/image?${q}`, form);
 }
 
 export function FindByImagePage() {
