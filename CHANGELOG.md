@@ -70,6 +70,10 @@
   already gone are removed); *Sort Files* drops its copy when a move between drives cannot remove the original;
   a model file asked for twice in one viewer batch loads both times; the desktop update dialog shows the version
   it installs in its usual spelling.
+- **New thumbnails survive a reused image id:** SQLite gives a deleted image's id to the next new image, and
+  cleaning up a deleted image's thumbnail right after another write stored the new image's thumbnail under that
+  id could delete it (the image then showed none until *Generate Thumbnails*). Thumbnail cleanup now waits for
+  other writes and keeps every thumbnail an image still uses.
 
 ## 2026.46.2 — 2026-11-15
 

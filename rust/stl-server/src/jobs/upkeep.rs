@@ -85,7 +85,7 @@ pub(super) fn prune_images(lib: &Library, job: &Job, keep: usize) -> Result<Stri
         if !excess.is_empty() {
             lib.db.with_tx(|tx| maintenance::delete_images(tx, &excess)).map_err(db_err)?;
             let refs: Vec<u64> = excess.iter().map(|&i| i as u64).collect();
-            lib.thumbs.delete_many(&refs).map_err(|e| e.to_string())?;
+            lib.drop_thumbs(&refs).map_err(db_err)?;
             // Every model of the chunk has more than `keep` images: all were pruned.
             let paths = lib.db.with(|c| stl_core::storage::model_editor::archive_paths(c, chunk)).map_err(db_err)?;
             job.touch_sidecars(paths.into_values());

@@ -173,15 +173,14 @@ pub(super) fn clear_library(lib: &Library, job: &Job) -> Result<String, String> 
         .collect();
     let models = lib.db.with(maintenance::model_count).map_err(db_err)?;
     lib.db.with_tx(maintenance::clear_all).map_err(db_err)?;
-    lib.thumbs.delete_many(&ids).map_err(|e| e.to_string())?;
+    lib.drop_thumbs(&ids).map_err(db_err)?;
     lib.thumbs.delete_orphan_blobs().map_err(|e| e.to_string())?;
     lib.job_log(job, format!("Deleted {models} model(s) and {} thumbnail(s).", ids.len()));
     Ok(format!("library cleared: {models} model(s) deleted"))
 }
 
 pub(super) fn delete_thumb_refs(lib: &Library, refs: &[String]) -> Result<(), String> {
-    let ids: Vec<u64> = stl_core::storage::crawl::ref_ids(refs);
-    lib.thumbs.delete_many(&ids).map_err(|e| e.to_string())
+    lib.drop_thumbs(&stl_core::storage::crawl::ref_ids(refs)).map_err(db_err)
 }
 
 #[allow(clippy::too_many_arguments)]

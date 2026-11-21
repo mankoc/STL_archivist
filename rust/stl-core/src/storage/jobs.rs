@@ -282,6 +282,37 @@ mod tests {
     use crate::storage::{Vectors, crawl, maintenance, migrate, model_files, open, schema_sql};
 
     /// Generate Thumbnails keeps the chosen order by name, a store key the new
+    /// A freed image id that another writer gives a new image, thumbnail stored but
+    /// row not yet committed, keeps that thumbnail: the cleanup waits for the commit.
+    #[test]
+    fn a_reused_image_id_keeps_its_new_thumbnail() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("lib.db");
+        migrate(&path, &Vectors::default()).unwrap();
+        let store = ThumbStore::open(&dir.path().join("thumbs")).unwrap();
+        let mut writer = open(&path).unwrap();
+        writer
+            .execute_batch(
+                "INSERT INTO libraries (uuid, name, root) VALUES ('u1', 'F', 'F:');
+                 INSERT INTO models (title, library_id, rel_path, archive_hash, is_missing, to_print) VALUES ('A', 1, 'a.7z', 'h1', 0, 0);
+                 INSERT INTO images (id, model_id, filename) VALUES (6, 1, 'kept.jpg'), (7, 1, 'old.jpg');
+                 DELETE FROM images WHERE id = 7;",
+            )
+            .unwrap();
+        // Another writer takes the freed id 7 for a new image and stores its thumbnail, uncommitted.
+        let tx = writer.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
+        tx.execute("INSERT INTO images (model_id, filename) VALUES (1, 'new.jpg')", []).unwrap();
+        assert_eq!(tx.last_insert_rowid(), 7, "SQLite reuses the freed id");
+        store.put_many(&[(7, b"new".as_slice())]).unwrap();
+        std::thread::scope(|s| {
+            let cleanup = s.spawn(|| crawl::drop_unused_thumbs(&open(&path).unwrap(), &store, &[7]).unwrap());
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            tx.commit().unwrap();
+            cleanup.join().unwrap();
+        });
+        assert_eq!(store.get_many(&[7]).unwrap().len(), 1, "the new image's thumbnail stays");
+    }
+
     /// images reuse keeps its new thumbnail, and Prune keeps the cover.
     #[test]
     fn regenerated_thumbnails_keep_their_order() {
