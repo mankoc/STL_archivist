@@ -100,11 +100,6 @@ pub async fn login(State(lib): State<AppState>, headers: HeaderMap, Json(c): Jso
     if c.name.trim().chars().count() > accounts::MAX_NAME {
         return Err(ApiError::new(StatusCode::UNAUTHORIZED, "wrong name or password"));
     }
-    let locked = |lib: &AppState, name: &str| {
-        lib.logins.locked_for(name, accounts::now()).map(|left| {
-            ApiError::new(StatusCode::TOO_MANY_REQUESTS, format!("too many failed sign-ins; try again in {} minutes", (left + 59) / 60))
-        })
-    };
     if let Some(e) = locked(&lib, &c.name) {
         return Err(e);
     }
@@ -137,6 +132,13 @@ pub async fn login(State(lib): State<AppState>, headers: HeaderMap, Json(c): Jso
     }
 }
 
+/// A 429 while `name` is locked out after failed password checks.
+fn locked(lib: &AppState, name: &str) -> Option<ApiError> {
+    lib.logins.locked_for(name, accounts::now()).map(|left| {
+        ApiError::new(StatusCode::TOO_MANY_REQUESTS, format!("too many failed sign-ins; try again in {} minutes", (left + 59) / 60))
+    })
+}
+
 /// End this session.
 #[utoipa::path(post, path = "/api/auth/logout", tag = "auth", responses((status = 204)))]
 pub async fn logout(State(lib): State<AppState>, me: CurrentUser) -> Result<Response, ApiError> {
@@ -153,13 +155,29 @@ pub struct PasswordChange {
 
 /// Change your own password. Ends all your sessions, this one included.
 #[utoipa::path(put, path = "/api/auth/password", tag = "auth", request_body = PasswordChange,
-    responses((status = 204), (status = 400, body = crate::error::ErrorBody)))]
+    responses((status = 204), (status = 400, body = crate::error::ErrorBody), (status = 429, body = crate::error::ErrorBody)))]
 pub async fn change_password(
     State(lib): State<AppState>,
     me: CurrentUser,
     Json(p): Json<PasswordChange>,
 ) -> Result<Response, ApiError> {
-    lib.run(move |lib| Ok(lib.accounts.with(|c| accounts::change_own_password(c, me.user.id, &p.current, &p.new))?))
-        .await?;
+    // Checked like a sign-in: the same memory bound, and the same lockout for guesses.
+    let name = me.user.name.clone();
+    if let Some(e) = locked(&lib, &name) {
+        return Err(e);
+    }
+    let _permit = lib.password_checks.acquire().await.map_err(|e| ApiError::internal(e.to_string()))?;
+    if let Some(e) = locked(&lib, &name) {
+        return Err(e);
+    }
+    let id = me.user.id;
+    let changed = lib.run(move |lib| Ok(lib.accounts.with(|c| accounts::change_own_password(c, id, &p.current, &p.new)))).await?;
+    if let Err(accounts::AccountError::Invalid(m)) = &changed
+        && m == accounts::WRONG_CURRENT
+    {
+        lib.logins.failed(&name, accounts::now());
+        tracing::warn!(name = %name, "wrong current password");
+    }
+    changed?;
     Ok((StatusCode::NO_CONTENT, [(header::SET_COOKIE, auth::clear_cookie())]).into_response())
 }
