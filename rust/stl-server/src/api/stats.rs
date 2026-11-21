@@ -69,6 +69,7 @@ const MONTHS: [&str; 12] = [
 ];
 
 #[derive(Deserialize, utoipa::IntoParams)]
+#[serde(deny_unknown_fields)]
 pub struct ColumnQuery {
     /// One of `category`, `collection`, `creator`, `presupports`, `release`,
     /// `release_month`, `release_year`, `scale`, `sculptor`, `source`,

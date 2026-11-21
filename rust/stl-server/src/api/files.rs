@@ -85,6 +85,7 @@ pub fn check_access(lib: &Library, me: &CurrentUser, path: &Path) -> Result<(), 
 }
 
 #[derive(Deserialize, utoipa::IntoParams)]
+#[serde(deny_unknown_fields)]
 pub struct BrowseQuery {
     /// The folder to list; empty lists the starting points.
     #[serde(default)]

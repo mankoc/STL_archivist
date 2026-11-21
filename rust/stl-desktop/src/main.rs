@@ -1003,16 +1003,20 @@ async fn open_in_packer(app: AppHandle, webview: tauri::Webview, path: String) -
     Ok(())
 }
 
-/// The installer's address and file name for `version`, a release newer than `current`.
-fn installer_of(version: &str, current: &str) -> Result<(String, String, String), String> {
+/// `version` in its usual spelling, when it names a release newer than `current`.
+fn newer_version(version: &str, current: &str) -> Result<String, String> {
     let parts = |v: &str| v.split('.').map(str::parse::<u32>).collect::<Result<Vec<_>, _>>();
     let wanted = parts(version).ok().filter(|p| p.len() == 3).ok_or_else(|| format!("Not a version: {version}"))?;
     if parts(current).is_ok_and(|mine| wanted <= mine) {
         return Err(format!("This app is already at version {current}"));
     }
-    let version = format!("{}.{}.{}", wanted[0], wanted[1], wanted[2]);
+    Ok(format!("{}.{}.{}", wanted[0], wanted[1], wanted[2]))
+}
+
+/// The installer's address, file name and release address for `version` (from [`newer_version`]).
+fn installer_of(version: &str) -> (String, String, String) {
     let name = format!("StlArchivist_{version}_x64-setup.exe");
-    Ok((format!("{RELEASE_DOWNLOADS}/v{version}/{name}"), name, format!("{RELEASE_API}/v{version}")))
+    (format!("{RELEASE_DOWNLOADS}/v{version}/{name}"), name, format!("{RELEASE_API}/v{version}"))
 }
 
 /// The SHA-256 GitHub publishes for the asset `name`, from a release's JSON.
@@ -1052,7 +1056,8 @@ async fn install_update(app: AppHandle, version: String) -> Result<(), String> {
     if !cfg!(windows) {
         return Err("Updates install only on Windows; download this one from the release page".to_string());
     }
-    let (url, name, release) = installer_of(&version, env!("CARGO_PKG_VERSION"))?;
+    let version = newer_version(&version, env!("CARGO_PKG_VERSION"))?;
+    let (url, name, release) = installer_of(&version);
     let agreed = app
         .dialog()
         .message(format!("Download and install StlArchivist {version}? The app closes to update."))
@@ -1292,14 +1297,15 @@ mod tests {
 
     #[test]
     fn a_page_can_only_ask_for_a_newer_release() {
-        let (url, name, release) = installer_of("2026.46.0", "2026.45.13").unwrap();
+        assert_eq!(newer_version("2026.046.00", "2026.45.13").unwrap(), "2026.46.0", "as the dialog shows it");
+        let (url, name, release) = installer_of(&newer_version("2026.46.0", "2026.45.13").unwrap());
         assert!(release.ends_with("/releases/tags/v2026.46.0"));
         assert_eq!(name, "StlArchivist_2026.46.0_x64-setup.exe");
         assert_eq!(url, format!("{RELEASE_DOWNLOADS}/v2026.46.0/{name}"));
-        assert!(installer_of("2026.45.13", "2026.45.13").is_err());
-        assert!(installer_of("2026.45.12", "2026.45.13").is_err());
-        assert!(installer_of("../../evil", "2026.45.13").is_err());
-        assert!(installer_of("2027.1", "2026.45.13").is_err());
+        assert!(newer_version("2026.45.13", "2026.45.13").is_err());
+        assert!(newer_version("2026.45.12", "2026.45.13").is_err());
+        assert!(newer_version("../../evil", "2026.45.13").is_err());
+        assert!(newer_version("2027.1", "2026.45.13").is_err());
     }
 
     #[test]

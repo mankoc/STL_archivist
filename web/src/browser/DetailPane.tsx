@@ -47,7 +47,8 @@ import { api, postForm, type Schemas, unwrap } from "../api/client";
 import { hasRole, useUser } from "../auth/user";
 import { inDesktopShell, meshpeekState, openFolder, openInMeshPeek, openInPacker, packerState } from "../desktop";
 import { FileList } from "./ArchiveInfo";
-import { detailFacts, type Fields, loadTab, middlePath, moveImage, orderedImages, saveTab, type Tab, webLink } from "./detail";
+import { webHref } from "./cells";
+import { detailFacts, type Fields, loadTab, middlePath, moveImage, orderedImages, saveTab, type Tab } from "./detail";
 import { ImageViewer, type ViewerImage } from "./ImageViewer";
 import { baseName } from "../format";
 import { ModelViewer } from "../viewer/ModelViewer";
@@ -131,7 +132,7 @@ export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: num
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
-  const link = webLink(f.url);
+  const link = webHref(typeof f.url === "string" ? f.url : null);
   const description = String(f.description ?? "").trim();
   const fileCount = typeof f.file_count === "number" ? f.file_count : 0;
   const cover = viewable[0];

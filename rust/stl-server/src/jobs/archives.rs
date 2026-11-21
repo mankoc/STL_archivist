@@ -43,9 +43,7 @@ pub(super) fn generate_thumbnails(lib: &Library, job: &Job, ids: &[i64], max: Op
 
 pub(super) fn delete_files(lib: &Library, job: &Job, ids: &[i64]) -> Result<String, String> {
     let log = |line: String| lib.job_log(job, line);
-    job.ctl.set_total(ids.len() as u64);
-    let (deleted, failed, paths) = crate::archive_tools::delete_files(lib, &log, ids)?;
-    job.ctl.advance(ids.len() as u64);
+    let (deleted, failed, paths) = crate::archive_tools::delete_files(lib, &job.ctl, &log, ids)?;
     job.touch_sidecars(paths);
     // Nothing deleted and something failed: the job failed, with the first reason.
     if deleted == 0

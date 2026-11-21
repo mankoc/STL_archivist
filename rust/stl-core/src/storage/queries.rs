@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use rusqlite::types::Value;
 use rusqlite::{Connection, params_from_iter};
 
-use super::Result;
+use super::{Result, like_literal};
 use crate::winpath::WinPath;
 
 /// Filter-pane sections, in display order (`FACETS`).
@@ -282,25 +282,27 @@ fn conditions(spec: &FilterSpec, t: &str, skip: Option<&str>, path_table: Option
     if want("warning") {
         if let Some(vs) = inc.get("warning") {
             let p = text_values(FilterSpec::texts(vs));
-            let parts = vec![format!("{t}.warning LIKE '%' || ? || '%'"); p.len()];
+            let p = escaped(p);
+            let parts = vec![format!("{t}.warning LIKE '%' || ? || '%' ESCAPE '!'"); p.len()];
             out.push(Sql::with(format!("({})", parts.join(" OR ")), p));
         }
         if let Some(vs) = exc.get("warning") {
             let p = text_values(FilterSpec::texts(vs));
-            let parts = vec![format!("({t}.warning LIKE '%' || ? || '%') IS NOT TRUE"); p.len()];
+            let p = escaped(p);
+            let parts = vec![format!("({t}.warning LIKE '%' || ? || '%' ESCAPE '!') IS NOT TRUE"); p.len()];
             out.push(Sql::with(format!("({})", parts.join(" AND ")), p));
         }
     }
 
     if want("filetype") {
         if let Some(vs) = inc.get("filetype") {
-            let p: Vec<Value> = FilterSpec::texts(vs).map(|e| Value::Text(format!("%{e}"))).collect();
-            let parts = vec![format!("lower({t}.rel_path) LIKE ?"); p.len()];
+            let p: Vec<Value> = FilterSpec::texts(vs).map(|e| Value::Text(format!("%{}", like_literal(e)))).collect();
+            let parts = vec![format!("lower({t}.rel_path) LIKE ? ESCAPE '!'"); p.len()];
             out.push(Sql::with(format!("({})", parts.join(" OR ")), p));
         }
         if let Some(vs) = exc.get("filetype") {
-            let p: Vec<Value> = FilterSpec::texts(vs).map(|e| Value::Text(format!("%{e}"))).collect();
-            let parts = vec![format!("lower({t}.rel_path) NOT LIKE ?"); p.len()];
+            let p: Vec<Value> = FilterSpec::texts(vs).map(|e| Value::Text(format!("%{}", like_literal(e)))).collect();
+            let parts = vec![format!("lower({t}.rel_path) NOT LIKE ? ESCAPE '!'"); p.len()];
             out.push(Sql::with(format!("({})", parts.join(" AND ")), p));
         }
     }
@@ -339,6 +341,11 @@ fn folder_counts_sql(scope: Option<&str>) -> String {
     FOLDER_COUNTS.replace("{scope}", scope.unwrap_or("1"))
 }
 
+/// Text values matched literally in `LIKE … ESCAPE '!'`.
+fn escaped(values: Vec<Value>) -> Vec<Value> {
+    values.into_iter().map(|v| if let Value::Text(s) = v { Value::Text(like_literal(&s)) } else { v }).collect()
+}
+
 fn serde_json_ids(ids: &[i64]) -> String {
     let parts: Vec<String> = ids.iter().map(i64::to_string).collect();
     format!("[{}]", parts.join(","))
@@ -349,8 +356,8 @@ fn path_matches(t: &str, paths: &[String]) -> Option<Sql> {
         return None;
     }
     let params: Vec<Value> =
-        paths.iter().map(|p| Value::Text(format!("{}/%", p.trim_end_matches('/')))).collect();
-    let parts = vec![format!("replace({}, '\\', '/') LIKE ?", archive_path_of(t)); params.len()];
+        paths.iter().map(|p| Value::Text(format!("{}/%", like_literal(p.trim_end_matches('/'))))).collect();
+    let parts = vec![format!("replace({}, '\\', '/') LIKE ? ESCAPE '!'", archive_path_of(t)); params.len()];
     Some(Sql::with(format!("({})", parts.join(" OR ")), params))
 }
 
@@ -441,7 +448,7 @@ fn text_condition(text: &str, fields: &[&str], fuzzy: bool) -> Result<Sql> {
         let text_sql = cols.iter().map(|c| format!("coalesce({c}, '')")).collect::<Vec<_>>().join(" || ' ' || ");
         return Ok(Sql::with(format!("fuzzy_match({text_sql}, ?)"), vec![Value::Text(text.to_string())]));
     }
-    let pat = format!("%{text}%");
+    let pat = format!("%{}%", like_literal(text));
     // `LIKE` ignores the case of ASCII letters, and that is all SQLite's `lower()` folds
     // (no ICU in this build): `lower()` on both sides found the same rows in twice the time.
     let parts: Vec<String> = fields
@@ -449,8 +456,8 @@ fn text_condition(text: &str, fields: &[&str], fuzzy: bool) -> Result<Sql> {
         .zip(&cols)
         .map(|(f, c)| match *f {
             // Through the tag names (a small table) rather than joining them per model.
-            "tags" => format!("models_view.id IN ({TAGGED} WHERE tags.name LIKE ?)"),
-            _ => format!("{c} LIKE ?"),
+            "tags" => format!("models_view.id IN ({TAGGED} WHERE tags.name LIKE ? ESCAPE '!')"),
+            _ => format!("{c} LIKE ? ESCAPE '!'"),
         })
         .collect();
     let n = parts.len();
@@ -1528,6 +1535,20 @@ mod tests {
         assert_eq!(find("NOT description=x", &[], false), vec![2, 3, 4, 1], "no description: not x either");
         assert_eq!(find("(red OR blue) AND tags=dragon", &["title"], false), vec![1]);
         assert_eq!(find("tags=drgon", &["title"], true), vec![3, 1]);
+    }
+
+    #[test]
+    fn like_wildcards_are_literal() {
+        let (_dir, pool) = sample();
+        let ids = |spec: &FilterSpec, text: &str| {
+            let search = Search { text: text.into(), fields: vec!["title".into()], fuzzy: false };
+            pool.with(|c| table_ids(c, spec, &search, None)).unwrap()
+        };
+        let mut folder = FilterSpec::default();
+        folder.include.insert("path".into(), vec![FilterValue::Text("F:/lib/_".into())]);
+        assert!(ids(&folder, "").is_empty(), "`_` is no wildcard: A and B do not match");
+        assert!(ids(&FilterSpec::default(), "R_d").is_empty());
+        assert!(ids(&FilterSpec::default(), "%").is_empty());
     }
 
     #[test]
