@@ -504,6 +504,8 @@ fn images_in(dir: &str, pool: &rayon::ThreadPool, cfg: &CrawlConfig, host: &dyn 
         .map(|rd| {
             rd.flatten()
                 .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+                // As for members: a folder of huge renders would fill memory, read in parallel.
+                .filter(|e| e.metadata().is_ok_and(|m| m.len() <= SIZE_LIMIT_IMAGE))
                 .map(|e| e.file_name().to_string_lossy().into_owned())
                 .filter(|n| rules::IMAGE_SUFFIXES.contains(&suffix_lower(n).as_str()))
                 .map(|n| crate::winpath::join(dir, &n))

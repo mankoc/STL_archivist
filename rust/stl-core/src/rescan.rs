@@ -42,8 +42,10 @@ pub fn rescan(path: &str, old_size: Option<i64>, old_mtime: Option<i64>, old_has
     };
     let unchanged = fs_size.is_some() && fs_mtime.is_some() && fs_size == old_size && fs_mtime == old_mtime;
     let members = crate::archive::list_members(p).ok();
+    // An empty or size/mtime fingerprint is read again, as crawls do: the readers may list it now.
+    let trusted = unchanged && !old_hash.is_empty() && !old_hash.starts_with("fallback:");
     let hash = match &members {
-        _ if unchanged => old_hash.to_string(),
+        _ if trusted => old_hash.to_string(),
         Some(members) => crate::archive::fingerprint_of(members),
         None => fallback_fingerprint(path),
     };
@@ -216,7 +218,24 @@ mod tests {
         // Unchanged size and time: the stored hash is kept.
         let (s, m) = stat(&path).unwrap();
         assert_eq!(rescan(&path, Some(s), Some(m), "kept", &opts()).unwrap().archive_hash, "kept");
+        // Unless it is a size/mtime fingerprint: the readers list the archive now.
+        let fallback = rescan(&path, Some(s), Some(m), "fallback:1:2", &opts()).unwrap();
+        assert_eq!(fallback.archive_hash, crate::archive::fingerprint(&p).unwrap());
         assert!(rescan(&dir.path().join("gone.zip").to_string_lossy(), None, None, "", &opts()).is_err());
+    }
+
+    /// A ZIP member zipfile would not read (its local header names another file)
+    /// is skipped alone: the archive's other members are still read.
+    #[test]
+    fn one_odd_zip_member_leaves_the_others() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.zip");
+        zip(&path, &[("a.txt", b"one"), ("b.txt", b"two")]);
+        let mut bytes = std::fs::read(&path).unwrap();
+        bytes[30] = b'x'; // the first local header now says "x.txt"
+        std::fs::write(&path, &bytes).unwrap();
+        let read = crate::archive::read_members(&path, &["a.txt".into(), "b.txt".into()]).unwrap();
+        assert_eq!(read, [("b.txt".to_string(), b"two".to_vec())]);
     }
 
     #[test]
