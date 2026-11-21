@@ -35,6 +35,9 @@ import { RELATIVE_PATHS } from "./cells";
 import { type ModelActionHandlers, ModelActionItems } from "./ModelActions";
 import classes from "./BrowserPage.module.css";
 
+/** The order while the ids load (one array, so that effects and memos keep still). */
+const NO_IDS: number[] = [];
+
 const SHOW = ["library", "author", "tags", "source", "date", "sculptor", "collection", "subcollection", "category", "release", "scale", "presupports", "path"];
 
 /** `active`: shown. The page stays mounted while another one shows (Shell). */
@@ -171,8 +174,11 @@ export function BrowserPage({ active = true }: { active?: boolean }) {
   const queryClient = useQueryClient();
   const query = { filter, search, searchFields: searchOptions.fields, fuzzy: searchOptions.fuzzy, sort };
   const ids = useModelIds(query);
-  const order = ids.data ?? [];
-  useEffect(() => setSelection((s) => prune(s, order)), [order]);
+  const order = ids.data ?? NO_IDS;
+  // Only against a real list: while loading, or after an error (no placeholder then), nothing is pruned.
+  useEffect(() => {
+    if (ids.data) setSelection((s) => prune(s, ids.data));
+  }, [ids.data]);
   // The selected models in table order, worked out again only when either changes
   // (the table can hold every model of the library).
   const selected = useMemo(() => order.filter((i) => selection.ids.has(i)), [order, selection.ids]);
