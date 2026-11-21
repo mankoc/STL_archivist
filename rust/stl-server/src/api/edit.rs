@@ -444,8 +444,7 @@ pub async fn clear_warnings(State(lib): State<AppState>, me: CurrentUser, Json(r
 /// Drop thumbnail references (`images.thumbnail_path`: the image id) from the
 /// store, after the database change committed.
 fn delete_thumbnails(lib: &Library, refs: &[String]) -> Result<(), ApiError> {
-    let ids: Vec<u64> = stl_core::storage::crawl::ref_ids(refs);
-    lib.thumbs.delete_many(&ids)?;
+    lib.drop_thumbs(&stl_core::storage::crawl::ref_ids(refs))?;
     Ok(())
 }
 
@@ -601,7 +600,7 @@ pub async fn delete_image(State(lib): State<AppState>, me: CurrentUser, Path(id)
             })?;
             let Some(path) = path else { return Ok(None) };
             lib.db.with_tx(|tx| maintenance::delete_images(tx, &[id]))?;
-            lib.thumbs.delete_many(&[id as u64])?;
+            lib.drop_thumbs(&[id as u64])?;
             Ok(Some(path))
         })
         .await?;

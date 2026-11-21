@@ -1070,18 +1070,25 @@ pub(super) fn remove_images(tx: &Transaction, model_id: i64, drops: &mut Vec<u64
     Ok(positions)
 }
 
-/// After a commit: delete the thumbnails of the store keys `ids` that no image
-/// uses (a key freed in the transaction may have gone to a new image).
+/// After a commit (no transaction open on `conn`): delete the thumbnails of the
+/// store keys `ids` that no image uses. Image ids are reused (no `AUTOINCREMENT`),
+/// so a freed key may already belong to a new image of another writer. Thumbnails
+/// are only written inside write transactions, so this looks and deletes holding
+/// the write lock: no other writer is then between storing a new image's thumbnail
+/// and committing its row.
 pub fn drop_unused_thumbs(conn: &Connection, store: &ThumbStore, ids: &[u64]) -> Result<()> {
     if ids.is_empty() {
         return Ok(());
     }
+    let tx = Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
     let json = format!("[{}]", ids.iter().map(u64::to_string).collect::<Vec<_>>().join(","));
-    let mut st = conn.prepare("SELECT id FROM images WHERE id IN (SELECT value FROM json_each(?1))")?;
-    let used: HashSet<i64> = st.query_map([json], |r| r.get(0))?.collect::<Result<_>>()?;
+    let used: HashSet<i64> = {
+        let mut st = tx.prepare("SELECT id FROM images WHERE id IN (SELECT value FROM json_each(?1))")?;
+        st.query_map([json], |r| r.get(0))?.collect::<Result<_>>()?
+    };
     let unused: Vec<u64> = ids.iter().copied().filter(|&i| !used.contains(&(i as i64))).collect();
     let _ = store.delete_many(&unused);
-    Ok(())
+    tx.commit()
 }
 
 #[cfg(test)]
