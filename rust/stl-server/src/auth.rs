@@ -74,6 +74,15 @@ impl CurrentUser {
     }
 }
 
+/// Whether `token` is still a session of an enabled user with at least `role`:
+/// long-lived connections (the event stream, compute workers) check again now
+/// and then, so that disabling, demoting or signing a user out reaches them.
+pub async fn still_allowed(lib: &AppState, token: &str, role: Role) -> bool {
+    let token = token.to_string();
+    let user = lib.run(move |lib| Ok(lib.accounts.with(|c| accounts::session_user(c, &token))?)).await;
+    matches!(user, Ok(Some(u)) if u.role >= role)
+}
+
 impl FromRequestParts<AppState> for CurrentUser {
     type Rejection = ApiError;
 
