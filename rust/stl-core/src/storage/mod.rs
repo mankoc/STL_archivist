@@ -62,6 +62,11 @@ fn register_sqlite_vec() {
 }
 
 /// Open the database with the pragmas `db.init_db` sets on every connection.
+/// `text` matched literally in a `LIKE … ESCAPE '!'` pattern (`%`, `_` and `!` escaped).
+pub fn like_literal(text: &str) -> String {
+    text.chars().flat_map(|c| if matches!(c, '%' | '_' | '!') { vec!['!', c] } else { vec![c] }).collect()
+}
+
 pub fn open(path: &Path) -> Result<Connection> {
     register_sqlite_vec();
     if let Some(parent) = path.parent() {

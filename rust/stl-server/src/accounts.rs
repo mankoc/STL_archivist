@@ -174,14 +174,13 @@ pub fn create_user(conn: &Connection, name: &str, password: &str, role: Role) ->
     let name = clean_name(name)?;
     check_password(password)?;
     let hash = hash_password(password)?;
-    let taken: bool = conn.query_row("SELECT count(*) > 0 FROM users WHERE name = ?1", [&name], |r| r.get(0))?;
-    if taken {
-        return Err(AccountError::Conflict(format!("the name {name:?} is taken")));
-    }
+    // The unique index decides (a check first could race another create of the name).
+    let taken = |e: &rusqlite::Error| e.sqlite_error_code() == Some(rusqlite::ErrorCode::ConstraintViolation);
     conn.execute(
         "INSERT INTO users (name, password_hash, role, created_at) VALUES (?1, ?2, ?3, ?4)",
         params![name, hash, role.as_str(), now()],
-    )?;
+    )
+    .map_err(|e| if taken(&e) { AccountError::Conflict(format!("the name {name:?} is taken")) } else { e.into() })?;
     get_user(conn, conn.last_insert_rowid())
 }
 

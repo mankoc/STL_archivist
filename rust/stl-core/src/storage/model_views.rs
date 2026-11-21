@@ -113,12 +113,8 @@ pub fn folder_models(conn: &Connection, folder: &str, include_subfolders: bool) 
         Ok(FolderModel { id: r.get(0)?, title: r.get(1)?, creator: r.get(2)?, archive_path: r.get(3)?, thumbs: Vec::new() })
     };
     let mut rows: Vec<FolderModel> = if include_subfolders {
-        let mut prefix = folder.replace('\\', "/");
-        if !prefix.ends_with('/') {
-            prefix.push('/');
-        }
-        prefix.push('%');
-        let mut st = conn.prepare(&format!("SELECT * FROM ({cols}) WHERE folder = ?1 OR folder LIKE ?2{order}"))?;
+        let prefix = format!("{}/%", super::like_literal(folder.replace('\\', "/").trim_end_matches('/')));
+        let mut st = conn.prepare(&format!("SELECT * FROM ({cols}) WHERE folder = ?1 OR folder LIKE ?2 ESCAPE '!'{order}"))?;
         st.query_map([folder, prefix.as_str()], map)?.collect::<Result<_>>()?
     } else {
         let mut st = conn.prepare(&format!("SELECT * FROM ({cols}) WHERE folder = ?1{order}"))?;

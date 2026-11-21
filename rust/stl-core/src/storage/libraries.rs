@@ -127,9 +127,14 @@ pub fn exclude_folder(tx: &Transaction, id: i64, rel_folder: &str) -> Result<sup
     super::maintenance::remove_records(tx, &ids)
 }
 
-/// Crawl `rel_folder` of library folder `id` again.
+/// Crawl `rel_folder` of library folder `id` again (compared as [`exclude_folder`] compares).
 pub fn include_folder(tx: &Transaction, id: i64, rel_folder: &str) -> Result<()> {
-    tx.execute("DELETE FROM excluded_folders WHERE library_id = ?1 AND rel_folder = ?2", params![id, rel_folder])?;
+    let key = path_key(rel_folder);
+    let mut st = tx.prepare("SELECT rel_folder FROM excluded_folders WHERE library_id = ?1")?;
+    let spelled: Vec<String> = st.query_map([id], |r| r.get(0))?.collect::<Result<_>>()?;
+    for f in spelled.into_iter().filter(|f| path_key(f) == key) {
+        tx.execute("DELETE FROM excluded_folders WHERE library_id = ?1 AND rel_folder = ?2", params![id, f])?;
+    }
     Ok(())
 }
 
@@ -1095,6 +1100,10 @@ mod tests {
         remove(&tx, inner).unwrap();
         assert_eq!(rows(&tx, "excluded_folders"), [(outer, "Other".into()), (outer, "Sub/Skip".into())]);
         assert_eq!(rows(&tx, "folder_patterns"), [(outer, "Sub/A".into()), (outer, "Top".into())]);
+        // Included again as exclusions compare: by `path_key`.
+        let other = if relpath::CASE_INSENSITIVE { "other" } else { "Other" };
+        include_folder(&tx, outer, other).unwrap();
+        assert_eq!(rows(&tx, "excluded_folders"), [(outer, "Sub/Skip".into())]);
     }
 
     #[test]

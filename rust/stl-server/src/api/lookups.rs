@@ -414,6 +414,7 @@ pub struct Profile {
 }
 
 #[derive(Deserialize, utoipa::IntoParams)]
+#[serde(deny_unknown_fields)]
 pub struct NameQuery {
     pub name: String,
 }
