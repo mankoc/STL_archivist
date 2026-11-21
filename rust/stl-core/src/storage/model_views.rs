@@ -9,10 +9,6 @@ use rusqlite::{Connection, OptionalExtension};
 
 use super::Result;
 
-fn id_json(ids: &[i64]) -> String {
-    format!("[{}]", ids.iter().map(i64::to_string).collect::<Vec<_>>().join(","))
-}
-
 pub type StlFileRow = (String, Option<i64>, Option<String>);
 
 pub fn stl_files(conn: &Connection, model_id: i64) -> Result<Vec<StlFileRow>> {
@@ -84,7 +80,7 @@ fn thumbs(conn: &Connection, ids: &[i64]) -> Result<HashMap<i64, Vec<Option<Stri
          WHERE model_id IN (SELECT value FROM json_each(?1)) ORDER BY {}",
         super::schema_sql::IMAGE_ORDER
     ))?;
-    let rows = st.query_map([id_json(ids)], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?)))?;
+    let rows = st.query_map([super::id_json(ids)], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?)))?;
     for row in rows {
         let (mid, path) = row?;
         out.entry(mid).or_default().push(path);
@@ -153,7 +149,7 @@ const GRID_FIELDS: [&str; 10] = [
 fn names_by_model(conn: &Connection, sql: &str, ids: &[i64]) -> Result<HashMap<i64, Vec<String>>> {
     let mut out: HashMap<i64, Vec<String>> = HashMap::new();
     let mut st = conn.prepare(sql)?;
-    let rows = st.query_map([id_json(ids)], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
+    let rows = st.query_map([super::id_json(ids)], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
     for row in rows {
         let (mid, name) = row?;
         out.entry(mid).or_default().push(name);
@@ -187,7 +183,7 @@ pub fn grid_models(conn: &Connection, ids: &[i64]) -> Result<Vec<GridModel>> {
         cols.join(", ")
     ))?;
     let mut rows: Vec<GridModel> = st
-        .query_map([id_json(ids)], |r| {
+        .query_map([super::id_json(ids)], |r| {
             let fields =
                 GRID_FIELDS.iter().enumerate().map(|(k, f)| Ok((*f, r.get(k + 1)?))).collect::<Result<_>>()?;
             Ok(GridModel { id: r.get(0)?, fields, tags: Vec::new(), scales: Vec::new(), thumbs: Vec::new() })
@@ -258,7 +254,7 @@ pub fn image_hashes(conn: &Connection) -> Result<Vec<HashRow>> {
 pub type ImageDetail = (Option<String>, Option<String>, Option<String>);
 
 pub fn image_details(conn: &Connection, ids: &[i64]) -> Result<HashMap<i64, ImageDetail>> {
-    let json = format!("[{}]", ids.iter().map(i64::to_string).collect::<Vec<_>>().join(","));
+    let json = super::id_json(ids);
     let mut st = conn.prepare(&format!(
         "SELECT i.id, i.thumbnail_path, m.title, {} FROM images i JOIN models m ON i.model_id = m.id \
          WHERE i.id IN (SELECT value FROM json_each(?1))",

@@ -61,12 +61,22 @@ fn register_sqlite_vec() {
     });
 }
 
-/// Open the database with the pragmas `db.init_db` sets on every connection.
 /// `text` matched literally in a `LIKE … ESCAPE '!'` pattern (`%`, `_` and `!` escaped).
 pub fn like_literal(text: &str) -> String {
     text.chars().flat_map(|c| if matches!(c, '%' | '_' | '!') { vec!['!', c] } else { vec![c] }).collect()
 }
 
+/// `ids` as a JSON array, for `… IN (SELECT value FROM json_each(?))`.
+pub fn id_json(ids: &[i64]) -> String {
+    format!("[{}]", ids.iter().map(i64::to_string).collect::<Vec<_>>().join(","))
+}
+
+/// Whether the model `id` exists.
+pub(crate) fn model_exists(conn: &Connection, id: i64) -> Result<bool> {
+    Ok(conn.query_row("SELECT 1 FROM models WHERE id = ?1", [id], |_| Ok(())).optional()?.is_some())
+}
+
+/// Open the database with the pragmas `db.init_db` sets on every connection.
 pub fn open(path: &Path) -> Result<Connection> {
     register_sqlite_vec();
     if let Some(parent) = path.parent() {

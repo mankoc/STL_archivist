@@ -105,7 +105,7 @@ pub fn verify(conn: &Connection, ctl: &Control) -> Result<Verified> {
 /// Clear `is_missing` for files that reappeared (one UPDATE). Sets `updated_at`,
 /// as SQLAlchemy's bulk `update()` applies the column's `onupdate`.
 pub fn clear_missing(tx: &Transaction, ids: &[i64]) -> Result<usize> {
-    let json = format!("[{}]", ids.iter().map(i64::to_string).collect::<Vec<_>>().join(","));
+    let json = super::id_json(ids);
     tx.execute(
         "UPDATE models SET is_missing = 0, updated_at = ?2 WHERE id IN (SELECT value FROM json_each(?1))",
         rusqlite::params![json, super::writes::utc_now_text()],
@@ -197,7 +197,7 @@ pub fn models_over(conn: &Connection, keep: i64) -> Result<Vec<i64>> {
 /// `prune_images`, per batch: `(models pruned, image ids beyond the first `keep`
 /// of each model)`, the first in the model's order kept (the cover first).
 pub fn excess_images(conn: &Connection, model_ids: &[i64], keep: usize) -> Result<(usize, Vec<i64>)> {
-    let json = format!("[{}]", model_ids.iter().map(i64::to_string).collect::<Vec<_>>().join(","));
+    let json = super::id_json(model_ids);
     let mut st = conn.prepare(&format!(
         "SELECT id, model_id FROM images WHERE model_id IN (SELECT value FROM json_each(?1)) ORDER BY model_id, {}",
         super::schema_sql::IMAGE_ORDER
@@ -222,7 +222,7 @@ pub fn excess_images(conn: &Connection, model_ids: &[i64], keep: usize) -> Resul
 
 /// Delete images by id (their vectors go with them through the TEMP trigger).
 pub fn delete_images(tx: &Transaction, ids: &[i64]) -> Result<usize> {
-    let json = format!("[{}]", ids.iter().map(i64::to_string).collect::<Vec<_>>().join(","));
+    let json = super::id_json(ids);
     tx.execute("DELETE FROM images WHERE id IN (SELECT value FROM json_each(?1))", [json])
 }
 
@@ -332,7 +332,7 @@ pub fn location_rows(conn: &Connection) -> Result<Vec<LocationRow>> {
 pub fn merge_moved(tx: &Transaction, items: &[(i64, String)]) -> Result<(usize, usize, Vec<String>)> {
     let (mut merged, mut errors, mut refs) = (0, 0, Vec::new());
     for (old_id, path) in items {
-        let old = tx.query_row("SELECT 1 FROM models WHERE id = ?1", [old_id], |_| Ok(())).optional()?;
+        let old = super::model_exists(tx, *old_id)?;
         let new: Option<i64> = tx
             .query_row(
                 &format!("SELECT models.id FROM {} ORDER BY models.id LIMIT 1", super::crawl::LOCATED),
@@ -341,7 +341,7 @@ pub fn merge_moved(tx: &Transaction, items: &[(i64, String)]) -> Result<(usize, 
             )
             .optional()?;
         match (old, new) {
-            (Some(()), Some(new_id)) => {
+            (true, Some(new_id)) => {
                 refs.extend(super::writes::merge_into_missing(tx, *old_id, new_id)?);
                 merged += 1;
             }
@@ -411,7 +411,7 @@ pub fn dhash_targets(conn: &Connection, all: bool, current_len: i64) -> Result<V
 
 /// Legacy thumbnail blobs (the `images.thumbnail` column) of `ids`.
 pub fn legacy_thumbnails(conn: &Connection, ids: &[i64]) -> Result<Vec<(i64, Vec<u8>)>> {
-    let json = format!("[{}]", ids.iter().map(i64::to_string).collect::<Vec<_>>().join(","));
+    let json = super::id_json(ids);
     let mut st = conn.prepare(
         "SELECT id, thumbnail FROM images WHERE id IN (SELECT value FROM json_each(?1)) AND thumbnail IS NOT NULL",
     )?;
