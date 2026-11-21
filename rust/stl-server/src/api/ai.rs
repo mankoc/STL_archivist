@@ -88,7 +88,7 @@ fn check_key(key: &str) -> Result<(), ApiError> {
 /// The AI tagger's OpenAI-compatible endpoint.
 #[utoipa::path(get, path = "/api/ai/openai", tag = "ai", responses((status = 200, body = OpenAiEndpointState)))]
 pub async fn openai_get(State(lib): State<AppState>, _me: CurrentUser) -> Result<Json<OpenAiEndpointState>, ApiError> {
-    let ep = lib.accounts.with(crate::ai::openai_endpoint).map_err(|e| ApiError::internal(e.to_string()))?;
+    let ep = lib.run(|lib| lib.accounts.with(crate::ai::openai_endpoint).map_err(|e| ApiError::internal(e.to_string()))).await?;
     Ok(Json(OpenAiEndpointState { url: ep.url, key_set: ep.key.is_some() }))
 }
 
@@ -109,21 +109,27 @@ pub async fn openai_put(State(lib): State<AppState>, me: CurrentUser, Json(req):
     if let Some(k) = key {
         check_key(k)?;
     }
+    let (url, key) = (url.to_string(), key.map(str::to_string));
+    let key_changed = key.is_some();
+    let u = url.clone();
     let ep = lib
-        .accounts
-        .with(|c| {
-            crate::ai::set_openai_endpoint(c, url, key)?;
-            crate::ai::openai_endpoint(c)
+        .run(move |lib| {
+            lib.accounts
+                .with(|c| {
+                    crate::ai::set_openai_endpoint(c, &u, key.as_deref())?;
+                    crate::ai::openai_endpoint(c)
+                })
+                .map_err(|e| ApiError::internal(e.to_string()))
         })
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-    tracing::info!(by = %me.user.name, url, key_changed = key.is_some(), "OpenAI-compatible endpoint changed");
+        .await?;
+    tracing::info!(by = %me.user.name, url, key_changed, "OpenAI-compatible endpoint changed");
     Ok(Json(OpenAiEndpointState { url: ep.url, key_set: ep.key.is_some() }))
 }
 
 /// Whether the AI tagger has an OpenRouter API key.
 #[utoipa::path(get, path = "/api/ai/openrouter", tag = "ai", responses((status = 200, body = OpenRouterKeyState)))]
 pub async fn openrouter_get(State(lib): State<AppState>, _me: CurrentUser) -> Result<Json<OpenRouterKeyState>, ApiError> {
-    let key = lib.accounts.with(crate::ai::openrouter_key).map_err(|e| ApiError::internal(e.to_string()))?;
+    let key = lib.run(|lib| lib.accounts.with(crate::ai::openrouter_key).map_err(|e| ApiError::internal(e.to_string()))).await?;
     Ok(Json(OpenRouterKeyState { key_set: key.is_some() }))
 }
 
@@ -133,9 +139,10 @@ pub async fn openrouter_get(State(lib): State<AppState>, _me: CurrentUser) -> Re
               (status = 403, body = crate::error::ErrorBody)))]
 pub async fn openrouter_put(State(lib): State<AppState>, me: CurrentUser, Json(req): Json<OpenRouterKey>) -> Result<Json<OpenRouterKeyState>, ApiError> {
     me.require(Role::Admin)?;
-    let key = req.key.trim();
-    check_key(key)?;
-    lib.accounts.with(|c| crate::ai::set_openrouter_key(c, key)).map_err(|e| ApiError::internal(e.to_string()))?;
-    tracing::info!(by = %me.user.name, set = !key.is_empty(), "OpenRouter API key changed");
-    Ok(Json(OpenRouterKeyState { key_set: !key.is_empty() }))
+    let key = req.key.trim().to_string();
+    check_key(&key)?;
+    let set = !key.is_empty();
+    lib.run(move |lib| lib.accounts.with(|c| crate::ai::set_openrouter_key(c, &key)).map_err(|e| ApiError::internal(e.to_string()))).await?;
+    tracing::info!(by = %me.user.name, set, "OpenRouter API key changed");
+    Ok(Json(OpenRouterKeyState { key_set: set }))
 }

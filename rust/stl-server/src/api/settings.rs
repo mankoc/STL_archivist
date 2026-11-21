@@ -139,8 +139,8 @@ impl Settings {
 
 /// The library settings.
 #[utoipa::path(get, path = "/api/settings/library", tag = "settings", responses((status = 200, body = Settings)))]
-pub async fn get(State(lib): State<AppState>, _me: CurrentUser) -> Json<Settings> {
-    Json(Settings::current(&LibrarySettings::load(&lib.config.data_dir)))
+pub async fn get(State(lib): State<AppState>, _me: CurrentUser) -> Result<Json<Settings>, ApiError> {
+    Ok(Json(lib.run(|lib| Ok(Settings::current(&LibrarySettings::load(&lib.config.data_dir)))).await?))
 }
 
 /// Change the library settings (administrators). Takes every field; the

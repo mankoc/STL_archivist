@@ -38,6 +38,11 @@
   warnings, and the *Statistics* page, reload instead of showing what they showed before.
 - **Clear upload errors:** a refused image upload or *Find by image* search shows the server's (or proxy's) error,
   such as *Payload Too Large*, instead of a JSON parse error.
+- **Cross-site request protection:** changes made with the session cookie need an `X-Requested-With` header, which
+  the web client sends and no other site can, so a page on another port or subdomain of the same host cannot make
+  them. Clients using `Authorization: Bearer` (the desktop app, compute workers, sync) are unaffected.
+- **Stopped jobs show as cancelled:** a job stopped by hand ends as *Cancelled* even when its work ends with an
+  error, instead of *Failed*.
 
 ## 2026.46.2 — 2026-11-15
 
