@@ -36,10 +36,15 @@ impl ApiError {
     }
 }
 
+/// A database error as the message jobs and tools report.
+pub(crate) fn db_err(e: rusqlite::Error) -> String {
+    format!("database: {e}")
+}
+
 impl From<rusqlite::Error> for ApiError {
     fn from(e: rusqlite::Error) -> Self {
         tracing::error!("database: {e}");
-        Self::internal(format!("database: {e}"))
+        Self::internal(db_err(e))
     }
 }
 

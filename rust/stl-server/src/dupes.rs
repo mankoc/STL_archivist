@@ -10,6 +10,7 @@ use utoipa::ToSchema;
 use stl_core::storage::{duplicates, schema_sql, vectors, model_views};
 
 use crate::Library;
+use crate::error::db_err;
 use crate::jobs::JobResult;
 
 /// Most result rows kept (`image_duplicates.MAX_RESULTS`).
@@ -86,10 +87,6 @@ pub struct MetadataModel {
     pub value: String,
 }
 
-fn db(e: rusqlite::Error) -> String {
-    format!("database: {e}")
-}
-
 fn stem(path: &str) -> String {
     Path::new(path).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
 }
@@ -97,7 +94,7 @@ fn stem(path: &str) -> String {
 /// `(model id, hash)` per thumbnailed image of a present model: stored current
 /// hashes, else computed from the thumbnail (not saved), as `load_dhash_items`.
 fn dhash_items(lib: &Library, log: &dyn Fn(String)) -> Result<Vec<(i64, u128)>, String> {
-    let rows = lib.db.with(duplicates::present_images).map_err(db)?;
+    let rows = lib.db.with(duplicates::present_images).map_err(db_err)?;
     let mut good = Vec::new();
     let mut todo = Vec::new();
     for (image, model, hash) in rows {
@@ -128,7 +125,7 @@ fn rows(lib: &Library, pairs: Vec<stl_core::image_pairs::ModelPair>, img_model: 
     let info: HashMap<i64, (String, String, Option<i64>)> = lib
         .db
         .with(duplicates::model_info)
-        .map_err(db)?
+        .map_err(db_err)?
         .into_iter()
         .map(|(id, title, path, size)| {
             let path = path.unwrap_or_default();
@@ -227,7 +224,7 @@ impl std::hash::Hash for SameBits<'_> {
 pub fn image_clip(lib: &Library, ctl: &Control, log: &dyn Fn(String), threshold: f32, max_models: usize) -> Result<JobResult, String> {
     log("Loading image embeddings…".into());
     let dim = schema_sql::EMBED_DIM as usize;
-    let (img_model, mat) = lib.db.with(|c| vectors::load_model_vectors(c, dim)).map_err(db)?;
+    let (img_model, mat) = lib.db.with(|c| vectors::load_model_vectors(c, dim)).map_err(db_err)?;
     let mut vecs: Vec<f32> = Vec::new();
     let img_item: Vec<usize> = {
         let mut index: HashMap<SameBits, usize> = HashMap::new();
@@ -264,7 +261,7 @@ pub fn image_clip(lib: &Library, ctl: &Control, log: &dyn Fn(String), threshold:
 
 /// Find Duplicate Archives → STL files: archive pairs sharing a fraction of files.
 pub fn content(lib: &Library, ctl: &Control, threshold: f64) -> Result<JobResult, String> {
-    let found = lib.db.with(|c| duplicates::stl_content_pairs(c, threshold, ctl)).map_err(db)?;
+    let found = lib.db.with(|c| duplicates::stl_content_pairs(c, threshold, ctl)).map_err(db_err)?;
     let Some(pairs) = found else { return Err("stopped".into()) };
     let pairs = pairs
         .into_iter()
@@ -300,7 +297,7 @@ pub const COLUMNS: &[(&str, &str, Option<usize>)] = &[
 /// Find Duplicates (metadata): models with identical, near (Levenshtein) or
 /// phonetically similar (Soundex) values, as the desktop's search worker.
 pub fn metadata(lib: &Library, ctl: &Control, columns: &[String], method: &str, max_distance: u32) -> Result<JobResult, String> {
-    let rows = lib.db.with(model_views::duplicate_rows).map_err(db)?;
+    let rows = lib.db.with(model_views::duplicate_rows).map_err(db_err)?;
     ctl.set_total(columns.len() as u64);
     let mut groups = Vec::new();
     for key in columns {

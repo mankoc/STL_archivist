@@ -589,7 +589,7 @@ fn prepare(lib: &Library, model_id: i64) -> Result<Asking, String> {
     let inputs: AiInputs = lib
         .db
         .with(|c| stl_core::storage::model_editor::ai_model_inputs(c, model_id))
-        .map_err(|e| format!("database: {e}"))?
+        .map_err(crate::error::db_err)?
         .ok_or_else(|| format!("no model {model_id}"))?;
     let ids: Vec<u64> = inputs.images.iter().map(|&(i, _)| i as u64).collect();
     let thumbs: std::collections::HashMap<u64, Vec<u8>> = lib.thumbs.get_many(&ids).map_err(|e| e.to_string())?.into_iter().collect();
@@ -678,7 +678,7 @@ const VOCAB_CAP: usize = 40;
 pub fn infer_fields(lib: &Library, ctl: &Control, log: &dyn Fn(String), model_id: i64) -> Result<AiEditorFields, String> {
     use stl_core::ai_tagging as T;
     let a = prepare(lib, model_id)?;
-    let choices = lib.db.with(stl_core::storage::model_editor::editor_choices).map_err(|e| format!("database: {e}"))?;
+    let choices = lib.db.with(stl_core::storage::model_editor::editor_choices).map_err(crate::error::db_err)?;
     let list = |name: &str| choices.iter().find(|(n, _)| *n == name).map(|(_, v)| v.as_slice()).unwrap_or_default();
     let lists: [(&str, &[String]); 8] = [
         ("CREATOR", list("creators")),
@@ -757,7 +757,7 @@ pub fn fill_form(form: &mut stl_core::storage::model_editor::EditorForm, f: &AiE
 pub fn fill(lib: &Library, ctl: &Control, log: &dyn Fn(String), model_id: i64, overwrite: bool) -> Result<Option<String>, String> {
     use stl_core::storage::model_editor as E;
     let f = infer_fields(lib, ctl, log, model_id)?;
-    let Some(model) = lib.db.with(|c| E::model_for_editor(c, model_id)).map_err(|e| format!("database: {e}"))? else {
+    let Some(model) = lib.db.with(|c| E::model_for_editor(c, model_id)).map_err(crate::error::db_err)? else {
         return Ok(None);
     };
     let mut form = model.form();
@@ -805,14 +805,14 @@ pub fn infer_pattern(lib: &Library, ctl: &Control, log: &dyn Fn(String), folder:
                 let mut st = c.prepare("SELECT rel_path FROM models WHERE id IN (SELECT value FROM json_each(?1))")?;
                 st.query_map([json], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()
             })
-            .map_err(|e| format!("database: {e}"))?
+            .map_err(crate::error::db_err)?
     };
     rel.sort();
     if rel.is_empty() {
         return Err(if ids.is_empty() { format!("no archives below {folder}") } else { "none of the models exist".into() });
     }
     let samples = T::spread(&rel, PATTERN_SAMPLES);
-    let choices = lib.db.with(stl_core::storage::model_editor::editor_choices).map_err(|e| format!("database: {e}"))?;
+    let choices = lib.db.with(stl_core::storage::model_editor::editor_choices).map_err(crate::error::db_err)?;
     let context = samples.join(" ");
     let vocab: Vec<(&str, Vec<&str>)> = [("creator", "creators"), ("sculptor", "sculptors"), ("release", "releases"), ("collection", "collections"), ("subcollection", "subcollections")]
         .into_iter()
@@ -857,7 +857,7 @@ pub struct AiIssue {
 pub fn check(lib: &Library, ctl: &Control, log: &dyn Fn(String), model_id: i64) -> Result<Vec<AiIssue>, String> {
     use stl_core::ai_tagging as T;
     let a = prepare(lib, model_id)?;
-    let choices = lib.db.with(stl_core::storage::model_editor::editor_choices).map_err(|e| format!("database: {e}"))?;
+    let choices = lib.db.with(stl_core::storage::model_editor::editor_choices).map_err(crate::error::db_err)?;
     let context = std::iter::once(a.inputs.archive_path.as_str())
         .chain(a.inputs.files.iter().map(String::as_str))
         .chain(a.inputs.meta.iter().map(|(_, v)| v.as_str()))

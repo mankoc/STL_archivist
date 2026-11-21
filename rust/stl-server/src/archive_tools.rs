@@ -13,11 +13,8 @@ use stl_core::storage::{model_files, crawl as crawl_db, jobs as jobs_db};
 use utoipa::ToSchema;
 
 use crate::Library;
+use crate::error::db_err;
 use crate::library_settings::LibrarySettings;
-
-fn db(e: rusqlite::Error) -> String {
-    format!("database: {e}")
-}
 
 fn options(lib: &Library, settings: &LibrarySettings) -> Options {
     Options {
@@ -42,10 +39,10 @@ pub struct Outcome {
 /// Fill the model's empty fields with the path pattern of its folder.
 fn apply_folder_pattern(lib: &Library, roots: &Roots, id: i64, path: &str) -> Result<(), String> {
     let Some((library, rel)) = roots.locate(path) else { return Ok(()) };
-    let patterns = lib.db.with(|c| FolderPatterns::load(c, library)).map_err(db)?;
+    let patterns = lib.db.with(|c| FolderPatterns::load(c, library)).map_err(db_err)?;
     let matched = patterns.of(rel.folder()).zip(roots.root(library)).and_then(|(pattern, root)| stl_core::crawler::match_pattern(pattern, path, root));
     match matched {
-        Some(ex) => lib.db.with_tx(|tx| crawl_db::reapply_pattern(tx, id, &ex)).map_err(db),
+        Some(ex) => lib.db.with_tx(|tx| crawl_db::reapply_pattern(tx, id, &ex)).map_err(db_err),
         None => Ok(()),
     }
 }
@@ -62,7 +59,7 @@ fn workers(settings: &LibrarySettings) -> Result<(rayon::ThreadPool, usize), Str
 pub fn rescan_models(lib: &Library, ctl: &Control, log: &dyn Fn(String), ids: &[i64]) -> Result<Outcome, String> {
     let settings = LibrarySettings::load(&lib.config.data_dir);
     let opts = options(lib, &settings);
-    let roots = lib.db.with(Roots::load).map_err(db)?;
+    let roots = lib.db.with(Roots::load).map_err(db_err)?;
     let (pool, chunk) = workers(&settings)?;
     ctl.set_total(ids.len() as u64);
     let mut out = Outcome::default();
@@ -72,7 +69,7 @@ pub fn rescan_models(lib: &Library, ctl: &Control, log: &dyn Fn(String), ids: &[
         }
         let mut models = Vec::with_capacity(chunk.len());
         for &id in chunk {
-            match lib.db.with(|c| jobs_db::rescan_state(c, id)).map_err(db)? {
+            match lib.db.with(|c| jobs_db::rescan_state(c, id)).map_err(db_err)? {
                 Some((Some(path), size, mtime, hash)) => models.push((id, path, size, mtime, hash)),
                 _ => ctl.advance(1),
             }
@@ -83,7 +80,7 @@ pub fn rescan_models(lib: &Library, ctl: &Control, log: &dyn Fn(String), ids: &[
             ctl.advance(1);
             match read {
                 Ok(values) => {
-                    let applied = lib.db.with_tx(|tx| Ok::<_, rusqlite::Error>(jobs_db::apply_rescan(tx, id, &values))).map_err(db)?;
+                    let applied = lib.db.with_tx(|tx| Ok::<_, rusqlite::Error>(jobs_db::apply_rescan(tx, id, &values))).map_err(db_err)?;
                     match applied {
                         Ok(true) => {
                             apply_folder_pattern(lib, &roots, id, &path)?;
@@ -118,7 +115,7 @@ pub fn generate_thumbnails(lib: &Library, ctl: &Control, log: &dyn Fn(String), i
         let mut models = Vec::with_capacity(chunk.len());
         for &id in chunk {
             position += 1;
-            match lib.db.with(|c| jobs_db::rescan_state(c, id)).map_err(db)? {
+            match lib.db.with(|c| jobs_db::rescan_state(c, id)).map_err(db_err)? {
                 Some((Some(path), ..)) => models.push((position, id, path)),
                 _ => ctl.advance(1),
             }
@@ -140,9 +137,9 @@ pub fn generate_thumbnails(lib: &Library, ctl: &Control, log: &dyn Fn(String), i
             let stored = lib
                 .db
                 .with_tx(|tx| jobs_db::replace_thumbnails(tx, Some(&lib.thumbs), id, &t.thumbs, t.warning.as_deref()))
-                .map_err(db)?;
+                .map_err(db_err)?;
             if let Some((n, drops)) = stored {
-                lib.drop_thumbs(&drops).map_err(db)?;
+                lib.drop_thumbs(&drops).map_err(db_err)?;
                 log(format!("  {n} thumbnail(s) stored"));
                 out.done += 1;
                 out.touched.push(path);
@@ -203,7 +200,7 @@ pub fn delete_files(lib: &Library, ctl: &Control, log: &dyn Fn(String), ids: &[i
     if let Some(t) = &trash {
         std::fs::create_dir_all(t).map_err(|e| format!("trash folder {}: {e}", t.display()))?;
     }
-    let rows = lib.db.with(|c| model_files::deletion_rows(c, ids)).map_err(db)?;
+    let rows = lib.db.with(|c| model_files::deletion_rows(c, ids)).map_err(db_err)?;
     ctl.set_total(rows.len() as u64);
     let (mut done, mut failed, mut paths) = (Vec::new(), Vec::new(), Vec::new());
     for (id, path, title, creator, hash) in rows {
@@ -232,9 +229,9 @@ pub fn delete_files(lib: &Library, ctl: &Control, log: &dyn Fn(String), ids: &[i
             }
         }
     }
-    let refs = lib.db.with_tx(|tx| model_files::delete_models(tx, &done)).map_err(db)?;
+    let refs = lib.db.with_tx(|tx| model_files::delete_models(tx, &done)).map_err(db_err)?;
     let thumb_ids: Vec<u64> = stl_core::storage::crawl::ref_ids(&refs);
-    lib.drop_thumbs(&thumb_ids).map_err(db)?;
+    lib.drop_thumbs(&thumb_ids).map_err(db_err)?;
     Ok((done.len(), failed, paths))
 }
 
