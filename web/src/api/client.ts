@@ -20,6 +20,23 @@ export class ApiError extends Error {
 }
 
 /**
+ * POST a multipart form (uploads openapi-fetch does not type) and return the
+ * JSON answer. An error answer that is not JSON (a body-size limit's plain
+ * text, a proxy's HTML page) gives its status text, not a parse error.
+ */
+export async function postForm<T>(url: string, form: FormData): Promise<T> {
+  const resp = await fetch(url, { method: "POST", body: form, credentials: "same-origin" });
+  let body: unknown = null;
+  try {
+    body = await resp.json();
+  } catch {
+    // Not JSON: the status text explains.
+  }
+  if (!resp.ok) throw new ApiError(resp.status, (body as { error?: string } | null)?.error ?? (resp.statusText || `HTTP ${resp.status}`));
+  return body as T;
+}
+
+/**
  * Upload a library package (`POST /api/backups/upload`, the file as the body),
  * reporting its progress (0 to 1), which fetch cannot do.
  */
