@@ -1,7 +1,7 @@
 //! Rescan and Generate Thumbnails for one archive: an archive the readers refuse
 //! is reported, not guessed at. The results go to `storage::jobs::apply_rescan` / `replace_thumbnails`.
 
-use crate::crawler::{SIZE_LIMIT_IMAGE, extract_native, fallback_fingerprint};
+use crate::crawler::{SIZE_LIMIT_IMAGE, fallback_fingerprint};
 use crate::metadata;
 use crate::path_pattern;
 use crate::rules::{self, Checks, MemberPath, PresupportPatterns};
@@ -50,7 +50,9 @@ pub fn rescan(path: &str, old_size: Option<i64>, old_mtime: Option<i64>, old_has
         None => fallback_fingerprint(path),
     };
     let pats = patterns(&opts.presupport_patterns)?;
-    let extracted = extract_native(path, &opts.unrar, Some(0)).ok_or("the server cannot read this archive; left unchanged")?;
+    // The catalog listed above, not listed again.
+    let listed = members.as_deref().ok_or("the server cannot read this archive; left unchanged")?;
+    let extracted = crate::crawler::extract_listed(path, listed, &opts.unrar, Some(0));
     if extracted.names.is_empty() {
         return Err("Could not read archive contents — left unchanged".into());
     }
