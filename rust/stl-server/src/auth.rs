@@ -79,7 +79,8 @@ impl CurrentUser {
 /// and then, so that disabling, demoting or signing a user out reaches them.
 pub async fn still_allowed(lib: &AppState, token: &str, role: Role) -> bool {
     let token = token.to_string();
-    let user = lib.run(move |lib| Ok(lib.accounts.with(|c| accounts::session_user(c, &token))?)).await;
+    // A session's kind never changes: a compute worker's passes here only on its connection.
+    let user = lib.run(move |lib| Ok(lib.accounts.with(|c| accounts::worker_session_user(c, &token))?)).await;
     matches!(user, Ok(Some(u)) if u.role >= role)
 }
 
@@ -94,6 +95,22 @@ impl FromRequestParts<AppState> for CurrentUser {
         let t = token.clone();
         let user = lib.run(move |lib| Ok(lib.accounts.with(|c| accounts::session_user(c, &t))?)).await?;
         user.map(|user| CurrentUser { user, token }).ok_or_else(unauthorized)
+    }
+}
+
+/// The user of the worker connection: [`CurrentUser`], also from a compute
+/// worker's session (`POST /api/workers/token`), which no other route accepts.
+#[derive(Debug, Clone)]
+pub struct WorkerUser(pub CurrentUser);
+
+impl FromRequestParts<AppState> for WorkerUser {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, lib: &AppState) -> Result<Self, ApiError> {
+        let token = request_token(&parts.headers).ok_or_else(unauthorized)?;
+        let t = token.clone();
+        let user = lib.run(move |lib| Ok(lib.accounts.with(|c| accounts::worker_session_user(c, &t))?)).await?;
+        user.map(|user| WorkerUser(CurrentUser { user, token })).ok_or_else(unauthorized)
     }
 }
 

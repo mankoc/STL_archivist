@@ -117,9 +117,15 @@ pub fn now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
-/// Create the tables if missing.
+/// Create the tables if missing, and add the columns later versions brought.
 pub fn ensure_schema(conn: &Connection) -> rusqlite::Result<()> {
-    conn.execute_batch(SCHEMA)
+    conn.execute_batch(SCHEMA)?;
+    // A compute worker's session: it opens the worker connection and nothing else.
+    let has_worker: bool = conn.query_row("SELECT count(*) > 0 FROM pragma_table_info('sessions') WHERE name = 'worker'", [], |r| r.get(0))?;
+    if !has_worker {
+        conn.execute_batch("ALTER TABLE sessions ADD COLUMN worker INTEGER NOT NULL DEFAULT 0")?;
+    }
+    Ok(())
 }
 
 fn user_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<User> {
@@ -277,31 +283,53 @@ fn token_hash(token: &str) -> Vec<u8> {
 /// too long go meanwhile: one is otherwise deleted only when presented again, and
 /// a browser that lost its cookie never presents it.
 pub fn create_session(conn: &Connection, user_id: i64) -> Result<String> {
+    new_session(conn, user_id, false)
+}
+
+/// Start a compute worker's session: [`worker_session_user`] accepts it,
+/// [`session_user`] (every other route) does not.
+pub fn create_worker_session(conn: &Connection, user_id: i64) -> Result<String> {
+    new_session(conn, user_id, true)
+}
+
+fn new_session(conn: &Connection, user_id: i64, worker: bool) -> Result<String> {
     let mut bytes = [0u8; 32];
     OsRng.fill_bytes(&mut bytes);
     let token: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
     let t = now();
     conn.execute("DELETE FROM sessions WHERE last_used < ?1", [t - SESSION_IDLE_SECS])?;
     conn.execute(
-        "INSERT INTO sessions (token_hash, user_id, created_at, last_used) VALUES (?1, ?2, ?3, ?3)",
-        params![token_hash(&token), user_id, t],
+        "INSERT INTO sessions (token_hash, user_id, created_at, last_used, worker) VALUES (?1, ?2, ?3, ?3, ?4)",
+        params![token_hash(&token), user_id, t, worker],
     )?;
     Ok(token)
 }
 
-/// The enabled user owning a live session; refreshes its `last_used`.
+/// The enabled user owning a live session (not a compute worker's); refreshes its `last_used`.
 pub fn session_user(conn: &Connection, token: &str) -> Result<Option<User>> {
+    live_session(conn, token, false)
+}
+
+/// [`session_user`], also for a compute worker's session: for the worker connection only.
+pub fn worker_session_user(conn: &Connection, token: &str) -> Result<Option<User>> {
+    live_session(conn, token, true)
+}
+
+fn live_session(conn: &Connection, token: &str, worker_ok: bool) -> Result<Option<User>> {
     let hash = token_hash(token);
     let t = now();
-    let row: Option<(User, i64)> = conn
+    let row: Option<(User, i64, bool)> = conn
         .query_row(
-            "SELECT u.id, u.name, u.role, u.disabled, s.last_used FROM sessions s \
+            "SELECT u.id, u.name, u.role, u.disabled, s.last_used, s.worker FROM sessions s \
              JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?1",
             [&hash],
-            |r| Ok((user_from_row(r)?, r.get(4)?)),
+            |r| Ok((user_from_row(r)?, r.get(4)?, r.get(5)?)),
         )
         .optional()?;
-    let Some((user, last_used)) = row else { return Ok(None) };
+    let Some((user, last_used, worker)) = row else { return Ok(None) };
+    if worker && !worker_ok {
+        return Ok(None);
+    }
     if t - last_used > SESSION_IDLE_SECS || user.disabled {
         conn.execute("DELETE FROM sessions WHERE token_hash = ?1", [&hash])?;
         return Ok(None);
@@ -315,6 +343,40 @@ pub fn session_user(conn: &Connection, token: &str) -> Result<Option<User>> {
 pub fn end_session(conn: &Connection, token: &str) -> Result<()> {
     conn.execute("DELETE FROM sessions WHERE token_hash = ?1", [token_hash(token)])?;
     Ok(())
+}
+
+/// A compute worker's session, as listed (never its token).
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+pub struct WorkerSession {
+    /// Names the session to end it (the hex of its token's hash).
+    pub id: String,
+    pub user: String,
+    /// Unix seconds.
+    pub created_at: i64,
+    /// Unix seconds; the session ends after 30 days unused.
+    pub last_used: i64,
+}
+
+/// The live compute worker sessions: of user `owner`, or every user's (`None`).
+pub fn worker_sessions(conn: &Connection, owner: Option<i64>) -> Result<Vec<WorkerSession>> {
+    let mut st = conn.prepare(
+        "SELECT lower(hex(s.token_hash)), u.name, s.created_at, s.last_used FROM sessions s JOIN users u ON u.id = s.user_id \
+         WHERE s.worker = 1 AND s.last_used >= ?1 AND (?2 IS NULL OR s.user_id = ?2) ORDER BY s.created_at",
+    )?;
+    let rows = st.query_map(params![now() - SESSION_IDLE_SECS, owner], |r| {
+        Ok(WorkerSession { id: r.get(0)?, user: r.get(1)?, created_at: r.get(2)?, last_used: r.get(3)? })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+/// End the compute worker session `id` (of user `owner`, or anyone's with `None`);
+/// false when there is none.
+pub fn end_worker_session(conn: &Connection, id: &str, owner: Option<i64>) -> Result<bool> {
+    let n = conn.execute(
+        "DELETE FROM sessions WHERE worker = 1 AND lower(hex(token_hash)) = lower(?1) AND (?2 IS NULL OR user_id = ?2)",
+        params![id, owner],
+    )?;
+    Ok(n > 0)
 }
 
 fn check_key(key: &str) -> Result<()> {
@@ -418,6 +480,26 @@ mod tests {
         update_user(&c, u.id, None, Some(true), None).unwrap();
         assert_eq!(session_user(&c, &t).unwrap(), None, "disabling ends sessions");
         assert_eq!(authenticate(&c, "u", "password2").unwrap(), None, "disabled users cannot log in");
+    }
+
+    #[test]
+    fn worker_sessions_open_only_the_worker_connection() {
+        let c = db();
+        let u = create_user(&c, "u", "password1", Role::Editor).unwrap();
+        let v = create_user(&c, "v", "password1", Role::Editor).unwrap();
+        let w = create_worker_session(&c, u.id).unwrap();
+        let s = create_session(&c, u.id).unwrap();
+        assert_eq!(session_user(&c, &w).unwrap(), None, "not for other routes");
+        assert_eq!(worker_session_user(&c, &w).unwrap(), Some(u.clone()));
+        assert_eq!(worker_session_user(&c, &s).unwrap(), Some(u.clone()), "an ordinary session still connects a worker");
+        let listed = worker_sessions(&c, Some(u.id)).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].user, "u");
+        assert!(worker_sessions(&c, Some(v.id)).unwrap().is_empty());
+        assert!(!end_worker_session(&c, &listed[0].id, Some(v.id)).unwrap(), "not another user's");
+        assert!(end_worker_session(&c, &listed[0].id.to_uppercase(), None).unwrap());
+        assert_eq!(worker_session_user(&c, &w).unwrap(), None);
+        assert!(!end_worker_session(&c, &listed[0].id, None).unwrap());
     }
 
     #[test]

@@ -1595,11 +1595,48 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * A session token for a compute worker (editors): the web client asks for
-         *     one and hands it to the desktop app, which starts the worker with it.
+         * A compute worker's token (editors): the web client asks for one and hands it
+         *     to the desktop app, which starts the worker with it.
          */
         post: operations["post_workers_token"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workers/tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The live compute worker sessions (editors: their own; administrators: everyone's). */
+        get: operations["get_workers_tokens"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workers/tokens/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * End a compute worker session (editors: their own; administrators: anyone's).
+         *     A worker connected with it is disconnected within a minute.
+         */
+        delete: operations["delete_workers_tokens_by_id"];
         options?: never;
         head?: never;
         patch?: never;
@@ -3394,10 +3431,27 @@ export interface components {
             user: string;
             version: string;
         };
+        /** @description A compute worker's session, as listed (never its token). */
+        WorkerSession: {
+            /**
+             * Format: int64
+             * @description Unix seconds.
+             */
+            created_at: number;
+            /** @description Names the session to end it (the hex of its token's hash). */
+            id: string;
+            /**
+             * Format: int64
+             * @description Unix seconds; the session ends after 30 days unused.
+             */
+            last_used: number;
+            user: string;
+        };
         WorkerToken: {
             /**
-             * @description A new session of the signed-in user, for `stl-server worker`
-             *     (`STL_WORKER_TOKEN`). Signing out elsewhere does not end it.
+             * @description A new compute worker session of the signed-in user, for `stl-server worker`
+             *     (`STL_WORKER_TOKEN`): it opens `/api/workers/connect` and no other route.
+             *     Signing out elsewhere does not end it; `DELETE /api/workers/tokens/{id}` does.
              */
             token: string;
         };
@@ -6727,6 +6781,69 @@ export interface operations {
                 };
             };
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_workers_tokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerSession"][];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    delete_workers_tokens_by_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The session's id from GET /api/workers/tokens */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

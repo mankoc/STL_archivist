@@ -4424,7 +4424,7 @@
         "tags": [
           "workers"
         ],
-        "summary": "A session token for a compute worker (editors): the web client asks for\none and hands it to the desktop app, which starts the worker with it.",
+        "summary": "A compute worker's token (editors): the web client asks for one and hands it\nto the desktop app, which starts the worker with it.",
         "operationId": "post_workers_token",
         "responses": {
           "200": {
@@ -4438,6 +4438,85 @@
             }
           },
           "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workers/tokens": {
+      "get": {
+        "tags": [
+          "workers"
+        ],
+        "summary": "The live compute worker sessions (editors: their own; administrators: everyone's).",
+        "operationId": "get_workers_tokens",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/WorkerSession"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workers/tokens/{id}": {
+      "delete": {
+        "tags": [
+          "workers"
+        ],
+        "summary": "End a compute worker session (editors: their own; administrators: anyone's).\nA worker connected with it is disconnected within a minute.",
+        "operationId": "delete_workers_tokens_by_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The session's id from GET /api/workers/tokens",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
             "description": "",
             "content": {
               "application/json": {
@@ -9965,6 +10044,35 @@
           }
         }
       },
+      "WorkerSession": {
+        "type": "object",
+        "description": "A compute worker's session, as listed (never its token).",
+        "required": [
+          "id",
+          "user",
+          "created_at",
+          "last_used"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix seconds."
+          },
+          "id": {
+            "type": "string",
+            "description": "Names the session to end it (the hex of its token's hash)."
+          },
+          "last_used": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix seconds; the session ends after 30 days unused."
+          },
+          "user": {
+            "type": "string"
+          }
+        }
+      },
       "WorkerToken": {
         "type": "object",
         "required": [
@@ -9973,7 +10081,7 @@
         "properties": {
           "token": {
             "type": "string",
-            "description": "A new session of the signed-in user, for `stl-server worker`\n(`STL_WORKER_TOKEN`). Signing out elsewhere does not end it."
+            "description": "A new compute worker session of the signed-in user, for `stl-server worker`\n(`STL_WORKER_TOKEN`): it opens `/api/workers/connect` and no other route.\nSigning out elsewhere does not end it; `DELETE /api/workers/tokens/{id}` does."
           }
         }
       },
