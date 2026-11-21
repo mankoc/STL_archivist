@@ -31,15 +31,21 @@ COPY web/ ./
 RUN npm run build
 
 FROM debian:trixie-slim
+# The same builds and SHA-256 as the server's components (rust/stl-server/src/components.rs):
+# change a version and its hash together.
 ARG PDFIUM_BUILD=7881
+ARG PDFIUM_SHA256=1470e21b8b4a3b4ad7f85684e2da11d94f3b69a86d81dee11b9b6709d927ac1d
 ARG ORT_VERSION=1.22.0
+ARG ORT_SHA256=8344d55f93d5bc5021ce342db50f62079daf39aaafb5d311a451846228be49b3
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl \
  && mkdir -p /opt/pdfium \
- && curl -fsSL --retry 5 --retry-all-errors --retry-delay 15 "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/${PDFIUM_BUILD}/pdfium-linux-x64.tgz" \
-    | tar -xz -C /opt/pdfium \
- && curl -fsSL --retry 5 --retry-all-errors --retry-delay 15 "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-${ORT_VERSION}.tgz" \
-    | tar -xz -C /opt \
+ && curl -fsSL --retry 5 --retry-all-errors --retry-delay 15 -o /tmp/pdfium.tgz "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/${PDFIUM_BUILD}/pdfium-linux-x64.tgz" \
+ && curl -fsSL --retry 5 --retry-all-errors --retry-delay 15 -o /tmp/ort.tgz "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-${ORT_VERSION}.tgz" \
+ && printf '%s  %s\n' "$PDFIUM_SHA256" /tmp/pdfium.tgz "$ORT_SHA256" /tmp/ort.tgz | sha256sum -c - \
+ && tar -xzf /tmp/pdfium.tgz -C /opt/pdfium \
+ && tar -xzf /tmp/ort.tgz -C /opt \
+ && rm /tmp/pdfium.tgz /tmp/ort.tgz \
  && mv "/opt/onnxruntime-linux-x64-${ORT_VERSION}" /opt/onnxruntime \
  && apt-get purge -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/* \
  && useradd --uid 1000 --create-home stl && mkdir -p /data && chown stl /data

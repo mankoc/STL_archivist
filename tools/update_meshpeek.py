@@ -14,6 +14,14 @@ from version import add_note, read, write
 
 MANIFESTS = ["rust/stl-core/Cargo.toml", "rust/stl-server/Cargo.toml", "rust/stl-viewer/Cargo.toml"]
 TAG = re.compile(r'(git = "https://github\.com/mankoc/meshpeek", tag = ")([^"]+)(")')
+VERSION_TAG = re.compile(r"v\d+\.\d+\.\d+")
+
+
+def checked(tag):
+    """`tag`, when it is a version tag (it goes into manifests and the changelog)."""
+    if not VERSION_TAG.fullmatch(tag):
+        sys.exit(f"not a version tag: {tag!r}")
+    return tag
 
 
 def note(tag):
@@ -29,12 +37,13 @@ def main():
         print(TAG.search(read(MANIFESTS[0])).group(2))
     elif command == "set":
         for manifest in MANIFESTS:
-            text, count = TAG.subn(rf"\g<1>{sys.argv[2]}\g<3>", read(manifest))
+            tag = checked(sys.argv[2])
+            text, count = TAG.subn(lambda m: m.group(1) + tag + m.group(3), read(manifest))
             if count == 0:
                 sys.exit(f"{manifest}: no MeshPeek tag")
             write(manifest, text)
     elif command == "note":
-        note(sys.argv[2])
+        note(checked(sys.argv[2]))
     else:
         sys.exit(__doc__)
 
