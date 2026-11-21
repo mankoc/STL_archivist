@@ -260,7 +260,7 @@ type Phase1 = (Vec<String>, Vec<FileList>, Vec<String>);
 // ── phase 3 ──────────────────────────────────────────────────────────────────
 
 fn is_wanted(name: &str) -> bool {
-    let p = MemberPath::new(&name.replace('\\', "/"));
+    let p = MemberPath::new(name);
     let suffix = p.suffix().to_lowercase();
     rules::IMAGE_SUFFIXES.contains(&suffix.as_str())
         || suffix == ".pdf"
@@ -269,7 +269,7 @@ fn is_wanted(name: &str) -> bool {
 }
 
 fn is_image_or_pdf(name: &str) -> bool {
-    let suffix = MemberPath::new(&name.replace('\\', "/")).suffix().to_lowercase();
+    let suffix = MemberPath::new(name).suffix().to_lowercase();
     rules::IMAGE_SUFFIXES.contains(&suffix.as_str()) || suffix == ".pdf"
 }
 
@@ -292,7 +292,7 @@ pub(crate) fn extract_listed(path: &str, members: &[archive::ArchiveMember], unr
     let p = Path::new(path);
     let names: Vec<String> = members.iter().map(|m| m.name.clone()).collect();
     let uncompressed = Some(members.iter().filter_map(|m| m.size).sum::<u64>() as i64);
-    let stl_info = stl_dict(members.iter().map(|m| (m.name.clone(), m.size.map(|s| s as i64))));
+    let stl_info = stl_list(members);
     let size_by_name: HashMap<&str, Option<u64>> = members.iter().map(|m| (m.name.as_str(), m.size)).collect();
     let mut images = 0;
     let to_read: Vec<String> = names
@@ -361,7 +361,7 @@ fn stl_dict(members: impl Iterator<Item = (String, Option<i64>)>) -> Vec<(String
     let mut out: Vec<(String, Option<i64>)> = Vec::new();
     let mut index: HashMap<String, usize> = HashMap::new();
     for (name, size) in members {
-        if !STL_EXTS.contains(&MemberPath::new(&name.replace('\\', "/")).suffix().to_lowercase().as_str()) {
+        if !STL_EXTS.contains(&MemberPath::new(&name).suffix().to_lowercase().as_str()) {
             continue;
         }
         match index.get(&name) {
@@ -407,7 +407,7 @@ fn prepare(path: &str, members: Option<&Vec<archive::ArchiveMember>>, cfg: &Craw
             if raw.is_empty() {
                 return (name.clone(), None, None);
             }
-            let pdf = MemberPath::new(&name.replace('\\', "/")).suffix().to_lowercase() == ".pdf";
+            let pdf = MemberPath::new(name).suffix().to_lowercase() == ".pdf";
             let jpeg = thumbnail(raw, cfg.max_thumb_size, pdf, host);
             let dh = jpeg.as_deref().and_then(dhash_text);
             (name.clone(), jpeg, dh)
@@ -551,13 +551,17 @@ fn embed_batch(host: &dyn Host, inputs: &mut [db::UpsertInput]) {
     }
 }
 
-fn metadata_for(path: &str, contents: &[(String, Vec<u8>)], cfg: &CrawlConfig) -> Metadata {
-    let files: Vec<(String, Vec<u8>)> = contents
+/// The `.url` and `info.json` members of an archive's read contents (what metadata reads).
+pub(crate) fn link_contents(contents: &[(String, Vec<u8>)]) -> Vec<(String, Vec<u8>)> {
+    contents
         .iter()
         .filter(|(n, _)| n.to_lowercase().ends_with(".url") || n.to_lowercase().ends_with("info.json"))
         .cloned()
-        .collect();
-    metadata::extract(path, &files, Some(cfg.root()))
+        .collect()
+}
+
+fn metadata_for(path: &str, contents: &[(String, Vec<u8>)], cfg: &CrawlConfig) -> Metadata {
+    metadata::extract(path, &link_contents(contents), Some(cfg.root()))
 }
 
 // ── the run ──────────────────────────────────────────────────────────────────
@@ -1018,58 +1022,52 @@ impl Run<'_> {
 
     /// Records for archives that have none, from their folders' sidecars.
     fn import_sidecars(&mut self, archives: &[String]) -> Result<(), CrawlError> {
-        let (cfg, host, store) = (self.cfg, self.host, self.store);
-        if cfg.sidecars
-            && let Some(st) = store
-        {
-            // The folders in crawl order, with their archives.
-            let mut folders: Vec<(String, Vec<String>)> = Vec::new();
-            let mut at: HashMap<String, usize> = HashMap::new();
-            for p in archives {
-                let folder = crate::winpath::native(&WinPath::new(p).parent().as_posix());
-                match at.get(&folder) {
-                    Some(&i) => folders[i].1.push(p.clone()),
-                    None => {
-                        at.insert(folder.clone(), folders.len());
-                        folders.push((folder, vec![p.clone()]));
-                    }
+        let (cfg, host) = (self.cfg, self.host);
+        let Some(st) = self.store.filter(|_| cfg.sidecars) else { return Ok(()) };
+        // The folders in crawl order, with their archives.
+        let mut folders: Vec<(String, Vec<String>)> = Vec::new();
+        let mut at: HashMap<String, usize> = HashMap::new();
+        for p in archives {
+            let folder = crate::winpath::native(&WinPath::new(p).parent().as_posix());
+            match at.get(&folder) {
+                Some(&i) => folders[i].1.push(p.clone()),
+                None => {
+                    at.insert(folder.clone(), folders.len());
+                    folders.push((folder, vec![p.clone()]));
                 }
             }
-            let root = WinPath::new(cfg.root()).as_posix();
-            for (folder, paths) in &folders {
-                if host.should_stop() {
-                    break;
+        }
+        let root = WinPath::new(cfg.root()).as_posix();
+        for (folder, paths) in &folders {
+            if host.should_stop() {
+                break;
+            }
+            if !Path::new(folder).join(sidecar::METADATA_FILENAME).exists() {
+                continue;
+            }
+            // Importing only adds the archives without a record, and reading a sidecar
+            // decompresses all its thumbnails: a folder whose archives all have one is left
+            // alone (but the crawled folder's own sidecar can still give the library its pattern).
+            let is_root = WinPath::new(folder).as_posix().trim_end_matches('/').eq_ignore_ascii_case(root.trim_end_matches('/'));
+            if !is_root && db::existing(&self.conn, paths)?.len() == paths.len() {
+                continue;
+            }
+            let read = sidecar::read(folder);
+            let t = tx(&mut self.conn)?;
+            let imported = match read.and_then(|s| sidecar::import(&t, st, folder, s)) {
+                Ok(v) => {
+                    t.commit()?;
+                    self.from_sidecar.extend(v.iter().map(|p| crate::relpath::path_key(p)));
+                    v.len()
                 }
-                if !Path::new(folder).join(sidecar::METADATA_FILENAME).exists() {
-                    continue;
+                Err(e) => {
+                    drop(t);
+                    host.emit(Event::Warning(format!("cannot import METADATA.7z in {folder}: {e}")));
+                    0
                 }
-                // Importing only adds the archives without a record, and reading a sidecar
-                // decompresses all its thumbnails: a folder whose archives all have one is left
-                // alone (but the crawled folder's own sidecar can still give the library its pattern).
-                let is_root = WinPath::new(folder).as_posix().trim_end_matches('/').eq_ignore_ascii_case(root.trim_end_matches('/'));
-                if !is_root && db::existing(&self.conn, paths)?.len() == paths.len() {
-                    continue;
-                }
-                let folder = folder.clone();
-                let imported = {
-                    let read = sidecar::read(&folder);
-                    let t = tx(&mut self.conn)?;
-                    match read.and_then(|s| sidecar::import(&t, st, &folder, s)) {
-                        Ok(v) => {
-                            t.commit()?;
-                            self.from_sidecar.extend(v.iter().map(|p| crate::relpath::path_key(p)));
-                            v.len()
-                        }
-                        Err(e) => {
-                            drop(t);
-                            host.emit(Event::Warning(format!("cannot import METADATA.7z in {folder}: {e}")));
-                            0
-                        }
-                    }
-                };
-                if imported > 0 {
-                    self.log(format!("Imported {imported} record(s) from METADATA.7z in {}", WinPath::new(&folder).name()));
-                }
+            };
+            if imported > 0 {
+                self.log(format!("Imported {imported} record(s) from METADATA.7z in {}", WinPath::new(folder).name()));
             }
         }
         Ok(())
@@ -1100,18 +1098,19 @@ impl Run<'_> {
     /// Write the sidecars of the folders that changed.
     fn export_sidecars(&mut self, modified: HashSet<String>) {
         let (cfg, host, store) = (self.cfg, self.host, self.store);
-        if !modified.is_empty() && cfg.sidecars && store.is_some() {
-            self.log(format!("Updating METADATA.7z in {} folder(s)…", modified.len()));
-            let mut folders: Vec<String> = modified.into_iter().map(|f| crate::winpath::native(&f)).collect();
-            sort_paths(&mut folders);
-            for folder in folders {
-                if host.should_stop() {
-                    break;
-                }
-                match sidecar::export(&self.conn, store, &folder, cfg.sidecar_thumbnails) {
-                    Ok(_) => self.log(format!("  Updated METADATA.7z in {}", WinPath::new(&folder).name())),
-                    Err(e) => host.emit(Event::Warning(format!("cannot write METADATA.7z in {folder}: {e}"))),
-                }
+        if modified.is_empty() || !cfg.sidecars || store.is_none() {
+            return;
+        }
+        self.log(format!("Updating METADATA.7z in {} folder(s)…", modified.len()));
+        let mut folders: Vec<String> = modified.into_iter().map(|f| crate::winpath::native(&f)).collect();
+        sort_paths(&mut folders);
+        for folder in folders {
+            if host.should_stop() {
+                break;
+            }
+            match sidecar::export(&self.conn, store, &folder, cfg.sidecar_thumbnails) {
+                Ok(_) => self.log(format!("  Updated METADATA.7z in {}", WinPath::new(&folder).name())),
+                Err(e) => host.emit(Event::Warning(format!("cannot write METADATA.7z in {folder}: {e}"))),
             }
         }
     }
