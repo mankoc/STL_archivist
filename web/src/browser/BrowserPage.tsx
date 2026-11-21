@@ -1,13 +1,10 @@
 // The browser: filter pane, table and detail pane (the desktop's main window).
-import {
-  ActionIcon, Box, Button, Center, Checkbox, CloseButton, Group, Loader, Menu, Modal, SegmentedControl, Stack, Text,
-  TextInput, Tooltip, VisuallyHidden,
-} from "@mantine/core";
+import { Box, Button, Center, CloseButton, Group, Loader, Menu, SegmentedControl, Text, Tooltip, VisuallyHidden } from "@mantine/core";
 import { useHotkeys } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { IconChevronDown, IconColumns, IconEdit, IconFilterOff, IconPhoto, IconRefresh, IconTable } from "@tabler/icons-react";
+import { IconChevronDown, IconEdit, IconFilterOff, IconPhoto, IconTable } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, unwrap } from "../api/client";
 import { hasRole, useUser } from "../auth/user";
@@ -16,16 +13,16 @@ import { DetailPane } from "./DetailPane";
 import { EditorDrawer } from "./EditorDrawer";
 import { FilterPane } from "./FilterPane";
 import { GridView } from "./GridView";
-import { clampWidth, DEFAULT_WIDTH, FILTER_PANE, loadWidth, saveWidth } from "./paneWidth";
-import { AiPatternButton } from "./AiPatternButton";
-import { PatternSample } from "./PatternSample";
-import { folderPattern } from "./patterns";
+import { usePaneWidths } from "./usePaneWidths";
+import { ColumnsMenu } from "./ColumnsMenu";
+import { ConfirmModal } from "./ConfirmModal";
+import { FolderMenu, type FolderMenuAt } from "./FolderMenu";
 import { SortModal } from "./SortModal";
 import { AiCheckDrawer } from "./AiCheckDrawer";
 import { AiTaggerDrawer } from "./AiTaggerDrawer";
 import { MassEditDrawer } from "./MassEditDrawer";
 import { EMPTY, type FilterSpec, isEmpty } from "./filters";
-import { ALWAYS_SHOWN, choiceFrom, COLUMN_ORDER_KEY, HIDDEN_COLUMNS_KEY, isShown, moveColumn, SHOWN_COLUMNS_KEY, toggle } from "./columns";
+import { choiceFrom, COLUMN_ORDER_KEY, moveColumn } from "./columns";
 import { COLUMNS, ModelTable, type Sort, useModelIds } from "./ModelTable";
 import { loadOptions, saveOptions, type SearchOptions } from "./search";
 import { SearchBox } from "./SearchBox";
@@ -61,87 +58,23 @@ export function BrowserPage({ active = true }: { active?: boolean }) {
   const [view, setView] = useState<"table" | "grid">("table");
   // The side panes' widths, dragged by their inner edges.
   const layoutRef = useRef<HTMLDivElement>(null);
-  const [detailWidth, setDetailWidth] = useState(loadWidth);
-  const [filterWidth, setFilterWidth] = useState(() => loadWidth(FILTER_PANE.key, FILTER_PANE.fallback, FILTER_PANE.min));
-  const [dragging, setDragging] = useState<"filter" | "detail" | null>(null);
-  const startDrag = (pane: "filter" | "detail") => (e: ReactPointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    const layout = layoutRef.current;
-    if (!layout) return;
-    const target = e.currentTarget;
-    target.setPointerCapture(e.pointerId);
-    setDragging(pane);
-    let width = pane === "filter" ? filterWidth : detailWidth;
-    // While dragging, only the layout's width variable changes: the panes are laid out
-    // again, but not rendered again on every move. The state follows on release.
-    const move = (ev: PointerEvent) => {
-      const box = layout.getBoundingClientRect();
-      if (pane === "filter") {
-        width = clampWidth(ev.clientX - box.left, box.width, FILTER_PANE.maxShare, FILTER_PANE.min);
-        layout.style.setProperty("--filter-width", `${width}px`);
-      } else {
-        width = clampWidth(box.right - ev.clientX, box.width);
-        layout.style.setProperty("--detail-width", `${width}px`);
-      }
-    };
-    const up = () => {
-      target.removeEventListener("pointermove", move);
-      target.removeEventListener("pointerup", up);
-      setDragging(null);
-      if (pane === "filter") {
-        setFilterWidth(width);
-        saveWidth(width, FILTER_PANE.key);
-      } else {
-        setDetailWidth(width);
-        saveWidth(width);
-      }
-    };
-    target.addEventListener("pointermove", move);
-    target.addEventListener("pointerup", up);
-  };
-  // Hidden table columns: a per-user setting, so it follows the account.
+  const { detailWidth, filterWidth, dragging, startDrag, reset } = usePaneWidths(layoutRef);
+  // The table's columns and paths: per-user settings (ColumnsMenu changes them).
   const prefs = useQuery({ queryKey: ["me-settings"], queryFn: async () => unwrap(await api.GET("/api/me/settings")) as Record<string, unknown> });
   const choice = choiceFrom(prefs.data);
-  const toggleColumn = async (c: (typeof COLUMNS)[number]) => {
-    const next = toggle(choice, c);
-    const [key, value] = c.optional ? [SHOWN_COLUMNS_KEY, next.shown] : [HIDDEN_COLUMNS_KEY, next.hidden];
-    queryClient.setQueryData<Record<string, unknown>>(["me-settings"], (old) => ({ ...old, [key]: value }));
-    await api.PUT("/api/me/settings/{key}", { params: { path: { key } }, body: value as never });
-  };
-  // The column order: dragged headers, and back to the default.
+  // The column order, by dragging a header.
   const moveCol = async (from: string, to: string) => {
     const order = moveColumn(COLUMNS, choice.order, from, to);
     queryClient.setQueryData<Record<string, unknown>>(["me-settings"], (old) => ({ ...old, [COLUMN_ORDER_KEY]: order }));
     await api.PUT("/api/me/settings/{key}", { params: { path: { key: COLUMN_ORDER_KEY } }, body: order as never });
   };
-  const resetOrder = async () => {
-    queryClient.setQueryData<Record<string, unknown>>(["me-settings"], (old) => {
-      const next = { ...old };
-      delete next[COLUMN_ORDER_KEY];
-      return next;
-    });
-    await api.DELETE("/api/me/settings/{key}", { params: { path: { key: COLUMN_ORDER_KEY } } });
-  };
   const relativePaths = prefs.data?.[RELATIVE_PATHS] === true;
-  const toggleRelativePaths = async () => {
-    const value = !relativePaths;
-    queryClient.setQueryData<Record<string, unknown>>(["me-settings"], (old) => ({ ...old, [RELATIVE_PATHS]: value }));
-    await api.PUT("/api/me/settings/{key}", { params: { path: { key: RELATIVE_PATHS } }, body: value as never });
-  };
-  const columnItem = (c: (typeof COLUMNS)[number]) => (
-    <Menu.Item key={c.id} disabled={c.id === ALWAYS_SHOWN} onClick={() => toggleColumn(c)}
-      leftSection={<Checkbox size="xs" readOnly checked={isShown(c, choice)} tabIndex={-1} />}>
-      {c.header}
-    </Menu.Item>
-  );
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [sorting, setSorting] = useState(false);
   // The right-click menu: where, and the models it acts on.
   const [menu, setMenu] = useState<{ x: number; y: number; ids: number[] } | null>(null);
   // The Path section's right-click menu: where, and the folder.
-  const [folderMenu, setFolderMenu] = useState<{ x: number; y: number; folder: string } | null>(null);
-  // *Crawl with a pattern…*: the folder, and the pattern being typed.
-  const [patternCrawl, setPatternCrawl] = useState<{ folder: string; pattern: string } | null>(null);
+  const [folderMenu, setFolderMenu] = useState<FolderMenuAt | null>(null);
   // Leaving the page closes what floats over it (drawers, dialogs, menus): they are
   // portals, so hiding the page would leave them over the next one.
   useEffect(() => {
@@ -158,9 +91,7 @@ export function BrowserPage({ active = true }: { active?: boolean }) {
     setSorting(false);
     setMenu(null);
     setFolderMenu(null);
-    setPatternCrawl(null);
   }, [active]);
-  const libraries = useQuery({ queryKey: ["libraries"], queryFn: async () => unwrap(await api.GET("/api/libraries")) });
   const queueJob = async (body: JobRequest, what: string) => {
     try {
       unwrap(await api.POST("/api/jobs", { body }));
@@ -240,7 +171,7 @@ export function BrowserPage({ active = true }: { active?: boolean }) {
           className={`${classes.splitter} ${classes.splitterRight}`}
           data-dragging={dragging === "filter" || undefined}
           onPointerDown={startDrag("filter")}
-          onDoubleClick={() => { setFilterWidth(FILTER_PANE.fallback); saveWidth(FILTER_PANE.fallback, FILTER_PANE.key); }}
+          onDoubleClick={() => reset("filter")}
           title="Drag to resize; double-click to reset"
           data-testid="filter-splitter"
         />
@@ -328,35 +259,7 @@ export function BrowserPage({ active = true }: { active?: boolean }) {
               onMoveColumn={moveCol}
               checkboxes={{ coverage: covered, onAll: selectEvery }}
               relativePaths={relativePaths}
-              corner={
-                <Menu closeOnItemClick={false} position="bottom-end">
-                  <Menu.Target>
-                    <Tooltip label="Columns" openDelay={400}>
-                      <ActionIcon size="sm" variant="subtle" color="gray" aria-label="Columns" data-testid="columns-menu">
-                        <IconColumns size={16} />
-                      </ActionIcon>
-                    </Tooltip>
-                  </Menu.Target>
-                  <Menu.Dropdown mah="70vh" style={{ overflowY: "auto" }}>
-                    {COLUMNS.filter((c) => !c.optional).map(columnItem)}
-                    <Menu.Label>More columns</Menu.Label>
-                    {COLUMNS.filter((c) => c.optional).map(columnItem)}
-                    <Menu.Divider />
-                    <Menu.Item onClick={toggleRelativePaths} leftSection={<Checkbox size="xs" readOnly checked={relativePaths} tabIndex={-1} />}
-                      data-testid="relative-paths">
-                      Paths relative to their library
-                    </Menu.Item>
-                    <Menu.Divider />
-                    <Text size="xs" c="dimmed" px="sm" py={4} maw={250}>
-                      To move a column, drag the ⋮⋮ grip left of its name in the table header and drop it on the
-                      column whose place it should take.
-                    </Text>
-                    <Menu.Item disabled={!choice.order.length} onClick={resetOrder} data-testid="reset-column-order">
-                      Reset column order
-                    </Menu.Item>
-                  </Menu.Dropdown>
-                </Menu>
-              }
+              corner={<ColumnsMenu choice={choice} relativePaths={relativePaths} />}
             />
           )}
         </Box>
@@ -366,7 +269,7 @@ export function BrowserPage({ active = true }: { active?: boolean }) {
           className={classes.splitter}
           data-dragging={dragging === "detail" || undefined}
           onPointerDown={startDrag("detail")}
-          onDoubleClick={() => { setDetailWidth(DEFAULT_WIDTH); saveWidth(DEFAULT_WIDTH); }}
+          onDoubleClick={() => reset("detail")}
           title="Drag to resize; double-click to reset"
           data-testid="detail-splitter"
         />
@@ -384,87 +287,30 @@ export function BrowserPage({ active = true }: { active?: boolean }) {
           {menu && <ModelActionItems ids={menu.ids} where="menu" editor={editor} on={actions} />}
         </Menu.Dropdown>
       </Menu>
-      <Menu opened={folderMenu != null} onChange={(o) => !o && setFolderMenu(null)} position="bottom-start" withinPortal>
-        <Menu.Target>
-          <div style={{ position: "fixed", left: folderMenu?.x ?? 0, top: folderMenu?.y ?? 0, width: 0, height: 0 }} />
-        </Menu.Target>
-        <Menu.Dropdown data-testid="folder-menu">
-          <Menu.Label maw={320} style={{ overflowWrap: "anywhere" }}>{folderMenu?.folder}</Menu.Label>
-          <Menu.Item
-            leftSection={<IconRefresh size={14} />}
-            onClick={() => folderMenu && queueJob({ kind: "crawl", folder: folderMenu.folder, in_library: true }, "Crawl")}
-          >
-            Crawl this folder (new and changed archives)
-          </Menu.Item>
-          <Menu.Item
-            leftSection={<IconRefresh size={14} />}
-            onClick={() => folderMenu && queueJob({ kind: "crawl", folder: folderMenu.folder, in_library: true, force_rescan: true }, "Rescan")}
-          >
-            Rescan this folder (read every archive again)
-          </Menu.Item>
-          <Menu.Item
-            leftSection={<IconRefresh size={14} />}
-            onClick={() => folderMenu && setPatternCrawl({ folder: folderMenu.folder, pattern: folderPattern(folderMenu.folder, libraries.data ?? []) })}
-          >
-            Crawl with a pattern…
-          </Menu.Item>
-        </Menu.Dropdown>
-      </Menu>
-      <Modal opened={patternCrawl != null} onClose={() => setPatternCrawl(null)} title="Crawl with a pattern">
-        {patternCrawl && (
-          <Stack>
-            <Text size="sm" style={{ overflowWrap: "anywhere" }}>{patternCrawl.folder}</Text>
-            <TextInput
-              label="Path pattern"
-              description="Kept for the archives directly in this folder (its sub-folders keep their own, or the library's): later crawls and rescans use it. Read from the library folder's root; empty goes back to the library's pattern."
-              value={patternCrawl.pattern}
-              onChange={(e) => setPatternCrawl({ ...patternCrawl, pattern: e.currentTarget.value })}
-              data-autofocus
-            />
-            <AiPatternButton folder={patternCrawl.folder} onPattern={(pattern) => setPatternCrawl((c) => c && { ...c, pattern })} />
-            <PatternSample folder={patternCrawl.folder} pattern={patternCrawl.pattern} />
-            <Group justify="flex-end">
-              <Button variant="default" onClick={() => setPatternCrawl(null)}>Cancel</Button>
-              <Button
-                onClick={async () => {
-                  const c = patternCrawl;
-                  setPatternCrawl(null);
-                  await queueJob({ kind: "crawl", folder: c.folder, in_library: true, pattern: c.pattern.trim() }, "Crawl");
-                }}
-              >
-                Start
-              </Button>
-            </Group>
-          </Stack>
-        )}
-      </Modal>
+      {/* Only while shown: leaving the page drops a half-typed pattern crawl. */}
+      {active && <FolderMenu at={folderMenu} onClose={() => setFolderMenu(null)} queueJob={queueJob} />}
       {sorting && <SortModal ids={selected} opened onClose={() => setSorting(false)} />}
-      <Modal opened={confirmDelete} onClose={() => setConfirmDelete(false)} title="Delete archive files">
-        <Text size="sm">
-          Delete the archive files of {selection.ids.size} model(s) and remove them from the library? With a trash folder set in
-          the library settings the files are moved there; otherwise they are deleted. Needs “allow file delete” in the settings.
-        </Text>
-        <Group justify="flex-end" mt="md">
-          <Button variant="default" onClick={() => setConfirmDelete(false)}>Cancel</Button>
-          <Button color="red" onClick={() => { setConfirmDelete(false); void queueJob({ kind: "delete_files", ids: selected }, "Deleting files"); }}>
-            Delete files
-          </Button>
-        </Group>
-      </Modal>
-      <Modal opened={confirmRemove} onClose={() => setConfirmRemove(false)} title="Remove from library">
-        <Text size="sm">
-          Remove {selection.ids.size} model(s) from the library? Their records, images and thumbnails are deleted;
-          the archive files stay where they are.
-        </Text>
-        <Group justify="flex-end" mt="md">
-          <Button variant="default" onClick={() => setConfirmRemove(false)}>
-            Cancel
-          </Button>
-          <Button color="red" onClick={remove} data-testid="confirm-remove">
-            Remove
-          </Button>
-        </Group>
-      </Modal>
+      <ConfirmModal
+        opened={confirmDelete}
+        title="Delete archive files"
+        confirm="Delete files"
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={() => { setConfirmDelete(false); void queueJob({ kind: "delete_files", ids: selected }, "Deleting files"); }}
+      >
+        Delete the archive files of {selection.ids.size} model(s) and remove them from the library? With a trash folder set in
+        the library settings the files are moved there; otherwise they are deleted. Needs “allow file delete” in the settings.
+      </ConfirmModal>
+      <ConfirmModal
+        opened={confirmRemove}
+        title="Remove from library"
+        confirm="Remove"
+        onCancel={() => setConfirmRemove(false)}
+        onConfirm={remove}
+        testId="confirm-remove"
+      >
+        Remove {selection.ids.size} model(s) from the library? Their records, images and thumbnails are deleted;
+        the archive files stay where they are.
+      </ConfirmModal>
     </div>
   );
 }
