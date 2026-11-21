@@ -77,6 +77,9 @@
 - **Hooks are linted:** the web client's checks include `npm run lint` (ESLint with React's hooks rules:
   `rules-of-hooks` and `exhaustive-deps`, both errors), also in the *Server, web client and desktop shell*
   workflow. The three effects that left dependencies out on purpose use `useEffectEvent` instead.
+- **Smaller browser and settings pages (no visible change):** the Settings page's Account, Library and Users tabs
+  are files of their own, and the browser's pane resizing, Columns menu, folder menu and confirmations moved out
+  of `BrowserPage.tsx` (482 → 328 lines; `SettingsPage.tsx` 682 → 85).
 
 ## 2026.46.2 — 2026-11-15
 
