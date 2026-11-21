@@ -53,12 +53,7 @@ pub fn rescan(path: &str, old_size: Option<i64>, old_mtime: Option<i64>, old_has
     if extracted.names.is_empty() {
         return Err("Could not read archive contents — left unchanged".into());
     }
-    let files: Vec<(String, Vec<u8>)> = extracted
-        .contents
-        .iter()
-        .filter(|(n, _)| n.to_lowercase().ends_with(".url") || n.to_lowercase().ends_with("info.json"))
-        .cloned()
-        .collect();
+    let files = crate::crawler::link_contents(&extracted.contents);
     let parent = crate::winpath::native(&WinPath::new(path).parent().as_posix());
     let meta = metadata::extract(path, &files, Some(&parent));
     let release = meta.release_date.as_deref().map(path_pattern::parse_release_date).and_then(|(y, m)| y.map(|y| (y, m)));
