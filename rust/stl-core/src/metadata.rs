@@ -300,8 +300,15 @@ fn glob_sorted(dir: &Path, matches: impl Fn(&str) -> bool) -> Vec<std::path::Pat
     v.into_iter().map(|(_, p)| p).collect()
 }
 
+/// The largest `.url` file read (inside an archive or beside it): a shortcut is a
+/// few lines, and a member may decompress to far more than the archive holds.
+pub const MAX_URL_FILE: u64 = 1024 * 1024;
+
 /// `_parse_url_shortcut`.
 fn parse_url_shortcut(path: &Path) -> Option<String> {
+    if std::fs::metadata(path).ok()?.len() > MAX_URL_FILE {
+        return None;
+    }
     let data = std::fs::read(path).ok()?;
     url_line(&decode_ignore(&data))
 }
@@ -314,7 +321,7 @@ fn read_url_file(archive_path: &Path) -> Option<String> {
         return None;
     }
     for m in archive::list_members(archive_path).ok()? {
-        if MemberPath::new(&m.name).suffix().to_lowercase() != ".url" {
+        if MemberPath::new(&m.name).suffix().to_lowercase() != ".url" || m.size.is_none_or(|s| s > MAX_URL_FILE) {
             continue;
         }
         let Ok(data) = archive::read_members(archive_path, std::slice::from_ref(&m.name)) else { continue };
@@ -495,6 +502,34 @@ mod tests {
         let m = extract(&path, &[], None);
         assert_eq!(m.title.as_deref(), Some("oola"));
         assert_eq!(m.url.as_deref(), Some("https://example.com/oola"), "the .url beside it still counts");
+    }
+
+    /// A `.url` over [`MAX_URL_FILE`] is not read, inside the archive or beside it.
+    #[test]
+    fn oversized_url_files_are_not_read() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let mut link = b"[InternetShortcut]
+URL=https://shop.example/big
+".to_vec();
+        let write_zip = |path: &Path, data: &[u8]| {
+            let mut z = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+            z.start_file("link.url", zip::write::SimpleFileOptions::default()).unwrap();
+            z.write_all(data).unwrap();
+            z.finish().unwrap();
+        };
+        let small = dir.path().join("small");
+        std::fs::create_dir(&small).unwrap();
+        write_zip(&small.join("a.zip"), &link);
+        assert_eq!(find_url_file(&small.join("a.zip")).as_deref(), Some("https://shop.example/big"));
+
+        link.resize(MAX_URL_FILE as usize + 1, b' ');
+        let big = dir.path().join("big");
+        std::fs::create_dir(&big).unwrap();
+        write_zip(&big.join("a.zip"), &link);
+        assert_eq!(find_url_file(&big.join("a.zip")), None, "the member is too large");
+        std::fs::write(big.join("a.url"), &link).unwrap();
+        assert_eq!(find_url_file(&big.join("a.zip")), None, "so is the file beside it");
     }
 
     #[test]
