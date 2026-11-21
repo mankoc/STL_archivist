@@ -66,7 +66,8 @@ pub fn values(s: &SortSource, missing: &str) -> HashMap<String, String> {
 }
 
 /// `_sanitise_segment`: unsafe characters become `_` and runs of `_` collapse.
-/// Nothing left, or only dots (`..` would leave the target folder), gives `""`.
+/// Trailing dots and spaces go, as Windows drops them from names (the stored path
+/// would not match the file's). Nothing left gives `""`.
 pub fn sanitise_segment(segment: &str) -> String {
     let mut out = String::new();
     for ch in segment.trim().chars() {
@@ -75,8 +76,7 @@ pub fn sanitise_segment(segment: &str) -> String {
             out.push(c);
         }
     }
-    let s = out.trim_matches('_');
-    if s.chars().all(|c| c == '.') { String::new() } else { s.to_string() }
+    out.trim_matches('_').trim_end_matches(['.', ' ']).to_string()
 }
 
 /// `_compute_target`: `base` / sanitised folders / sanitised name + the archive's
@@ -387,6 +387,8 @@ mod tests {
         assert_eq!(sanitise_segment(" a:b**c "), "a_b_c");
         assert_eq!(sanitise_segment("___"), "");
         assert_eq!(sanitise_segment(" .. "), "");
+        assert_eq!(sanitise_segment("Vol. 2."), "Vol. 2", "Windows drops trailing dots");
+        assert_eq!(sanitise_segment("a . ."), "a");
         let s = source(1, "D:/old/Dragon.zip", Some("Red: Dragon"), None);
         let t = target(Path::new("D:/new"), "/{collection}/{creator}/{title} {date}/", &s, UNKNOWN);
         assert_eq!(t, Path::new("D:/new").join("Fantasy").join("unknown").join("Red_ Dragon 2024.zip"), "as Python: \"_unknown\".strip(\"_\")");

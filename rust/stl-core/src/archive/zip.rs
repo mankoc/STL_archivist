@@ -195,10 +195,14 @@ pub(super) fn read_members(
             skipped = Some("encrypted or patched zip member".to_string());
         } else if e.method != 0 && e.method != 8 {
             skipped = Some(format!("zip compression method {}", e.method));
-        } else if let Some(data) = read_entry(&mut f, e)?
-            && !data.is_empty()
-        {
-            out.push((name.clone(), data));
+        } else {
+            match read_entry(&mut f, e) {
+                Ok(Some(data)) if !data.is_empty() => out.push((name.clone(), data)),
+                Ok(_) => {}
+                // This member only: the archive's other members are still read.
+                Err(ArchiveError::Unsupported(why)) => skipped = Some(why),
+                Err(err) => return Err(err),
+            }
         }
     }
     match skipped {
@@ -218,7 +222,7 @@ fn read_entry(f: &mut File, e: &Entry) -> Result<Option<Vec<u8>>, ArchiveError> 
     let extra_len = u16le(&hdr, 28) as u64;
     let local_name = read_exact_at(f, e.header_offset + 30, name_len as usize)?;
     if local_name != e.raw_name || (u16le(&hdr, 6) ^ e.flags) & MASK_UTF_FILENAME != 0 {
-        // zipfile compares the *decoded* names; leave that judgement to it.
+        // zipfile compares the *decoded* names: not read here (this member only).
         return Err(ArchiveError::Unsupported("local header name differs".into()));
     }
     let data_start = e.header_offset.saturating_add(30 + name_len + extra_len);
@@ -241,7 +245,7 @@ fn read_entry(f: &mut File, e: &Entry) -> Result<Option<Vec<u8>>, ArchiveError> 
         out
     };
     if Some(data.len() as u64) != e.member.size {
-        // ZipExtFile truncates to file_size; such members are left to it.
+        // ZipExtFile truncates to file_size: not read here (this member only).
         return Err(ArchiveError::Unsupported("zip member size mismatch".into()));
     }
     if crc32fast::hash(&data) != e.member.crc {
