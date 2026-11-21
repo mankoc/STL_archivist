@@ -46,5 +46,5 @@ pub async fn token(State(lib): State<AppState>, me: CurrentUser) -> Result<Json<
 pub async fn connect(State(lib): State<AppState>, me: CurrentUser, ws: WebSocketUpgrade) -> Result<Response, ApiError> {
     me.require(Role::Editor)?;
     let lib = Arc::clone(&lib);
-    Ok(ws.max_message_size(crate::workers::MAX_MESSAGE).on_upgrade(move |socket| crate::workers::serve(lib, me.user.name, socket)))
+    Ok(ws.max_message_size(crate::workers::MAX_MESSAGE).on_upgrade(move |socket| crate::workers::serve(lib, me, socket)))
 }
