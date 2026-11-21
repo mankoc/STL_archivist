@@ -51,12 +51,6 @@ export function detailFacts(f: Fields): [string, string][] {
   return facts.filter(([, v]) => v !== "");
 }
 
-/** A source link to show: only web addresses. */
-export function webLink(url: unknown): string | null {
-  const u = text(url);
-  return /^https?:\/\//i.test(u) ? u : null;
-}
-
 /** A long path shortened in the middle, so that the archive's name stays whole. */
 export function middlePath(path: string, max = 64): string {
   if (path.length <= max) return path;

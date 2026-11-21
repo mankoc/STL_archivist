@@ -235,9 +235,12 @@ fn unique_target(path: &Path, taken: &HashSet<String>) -> PathBuf {
 
 fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
     if std::fs::rename(from, to).is_err() {
-        // Another drive: copy, then remove.
+        // Another drive: copy, then remove (or drop the copy, so that the file is in one place).
         std::fs::copy(from, to)?;
-        std::fs::remove_file(from)?;
+        if let Err(e) = std::fs::remove_file(from) {
+            let _ = std::fs::remove_file(to);
+            return Err(e);
+        }
     }
     Ok(())
 }
@@ -290,7 +293,7 @@ pub fn execute(rows: &[PlanRow]) -> Result<Vec<(i64, String)>, String> {
         });
     }
     let mut dirs: Vec<PathBuf> = plan.iter().filter(|(s, d, _)| s != d).filter_map(|(s, _, _)| s.parent().map(Path::to_path_buf)).collect();
-    dirs.sort_by_key(|d| std::cmp::Reverse(d.components().count()));
+    dirs.sort_by(|a, b| b.components().count().cmp(&a.components().count()).then_with(|| a.cmp(b)));
     dirs.dedup();
     for d in dirs {
         let names: Vec<String> = match std::fs::read_dir(&d) {
