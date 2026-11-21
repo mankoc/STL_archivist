@@ -14,6 +14,8 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
+use crate::pyunicode::{py_int, py_strip};
+
 /// Token name (lowercase) -> field key, as `TOKEN_MAP`.
 pub fn token_field(token: &str) -> Option<&'static str> {
     Some(match token {
@@ -34,7 +36,7 @@ pub fn token_field(token: &str) -> Option<&'static str> {
 /// `(year, month)` from `"YYYY-MM"`, `"YYYY_MM"` or `"YYYY"` (surrounding space
 /// ignored), with decimal digits of any script as Python's `\d` and `int()` read them.
 pub fn parse_release_date(s: &str) -> (Option<i64>, Option<i64>) {
-    use crate::pyunicode::{is_digits, py_int};
+    use crate::pyunicode::is_digits;
     let t = py_strip(s);
     if let Some((y, m)) = t.split_once(['-', '_'])
         && is_digits(y, 4..=4)
@@ -48,15 +50,6 @@ pub fn parse_release_date(s: &str) -> (Option<i64>, Option<i64>) {
     (None, None)
 }
 
-/// `str.strip()` with no arguments: Unicode whitespace.
-fn py_strip(s: &str) -> &str {
-    s.trim_matches(|c: char| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
-}
-
-/// `int()` of a run of decimal digits (any script).
-fn py_int(digits: &str) -> Option<i64> {
-    crate::pyunicode::py_int(digits)
-}
 
 /// `format_release_date`: `""`, `"YYYY"` or `"YYYY-MM"`.
 pub fn format_release_date(year: Option<i64>, month: Option<i64>) -> String {
@@ -183,33 +176,28 @@ pub fn parse_path(pattern: &str, path: &str) -> Fields {
         None => norm.as_str(),
     };
     let archive_stem = splitext_root(filename);
+    let reaches_end = |c: &regex::Captures, text: &str| c.get(0).unwrap().end() == text.len();
 
-    // Pass 1: the whole path, accepted only when the match reaches the end.
-    let first = cp.rx.captures(&norm);
-    if norm_pattern.starts_with('/') {
-        if let Some(c) = &first
-            && c.get(0).unwrap().end() == norm.len()
-        {
-            return cp.result(c);
-        }
-    } else {
-        // The shortest suffix that matches the whole pattern.
+    // Pass 1: the whole path, accepted only when the match reaches the end. A
+    // relative pattern first tries the shortest suffix that matches it whole.
+    if !norm_pattern.starts_with('/') {
         for (i, _) in norm.char_indices() {
             if let Some(c) = cp.anchored.captures(&norm[i..]) {
                 return cp.result(&c);
             }
         }
-        if let Some(c) = &first
-            && c.get(0).unwrap().end() == norm.len()
-        {
-            return cp.result(c);
-        }
+    }
+    let first = cp.rx.captures(&norm);
+    if let Some(c) = &first
+        && reaches_end(c, &norm)
+    {
+        return cp.result(c);
     }
 
     // Pass 1b: a pattern without separators against the filename alone.
     if !pattern.contains('/')
         && let Some(c) = cp.rx.captures(filename)
-        && c.get(0).unwrap().end() == filename.len()
+        && reaches_end(&c, filename)
     {
         return cp.result(&c);
     }
