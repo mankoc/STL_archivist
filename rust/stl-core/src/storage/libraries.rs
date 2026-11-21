@@ -382,7 +382,29 @@ fn adopt(tx: &Transaction, from: i64, from_root: &str, to: i64, inner_root: &str
             moved += 1;
         }
     }
+    move_settings(tx, from, from_root, to, inner_root)?;
     Ok(moved)
+}
+
+/// Move the excluded folders and folder patterns of library folder `from` that
+/// lie below `to_root` to library folder `to`, relative to its root: they follow
+/// the records (a crawl reads only the crawled folder's own). Where `to` already
+/// has a row for that folder, its own stays.
+fn move_settings(tx: &Transaction, from: i64, from_root: &str, to: i64, to_root: &str) -> Result<()> {
+    for table in ["excluded_folders", "folder_patterns"] {
+        let mut st = tx.prepare(&format!("SELECT rel_folder FROM {table} WHERE library_id = ?1"))?;
+        let rels: Vec<String> = st.query_map([from], |r| r.get(0))?.collect::<Result<_>>()?;
+        for rel in rels {
+            if let Some(r) = RelPath::from_abs(to_root, &relpath::join(from_root, &rel)) {
+                tx.execute(
+                    &format!("UPDATE OR IGNORE {table} SET library_id = ?3, rel_folder = ?4 WHERE library_id = ?1 AND rel_folder = ?2"),
+                    params![from, rel, to, r.as_str()],
+                )?;
+                tx.execute(&format!("DELETE FROM {table} WHERE library_id = ?1 AND rel_folder = ?2"), params![from, rel])?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Which library a new folder joins.
@@ -507,6 +529,9 @@ pub fn remove(tx: &Transaction, id: i64) -> Result<Removed> {
                 out.deleted += 1;
             }
         }
+    }
+    if let Some((o, oroot)) = &outer {
+        move_settings(tx, id, &lib.root, *o, oroot)?;
     }
     tx.execute("DELETE FROM libraries WHERE id = ?1", [id])?;
     if let Some(g) = lib.group_id {
@@ -1045,6 +1070,31 @@ mod tests {
 
     fn of(conn: &Connection, id: i64) -> (i64, String) {
         conn.query_row("SELECT library_id, rel_path FROM models WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap()
+    }
+
+    /// Exclusions and folder patterns below a new inner folder move into it with
+    /// the records, and back out when it is removed.
+    #[test]
+    fn folder_settings_follow_an_inner_folder() {
+        let (_dir, mut conn) = db();
+        let tx = conn.transaction().unwrap();
+        let outer = create(&tx, "D:/Minis", Target::New("Minis"), None, None).unwrap();
+        tx.execute_batch(&format!(
+            "INSERT INTO excluded_folders VALUES ({outer}, 'Sub/Skip'), ({outer}, 'Other');
+             INSERT INTO folder_patterns VALUES ({outer}, 'Sub/A', '{{title}}'), ({outer}, 'Top', '{{creator}}');"
+        ))
+        .unwrap();
+        let rows = |tx: &Transaction, table: &str| -> Vec<(i64, String)> {
+            let sql = format!("SELECT library_id, rel_folder FROM {table} ORDER BY library_id, rel_folder");
+            tx.prepare(&sql).unwrap().query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|r| r.unwrap()).collect()
+        };
+        let inner = create(&tx, "D:/Minis/Sub", Target::Around, None, None).unwrap();
+        assert_eq!(rows(&tx, "excluded_folders"), [(outer, "Other".into()), (inner, "Skip".into())]);
+        assert_eq!(rows(&tx, "folder_patterns"), [(outer, "Top".into()), (inner, "A".into())]);
+        assert_eq!(excluded_roots(&tx, inner).unwrap(), [relpath::join("D:/Minis/Sub", "Skip")], "the crawl of the inner folder skips it");
+        remove(&tx, inner).unwrap();
+        assert_eq!(rows(&tx, "excluded_folders"), [(outer, "Other".into()), (outer, "Sub/Skip".into())]);
+        assert_eq!(rows(&tx, "folder_patterns"), [(outer, "Sub/A".into()), (outer, "Top".into())]);
     }
 
     #[test]
