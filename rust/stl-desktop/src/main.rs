@@ -53,11 +53,11 @@ const ABOUT: &str = "about";
 /// The shell's name and version: the window's title until a page names it.
 const TITLE: &str = concat!("StlArchivist ", env!("CARGO_PKG_VERSION"));
 const SERVERS_FILE: &str = "servers.json";
+/// How long the local server gets to stop by itself: a running job can hold it up.
+const LOCAL_STOP_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long a local server that is still running may take to answer. A first
 /// start can be slow (backing a large library up and moving it to libraries),
 /// and a server that fails exits, so this only bounds a hung one.
-/// How long the local server gets to stop by itself: a running job can hold it up.
-const LOCAL_STOP_TIMEOUT: Duration = Duration::from_secs(15);
 const LOCAL_START_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 /// A remembered server.
@@ -184,7 +184,11 @@ struct InstallState {
 
 #[derive(Default)]
 struct Shell {
+    /// The running local server; locked only briefly (the launcher reads it).
     local: Mutex<Option<LocalServer>>,
+    /// Held while a local server stops and starts (up to [`LOCAL_START_TIMEOUT`]),
+    /// so that one start runs at a time without holding `local`.
+    starting: Mutex<()>,
     worker: Mutex<Option<WorkerProc>>,
     installing: Mutex<Option<Installing>>,
     launcher: Mutex<Option<Url>>,
@@ -633,17 +637,21 @@ async fn start_local(app: AppHandle, data_dir: String) -> Result<String, String>
     let app2 = app.clone();
     let url = tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
         let shell = app2.state::<Shell>();
-        let mut local = shell.local.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(l) = local.as_mut()
-            && l.data_dir == dir
-            && matches!(l.child.try_wait(), Ok(None))
-        {
-            return Ok(l.url.clone());
-        }
-        *local = None; // stop another library first
+        let _starting = shell.starting.lock().unwrap_or_else(|e| e.into_inner());
+        let old = {
+            let mut local = shell.local.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(l) = local.as_mut()
+                && l.data_dir == dir
+                && matches!(l.child.try_wait(), Ok(None))
+            {
+                return Ok(l.url.clone());
+            }
+            local.take()
+        };
+        drop(old); // stop another library first, outside the lock
         let started = spawn_local(&app2, &dir)?;
         let url = started.url.clone();
-        *local = Some(started);
+        *shell.local.lock().unwrap_or_else(|e| e.into_inner()) = Some(started);
         Ok(url)
     })
     .await

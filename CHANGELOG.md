@@ -32,6 +32,8 @@
   looking for a model's link, so a huge (or highly compressed) one cannot exhaust memory during crawls.
 - **The AI status answers while the model loads:** starting the local AI model server no longer blocks
   `/api/ai/status` (or hangs it indefinitely when the AI job is paused meanwhile).
+- **The desktop app stays responsive while a library starts:** reloading, *Switch server…* or quitting while a local
+  library is starting (which can take minutes the first time) no longer freezes the window.
 
 ## 2026.46.2 — 2026-11-15
 
