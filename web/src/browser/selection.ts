@@ -27,7 +27,9 @@ export function click(sel: Selection, order: number[], id: number, mods: { ctrl:
     const ids = new Set(sel.ids);
     if (ids.has(id)) ids.delete(id);
     else ids.add(id);
-    return { ids, anchor: id, current: ids.has(id) ? id : sel.current === id ? null : sel.current };
+    if (ids.has(id)) return { ids, anchor: id, current: id };
+    // The row just deselected leaves the detail pane.
+    return { ids, anchor: id, current: sel.current === id ? null : sel.current };
   }
   return { ids: new Set([id]), anchor: id, current: id };
 }

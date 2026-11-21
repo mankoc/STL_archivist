@@ -104,7 +104,7 @@ pub enum Likeness {
 /// (by Soundex code for [`Likeness::Sound`]). The score reads as the distance, the
 /// code or a percentage. At most `limit + 1` pairs: one more tells that there are more.
 pub fn similar_pairs(names: &[String], how: Likeness, limit: usize) -> Vec<(u32, u32, String)> {
-    let mut out: Vec<(u32, u32, String)> = match how {
+    match how {
         Likeness::Spelling(max) => {
             let folded: Vec<String> = names.iter().map(|n| n.to_lowercase()).collect();
             let mut pairs = levenshtein_pairs(&folded, max);
@@ -127,9 +127,7 @@ pub fn similar_pairs(names: &[String], how: Likeness, limit: usize) -> Vec<(u32,
             pairs.sort_by_key(|&(i, j, p)| (std::cmp::Reverse(p), i, j));
             pairs.into_iter().take(limit + 1).map(|(i, j, p)| (i, j, format!("{p}%"))).collect()
         }
-    };
-    out.truncate(limit + 1);
-    out
+    }
 }
 
 /// [`Likeness::Words`]: the names sharing a word, through an index of the words.

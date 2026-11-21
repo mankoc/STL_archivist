@@ -209,11 +209,10 @@ pub struct ModelDetail {
 
 fn json_value(v: Value) -> serde_json::Value {
     match v {
-        Value::Null => serde_json::Value::Null,
         Value::Integer(i) => i.into(),
         Value::Real(f) => serde_json::Number::from_f64(f).map_or(serde_json::Value::Null, Into::into),
         Value::Text(s) => s.into(),
-        Value::Blob(_) => serde_json::Value::Null,
+        Value::Null | Value::Blob(_) => serde_json::Value::Null,
     }
 }
 

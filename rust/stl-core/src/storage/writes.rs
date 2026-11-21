@@ -18,10 +18,7 @@ use rusqlite::{OptionalExtension, Transaction, params};
 
 use super::Result;
 
-/// Python's `str.strip()` (Unicode whitespace, plus the separators it counts).
-pub fn py_strip(s: &str) -> &str {
-    s.trim_matches(|c: char| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
-}
+pub use crate::pyunicode::py_strip;
 
 /// `editing.clean`: stripped, or `None` when empty.
 pub fn clean(value: Option<&str>) -> Option<String> {

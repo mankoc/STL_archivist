@@ -833,16 +833,14 @@ pub fn reconcile(
             && let Some(size) = size
         {
             let key = (name.clone(), *size);
-            if !ns_collision.contains(&key) {
-                if let Some(c) = ns_to_path.get(&key).filter(|c| !used.contains(*c)) {
-                    target = Some(c.clone());
-                }
-            } else {
+            if ns_collision.contains(&key) {
                 skipped.push(name.clone());
+            } else if let Some(c) = ns_to_path.get(&key).filter(|c| !used.contains(*c)) {
+                target = Some(c.clone());
             }
         }
         let Some(new_path) = target else { continue };
-        let exists = tx.query_row("SELECT 1 FROM models WHERE id = ?1", [id], |_| Ok(())).optional()?.is_some();
+        let exists = super::model_exists(tx, *id)?;
         let Some(&new_id) = new_ids.get(&new_path) else { continue };
         if !exists {
             continue;

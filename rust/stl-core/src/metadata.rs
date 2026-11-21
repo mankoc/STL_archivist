@@ -14,6 +14,7 @@ use std::sync::LazyLock;
 use fancy_regex::{Regex, RegexBuilder};
 
 use crate::archive;
+use crate::pyunicode::{py_splitlines, py_strip};
 use crate::rules::MemberPath;
 
 /// `ModelMetadata`.
@@ -63,41 +64,6 @@ static DATE_PREFIX: LazyLock<regex::Regex> = LazyLock::new(|| {
 });
 static YEAR_PREFIX: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(&format!(r"^\p{{Nd}}{{4}}{PY_SPACE}+")).expect("built-in pattern"));
-
-/// `str.isspace()`.
-fn py_isspace(c: char) -> bool {
-    c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c)
-}
-
-/// `str.strip()`.
-fn py_strip(s: &str) -> &str {
-    s.trim_matches(py_isspace)
-}
-
-/// `str.splitlines()`.
-fn py_splitlines(s: &str) -> Vec<&str> {
-    let mut out = Vec::new();
-    let mut start = 0;
-    let mut it = s.char_indices().peekable();
-    while let Some((i, c)) = it.next() {
-        let brk = matches!(c, '\n' | '\r' | '\u{0b}' | '\u{0c}' | '\u{1c}' | '\u{1d}' | '\u{1e}' | '\u{85}' | '\u{2028}' | '\u{2029}');
-        if brk {
-            out.push(&s[start..i]);
-            let mut end = i + c.len_utf8();
-            if c == '\r'
-                && let Some(&(j, '\n')) = it.peek()
-            {
-                it.next();
-                end = j + 1;
-            }
-            start = end;
-        }
-    }
-    if start < s.len() {
-        out.push(&s[start..]);
-    }
-    out
-}
 
 /// `bytes.decode("utf-8", errors="ignore")`.
 fn decode_ignore(b: &[u8]) -> String {
@@ -221,7 +187,6 @@ fn py_str(v: &serde_json::Value) -> Option<String> {
         Value::Bool(true) => Some("True".into()),
         Value::Bool(false) => Some("False".into()),
         Value::Null => Some("None".into()),
-        Value::Number(n) if n.is_i64() || n.is_u64() => Some(n.to_string()),
         Value::Number(n) => Some(n.to_string()),
         Value::Array(_) | Value::Object(_) => None,
     }
@@ -241,12 +206,8 @@ pub fn find_url_file(archive_path: &Path) -> Option<String> {
     }
     let parent = archive_path.parent()?;
     let parent = if parent.as_os_str().is_empty() { Path::new(".") } else { parent };
-    for f in glob_sorted(parent, |n| ends_ci(n, ".url")) {
-        if let Some(u) = parse_url_shortcut(&f)
-            && !u.is_empty()
-        {
-            return Some(u);
-        }
+    if let Some(u) = glob_sorted(parent, |n| ends_ci(n, ".url")).iter().find_map(|f| parse_url_shortcut(f)) {
+        return Some(u);
     }
     for sep in ["-links", "_links"] {
         let mut hits: Vec<(String, String, std::path::PathBuf)> = Vec::new();
@@ -261,12 +222,8 @@ pub fn find_url_file(archive_path: &Path) -> Option<String> {
             }
         }
         hits.sort_by(|a, b| (&a.0, &a.1).cmp(&(&b.0, &b.1)));
-        for (_, _, f) in hits {
-            if let Some(u) = parse_url_shortcut(&f)
-                && !u.is_empty()
-            {
-                return Some(u);
-            }
+        if let Some(u) = hits.iter().find_map(|(_, _, f)| parse_url_shortcut(f)) {
+            return Some(u);
         }
     }
     // A model's folder holding a few part folders (`Supported/`, `Unsupported/`, …)
@@ -276,7 +233,7 @@ pub fn find_url_file(archive_path: &Path) -> Option<String> {
     if folders > MAX_MODEL_SUBFOLDERS {
         return None;
     }
-    glob_sorted(grand, |n| ends_ci(n, ".url")).iter().find_map(|f| parse_url_shortcut(f).filter(|u| !u.is_empty()))
+    glob_sorted(grand, |n| ends_ci(n, ".url")).iter().find_map(|f| parse_url_shortcut(f))
 }
 
 /// Most subfolders a model's folder has for [`find_url_file`] to take its link.
@@ -304,13 +261,13 @@ fn glob_sorted(dir: &Path, matches: impl Fn(&str) -> bool) -> Vec<std::path::Pat
 /// few lines, and a member may decompress to far more than the archive holds.
 pub const MAX_URL_FILE: u64 = 1024 * 1024;
 
-/// `_parse_url_shortcut`.
+/// `_parse_url_shortcut`, `None` for an empty URL too.
 fn parse_url_shortcut(path: &Path) -> Option<String> {
     if std::fs::metadata(path).ok()?.len() > MAX_URL_FILE {
         return None;
     }
     let data = std::fs::read(path).ok()?;
-    url_line(&decode_ignore(&data))
+    url_line(&decode_ignore(&data)).filter(|u| !u.is_empty())
 }
 
 /// `archive.read_url_file`: the `URL=` value of the first `.url` member that
@@ -321,7 +278,7 @@ fn read_url_file(archive_path: &Path) -> Option<String> {
         return None;
     }
     for m in archive::list_members(archive_path).ok()? {
-        if MemberPath::new(&m.name).suffix().to_lowercase() != ".url" || m.size.is_none_or(|s| s > MAX_URL_FILE) {
+        if !is_url_file(&m.name) || m.size.is_none_or(|s| s > MAX_URL_FILE) {
             continue;
         }
         let Ok(data) = archive::read_members(archive_path, std::slice::from_ref(&m.name)) else { continue };
@@ -423,13 +380,13 @@ pub fn from_files(archive_path: &str, contents: &[(String, Vec<u8>)]) -> Metadat
 
 /// Whether an archive member is `info.json` (in any folder of the archive).
 pub fn is_info_json(member: &str) -> bool {
-    let n = MemberPath::new(&member.replace('\\', "/")).name;
+    let n = MemberPath::new(member).name;
     n.is_ascii() && n.eq_ignore_ascii_case("info.json")
 }
 
 /// Whether an archive member is a `.url` link.
 pub fn is_url_file(member: &str) -> bool {
-    MemberPath::new(&member.replace('\\', "/")).suffix().to_lowercase() == ".url"
+    MemberPath::new(member).suffix().to_lowercase() == ".url"
 }
 
 #[cfg(test)]

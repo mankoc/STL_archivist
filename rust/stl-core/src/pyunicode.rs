@@ -46,6 +46,41 @@ pub fn is_digits(s: &str, n: std::ops::RangeInclusive<usize>) -> bool {
     n.contains(&count) && s.chars().all(|c| decimal(c).is_some())
 }
 
+/// `str.isspace()`: Unicode whitespace plus the four separators Python counts.
+pub fn py_isspace(c: char) -> bool {
+    c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c)
+}
+
+/// `str.strip()` with no arguments.
+pub fn py_strip(s: &str) -> &str {
+    s.trim_matches(py_isspace)
+}
+
+/// `str.splitlines()`: every line boundary Python knows, `\r\n` as one.
+pub fn py_splitlines(s: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut it = s.char_indices().peekable();
+    while let Some((i, c)) = it.next() {
+        let brk = matches!(c, '\n' | '\r' | '\u{0b}' | '\u{0c}' | '\u{1c}' | '\u{1d}' | '\u{1e}' | '\u{85}' | '\u{2028}' | '\u{2029}');
+        if brk {
+            out.push(&s[start..i]);
+            let mut end = i + c.len_utf8();
+            if c == '\r'
+                && let Some(&(j, '\n')) = it.peek()
+            {
+                it.next();
+                end = j + 1;
+            }
+            start = end;
+        }
+    }
+    if start < s.len() {
+        out.push(&s[start..]);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

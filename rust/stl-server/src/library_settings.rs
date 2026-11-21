@@ -29,23 +29,23 @@ impl LibrarySettings {
         self.0.get(key).and_then(Value::as_bool).unwrap_or(default)
     }
 
+    /// A `u32` above 0, or `None`.
+    fn get_positive_u32(&self, key: &str) -> Option<u32> {
+        self.0.get(key).and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok()).filter(|&n| n > 0)
+    }
+
+    /// Text without surrounding whitespace, `None` when empty.
+    fn get_trimmed(&self, key: &str) -> Option<&str> {
+        self.0.get(key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty())
+    }
+
     pub fn max_thumb_size(&self) -> u32 {
-        self.0
-            .get("max_thumb_size")
-            .and_then(Value::as_u64)
-            .and_then(|n| u32::try_from(n).ok())
-            .filter(|&n| n > 0)
-            .unwrap_or(MAX_THUMB_SIZE_DEFAULT)
+        self.get_positive_u32("max_thumb_size").unwrap_or(MAX_THUMB_SIZE_DEFAULT)
     }
 
     /// Longest edge of a thumbnail made from a model viewer capture; default: [`Self::max_thumb_size`].
     pub fn view_thumb_size(&self) -> u32 {
-        self.0
-            .get("view_thumb_size")
-            .and_then(Value::as_u64)
-            .and_then(|n| u32::try_from(n).ok())
-            .filter(|&n| n > 0)
-            .unwrap_or_else(|| self.max_thumb_size())
+        self.get_positive_u32("view_thumb_size").unwrap_or_else(|| self.max_thumb_size())
     }
 
     /// Crawls and the monitor take an archive of the stored size as unchanged, whatever its time.
@@ -136,24 +136,12 @@ impl LibrarySettings {
 
     /// The OpenRouter model the AI tagger uses with `ai_provider: openrouter`.
     pub fn openrouter_model(&self) -> String {
-        self.0
-            .get("openrouter_model")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|m| !m.is_empty())
-            .unwrap_or(OPENROUTER_MODEL_DEFAULT)
-            .to_string()
+        self.get_trimmed("openrouter_model").unwrap_or(OPENROUTER_MODEL_DEFAULT).to_string()
     }
 
     /// The model the AI tagger asks with `ai_provider: openai`.
     pub fn openai_model(&self) -> String {
-        self.0
-            .get("openai_model")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|m| !m.is_empty())
-            .unwrap_or(OPENAI_MODEL_DEFAULT)
-            .to_string()
+        self.get_trimmed("openai_model").unwrap_or(OPENAI_MODEL_DEFAULT).to_string()
     }
 
     /// How often monitored folders are checked (minutes).
