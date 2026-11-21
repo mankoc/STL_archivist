@@ -331,7 +331,9 @@ and cuDNN 9 must be installed). To install by hand:
   the embeddings and tagging: in the desktop app, *Settings → Workers → Use this
   computer for AI*; the same card downloads the models into a folder of that computer you
   choose. With `"compute": "workers"` (or `STL_COMPUTE=workers`) the server never
-  runs the models itself and its jobs wait for a worker. See the deployment guide.
+  runs the models itself and its jobs wait for a worker. A worker signs in with a session of
+  its own that opens only the worker connection; *Settings → Workers → Worker sessions* lists
+  them (editors their own, administrators everyone's) and ends one. See the deployment guide.
 
 ### Backups and restore
 

@@ -325,7 +325,9 @@ stl-server libraries [list] | relocate FOLDER NEW_ROOT [--apply] [--fix-case] [-
                                                    list libraries and their folders, or move a folder
                                                    (checks first; server stopped)
 stl-server worker --server URL [--data-dir DIR]    compute worker for a remote server (token in
-                                                   STL_WORKER_TOKEN; the desktop app starts it)
+                                                   STL_WORKER_TOKEN, from POST /api/workers/token:
+                                                   it opens only the worker connection; the
+                                                   desktop app starts it)
 stl-server components status|install|remove [ID...] [--variant ID=V]... [--data-dir DIR]
                                                    the optional components of a folder, without
                                                    opening a library (JSON output)
