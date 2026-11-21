@@ -1400,6 +1400,46 @@ endsolid
         assert_eq!(records, 1, "the moved archive's record is kept");
     }
 
+    /// An unchanged archive whose catalog is read again (only its time changed) gives
+    /// a record without an STL list that list, without extracting the archive again.
+    #[test]
+    fn a_record_without_an_stl_list_gets_it_from_the_catalog_read() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("archives");
+        std::fs::create_dir_all(&folder).unwrap();
+        let path = folder.join("m.zip");
+        let mut z = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+        for name in ["model.stl", "readme.txt"] {
+            z.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+            z.write_all(b"solid\nendsolid\n").unwrap();
+        }
+        z.finish().unwrap();
+        let db = dir.path().join("lib.db");
+        storage::migrate(&db, &storage::Vectors::default()).unwrap();
+        let cfg = CrawlConfig { source_dir: crate::winpath::native(&folder.to_string_lossy()), recurse: true, max_workers: 1, ..Default::default() };
+        assert_eq!(crawl(&db, None, &cfg, &Recorder::default()).unwrap().new, 1);
+
+        let conn = storage::open(&db).unwrap();
+        let stl_files = || -> Vec<String> {
+            let mut st = conn.prepare("SELECT filename FROM stl_files ORDER BY filename").unwrap();
+            st.query_map([], |r| r.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap()
+        };
+        assert_eq!(stl_files(), ["model.stl"]);
+        // A record without a list, as older versions left them.
+        conn.execute_batch("DELETE FROM stl_files; UPDATE models SET stl_list_hash = NULL").unwrap();
+        // Only the time changes: the catalog is read again, and the hash is the same.
+        let mtime = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        std::fs::File::options().write(true).open(&path).unwrap().set_modified(mtime).unwrap();
+
+        let summary = crawl(&db, None, &cfg, &Recorder::default()).unwrap();
+        assert_eq!((summary.new, summary.updated, summary.unchanged), (0, 0, 1), "not extracted again");
+        assert_eq!(stl_files(), ["model.stl"], "the list comes from the catalog");
+        let (hash, listed): (String, Option<String>) =
+            conn.query_row("SELECT archive_hash, stl_list_hash FROM models", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(listed.as_deref(), Some(hash.as_str()), "marked read, so later crawls skip it");
+    }
+
     #[test]
     fn a_batch_of_archives_is_embedded_in_one_request() {
         use std::io::Write;
