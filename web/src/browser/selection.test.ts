@@ -29,6 +29,20 @@ describe("selection", () => {
     expect([...s.ids]).toEqual([40]);
   });
 
+  it("keeps the detail pane on a selected row when Ctrl deselects", () => {
+    const ctrl = { ctrl: true, shift: false };
+    let s = click(NONE, order, 20, plain);
+    s = click(s, order, 40, ctrl);
+    expect(s.current).toBe(40);
+    // Deselecting another row keeps the current one.
+    s = click(s, order, 20, ctrl);
+    expect(s.current).toBe(40);
+    // Deselecting the current row leaves the pane empty.
+    s = click(s, order, 40, ctrl);
+    expect([...s.ids]).toEqual([]);
+    expect(s.current).toBeNull();
+  });
+
   it("selects a range with Shift, in either direction", () => {
     let s = click(NONE, order, 40, plain);
     s = click(s, order, 20, { ctrl: false, shift: true });
