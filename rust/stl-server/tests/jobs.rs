@@ -408,6 +408,9 @@ async fn jobs_queue_and_cancel() {
     let r = call(&lib.state, "POST", "/api/jobs", Some(&viewer), Some(json!({"kind": "verify_archives"}))).await;
     assert_eq!(r.status, StatusCode::FORBIDDEN);
     assert!(call(&lib.state, "POST", "/api/jobs", Some(&ed), Some(json!({"kind": "nope"}))).await.status.is_client_error());
+    // A misspelled option is refused, not dropped (`keep_mising` would delete missing records).
+    let typo = json!({"kind": "crawl", "folder": root.to_string_lossy(), "keep_mising": true});
+    assert!(call(&lib.state, "POST", "/api/jobs", Some(&ed), Some(typo)).await.status.is_client_error());
 
     let first = submit(&lib, &ed, json!({"kind": "crawl", "folder": root.to_string_lossy()})).await;
     let second = submit(&lib, &ed, json!({"kind": "verify_archives"})).await;
