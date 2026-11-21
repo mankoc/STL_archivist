@@ -47,6 +47,11 @@
   lists every move, the sidecars are refreshed, and the error says to crawl the target folder.
 - **The UnRAR download can be stopped:** stopping the components install stops it, and an endless or oversized
   response is cut off.
+- **Archive reading fixes:** one ZIP member that cannot be read no longer hides the archive's other members
+  (thumbnails, `info.json`); *Rescan* re-reads a fingerprint that was only size and time, as crawls do; images over
+  50 MB beside an archive are skipped like those inside it.
+- **Sort Files names match Windows:** trailing dots and spaces are dropped from folder and file names, as Windows does,
+  so the stored path matches the file.
 
 ## 2026.46.2 — 2026-11-15
 
