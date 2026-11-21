@@ -230,10 +230,13 @@ pub fn delete_user(conn: &Connection, id: i64) -> Result<()> {
 }
 
 /// Check a user's own password change: the current password must match.
+/// What [`change_own_password`] answers to a wrong current password.
+pub const WRONG_CURRENT: &str = "the current password is wrong";
+
 pub fn change_own_password(conn: &Connection, id: i64, current: &str, new: &str) -> Result<()> {
     let hash: String = conn.query_row("SELECT password_hash FROM users WHERE id = ?1", [id], |r| r.get(0))?;
     if !verify_password(current, &hash) {
-        return Err(AccountError::Invalid("the current password is wrong".into()));
+        return Err(AccountError::Invalid(WRONG_CURRENT.into()));
     }
     update_user(conn, id, None, None, Some(new)).map(|_| ())
 }

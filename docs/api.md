@@ -47,7 +47,7 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 |---|---|---|---|---|
 | `POST /api/auth/login` | Sign in. After five failures a name is locked out for 15 minutes. | body: [Credentials](#credentials) | 200 [Session](#session) | 401, 429 |
 | `POST /api/auth/logout` | End this session. |  | 204 |  |
-| `PUT /api/auth/password` | Change your own password. Ends all your sessions, this one included. | body: [PasswordChange](#passwordchange) | 204 | 400 |
+| `PUT /api/auth/password` | Change your own password. Ends all your sessions, this one included. | body: [PasswordChange](#passwordchange) | 204 | 400, 429 |
 | `POST /api/auth/setup` | Create the first administrator and sign in. Only while no user exists, and only from the server's own machine (not through a proxy). | body: [Credentials](#credentials) | 200 [Session](#session) | 403, 409 |
 | `GET /api/auth/status` | Whether setup is needed and who is signed in. Needs no session. |  | 200 [AuthStatus](#authstatus) |  |
 
