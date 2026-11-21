@@ -139,6 +139,8 @@ pub const DOWNLOAD_CHUNK: usize = 256 * 1024;
         workers::list,
         maintenance::remove_missing,
         workers::token,
+        workers::tokens,
+        workers::revoke,
         workers::connect,
         sync::thumbnails,
         sync::have,
@@ -268,6 +270,8 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/api/search/image", post(search::by_image).layer(DefaultBodyLimit::max(edit::MAX_IMAGE_BYTES)))
         .route("/api/workers", get(workers::list))
         .route("/api/workers/token", post(workers::token))
+        .route("/api/workers/tokens", get(workers::tokens))
+        .route("/api/workers/tokens/{id}", delete(workers::revoke))
         .route("/api/workers/connect", get(workers::connect))
         .route("/api/sync/thumbnails", get(sync::thumbnails).post(sync::have).layer(DefaultBodyLimit::disable()))
         .route("/api/sync/blocks", get(sync::blocks).post(sync::post_blocks).layer(DefaultBodyLimit::disable()))

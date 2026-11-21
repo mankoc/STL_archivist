@@ -8,6 +8,7 @@ import { JobLog } from "./JobsPage";
 import { SyncCard } from "./SyncCard";
 import { useStartJob } from "./useStartJob";
 import { WorkersCard } from "./WorkersCard";
+import { WorkerTokensCard } from "./WorkerTokensCard";
 
 export function SidecarsTab({ editor, admin }: { editor: boolean; admin: boolean }) {
   const { start, current } = useStartJob();
@@ -23,6 +24,7 @@ export function WorkersTab({ editor }: { editor: boolean }) {
   return (
     <Stack gap="md" maw={980}>
       <WorkersCard editor={editor} />
+      {editor && <WorkerTokensCard />}
     </Stack>
   );
 }

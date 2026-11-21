@@ -31,6 +31,7 @@ export function WorkersCard({ editor }: { editor: boolean }) {
       const state = on ? await startWorker(unwrap(await api.POST("/api/workers/token")).token) : await stopWorker();
       queryClient.setQueryData(["worker-state"], state);
       void queryClient.invalidateQueries({ queryKey: ["workers"] });
+      void queryClient.invalidateQueries({ queryKey: ["worker-tokens"] }); // a start makes a session
     } catch (err) {
       fail(err);
     } finally {

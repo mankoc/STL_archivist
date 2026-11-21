@@ -147,6 +147,18 @@ async fn a_worker_embeds_and_tags() {
     assert_eq!(call(&lib.state, "POST", "/api/workers/token", Some(&viewer), None).await.status, StatusCode::FORBIDDEN);
     let token = call(&lib.state, "POST", "/api/workers/token", Some(&ed), None).await.json()["token"].as_str().unwrap().to_string();
     assert_ne!(token, ed);
+    // It opens the worker connection and nothing else.
+    assert_eq!(call(&lib.state, "GET", "/api/workers", Some(&token), None).await.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(call(&lib.state, "GET", "/api/me/settings", Some(&token), None).await.status, StatusCode::UNAUTHORIZED);
+    // Listed for its user (and administrators), not for other editors; viewers have none.
+    let listed = call(&lib.state, "GET", "/api/workers/tokens", Some(&ed), None).await.json();
+    assert_eq!(listed.as_array().unwrap().len(), 1, "{listed}");
+    assert_eq!(listed[0]["user"], "ed");
+    let other = lib.user("ed2", Role::Editor);
+    assert_eq!(call(&lib.state, "GET", "/api/workers/tokens", Some(&other), None).await.json(), json!([]));
+    assert_eq!(call(&lib.state, "GET", "/api/workers/tokens", Some(&viewer), None).await.status, StatusCode::FORBIDDEN);
+    let revoke = format!("/api/workers/tokens/{}", listed[0]["id"].as_str().unwrap());
+    assert_eq!(call(&lib.state, "DELETE", &revoke, Some(&other), None).await.status, StatusCode::NOT_FOUND, "not another editor's");
 
     let (task, asked, welcome) = fake_worker(&base, &token, stl_server::components::CLIP_SHA256).await;
     assert_eq!(welcome, ToWorker::Welcome { clip: true, chat: true, note: None });
@@ -178,6 +190,12 @@ async fn a_worker_embeds_and_tags() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     assert!(call(&lib.state, "GET", "/api/workers", Some(&ed), None).await.json()["workers"].as_array().unwrap().is_empty());
+
+    // Its user ends the session: the token no longer connects.
+    assert_ne!(call(&lib.state, "GET", "/api/workers/connect", Some(&token), None).await.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(call(&lib.state, "DELETE", &revoke, Some(&ed), None).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(call(&lib.state, "GET", "/api/workers/tokens", Some(&ed), None).await.json(), json!([]));
+    assert_eq!(call(&lib.state, "GET", "/api/workers/connect", Some(&token), None).await.status, StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test(flavor = "multi_thread")]
