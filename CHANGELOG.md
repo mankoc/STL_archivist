@@ -16,6 +16,11 @@
 - **Oversized GIFs no longer crash the server:** an animated GIF declaring a screen over 4096 pixels wide or tall
   is not animated, and GIF frames are decoded within the usual memory limits; a small file declaring 65535×65535
   asked for about 17 GB and aborted the server on every crawl.
+- **The chosen cover survives maintenance:** *Generate Thumbnails* and a crawl of a changed archive keep each image's
+  place in the model's order (matched by name), and *Prune Images* keeps the first images in that order, so the
+  cover is no longer pruned. Pruning now also updates the folders' `METADATA.7z`.
+- **Thumbnails stay with their images:** replaced thumbnails are deleted only after the database commits, so a failed
+  or rolled-back write no longer leaves image records without thumbnails.
 
 ## 2026.46.2 — 2026-11-15
 

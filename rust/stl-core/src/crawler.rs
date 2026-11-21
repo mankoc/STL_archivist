@@ -775,9 +775,12 @@ impl Run<'_> {
         }
         let results = {
             let t = tx(&mut self.conn)?;
-            let r = db::upsert_batch(&t, self.store, &cfg.upsert, &inputs, self.failures, MAX_CONSECUTIVE_FAILURES)?;
+            let (r, drops) = db::upsert_batch(&t, self.store, &cfg.upsert, &inputs, self.failures, MAX_CONSECUTIVE_FAILURES)?;
             db::store_stl_lists(&t, &stl_lists)?;
             t.commit()?;
+            if let Some(s) = self.store {
+                db::drop_unused_thumbs(&self.conn, s, &drops)?;
+            }
             r
         };
         for (k, (input, result)) in inputs.iter().zip(results).enumerate() {
