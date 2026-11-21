@@ -288,7 +288,7 @@ pub(crate) fn extract_native(path: &str, unrar: &str, max_images: Option<usize>)
 }
 
 /// [`extract_native`] of an archive whose catalog is at hand.
-fn extract_listed(path: &str, members: &[archive::ArchiveMember], unrar: &str, max_images: Option<usize>) -> Extracted {
+pub(crate) fn extract_listed(path: &str, members: &[archive::ArchiveMember], unrar: &str, max_images: Option<usize>) -> Extracted {
     let p = Path::new(path);
     let names: Vec<String> = members.iter().map(|m| m.name.clone()).collect();
     let uncompressed = Some(members.iter().filter_map(|m| m.size).sum::<u64>() as i64);
