@@ -121,7 +121,7 @@ stl_database/
   more than viewer (writes: `Editor`; users, backups, compacting, clearing: `Admin`). Tests get
   a session with `TestLib::user(name, role)`; `library_with` adjusts the config.
 - **Edits:** after a write commits, call `lib.schedule_sidecars(archive_paths)`; delete
-  thumbnails with one `thumbs.delete_many` after the commit. Writes under `/api/models`,
+  thumbnails with one `lib.drop_thumbs` after the commit (never `thumbs.delete_many`: image ids are reused). Writes under `/api/models`,
   `/api/images`, `/api/lookups`, `/api/maintenance`, `/api/libraries` and `/api/ai/commit` are announced by
   the `announce_changes` middleware (POSTs that only read are listed there). Library settings
   come from `library_settings::LibrarySettings` (`settings.json`, read per use).

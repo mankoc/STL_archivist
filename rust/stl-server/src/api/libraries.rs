@@ -285,7 +285,7 @@ pub async fn change_folder(State(lib): State<AppState>, me: CurrentUser, Path(id
             // The excluded folders' sidecars stay as they are: their folders are not read any more,
             // and they bring the records back if the folder is included again.
             if let Some((refs, _)) = excluded {
-                lib.thumbs.delete_many(&stl_core::storage::crawl::ref_ids(&refs))?;
+                lib.drop_thumbs(&stl_core::storage::crawl::ref_ids(&refs))?;
             }
             Ok((LibraryFolder::from(folder), touched))
         })
@@ -372,8 +372,7 @@ pub struct LibraryRemoved {
 }
 
 fn removed(lib: &crate::Library, r: Removed) -> Result<LibraryRemoved, ApiError> {
-    let ids: Vec<u64> = stl_core::storage::crawl::ref_ids(&r.refs);
-    lib.thumbs.delete_many(&ids)?;
+    lib.drop_thumbs(&stl_core::storage::crawl::ref_ids(&r.refs))?;
     Ok(LibraryRemoved { moved_to: r.moved_to, moved: r.moved, deleted: r.deleted })
 }
 

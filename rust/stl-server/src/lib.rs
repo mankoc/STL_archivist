@@ -97,6 +97,13 @@ fn backup_before_libraries(config: &Config, thumbs: &ThumbStore) -> Result<(), S
 }
 
 impl Library {
+    /// After a write committed: delete the thumbnails of the store keys `ids` that no
+    /// image uses any more ([`stl_core::storage::crawl::drop_unused_thumbs`]: never
+    /// `thumbs.delete_many`, which could take a new image's thumbnail).
+    pub fn drop_thumbs(&self, ids: &[u64]) -> rusqlite::Result<()> {
+        self.db.with(|c| stl_core::storage::crawl::drop_unused_thumbs(c, &self.thumbs, ids))
+    }
+
     /// Lock the data directory, migrate the database and open the thumbnail store.
     pub fn open(config: Config) -> Result<Library, String> {
         let owner = format!("stl-server {}, pid {}", stl_core::VERSION, std::process::id());
