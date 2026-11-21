@@ -1071,7 +1071,9 @@ impl Run<'_> {
     }
 
     /// Hash, read and record the archives; returns the folders whose sidecars changed.
-    fn process(&mut self, archives: &[String]) -> Result<HashSet<String>, CrawlError> {
+    /// The folders changed, and whether every archive was processed (not stopped
+    /// or aborted).
+    fn process(&mut self, archives: &[String]) -> Result<(HashSet<String>, bool), CrawlError> {
         let host = self.host;
         let total = archives.len();
         if total > 0 {
@@ -1080,14 +1082,14 @@ impl Run<'_> {
         let mut modified: HashSet<String> = HashSet::new();
         for start in (0..total).step_by(BATCH_SIZE) {
             if host.should_stop() {
-                break;
+                return Ok((modified, false));
             }
             let batch = &archives[start..(start + BATCH_SIZE).min(total)];
-            if self.batch(batch, start, &mut modified)? || host.should_stop() {
-                break;
+            if self.batch(batch, start, &mut modified)? {
+                return Ok((modified, false));
             }
         }
-        Ok(modified)
+        Ok((modified, true))
     }
 
     /// Write the sidecars of the folders that changed.
@@ -1201,9 +1203,14 @@ pub fn crawl(db_path: &Path, store: Option<&ThumbStore>, cfg: &CrawlConfig, host
     host.emit(Event::Phase(msg));
 
     run.import_sidecars(&archives)?;
-    let modified = run.process(&archives)?;
+    let (modified, complete) = run.process(&archives)?;
     run.export_sidecars(modified);
-    run.settle_missing(missing)?;
+    // An archive not reached may be a missing record moved: judge none gone.
+    if complete {
+        run.settle_missing(missing)?;
+    } else if !missing.is_empty() {
+        run.log(format!("Stopped before every archive was read: {} record(s) not found on disk are left as they are.", missing.len()));
+    }
     run.close(total)?;
     Ok(run.finish())
 }
@@ -1312,6 +1319,8 @@ mod tests {
         embeds: std::sync::Mutex<Vec<usize>>,
         /// What a PDF's first page gives (`None`: no PDF library).
         pdf: Option<Vec<u8>>,
+        /// Stop requested from the start.
+        stop: bool,
     }
 
     impl Host for Recorder {
@@ -1325,8 +1334,33 @@ mod tests {
         }
         fn emit(&self, _: Event) {}
         fn should_stop(&self) -> bool {
-            false
+            self.stop
         }
+    }
+
+    /// A stopped crawl did not see every archive, so it judges no record gone: a
+    /// moved archive it never reached keeps its record.
+    #[test]
+    fn a_stopped_crawl_deletes_no_missing_record() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("archives");
+        std::fs::create_dir_all(folder.join("sub")).unwrap();
+        let mut z = zip::ZipWriter::new(std::fs::File::create(folder.join("m.zip")).unwrap());
+        z.start_file("model.stl", zip::write::SimpleFileOptions::default()).unwrap();
+        z.write_all(b"solid
+endsolid
+").unwrap();
+        z.finish().unwrap();
+        let db = dir.path().join("lib.db");
+        storage::migrate(&db, &storage::Vectors::default()).unwrap();
+        let cfg = CrawlConfig { source_dir: crate::winpath::native(&folder.to_string_lossy()), recurse: true, max_workers: 1, ..Default::default() };
+        assert_eq!(crawl(&db, None, &cfg, &Recorder::default()).unwrap().new, 1);
+        std::fs::rename(folder.join("m.zip"), folder.join("sub").join("m.zip")).unwrap();
+        let summary = crawl(&db, None, &cfg, &Recorder { stop: true, ..Default::default() }).unwrap();
+        assert_eq!((summary.deleted, summary.marked), (0, 0));
+        let records: i64 = storage::open(&db).unwrap().query_row("SELECT count(*) FROM models", [], |r| r.get(0)).unwrap();
+        assert_eq!(records, 1, "the moved archive's record is kept");
     }
 
     #[test]
