@@ -113,12 +113,22 @@ pub fn load_members(path: &Path, names: &[String], unrar: &str) -> Result<Loaded
     } else {
         archive::read_members_with(path, &wanted, unrar).map_err(ViewError::Archive)?.into_iter().collect()
     };
+    // A name asked for more than once gets a copy until its last use.
+    let mut uses: HashMap<String, usize> = HashMap::new();
+    for n in &wanted {
+        *uses.entry(n.clone()).or_default() += 1;
+    }
     Ok(checked
         .into_iter()
         .map(|(name, check)| {
             let scene = check.and_then(|()| {
-                // Taken out of the map, so each member's bytes are freed once it is loaded.
-                let bytes = data.remove(&name).ok_or_else(|| ViewError::Missing(name.clone()))?;
+                let left = uses.get_mut(&name).map(|u| {
+                    *u -= 1;
+                    *u
+                });
+                // Taken out of the map at its last use, so each member's bytes are freed once it is loaded.
+                let bytes = if left == Some(0) { data.remove(&name) } else { data.get(&name).cloned() };
+                let bytes = bytes.ok_or_else(|| ViewError::Missing(name.clone()))?;
                 let scene = meshpeek_core::io::load_data(Path::new(&name), meshpeek_core::io::Data::Owned(bytes), &LoadOptions::default())
                     .map_err(ViewError::Model)?;
                 Ok(meshpeek_core::wire::encode(&scene))
@@ -213,9 +223,10 @@ mod tests {
     fn members_load_together_each_with_its_own_result() {
         let dir = tempfile::tempdir().unwrap();
         let path = archive(dir.path());
-        let names: Vec<String> = ["Parts/b.STL", "missing.stl", "readme.txt", "bad.stl"].map(String::from).to_vec();
+        let names: Vec<String> = ["Parts/b.STL", "missing.stl", "readme.txt", "bad.stl", "Parts/b.STL"].map(String::from).to_vec();
         let loaded = load_members(&path, &names, "").unwrap();
         assert_eq!(loaded.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), names);
+        assert_eq!(loaded[4].1.as_ref().unwrap(), loaded[0].1.as_ref().unwrap(), "asked twice, loaded twice");
         let scene = meshpeek_core::wire::decode(loaded[0].1.as_ref().unwrap()).unwrap();
         assert_eq!(scene.objects[0].mesh.n_faces(), 1);
         assert!(matches!(loaded[1].1, Err(ViewError::Missing(_))));

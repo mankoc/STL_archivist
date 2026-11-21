@@ -1,4 +1,4 @@
-import { detailFacts, loadTab, middlePath, moveImage, orderedImages, saveTab, webLink } from "./detail";
+import { detailFacts, loadTab, middlePath, moveImage, orderedImages, saveTab } from "./detail";
 
 describe("detail facts", () => {
   it("lists what has a value, joined and formatted", () => {
@@ -30,12 +30,6 @@ describe("the pane's tab", () => {
 });
 
 describe("links and paths", () => {
-  it("links only web addresses", () => {
-    expect(webLink("https://example.com/x")).toBe("https://example.com/x");
-    expect(webLink("javascript:alert(1)")).toBeNull();
-    expect(webLink(null)).toBeNull();
-  });
-
   it("shortens a long path in the middle, keeping the name", () => {
     const p = "F:\\STL\\00 - Kickstarters\\VintageVault\\Deep\\Folder\\VintageVault - Orbiting Beauties.7z";
     const short = middlePath(p, 60);

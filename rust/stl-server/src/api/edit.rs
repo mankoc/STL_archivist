@@ -230,6 +230,7 @@ pub async fn choices(State(lib): State<AppState>, _me: CurrentUser) -> Result<Js
 }
 
 #[derive(Deserialize, utoipa::IntoParams)]
+#[serde(deny_unknown_fields)]
 pub struct CollectionQuery {
     pub collection: String,
 }

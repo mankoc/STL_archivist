@@ -61,6 +61,15 @@
   SHA-256, and the MeshPeek update accepts only version tags.
 - **Steadier image ordering and selection:** a new image order shows at once, so two quick drags no longer undo each
   other; a search the server refuses no longer clears the table's selection.
+- **Literal `_` and `%` in filters and searches:** folder filters, file-type and warning filters, the search box
+  and the folder view's subfolders no longer treat `_` and `%` as wildcards (a filter on `Set_1` matched `SetX1`).
+- **Including a folder again ignores case where excluding does:** on Windows, *Include* finds an exclusion
+  spelled with other letter case.
+- **Fewer small surprises:** query parameters refuse unknown names like request bodies; creating the same user
+  twice at once answers 409 instead of 500; *Delete Files* can be stopped between files (the records of files
+  already gone are removed); *Sort Files* drops its copy when a move between drives cannot remove the original;
+  a model file asked for twice in one viewer batch loads both times; the desktop update dialog shows the version
+  it installs in its usual spelling.
 
 ## 2026.46.2 — 2026-11-15
 

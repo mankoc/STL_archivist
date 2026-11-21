@@ -31,7 +31,7 @@ impl Changes {
 /// `LIKE` pattern for paths under `folder` (`/` form, `!` escapes).
 fn under(folder: &str) -> String {
     let posix = WinPath::new(folder).as_posix();
-    let escaped: String = posix.chars().flat_map(|c| if matches!(c, '%' | '_' | '!') { vec!['!', c] } else { vec![c] }).collect();
+    let escaped = crate::storage::like_literal(&posix);
     format!("{}/%", escaped.trim_end_matches('/'))
 }
 

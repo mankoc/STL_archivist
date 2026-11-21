@@ -251,6 +251,7 @@ pub async fn login(State(lib): State<AppState>, me: CurrentUser, Path(id): Path<
 }
 
 #[derive(Deserialize, IntoParams)]
+#[serde(deny_unknown_fields)]
 pub struct PreviewQuery {
     /// `pull` or `push`.
     pub direction: Direction,

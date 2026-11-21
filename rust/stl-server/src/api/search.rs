@@ -19,6 +19,7 @@ use crate::{ApiError, AppState};
 pub const MAX_RESULT_IMAGES: usize = 1024;
 
 #[derive(Deserialize, utoipa::IntoParams)]
+#[serde(deny_unknown_fields)]
 pub struct SearchQuery {
     /// `dhash` (default) or `clip`.
     pub method: Option<String>,
