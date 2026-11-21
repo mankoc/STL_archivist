@@ -10,7 +10,8 @@
     "test": "vitest run",
     "gen:api": "cd ../rust && cargo run -q -p stl-server -- openapi > ../web/openapi.json && cd ../web && openapi-typescript openapi.json -o src/api/schema.d.ts",
     "check:api": "openapi-typescript openapi.json -o src/api/schema.d.ts --check",
-    "gen:viewer": "cd ../rust && cargo build -q -p stl-viewer --target wasm32-unknown-unknown --release && wasm-bindgen --target web --out-dir ../web/src/viewer/wasm --out-name stl_viewer target/wasm32-unknown-unknown/release/stl_viewer.wasm"
+    "gen:viewer": "cd ../rust && cargo build -q -p stl-viewer --target wasm32-unknown-unknown --release && wasm-bindgen --target web --out-dir ../web/src/viewer/wasm --out-name stl_viewer target/wasm32-unknown-unknown/release/stl_viewer.wasm",
+    "lint": "eslint --max-warnings 0 ."
   },
   "dependencies": {
     "@mantine/core": "^8.3.18",
@@ -29,12 +30,15 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.2.0",
+    "eslint": "^10.15.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "jsdom": "^26.1.0",
     "openapi-typescript": "^7.13.0",
     "postcss": "^8.5.30",
     "postcss-preset-mantine": "^1.18.0",
     "postcss-simple-vars": "^7.0.1",
     "typescript": "~5.9.3",
+    "typescript-eslint": "^8.73.0",
     "vite": "^7.3.7",
     "vitest": "^5.1.0"
   }
