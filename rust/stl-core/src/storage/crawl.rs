@@ -540,7 +540,10 @@ fn new_values(tx: &Transaction, cfg: &UpsertConfig, input: &UpsertInput, ch: &Ch
     Ok((row, scales, tag_ids))
 }
 
-/// The model's images, from what was just read; the thumbnails go in `puts`.
+/// The model's images, from what was just read; the thumbnails go in `puts`, and
+/// the replaced images' store keys in `drops` (for [`drop_unused_thumbs`] after
+/// the commit). A new image keeps the place of the old one with its name.
+#[allow(clippy::too_many_arguments)]
 fn replace_images<'a>(
     tx: &Transaction,
     store: Option<&ThumbStore>,
@@ -549,23 +552,16 @@ fn replace_images<'a>(
     model_id: i64,
     hash_changed: bool,
     puts: &mut Vec<(u64, &'a [u8])>,
+    drops: &mut Vec<u64>,
 ) -> Result<Upserted> {
     let mut out = Upserted::default();
-    if hash_changed {
-        let mut st = tx.prepare("SELECT id, thumbnail_path FROM images WHERE model_id = ?1 ORDER BY id")?;
-        let old_imgs: Vec<(i64, Option<String>)> =
-            st.query_map([model_id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_>>()?;
-        let refs: Vec<String> = old_imgs.iter().filter_map(|(_, t)| t.clone()).filter(|t| !t.is_empty()).collect();
-        if let Some(s) = store {
-            let _ = s.delete_many(&ref_ids(&refs));
-        }
-        for (id, _) in &old_imgs {
-            tx.execute("DELETE FROM images WHERE id = ?1", [id])?;
-        }
-    }
+    let positions = if hash_changed { remove_images(tx, model_id, drops)? } else { HashMap::new() };
     // An image row for each thumbnail made; its id is the store's key.
     let add = |name: &str, dhash: &Option<String>| -> Result<i64> {
-        tx.execute("INSERT INTO images (model_id, filename, dhash) VALUES (?1, ?2, ?3)", params![model_id, name, dhash])?;
+        tx.execute(
+            "INSERT INTO images (model_id, filename, dhash, position) VALUES (?1, ?2, ?3, ?4)",
+            params![model_id, name, dhash, positions.get(name)],
+        )?;
         let id = tx.last_insert_rowid();
         tx.execute("UPDATE images SET thumbnail_path = ?2 WHERE id = ?1", params![id, id.to_string()])?;
         Ok(id)
@@ -602,6 +598,7 @@ fn upsert<'a>(
     cfg: &UpsertConfig,
     input: &'a UpsertInput,
     puts: &mut Vec<(u64, &'a [u8])>,
+    drops: &mut Vec<u64>,
 ) -> Result<Upserted> {
     let Some(ch) = &input.changed else {
         // Unchanged: re-apply the pattern without overwriting.
@@ -630,7 +627,7 @@ fn upsert<'a>(
     link_all(tx, "model_tags", "tag_id", model_id, &tag_ids)?;
 
     let out = if input.existing.is_none() || hash_changed {
-        replace_images(tx, store, cfg, ch, model_id, hash_changed, puts)?
+        replace_images(tx, store, cfg, ch, model_id, hash_changed, puts, drops)?
     } else {
         Upserted::default()
     };
@@ -1009,6 +1006,8 @@ pub fn store_stl_lists(tx: &Transaction, lists: &[StlList]) -> Result<()> {
 /// The batch's thumbnails go to the store in one write transaction at the end
 /// (one disk sync per batch, not one per archive and image), before the caller
 /// commits `tx`; when the store refuses them, their image rows are removed.
+/// Also returns the store keys of the images replaced, for [`drop_unused_thumbs`]
+/// once `tx` is committed.
 pub fn upsert_batch(
     tx: &Transaction,
     store: Option<&ThumbStore>,
@@ -1016,14 +1015,15 @@ pub fn upsert_batch(
     inputs: &[UpsertInput],
     failures_before: usize,
     max_failures: usize,
-) -> Result<Vec<std::result::Result<Upserted, String>>> {
+) -> Result<(Vec<std::result::Result<Upserted, String>>, Vec<u64>)> {
     let mut out = Vec::with_capacity(inputs.len());
     let mut failures = failures_before;
     let mut puts: Vec<(u64, &[u8])> = Vec::new();
+    let mut drops: Vec<u64> = Vec::new();
     for input in inputs {
         tx.execute_batch("SAVEPOINT crawl_upsert")?;
-        let before = puts.len();
-        match upsert(tx, store, cfg, input, &mut puts) {
+        let (before, dropped) = (puts.len(), drops.len());
+        match upsert(tx, store, cfg, input, &mut puts, &mut drops) {
             Ok(u) => {
                 tx.execute_batch("RELEASE crawl_upsert")?;
                 failures = 0;
@@ -1032,6 +1032,7 @@ pub fn upsert_batch(
             Err(e) => {
                 tx.execute_batch("ROLLBACK TO crawl_upsert; RELEASE crawl_upsert")?;
                 puts.truncate(before);
+                drops.truncate(dropped);
                 failures += 1;
                 out.push(Err(e.to_string()));
                 if failures >= max_failures {
@@ -1047,7 +1048,40 @@ pub fn upsert_batch(
         let ids: Vec<i64> = puts.iter().map(|(id, _)| *id as i64).collect();
         super::maintenance::delete_images(tx, &ids)?;
     }
-    Ok(out)
+    Ok((out, drops))
+}
+
+/// Delete a model's images; their store keys go to `drops`. Returns the place
+/// each name had in the model's order.
+pub(super) fn remove_images(tx: &Transaction, model_id: i64, drops: &mut Vec<u64>) -> Result<HashMap<String, i64>> {
+    let mut st = tx.prepare("SELECT thumbnail_path, filename, position FROM images WHERE model_id = ?1")?;
+    let mut refs = Vec::new();
+    let mut positions = HashMap::new();
+    let mut rows = st.query([model_id])?;
+    while let Some(r) = rows.next()? {
+        let (thumb, name, position): (Option<String>, Option<String>, Option<i64>) = (r.get(0)?, r.get(1)?, r.get(2)?);
+        refs.extend(thumb);
+        if let (Some(n), Some(p)) = (name, position) {
+            positions.insert(n, p);
+        }
+    }
+    drops.extend(ref_ids(&refs));
+    tx.execute("DELETE FROM images WHERE model_id = ?1", [model_id])?;
+    Ok(positions)
+}
+
+/// After a commit: delete the thumbnails of the store keys `ids` that no image
+/// uses (a key freed in the transaction may have gone to a new image).
+pub fn drop_unused_thumbs(conn: &Connection, store: &ThumbStore, ids: &[u64]) -> Result<()> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let json = format!("[{}]", ids.iter().map(u64::to_string).collect::<Vec<_>>().join(","));
+    let mut st = conn.prepare("SELECT id FROM images WHERE id IN (SELECT value FROM json_each(?1))")?;
+    let used: HashSet<i64> = st.query_map([json], |r| r.get(0))?.collect::<Result<_>>()?;
+    let unused: Vec<u64> = ids.iter().copied().filter(|&i| !used.contains(&(i as i64))).collect();
+    let _ = store.delete_many(&unused);
+    Ok(())
 }
 
 #[cfg(test)]
