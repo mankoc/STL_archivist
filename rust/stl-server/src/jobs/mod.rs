@@ -500,6 +500,8 @@ async fn worker(lib: Weak<Library>, wake: Arc<Notify>) {
         match outcome {
             Ok(summary) if job.stop.load(Ordering::Relaxed) => finish(&job, JobState::Cancelled, Some(format!("stopped: {summary}"))),
             Ok(summary) => finish(&job, JobState::Done, Some(summary)),
+            // Many bodies end a stop with an error ("stopped"): that is not a failure.
+            Err(e) if job.stop.load(Ordering::Relaxed) => finish(&job, JobState::Cancelled, Some(format!("stopped: {e}"))),
             Err(e) => {
                 tracing::error!(job = job.info().id, "job failed: {e}");
                 finish(&job, JobState::Failed, Some(e));

@@ -7,7 +7,10 @@ import type { components, paths } from "./schema";
 
 export type Schemas = components["schemas"];
 
-export const api = createClient<paths>({ baseUrl: "", credentials: "same-origin" });
+/** Sent with every request: the server refuses changes made with the session cookie without it (no other site can send it). */
+const CLIENT_HEADERS = { "X-Requested-With": "stl-web" };
+
+export const api = createClient<paths>({ baseUrl: "", credentials: "same-origin", headers: CLIENT_HEADERS });
 
 /** An API error: the HTTP status and the server's message. */
 export class ApiError extends Error {
@@ -25,7 +28,7 @@ export class ApiError extends Error {
  * text, a proxy's HTML page) gives its status text, not a parse error.
  */
 export async function postForm<T>(url: string, form: FormData): Promise<T> {
-  const resp = await fetch(url, { method: "POST", body: form, credentials: "same-origin" });
+  const resp = await fetch(url, { method: "POST", body: form, credentials: "same-origin", headers: CLIENT_HEADERS });
   let body: unknown = null;
   try {
     body = await resp.json();
@@ -45,6 +48,7 @@ export function uploadPackage(file: Blob, onProgress: (fraction: number) => void
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/backups/upload");
     xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    for (const [k, v] of Object.entries(CLIENT_HEADERS)) xhr.setRequestHeader(k, v);
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(e.loaded / e.total);
     };
