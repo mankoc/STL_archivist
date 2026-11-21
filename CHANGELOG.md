@@ -43,6 +43,10 @@
   them. Clients using `Authorization: Bearer` (the desktop app, compute workers, sync) are unaffected.
 - **Stopped jobs show as cancelled:** a job stopped by hand ends as *Cancelled* even when its work ends with an
   error, instead of *Failed*.
+- **Sort Files reports a half-done sort:** when the files moved but their records could not be updated, the job log
+  lists every move, the sidecars are refreshed, and the error says to crawl the target folder.
+- **The UnRAR download can be stopped:** stopping the components install stops it, and an endless or oversized
+  response is cut off.
 
 ## 2026.46.2 — 2026-11-15
 
