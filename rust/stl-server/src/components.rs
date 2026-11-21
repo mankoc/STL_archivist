@@ -581,6 +581,29 @@ fn sha256_of(path: &Path) -> io::Result<String> {
     Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
+/// Copy `from` to `to` in chunks: at most `cap` bytes, stopping when `ctl` asks
+/// (not a checkpoint: a paused download would time out). Progress goes to `ctl`,
+/// up to `expected` bytes.
+fn copy_bounded(from: &mut impl Read, to: &mut impl Write, cap: u64, ctl: &Control, expected: u64) -> Result<u64, String> {
+    let mut buf = vec![0u8; 1 << 20];
+    let mut copied = 0u64;
+    loop {
+        if ctl.stop_requested() {
+            return Err("stopped".into());
+        }
+        let n = from.read(&mut buf).map_err(|e| e.to_string())?;
+        if n == 0 {
+            return Ok(copied);
+        }
+        if copied + n as u64 > cap {
+            return Err(format!("larger than {} MB", cap >> 20));
+        }
+        to.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+        ctl.advance((copied + n as u64).min(expected) - copied.min(expected));
+        copied += n as u64;
+    }
+}
+
 /// Download `url` to `dest`, resuming a `dest.part` left by an earlier try, and
 /// check its size and hash. Progress goes to `ctl` (bytes); a stop request
 /// keeps the `.part` for the next try.
@@ -599,9 +622,14 @@ fn download_checked(url: &str, dest: &Path, size: u64, sha256: &str, signer: Opt
         let part = PathBuf::from(format!("{}.part", dest.display()));
         let mut resp = agent().get(url).call().map_err(|e| format!("download {url}: {e}"))?;
         let mut out = File::create(&part).map_err(|e| format!("{}: {e}", part.display()))?;
-        let copied = io::copy(&mut resp.body_mut().as_reader(), &mut out).map_err(|e| format!("download {url}: {e}"))?;
+        // The size is only what the file was: allow it to grow, not to be endless.
+        let cap = size.saturating_mul(4).max(64 << 20);
+        let copied = copy_bounded(&mut resp.body_mut().as_reader(), &mut out, cap, ctl, size);
         drop(out);
-        ctl.advance(copied.min(size));
+        if let Err(e) = copied {
+            let _ = fs::remove_file(&part);
+            return Err(if e == "stopped" { e } else { format!("download {url}: {e}") });
+        }
         if let Err(e) = check_signature(&part, signer) {
             let _ = fs::remove_file(&part);
             return Err(format!("{url}: {e}; the download was deleted"));
@@ -1085,6 +1113,20 @@ mod tests {
     use std::net::TcpListener;
 
     use super::*;
+
+    /// A download of unknown size is copied in chunks: capped, stoppable, its
+    /// progress at most the expected size.
+    #[test]
+    fn bounded_copies() {
+        let ctl = Control::new();
+        ctl.set_total(2000);
+        let mut out = Vec::new();
+        assert_eq!(copy_bounded(&mut &[7u8; 3000][..], &mut out, 5000, &ctl, 1000), Ok(3000));
+        assert_eq!((out.len(), ctl.progress().0), (3000, 1000));
+        assert!(copy_bounded(&mut &[7u8; 3000][..], &mut Vec::new(), 2000, &ctl, 1000).unwrap_err().starts_with("larger than"));
+        ctl.request_stop();
+        assert_eq!(copy_bounded(&mut &[7u8; 10][..], &mut Vec::new(), 2000, &ctl, 10), Err("stopped".into()));
+    }
 
     fn sha(bytes: &[u8]) -> String {
         Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
