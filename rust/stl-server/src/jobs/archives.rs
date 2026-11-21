@@ -105,12 +105,18 @@ pub(super) fn sort_files(lib: &Library, job: &Job, ids: &[i64], target_dir: &str
     }
     job.ctl.set_total(rows.len() as u64);
     let moved = stl_core::sort_files::execute(&rows)?;
-    lib.db.with_tx(|tx| storage::model_files::set_archive_paths(tx, &moved, Some(target_dir))).map_err(db_err)?;
+    let recorded = lib.db.with_tx(|tx| storage::model_files::set_archive_paths(tx, &moved, Some(target_dir)));
     job.ctl.advance(rows.len() as u64);
+    // The files have moved either way: say where, and refresh both folders' sidecars.
     for r in rows.iter().filter(|r| r.moves()) {
         lib.job_log(job, format!("Moved: {} → {}", r.from, r.to));
     }
     job.touch_sidecars(rows.iter().filter(|r| r.moves()).map(|r| r.from.clone()).chain(moved.iter().map(|(_, p)| p.clone())));
+    if let Err(e) = recorded {
+        return Err(format!(
+            "the files were moved but their records could not be updated ({e}): crawl {target_dir} to find them again"
+        ));
+    }
     let others = rows.iter().filter(|r| r.status == "FILE").count();
     Ok(if others > 0 {
         format!("moved {} archive(s) and {others} other file(s)", moved.len())
