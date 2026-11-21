@@ -21,7 +21,7 @@ import {
   IconLayoutDistributeHorizontal, IconPalette, IconPolygon,
 } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
 import { api, unwrap } from "../api/client";
 import { type FileTree, fileTree, foldersOf, treeFiles } from "../browser/fileTree";
@@ -297,9 +297,10 @@ function FileTreePane({ tree, order, current, shown, status, styles, onShowOnly,
   const controller = useTree({
     initialExpandedState: getTreeExpandedState(tree.data, order.length <= 40 ? "*" : current ? foldersOf(tree, current) : []),
   });
+  // Not on the controller: it is a new object each render.
+  const expand = useEffectEvent((folders: string[]) => folders.forEach((f) => controller.expand(f)));
   useEffect(() => {
-    if (current) for (const f of foldersOf(tree, current)) controller.expand(f);
-    // (not on the controller: it is a new object each render)
+    if (current) expand(foldersOf(tree, current));
   }, [tree, current]);
   const [menu, setMenu] = useState<{ value: string; x: number; y: number } | null>(null);
   const menuInfo = menu ? tree.info.get(menu.value) : undefined;

@@ -30,6 +30,7 @@ cd rust && cargo build -p stl-server -p stl-desktop && cargo run -p stl-desktop
 cd web && npm install && npm run dev
 npm run build        # web/dist, served by stl-server
 npm test             # vitest
+npm run lint         # ESLint: React's hooks rules
 npm run gen:api      # after changing server routes or schemas, then (from the repository root)
 python tools/api_doc.py  # docs/api.md, the API reference, from web/openapi.json
 npm run gen:viewer   # after changing rust/stl-viewer or the MeshPeek tag: web/src/viewer/wasm (committed);
@@ -37,7 +38,7 @@ npm run gen:viewer   # after changing rust/stl-viewer or the MeshPeek tag: web/s
 
 # Checks (all must pass)
 cd rust && cargo test --workspace && cargo clippy --workspace --all-targets -- -D warnings
-cd web && npm test && npx tsc --noEmit -p .
+cd web && npm test && npm run lint && npx tsc --noEmit -p .
 ```
 
 `rust-toolchain.toml` pins the Rust version for development and CI; `RUST_VERSION` in

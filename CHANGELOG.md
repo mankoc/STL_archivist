@@ -74,6 +74,9 @@
   cleaning up a deleted image's thumbnail right after another write stored the new image's thumbnail under that
   id could delete it (the image then showed none until *Generate Thumbnails*). Thumbnail cleanup now waits for
   other writes and keeps every thumbnail an image still uses.
+- **Hooks are linted:** the web client's checks include `npm run lint` (ESLint with React's hooks rules:
+  `rules-of-hooks` and `exhaustive-deps`, both errors), also in the *Server, web client and desktop shell*
+  workflow. The three effects that left dependencies out on purpose use `useEffectEvent` instead.
 
 ## 2026.46.2 — 2026-11-15
 
