@@ -47,7 +47,7 @@ import { api, postForm, type Schemas, unwrap } from "../api/client";
 import { hasRole, useUser } from "../auth/user";
 import { inDesktopShell, meshpeekState, openFolder, openInMeshPeek, openInPacker, packerState } from "../desktop";
 import { FileList } from "./ArchiveInfo";
-import { detailFacts, type Fields, loadTab, middlePath, moveImage, saveTab, type Tab, webLink } from "./detail";
+import { detailFacts, type Fields, loadTab, middlePath, moveImage, orderedImages, saveTab, type Tab, webLink } from "./detail";
 import { ImageViewer, type ViewerImage } from "./ImageViewer";
 import { baseName } from "../format";
 import { ModelViewer } from "../viewer/ModelViewer";
@@ -143,13 +143,15 @@ export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: num
   ].filter((o) => o != null);
   const openImage = (imageId: number) => setViewing(viewable.findIndex((v) => v.id === imageId));
   // Save a new order of the images (the first is the cover).
+  // Shown at once, so that a second drag starts from the new order (not the one before the save).
   const orderImages = async (ids: number[]) => {
+    queryClient.setQueryData<typeof d>(["model", id], (old) => old && { ...old, images: orderedImages(old.images, ids) });
     try {
       unwrap(await api.PUT("/api/models/{id}/images/order", { params: { path: { id } }, body: { ids } }));
-      await refresh();
     } catch (err) {
       notify((err as Error).message);
     }
+    await refresh();
   };
   const imageIds = d.images.map((i) => i.id);
   return (
