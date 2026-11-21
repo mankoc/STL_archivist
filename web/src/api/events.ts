@@ -9,7 +9,22 @@ export type ServerEvent = Schemas["ServerEvent"];
 type Job = Schemas["JobInfo"];
 
 /** The query keys a library change makes stale. */
-export const LIBRARY_KEYS = ["ids", "rows", "tree", "model", "editor", "lookups", "libraries", "grid", "folders", "folder-cells"] as const;
+export const LIBRARY_KEYS = [
+  "ids",
+  "rows",
+  "tree",
+  "model",
+  "model-files",
+  "model-viewable",
+  "model-warnings",
+  "editor",
+  "lookups",
+  "libraries",
+  "grid",
+  "folders",
+  "folder-cells",
+  "stats",
+] as const;
 
 /** What a change of `what: "rows"` makes stale: a cell outside the filter pane. */
 const ROW_KEYS = ["ids", "rows", "model", "editor", "grid", "folder-cells"] as const;

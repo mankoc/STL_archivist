@@ -34,6 +34,10 @@
   `/api/ai/status` (or hangs it indefinitely when the AI job is paused meanwhile).
 - **The desktop app stays responsive while a library starts:** reloading, *Switch server…* or quitting while a local
   library is starting (which can take minutes the first time) no longer freezes the window.
+- **Rescans refresh the open model:** after a crawl or *Rescan*, the detail pane's file list, viewable files and
+  warnings, and the *Statistics* page, reload instead of showing what they showed before.
+- **Clear upload errors:** a refused image upload or *Find by image* search shows the server's (or proxy's) error,
+  such as *Payload Too Large*, instead of a JSON parse error.
 
 ## 2026.46.2 — 2026-11-15
 
