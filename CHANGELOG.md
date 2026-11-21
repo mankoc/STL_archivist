@@ -13,6 +13,9 @@
   reached kept being deleted with its tags, edits and thumbnails.
 - **Job options are checked:** `POST /api/jobs` refuses unknown fields, so a misspelled option (such as
   `keep_mising`) is an error instead of being ignored.
+- **Oversized GIFs no longer crash the server:** an animated GIF declaring a screen over 4096 pixels wide or tall
+  is not animated, and GIF frames are decoded within the usual memory limits; a small file declaring 65535×65535
+  asked for about 17 GB and aborted the server on every crawl.
 
 ## 2026.46.2 — 2026-11-15
 
