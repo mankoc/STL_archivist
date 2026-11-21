@@ -100,11 +100,10 @@ fn label(key: &str, v: Value) -> String {
         _ => "(none)",
     };
     let text = match v {
-        Value::Null => return null.to_string(),
         Value::Integer(i) => i.to_string(),
         Value::Real(f) => f.to_string(),
         Value::Text(s) => s,
-        Value::Blob(_) => return null.to_string(),
+        Value::Null | Value::Blob(_) => return null.to_string(),
     };
     if key == "release_month"
         && let Ok(m) = text.parse::<usize>()
