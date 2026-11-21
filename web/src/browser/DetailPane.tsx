@@ -361,7 +361,7 @@ export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: num
           <Menu.Item
             leftSection={<IconPhotoStar size={14} />}
             disabled={imageMenu?.id === imageIds[0]}
-            onClick={() => imageMenu && void orderImages([imageMenu.id, ...imageIds.filter((i) => i !== imageMenu.id)])}
+            onClick={() => imageMenu && void orderImages(moveImage(imageIds, imageMenu.id, imageIds[0]))}
           >
             Set as cover
           </Menu.Item>
