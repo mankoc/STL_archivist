@@ -26,7 +26,7 @@ const BATCH_SIZE: usize = 50;
 const MAX_CONSECUTIVE_FAILURES: usize = 50;
 /// The largest image (or PDF) a crawl reads, and the server serves at full size.
 pub const SIZE_LIMIT_IMAGE: u64 = 50 * 1024 * 1024;
-const SIZE_LIMIT_META: u64 = 1024 * 1024;
+const SIZE_LIMIT_META: u64 = metadata::MAX_URL_FILE;
 
 /// The crawl settings (`CrawlerConfig` plus the source folder and pattern).
 #[derive(Debug, Clone, Default)]
