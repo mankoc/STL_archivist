@@ -23,35 +23,32 @@ pub fn rescan_state(conn: &Connection, model_id: i64) -> Result<Option<(Option<S
     .optional()
 }
 
-/// Generate Thumbnails for one model: drop its images (and their thumbnails),
-/// then store `thumbs` (`(member name, JPEG or None for a failed conversion)`)
-/// and set the warning. Returns the number stored, or `None` without the model.
+/// Generate Thumbnails for one model: drop its images, then store `thumbs`
+/// (`(member name, JPEG or None for a failed conversion)`, each keeping the place
+/// of the old image with its name) and set the warning. Returns the number stored
+/// and the old images' store keys, for [`super::crawl::drop_unused_thumbs`] after
+/// the commit; `None` without the model.
 pub fn replace_thumbnails(
     tx: &Transaction,
     store: Option<&ThumbStore>,
     model_id: i64,
     thumbs: &[(String, Option<Vec<u8>>)],
     warning: Option<&str>,
-) -> Result<Option<usize>> {
+) -> Result<Option<(usize, Vec<u64>)>> {
     if tx.query_row("SELECT 1 FROM models WHERE id = ?1", [model_id], |_| Ok(())).optional()?.is_none() {
         return Ok(None);
     }
-    let mut st = tx.prepare("SELECT id, thumbnail_path FROM images WHERE model_id = ?1 ORDER BY id")?;
-    let old: Vec<(i64, Option<String>)> = st.query_map([model_id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_>>()?;
-    drop(st);
-    let refs: Vec<String> = old.iter().filter_map(|(_, t)| t.clone()).filter(|t| !t.is_empty()).collect();
-    if let Some(s) = store {
-        let _ = s.delete_many(&super::crawl::ref_ids(&refs));
-    }
-    for (id, _) in &old {
-        tx.execute("DELETE FROM images WHERE id = ?1", [id])?;
-    }
+    let mut drops = Vec::new();
+    let positions = super::crawl::remove_images(tx, model_id, &mut drops)?;
     let mut count = 0;
     if let Some(s) = store {
         let mut blobs: Vec<(u64, &[u8])> = Vec::new();
         for (name, jpeg) in thumbs {
             let Some(j) = jpeg.as_ref().filter(|j| !j.is_empty()) else { continue };
-            tx.execute("INSERT INTO images (model_id, filename) VALUES (?1, ?2)", params![model_id, name])?;
+            tx.execute(
+                "INSERT INTO images (model_id, filename, position) VALUES (?1, ?2, ?3)",
+                params![model_id, name, positions.get(name)],
+            )?;
             blobs.push((tx.last_insert_rowid() as u64, j.as_slice()));
         }
         // One store commit for the model.
@@ -70,7 +67,7 @@ pub fn replace_thumbnails(
         "UPDATE models SET warning = ?2, updated_at = ?3 WHERE id = ?1 AND warning IS NOT ?2",
         params![model_id, warning, utc_now_text()],
     )?;
-    Ok(Some(count))
+    Ok(Some((count, drops)))
 }
 
 /// What the browser's Rescan writes for one model.
@@ -277,4 +274,46 @@ pub fn delete_missing_under(tx: &Transaction, roots: &[String]) -> Result<(Vec<S
         }
     }
     Ok((deleted, refs))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::{Vectors, crawl, maintenance, migrate, model_files, open, schema_sql};
+
+    /// Generate Thumbnails keeps the chosen order by name, a store key the new
+    /// images reuse keeps its new thumbnail, and Prune keeps the cover.
+    #[test]
+    fn regenerated_thumbnails_keep_their_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("lib.db");
+        migrate(&path, &Vectors::default()).unwrap();
+        let store = ThumbStore::open(&dir.path().join("thumbs")).unwrap();
+        let mut conn = open(&path).unwrap();
+        conn.execute_batch(
+            "INSERT INTO libraries (uuid, name, root) VALUES ('u1', 'F', 'F:');
+             INSERT INTO models (title, library_id, rel_path, archive_hash, is_missing, to_print) VALUES ('A', 1, 'a.7z', 'h1', 0, 0);",
+        )
+        .unwrap();
+        let thumbs: Vec<(String, Option<Vec<u8>>)> = ["a.jpg", "b.jpg", "c.jpg"].map(|n| (n.to_string(), Some(n.as_bytes().to_vec()))).into();
+        let ids = |c: &Connection| model_files::model_images(c, 1).unwrap().into_iter().map(|(id, _)| id).collect::<Vec<i64>>();
+        let tx = conn.transaction().unwrap();
+        assert_eq!(replace_thumbnails(&tx, Some(&store), 1, &thumbs, None).unwrap().unwrap(), (3, vec![]));
+        tx.commit().unwrap();
+        let first = ids(&conn);
+
+        let tx = conn.transaction().unwrap();
+        model_files::order_images(&tx, 1, &[first[2]]).unwrap(); // c.jpg is the cover
+        let (_, drops) = replace_thumbnails(&tx, Some(&store), 1, &thumbs, None).unwrap().unwrap();
+        tx.commit().unwrap();
+        crawl::drop_unused_thumbs(&conn, &store, &drops).unwrap();
+
+        let sql = format!("SELECT filename FROM images WHERE model_id = 1 ORDER BY {}", schema_sql::IMAGE_ORDER);
+        let names: Vec<String> = conn.prepare(&sql).unwrap().query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect();
+        assert_eq!(names, ["c.jpg", "a.jpg", "b.jpg"], "the cover stays first");
+        let now = ids(&conn);
+        let keys: Vec<u64> = now.iter().map(|&i| i as u64).collect();
+        assert_eq!(store.get_many(&keys).unwrap().len(), 3, "reused keys keep the new thumbnails");
+        assert_eq!(maintenance::excess_images(&conn, &[1], 1).unwrap(), (1, now[1..].to_vec()), "pruning keeps the cover");
+    }
 }
