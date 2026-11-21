@@ -43,7 +43,7 @@ import {
 } from "@tabler/icons-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api, ApiError, type Schemas, unwrap } from "../api/client";
+import { api, postForm, type Schemas, unwrap } from "../api/client";
 import { hasRole, useUser } from "../auth/user";
 import { inDesktopShell, meshpeekState, openFolder, openInMeshPeek, openInPacker, packerState } from "../desktop";
 import { FileList } from "./ArchiveInfo";
@@ -57,10 +57,7 @@ import classes from "./DetailPane.module.css";
 async function uploadImages(id: number, files: File[], view = false): Promise<Schemas["AddedImages"]> {
   const form = new FormData();
   for (const f of files) form.append("file", f, f.name);
-  const resp = await fetch(`/api/models/${id}/images${view ? "?view=true" : ""}`, { method: "POST", body: form, credentials: "same-origin" });
-  const body = await resp.json();
-  if (!resp.ok) throw new ApiError(resp.status, body.error ?? resp.statusText);
-  return body;
+  return postForm(`/api/models/${id}/images${view ? "?view=true" : ""}`, form);
 }
 
 export function DetailPane({ id, onEdit }: { id: number | null; onEdit: (id: number) => void }) {

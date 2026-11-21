@@ -106,4 +106,8 @@ describe("staleKeys", () => {
     expect(staleKeys(new Set(["crawl"]))).toBe(LIBRARY_KEYS);
     expect(staleKeys(new Set())).toBe(LIBRARY_KEYS);
   });
+
+  it("covers a model's archive views and the statistics (a rescan changes them)", () => {
+    for (const key of ["model-files", "model-viewable", "model-warnings", "stats"]) expect(LIBRARY_KEYS).toContain(key);
+  });
 });
