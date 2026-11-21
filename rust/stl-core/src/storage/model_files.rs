@@ -72,7 +72,7 @@ pub struct SortSource {
 }
 
 pub fn sort_sources(conn: &Connection, ids: &[i64]) -> Result<Vec<SortSource>> {
-    let json = format!("[{}]", ids.iter().map(i64::to_string).collect::<Vec<_>>().join(","));
+    let json = super::id_json(ids);
     let mut st = conn.prepare(&format!(
         "SELECT m.id, {}, m.title, m.source, m.creator, m.release_year, m.release_month, m.url, \
          m.sequence, scu.name, col.name, sub.name, rel.name FROM models m \
@@ -124,7 +124,7 @@ pub fn set_archive_paths(tx: &Transaction, items: &[(i64, String)], fallback_roo
 pub type DeletionRow = (i64, Option<String>, Option<String>, Option<String>, Option<String>);
 
 pub fn deletion_rows(conn: &Connection, ids: &[i64]) -> Result<Vec<DeletionRow>> {
-    let json = format!("[{}]", ids.iter().map(i64::to_string).collect::<Vec<_>>().join(","));
+    let json = super::id_json(ids);
     let mut st = conn.prepare(&format!(
         "SELECT id, {}, title, creator, archive_hash FROM models \
          WHERE id IN (SELECT value FROM json_each(?1)) ORDER BY id",

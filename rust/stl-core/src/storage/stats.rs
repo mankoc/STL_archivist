@@ -20,8 +20,7 @@ fn scalar(conn: &Connection, sql: &str) -> Result<Value> {
     let v: Value = conn.query_row(sql, [], |r| r.get(0))?;
     // `scalar() or 0`: NULL (an empty SUM) and 0 both become 0.
     Ok(match v {
-        Value::Null => Value::Integer(0),
-        Value::Real(0.0) => Value::Integer(0),
+        Value::Null | Value::Real(0.0) => Value::Integer(0),
         v => v,
     })
 }
