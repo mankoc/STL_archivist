@@ -5,7 +5,7 @@ use super::*;
 /// What to run. Crawl settings not given here come from the library's
 /// `settings.json`, as in the desktop app.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum JobRequest {
     /// Crawl a folder of archives.
     Crawl {

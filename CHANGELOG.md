@@ -8,6 +8,11 @@
   right-click an image → *Set as cover* to put it first; the first image is the cover everywhere (the pane, the
   image grid, sidecars). The cover now shows above the tabs on the *Images* tab too. The order is a new
   `images.position` column (older databases gain it on opening) and `PUT /api/models/{id}/images/order`.
+- **A stopped crawl keeps missing records:** a crawl stopped (or aborted after repeated failures) before it read
+  every archive no longer deletes or flags records it did not find; an archive moved into a batch it never
+  reached kept being deleted with its tags, edits and thumbnails.
+- **Job options are checked:** `POST /api/jobs` refuses unknown fields, so a misspelled option (such as
+  `keep_mising`) is an error instead of being ignored.
 
 ## 2026.46.2 — 2026-11-15
 
