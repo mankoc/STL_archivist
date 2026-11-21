@@ -156,7 +156,14 @@ async fn own_password_and_settings() {
     assert_eq!(call(s, "GET", "/api/me/settings", Some(&other), None).await.json(), json!({}));
 
     let wrong = json!({"current": "nope", "new": "brand new password"});
-    assert_eq!(call(s, "PUT", "/api/auth/password", Some(&token), Some(wrong)).await.status, StatusCode::BAD_REQUEST);
+    assert_eq!(call(s, "PUT", "/api/auth/password", Some(&token), Some(wrong.clone())).await.status, StatusCode::BAD_REQUEST);
+    // Guessing the current password locks the name out, as failed sign-ins do.
+    let mut last = StatusCode::OK;
+    for _ in 0..6 {
+        last = call(s, "PUT", "/api/auth/password", Some(&token), Some(wrong.clone())).await.status;
+    }
+    assert_eq!(last, StatusCode::TOO_MANY_REQUESTS);
+    lib.state.logins.succeeded("carol");
     let ok = json!({"current": "password123", "new": "brand new password"});
     assert_eq!(call(s, "PUT", "/api/auth/password", Some(&token), Some(ok)).await.status, StatusCode::NO_CONTENT);
     assert_eq!(call(s, "GET", "/api/me/settings", Some(&token), None).await.status, StatusCode::UNAUTHORIZED, "sessions end");

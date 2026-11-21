@@ -21,6 +21,8 @@
   cover is no longer pruned. Pruning now also updates the folders' `METADATA.7z`.
 - **Thumbnails stay with their images:** replaced thumbnails are deleted only after the database commits, so a failed
   or rolled-back write no longer leaves image records without thumbnails.
+- **Password changes are rate-limited:** changing your password takes the same memory-bounded check as signing in,
+  and repeated wrong current passwords lock the name out like failed sign-ins (429).
 
 ## 2026.46.2 — 2026-11-15
 
