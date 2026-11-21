@@ -25,6 +25,9 @@
   and repeated wrong current passwords lock the name out like failed sign-ins (429).
 - **Account changes reach open connections:** a compute worker whose user is disabled, demoted below editor or
   signed out is disconnected within 30 seconds, and the event stream of a session that ended closes within a minute.
+- **Inner library folders keep their settings:** a library folder added inside another takes over the excluded
+  folders and folder patterns below it (and gives them back when removed), so excluded folders are no longer
+  crawled again and their patterns no longer lost.
 
 ## 2026.46.2 — 2026-11-15
 
