@@ -1,4 +1,4 @@
-import { detailFacts, loadTab, middlePath, moveImage, saveTab, webLink } from "./detail";
+import { detailFacts, loadTab, middlePath, moveImage, orderedImages, saveTab, webLink } from "./detail";
 
 describe("detail facts", () => {
   it("lists what has a value, joined and formatted", () => {
@@ -52,5 +52,11 @@ describe("image order", () => {
     expect(moveImage([1, 2, 3, 4], 1, 3)).toEqual([2, 3, 1, 4]);
     expect(moveImage([1, 2, 3], 2, 2)).toEqual([1, 2, 3]);
     expect(moveImage([1, 2, 3], 9, 2)).toEqual([1, 2, 3]);
+  });
+
+  it("orders images as the server will", () => {
+    const imgs = [1, 2, 3, 4].map((id) => ({ id }));
+    expect(orderedImages(imgs, [3, 1]).map((i) => i.id)).toEqual([3, 1, 2, 4]);
+    expect(orderedImages(imgs, []).map((i) => i.id)).toEqual([1, 2, 3, 4]);
   });
 });
