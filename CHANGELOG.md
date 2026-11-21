@@ -59,6 +59,8 @@
   install that cannot start restarts the worker; the worker ends with the app even when the app is killed.
 - **Verified downloads in the Docker image and the MeshPeek workflow:** the image checks pdfium's and ONNX Runtime's
   SHA-256, and the MeshPeek update accepts only version tags.
+- **Steadier image ordering and selection:** a new image order shows at once, so two quick drags no longer undo each
+  other; a search the server refuses no longer clears the table's selection.
 
 ## 2026.46.2 — 2026-11-15
 

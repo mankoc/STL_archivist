@@ -65,6 +65,15 @@ export function middlePath(path: string, max = 64): string {
   return name.length + 9 >= max ? `…${path.slice(-(max - 1))}` : `${path.slice(0, head)}…${path.slice(path.length - name.length - 1)}`;
 }
 
+/** `images` in the order of `ids` (the server's rule: those not listed follow, as they were). */
+export function orderedImages<T extends { id: number }>(images: T[], ids: number[]): T[] {
+  const place = new Map(ids.map((id, i) => [id, i]));
+  return images
+    .map((img, i) => ({ img, key: place.get(img.id) ?? ids.length + i }))
+    .sort((a, b) => a.key - b.key)
+    .map((x) => x.img);
+}
+
 /** `ids` with `id` moved to where `target` is (before it moving up, after it moving down). */
 export function moveImage(ids: number[], id: number, target: number): number[] {
   const from = ids.indexOf(id);
