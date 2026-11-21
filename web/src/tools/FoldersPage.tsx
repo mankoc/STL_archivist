@@ -4,7 +4,7 @@
 import { Box, Checkbox, getTreeExpandedState, Group, Modal, ScrollArea, Slider, Stack, Text, TextInput, Tree, useTree } from "@mantine/core";
 import { IconChevronRight, IconFolder, IconPhoto } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useState } from "react";
 
 import { api, unwrap } from "../api/client";
 import { CellGrid } from "../browser/CellGrid";
@@ -28,11 +28,12 @@ export function FoldersPage() {
   const controller = useTree();
   const loaded = folders.data != null;
   // The first level open (and the way to the chosen folder); everything while filtering.
-  useEffect(() => {
+  // Only when the filter changes or the list first loads: not on every refetch, which would close what was opened.
+  const openTree = useEffectEvent(() => {
     const opened = filter ? "*" : [...tree.data.map((n) => n.value), ...(folder ? nodesTo(tree.data, folder) : [])];
     controller.setExpandedState(getTreeExpandedState(tree.data, opened));
-    // (not on every refetch, which would close what was opened; not on the controller: it is a new object each render)
-  }, [filter, loaded]);
+  });
+  useEffect(() => openTree(), [filter, loaded]);
   const cells = useQuery({
     queryKey: ["folder-cells", folder, subfolders],
     queryFn: async () => unwrap(await api.POST("/api/views/folder", { body: { folder: folder!, include_subfolders: subfolders } })),

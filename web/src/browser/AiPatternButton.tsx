@@ -4,7 +4,7 @@
 import { Button, Text } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useEffectEvent, useState } from "react";
 
 import { api, unwrap } from "../api/client";
 
@@ -24,10 +24,12 @@ export function AiPatternButton({ folder, ids, onPattern }: { folder?: string; i
       setJobId(null);
     }
   }, [job?.state, job?.message]);
+  // Once per result: a new `onPattern` from the parent does not apply it again.
+  const applyPattern = useEffectEvent((pattern: string) => onPattern(pattern));
   useEffect(() => {
     const r = detail.data?.result;
     if (r?.type !== "ai_pattern") return;
-    onPattern(r.pattern);
+    applyPattern(r.pattern);
     setNote(`Reads ${r.fits} of ${r.sampled} sampled archive paths. Check the sample below.`);
     setJobId(null);
   }, [detail.data]);
