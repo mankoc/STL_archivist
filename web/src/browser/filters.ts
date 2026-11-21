@@ -122,7 +122,10 @@ export function groupByLetter<T>(items: T[], name: (item: T) => string): LetterG
     if (list) list.push(item);
     else groups.set(letter, [item]);
   }
-  const rank = (letter: string) => (letter === DIGITS ? 0 : letter === NO_LETTER ? 2 : 1);
+  const rank = (letter: string) => {
+    if (letter === DIGITS) return 0;
+    return letter === NO_LETTER ? 2 : 1;
+  };
   return [...groups.entries()]
     .map(([letter, list]) => ({ letter, items: list }))
     .sort((a, b) => rank(a.letter) - rank(b.letter) || a.letter.localeCompare(b.letter));

@@ -10,9 +10,9 @@ export function installProgress(s: { running: boolean; progress: [number, number
   percent: number | null;
   text: string;
 } {
-  const percent = s.running && s.progress && s.progress[1] > 0 ? Math.round((100 * s.progress[0]) / s.progress[1]) : null;
-  const text = s.running ? (s.log[s.log.length - 1] ?? "Starting…") : s.error ? `Failed: ${s.error}` : (s.done ?? "");
-  return { percent, text };
+  if (!s.running) return { percent: null, text: s.error ? `Failed: ${s.error}` : (s.done ?? "") };
+  const percent = s.progress && s.progress[1] > 0 ? Math.round((100 * s.progress[0]) / s.progress[1]) : null;
+  return { percent, text: s.log[s.log.length - 1] ?? "Starting…" };
 }
 
 /** What the server does without a worker. */

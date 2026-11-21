@@ -42,6 +42,12 @@ export interface MassForm {
 
 export const CLEAR_PRESUPPORTS = "(clear)";
 
+/** The form's presupports choice as sent: no change (null), cleared ("") or the value. */
+function presupportsValue(choice: string): string | null {
+  if (choice === "") return null;
+  return choice === CLEAR_PRESUPPORTS ? "" : choice;
+}
+
 export function emptyForm(): MassForm {
   const blank = Object.fromEntries(MANUAL.map(([k]) => [k, ""])) as Record<ManualField, string>;
   const off = Object.fromEntries(MANUAL.map(([k]) => [k, false])) as Record<ManualField, boolean>;
@@ -69,7 +75,7 @@ export function toRequest(form: MassForm, ids: number[]): MassEdit {
     manual,
     clearing: [...MANUAL.filter(([k]) => form.clear[k]).map(([k]) => k as string), ...(form.clearTags ? ["tags"] : [])],
     scale: form.scale.trim(),
-    presupports: form.presupports === "" ? null : form.presupports === CLEAR_PRESUPPORTS ? "" : form.presupports,
+    presupports: presupportsValue(form.presupports),
     release: form.release.trim(),
     collection: form.collection.trim(),
     subcollection: form.subcollection.trim(),
