@@ -1223,6 +1223,28 @@ mod tests {
         assert_eq!(roots.resolve(2, "a/x.zip").unwrap(), relpath::join("/stl/Gambody", "a/x.zip"));
     }
 
+    /// The rebuilt `models` gets the indexes of the current schema (some are made only there).
+    #[test]
+    fn the_migrated_models_table_has_its_indexes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.db");
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE models (id INTEGER NOT NULL, title VARCHAR(512), archive_path TEXT NOT NULL,
+                     archive_folder VARCHAR(512), archive_hash VARCHAR(64) NOT NULL, warning TEXT, is_missing BOOLEAN DEFAULT '0' NOT NULL,
+                     to_print BOOLEAN DEFAULT '0' NOT NULL, description TEXT, updated_at DATETIME, PRIMARY KEY (id), UNIQUE (archive_path));
+                 INSERT INTO models (id, title, archive_path, archive_folder, archive_hash) VALUES (1, 'A', 'D:/STL/a.zip', 'D:/STL', 'h1');",
+            )
+            .unwrap();
+        assert!(migrate_db(&path, &Vectors::default()).unwrap().paths.is_some());
+        let conn = open(&path).unwrap();
+        let has = |ix: &str| conn.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1").unwrap().exists([ix]).unwrap();
+        for ix in ["ix_models_title", "ix_models_category_id", "ix_models_release_id", "ix_models_subcollection_id"] {
+            assert!(has(ix), "{ix}");
+        }
+    }
+
     #[test]
     fn inner_libraries_adopt_and_give_back_records() {
         let (dir, mut conn) = db();
