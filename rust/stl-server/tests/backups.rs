@@ -291,3 +291,48 @@ async fn export_and_import_with_new_roots() {
     assert_eq!(call(&b.state, "GET", "/api/libraries", Some(&ed), None).await.status, StatusCode::OK);
     b.state.importing.store(false, std::sync::atomic::Ordering::SeqCst);
 }
+
+/// A package from before libraries is brought up to date when imported: the
+/// thumbnails of the duplicate records it merges away do not come along.
+#[tokio::test(flavor = "multi_thread")]
+async fn importing_a_package_from_before_libraries_drops_merged_thumbnails() {
+    let b = empty_library();
+    let admin = b.user("boss", Role::Admin);
+    let work = tempfile::tempdir().unwrap();
+    let root = b.dir.path().join("archives").to_string_lossy().replace('\\', "/");
+    let db = work.path().join("old.db");
+    {
+        // The layout before libraries; record 3 is record 1 under another spelling,
+        // changed later, so the merge keeps it and drops record 1's thumbnail.
+        let c = rusqlite::Connection::open(&db).unwrap();
+        c.execute_batch(&format!(
+            "CREATE TABLE crawled_folders (id INTEGER NOT NULL, path TEXT NOT NULL, pattern TEXT, last_crawled_at DATETIME,
+                 archive_count INTEGER, new_count INTEGER, updated_count INTEGER, PRIMARY KEY (id), UNIQUE (path));
+             CREATE TABLE models (id INTEGER NOT NULL, title VARCHAR(512), archive_path TEXT NOT NULL,
+                 archive_folder VARCHAR(512), archive_hash VARCHAR(64) NOT NULL, warning TEXT, is_missing BOOLEAN DEFAULT '0' NOT NULL,
+                 to_print BOOLEAN DEFAULT '0' NOT NULL, description TEXT, updated_at DATETIME, PRIMARY KEY (id), UNIQUE (archive_path));
+             CREATE TABLE images (id INTEGER NOT NULL, model_id INTEGER NOT NULL, filename VARCHAR(512), thumbnail_path VARCHAR(512),
+                 PRIMARY KEY (id), FOREIGN KEY(model_id) REFERENCES models (id) ON DELETE CASCADE);
+             INSERT INTO crawled_folders (path, pattern, archive_count) VALUES ('{root}', '{{title}}', 2);
+             INSERT INTO models (id, title, archive_path, archive_folder, archive_hash, updated_at) VALUES
+                 (1, 'A', '{root}/Studio/a.zip', '{root}/Studio', 'h1', '2020-01-01'),
+                 (2, 'B', '{root}/Studio/b.zip', '{root}/Studio', 'h2', NULL),
+                 (3, 'A', '{root}/./Studio/a.zip', '{root}/Studio', 'h1', '2024-01-01');
+             INSERT INTO images (id, model_id, filename, thumbnail_path) VALUES (1, 1, 'a.png', '1'), (2, 2, 'b.png', '2'), (3, 3, 'a.png', '3');"
+        ))
+        .unwrap();
+        let store = stl_core::thumbstore::ThumbStore::open(&work.path().join("thumbs")).unwrap();
+        store.put_many(&[(1, b"\xff\xd8one".as_slice()), (2, b"\xff\xd8two"), (3, b"\xff\xd8three")]).unwrap();
+        let package = work.path().join("old.7z");
+        stl_core::backup::write(&c, &store, None, &package, &stl_core::control::Control::new()).unwrap();
+        store.close();
+        let r = upload(&b, &admin, std::fs::read(&package).unwrap()).await;
+        assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+        let pkg = r.json()["name"].as_str().unwrap().to_string();
+        let v = run(&b, &admin, json!({"kind": "import_library", "name": pkg, "apply": true, "confirm": "REPLACE"})).await;
+        assert_eq!(v["result"]["applied"], true, "{v}");
+    }
+    assert_eq!(count(&b, "SELECT count(*) FROM models").await, 2, "the duplicate was merged");
+    let kept: Vec<u64> = b.state.thumbs.get_many(&[1, 2, 3]).unwrap().into_iter().map(|(id, _)| id).collect();
+    assert_eq!(kept, [2, 3], "record 1's thumbnail was dropped");
+}
