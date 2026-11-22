@@ -495,6 +495,8 @@ Two archives sharing STL files (name and size).
 | `path_a` (optional) | string \| null |  |
 | `path_b` (optional) | string \| null |  |
 | `similarity` | number | `overlap` over the larger list. |
+| `size_a` (optional) | integer \| null | Archive size in bytes, when known. |
+| `size_b` (optional) | integer \| null |  |
 | `title_a` (optional) | string \| null |  |
 | `title_b` (optional) | string \| null |  |
 | `total_a` | integer |  |

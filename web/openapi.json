@@ -5280,6 +5280,21 @@
             "format": "double",
             "description": "`overlap` over the larger list."
           },
+          "size_a": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Archive size in bytes, when known."
+          },
+          "size_b": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
           "title_a": {
             "type": [
               "string",
