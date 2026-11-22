@@ -279,4 +279,36 @@ mod tests {
         assert!(args(&["--name", "pc"]).is_err(), "--server is needed");
         assert!(args(&["--server"]).is_err(), "and its value");
     }
+
+    /// Without its components a worker refuses each request with an error; with a
+    /// model server (`ai.url`) it answers chats with the model's text.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn answers() {
+        async fn completions() -> axum::Json<serde_json::Value> {
+            axum::Json(serde_json::json!({"choices": [{"message": {"role": "assistant", "content": "a dragon"}}]}))
+        }
+        let app = axum::Router::new().route("/v1/chat/completions", axum::routing::post(completions));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::resolve(&["--data-dir".into(), dir.path().to_string_lossy().into_owned()], |_| None).unwrap();
+        let chat = |id| ToWorker::Chat { id, images: vec![b64(b"img"), "not base64".into()], prompt: "tags?".into(), max_tokens: 50, temperature: 0.1 };
+        let replies = tokio::task::spawn_blocking(move || {
+            let bare = Engines::load(config.clone(), "pc".into());
+            assert!(bare.hello().clip.is_none() && bare.hello().chat.is_none(), "nothing to offer");
+            assert!(bare.answer(ToWorker::Welcome { clip: false, chat: false, note: None }).is_none());
+            let embed = bare.answer(ToWorker::Embed { id: 1, images: vec![b64(b"img")] });
+            let unanswered = bare.answer(chat(2));
+            let mut config = config;
+            config.ai.url = Some(url);
+            (embed, unanswered, Engines::load(config, "pc".into()).answer(chat(3)))
+        })
+        .await
+        .unwrap();
+        assert!(matches!(replies.0, Some(ToServer::Error { id: 1, message }) if message == "no CLIP encoder on this worker"));
+        assert!(matches!(replies.1, Some(ToServer::Error { id: 2, .. })));
+        assert!(matches!(replies.2, Some(ToServer::Text { id: 3, text }) if text == "a dragon"));
+    }
 }
