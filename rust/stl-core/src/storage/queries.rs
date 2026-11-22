@@ -171,142 +171,52 @@ fn int_values(values: &[FilterValue]) -> Vec<Value> {
 
 const TAGGED: &str = "SELECT model_tags.model_id FROM model_tags JOIN tags ON model_tags.tag_id = tags.id";
 
-/// `conditions(spec, cols, skip=..., path_ids=...)` over table `t` (`models` or `models_view`).
+/// A facet's included values, then its excluded ones (`true`), where it has any.
+fn sides<'a>(spec: &'a FilterSpec, facet: &str) -> impl Iterator<Item = (&'a [FilterValue], bool)> {
+    [(spec.include.get(facet), false), (spec.exclude.get(facet), true)].into_iter().filter_map(|(vs, exclude)| vs.map(|vs| (vs.as_slice(), exclude)))
+}
+
+/// `conditions(spec, cols, skip=..., path_ids=...)` over table `t` (`models` or `models_view`),
+/// in a fixed order: ids, then each facet, then the has-value and no-value groups.
 fn conditions(spec: &FilterSpec, t: &str, skip: Option<&str>, path_table: Option<&str>) -> Vec<Sql> {
-    let (inc, exc) = (&spec.include, &spec.exclude);
     let want = |facet: &str| Some(facet) != skip && spec.facet_active(facet);
+    let texts = |vs: &[FilterValue]| text_values(FilterSpec::texts(vs));
     let mut out = Vec::new();
 
     if let Some(ids) = &spec.ids {
-        let json = serde_json_ids(ids);
-        out.push(Sql::with(format!("{t}.id IN (SELECT value FROM json_each(?))"), vec![Value::Text(json)]));
+        out.push(Sql::with(format!("{t}.id IN (SELECT value FROM json_each(?))"), vec![Value::Text(super::id_json(ids))]));
     }
-
     for facet in ["creator", "source"] {
         if want(facet) {
-            for (values, exclude) in [(inc.get(facet), false), (exc.get(facet), true)] {
-                if let Some(vs) = values {
-                    out.push(one_of(&format!("{t}.{facet}"), text_values(FilterSpec::texts(vs)), exclude));
-                }
-            }
+            out.extend(sides(spec, facet).map(|(vs, exclude)| one_of(&format!("{t}.{facet}"), texts(vs), exclude)));
         }
     }
-
     if want("tag") {
-        for (values, neg) in [(inc.get("tag"), ""), (exc.get("tag"), "NOT ")] {
-            if let Some(vs) = values {
-                let p = text_values(FilterSpec::texts(vs));
-                out.push(Sql::with(
-                    format!("{t}.id {neg}IN ({TAGGED} WHERE tags.name IN ({}))", placeholders(p.len())),
-                    p,
-                ));
-            }
-        }
+        out.extend(sides(spec, "tag").map(|(vs, exclude)| member_of(t, &format!("{TAGGED} WHERE tags.name"), texts(vs), exclude)));
     }
-
     if want("path") {
-        if let Some(pt) = path_table {
-            out.push(Sql::new(format!("{t}.id IN (SELECT {pt}.id FROM {pt})")));
-        } else {
-            let (p_inc, p_exc) = spec.pruned_paths();
-            if let Some(s) = path_matches(t, &p_inc) {
-                out.push(s);
-            }
-            if let Some(s) = path_matches(t, &p_exc) {
-                out.push(Sql::with(format!("NOT ({})", s.text), s.params));
-            }
-        }
+        path_conditions(spec, t, path_table, &mut out);
     }
-
     if want("date") {
-        for (values, neg) in [(inc.get("date"), false), (exc.get("date"), true)] {
-            if let Some(vs) = values {
-                let mut parts = Vec::new();
-                let mut params = Vec::new();
-                for v in vs {
-                    if let FilterValue::Date(y, m) = v {
-                        match m {
-                            None => {
-                                parts.push(format!("{t}.release_year = ?"));
-                                params.push(Value::Integer(*y));
-                            }
-                            Some(m) => {
-                                parts.push(format!("{t}.release_year = ? AND {t}.release_month = ?"));
-                                params.push(Value::Integer(*y));
-                                params.push(Value::Integer(*m));
-                            }
-                        }
-                    }
-                }
-                let joined = parts.iter().map(|p| format!("({p})")).collect::<Vec<_>>().join(" OR ");
-                let text = if neg { format!("({joined}) IS NOT TRUE") } else { format!("({joined})") };
-                out.push(Sql::with(text, params));
-            }
-        }
+        out.extend(sides(spec, "date").map(|(vs, exclude)| date_condition(t, vs, exclude)));
     }
-
     for &(facet, column) in ID_FACETS {
         if want(facet) {
-            for (values, exclude) in [(inc.get(facet), false), (exc.get(facet), true)] {
-                if let Some(vs) = values {
-                    out.push(one_of(&column_of(t, column), int_values(vs), exclude));
-                }
-            }
+            out.extend(sides(spec, facet).map(|(vs, exclude)| one_of(&column_of(t, column), int_values(vs), exclude)));
         }
     }
-
     if want("scale") {
-        for (values, neg) in [(inc.get("scale"), ""), (exc.get("scale"), "NOT ")] {
-            if let Some(vs) = values {
-                let p = int_values(vs);
-                out.push(Sql::with(
-                    format!(
-                        "{t}.id {neg}IN (SELECT model_scales.model_id FROM model_scales \
-                         WHERE model_scales.scale_id IN ({}))",
-                        placeholders(p.len())
-                    ),
-                    p,
-                ));
-            }
-        }
+        out.extend(sides(spec, "scale").map(|(vs, exclude)| member_of(t, SCALED, int_values(vs), exclude)));
     }
-
     if want("presupports") {
-        for (values, exclude) in [(inc.get("presupports"), false), (exc.get("presupports"), true)] {
-            if let Some(vs) = values {
-                out.push(one_of(&format!("{t}.presupports"), text_values(FilterSpec::texts(vs)), exclude));
-            }
-        }
+        out.extend(sides(spec, "presupports").map(|(vs, exclude)| one_of(&format!("{t}.presupports"), texts(vs), exclude)));
     }
-
     if want("warning") {
-        if let Some(vs) = inc.get("warning") {
-            let p = text_values(FilterSpec::texts(vs));
-            let p = escaped(p);
-            let parts = vec![format!("{t}.warning LIKE '%' || ? || '%' ESCAPE '!'"); p.len()];
-            out.push(Sql::with(format!("({})", parts.join(" OR ")), p));
-        }
-        if let Some(vs) = exc.get("warning") {
-            let p = text_values(FilterSpec::texts(vs));
-            let p = escaped(p);
-            let parts = vec![format!("({t}.warning LIKE '%' || ? || '%' ESCAPE '!') IS NOT TRUE"); p.len()];
-            out.push(Sql::with(format!("({})", parts.join(" AND ")), p));
-        }
+        out.extend(sides(spec, "warning").map(|(vs, exclude)| warning_condition(t, vs, exclude)));
     }
-
     if want("filetype") {
-        if let Some(vs) = inc.get("filetype") {
-            let p: Vec<Value> = FilterSpec::texts(vs).map(|e| Value::Text(format!("%{}", like_literal(e)))).collect();
-            let parts = vec![format!("lower({t}.rel_path) LIKE ? ESCAPE '!'"); p.len()];
-            out.push(Sql::with(format!("({})", parts.join(" OR ")), p));
-        }
-        if let Some(vs) = exc.get("filetype") {
-            let p: Vec<Value> = FilterSpec::texts(vs).map(|e| Value::Text(format!("%{}", like_literal(e)))).collect();
-            let parts = vec![format!("lower({t}.rel_path) NOT LIKE ? ESCAPE '!'"); p.len()];
-            out.push(Sql::with(format!("({})", parts.join(" AND ")), p));
-        }
+        out.extend(sides(spec, "filetype").map(|(vs, exclude)| filetype_condition(t, vs, exclude)));
     }
-
     for key in &spec.has_value {
         out.push(Sql::new(group_has_value(key, t)));
     }
@@ -314,6 +224,73 @@ fn conditions(spec: &FilterSpec, t: &str, skip: Option<&str>, path_table: Option
         out.push(Sql::new(format!("NOT ({})", group_has_value(key, t))));
     }
     out
+}
+
+const SCALED: &str = "SELECT model_scales.model_id FROM model_scales WHERE model_scales.scale_id";
+
+/// The model is (with `exclude`, is not) among those `select` gives for one of `values`:
+/// `select` ends with the column compared (`… WHERE tags.name`).
+fn member_of(t: &str, select: &str, values: Vec<Value>, exclude: bool) -> Sql {
+    let neg = if exclude { "NOT " } else { "" };
+    Sql::with(format!("{t}.id {neg}IN ({select} IN ({}))", placeholders(values.len())), values)
+}
+
+/// The Path section: the folders' models from `path_table` when given, else the
+/// included folders and the excluded ones matched on the archive path.
+fn path_conditions(spec: &FilterSpec, t: &str, path_table: Option<&str>, out: &mut Vec<Sql>) {
+    if let Some(pt) = path_table {
+        out.push(Sql::new(format!("{t}.id IN (SELECT {pt}.id FROM {pt})")));
+        return;
+    }
+    let (p_inc, p_exc) = spec.pruned_paths();
+    if let Some(s) = path_matches(t, &p_inc) {
+        out.push(s);
+    }
+    if let Some(s) = path_matches(t, &p_exc) {
+        out.push(Sql::with(format!("NOT ({})", s.text), s.params));
+    }
+}
+
+/// Released in one of the years or months of `values` (with `exclude`, in none of them).
+fn date_condition(t: &str, values: &[FilterValue], exclude: bool) -> Sql {
+    let mut parts = Vec::new();
+    let mut params = Vec::new();
+    for v in values {
+        let FilterValue::Date(y, m) = v else { continue };
+        params.push(Value::Integer(*y));
+        match m {
+            None => parts.push(format!("{t}.release_year = ?")),
+            Some(m) => {
+                parts.push(format!("{t}.release_year = ? AND {t}.release_month = ?"));
+                params.push(Value::Integer(*m));
+            }
+        }
+    }
+    let joined = parts.iter().map(|p| format!("({p})")).collect::<Vec<_>>().join(" OR ");
+    let text = if exclude { format!("({joined}) IS NOT TRUE") } else { format!("({joined})") };
+    Sql::with(text, params)
+}
+
+/// The warning text holds one of `values` (with `exclude`, none of them).
+fn warning_condition(t: &str, values: &[FilterValue], exclude: bool) -> Sql {
+    let p = escaped(text_values(FilterSpec::texts(values)));
+    let (part, join) = if exclude {
+        (format!("({t}.warning LIKE '%' || ? || '%' ESCAPE '!') IS NOT TRUE"), " AND ")
+    } else {
+        (format!("{t}.warning LIKE '%' || ? || '%' ESCAPE '!'"), " OR ")
+    };
+    Sql::with(format!("({})", vec![part; p.len()].join(join)), p)
+}
+
+/// The archive's name ends with one of the suffixes in `values` (with `exclude`, none of them).
+fn filetype_condition(t: &str, values: &[FilterValue], exclude: bool) -> Sql {
+    let p: Vec<Value> = FilterSpec::texts(values).map(|e| Value::Text(format!("%{}", like_literal(e)))).collect();
+    let (part, join) = if exclude {
+        (format!("lower({t}.rel_path) NOT LIKE ? ESCAPE '!'"), " AND ")
+    } else {
+        (format!("lower({t}.rel_path) LIKE ? ESCAPE '!'"), " OR ")
+    };
+    Sql::with(format!("({})", vec![part; p.len()].join(join)), p)
 }
 
 /// The "column" of a model's library: the library (`library_groups`) of its
@@ -344,11 +321,6 @@ fn folder_counts_sql(scope: Option<&str>) -> String {
 /// Text values matched literally in `LIKE … ESCAPE '!'`.
 fn escaped(values: Vec<Value>) -> Vec<Value> {
     values.into_iter().map(|v| if let Value::Text(s) = v { Value::Text(like_literal(&s)) } else { v }).collect()
-}
-
-fn serde_json_ids(ids: &[i64]) -> String {
-    let parts: Vec<String> = ids.iter().map(i64::to_string).collect();
-    format!("[{}]", parts.join(","))
 }
 
 fn path_matches(t: &str, paths: &[String]) -> Option<Sql> {
@@ -531,7 +503,7 @@ pub struct PageRow {
 
 /// `page_rows`: rows for `ids` in that order (missing ids skipped).
 pub fn page_rows(conn: &Connection, ids: &[i64]) -> Result<Vec<PageRow>> {
-    let json = Value::Text(serde_json_ids(ids));
+    let json = Value::Text(super::id_json(ids));
     let mut st = conn.prepare(
         "SELECT v.id, v.title, v.creator, v.source, v.release_year, v.release_month, v.archive_path, v.presupports, \
          v.warning, v.archive_size, v.compression_rate, v.sequence, v.created_at, v.sculptor_name, v.collection_name, \
@@ -1232,8 +1204,50 @@ fn in_scope(col: &str, sc: &Sql) -> Sql {
     Sql::with(format!("{col} IN ({})", sc.text), sc.params.clone())
 }
 
+/// Each scoped section's counts, by the other sections' filters.
 fn scoped_counts(conn: &Connection, scopes: &Scopes, ft: &mut FilterTree) -> Result<()> {
-    let scope = |section: &str| scopes.get(section);
+    scoped_column_counts(conn, scopes, ft)?;
+    if let Some(sc) = scopes.get("scale") {
+        let cond = in_scope("model_scales.model_id", sc);
+        let rows = format!(
+            "SELECT model_scales.scale_id, count(model_scales.model_id) FROM model_scales WHERE {} \
+             GROUP BY model_scales.scale_id",
+            cond.text
+        );
+        let models = format!("SELECT count(DISTINCT model_scales.model_id) FROM model_scales WHERE {}", cond.text);
+        scoped_link_counts(conn, &cond, "scale_id", "scale", &rows, &models, ft)?;
+    }
+    if let Some(sc) = scopes.get("tag") {
+        let cond = in_scope("model_tags.model_id", sc);
+        let rows = format!(
+            "SELECT tags.name, count(model_tags.model_id) FROM tags JOIN model_tags ON tags.id = model_tags.tag_id \
+             WHERE {} GROUP BY tags.name",
+            cond.text
+        );
+        let models = format!("SELECT count(DISTINCT model_tags.model_id) FROM model_tags WHERE {}", cond.text);
+        scoped_link_counts(conn, &cond, "tag", "tag", &rows, &models, ft)?;
+    }
+    if let Some(sc) = scopes.get("date") {
+        scoped_date_counts(conn, sc, ft)?;
+    }
+    if let Some(sc) = scopes.get("warning") {
+        scoped_warning_counts(conn, sc, ft)?;
+    }
+    if let Some(sc) = scopes.get("filetype") {
+        scoped_filetype_counts(conn, sc, ft)?;
+    }
+    if let Some(sc) = scopes.get("path") {
+        let direct = direct_folders(conn, Some(sc))?;
+        let mut counts = HashMap::new();
+        add_ancestors(&mut counts, &direct);
+        ft.scoped_counts.insert(Key::Group("path".into()), direct.values().sum());
+        ft.sc_path_counts = Some(counts);
+    }
+    Ok(())
+}
+
+/// The scoped counts of the sections that are a column of `models` (or its library).
+fn scoped_column_counts(conn: &Connection, scopes: &Scopes, ft: &mut FilterTree) -> Result<()> {
     for (section, col, kind) in [
         ("library", LIBRARY, "library_id"),
         ("creator", "creator", "creator"),
@@ -1245,7 +1259,7 @@ fn scoped_counts(conn: &Connection, scopes: &Scopes, ft: &mut FilterTree) -> Res
         ("release", "release_id", "release_id"),
         ("presupports", "presupports", "presupports"),
     ] {
-        if let Some(sc) = scope(section) {
+        if let Some(sc) = scopes.get(section) {
             let cond = in_scope("models.id", sc);
             let rows = rows_i64_text(
                 conn,
@@ -1267,85 +1281,56 @@ fn scoped_counts(conn: &Connection, scopes: &Scopes, ft: &mut FilterTree) -> Res
             ft.scoped_counts.insert(Key::Group(rstrip_id(kind).into()), total);
         }
     }
-    if let Some(sc) = scope("scale") {
-        let cond = in_scope("model_scales.model_id", sc);
-        for (v, c) in rows_i64_text(
-            conn,
-            &format!(
-                "SELECT model_scales.scale_id, count(model_scales.model_id) FROM model_scales WHERE {} \
-                 GROUP BY model_scales.scale_id",
-                cond.text
-            ),
-            &cond.params,
-        )? {
-            if let Some(k) = key_for("scale_id", v) {
-                ft.scoped_counts.insert(k, c);
-            }
+    Ok(())
+}
+
+/// A linked section's scoped counts (scales, tags): per value from `rows` (value,
+/// count), and the models with any of them from `models`, both under `cond`.
+fn scoped_link_counts(conn: &Connection, cond: &Sql, kind: &str, group: &str, rows: &str, models: &str, ft: &mut FilterTree) -> Result<()> {
+    for (v, c) in rows_i64_text(conn, rows, &cond.params)? {
+        if let Some(k) = key_for(kind, v) {
+            ft.scoped_counts.insert(k, c);
         }
-        ft.scoped_counts.insert(
-            Key::Group("scale".into()),
-            scalar(conn, &format!("SELECT count(DISTINCT model_scales.model_id) FROM model_scales WHERE {}", cond.text), &cond.params)?,
-        );
     }
-    if let Some(sc) = scope("tag") {
-        let cond = in_scope("model_tags.model_id", sc);
-        for (v, c) in rows_i64_text(
-            conn,
-            &format!(
-                "SELECT tags.name, count(model_tags.model_id) FROM tags JOIN model_tags ON tags.id = model_tags.tag_id \
-                 WHERE {} GROUP BY tags.name",
-                cond.text
-            ),
-            &cond.params,
-        )? {
-            if let Some(k) = key_for("tag", v) {
-                ft.scoped_counts.insert(k, c);
-            }
-        }
-        ft.scoped_counts.insert(
-            Key::Group("tag".into()),
-            scalar(conn, &format!("SELECT count(DISTINCT model_tags.model_id) FROM model_tags WHERE {}", cond.text), &cond.params)?,
-        );
+    ft.scoped_counts.insert(Key::Group(group.into()), scalar(conn, models, &cond.params)?);
+    Ok(())
+}
+
+fn scoped_date_counts(conn: &Connection, sc: &Sql, ft: &mut FilterTree) -> Result<()> {
+    let (years, total) = date_counts(conn, Some(sc), &mut ft.scoped_counts)?;
+    for (y, c) in years {
+        ft.scoped_counts.insert(Key::Year(y), c);
     }
-    if let Some(sc) = scope("date") {
-        let (years, total) = date_counts(conn, Some(sc), &mut ft.scoped_counts)?;
-        for (y, c) in years {
-            ft.scoped_counts.insert(Key::Year(y), c);
-        }
-        ft.scoped_counts.insert(Key::Group("date".into()), total);
+    ft.scoped_counts.insert(Key::Group("date".into()), total);
+    Ok(())
+}
+
+fn scoped_warning_counts(conn: &Connection, sc: &Sql, ft: &mut FilterTree) -> Result<()> {
+    let cond = in_scope("models.id", sc);
+    let warnings = column_texts(
+        conn,
+        &format!("SELECT models.warning FROM models WHERE {} AND models.warning IS NOT NULL", cond.text),
+        &cond.params,
+    )?;
+    // Every warning but "Unreadable archive", which has no scoped count.
+    for wt in WARNINGS_ALL.iter().filter(|w| **w != super::crawl::WARNING_UNREADABLE) {
+        ft.scoped_counts
+            .insert(Key::Text("warning".into(), wt.to_string()), warnings.iter().filter(|w| w.contains(wt)).count() as i64);
     }
-    if let Some(sc) = scope("warning") {
-        let cond = in_scope("models.id", sc);
-        let warnings = column_texts(
-            conn,
-            &format!("SELECT models.warning FROM models WHERE {} AND models.warning IS NOT NULL", cond.text),
-            &cond.params,
-        )?;
-        // Every warning but "Unreadable archive", which has no scoped count.
-        for wt in WARNINGS_ALL.iter().filter(|w| **w != super::crawl::WARNING_UNREADABLE) {
-            ft.scoped_counts
-                .insert(Key::Text("warning".into(), wt.to_string()), warnings.iter().filter(|w| w.contains(wt)).count() as i64);
-        }
-        ft.scoped_counts.insert(Key::Group("warning".into()), warnings.iter().filter(|w| !w.is_empty()).count() as i64);
+    ft.scoped_counts.insert(Key::Group("warning".into()), warnings.iter().filter(|w| !w.is_empty()).count() as i64);
+    Ok(())
+}
+
+fn scoped_filetype_counts(conn: &Connection, sc: &Sql, ft: &mut FilterTree) -> Result<()> {
+    let suffixes = filetype_suffixes(conn, Some(sc), true)?;
+    let mut counts: HashMap<String, i64> = HashMap::new();
+    for s in &suffixes {
+        *counts.entry(s.clone()).or_default() += 1;
     }
-    if let Some(sc) = scope("filetype") {
-        let suffixes = filetype_suffixes(conn, Some(sc), true)?;
-        let mut counts: HashMap<String, i64> = HashMap::new();
-        for s in &suffixes {
-            *counts.entry(s.clone()).or_default() += 1;
-        }
-        for (s, c) in counts {
-            ft.scoped_counts.insert(Key::Text("filetype".into(), s), c);
-        }
-        ft.scoped_counts.insert(Key::Group("filetype".into()), suffixes.len() as i64);
+    for (s, c) in counts {
+        ft.scoped_counts.insert(Key::Text("filetype".into(), s), c);
     }
-    if let Some(sc) = scope("path") {
-        let direct = direct_folders(conn, Some(sc))?;
-        let mut counts = HashMap::new();
-        add_ancestors(&mut counts, &direct);
-        ft.scoped_counts.insert(Key::Group("path".into()), direct.values().sum());
-        ft.sc_path_counts = Some(counts);
-    }
+    ft.scoped_counts.insert(Key::Group("filetype".into()), suffixes.len() as i64);
     Ok(())
 }
 
