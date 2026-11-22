@@ -220,7 +220,8 @@ fn backup_before_import(lib: &Library, job: &Job, pre: &str) -> Result<(), Strin
     lib.db
         .with(|c| Ok::<_, rusqlite::Error>(backup::write(c, &lib.thumbs, Some(&settings), &dest, &job.ctl)))
         .map_err(db_err)?
-        .map_err(|e| format!("could not back this library up ({e}); nothing was changed"))
+        .map_err(|e| format!("could not back this library up ({e}); nothing was changed"))?;
+    Ok(())
 }
 
 /// The package's thumbnail store taken out into `dir`, without the thumbnails of
