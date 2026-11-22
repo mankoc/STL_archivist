@@ -113,19 +113,58 @@ fn host_name() -> String {
         .unwrap_or_else(|| "worker".into())
 }
 
-/// One connection: hello, then requests until it drops.
-pub async fn session(url: &str, token: &str, engines: &Arc<Engines>) -> Result<(), Ended> {
+type Socket = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+/// The WebSocket to the server, signed in with `token`; a refused token ends the worker.
+async fn connect(url: &str, token: &str) -> Result<Socket, Ended> {
     let mut req = url.into_client_request().map_err(|e| Ended::Refused(format!("{url}: {e}")))?;
     let auth = format!("Bearer {token}").parse().map_err(|_| Ended::Refused("the token is not valid text".into()))?;
     req.headers_mut().insert("authorization", auth);
     let config = WebSocketConfig::default().max_message_size(Some(MAX_MESSAGE)).max_frame_size(Some(MAX_MESSAGE));
-    let (ws, _) = match tokio_tungstenite::connect_async_with_config(req, Some(config), true).await {
-        Ok(c) => c,
+    match tokio_tungstenite::connect_async_with_config(req, Some(config), true).await {
+        Ok((ws, _)) => Ok(ws),
         Err(tungstenite::Error::Http(resp)) if matches!(resp.status().as_u16(), 401 | 403) => {
-            return Err(Ended::Refused(format!("the server refused the worker's session ({}); turn the worker on again", resp.status())));
+            Err(Ended::Refused(format!("the server refused the worker's session ({}); turn the worker on again", resp.status())))
         }
-        Err(e) => return Err(Ended::Retry(format!("cannot connect to {url}: {e}"))),
+        Err(e) => Err(Ended::Retry(format!("cannot connect to {url}: {e}"))),
+    }
+}
+
+/// What a message from the server asks of the worker.
+enum Incoming {
+    Request(ToWorker),
+    /// The server closed the session.
+    Closed,
+    /// Nothing to answer: a ping, the welcome (logged), or an unreadable message (logged).
+    Nothing,
+}
+
+fn incoming(msg: Message) -> Incoming {
+    let text = match msg {
+        Message::Text(t) => t,
+        Message::Close(_) => return Incoming::Closed,
+        _ => return Incoming::Nothing, // pings are answered by tungstenite
     };
+    let msg: ToWorker = match serde_json::from_str(&text) {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::warn!("unreadable message from the server: {e}");
+            return Incoming::Nothing;
+        }
+    };
+    if let ToWorker::Welcome { clip, chat, note } = &msg {
+        tracing::info!(clip, chat, "connected to the server");
+        if let Some(n) = note {
+            tracing::warn!("{n}");
+        }
+        return Incoming::Nothing;
+    }
+    Incoming::Request(msg)
+}
+
+/// One connection: hello, then requests until it drops.
+pub async fn session(url: &str, token: &str, engines: &Arc<Engines>) -> Result<(), Ended> {
+    let ws = connect(url, token).await?;
     let (mut sink, mut stream) = ws.split();
     let hello = serde_json::to_string(&ToServer::Hello(engines.hello.clone())).unwrap_or_default();
     sink.send(Message::Text(hello.into())).await.map_err(|e| Ended::Retry(e.to_string()))?;
@@ -144,25 +183,11 @@ pub async fn session(url: &str, token: &str, engines: &Arc<Engines>) -> Result<(
                     Ok(Some(Err(e))) => return Err(Ended::Retry(e.to_string())),
                     Ok(Some(Ok(m))) => m,
                 };
-                let text = match msg {
-                    Message::Text(t) => t,
-                    Message::Close(_) => return Ok(()),
-                    _ => continue, // pings are answered by tungstenite
+                let msg = match incoming(msg) {
+                    Incoming::Request(m) => m,
+                    Incoming::Closed => return Ok(()),
+                    Incoming::Nothing => continue,
                 };
-                let msg: ToWorker = match serde_json::from_str(&text) {
-                    Ok(m) => m,
-                    Err(e) => {
-                        tracing::warn!("unreadable message from the server: {e}");
-                        continue;
-                    }
-                };
-                if let ToWorker::Welcome { clip, chat, note } = &msg {
-                    tracing::info!(clip, chat, "connected to the server");
-                    if let Some(n) = note {
-                        tracing::warn!("{n}");
-                    }
-                    continue;
-                }
                 let (engines, tx) = (Arc::clone(engines), out_tx.clone());
                 tokio::task::spawn_blocking(move || {
                     if let Some(reply) = engines.answer(msg) {
@@ -175,18 +200,26 @@ pub async fn session(url: &str, token: &str, engines: &Arc<Engines>) -> Result<(
 }
 
 /// Parse the arguments and serve until the token is refused.
-pub async fn run(args: &[String]) -> Result<(), String> {
-    let usage = "usage: stl-server worker --server URL [--data-dir DIR] [--name NAME] (token in STL_WORKER_TOKEN)";
+const USAGE: &str = "usage: stl-server worker --server URL [--data-dir DIR] [--name NAME] (token in STL_WORKER_TOKEN)";
+
+/// `--server` and `--name`, and the arguments left for [`Config::load`].
+fn parse_args(args: &[String]) -> Result<(String, Option<String>, Vec<String>), &'static str> {
     let (mut server, mut name, mut rest) = (None, None, Vec::new());
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
-            "--server" => server = Some(it.next().ok_or(usage)?.clone()),
-            "--name" => name = Some(it.next().ok_or(usage)?.clone()),
+            "--server" => server = Some(it.next().ok_or(USAGE)?.clone()),
+            "--name" => name = Some(it.next().ok_or(USAGE)?.clone()),
             _ => rest.push(a.clone()),
         }
     }
-    let url = connect_url(&server.ok_or(usage)?)?;
+    Ok((server.ok_or(USAGE)?, name, rest))
+}
+
+pub async fn run(args: &[String]) -> Result<(), String> {
+    let usage = USAGE;
+    let (server, name, rest) = parse_args(args)?;
+    let url = connect_url(&server)?;
     let token = std::env::var("STL_WORKER_TOKEN").ok().filter(|t| !t.is_empty()).ok_or(usage)?;
     let config = Config::load(&rest)?;
     tracing::info!(data_dir = %config.data_dir.display(), "loading the compute engines");
