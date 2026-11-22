@@ -83,6 +83,68 @@ async fn a_filtered_tree_has_the_library_s_counts_and_its_own() {
     assert_eq!(filtered["creators"], json!(["ALICE", "Alice"]));
 }
 
+/// Models with tags, scales, warnings and archive types (the fixture's have none
+/// of the first two, and all are `.zip`).
+fn linked_fixture() -> (TestLib, String) {
+    let lib = empty_library();
+    let token = lib.user("ed", Role::Editor);
+    let root = lib.dir.path().join("archives").to_string_lossy().into_owned();
+    lib.state
+        .db
+        .with_tx(|tx| {
+            tx.execute_batch(
+                "INSERT INTO library_groups (id, uuid, name) VALUES (1, 'g', 'G');
+                 INSERT INTO tags (id, name) VALUES (1, 'dragon'), (2, 'bust');
+                 INSERT INTO scales (id, name) VALUES (1, '32 mm'), (2, '75 mm');",
+            )?;
+            tx.execute("INSERT INTO libraries (id, uuid, name, root, group_id) VALUES (1, 'l', 'L', ?1, 1)", [root])?;
+            for (id, title, rel_path, warning) in [
+                (1, "dragon", "dragon.zip", Some("Nested archives\nArchive without images")),
+                (2, "knight", "knight.7z", Some("Nested archives")),
+                (3, "plain", "plain.rar", None),
+            ] {
+                tx.execute(
+                    "INSERT INTO models (id, title, warning, library_id, rel_path, rel_folder, archive_hash, is_missing, to_print) \
+                     VALUES (?1, ?2, ?3, 1, ?4, '', 'h', 0, 0)",
+                    rusqlite::params![id, title, warning, rel_path],
+                )?;
+            }
+            // dragon: both tags and 32 mm; knight: bust and 75 mm; plain: none.
+            tx.execute_batch(
+                "INSERT INTO model_tags (model_id, tag_id) VALUES (1, 1), (1, 2), (2, 2);
+                 INSERT INTO model_scales (model_id, scale_id) VALUES (1, 1), (2, 2);",
+            )?;
+            Ok::<_, rusqlite::Error>(())
+        })
+        .unwrap();
+    (lib, token)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn excluding_tags_and_scales_keeps_models_without_them() {
+    let (lib, ed) = linked_fixture();
+    assert_eq!(titles(&lib, &ed, json!({"exclude": {"tag": ["dragon"]}})).await, ["knight", "plain"]);
+    assert_eq!(titles(&lib, &ed, json!({"exclude": {"tag": ["dragon", "bust"]}})).await, ["plain"]);
+    assert_eq!(titles(&lib, &ed, json!({"exclude": {"scale": [1]}})).await, ["knight", "plain"]);
+    assert_eq!(titles(&lib, &ed, json!({"include": {"scale": [1, 2]}})).await, ["dragon", "knight"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn excluding_several_warnings_excludes_each() {
+    let (lib, ed) = linked_fixture();
+    let both = json!(["Archive without images", "Nested archives"]);
+    assert_eq!(titles(&lib, &ed, json!({"exclude": {"warning": both.clone()}})).await, ["plain"], "knight has one of them");
+    assert_eq!(titles(&lib, &ed, json!({"include": {"warning": both}})).await, ["dragon", "knight"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn excluding_archive_types_excludes_each() {
+    let (lib, ed) = linked_fixture();
+    assert_eq!(titles(&lib, &ed, json!({"exclude": {"filetype": [".7z", ".rar"]}})).await, ["dragon"]);
+    assert_eq!(titles(&lib, &ed, json!({"exclude": {"filetype": [".zip"]}})).await, ["knight", "plain"]);
+    assert_eq!(titles(&lib, &ed, json!({"include": {"filetype": [".7z", ".rar"]}})).await, ["knight", "plain"]);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn creators_match_exactly_as_the_pane_lists_them() {
     let (lib, ed) = fixture();
