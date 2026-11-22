@@ -139,7 +139,7 @@ enum Incoming {
     Nothing,
 }
 
-fn incoming(msg: Message) -> Incoming {
+fn classify(msg: Message) -> Incoming {
     let text = match msg {
         Message::Text(t) => t,
         Message::Close(_) => return Incoming::Closed,
@@ -183,7 +183,7 @@ pub async fn session(url: &str, token: &str, engines: &Arc<Engines>) -> Result<(
                     Ok(Some(Err(e))) => return Err(Ended::Retry(e.to_string())),
                     Ok(Some(Ok(m))) => m,
                 };
-                let msg = match incoming(msg) {
+                let msg = match classify(msg) {
                     Incoming::Request(m) => m,
                     Incoming::Closed => return Ok(()),
                     Incoming::Nothing => continue,
@@ -258,5 +258,25 @@ mod tests {
         assert_eq!(connect_url("http://nas:8770/").unwrap(), "ws://nas:8770/api/workers/connect");
         assert_eq!(connect_url("https://stl.example.org").unwrap(), "wss://stl.example.org/api/workers/connect");
         assert!(connect_url("nas:8770").is_err());
+    }
+
+    #[test]
+    fn messages_from_the_server() {
+        let text = |m: &ToWorker| Message::Text(serde_json::to_string(m).unwrap().into());
+        let embed = ToWorker::Embed { id: 7, images: vec![b64(b"img")] };
+        assert!(matches!(classify(text(&embed)), Incoming::Request(ToWorker::Embed { id: 7, .. })));
+        assert!(matches!(classify(Message::Close(None)), Incoming::Closed));
+        assert!(matches!(classify(Message::Ping(Default::default())), Incoming::Nothing));
+        assert!(matches!(classify(text(&ToWorker::Welcome { clip: true, chat: false, note: None })), Incoming::Nothing), "logged, not answered");
+        assert!(matches!(classify(Message::Text("not json".into())), Incoming::Nothing));
+    }
+
+    #[test]
+    fn arguments() {
+        let args = |a: &[&str]| parse_args(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        let (server, name, rest) = args(&["--data-dir", "D", "--server", "http://nas:8770", "--name", "pc"]).unwrap();
+        assert_eq!((server.as_str(), name.as_deref(), rest), ("http://nas:8770", Some("pc"), vec!["--data-dir".to_string(), "D".to_string()]));
+        assert!(args(&["--name", "pc"]).is_err(), "--server is needed");
+        assert!(args(&["--server"]).is_err(), "and its value");
     }
 }
