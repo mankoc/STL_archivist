@@ -429,31 +429,36 @@ pub fn status(lib: &Library) -> WorkersStatus {
 
 // ── one connection ───────────────────────────────────────────────────────────
 
+/// The worker's first message, its [`Hello`]; `None` (the connection ends) for
+/// anything else, or nothing within [`HELLO_TIMEOUT`].
+async fn read_hello(socket: &mut WebSocket) -> Option<Hello> {
+    match tokio::time::timeout(HELLO_TIMEOUT, socket.recv()).await {
+        Ok(Some(Ok(Message::Text(t)))) => match serde_json::from_str::<ToServer>(&t) {
+            Ok(ToServer::Hello(h)) => Some(h),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Whether the worker's CLIP model computes this library's embeddings (the
+/// component's, or the one this server has), and the note when it does not.
+async fn clip_accepted(lib: &Arc<Library>, hello: &Hello) -> (bool, Option<String>) {
+    let Some(c) = &hello.clip else { return (false, None) };
+    let lib2 = Arc::clone(lib);
+    let own = tokio::task::spawn_blocking(move || lib2.workers.own_clip_sha(crate::tools::model_path(&lib2.config))).await.ok().flatten();
+    if c.sha256 == crate::components::CLIP_SHA256 || own.as_deref() == Some(c.sha256.as_str()) {
+        (true, None)
+    } else {
+        (false, Some("its CLIP model differs from this library's, so it is not used for embeddings".to_string()))
+    }
+}
+
 /// Serve one worker's WebSocket: read its [`Hello`], register it, pass
 /// requests out and replies in until it disconnects.
 pub async fn serve(lib: Arc<Library>, me: crate::auth::CurrentUser, mut socket: WebSocket) {
-    let hello = match tokio::time::timeout(HELLO_TIMEOUT, socket.recv()).await {
-        Ok(Some(Ok(Message::Text(t)))) => match serde_json::from_str::<ToServer>(&t) {
-            Ok(ToServer::Hello(h)) => h,
-            _ => return,
-        },
-        _ => return,
-    };
-    let (clip, note) = match &hello.clip {
-        None => (false, None),
-        Some(c) => {
-            let lib2 = Arc::clone(&lib);
-            let own = tokio::task::spawn_blocking(move || lib2.workers.own_clip_sha(crate::tools::model_path(&lib2.config)))
-                .await
-                .ok()
-                .flatten();
-            if c.sha256 == crate::components::CLIP_SHA256 || own.as_deref() == Some(c.sha256.as_str()) {
-                (true, None)
-            } else {
-                (false, Some("its CLIP model differs from this library's, so it is not used for embeddings".to_string()))
-            }
-        }
-    };
+    let Some(hello) = read_hello(&mut socket).await else { return };
+    let (clip, note) = clip_accepted(&lib, &hello).await;
     let chat = hello.chat.is_some();
     let welcome = ToWorker::Welcome { clip, chat, note: note.clone() };
     if socket.send(Message::Text(serde_json::to_string(&welcome).unwrap_or_default().into())).await.is_err() {
