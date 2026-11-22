@@ -301,6 +301,57 @@ async fn mass_edit_adds_and_clears_tags() {
     assert_eq!((tags(l.ids[0]), tags(l.ids[1])), (String::new(), String::new()));
 }
 
+#[tokio::test]
+async fn mass_edit_sets_and_clears_each_kind_of_field() {
+    let l = library();
+    let id = l.ids[0];
+    async fn mass(l: &Lib, body: Value) {
+        let r = l.call("POST", "/api/models/mass-edit", Some(body)).await;
+        assert_eq!(r.status, StatusCode::OK, "{:?}", r.json());
+    }
+    let text = |col: &str| -> Option<String> { l.scalar(&format!("SELECT {col} FROM models WHERE id = {id}")) };
+    let name = |table: &str, col: &str| -> Option<String> {
+        l.scalar(&format!("SELECT t.name FROM models m LEFT JOIN {table} t ON t.id = m.{col} WHERE m.id = {id}"))
+    };
+    let scales = || -> String {
+        l.scalar(&format!(
+            "SELECT coalesce(group_concat(name, ','), '') FROM (SELECT s.name FROM model_scales k JOIN scales s ON s.id = k.scale_id WHERE k.model_id = {id} ORDER BY s.name)"
+        ))
+    };
+
+    // Typed fields: templates read the model's fields and its archive's folder.
+    mass(&l, json!({"ids": [id], "manual": {"title": "{folder}: {title}", "creator": "Onicron"}})).await;
+    assert_eq!((text("title"), text("creator")), (Some("Studio: old 0".into()), Some("Onicron".into())));
+    // ... and what the path pattern read from the archive's name.
+    mass(&l, json!({"ids": [id], "pattern": "{release} - {title}", "manual": {"url": "release {release_name}"}})).await;
+    assert_eq!(text("url").as_deref(), Some("release 030"));
+    // Named fields (the release a template too), and scales once each, letter case aside.
+    let names = json!({"ids": [id], "release": "{creator} 2024", "collection": "Tales", "subcollection": "Coats",
+                       "category": "Busts", "sculptor": "Onicron", "scale": "32 mm, 32 MM, 75 mm"});
+    mass(&l, names).await;
+    assert_eq!(name("releases", "release_id").as_deref(), Some("Onicron 2024"));
+    assert_eq!(name("collections", "collection_id").as_deref(), Some("Tales"));
+    assert_eq!(name("subcollections", "subcollection_id").as_deref(), Some("Coats"));
+    assert_eq!(name("categories", "category_id").as_deref(), Some("Busts"));
+    assert_eq!(name("sculptors", "sculptor_id").as_deref(), Some("Onicron"));
+    assert_eq!(scales(), "32 mm,75 mm");
+    // Find & replace in a collection's name points the model at the renamed one.
+    mass(&l, json!({"ids": [id], "find": {"find": "Tales", "replace": "Stories", "fields": ["collection"]}})).await;
+    assert_eq!(name("collections", "collection_id").as_deref(), Some("Stories"));
+    // Trimming.
+    mass(&l, json!({"ids": [id], "manual": {"title": "  padded  "}})).await;
+    assert_eq!(text("title").as_deref(), Some("  padded  "));
+    mass(&l, json!({"ids": [id], "trim": true})).await;
+    assert_eq!(text("title").as_deref(), Some("padded"));
+    // Clearing.
+    mass(&l, json!({"ids": [id], "manual": {"creator": null}, "clearing": ["creator", "scale", "sculptor", "collection"]})).await;
+    assert_eq!(text("creator"), None);
+    assert_eq!(scales(), "");
+    assert_eq!(name("sculptors", "sculptor_id"), None);
+    assert_eq!((name("collections", "collection_id"), name("subcollections", "subcollection_id")), (None, None), "its subcollection goes with it");
+    assert_eq!(name("categories", "category_id").as_deref(), Some("Busts"), "what is not cleared stays");
+}
+
 fn png() -> Vec<u8> {
     let img = image::RgbImage::from_pixel(64, 48, image::Rgb([200, 30, 30]));
     let mut out = std::io::Cursor::new(Vec::new());
