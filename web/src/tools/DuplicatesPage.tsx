@@ -18,7 +18,8 @@ import { formatSize } from "../format";
 import { addJob, type Job, type JobRequest, isActive, percent, progressText } from "../jobs/jobs";
 import { SETTINGS_QUERY } from "../settings/librarySettings";
 import {
-  type Deletion, deletion, deletionLabel, type Finder, latestJob, matches, METADATA_COLUMNS, pageCount, pageOf, percentLabel, scoreLabel,
+  type Deletion, deletion, deletionLabel, type Finder, latestJob, matches, METADATA_COLUMNS, pageCount, pageOf, type PairSort, percentLabel,
+  scoreLabel, sortPairs,
 } from "./duplicates";
 
 type Compare = number[];
@@ -193,13 +194,14 @@ function FinderFrame({
   );
 }
 
-function SearchAndPages({ text, setText, page, setPage, total, summary }: {
-  text: string; setText: (t: string) => void; page: number; setPage: (p: number) => void; total: number; summary: ReactNode;
+function SearchAndPages({ text, setText, page, setPage, total, summary, extra }: {
+  text: string; setText: (t: string) => void; page: number; setPage: (p: number) => void; total: number; summary: ReactNode; extra?: ReactNode;
 }) {
   return (
     <Group justify="space-between">
       <Group gap="sm">
         <TextInput placeholder="Filter by title or path" value={text} onChange={(e) => { setText(e.currentTarget.value); setPage(1); }} w={260} size="xs" />
+        {extra}
         <Text size="sm" c="dimmed" data-testid="dupes-summary">
           {summary}
         </Text>
@@ -259,8 +261,12 @@ function ContentFinder({ onCompare, remover }: FinderProps) {
   const [threshold, setThreshold] = useState<number>(80);
   const [text, setText] = useState("");
   const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<PairSort>("found");
   const result = finder.result?.type === "content" ? finder.result : null;
-  const rows = useMemo(() => (result?.pairs ?? []).filter((p) => matches(text, p.title_a, p.path_a, p.title_b, p.path_b)), [result, text]);
+  const rows = useMemo(
+    () => sortPairs((result?.pairs ?? []).filter((p) => matches(text, p.title_a, p.path_a, p.title_b, p.path_b)), sort),
+    [result, text, sort],
+  );
   return (
     <FinderFrame
       finder={finder}
@@ -272,7 +278,11 @@ function ContentFinder({ onCompare, remover }: FinderProps) {
       {result && (
         <>
           <SearchAndPages text={text} setText={setText} page={page} setPage={setPage} total={rows.length}
-            summary={`${result.pairs.length} archive pair(s) share STL files (same name and size)`} />
+            summary={`${result.pairs.length} archive pair(s) share STL files (same name and size)`}
+            extra={
+              <SegmentedControl size="xs" value={sort} onChange={(v) => { setSort(v as PairSort); setPage(1); }} data-testid="dupes-sort"
+                data={[{ value: "found", label: "Most shared" }, { value: "largest", label: "Largest" }, { value: "smallest", label: "Smallest" }]} />
+            } />
           <Table striped highlightOnHover fz="sm">
             <Table.Thead>
               <Table.Tr>
@@ -285,8 +295,14 @@ function ContentFinder({ onCompare, remover }: FinderProps) {
             <Table.Tbody>
               {pageOf(rows, page).map((p) => (
                 <Table.Tr key={`${p.id_a}-${p.id_b}`} data-testid="dupe-row">
-                  <Table.Td><Archive id={p.id_a} title={p.title_a} path={p.path_a} remover={remover} onOpen={() => onCompare([p.id_a])} /></Table.Td>
-                  <Table.Td><Archive id={p.id_b} title={p.title_b} path={p.path_b} remover={remover} onOpen={() => onCompare([p.id_b])} /></Table.Td>
+                  <Table.Td>
+                    <Archive id={p.id_a} title={p.title_a} path={p.path_a} remover={remover} onOpen={() => onCompare([p.id_a])} />
+                    {p.size_a != null && <Text size="xs" c="dimmed">{formatSize(p.size_a)}</Text>}
+                  </Table.Td>
+                  <Table.Td>
+                    <Archive id={p.id_b} title={p.title_b} path={p.path_b} remover={remover} onOpen={() => onCompare([p.id_b])} />
+                    {p.size_b != null && <Text size="xs" c="dimmed">{formatSize(p.size_b)}</Text>}
+                  </Table.Td>
                   <Table.Td>
                     <Text size="sm">{percentLabel(p.similarity)}</Text>
                     <Text size="xs" c="dimmed">{p.overlap} of {p.total_a} / {p.total_b}</Text>

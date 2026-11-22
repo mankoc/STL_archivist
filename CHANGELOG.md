@@ -89,6 +89,8 @@
   Worker sessions* lists them (editors their own, administrators everyone's) and ends one, which disconnects its
   worker within a minute (`GET /api/workers/tokens`, `DELETE /api/workers/tokens/{id}`). `server.db` gains
   `sessions.worker` on opening; workers started with an older token keep connecting until it is ended.
+- **Duplicate STL files by size:** the *STL files* tab of *Duplicates* shows each archive's size and sorts the
+  pairs by most shared files (as before), largest or smallest archive; the result's pairs carry `size_a` / `size_b`.
 
 ## 2026.46.2 — 2026-11-15
 

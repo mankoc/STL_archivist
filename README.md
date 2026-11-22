@@ -58,7 +58,7 @@ Version: 2026.46.2
 - **Editing** — model editor, mass editor (path patterns with a preview, find & replace, tags added or cleared,
   trimming), lookup editors for tags, categories, collections, subcollections, scales, sculptors, releases and
   creators, with *Merge similar* to find and join near-duplicate names
-- **Duplicates** — archives sharing STL files, archives with similar images (perceptual hash
+- **Duplicates** — archives sharing STL files (with their sizes, sorted by most shared or by size), archives with similar images (perceptual hash
   or AI embedding, skipping banners shared by many archives), models with equal or similar
   metadata (exact, Levenshtein, Soundex), with side-by-side comparison and a button
   before each archive that deletes its file (to the trash folder when one is set)
