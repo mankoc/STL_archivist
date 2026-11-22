@@ -150,6 +150,40 @@ fn png(rgb: [u8; 3]) -> Vec<u8> {
     out.into_inner()
 }
 
+/// A package whose library holds a folder inside another: the outer folder is listed,
+/// the inner one moves along, and a check names the archives it would not find.
+#[tokio::test(flavor = "multi_thread")]
+async fn importing_a_folder_inside_another() {
+    let a = empty_library();
+    let a_admin = a.user("admin", Role::Admin);
+    let a_root = a.dir.path().join("archives");
+    archives(&a_root);
+    run(&a, &a_admin, json!({"kind": "crawl", "folder": a_root.to_string_lossy(), "pattern": "{title}"})).await;
+    let r = call(&a.state, "POST", "/api/libraries", Some(&a_admin), Some(json!({"path": a_root.join("Studio").to_string_lossy(), "name": "Studio"}))).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    run(&a, &a_admin, json!({"kind": "backup"})).await;
+    let name = call(&a.state, "GET", "/api/backups", Some(&a_admin), None).await.json()[0]["name"].as_str().unwrap().to_string();
+    let package = r_body(&a, &a_admin, &name).await;
+
+    let b = empty_library();
+    let admin = b.user("boss", Role::Admin);
+    let r = upload(&b, &admin, package).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{:?}", r.json());
+    let pkg = r.json()["name"].as_str().unwrap().to_string();
+    let v = run(&b, &admin, json!({"kind": "import_library", "name": pkg})).await;
+    let folders = v["result"]["folders"].as_array().unwrap().clone();
+    assert_eq!(folders.len(), 1, "only the outer folder: {folders:?}");
+    assert_eq!((folders[0]["inner"].as_u64(), folders[0]["models"].as_i64(), folders[0]["found"].as_u64()), (Some(1), Some(2), Some(2)), "{folders:?}");
+
+    let uuid = folders[0]["uuid"].as_str().unwrap().to_string();
+    let nowhere = b.dir.path().join("nowhere").to_string_lossy().into_owned();
+    let v = run(&b, &admin, json!({"kind": "import_library", "name": pkg, "roots": {&uuid: nowhere}})).await;
+    let mut examples: Vec<String> =
+        v["result"]["folders"][0]["missing_examples"].as_array().unwrap().iter().map(|e| e.as_str().unwrap().to_string()).collect();
+    examples.sort();
+    assert_eq!(examples, ["Other/Knight.zip", "Studio/Dragon.zip"], "the inner folder's archives under its path");
+}
+
 /// The archives of the exported library, wherever they are put.
 fn archives(root: &Path) {
     write_zip(&root.join("Studio").join("Dragon.zip"), &[("dragon.stl", b"solid d\nendsolid\n"), ("dragon.png", &png([200, 30, 30]))]);
