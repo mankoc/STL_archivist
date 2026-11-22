@@ -145,6 +145,38 @@ async fn excluding_archive_types_excludes_each() {
     assert_eq!(titles(&lib, &ed, json!({"include": {"filetype": [".7z", ".rar"]}})).await, ["knight", "plain"]);
 }
 
+/// The filter tree's counts scoped by `filter` (each section counts the models the
+/// other sections' filters leave).
+async fn scoped_counts(lib: &TestLib, token: &str, filter: Value) -> Value {
+    let body = json!({"filter": filter, "show": ["tags", "scale"], "counts": true});
+    let tree = call(&lib.state, "POST", "/api/filter-tree", Some(token), Some(body)).await.json();
+    assert_eq!(tree["scoped"], true);
+    tree["scoped_counts"].clone()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn scoped_counts_of_scales_warnings_and_archive_types() {
+    let (lib, ed) = linked_fixture();
+    // Without the dragon tag: knight (75 mm, nested, .7z) and plain (nothing, .rar).
+    let c = scoped_counts(&lib, &ed, json!({"exclude": {"tag": ["dragon"]}})).await;
+    assert_eq!(c["scale"], json!({"2": 1}));
+    assert_eq!(c["group"]["scale"], 1, "models with a scale");
+    assert_eq!(c["warning"]["Nested archives"], 1);
+    assert_eq!(c["warning"]["Archive without images"], 0);
+    assert_eq!(c["group"]["warning"], 1, "models with a warning");
+    assert_eq!(c["filetype"], json!({".7z": 1, ".rar": 1}));
+    assert_eq!(c["group"]["filetype"], 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn scoped_counts_of_tags() {
+    let (lib, ed) = linked_fixture();
+    // At 32 mm: dragon alone, with both tags.
+    let c = scoped_counts(&lib, &ed, json!({"include": {"scale": [1]}})).await;
+    assert_eq!(c["tag"], json!({"bust": 1, "dragon": 1}));
+    assert_eq!(c["group"]["tag"], 1, "models with a tag, not tags");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn creators_match_exactly_as_the_pane_lists_them() {
     let (lib, ed) = fixture();
