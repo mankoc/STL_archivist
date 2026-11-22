@@ -76,7 +76,7 @@ pub(super) fn import_library(
     backup_first: bool,
 ) -> Result<String, String> {
     use stl_core::backup;
-    use storage::libraries::{self, Folder};
+    use storage::libraries;
     let src = crate::api::backups::package(&lib.config.data_dir, name).map_err(|e| e.message)?;
     let dir = stage_package(lib, job, &src, name)?;
     let db = dir.join(backup::DB_FILE);
@@ -86,56 +86,15 @@ pub(super) fn import_library(
     if let Some(uuid) = roots.keys().find(|u| !folders.iter().any(|f| &f.uuid == *u)) {
         return Err(format!("the package has no folder {uuid}"));
     }
-    // The outermost folders: the folders inside them move along.
-    let inside = |outer: &Folder, f: &Folder| f.id != outer.id && libraries::foreign_rel(&outer.root, &f.root).is_some();
-    let outer: Vec<&Folder> = folders.iter().filter(|f| !folders.iter().any(|o| inside(o, f))).collect();
-    // A folder neither given nor matched by a rule keeps its root when that is a folder here.
-    let map: Vec<(i64, String)> = outer
-        .iter()
-        .filter_map(|f| {
-            let given = roots.get(&f.uuid).map(|r| r.trim()).filter(|r| !r.is_empty()).map(str::to_string);
-            given
-                .or_else(|| crate::sync::apply_rules(rules, &f.root))
-                .or_else(|| std::path::Path::new(&f.root).is_dir().then(|| f.root.clone()))
-                .map(|r| (f.id, r))
-        })
-        .collect();
+    let outer = outer_folders(&folders);
+    let map = root_map(&outer, roots, rules);
     let plan = libraries::import_plan(&conn, &map)?;
 
     let models: i64 = folders.iter().map(|f| f.models).sum();
     job.ctl.set_total(models.max(0) as u64);
     let mut rows = Vec::new();
     for f in &outer {
-        let new_root = plan.iter().find(|p| p.id == f.id).map_or_else(|| f.root.clone(), |p| p.new.clone());
-        let mut row = crate::jobs::ImportFolder {
-            uuid: f.uuid.clone(),
-            name: f.name.clone(),
-            library: groups.iter().find(|g| Some(g.id) == f.group_id).map(|g| g.name.clone()).unwrap_or_default(),
-            root: f.root.clone(),
-            root_exists: std::path::Path::new(&new_root).is_dir(),
-            new_root,
-            models: 0,
-            inner: 0,
-            found: 0,
-            case_only: 0,
-            missing: 0,
-            missing_examples: Vec::new(),
-        };
-        for p in &plan {
-            let Some(rel) = libraries::foreign_rel(&f.root, &p.old) else { continue };
-            let check = libraries::count_found(&conn, p.id, &p.new, None)?;
-            row.models += check.total as i64;
-            row.inner += usize::from(p.id != f.id);
-            row.found += check.found;
-            row.case_only += check.case_only.len();
-            row.missing += check.missing;
-            let room = 20usize.saturating_sub(row.missing_examples.len());
-            row.missing_examples.extend(check.missing_examples.into_iter().take(room).map(|m| if rel.is_empty() { m } else { format!("{rel}/{m}") }));
-            job.ctl.advance(check.total as u64);
-            if job.stopped() {
-                return Err("stopped".into());
-            }
-        }
+        let row = check_folder(job, &conn, f, &plan, &groups)?;
         lib.job_log(job, format!("{}: {} of {} archive(s) found under {}", f.name, row.found + row.case_only, row.models, row.new_root));
         rows.push(row);
     }
@@ -151,33 +110,9 @@ pub(super) fn import_library(
     let _importing = Importing(lib);
     let pre = backup_first.then(|| crate::api::backups::new_name().replace(".7z", "_pre_import.7z"));
     if let Some(pre) = &pre {
-        lib.job_log(job, format!("Backing up this library to {pre}…"));
-        let settings = lib.config.data_dir.join(backup::SETTINGS_FILE);
-        let dest = crate::api::backups::dir(&lib.config.data_dir).join(pre);
-        lib.db
-            .with(|c| Ok::<_, rusqlite::Error>(backup::write(c, &lib.thumbs, Some(&settings), &dest, &job.ctl)))
-            .map_err(db_err)?
-            .map_err(|e| format!("could not back this library up ({e}); nothing was changed"))?;
+        backup_before_import(lib, job, pre)?;
     }
-    lib.job_log(job, "Reading the thumbnails…".into());
-    backup::extract(&src, &dir, backup::Parts::Thumbnails).map_err(|e| e.to_string())?;
-    {
-        // Opening it makes an empty store for a package without thumbnails.
-        let staged = stl_core::thumbstore::ThumbStore::open(&dir.join(backup::THUMB_DIR)).map_err(|e| format!("the package's thumbnails: {e}"))?;
-        if let Some(ids) = std::fs::read_to_string(dir.join(DROPPED)).ok().and_then(|t| serde_json::from_str::<Vec<u64>>(&t).ok()) {
-            staged.delete_many(&ids).map_err(|e| format!("the package's thumbnails: {e}"))?;
-        }
-        // A sync's package leaves out the images this server has: take them from here.
-        let filled = staged.fill_missing_blobs(&lib.thumbs);
-        staged.close();
-        let (filled, lost) = filled.map_err(|e| format!("the package's thumbnails: {e}"))?;
-        if filled > 0 {
-            lib.job_log(job, format!("{filled} thumbnail image(s) taken from this server's store."));
-        }
-        if lost > 0 {
-            lib.job_log(job, format!("{lost} thumbnail image(s) are in neither (Generate thumbnails makes them again)."));
-        }
-    }
+    stage_thumbnails(lib, job, &src, &dir)?;
     {
         let tx = conn.transaction().map_err(db_err)?;
         libraries::import_roots(&tx, &map)?;
@@ -209,6 +144,107 @@ pub(super) fn import_library(
     job.set_result(crate::jobs::JobResult::Import(preview));
     lib.job_log(job, format!("Imported{before}."));
     Ok(format!("{summary}; imported"))
+}
+
+/// The package's outermost folders: the folders inside them move along.
+fn outer_folders(folders: &[storage::libraries::Folder]) -> Vec<&storage::libraries::Folder> {
+    use storage::libraries::{Folder, foreign_rel};
+    let inside = |outer: &Folder, f: &Folder| f.id != outer.id && foreign_rel(&outer.root, &f.root).is_some();
+    folders.iter().filter(|f| !folders.iter().any(|o| inside(o, f))).collect()
+}
+
+/// Each outer folder's root here: the one given for its uuid, else the first rule's
+/// that matches, else its own root when that is a folder here (none: left out).
+fn root_map(outer: &[&storage::libraries::Folder], roots: &BTreeMap<String, String>, rules: &[crate::sync::RootRule]) -> Vec<(i64, String)> {
+    outer
+        .iter()
+        .filter_map(|f| {
+            let given = roots.get(&f.uuid).map(|r| r.trim()).filter(|r| !r.is_empty()).map(str::to_string);
+            given
+                .or_else(|| crate::sync::apply_rules(rules, &f.root))
+                .or_else(|| std::path::Path::new(&f.root).is_dir().then(|| f.root.clone()))
+                .map(|r| (f.id, r))
+        })
+        .collect()
+}
+
+/// Outer folder `f`'s preview row: its archives (and those of the folders inside it)
+/// looked for under their new roots. `Err("stopped")` when the job is stopped.
+fn check_folder(
+    job: &Job,
+    conn: &rusqlite::Connection,
+    f: &storage::libraries::Folder,
+    plan: &[storage::libraries::Rooted],
+    groups: &[storage::libraries::Group],
+) -> Result<crate::jobs::ImportFolder, String> {
+    use storage::libraries::{count_found, foreign_rel};
+    let new_root = plan.iter().find(|p| p.id == f.id).map_or_else(|| f.root.clone(), |p| p.new.clone());
+    let mut row = crate::jobs::ImportFolder {
+        uuid: f.uuid.clone(),
+        name: f.name.clone(),
+        library: groups.iter().find(|g| Some(g.id) == f.group_id).map(|g| g.name.clone()).unwrap_or_default(),
+        root: f.root.clone(),
+        root_exists: std::path::Path::new(&new_root).is_dir(),
+        new_root,
+        models: 0,
+        inner: 0,
+        found: 0,
+        case_only: 0,
+        missing: 0,
+        missing_examples: Vec::new(),
+    };
+    for p in plan {
+        let Some(rel) = foreign_rel(&f.root, &p.old) else { continue };
+        let check = count_found(conn, p.id, &p.new, None)?;
+        row.models += check.total as i64;
+        row.inner += usize::from(p.id != f.id);
+        row.found += check.found;
+        row.case_only += check.case_only.len();
+        row.missing += check.missing;
+        let room = 20usize.saturating_sub(row.missing_examples.len());
+        row.missing_examples.extend(check.missing_examples.into_iter().take(room).map(|m| if rel.is_empty() { m } else { format!("{rel}/{m}") }));
+        job.ctl.advance(check.total as u64);
+        if job.stopped() {
+            return Err("stopped".into());
+        }
+    }
+    Ok(row)
+}
+
+/// Back this library up to `pre` (in the backups folder) before it is replaced.
+fn backup_before_import(lib: &Library, job: &Job, pre: &str) -> Result<(), String> {
+    use stl_core::backup;
+    lib.job_log(job, format!("Backing up this library to {pre}…"));
+    let settings = lib.config.data_dir.join(backup::SETTINGS_FILE);
+    let dest = crate::api::backups::dir(&lib.config.data_dir).join(pre);
+    lib.db
+        .with(|c| Ok::<_, rusqlite::Error>(backup::write(c, &lib.thumbs, Some(&settings), &dest, &job.ctl)))
+        .map_err(db_err)?
+        .map_err(|e| format!("could not back this library up ({e}); nothing was changed"))
+}
+
+/// The package's thumbnail store taken out into `dir`, without the thumbnails of
+/// records merged away when its database was brought up to date, and completed with
+/// the images this server has (a sync's package leaves them out).
+fn stage_thumbnails(lib: &Library, job: &Job, src: &std::path::Path, dir: &std::path::Path) -> Result<(), String> {
+    use stl_core::backup;
+    lib.job_log(job, "Reading the thumbnails…".into());
+    backup::extract(src, dir, backup::Parts::Thumbnails).map_err(|e| e.to_string())?;
+    // Opening it makes an empty store for a package without thumbnails.
+    let staged = stl_core::thumbstore::ThumbStore::open(&dir.join(backup::THUMB_DIR)).map_err(|e| format!("the package's thumbnails: {e}"))?;
+    if let Some(ids) = std::fs::read_to_string(dir.join(DROPPED)).ok().and_then(|t| serde_json::from_str::<Vec<u64>>(&t).ok()) {
+        staged.delete_many(&ids).map_err(|e| format!("the package's thumbnails: {e}"))?;
+    }
+    let filled = staged.fill_missing_blobs(&lib.thumbs);
+    staged.close();
+    let (filled, lost) = filled.map_err(|e| format!("the package's thumbnails: {e}"))?;
+    if filled > 0 {
+        lib.job_log(job, format!("{filled} thumbnail image(s) taken from this server's store."));
+    }
+    if lost > 0 {
+        lib.job_log(job, format!("{lost} thumbnail image(s) are in neither (Generate thumbnails makes them again)."));
+    }
+    Ok(())
 }
 
 // ── sync ─────────────────────────────────────────────────────────────────────
