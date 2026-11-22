@@ -40,6 +40,21 @@ export function matches(text: string, ...fields: (string | null | undefined)[]):
   return words.every((w) => hay.includes(w));
 }
 
+/** How a pair list is ordered: as found (most shared first), or by the larger
+ *  archive of each pair; pairs of unknown size go last. */
+export type PairSort = "found" | "largest" | "smallest";
+
+export function sortPairs<T extends { size_a?: number | null; size_b?: number | null }>(rows: T[], sort: PairSort): T[] {
+  if (sort === "found") return rows;
+  const size = (p: T) => Math.max(p.size_a ?? -1, p.size_b ?? -1);
+  const sign = sort === "largest" ? -1 : 1;
+  return [...rows].sort((x, y) => {
+    const [a, b] = [size(x), size(y)];
+    if (a < 0 || b < 0) return (a < 0 ? 1 : 0) - (b < 0 ? 1 : 0);
+    return sign * (a - b);
+  });
+}
+
 export const PAGE_SIZE = 100;
 
 export function pageCount(n: number, size = PAGE_SIZE): number {

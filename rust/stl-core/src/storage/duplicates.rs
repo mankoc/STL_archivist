@@ -53,6 +53,9 @@ pub struct ContentPair {
     pub path_a: Option<String>,
     pub title_b: Option<String>,
     pub path_b: Option<String>,
+    /// Archive sizes in bytes, when known.
+    pub size_a: Option<i64>,
+    pub size_b: Option<i64>,
 }
 
 /// Archive pairs sharing `(file name, size)` entries with `overlap / max(total_a,
@@ -106,15 +109,15 @@ pub fn stl_content_pairs(conn: &Connection, threshold: f64, ctl: &Control) -> Re
     if pairs.is_empty() {
         return Ok(Some(Vec::new()));
     }
-    let info: HashMap<i64, (Option<String>, Option<String>)> =
-        model_info(conn)?.into_iter().map(|(id, t, p, _)| (id, (t, p))).collect();
+    let info: HashMap<_, _> =
+        model_info(conn)?.into_iter().map(|(id, t, p, s)| (id, (t, p, if let Value::Integer(i) = s { Some(i) } else { None }))).collect();
     Ok(Some(
         pairs
             .into_iter()
             .filter_map(|(a, b, n, ta, tb, sim)| {
-                let (title_a, path_a) = info.get(&a)?.clone();
-                let (title_b, path_b) = info.get(&b)?.clone();
-                Some(ContentPair { id_a: a, id_b: b, overlap: n, total_a: ta, total_b: tb, sim, title_a, path_a, title_b, path_b })
+                let (title_a, path_a, size_a) = info.get(&a)?.clone();
+                let (title_b, path_b, size_b) = info.get(&b)?.clone();
+                Some(ContentPair { id_a: a, id_b: b, overlap: n, total_a: ta, total_b: tb, sim, title_a, path_a, title_b, path_b, size_a, size_b })
             })
             .collect(),
     ))

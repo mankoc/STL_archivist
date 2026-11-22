@@ -24,10 +24,13 @@ pub struct ContentRow {
     pub title_a: Option<String>,
     pub path_a: Option<String>,
     pub total_a: i64,
+    /// Archive size in bytes, when known.
+    pub size_a: Option<i64>,
     pub id_b: i64,
     pub title_b: Option<String>,
     pub path_b: Option<String>,
     pub total_b: i64,
+    pub size_b: Option<i64>,
     /// Files in both.
     pub overlap: i64,
     /// `overlap` over the larger list.
@@ -270,10 +273,12 @@ pub fn content(lib: &Library, ctl: &Control, threshold: f64) -> Result<JobResult
             title_a: p.title_a,
             path_a: p.path_a,
             total_a: p.total_a,
+            size_a: p.size_a,
             id_b: p.id_b,
             title_b: p.title_b,
             path_b: p.path_b,
             total_b: p.total_b,
+            size_b: p.size_b,
             overlap: p.overlap,
             similarity: p.sim,
         })
