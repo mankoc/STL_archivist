@@ -659,147 +659,185 @@ pub fn mass_save(tx: &Transaction, plan: &MassPlan) -> EResult<()> {
         let mut row = old.clone();
         let extracted = plan.path_results.get(&mid).map(Vec::as_slice).unwrap_or(&[]);
         apply_extracted(tx, &mut row, extracted, plan.overwrite)?;
-
-        // token_context
-        let ap = archive_path.clone().unwrap_or_default();
-        let wp = WinPath::new(&ap);
-        let folder = if ap.is_empty() { String::new() } else { wp.parent().name().to_string() };
-        let filename = if ap.is_empty() { String::new() } else { wp.stem().to_string() };
-        let mut ctx: Vec<(String, String)> = vec![
-            ("creator".into(), row.creator.clone().unwrap_or_default()),
-            ("source".into(), row.source.clone().unwrap_or_default()),
-            ("title".into(), row.title.clone().unwrap_or_default()),
-            ("date".into(), format_release_date(row.release_year, row.release_month)),
-            ("path".into(), ap.clone()),
-            ("folder".into(), folder),
-            ("filename".into(), filename),
-        ];
-        ctx.extend(extracted.iter().cloned());
-
-        for (attr, value) in &plan.manual {
-            match value {
-                None if attr == "release_date" => {
-                    row.release_year = None;
-                    row.release_month = None;
-                }
-                None => set_text_field(&mut row, attr, None),
-                Some(t) => {
-                    let resolved = resolve_tokens(t, &ctx);
-                    if attr == "release_date" {
-                        (row.release_year, row.release_month) = release_date(&resolved)?;
-                    } else {
-                        set_text_field(&mut row, attr, (!resolved.is_empty()).then_some(resolved));
-                    }
-                }
-            }
-        }
-
-        if clearing("release") {
-            row.release_id = None;
-        } else if !plan.release.is_empty() {
-            let name = resolve_tokens(&plan.release, &ctx);
-            if !name.is_empty() {
-                row.release_id = Some(lookup(tx, "releases", &name)?);
-            }
-        }
-        if clearing("collection") {
-            row.collection_id = None;
-            row.subcollection_id = None;
-        } else if !plan.collection.is_empty() {
-            let col = lookup(tx, "collections", &plan.collection)?;
-            row.collection_id = Some(col);
-            if clearing("subcollection") {
-                row.subcollection_id = None;
-            } else if !plan.subcollection.is_empty() {
-                row.subcollection_id = Some(subcollection(tx, &plan.subcollection, col)?);
-            }
-        }
-        if clearing("category") {
-            row.category_id = None;
-        } else if !plan.category.is_empty() {
-            row.category_id = Some(lookup(tx, "categories", &plan.category)?);
-        }
-        if clearing("sculptor") {
-            row.sculptor_id = None;
-        } else if !plan.sculptor.is_empty() {
-            row.sculptor_id = Some(lookup(tx, "sculptors", &plan.sculptor)?);
-        }
-
+        let ctx = token_context(&row, archive_path.as_deref().unwrap_or_default(), extracted);
+        apply_manual(&mut row, &plan.manual, &ctx)?;
+        apply_names(tx, &mut row, plan, &ctx)?;
         if apply_scale {
-            tx.execute("DELETE FROM model_scales WHERE model_id = ?1", [mid])?;
-            if !clearing("scale") || !plan.scale.is_empty() {
-                let mut seen = std::collections::HashSet::new();
-                for name in plan.scale.split(',').map(py_strip).filter(|s| !s.is_empty()) {
-                    if !seen.insert(name.to_lowercase()) {
-                        continue;
-                    }
-                    let id = lookup(tx, "scales", name)?;
-                    tx.execute("INSERT INTO model_scales (model_id, scale_id) VALUES (?1, ?2)", params![mid, id])?;
-                }
-            }
+            set_scales(tx, mid, plan)?;
         }
         if apply_presupports {
             row.presupports = presupports_value.clone().filter(|v| !v.is_empty());
         }
-        // Tags are added; `clearing` "tags" removes the model's tags first.
         if apply_tags {
-            if clearing("tags") {
-                tx.execute("DELETE FROM model_tags WHERE model_id = ?1", [mid])?;
-            }
-            let resolved = resolve_tokens(&plan.tags, &ctx);
-            let names: Vec<&str> = resolved.split(',').map(py_strip).filter(|s| !s.is_empty()).collect();
-            let mut seen = std::collections::HashSet::new();
-            for name in names {
-                if !seen.insert(py_strip(name).to_lowercase()) {
-                    continue; // a tag listed twice is linked once
-                }
-                let id = tag(tx, name)?;
-                tx.execute("INSERT OR IGNORE INTO model_tags (model_id, tag_id) VALUES (?1, ?2)", params![mid, id])?;
-            }
+            add_tags(tx, mid, plan, &ctx)?;
         }
-
         if let (Some(r), Some(f)) = (&replacer, &plan.find) {
-            for field in f.fields.iter().filter(|x| *x != "collection" && *x != "subcollection") {
-                let Some(old_val) = text_field(&row, field).filter(|v| !v.is_empty()) else { continue };
-                let new_val = r.sub(&old_val)?;
-                if new_val != old_val {
-                    set_text_field(&mut row, field, (!new_val.is_empty()).then_some(new_val));
-                }
-            }
-            if f.fields.iter().any(|x| x == "collection")
-                && let Some(name) = super_name(tx, "collections", row.collection_id)?
-            {
-                let new_name = r.sub(&name)?;
-                if !new_name.is_empty() && new_name != name {
-                    row.collection_id = Some(lookup(tx, "collections", &new_name)?);
-                }
-            }
-            if f.fields.iter().any(|x| x == "subcollection")
-                && let Some(name) = super_name(tx, "subcollections", row.subcollection_id)?
-            {
-                let new_name = r.sub(&name)?;
-                if !new_name.is_empty()
-                    && new_name != name
-                    && let Some(parent) = row.collection_id
-                {
-                    row.subcollection_id = Some(subcollection(tx, &new_name, parent)?);
-                }
-            }
+            find_replace(tx, &mut row, r, f)?;
         }
-
         if plan.trim {
-            for attr in TRIMMABLE {
-                if let Some(v) = text_field(&row, attr) {
-                    let t = py_strip(&v);
-                    if t != v {
-                        set_text_field(&mut row, attr, (!t.is_empty()).then(|| t.to_string()));
-                    }
-                }
-            }
+            trim_fields(&mut row);
         }
         store_row(tx, mid, &old, &row)?;
     }
     Ok(())
+}
+
+/// `token_context`: what `{token}`s in the mass editor's templates read for a model
+/// (its fields so far, its archive's path, folder and file name), then what its
+/// path pattern extracted.
+fn token_context(row: &Row, archive_path: &str, extracted: &[(String, String)]) -> Vec<(String, String)> {
+    let wp = WinPath::new(archive_path);
+    let folder = if archive_path.is_empty() { String::new() } else { wp.parent().name().to_string() };
+    let filename = if archive_path.is_empty() { String::new() } else { wp.stem().to_string() };
+    let mut ctx: Vec<(String, String)> = vec![
+        ("creator".into(), row.creator.clone().unwrap_or_default()),
+        ("source".into(), row.source.clone().unwrap_or_default()),
+        ("title".into(), row.title.clone().unwrap_or_default()),
+        ("date".into(), format_release_date(row.release_year, row.release_month)),
+        ("path".into(), archive_path.to_string()),
+        ("folder".into(), folder),
+        ("filename".into(), filename),
+    ];
+    ctx.extend(extracted.iter().cloned());
+    ctx
+}
+
+/// The typed fields: a template resolved against `ctx` (empty clears), `None` clears.
+fn apply_manual(row: &mut Row, manual: &[(String, Option<String>)], ctx: &[(String, String)]) -> EResult<()> {
+    for (attr, value) in manual {
+        match value {
+            None if attr == "release_date" => {
+                row.release_year = None;
+                row.release_month = None;
+            }
+            None => set_text_field(row, attr, None),
+            Some(t) => {
+                let resolved = resolve_tokens(t, ctx);
+                if attr == "release_date" {
+                    (row.release_year, row.release_month) = release_date(&resolved)?;
+                } else {
+                    set_text_field(row, attr, (!resolved.is_empty()).then_some(resolved));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The named fields (release, collection and subcollection, category, sculptor):
+/// cleared, or set to the typed name (the release's a template).
+fn apply_names(tx: &Transaction, row: &mut Row, plan: &MassPlan, ctx: &[(String, String)]) -> EResult<()> {
+    let clearing = |f: &str| plan.clearing.contains(f);
+    if clearing("release") {
+        row.release_id = None;
+    } else if !plan.release.is_empty() {
+        let name = resolve_tokens(&plan.release, ctx);
+        if !name.is_empty() {
+            row.release_id = Some(lookup(tx, "releases", &name)?);
+        }
+    }
+    if clearing("collection") {
+        row.collection_id = None;
+        row.subcollection_id = None;
+    } else if !plan.collection.is_empty() {
+        let col = lookup(tx, "collections", &plan.collection)?;
+        row.collection_id = Some(col);
+        if clearing("subcollection") {
+            row.subcollection_id = None;
+        } else if !plan.subcollection.is_empty() {
+            row.subcollection_id = Some(subcollection(tx, &plan.subcollection, col)?);
+        }
+    }
+    if clearing("category") {
+        row.category_id = None;
+    } else if !plan.category.is_empty() {
+        row.category_id = Some(lookup(tx, "categories", &plan.category)?);
+    }
+    if clearing("sculptor") {
+        row.sculptor_id = None;
+    } else if !plan.sculptor.is_empty() {
+        row.sculptor_id = Some(lookup(tx, "sculptors", &plan.sculptor)?);
+    }
+    Ok(())
+}
+
+/// Replace model `mid`'s scales with the typed ones (letter case aside, each once).
+fn set_scales(tx: &Transaction, mid: i64, plan: &MassPlan) -> EResult<()> {
+    tx.execute("DELETE FROM model_scales WHERE model_id = ?1", [mid])?;
+    if plan.clearing.contains("scale") && plan.scale.is_empty() {
+        return Ok(());
+    }
+    let mut seen = std::collections::HashSet::new();
+    for name in plan.scale.split(',').map(py_strip).filter(|s| !s.is_empty()) {
+        if !seen.insert(name.to_lowercase()) {
+            continue;
+        }
+        let id = lookup(tx, "scales", name)?;
+        tx.execute("INSERT INTO model_scales (model_id, scale_id) VALUES (?1, ?2)", params![mid, id])?;
+    }
+    Ok(())
+}
+
+/// Add the typed tags (a template) to model `mid`; clearing "tags" removes its tags first.
+fn add_tags(tx: &Transaction, mid: i64, plan: &MassPlan, ctx: &[(String, String)]) -> EResult<()> {
+    if plan.clearing.contains("tags") {
+        tx.execute("DELETE FROM model_tags WHERE model_id = ?1", [mid])?;
+    }
+    let resolved = resolve_tokens(&plan.tags, ctx);
+    let names: Vec<&str> = resolved.split(',').map(py_strip).filter(|s| !s.is_empty()).collect();
+    let mut seen = std::collections::HashSet::new();
+    for name in names {
+        if !seen.insert(py_strip(name).to_lowercase()) {
+            continue; // a tag listed twice is linked once
+        }
+        let id = tag(tx, name)?;
+        tx.execute("INSERT OR IGNORE INTO model_tags (model_id, tag_id) VALUES (?1, ?2)", params![mid, id])?;
+    }
+    Ok(())
+}
+
+/// Find & replace in the chosen text fields, and in the collection's and
+/// subcollection's names (which then point at the named one).
+fn find_replace(tx: &Transaction, row: &mut Row, r: &Replacer, f: &Find) -> EResult<()> {
+    for field in f.fields.iter().filter(|x| *x != "collection" && *x != "subcollection") {
+        let Some(old_val) = text_field(row, field).filter(|v| !v.is_empty()) else { continue };
+        let new_val = r.sub(&old_val)?;
+        if new_val != old_val {
+            set_text_field(row, field, (!new_val.is_empty()).then_some(new_val));
+        }
+    }
+    if f.fields.iter().any(|x| x == "collection")
+        && let Some(name) = super_name(tx, "collections", row.collection_id)?
+    {
+        let new_name = r.sub(&name)?;
+        if !new_name.is_empty() && new_name != name {
+            row.collection_id = Some(lookup(tx, "collections", &new_name)?);
+        }
+    }
+    if f.fields.iter().any(|x| x == "subcollection")
+        && let Some(name) = super_name(tx, "subcollections", row.subcollection_id)?
+    {
+        let new_name = r.sub(&name)?;
+        if !new_name.is_empty()
+            && new_name != name
+            && let Some(parent) = row.collection_id
+        {
+            row.subcollection_id = Some(subcollection(tx, &new_name, parent)?);
+        }
+    }
+    Ok(())
+}
+
+/// Strip the [`TRIMMABLE`] fields (empty clears).
+fn trim_fields(row: &mut Row) {
+    for attr in TRIMMABLE {
+        if let Some(v) = text_field(row, attr) {
+            let t = py_strip(&v);
+            if t != v {
+                set_text_field(row, attr, (!t.is_empty()).then(|| t.to_string()));
+            }
+        }
+    }
 }
 
 fn super_name(tx: &Transaction, table: &str, id: Option<i64>) -> Result<Option<String>> {
