@@ -81,6 +81,8 @@ async fn content_and_image_duplicates() {
     let pairs = v["result"]["pairs"].as_array().unwrap();
     assert_eq!(titles(&pairs[0]), ("Dragon".into(), "Dragun".into()));
     assert_eq!((pairs[0]["overlap"].clone(), pairs[0]["similarity"].clone()), (json!(2), json!(1.0)));
+    let size = |id: &Value| lib.state.db.with(|c| c.query_row("SELECT archive_size FROM models WHERE id = ?1", [id.as_i64().unwrap()], |r| r.get::<_, i64>(0))).unwrap();
+    assert_eq!((pairs[0]["size_a"].as_i64(), pairs[0]["size_b"].as_i64()), (Some(size(&pairs[0]["id_a"])), Some(size(&pairs[0]["id_b"]))), "the archives' sizes");
 
     let v = run(&lib, &ed, json!({"kind": "find_image_duplicates", "method": "dhash", "max_distance": 0})).await;
     let r = &v["result"];

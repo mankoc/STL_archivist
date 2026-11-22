@@ -1,9 +1,23 @@
-import { deletion, deletionLabel, latestJob, matches, pageCount, pageOf, percentLabel, scoreLabel, type Job } from "./duplicates";
+import { deletion, deletionLabel, latestJob, matches, pageCount, pageOf, percentLabel, scoreLabel, sortPairs, type Job } from "./duplicates";
 
 const job = (id: number, kind: string): Job =>
   ({ id, kind, request: { kind }, state: "done", user: "ed", done: 0, total: 0, created_at: id }) as Job;
 
 describe("duplicates", () => {
+  it("sorts pairs by the larger archive, unknown sizes last", () => {
+    const rows = [
+      { id: 1, size_a: 10, size_b: 50 },
+      { id: 2, size_a: null, size_b: null },
+      { id: 3, size_a: 30, size_b: 20 },
+      { id: 4, size_a: 70 },
+    ];
+    const ids = (s: "found" | "largest" | "smallest") => sortPairs(rows, s).map((r) => r.id);
+    expect(ids("found")).toEqual([1, 2, 3, 4]);
+    expect(ids("largest")).toEqual([4, 1, 3, 2]);
+    expect(ids("smallest")).toEqual([3, 1, 4, 2]);
+    expect(rows.map((r) => r.id)).toEqual([1, 2, 3, 4]);
+  });
+
   it("picks the newest job of a finder", () => {
     const jobs = [job(1, "find_image_duplicates"), job(4, "crawl"), job(3, "find_image_duplicates"), job(2, "find_content_duplicates")];
     expect(latestJob(jobs, "images")?.id).toBe(3);

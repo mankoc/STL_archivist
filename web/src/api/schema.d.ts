@@ -1900,6 +1900,13 @@ export interface components {
              * @description `overlap` over the larger list.
              */
             similarity: number;
+            /**
+             * Format: int64
+             * @description Archive size in bytes, when known.
+             */
+            size_a?: number | null;
+            /** Format: int64 */
+            size_b?: number | null;
             title_a?: string | null;
             title_b?: string | null;
             /** Format: int64 */
