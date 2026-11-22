@@ -167,35 +167,13 @@ fn snapshot(conn: &Connection, folder: &str, include_thumbnails: bool) -> SResul
         if normcase(&WinPath::new(&path).parent().as_posix()) != want {
             continue;
         }
-        let m_idx = models.len();
         let archive_hash = match next() {
             Value::Text(s) => s,
             Value::Null => String::new(),
             _ => return unsupported("a non-text archive_hash"),
         };
-        let mut images = Vec::new();
-        if include_thumbnails {
-            let mut st = conn.prepare_cached(&format!("SELECT id, filename, thumbnail_path FROM images WHERE model_id = ?1 ORDER BY {}", super::schema_sql::IMAGE_ORDER))?;
-            let imgs: Vec<(i64, Option<String>, Option<String>)> =
-                st.query_map([id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<_>>()?;
-            for (i_idx, (image_id, filename, thumb)) in imgs.into_iter().enumerate() {
-                if thumb.is_none_or(|t| t.is_empty()) {
-                    continue;
-                }
-                let member = format!("{THUMBS_DIR}/{m_idx}_{i_idx}.jpg");
-                images.push(SidecarImage { filename: filename.unwrap_or_default(), thumbnail: member.clone() });
-                thumbs.push((member, image_id));
-            }
-        }
-        let mut st = conn.prepare_cached(
-            "SELECT filename, file_size, archive_hash FROM stl_files WHERE model_id = ?1 ORDER BY filename",
-        )?;
-        let files: Vec<(Value, Value, Value)> =
-            st.query_map([id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<_>>()?;
-        let stl_files = files
-            .into_iter()
-            .map(|(f, s, h)| Ok(SidecarStl { filename: value_json(f)?, file_size: value_json(s)?, archive_hash: value_json(h)? }))
-            .collect::<SResult<Vec<_>>>()?;
+        let images = if include_thumbnails { image_entries(conn, id, models.len(), &mut thumbs)? } else { Vec::new() };
+        let stl_files = stl_entries(conn, id)?;
         models.push(SidecarModel {
             archive_name: WinPath::new(&path).name().to_string(),
             archive_hash,
@@ -226,7 +204,49 @@ fn snapshot(conn: &Connection, folder: &str, include_thumbnails: bool) -> SResul
     if models.is_empty() {
         return Ok(None);
     }
-    // The pattern of the library the folder is the root of (none for other folders).
+    let (pattern, folder_pattern) = folder_patterns(conn, &roots, folder)?;
+    let data = SidecarFile {
+        version: SCHEMA_VERSION,
+        generated_at: format!("{}+00:00", utc_now_text().replacen(' ', "T", 1)),
+        models,
+        pattern: value_json(pattern.unwrap_or(Value::Null))?,
+        folder_pattern,
+    };
+    Ok(Some(Snapshot { data, thumbs }))
+}
+
+/// The thumbnailed images of model `model_id`, the `m_idx`-th of the sidecar, in
+/// the model's order; their `(member, image id)` go to `thumbs` for embedding.
+fn image_entries(conn: &Connection, model_id: i64, m_idx: usize, thumbs: &mut Vec<(String, i64)>) -> SResult<Vec<SidecarImage>> {
+    let mut st = conn.prepare_cached(&format!("SELECT id, filename, thumbnail_path FROM images WHERE model_id = ?1 ORDER BY {}", super::schema_sql::IMAGE_ORDER))?;
+    let imgs: Vec<(i64, Option<String>, Option<String>)> =
+        st.query_map([model_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<_>>()?;
+    let mut images = Vec::new();
+    for (i_idx, (image_id, filename, thumb)) in imgs.into_iter().enumerate() {
+        if thumb.is_none_or(|t| t.is_empty()) {
+            continue;
+        }
+        let member = format!("{THUMBS_DIR}/{m_idx}_{i_idx}.jpg");
+        images.push(SidecarImage { filename: filename.unwrap_or_default(), thumbnail: member.clone() });
+        thumbs.push((member, image_id));
+    }
+    Ok(images)
+}
+
+/// Model `model_id`'s STL file list, by file name.
+fn stl_entries(conn: &Connection, model_id: i64) -> SResult<Vec<SidecarStl>> {
+    let mut st = conn.prepare_cached("SELECT filename, file_size, archive_hash FROM stl_files WHERE model_id = ?1 ORDER BY filename")?;
+    let files: Vec<(Value, Value, Value)> =
+        st.query_map([model_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<_>>()?;
+    files
+        .into_iter()
+        .map(|(f, s, h)| Ok(SidecarStl { filename: value_json(f)?, file_size: value_json(s)?, archive_hash: value_json(h)? }))
+        .collect()
+}
+
+/// The pattern of the library `folder` is the root of (none for other folders), and
+/// the pattern of `folder` itself when it is a sub-folder with one of its own.
+fn folder_patterns(conn: &Connection, roots: &Roots, folder: &str) -> SResult<(Option<Value>, Option<String>)> {
     let pattern: Option<Value> = match roots.locate_root(folder) {
         Some(id) => conn.query_row("SELECT pattern FROM libraries WHERE id = ?1", [id], |r| r.get(0)).optional()?,
         None => None,
@@ -237,14 +257,7 @@ fn snapshot(conn: &Connection, folder: &str, include_thumbnails: bool) -> SResul
             .optional()?,
         _ => None,
     };
-    let data = SidecarFile {
-        version: SCHEMA_VERSION,
-        generated_at: format!("{}+00:00", utc_now_text().replacen(' ', "T", 1)),
-        models,
-        pattern: value_json(pattern.unwrap_or(Value::Null))?,
-        folder_pattern,
-    };
-    Ok(Some(Snapshot { data, thumbs }))
+    Ok((pattern, folder_pattern))
 }
 
 /// Exports run one at a time in a process. A crawl's and the after-edit exporter's can
@@ -343,6 +356,9 @@ fn list<'a>(v: Option<&'a Json>, what: &str) -> SResult<&'a [Json]> {
     }
 }
 
+/// An STL file of a sidecar model: name, size, archive hash.
+type StlEntry = (String, Option<i64>, Option<String>);
+
 /// Everything one model of the sidecar needs, checked before any write.
 struct Planned {
     archive_path: String,
@@ -362,7 +378,7 @@ struct Planned {
     scales: Vec<String>,
     tags: Vec<String>,
     images: Vec<(Option<String>, Vec<u8>)>,
-    stl_files: Vec<(String, Option<i64>, Option<String>)>,
+    stl_files: Vec<StlEntry>,
 }
 
 fn plan_model(m: &serde_json::Map<String, Json>, path: String, thumbs: &HashMap<String, Vec<u8>>) -> SResult<Planned> {
@@ -386,60 +402,11 @@ fn plan_model(m: &serde_json::Map<String, Json>, path: String, thumbs: &HashMap<
     let collection = or_text(m.get("collection"), m.get("category"), "collection")?.filter(|s| !s.is_empty());
     let subcollection = or_text(m.get("subcollection"), m.get("subcategory"), "subcollection")?.filter(|s| !s.is_empty());
     let category = if m.contains_key("collection") { truthy_text("category")? } else { None };
-    let scales: Vec<String> = match m.get("scales") {
-        None | Some(Json::Null) => match m.get("scale") {
-            Some(v) if truthy(v) => vec![opt_text(Some(v), "scale")?.unwrap_or_default()],
-            _ => Vec::new(),
-        },
-        Some(Json::Array(a)) => a
-            .iter()
-            .filter(|v| truthy(v))
-            .map(|v| opt_text(Some(v), "scale").map(Option::unwrap_or_default))
-            .collect::<SResult<_>>()?,
-        Some(v) if !truthy(v) => Vec::new(),
-        Some(_) => return unsupported("scales is not a list"),
-    };
-    let tags: Vec<String> = match m.get("tags") {
-        None => Vec::new(),
-        Some(Json::Array(a)) => a
-            .iter()
-            .map(|v| match v {
-                Json::String(s) => Ok(s.clone()),
-                _ => unsupported("a tag is not text"),
-            })
-            .collect::<SResult<Vec<_>>>()?
-            .into_iter()
-            .filter(|t| !py_strip(t).is_empty())
-            .collect(),
-        Some(_) => return unsupported("tags is not a list"),
-    };
-    let mut images = Vec::new();
-    for img in list(m.get("images"), "images")? {
-        let Json::Object(img) = img else { return unsupported("an image entry is not an object") };
-        let key = match img.get("thumbnail") {
-            None => String::new(),
-            Some(Json::String(s)) => s.clone(),
-            Some(Json::Array(_)) | Some(Json::Object(_)) => return unsupported("an unhashable thumbnail key"),
-            Some(_) => continue, // never a key of the thumbnail map
-        };
-        let Some(raw) = thumbs.get(&key).filter(|b| !b.is_empty()) else { continue };
-        let filename = match img.get("filename") {
-            None => Some(String::new()),
-            v => opt_text(v, "image filename")?,
-        };
-        images.push((filename, raw.clone()));
-    }
-    let mut stl_files = Vec::new();
-    let mut seen = HashSet::new();
-    for sf in list(m.get("stl_files"), "stl_files")? {
-        let Json::Object(sf) = sf else { return unsupported("an stl_files entry is not an object") };
-        let Some(fname) = sf.get("filename").filter(|v| truthy(v)) else { continue };
-        let Json::String(fname) = fname else { return unsupported("an STL file name is not text") };
-        if !seen.insert(fname.clone()) {
-            return unsupported("an STL file listed twice");
-        }
-        stl_files.push((fname.clone(), opt_int(sf.get("file_size"), "file_size")?, opt_text(sf.get("archive_hash"), "stl archive_hash")?));
-    }
+    // In this order, so that a sidecar with several faults is refused for the same one.
+    let scales = plan_scales(m)?;
+    let tags = plan_tags(m)?;
+    let images = plan_images(m, thumbs)?;
+    let stl_files = plan_stl_files(m)?;
     Ok(Planned {
         archive_path: path,
         columns: [
@@ -467,6 +434,74 @@ fn plan_model(m: &serde_json::Map<String, Json>, path: String, thumbs: &HashMap<
         images,
         stl_files,
     })
+}
+
+/// A model's scales: the `scales` list (empty entries dropped), or an older sidecar's single `scale`.
+fn plan_scales(m: &serde_json::Map<String, Json>) -> SResult<Vec<String>> {
+    match m.get("scales") {
+        None | Some(Json::Null) => match m.get("scale") {
+            Some(v) if truthy(v) => Ok(vec![opt_text(Some(v), "scale")?.unwrap_or_default()]),
+            _ => Ok(Vec::new()),
+        },
+        Some(Json::Array(a)) => a.iter().filter(|v| truthy(v)).map(|v| opt_text(Some(v), "scale").map(Option::unwrap_or_default)).collect(),
+        Some(v) if !truthy(v) => Ok(Vec::new()),
+        Some(_) => unsupported("scales is not a list"),
+    }
+}
+
+/// A model's tags, blank ones dropped.
+fn plan_tags(m: &serde_json::Map<String, Json>) -> SResult<Vec<String>> {
+    match m.get("tags") {
+        None => Ok(Vec::new()),
+        Some(Json::Array(a)) => Ok(a
+            .iter()
+            .map(|v| match v {
+                Json::String(s) => Ok(s.clone()),
+                _ => unsupported("a tag is not text"),
+            })
+            .collect::<SResult<Vec<_>>>()?
+            .into_iter()
+            .filter(|t| !py_strip(t).is_empty())
+            .collect()),
+        Some(_) => unsupported("tags is not a list"),
+    }
+}
+
+/// A model's images whose thumbnail the sidecar holds: `(file name, thumbnail bytes)`.
+fn plan_images(m: &serde_json::Map<String, Json>, thumbs: &HashMap<String, Vec<u8>>) -> SResult<Vec<(Option<String>, Vec<u8>)>> {
+    let mut images = Vec::new();
+    for img in list(m.get("images"), "images")? {
+        let Json::Object(img) = img else { return unsupported("an image entry is not an object") };
+        let key = match img.get("thumbnail") {
+            None => String::new(),
+            Some(Json::String(s)) => s.clone(),
+            Some(Json::Array(_)) | Some(Json::Object(_)) => return unsupported("an unhashable thumbnail key"),
+            Some(_) => continue, // never a key of the thumbnail map
+        };
+        let Some(raw) = thumbs.get(&key).filter(|b| !b.is_empty()) else { continue };
+        let filename = match img.get("filename") {
+            None => Some(String::new()),
+            v => opt_text(v, "image filename")?,
+        };
+        images.push((filename, raw.clone()));
+    }
+    Ok(images)
+}
+
+/// A model's STL file list `(name, size, archive hash)`; a name listed twice is refused.
+fn plan_stl_files(m: &serde_json::Map<String, Json>) -> SResult<Vec<StlEntry>> {
+    let mut stl_files = Vec::new();
+    let mut seen = HashSet::new();
+    for sf in list(m.get("stl_files"), "stl_files")? {
+        let Json::Object(sf) = sf else { return unsupported("an stl_files entry is not an object") };
+        let Some(fname) = sf.get("filename").filter(|v| truthy(v)) else { continue };
+        let Json::String(fname) = fname else { return unsupported("an STL file name is not text") };
+        if !seen.insert(fname.clone()) {
+            return unsupported("an STL file listed twice");
+        }
+        stl_files.push((fname.clone(), opt_int(sf.get("file_size"), "file_size")?, opt_text(sf.get("archive_hash"), "stl archive_hash")?));
+    }
+    Ok(stl_files)
 }
 
 /// The `metadata.json` and thumbnails of a sidecar, as `_read_metadata_7z` extracts them.
@@ -550,6 +585,32 @@ pub fn import(tx: &Transaction, store: &ThumbStore, folder: &str, sidecar: Sidec
         _ => None,
     };
     // Plan every model first: refusals happen before any write.
+    let plans = plan_models(&data, folder, &thumbs)?;
+    // A sidecar at a library's root gives that library its pattern when it has none.
+    if let Some(pattern) = &pattern
+        && let Some(id) = Roots::load(tx)?.locate_root(folder)
+    {
+        tx.execute("UPDATE libraries SET pattern = ?1 WHERE id = ?2 AND coalesce(pattern, '') = ''", params![pattern, id])?;
+    }
+    // An archive listed twice is inserted once: the second finds the first, as in Python.
+    let mut imported = Vec::new();
+    let mut thumb_writes: Vec<(i64, Vec<u8>)> = Vec::new();
+    for p in plans {
+        if let Some(path) = insert_model(tx, p, folder, &mut thumb_writes)? {
+            imported.push(path);
+        }
+    }
+    store_thumbnails(tx, store, &thumb_writes)?;
+    if let Some(pattern) = folder_pattern
+        && let Some((id, rel)) = Roots::load(tx)?.locate_folder(folder).filter(|(_, rel)| !rel.is_empty())
+    {
+        tx.execute("INSERT OR IGNORE INTO folder_patterns (library_id, rel_folder, pattern) VALUES (?1, ?2, ?3)", params![id, rel, pattern])?;
+    }
+    Ok(imported)
+}
+
+/// The sidecar's models whose archive is in `folder`, each checked ([`plan_model`]).
+fn plan_models(data: &serde_json::Map<String, Json>, folder: &str, thumbs: &HashMap<String, Vec<u8>>) -> SResult<Vec<Planned>> {
     let mut plans = Vec::new();
     for m in list(data.get("models"), "models")? {
         let Json::Object(m) = m else { return unsupported("a model entry is not an object") };
@@ -567,111 +628,107 @@ pub fn import(tx: &Transaction, store: &ThumbStore, folder: &str, sidecar: Sidec
         if !Path::new(&path).exists() {
             continue;
         }
-        plans.push(plan_model(m, path, &thumbs)?);
+        plans.push(plan_model(m, path, thumbs)?);
     }
-    // An archive listed twice is inserted once: the second finds the first, as in Python.
-    // A sidecar at a library's root gives that library its pattern when it has none.
-    if let Some(pattern) = &pattern
-        && let Some(id) = Roots::load(tx)?.locate_root(folder)
-    {
-        tx.execute("UPDATE libraries SET pattern = ?1 WHERE id = ?2 AND coalesce(pattern, '') = ''", params![pattern, id])?;
-    }
+    Ok(plans)
+}
 
-    let mut imported = Vec::new();
-    let mut thumb_writes: Vec<(i64, Vec<u8>)> = Vec::new();
-    for p in plans {
-        let (library, rel) = libraries::locate_or_create(tx, &p.archive_path, Some(folder))?;
-        if tx
-            .query_row("SELECT id FROM models WHERE library_id = ?1 AND rel_path = ?2 LIMIT 1", params![library, rel.as_str()], |r| {
-                r.get::<_, i64>(0)
-            })
-            .optional()?
-            .is_some()
-        {
-            continue;
-        }
-        let sculptor = p.sculptor.as_deref().map(|n| lookup(tx, "sculptors", n)).transpose()?;
-        let collection = p.collection.as_deref().map(|n| lookup(tx, "collections", n)).transpose()?;
-        let sub = match (p.subcollection.as_deref(), collection) {
-            (Some(n), Some(cid)) => Some(subcollection(tx, n, cid)?),
-            _ => None,
-        };
-        let category = p.category.as_deref().map(|n| lookup(tx, "categories", n)).transpose()?;
-        let release = p.release.as_deref().map(|n| lookup(tx, "releases", n)).transpose()?;
-        let mut scale_ids = Vec::new();
-        for s in &p.scales {
-            let id = lookup(tx, "scales", s)?;
-            if scale_ids.contains(&id) {
-                return unsupported("a scale linked twice");
-            }
-            scale_ids.push(id);
-        }
-        let mut tag_ids = Vec::new();
-        for t in &p.tags {
-            let id = tag(tx, t)?;
-            if tag_ids.contains(&id) {
-                return unsupported("a tag linked twice");
-            }
-            tag_ids.push(id);
-        }
-        let rate: Value = match &p.compression_rate {
-            Some(Json::Number(n)) if n.is_i64() => Value::Integer(n.as_i64().unwrap_or(0)),
-            Some(Json::Number(n)) => Value::Real(n.as_f64().unwrap_or(0.0)),
-            _ => Value::Null,
-        };
-        let now = utc_now_text();
-        let [title, creator, source, url, description, presupports, warning] = &p.columns;
-        tx.execute(
-            "INSERT INTO models (title, creator, source, release_year, release_month, url, description, library_id, rel_path, \
-             rel_folder, archive_hash, sequence, presupports, warning, compression_rate, is_missing, to_print, \
-             created_at, updated_at, sculptor_id, collection_id, subcollection_id, category_id, release_id, archive_size) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, 0, 0, ?16, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
-            params![
-                title, creator, source, p.release_year, p.release_month, url, description, library, rel.as_str(),
-                rel.folder(), p.archive_hash, p.sequence, presupports, warning, rate, now,
-                sculptor, collection, sub, category, release, p.archive_size
-            ],
-        )?;
-        let model_id = tx.last_insert_rowid();
-        for id in scale_ids {
-            tx.execute("INSERT INTO model_scales (model_id, scale_id) VALUES (?1, ?2)", [model_id, id])?;
-        }
-        for id in tag_ids {
-            tx.execute("INSERT INTO model_tags (model_id, tag_id) VALUES (?1, ?2)", [model_id, id])?;
-        }
-        for (filename, raw) in p.images {
-            tx.execute("INSERT INTO images (model_id, filename) VALUES (?1, ?2)", params![model_id, filename])?;
-            thumb_writes.push((tx.last_insert_rowid(), raw));
-        }
-        for (fname, size, hash) in p.stl_files {
-            tx.execute(
-                "INSERT INTO stl_files (model_id, filename, file_size, archive_hash) VALUES (?1, ?2, ?3, ?4)",
-                params![model_id, fname, size, hash],
-            )?;
-        }
-        imported.push(p.archive_path);
-    }
-    if !thumb_writes.is_empty() {
-        let items: Vec<(u64, &[u8])> = thumb_writes.iter().map(|(id, b)| (*id as u64, b.as_slice())).collect();
-        match store.put_many(&items) {
-            Ok(()) => {
-                for (id, _) in &thumb_writes {
-                    tx.execute("UPDATE images SET thumbnail_path = ?1 WHERE id = ?2", params![id.to_string(), id])?;
-                }
-            }
-            Err(_) => {
-                for (id, _) in &thumb_writes {
-                    tx.execute("DELETE FROM images WHERE id = ?1", [id])?;
-                }
-            }
-        }
-    }
-    if let Some(pattern) = folder_pattern
-        && let Some((id, rel)) = Roots::load(tx)?.locate_folder(folder).filter(|(_, rel)| !rel.is_empty())
+/// Insert one planned model with its links, images and STL files; its thumbnails go
+/// to `thumb_writes` (image id, bytes). Its archive path, or `None` when the archive
+/// already has a record.
+fn insert_model(tx: &Transaction, p: Planned, folder: &str, thumb_writes: &mut Vec<(i64, Vec<u8>)>) -> SResult<Option<String>> {
+    let (library, rel) = libraries::locate_or_create(tx, &p.archive_path, Some(folder))?;
+    if tx
+        .query_row("SELECT id FROM models WHERE library_id = ?1 AND rel_path = ?2 LIMIT 1", params![library, rel.as_str()], |r| {
+            r.get::<_, i64>(0)
+        })
+        .optional()?
+        .is_some()
     {
-        tx.execute("INSERT OR IGNORE INTO folder_patterns (library_id, rel_folder, pattern) VALUES (?1, ?2, ?3)", params![id, rel, pattern])?;
+        return Ok(None);
     }
-    Ok(imported)
+    let sculptor = p.sculptor.as_deref().map(|n| lookup(tx, "sculptors", n)).transpose()?;
+    let collection = p.collection.as_deref().map(|n| lookup(tx, "collections", n)).transpose()?;
+    let sub = match (p.subcollection.as_deref(), collection) {
+        (Some(n), Some(cid)) => Some(subcollection(tx, n, cid)?),
+        _ => None,
+    };
+    let category = p.category.as_deref().map(|n| lookup(tx, "categories", n)).transpose()?;
+    let release = p.release.as_deref().map(|n| lookup(tx, "releases", n)).transpose()?;
+    let mut scale_ids = Vec::new();
+    for s in &p.scales {
+        let id = lookup(tx, "scales", s)?;
+        if scale_ids.contains(&id) {
+            return unsupported("a scale linked twice");
+        }
+        scale_ids.push(id);
+    }
+    let mut tag_ids = Vec::new();
+    for t in &p.tags {
+        let id = tag(tx, t)?;
+        if tag_ids.contains(&id) {
+            return unsupported("a tag linked twice");
+        }
+        tag_ids.push(id);
+    }
+    let rate: Value = match &p.compression_rate {
+        Some(Json::Number(n)) if n.is_i64() => Value::Integer(n.as_i64().unwrap_or(0)),
+        Some(Json::Number(n)) => Value::Real(n.as_f64().unwrap_or(0.0)),
+        _ => Value::Null,
+    };
+    let now = utc_now_text();
+    let [title, creator, source, url, description, presupports, warning] = &p.columns;
+    tx.execute(
+        "INSERT INTO models (title, creator, source, release_year, release_month, url, description, library_id, rel_path, \
+         rel_folder, archive_hash, sequence, presupports, warning, compression_rate, is_missing, to_print, \
+         created_at, updated_at, sculptor_id, collection_id, subcollection_id, category_id, release_id, archive_size) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, 0, 0, ?16, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
+        params![
+            title, creator, source, p.release_year, p.release_month, url, description, library, rel.as_str(),
+            rel.folder(), p.archive_hash, p.sequence, presupports, warning, rate, now,
+            sculptor, collection, sub, category, release, p.archive_size
+        ],
+    )?;
+    let model_id = tx.last_insert_rowid();
+    for id in scale_ids {
+        tx.execute("INSERT INTO model_scales (model_id, scale_id) VALUES (?1, ?2)", [model_id, id])?;
+    }
+    for id in tag_ids {
+        tx.execute("INSERT INTO model_tags (model_id, tag_id) VALUES (?1, ?2)", [model_id, id])?;
+    }
+    for (filename, raw) in p.images {
+        tx.execute("INSERT INTO images (model_id, filename) VALUES (?1, ?2)", params![model_id, filename])?;
+        thumb_writes.push((tx.last_insert_rowid(), raw));
+    }
+    for (fname, size, hash) in p.stl_files {
+        tx.execute(
+            "INSERT INTO stl_files (model_id, filename, file_size, archive_hash) VALUES (?1, ?2, ?3, ?4)",
+            params![model_id, fname, size, hash],
+        )?;
+    }
+    Ok(Some(p.archive_path))
+}
+
+/// Write the imported images' thumbnails to `store` in one transaction, and point
+/// the images at them; when the store refuses, those images are dropped.
+fn store_thumbnails(tx: &Transaction, store: &ThumbStore, thumb_writes: &[(i64, Vec<u8>)]) -> SResult<()> {
+    if thumb_writes.is_empty() {
+        return Ok(());
+    }
+    let items: Vec<(u64, &[u8])> = thumb_writes.iter().map(|(id, b)| (*id as u64, b.as_slice())).collect();
+    match store.put_many(&items) {
+        Ok(()) => {
+            for (id, _) in thumb_writes {
+                tx.execute("UPDATE images SET thumbnail_path = ?1 WHERE id = ?2", params![id.to_string(), id])?;
+            }
+        }
+        Err(_) => {
+            for (id, _) in thumb_writes {
+                tx.execute("DELETE FROM images WHERE id = ?1", [id])?;
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -760,6 +817,52 @@ mod tests {
         assert_eq!((title.as_str(), rate), ("A", 0.5));
         let thumb: String = conn.query_row("SELECT thumbnail_path FROM images", [], |r| r.get(0)).unwrap();
         assert_eq!(store.get_many(&[thumb.parse().unwrap()]).unwrap()[0].1, b"jpeg");
+    }
+
+    /// A model's tags, scales and STL file list travel through the sidecar.
+    #[test]
+    fn links_and_file_lists_survive_a_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("models");
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::write(folder.join("a.zip"), b"x").unwrap();
+        let folder_s = crate::winpath::native(&folder.to_string_lossy());
+        let store = ThumbStore::open(&dir.path().join("thumbs")).unwrap();
+
+        let src = dir.path().join("src.db");
+        migrate(&src, &Vectors::default()).unwrap();
+        let conn = open(&src).unwrap();
+        conn.execute("INSERT INTO libraries (uuid, name, root) VALUES ('u1', 'lib', ?1)", [crate::winpath::native(&dir.path().to_string_lossy())])
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO models (id, title, library_id, rel_path, rel_folder, archive_hash, is_missing, to_print) \
+             VALUES (1, 'A', 1, 'models/a.zip', 'models', 'h', 0, 0);
+             INSERT INTO tags (id, name) VALUES (1, 'dragon'), (2, 'bust');
+             INSERT INTO model_tags (model_id, tag_id) VALUES (1, 1), (1, 2);
+             INSERT INTO scales (id, name) VALUES (1, '32 mm');
+             INSERT INTO model_scales (model_id, scale_id) VALUES (1, 1);
+             INSERT INTO stl_files (model_id, filename, file_size, archive_hash) VALUES (1, 'body.stl', 100, 'h'), (1, 'base.stl', NULL, 'h');",
+        )
+        .unwrap();
+        assert!(export(&conn, Some(&store), &folder_s, false).unwrap());
+
+        let dst = dir.path().join("dst.db");
+        migrate(&dst, &Vectors::default()).unwrap();
+        let mut conn = open(&dst).unwrap();
+        let tx = conn.transaction().unwrap();
+        assert_eq!(import(&tx, &store, &folder_s, read(&folder_s).unwrap()).unwrap().len(), 1);
+        tx.commit().unwrap();
+        let texts = |sql: &str| -> Vec<String> {
+            let mut st = conn.prepare(sql).unwrap();
+            st.query_map([], |r| r.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap()
+        };
+        assert_eq!(texts("SELECT t.name FROM model_tags k JOIN tags t ON t.id = k.tag_id ORDER BY t.name"), ["bust", "dragon"]);
+        assert_eq!(texts("SELECT s.name FROM model_scales k JOIN scales s ON s.id = k.scale_id"), ["32 mm"]);
+        let files: Vec<(String, Option<i64>, Option<String>)> = {
+            let mut st = conn.prepare("SELECT filename, file_size, archive_hash FROM stl_files ORDER BY filename").unwrap();
+            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().collect::<rusqlite::Result<_>>().unwrap()
+        };
+        assert_eq!(files, [("base.stl".to_string(), None, Some("h".to_string())), ("body.stl".to_string(), Some(100), Some("h".to_string()))]);
     }
 
     /// A crawl and the after-edit exporter can write the same folder's sidecar at once.

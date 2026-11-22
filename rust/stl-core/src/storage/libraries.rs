@@ -899,43 +899,70 @@ pub fn migrate(tx: &Transaction, models_ddl: &str, models_indexes: &[&str]) -> R
     // 1. Crawled folders → libraries.
     let has_folders = tx.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'crawled_folders'")?.exists([])?;
     if has_folders {
-        let cols: Vec<String> =
-            tx.prepare("SELECT name FROM pragma_table_info('crawled_folders')")?.query_map([], |r| r.get(0))?.collect::<Result<_>>()?;
-        let col = |c: &str| if cols.iter().any(|x| x == c) { c.to_string() } else { "NULL".to_string() };
-        let sql = format!(
-            "SELECT path, {}, {}, {}, {}, {}, {} FROM crawled_folders ORDER BY id",
-            col("pattern"),
-            col("monitored"),
-            col("last_crawled_at"),
-            col("archive_count"),
-            col("new_count"),
-            col("updated_count")
-        );
-        type Folder = (String, Option<String>, Option<i64>, Option<String>, Option<i64>, Option<i64>, Option<i64>);
-        let folders: Vec<Folder> = tx
-            .prepare(&sql)?
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))?
-            .collect::<Result<_>>()?;
-        for (path, pattern, monitored, last, count, new, updated) in folders {
-            let root = clean_root(&path);
-            if root.is_empty() || Roots::load(tx)?.locate_root(&root).is_some() {
-                continue;
-            }
-            let name = unique_name(tx, &default_name(&root), None)?;
-            tx.execute(
-                "INSERT INTO libraries (uuid, name, root, pattern, monitored, last_crawled_at, archive_count, new_count, updated_count, created_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                params![new_uuid(), name, root, pattern, monitored.unwrap_or(0), last, count, new, updated, utc_now_text()],
-            )?;
-            report.libraries += 1;
-        }
+        folders_to_libraries(tx, &mut report)?;
     }
     // 2. Each model to the deepest library above it; the rest grouped by folder.
     let models: Vec<(i64, Option<String>)> =
         tx.prepare("SELECT id, archive_path FROM models ORDER BY id")?.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_>>()?;
     report.models = models.len();
-    let mut roots = Roots::load(tx)?;
-    let usable = |p: &Option<String>| p.as_deref().filter(|p| !p.trim().is_empty()).map(str::to_string);
+    add_folder_libraries(tx, &models, &mut report)?;
+    let old_cols: Vec<String> = tx.prepare("SELECT name FROM pragma_table_info('models')")?.query_map([], |r| r.get(0))?.collect::<Result<_>>()?;
+    let tables: Vec<String> =
+        tx.prepare("SELECT name FROM sqlite_master WHERE type = 'table'")?.query_map([], |r| r.get(0))?.collect::<Result<_>>()?;
+    tx.execute_batch("CREATE TEMP TABLE _paths (id INTEGER PRIMARY KEY, library_id INTEGER, rel_path TEXT, rel_folder TEXT)")?;
+    place_models(tx, &models, &old_cols, &tables, &mut report)?;
+    // 3. Rebuild `models` with the new columns.
+    rebuild_models(tx, models_ddl, models_indexes, &old_cols)?;
+    if has_folders {
+        tx.execute_batch("DROP TABLE crawled_folders")?;
+    }
+    Ok(Some(report))
+}
+
+/// A stored archive path that can be placed (not blank).
+fn usable(path: &Option<String>) -> Option<String> {
+    path.as_deref().filter(|p| !p.trim().is_empty()).map(str::to_string)
+}
+
+/// Step 1: each crawled folder becomes a library (unless one has its root already).
+fn folders_to_libraries(tx: &Transaction, report: &mut PathsMigration) -> Result<()> {
+    let cols: Vec<String> =
+        tx.prepare("SELECT name FROM pragma_table_info('crawled_folders')")?.query_map([], |r| r.get(0))?.collect::<Result<_>>()?;
+    let col = |c: &str| if cols.iter().any(|x| x == c) { c.to_string() } else { "NULL".to_string() };
+    let sql = format!(
+        "SELECT path, {}, {}, {}, {}, {}, {} FROM crawled_folders ORDER BY id",
+        col("pattern"),
+        col("monitored"),
+        col("last_crawled_at"),
+        col("archive_count"),
+        col("new_count"),
+        col("updated_count")
+    );
+    type Folder = (String, Option<String>, Option<i64>, Option<String>, Option<i64>, Option<i64>, Option<i64>);
+    let folders: Vec<Folder> = tx
+        .prepare(&sql)?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))?
+        .collect::<Result<_>>()?;
+    for (path, pattern, monitored, last, count, new, updated) in folders {
+        let root = clean_root(&path);
+        if root.is_empty() || Roots::load(tx)?.locate_root(&root).is_some() {
+            continue;
+        }
+        let name = unique_name(tx, &default_name(&root), None)?;
+        tx.execute(
+            "INSERT INTO libraries (uuid, name, root, pattern, monitored, last_crawled_at, archive_count, new_count, updated_count, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![new_uuid(), name, root, pattern, monitored.unwrap_or(0), last, count, new, updated, utc_now_text()],
+        )?;
+        report.libraries += 1;
+    }
+    Ok(())
+}
+
+/// Step 2, first part: the archives outside every library get libraries at their
+/// outermost folders.
+fn add_folder_libraries(tx: &Transaction, models: &[(i64, Option<String>)], report: &mut PathsMigration) -> Result<()> {
+    let roots = Roots::load(tx)?;
     let orphan_folders: Vec<String> = {
         let mut f: Vec<String> = models
             .iter()
@@ -961,66 +988,72 @@ pub fn migrate(tx: &Transaction, models_ddl: &str, models_indexes: &[&str]) -> R
         )?;
         report.extra_libraries += 1;
     }
-    roots = Roots::load(tx)?;
-    let old_cols: Vec<String> = tx.prepare("SELECT name FROM pragma_table_info('models')")?.query_map([], |r| r.get(0))?.collect::<Result<_>>()?;
-    let tables: Vec<String> =
-        tx.prepare("SELECT name FROM sqlite_master WHERE type = 'table'")?.query_map([], |r| r.get(0))?.collect::<Result<_>>()?;
-    tx.execute_batch("CREATE TEMP TABLE _paths (id INTEGER PRIMARY KEY, library_id INTEGER, rel_path TEXT, rel_folder TEXT)")?;
-    {
-        let mut placed: Vec<(i64, i64, RelPath)> = Vec::with_capacity(models.len());
-        let mut unplaced: Option<i64> = None;
-        for (id, path) in &models {
-            let located = usable(path).and_then(|p| roots.locate(&p).or_else(|| sanitized(&roots, &p)));
-            let (lib, rel) = match located {
-                Some(found) => found,
-                None => {
-                    // No usable path: kept, missing, in a library of their own.
-                    let lib = match unplaced {
-                        Some(l) => l,
-                        None => {
-                            let name = unique_name(tx, "Archives without a path", None)?;
-                            tx.execute(
-                                "INSERT INTO libraries (uuid, name, root, monitored, origin, created_at) VALUES (?1, ?2, '', 0, 'migration', ?3)",
-                                params![new_uuid(), name, utc_now_text()],
-                            )?;
-                            report.extra_libraries += 1;
-                            *unplaced.insert(tx.last_insert_rowid())
-                        }
-                    };
-                    tx.execute("UPDATE models SET is_missing = 1 WHERE id = ?1", [id])?;
-                    (lib, RelPath::parse(&format!("model-{id}")).expect("a plain name"))
-                }
-            };
-            placed.push((*id, lib, rel));
-        }
-        // 2b. Records of the same archive (one folder crawled under two
-        // spellings) become one record.
-        let key = |lib: i64, rel: &RelPath| {
-            (lib, if crate::relpath::CASE_INSENSITIVE { rel.as_str().to_lowercase() } else { rel.as_str().to_string() })
-        };
-        let mut groups: std::collections::HashMap<(i64, String), Vec<i64>> = std::collections::HashMap::new();
-        for (id, lib, rel) in &placed {
-            groups.entry(key(*lib, rel)).or_default().push(*id);
-        }
-        let mut dropped: std::collections::HashSet<i64> = std::collections::HashSet::new();
-        let mut dup_groups: Vec<&Vec<i64>> = groups.values().filter(|v| v.len() > 1).collect();
-        dup_groups.sort();
-        let mut pairs: Vec<(i64, i64)> = Vec::new();
-        for ids in dup_groups {
-            let keep = kept_of(tx, ids, &old_cols)?;
-            for &d in ids.iter().filter(|&&d| d != keep) {
-                pairs.push((keep, d));
-                dropped.insert(d);
+    Ok(())
+}
+
+/// Step 2, second part: each record's library and relative path into `_paths` (a
+/// record without a usable path goes, missing, into a library of its own), after
+/// merging the records of one archive (2b).
+fn place_models(tx: &Transaction, models: &[(i64, Option<String>)], old_cols: &[String], tables: &[String], report: &mut PathsMigration) -> Result<()> {
+    let roots = Roots::load(tx)?;
+    let mut placed: Vec<(i64, i64, RelPath)> = Vec::with_capacity(models.len());
+    let mut unplaced: Option<i64> = None;
+    for (id, path) in models {
+        let located = usable(path).and_then(|p| roots.locate(&p).or_else(|| sanitized(&roots, &p)));
+        let (lib, rel) = match located {
+            Some(found) => found,
+            None => {
+                // No usable path: kept, missing, in a library of their own.
+                let lib = match unplaced {
+                    Some(l) => l,
+                    None => {
+                        let name = unique_name(tx, "Archives without a path", None)?;
+                        tx.execute(
+                            "INSERT INTO libraries (uuid, name, root, monitored, origin, created_at) VALUES (?1, ?2, '', 0, 'migration', ?3)",
+                            params![new_uuid(), name, utc_now_text()],
+                        )?;
+                        report.extra_libraries += 1;
+                        *unplaced.insert(tx.last_insert_rowid())
+                    }
+                };
+                tx.execute("UPDATE models SET is_missing = 1 WHERE id = ?1", [id])?;
+                (lib, RelPath::parse(&format!("model-{id}")).expect("a plain name"))
             }
-        }
-        report.duplicates_merged = pairs.len();
-        report.thumbnail_refs = merge_duplicates(tx, &pairs, &old_cols, &tables)?;
-        let mut ins = tx.prepare("INSERT INTO _paths VALUES (?1, ?2, ?3, ?4)")?;
-        for (id, lib, rel) in placed.iter().filter(|(id, ..)| !dropped.contains(id)) {
-            ins.execute(params![id, lib, rel.as_str(), rel.folder()])?;
+        };
+        placed.push((*id, lib, rel));
+    }
+    // 2b. Records of the same archive (one folder crawled under two
+    // spellings) become one record.
+    let key = |lib: i64, rel: &RelPath| {
+        (lib, if crate::relpath::CASE_INSENSITIVE { rel.as_str().to_lowercase() } else { rel.as_str().to_string() })
+    };
+    let mut groups: std::collections::HashMap<(i64, String), Vec<i64>> = std::collections::HashMap::new();
+    for (id, lib, rel) in &placed {
+        groups.entry(key(*lib, rel)).or_default().push(*id);
+    }
+    let mut dropped: std::collections::HashSet<i64> = std::collections::HashSet::new();
+    let mut dup_groups: Vec<&Vec<i64>> = groups.values().filter(|v| v.len() > 1).collect();
+    dup_groups.sort();
+    let mut pairs: Vec<(i64, i64)> = Vec::new();
+    for ids in dup_groups {
+        let keep = kept_of(tx, ids, old_cols)?;
+        for &d in ids.iter().filter(|&&d| d != keep) {
+            pairs.push((keep, d));
+            dropped.insert(d);
         }
     }
-    // 3. Rebuild `models` with the new columns.
+    report.duplicates_merged = pairs.len();
+    report.thumbnail_refs = merge_duplicates(tx, &pairs, old_cols, tables)?;
+    let mut ins = tx.prepare("INSERT INTO _paths VALUES (?1, ?2, ?3, ?4)")?;
+    for (id, lib, rel) in placed.iter().filter(|(id, ..)| !dropped.contains(id)) {
+        ins.execute(params![id, lib, rel.as_str(), rel.folder()])?;
+    }
+    Ok(())
+}
+
+/// Step 3: `models` rebuilt from `models_ddl` with `_paths`' columns, the columns it
+/// shares with the old table copied, and its indexes made again.
+fn rebuild_models(tx: &Transaction, models_ddl: &str, models_indexes: &[&str], old_cols: &[String]) -> Result<()> {
     tx.execute_batch("DROP VIEW IF EXISTS models_view")?;
     tx.execute_batch(&models_ddl.replace("CREATE TABLE models (", "CREATE TABLE models_new ("))?;
     let new_cols: Vec<String> =
@@ -1038,10 +1071,7 @@ pub fn migrate(tx: &Transaction, models_ddl: &str, models_indexes: &[&str]) -> R
     for ix in models_indexes {
         tx.execute_batch(ix)?;
     }
-    if has_folders {
-        tx.execute_batch("DROP TABLE crawled_folders")?;
-    }
-    Ok(Some(report))
+    Ok(())
 }
 
 /// A path whose parts include `.`, `..` or empty ones, cleaned up and located.
@@ -1191,6 +1221,28 @@ mod tests {
         assert_eq!(roots.locate("/other/c.zip"), None);
         assert_eq!(roots.inner(1), vec![(2, "/stl/Gambody".into())]);
         assert_eq!(roots.resolve(2, "a/x.zip").unwrap(), relpath::join("/stl/Gambody", "a/x.zip"));
+    }
+
+    /// The rebuilt `models` gets the indexes of the current schema (some are made only there).
+    #[test]
+    fn the_migrated_models_table_has_its_indexes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.db");
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE models (id INTEGER NOT NULL, title VARCHAR(512), archive_path TEXT NOT NULL,
+                     archive_folder VARCHAR(512), archive_hash VARCHAR(64) NOT NULL, warning TEXT, is_missing BOOLEAN DEFAULT '0' NOT NULL,
+                     to_print BOOLEAN DEFAULT '0' NOT NULL, description TEXT, updated_at DATETIME, PRIMARY KEY (id), UNIQUE (archive_path));
+                 INSERT INTO models (id, title, archive_path, archive_folder, archive_hash) VALUES (1, 'A', 'D:/STL/a.zip', 'D:/STL', 'h1');",
+            )
+            .unwrap();
+        assert!(migrate_db(&path, &Vectors::default()).unwrap().paths.is_some());
+        let conn = open(&path).unwrap();
+        let has = |ix: &str| conn.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1").unwrap().exists([ix]).unwrap();
+        for ix in ["ix_models_title", "ix_models_category_id", "ix_models_release_id", "ix_models_subcollection_id"] {
+            assert!(has(ix), "{ix}");
+        }
     }
 
     #[test]
