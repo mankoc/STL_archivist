@@ -618,7 +618,7 @@ export const TOPICS: Topic[] = [
         ["Cell editor", "Enter saves; Esc cancels"],
         ["Image viewer", "← / → previous and next image; Esc closes"],
         ["Filter pane", "Click a value: include → exclude → off; a header's circle: has value → no value → off"],
-        ["Desktop app", "Ctrl+L start page (switch server); Ctrl+R reload; Ctrl+Q quit"],
+        ["Desktop app", "Ctrl+L start page (switch server); Ctrl+R reload; F1 help; Ctrl+Q quit"],
       ] } },
     ],
   },

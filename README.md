@@ -216,7 +216,8 @@ When the app starts it opens the library opened last, local or on a server. Unti
 the last library when the app starts** on the start page to choose each time.
 
 The first time a library is opened you create its administrator account. *File → Switch
-server…* (Ctrl+L) returns to the start page; Ctrl+R reloads; *Help → About StlArchivist*
+server…* (Ctrl+L) returns to the start page; Ctrl+R reloads; *Help → StlArchivist Help* (F1) opens the help
+pages (the user guide on the start page), *Help → Changelog* the changelog in your browser; *Help → About StlArchivist*
 shows the app's version and creator (the window's title shows the version too: the app's on
 the start page, the server's once connected). Inside the app, the detail pane can show an
 archive's folder in the file manager.
