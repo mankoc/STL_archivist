@@ -39,7 +39,7 @@ ARG ORT_VERSION=1.22.0
 ARG ORT_SHA256=d571e63a2329baacb713f441e65ad75284de354db6e1ac435fe4bebbb417986a
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl unzip \
- && mkdir -p /opt/pdfium \
+ && mkdir -p /opt/pdfium /opt/onnxruntime/lib \
  && curl -fsSL --retry 5 --retry-all-errors --retry-delay 15 -o /tmp/pdfium.tgz "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/${PDFIUM_BUILD}/pdfium-linux-x64.tgz" \
  && curl -fsSL --retry 5 --retry-all-errors --retry-delay 15 -o /tmp/ort.zip "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/${ORT_VERSION}/microsoft.ml.onnxruntime.${ORT_VERSION}.nupkg" \
  && printf '%s  %s\n' "$PDFIUM_SHA256" /tmp/pdfium.tgz "$ORT_SHA256" /tmp/ort.zip | sha256sum -c - \
