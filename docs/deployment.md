@@ -226,7 +226,7 @@ without pushing it, to check it.
 UnRAR is not included (it is not free software): download it in *Settings → Components* (it
 lands in the data volume and is found by itself), or mount a copy and set `STL_UNRAR_PATH`.
 The image's ONNX Runtime is the CPU build; for CLIP on an NVIDIA GPU, derive an image with
-CUDA 12, cuDNN 9 and the `onnxruntime-linux-x64-gpu` build (`ORT_DYLIB_PATH` pointing at it),
+CUDA 12, cuDNN 9 and the Linux GPU build (NuGet's `Microsoft.ML.OnnxRuntime.Gpu.Linux`; `ORT_DYLIB_PATH` pointing at it),
 and run it with `--gpus all` (NVIDIA Container Toolkit).
 
 ## Option D: a Windows server
@@ -383,7 +383,7 @@ card shows it once the encoder is loaded):
 | Platform | GPU | ONNX Runtime build | Also needs |
 |---|---|---|---|
 | Windows | any DirectX 12 GPU | DirectML (`Microsoft.ML.OnnxRuntime.DirectML`) | `DirectML.dll` 1.15+ beside `onnxruntime.dll` |
-| Linux | NVIDIA | `onnxruntime-linux-x64-gpu` (its `libonnxruntime_providers_*.so` beside it) | CUDA 12 and cuDNN 9 on the library path |
+| Linux | NVIDIA | NuGet `Microsoft.ML.OnnxRuntime.Gpu.Linux` (its `libonnxruntime_providers_*.so` beside it) | CUDA 12 and cuDNN 9 on the library path |
 | Linux | AMD | a MIGraphX or ROCm build (AMD's packages) | ROCm |
 | Linux | Intel | an OpenVINO build (Intel's packages) | OpenVINO, the GPU driver |
 

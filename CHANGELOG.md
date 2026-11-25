@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **ONNX Runtime comes from NuGet:** Microsoft's ONNX Runtime repository is no longer on GitHub, so the component's
+  download and the Docker image's build failed. The same version (1.22.0) now comes from Microsoft's NuGet packages,
+  as the DirectML variant already did; the CPU download is larger (121 MB, every platform in one package).
+  Installed copies need nothing. Mirrors need the new files (`microsoft.ml.onnxruntime.1.22.0.nupkg` and
+  `microsoft.ml.onnxruntime.gpu.linux.1.22.0.nupkg`).
+
 ## 2026.48.0 — 2026-11-25
 
 - **No automatic workflows:** the checks and the Debian package build no longer start on pushes and pull requests,
