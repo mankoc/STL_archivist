@@ -93,6 +93,8 @@
   pairs by most shared files (as before), largest or smallest archive; the result's pairs carry `size_a` / `size_b`.
 - **Desktop app, *Switch server…*:** it opened an empty (black) page instead of the start page, because the
   start page's address was read from the window before the page had loaded.
+- **Help menu (desktop app):** *Help → StlArchivist Help* (F1) opens the connected server's help pages, or the user
+  guide in the browser from the start page; *Help → Changelog* opens the changelog in the browser.
 
 ## 2026.46.2 — 2026-11-15
 

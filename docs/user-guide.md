@@ -492,4 +492,4 @@ Example: archives stored as `ArtistName/2024-01 Some Release/model_name.zip` use
 | Cell editor | Enter saves; Esc cancels |
 | Image viewer | ← / → previous and next image; Esc closes |
 | Filter pane | Click a value: include → exclude → off; click a header's circle: has value → no value → off |
-| Desktop app | Ctrl+L back to the start page (switch server); Ctrl+R reload; Ctrl+Q quit |
+| Desktop app | Ctrl+L back to the start page (switch server); Ctrl+R reload; F1 help; Ctrl+Q quit |
