@@ -47,6 +47,8 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 const RELEASE_DOWNLOADS: &str = "https://github.com/mankoc/STL_archivist/releases/download";
 const RELEASE_API: &str = "https://api.github.com/repos/mankoc/STL_archivist/releases/tags";
+const USER_GUIDE: &str = "https://github.com/mankoc/STL_archivist/blob/main/docs/user-guide.md";
+const CHANGELOG: &str = "https://github.com/mankoc/STL_archivist/blob/main/CHANGELOG.md";
 const INSTALLER_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const MAIN: &str = "main";
 const ABOUT: &str = "about";
@@ -1092,6 +1094,24 @@ fn reload(app: &AppHandle) {
     }
 }
 
+/// Open `url` in the default browser.
+fn open_in_browser(url: &str) {
+    if let Err(e) = tauri_plugin_opener::open_url(url, None::<&str>) {
+        eprintln!("could not open {url}: {e}");
+    }
+}
+
+/// The Help page of the server being shown; from the start page, the user guide.
+fn show_help(app: &AppHandle) {
+    let servers = app.state::<Shell>().granted.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    match app.get_webview_window(MAIN).and_then(|w| Some((w.url().ok()?, w))) {
+        Some((url, w)) if new_window_target(&url, &servers) == NewWindow::App => {
+            let _ = w.eval("location.hash = '#/help'");
+        }
+        _ => open_in_browser(USER_GUIDE),
+    }
+}
+
 /// The About window (`ui/about.html`: the splash picture, the version, the creator),
 /// in front of the main window and closed with it. Windows' own About box shows only
 /// text.
@@ -1118,6 +1138,8 @@ fn on_menu(app: &AppHandle, id: &str) {
     match id {
         "launcher" => show_launcher(app),
         "reload" => reload(app),
+        "help" => show_help(app),
+        "changelog" => open_in_browser(CHANGELOG),
         "about" => show_about(app),
         "show" => {
             if let Some(w) = app.get_webview_window(MAIN) {
@@ -1151,7 +1173,9 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .item(&PredefinedMenuItem::select_all(handle, None)?)
         .build()?;
     let about = MenuItemBuilder::with_id("about", "About StlArchivist").build(handle)?;
-    let help = SubmenuBuilder::new(handle, "Help").item(&about).build()?;
+    let help_item = MenuItemBuilder::with_id("help", "StlArchivist Help").accelerator("F1").build(handle)?;
+    let changelog = MenuItemBuilder::with_id("changelog", "Changelog").build(handle)?;
+    let help = SubmenuBuilder::new(handle, "Help").item(&help_item).item(&changelog).separator().item(&about).build()?;
     let menu = MenuBuilder::new(handle).items(&[&file, &edit, &view, &help]).build()?;
 
     WebviewWindowBuilder::new(handle, MAIN, WebviewUrl::App("index.html".into()))
@@ -1168,9 +1192,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 match new_window_target(&url, &servers) {
                     NewWindow::App => NewWindowResponse::Allow,
                     NewWindow::Browser => {
-                        if let Err(e) = tauri_plugin_opener::open_url(url.as_str(), None::<&str>) {
-                            eprintln!("could not open {url}: {e}");
-                        }
+                        open_in_browser(url.as_str());
                         NewWindowResponse::Deny
                     }
                     NewWindow::Refused => NewWindowResponse::Deny,
