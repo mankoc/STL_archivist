@@ -198,7 +198,6 @@ struct Shell {
     network_hosts: Mutex<HashSet<String>>,
     worker: Mutex<Option<WorkerProc>>,
     installing: Mutex<Option<Installing>>,
-    launcher: Mutex<Option<Url>>,
     granted: Mutex<HashSet<String>>,
     /// The launcher asked what to open at start (it asks once per run).
     started: std::sync::atomic::AtomicBool,
@@ -1075,11 +1074,15 @@ async fn install_update(app: AppHandle, version: String) -> Result<(), String> {
     Ok(())
 }
 
+/// The bundled launcher page (`ui/index.html`). Not read from the new window: that
+/// still says `about:blank` until the page has loaded.
+const LAUNCHER_URL: &str = if cfg!(windows) { "http://tauri.localhost/" } else { "tauri://localhost/" };
+
 /// Back to the launcher page.
 fn show_launcher(app: &AppHandle) {
-    let url = app.state::<Shell>().launcher.lock().unwrap_or_else(|e| e.into_inner()).clone();
-    if let Some(url) = url {
-        let _ = navigate(app, url);
+    let url = Url::parse(LAUNCHER_URL).expect("the launcher's address is a URL");
+    if let Err(e) = navigate(app, url) {
+        eprintln!("could not open the launcher: {e}");
     }
 }
 
@@ -1151,7 +1154,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let help = SubmenuBuilder::new(handle, "Help").item(&about).build()?;
     let menu = MenuBuilder::new(handle).items(&[&file, &edit, &view, &help]).build()?;
 
-    let window = WebviewWindowBuilder::new(handle, MAIN, WebviewUrl::App("index.html".into()))
+    WebviewWindowBuilder::new(handle, MAIN, WebviewUrl::App("index.html".into()))
         .title(TITLE)
         // Pages name their version in their title (the launcher the shell's, a server's
         // web client the server's).
@@ -1181,7 +1184,6 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .min_inner_size(800.0, 500.0)
         .menu(menu)
         .build()?;
-    *app.state::<Shell>().launcher.lock().unwrap_or_else(|e| e.into_inner()) = Some(window.url()?);
 
     let tray_menu = MenuBuilder::new(handle)
         .item(&MenuItemBuilder::with_id("show", "Show StlArchivist").build(handle)?)
