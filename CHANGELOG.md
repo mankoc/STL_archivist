@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026.48.0 — 2026-11-25
 
 - **No automatic workflows:** the checks and the Debian package build no longer start on pushes and pull requests,
   only from *Actions*; the Nightly and MeshPeek schedules are disabled on GitHub.
