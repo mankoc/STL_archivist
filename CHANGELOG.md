@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026.48.1 — 2026-11-25
 
 - **ONNX Runtime comes from NuGet:** Microsoft's ONNX Runtime repository is no longer on GitHub, so the component's
   download and the Docker image's build failed. The same version (1.22.0) now comes from Microsoft's NuGet packages,
