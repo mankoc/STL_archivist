@@ -92,7 +92,9 @@ impl Asset {
 const LLAMA: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b9789/";
 const QWEN25: &str = "https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/resolve/5037fcf163dd95d1e41d1974465f0898ed108ca2/";
 const QWEN3: &str = "https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/1cd86afb9a95c410a6038ab3b40d8b578c892266/";
-const ORT: &str = "https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/";
+// NuGet: Microsoft's ONNX Runtime repository (and its release files) left GitHub in November 2026.
+const ORT: &str = "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/1.22.0/";
+const ORT_GPU: &str = "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime.gpu.linux/1.22.0/";
 const ORT_DML: &str = "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime.directml/1.22.0/";
 const DIRECTML: &str = "https://api.nuget.org/v3-flatcontainer/microsoft.ai.directml/1.15.4/";
 /// SHA-256 of the CLIP encoder the server downloads (compute workers' must match).
@@ -198,22 +200,22 @@ pub fn assets(id: &str, variant: &str) -> Vec<Asset> {
             ),
         ],
         "onnxruntime" if windows => vec![asset!(
-            ORT, "onnxruntime-win-x64-1.22.0.zip", "174c616efc0271194488642a72f1a514e01487da4dfe84c49296d66e40ebe0da", 72_368_545,
-            Unpack::ZipPick(&[("onnxruntime-win-x64-1.22.0/lib/onnxruntime.dll", "onnxruntime.dll")]), "onnxruntime.dll"
+            ORT, "microsoft.ml.onnxruntime.1.22.0.nupkg", "d571e63a2329baacb713f441e65ad75284de354db6e1ac435fe4bebbb417986a", 121_402_697,
+            Unpack::ZipPick(&[("runtimes/win-x64/native/onnxruntime.dll", "onnxruntime.dll")]), "onnxruntime.dll"
         )],
         // CUDA 12 and cuDNN 9 come from the system (or the container image).
         "onnxruntime" if linux && variant == "cuda" => vec![asset!(
-            ORT, "onnxruntime-linux-x64-gpu-1.22.0.tgz", "2a19dbfa403672ec27378c3d40a68f793ac7a6327712cd0e8240a86be2b10c55", 227_317_516,
-            Unpack::TarPick(&[
-                ("onnxruntime-linux-x64-gpu-1.22.0/lib/libonnxruntime.so.1.22.0", "libonnxruntime.so"),
-                ("onnxruntime-linux-x64-gpu-1.22.0/lib/libonnxruntime_providers_shared.so", "libonnxruntime_providers_shared.so"),
-                ("onnxruntime-linux-x64-gpu-1.22.0/lib/libonnxruntime_providers_cuda.so", "libonnxruntime_providers_cuda.so"),
+            ORT_GPU, "microsoft.ml.onnxruntime.gpu.linux.1.22.0.nupkg", "d3dabd8235b7a04a67838a3b93437420f1a709528a8d8611e08bedbb08206d1d", 227_384_342,
+            Unpack::ZipPick(&[
+                ("runtimes/linux-x64/native/libonnxruntime.so", "libonnxruntime.so"),
+                ("runtimes/linux-x64/native/libonnxruntime_providers_shared.so", "libonnxruntime_providers_shared.so"),
+                ("runtimes/linux-x64/native/libonnxruntime_providers_cuda.so", "libonnxruntime_providers_cuda.so"),
             ]),
             "libonnxruntime.so"
         )],
         "onnxruntime" if linux => vec![asset!(
-            ORT, "onnxruntime-linux-x64-1.22.0.tgz", "8344d55f93d5bc5021ce342db50f62079daf39aaafb5d311a451846228be49b3", 7_798_730,
-            Unpack::TarPick(&[("onnxruntime-linux-x64-1.22.0/lib/libonnxruntime.so.1.22.0", "libonnxruntime.so")]), "libonnxruntime.so"
+            ORT, "microsoft.ml.onnxruntime.1.22.0.nupkg", "d571e63a2329baacb713f441e65ad75284de354db6e1ac435fe4bebbb417986a", 121_402_697,
+            Unpack::ZipPick(&[("runtimes/linux-x64/native/libonnxruntime.so", "libonnxruntime.so")]), "libonnxruntime.so"
         )],
         "pdfium" if windows => vec![asset!(
             PDFIUM, "pdfium-win-x64.tgz", "73cc0de638ac2095e7445bf56a38200a5b7c7ca0e9f4ba144598f2457377ac08", 3_733_154,
@@ -273,7 +275,7 @@ fn info(id: &str) -> Info {
             label: "ONNX Runtime 1.22.0",
             enables: "AI image similarity (Find by Image, Duplicates)",
             license: "MIT",
-            license_url: "https://github.com/microsoft/onnxruntime/blob/main/LICENSE",
+            license_url: "https://www.nuget.org/packages/Microsoft.ML.OnnxRuntime/1.22.0/License",
         },
         "unrar" => Info {
             label: if cfg!(windows) { "UnRAR (RARLab, latest)" } else { "UnRAR 7.23 (RARLab)" },
