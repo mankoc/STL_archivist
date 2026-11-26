@@ -18,14 +18,14 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
   or `GET /api/jobs/{id}`.
 - Writes that change the library are announced on `/api/events` as `library_changed`.
 
-## Endpoints (109)
+## Endpoints (108)
 
 - [Sign-in and sessions](#sign-in-and-sessions) (5)
 - [Users and preferences](#users-and-preferences) (7)
 - [System](#system) (1)
 - [Browsing the library](#browsing-the-library) (12)
 - [Editing models](#editing-models) (13)
-- [Lookups (sculptors, collections, tags…)](#lookups-sculptors-collections-tags) (14)
+- [Lookups (sculptors, collections, tags…)](#lookups-sculptors-collections-tags) (13)
 - [Thumbnails and images](#thumbnails-and-images) (3)
 - [Files and folders](#files-and-folders) (3)
 - [Libraries and their folders](#libraries-and-their-folders) (8)
@@ -116,12 +116,11 @@ run `npm run gen:api` (in `web/`) and then `python tools/api_doc.py` after chang
 | `POST /api/lookups/{kind}` | Add a row. 409 when the name exists (within the collection, for a subcollection) or the parent collection does not. | path `kind`: string<br>body: [NewLookup](#newlookup) | 201 | 409 |
 | `POST /api/lookups/{kind}/merge` | Merge two rows: models of `remove` get `keep`, then `remove` is deleted. | path `kind`: string<br>body: [Merge](#merge) | 204 | 404 |
 | `GET /api/lookups/{kind}/similar` | Pairs of near-duplicate names of a lookup, or of the creators (kind `creator`), to merge. Subcollections are compared within their collection. | path `kind`: string<br>query `method`?: string \| null<br>query `threshold`?: integer \| null | 200 [SimilarNames](#similarnames) | 400, 404 |
+| `DELETE /api/lookups/{kind}/unused` | Delete the rows of a lookup kind that no model uses (their `models` is 0 in the list); a collection takes its subcollections. How many were deleted. | path `kind`: string | 200 [Count](#count) | 404 |
 | `GET /api/lookups/{kind}/{id}` | What deleting a row would affect. | path `kind`: string<br>path `id`: integer | 200 [DeleteInfo](#deleteinfo) | 404 |
 | `PATCH /api/lookups/{kind}/{id}` | Rename a row; 409 when the new name is taken. | path `kind`: string<br>path `id`: integer<br>body: [Rename](#rename) | 204 | 404, 409 |
 | `DELETE /api/lookups/{kind}/{id}` | Delete a row. Models lose the value; a collection takes its subcollections. | path `kind`: string<br>path `id`: integer | 204 | 404 |
 | `POST /api/tags/merge` | Merge tags into one (Tag editor → Merge). | body: [TagMerge](#tagmerge) | 204 |  |
-| `GET /api/tags/unused` | Tags no model uses. |  | 200 [Count](#count) |  |
-| `DELETE /api/tags/unused` | Delete the tags no model uses. |  | 200 [Count](#count) |  |
 
 ### Thumbnails and images
 

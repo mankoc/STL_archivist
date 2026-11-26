@@ -8,6 +8,14 @@
   (empty ones only, unless *Overwrite filled fields*); a subcollection is saved only within the suggested
   collection. The `ai_suggest` and `ai_tag` jobs take `collections`, and the suggestion's fields carry
   `collection` and `subcollection`.
+- **AI placeholders are not saved as values:** what a model writes instead of a value, such as "(no change needed)",
+  "leave as is", "(no problem)" or "None", or a remark after the value (`"Vyra studio" (no change)`), is no longer
+  taken as the value by the AI tagger, *AI data*, *AI fill* or the *AI metadata check*. The check also drops the
+  lines that report no problem, so *Apply* cannot write such text into a field. Values already saved stay: fix them
+  with *Mass edit*, then remove the lookup values left unused.
+- **Lookups: delete unused values on every tab:** the Lookups page's **Delete … unused** button, which tags had,
+  now works for categories, collections (with their subcollections), subcollections, scales, sculptors and releases
+  too (`DELETE /api/lookups/{kind}/unused`, replacing `/api/tags/unused`).
 
 ## 2026.48.2 — 2026-11-26
 
