@@ -1441,6 +1441,29 @@ endsolid
     }
 
     #[test]
+    fn tags_differing_only_in_case_are_linked_once() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("archives");
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut z = zip::ZipWriter::new(std::fs::File::create(folder.join("m.zip")).unwrap());
+        let info = br#"{"name": "M", "tags": ["NSFW", "nsfw", " Female", "female"]}"#;
+        for (name, data) in [("model.stl", &b"solid\nendsolid\n"[..]), ("info.json", &info[..])] {
+            z.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+            z.write_all(data).unwrap();
+        }
+        z.finish().unwrap();
+        let db = dir.path().join("lib.db");
+        storage::migrate(&db, &storage::Vectors::default()).unwrap();
+        let cfg = CrawlConfig { source_dir: crate::winpath::native(&folder.to_string_lossy()), recurse: true, max_workers: 1, ..Default::default() };
+        assert_eq!(crawl(&db, None, &cfg, &Recorder::default()).unwrap().new, 1);
+        let conn = storage::open(&db).unwrap();
+        let mut st = conn.prepare("SELECT t.name FROM model_tags mt JOIN tags t ON t.id = mt.tag_id ORDER BY t.name").unwrap();
+        let tags: Vec<String> = st.query_map([], |r| r.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap();
+        assert_eq!(tags, ["female", "nsfw"]);
+    }
+
+    #[test]
     fn a_batch_of_archives_is_embedded_in_one_request() {
         use std::io::Write;
         let dir = tempfile::tempdir().unwrap();
