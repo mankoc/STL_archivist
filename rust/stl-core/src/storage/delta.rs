@@ -75,6 +75,17 @@ fn tables(conn: &Connection, schema: &str) -> Result<Vec<(String, String)>> {
     Ok(st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?)
 }
 
+/// The name that reaches `table`'s real rowid. A column named `rowid` that is not
+/// `INTEGER PRIMARY KEY` hides it (sqlite-vec's `image_vec_vector_chunks00`,
+/// whose blobs sqlite-vec opens by the real rowid).
+fn rowid_name(conn: &Connection, schema: &str, table: &str) -> Result<&'static str> {
+    let cols = columns(conn, schema, table)?;
+    ["rowid", "_rowid_", "oid"]
+        .into_iter()
+        .find(|n| !cols.iter().any(|c| c.eq_ignore_ascii_case(n)))
+        .ok_or_else(|| DeltaError::Invalid(format!("table {table} hides its rowid")))
+}
+
 fn feed(h: &mut Xxh3, v: ValueRef) {
     match v {
         ValueRef::Null => h.update(&[0]),
@@ -109,8 +120,9 @@ pub fn state(conn: &Connection) -> Result<State> {
         schema.update(&[0]);
         schema.update(sql.as_bytes());
         schema.update(&[0]);
+        let rid = rowid_name(conn, "main", &name)?;
         let mut st = conn
-            .prepare(&format!("SELECT rowid, * FROM main.{} ORDER BY rowid", quote(&name)))
+            .prepare(&format!("SELECT {rid}, * FROM main.{} ORDER BY {rid}", quote(&name)))
             .map_err(|_| DeltaError::Invalid(format!("table {name} has no rowids")))?;
         let n = st.column_count();
         let mut blocks = BTreeMap::new();
@@ -261,7 +273,8 @@ pub fn write_delta(conn: &Connection, theirs: &State, dest: &Path) -> Result<Opt
             typed.join(", "),
             (0..=cols.len()).map(|i| format!("?{}", i + 1)).collect::<Vec<_>>().join(", ")
         ))?;
-        let mut read = conn.prepare(&format!("SELECT rowid, {} FROM main.{} WHERE rowid BETWEEN ?1 AND ?2 ORDER BY rowid", typed.join(", "), quote(name)))?;
+        let rid = rowid_name(conn, "main", name)?;
+        let mut read = conn.prepare(&format!("SELECT {rid}, {} FROM main.{} WHERE {rid} BETWEEN ?1 AND ?2 ORDER BY {rid}", typed.join(", "), quote(name)))?;
         for b in blocks {
             let mut rows = read.query(params![b * BLOCK, b * BLOCK + BLOCK - 1])?;
             while let Some(row) = rows.next()? {
@@ -333,7 +346,8 @@ pub fn apply_delta(base: &Path, delta: &Path) -> Result<Built> {
         if !known.contains(name) {
             return Err(DeltaError::Diverged(name.clone()));
         }
-        let mut del = tx.prepare(&format!("DELETE FROM main.{} WHERE rowid BETWEEN ?1 AND ?2", quote(name)))?;
+        let rid = rowid_name(&tx, "main", name)?;
+        let mut del = tx.prepare(&format!("DELETE FROM main.{} WHERE {rid} BETWEEN ?1 AND ?2", quote(name)))?;
         for b in list {
             del.execute(params![b * BLOCK, b * BLOCK + BLOCK - 1])?;
         }
@@ -346,7 +360,7 @@ pub fn apply_delta(base: &Path, delta: &Path) -> Result<Built> {
         let typed: Vec<String> = cols.iter().map(|c| quote(c)).collect();
         let (into, from) = match rowid_alias(&tx, name)? {
             Some(_) => (typed.join(", "), typed.join(", ")),
-            None => (format!("rowid, {}", typed.join(", ")), format!("\"__rid\", {}", typed.join(", "))),
+            None => (format!("{rid}, {}", typed.join(", ")), format!("\"__rid\", {}", typed.join(", "))),
         };
         built.rows += tx.execute(&format!("INSERT INTO main.{} ({into}) SELECT {from} FROM d.{} ORDER BY \"__rid\"", quote(name), quote(name)), [])? as u64;
     }
@@ -441,6 +455,35 @@ mod tests {
         assert_eq!(state(&b).unwrap(), state(&a).unwrap());
         let trigger: i64 = b.query_row("SELECT count(*) FROM sqlite_master WHERE type = 'trigger'", [], |r| r.get(0)).unwrap();
         assert_eq!(trigger, 1, "the trigger is back");
+    }
+
+    #[test]
+    fn vector_chunks_keep_the_rowid_sqlite_vec_reads() {
+        // `image_vec_vector_chunks00` has a column named `rowid`, which hides the
+        // real one; sqlite-vec opens its blobs by the real one.
+        let dir = tempfile::tempdir().unwrap();
+        let v = |x: f32| (0..512).flat_map(|_| x.to_le_bytes()).collect::<Vec<u8>>();
+        let [a_path, b_path] = ["a.db", "b.db"].map(|n| dir.path().join(n));
+        for p in [&a_path, &b_path] {
+            crate::storage::migrate(p, &Default::default()).unwrap();
+            let c = crate::storage::open(p).unwrap();
+            c.execute("INSERT INTO image_vec (image_id, embedding) VALUES (1, ?1)", [v(1.0)]).unwrap();
+            // A block the sync leaves alone: replaced rows used to get real rowids after it.
+            c.execute("INSERT INTO image_vec_vector_chunks00 (_rowid_, rowid, vectors) VALUES (1000, 1000, x'00')", []).unwrap();
+        }
+        let a = crate::storage::open(&a_path).unwrap();
+        a.execute("INSERT INTO image_vec (image_id, embedding) VALUES (2, ?1)", [v(0.5)]).unwrap();
+        let theirs = state(&crate::storage::open(&b_path).unwrap()).unwrap();
+        let delta = dir.path().join("delta.db");
+        write_delta(&a, &theirs, &delta).unwrap().unwrap();
+        apply_delta(&b_path, &delta).unwrap();
+
+        let b = crate::storage::open(&b_path).unwrap();
+        let moved: i64 = b.query_row("SELECT count(*) FROM image_vec_vector_chunks00 WHERE _rowid_ <> rowid", [], |r| r.get(0)).unwrap();
+        assert_eq!(moved, 0);
+        let near: i64 = b.query_row("SELECT image_id FROM image_vec WHERE embedding MATCH ?1 AND k = 1", [v(0.5)], |r| r.get(0)).unwrap();
+        assert_eq!(near, 2);
+        b.execute("DELETE FROM image_vec WHERE image_id = 1", []).unwrap();
     }
 
     fn fill_from(c: &Connection, from: i64, to: i64) {

@@ -162,7 +162,8 @@ stl_database/
   `ThumbStore::fill_missing_blobs` in the import), and the database as a delta when it can
   (`storage::delta`: block fingerprints, `delta.db` in the package, applied to a copy of the
   live database and verified against the sender's fingerprints; a mismatch retries with
-  the whole database). A delta covers every ordinary table, so new tables need nothing.
+  the whole database). A delta covers every ordinary table, so new tables need nothing. Rows go by their real rowid
+  (`delta::rowid_name`): sqlite-vec's `image_vec_vector_chunks00` has a column named `rowid` that hides it.
 - Spawned helpers (`llama-server`, the desktop's local server) call
   `stl_proc::end_with_parent`.
 

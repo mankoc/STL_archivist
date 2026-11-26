@@ -532,8 +532,12 @@ fn new_values(tx: &Transaction, cfg: &UpsertConfig, input: &UpsertInput, ch: &Ch
     }
     let mut tag_ids = Vec::new();
     for t in &ch.tags {
+        // `tag` lowercases: "NSFW" and "nsfw" are one tag, linked once.
         if !py_strip(t).is_empty() {
-            tag_ids.push(tag(tx, t)?);
+            let id = tag(tx, t)?;
+            if !tag_ids.contains(&id) {
+                tag_ids.push(id);
+            }
         }
     }
     row.stl_list_hash = Some(input.hash.clone());
