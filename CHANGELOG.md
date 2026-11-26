@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **AI tagger: collection and subcollection:** the AI tagger drawer has a **Collection and subcollection** option
+  (in both *Review one by one* and *Process all*) that also asks the model for them, listing the library's
+  collection names to reuse and matching its answer to their spelling. Saving fills them like the other fields
+  (empty ones only, unless *Overwrite filled fields*); a subcollection is saved only within the suggested
+  collection. The `ai_suggest` and `ai_tag` jobs take `collections`, and the suggestion's fields carry
+  `collection` and `subcollection`.
+
 ## 2026.48.2 — 2026-11-26
 
 - **Find by Image and deleting records after a sync:** a sync gave the CLIP vector index's storage rows new

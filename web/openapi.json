@@ -4650,6 +4650,10 @@
         "type": "object",
         "description": "The metadata fields the tagger fills (`normalize_meta`).",
         "properties": {
+          "collection": {
+            "type": "string",
+            "description": "Only when collections were asked for."
+          },
           "creator": {
             "type": "string"
           },
@@ -4665,6 +4669,9 @@
           "source": {
             "type": "string",
             "description": "`patreon`, `kickstarter`, `myminifactory` or empty."
+          },
+          "subcollection": {
+            "type": "string"
           },
           "title": {
             "type": "string"
@@ -7176,6 +7183,10 @@
               "kind"
             ],
             "properties": {
+              "collections": {
+                "type": "boolean",
+                "description": "Also ask for the collection and subcollection."
+              },
               "id": {
                 "type": "integer",
                 "format": "int64"
@@ -7301,6 +7312,10 @@
               "kind"
             ],
             "properties": {
+              "collections": {
+                "type": "boolean",
+                "description": "Also ask for (and save) the collection and subcollection."
+              },
               "ids": {
                 "type": "array",
                 "items": {
