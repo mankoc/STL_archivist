@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026.48.4 — 2026-11-26
 
 - **AI tagger: collections from the image tags:** with *Collection and subcollection* ticked, the tags the model
   just read from the images (franchises, characters…) go into the metadata request beside the catalogued metadata
