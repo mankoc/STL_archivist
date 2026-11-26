@@ -359,7 +359,7 @@ export const TOPICS: Topic[] = [
     title: "AI tagger",
     summary: "A vision model suggests tags and fields from the images and names.",
     blocks: [
-      { p: "The AI tagger uses a vision model (a local Qwen3-VL or Qwen2.5-VL through llama.cpp, an OpenRouter model, or any OpenAI-compatible endpoint such as Gemini's) to look at a model's thumbnails, archive path, file names and catalogued metadata, and suggests tags, title, creator, sculptor, collection, scale, source, year and description." },
+      { p: "The AI tagger uses a vision model (a local Qwen3-VL or Qwen2.5-VL through llama.cpp, an OpenRouter model, or any OpenAI-compatible endpoint such as Gemini's) to look at a model's thumbnails, archive path, file names and catalogued metadata, and suggests tags, title, creator, sculptor, scale, source, year and description; with **Collection and subcollection** ticked, also the collection and subcollection." },
       { h: "Using it" },
       { list: [
         "Select models, then **Actions → AI tagger…** (or right-click them). If the model is not available the drawer says what is missing.",
@@ -368,7 +368,7 @@ export const TOPICS: Topic[] = [
         "**AI data** in the model editor (*Edit*) asks about that one model for every field it can infer — title, creator, type, date, sculptor, release, collection, subcollection, category, scales, description, tags — reusing the names already in the library (creators, sculptors, collections…). It fills only empty fields and adds new scales and tags; review them and **Save**. Scales are only taken when written in the path or file names.",
         "**AI fill** in **Mass edit** does the same for every selected model in one job and saves the answers (empty fields only, unless *Replace filled fields*; new tags added). **Infer with AI** under its path pattern proposes a pattern from the selected models' paths.",
         "**Actions → AI metadata check…** asks the model to check the selected models' catalogued fields against their paths, file names and the library's names: implausible or contradicted scales, misspelled names, titles that do not match, values in the wrong field, impossible years. It lists each problem with the current and the suggested value; tick the suggestions to take and **Apply selected** (one save per model), or open a model with **Edit**. Nothing changes until you apply.",
-        "Options: **Max tags**; **Ignore catalogued metadata** (images and names only); **Overwrite filled fields** (by default only empty fields are filled; tags are always added).",
+        "Options: **Max tags**; **Ignore catalogued metadata** (images and names only); **Collection and subcollection** (also ask for them, reusing the library's collection names; a subcollection is saved only within the suggested collection); **Overwrite filled fields** (by default only empty fields are filled; tags are always added).",
       ] },
       { h: "Where it runs" },
       { list: [

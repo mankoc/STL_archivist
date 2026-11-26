@@ -535,6 +535,11 @@ pub struct AiFieldValues {
     pub source: String,
     #[serde(default)]
     pub year: Option<i64>,
+    /// Only when collections were asked for.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub collection: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub subcollection: String,
 }
 
 impl From<AiFields> for AiFieldValues {
@@ -547,6 +552,8 @@ impl From<AiFields> for AiFieldValues {
             description: f.description,
             source: f.source,
             year: f.year,
+            collection: f.collection,
+            subcollection: f.subcollection,
         }
     }
 }
@@ -561,6 +568,8 @@ impl From<AiFieldValues> for AiFields {
             description: f.description,
             source: f.source,
             year: f.year,
+            collection: f.collection,
+            subcollection: f.subcollection,
         }
     }
 }
@@ -622,9 +631,11 @@ fn ask_model(lib: &Library, ctl: &Control, log: &dyn Fn(String), images: &[Vec<u
     }
 }
 
-/// `_generate_suggestions`: tags and metadata for one model. Output that looks
-/// corrupted restarts the model server and is asked for once more.
-pub fn suggest(lib: &Library, ctl: &Control, log: &dyn Fn(String), model_id: i64, max_tags: usize, ignore_meta: bool) -> Result<AiSuggestion, String> {
+/// `_generate_suggestions`: tags and metadata for one model; with `collections`
+/// also the collection and subcollection (in the library's spelling when it has
+/// them). Output that looks corrupted restarts the model server and is asked for
+/// once more.
+pub fn suggest(lib: &Library, ctl: &Control, log: &dyn Fn(String), model_id: i64, max_tags: usize, ignore_meta: bool, collections: bool) -> Result<AiSuggestion, String> {
     use stl_core::ai_tagging as T;
     let a = prepare(lib, model_id)?;
     let known = if ignore_meta { Vec::new() } else { T::known_meta(&a.inputs) };
@@ -636,15 +647,32 @@ pub fn suggest(lib: &Library, ctl: &Control, log: &dyn Fn(String), model_id: i64
         return Err("stopped".into());
     }
     log(format!("{}: extracting metadata…", a.title));
-    let raw_meta = ask(&T::build_meta_prompt(&a.inputs.archive_path, &known), 200)?;
+    let lists: Vec<(&str, Vec<String>)> = if collections {
+        let choices = lib.db.with(stl_core::storage::model_editor::editor_choices).map_err(crate::error::db_err)?;
+        let list = |name: &str| choices.iter().find(|(n, _)| *n == name).map(|(_, v)| v.clone()).unwrap_or_default();
+        vec![("COLLECTION", list("collections")), ("SUBCOLLECTION", list("subcollections"))]
+    } else {
+        Vec::new()
+    };
+    let context = std::iter::once(a.inputs.archive_path.as_str()).chain(a.inputs.files.iter().map(String::as_str)).collect::<Vec<_>>().join(" ");
+    let vocab: Vec<(&str, Vec<&str>)> = lists.iter().map(|(k, names)| (*k, T::relevant_names(names, &context, VOCAB_CAP))).collect();
+    let raw_meta = ask(&T::build_meta_prompt(&a.inputs.archive_path, &known, collections.then_some(vocab.as_slice())), if collections { 260 } else { 200 })?;
     let meta = T::parse_meta(&raw_meta, &a.inputs.archive_path, &a.stems, &a.inputs.files);
+    let mut fields = T::normalize_meta(&meta);
+    if collections {
+        let names = |k: &str| lists.iter().find(|(n, _)| *n == k).map(|(_, v)| v.as_slice()).unwrap_or_default();
+        fields.collection = T::snap(&fields.collection, names("COLLECTION")).to_string();
+        fields.subcollection = T::snap(&fields.subcollection, names("SUBCOLLECTION")).to_string();
+    } else {
+        (fields.collection, fields.subcollection) = (String::new(), String::new());
+    }
     Ok(AiSuggestion {
         model_id,
         title: a.title,
         archive_path: a.inputs.archive_path,
         image_ids: a.image_ids,
         tags,
-        fields: T::normalize_meta(&meta).into(),
+        fields: fields.into(),
     })
 }
 

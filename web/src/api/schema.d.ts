@@ -1679,12 +1679,15 @@ export interface components {
         };
         /** @description The metadata fields the tagger fills (`normalize_meta`). */
         AiFieldValues: {
+            /** @description Only when collections were asked for. */
+            collection?: string;
             creator?: string;
             description?: string;
             scale?: string;
             sculptor?: string;
             /** @description `patreon`, `kickstarter`, `myminifactory` or empty. */
             source?: string;
+            subcollection?: string;
             title?: string;
             /** Format: int64 */
             year?: number | null;
@@ -2475,6 +2478,8 @@ export interface components {
             /** @enum {string} */
             kind: "delete_files";
         } | {
+            /** @description Also ask for the collection and subcollection. */
+            collections?: boolean;
             /** Format: int64 */
             id: number;
             /** @description Leave the catalogued metadata out of the prompt. */
@@ -2505,6 +2510,8 @@ export interface components {
             /** @enum {string} */
             kind: "ai_check";
         } | {
+            /** @description Also ask for (and save) the collection and subcollection. */
+            collections?: boolean;
             ids: number[];
             ignore_meta?: boolean;
             /** @enum {string} */

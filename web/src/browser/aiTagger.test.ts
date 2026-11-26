@@ -14,6 +14,7 @@ describe("aiTagger", () => {
 
   it("fills every field", () => {
     expect(fieldsOf(null).title).toBe("");
+    expect(fieldsOf({ model_id: 1, title: "t", archive_path: "p", image_ids: [], tags: [], fields: { collection: "Marvel" } })).toMatchObject({ collection: "Marvel", subcollection: "" });
     const f = fieldsOf({ model_id: 1, title: "t", archive_path: "p", image_ids: [], tags: [], fields: { title: "X", year: 2023 } });
     expect([f.title, f.year, f.source]).toEqual(["X", 2023, ""]);
   });

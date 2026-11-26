@@ -28,6 +28,7 @@ export function AiTaggerDrawer({ ids, opened, onClose }: { ids: number[]; opened
   const [maxTags, setMaxTags] = useState<number>(storedMaxTags);
   const [ignoreMeta, setIgnoreMeta] = useState(false);
   const [overwrite, setOverwrite] = useState(false);
+  const [collections, setCollections] = useState(false);
   const status = useQuery({ queryKey: ["ai-status"], queryFn: async () => unwrap(await api.GET("/api/ai/status")), enabled: opened });
   useEffect(() => {
     try {
@@ -48,18 +49,22 @@ export function AiTaggerDrawer({ ids, opened, onClose }: { ids: number[]; opened
           <Group gap="sm" align="flex-end">
             <NumberInput size="xs" label="Max tags" description="0: no limit" min={0} max={100} w={100} value={maxTags} onChange={(v) => setMaxTags(Number(v) || 0)} />
             <Checkbox size="xs" label="Ignore catalogued metadata" checked={ignoreMeta} onChange={(e) => setIgnoreMeta(e.currentTarget.checked)} />
+            <Checkbox size="xs" label="Collection and subcollection" checked={collections} onChange={(e) => setCollections(e.currentTarget.checked)} data-testid="ai-collections" />
             <Checkbox size="xs" label="Overwrite filled fields" checked={overwrite} onChange={(e) => setOverwrite(e.currentTarget.checked)} />
           </Group>
         </Group>
         {mode === "review" ? (
-          <Review ids={ids} maxTags={maxTags} ignoreMeta={ignoreMeta} overwrite={overwrite} onDone={onClose} />
+          <Review ids={ids} options={{ maxTags, ignoreMeta, overwrite, collections }} onDone={onClose} />
         ) : (
-          <Batch ids={ids} maxTags={maxTags} ignoreMeta={ignoreMeta} overwrite={overwrite} />
+          <Batch ids={ids} options={{ maxTags, ignoreMeta, overwrite, collections }} />
         )}
       </Stack>
     </Drawer>
   );
 }
+
+/** The drawer's options, shared by both modes. */
+type Options = { maxTags: number; ignoreMeta: boolean; overwrite: boolean; collections: boolean };
 
 function useJobs() {
   return useQuery({ queryKey: ["jobs"], queryFn: async () => unwrap(await api.GET("/api/jobs")) });
@@ -85,7 +90,8 @@ function JobProgress({ job }: { job: Job }) {
   );
 }
 
-function Review({ ids, maxTags, ignoreMeta, overwrite, onDone }: { ids: number[]; maxTags: number; ignoreMeta: boolean; overwrite: boolean; onDone: () => void }) {
+function Review({ ids, options, onDone }: { ids: number[]; options: Options; onDone: () => void }) {
+  const { maxTags, ignoreMeta, overwrite, collections } = options;
   const queryClient = useQueryClient();
   const jobs = useJobs();
   const [index, setIndex] = useState(0);
@@ -117,7 +123,7 @@ function Review({ ids, maxTags, ignoreMeta, overwrite, onDone }: { ids: number[]
   const next = () => (index + 1 < ids.length ? setIndex(index + 1) : onDone());
   const suggest = async (target = id) => {
     try {
-      await submit(queryClient, { kind: "ai_suggest", id: target, max_tags: maxTags, ignore_meta: ignoreMeta });
+      await submit(queryClient, { kind: "ai_suggest", id: target, max_tags: maxTags, ignore_meta: ignoreMeta, collections });
     } catch (err) {
       notifications.show({ color: "red", message: (err as Error).message });
     }
@@ -183,6 +189,12 @@ function Review({ ids, maxTags, ignoreMeta, overwrite, onDone }: { ids: number[]
               <TextInput size="xs" label="Scale" value={fields.scale} onChange={(e) => set("scale")(e.currentTarget.value)} />
               <Select size="xs" label="Source" data={SOURCES} value={fields.source || null} clearable onChange={(v) => set("source")(v ?? "")} />
               <NumberInput size="xs" label="Year" min={1900} max={2100} value={fields.year ?? ""} onChange={(v) => setFields((f) => ({ ...f, year: v === "" ? null : Number(v) }))} />
+              {(collections || fields.collection || fields.subcollection) && (
+                <>
+                  <TextInput size="xs" label="Collection" value={fields.collection} onChange={(e) => set("collection")(e.currentTarget.value)} />
+                  <TextInput size="xs" label="Subcollection" value={fields.subcollection} onChange={(e) => set("subcollection")(e.currentTarget.value)} />
+                </>
+              )}
             </SimpleGrid>
             <Textarea size="xs" label="Description" autosize minRows={2} value={fields.description} onChange={(e) => set("description")(e.currentTarget.value)} />
           </Stack>
@@ -196,14 +208,15 @@ function Review({ ids, maxTags, ignoreMeta, overwrite, onDone }: { ids: number[]
   );
 }
 
-function Batch({ ids, maxTags, ignoreMeta, overwrite }: { ids: number[]; maxTags: number; ignoreMeta: boolean; overwrite: boolean }) {
+function Batch({ ids, options }: { ids: number[]; options: Options }) {
+  const { maxTags, ignoreMeta, overwrite, collections } = options;
   const queryClient = useQueryClient();
   const jobs = useJobs();
   const [jobId, setJobId] = useState<number | null>(null);
   const job = (jobs.data ?? []).find((j) => j.id === jobId);
   const start = async () => {
     try {
-      const j = await submit(queryClient, { kind: "ai_tag", ids, overwrite, ignore_meta: ignoreMeta, max_tags: maxTags });
+      const j = await submit(queryClient, { kind: "ai_tag", ids, overwrite, ignore_meta: ignoreMeta, max_tags: maxTags, collections });
       setJobId(j.id);
     } catch (err) {
       notifications.show({ color: "red", message: (err as Error).message });
@@ -212,7 +225,7 @@ function Batch({ ids, maxTags, ignoreMeta, overwrite }: { ids: number[]; maxTags
   return (
     <Stack>
       <Text size="sm">
-        Ask the model about each of the {ids.length} selected model(s) and save the results: {overwrite ? "suggested values replace filled fields" : "only empty fields are filled"}; tags are added to the existing ones.
+        Ask the model about each of the {ids.length} selected model(s) and save the results: {overwrite ? "suggested values replace filled fields" : "only empty fields are filled"}; tags are added to the existing ones{collections ? "; the collection and subcollection are asked for too" : ""}.
       </Text>
       {job && isActive(job) ? (
         <JobProgress job={job} />
