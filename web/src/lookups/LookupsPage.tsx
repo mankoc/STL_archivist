@@ -83,11 +83,7 @@ function LookupEditor({ kind }: { kind: Kind }) {
   const [keep, setKeep] = useState<string>("");
   const [tagTarget, setTagTarget] = useState("");
   const [similar, setSimilar] = useState(false);
-  const unused = useQuery({
-    queryKey: ["lookups", "unused-tags"],
-    queryFn: async () => unwrap(await api.GET("/api/tags/unused")).count,
-    enabled: kind === "tag",
-  });
+  const unused = (rows.data ?? []).filter((r) => r.models === 0).length;
 
   const list = (rows.data ?? []).filter((r) => r.name.toLowerCase().includes(search.toLowerCase()));
   const byId = new Map((rows.data ?? []).map((r) => [r.id, r]));
@@ -142,9 +138,9 @@ function LookupEditor({ kind }: { kind: Kind }) {
             </Button>
           </Group>
         )}
-        {editor && kind === "tag" && (unused.data ?? 0) > 0 && (
-          <Button variant="subtle" color="red" onClick={() => act(async () => unwrap(await api.DELETE("/api/tags/unused")))}>
-            Delete {unused.data} unused tag(s)
+        {editor && unused > 0 && (
+          <Button variant="subtle" color="red" onClick={() => act(async () => unwrap(await api.DELETE("/api/lookups/{kind}/unused", { params: { path: { kind } } })))}>
+            Delete {unused} unused
           </Button>
         )}
       </Group>

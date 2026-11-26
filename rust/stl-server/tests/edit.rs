@@ -608,10 +608,16 @@ async fn lookups_and_authors() {
     assert_eq!(l.call("DELETE", &format!("/api/lookups/category/{busts}"), None).await.status, StatusCode::NOT_FOUND);
     assert_eq!(l.scalar::<i64>("SELECT count(*) FROM models WHERE category_id IS NOT NULL"), 0);
 
-    // Tags.
+    // Values no model uses.
     l.call("POST", "/api/lookups/tag", Some(json!({"name": "orphan"}))).await;
-    assert_eq!(l.call("GET", "/api/tags/unused", None).await.json()["count"], 1);
-    assert_eq!(l.call("DELETE", "/api/tags/unused", None).await.json()["count"], 1);
+    assert_eq!(l.call("DELETE", "/api/lookups/tag/unused", None).await.json()["count"], 1);
+    l.call("POST", "/api/lookups/collection", Some(json!({"name": "Empty"}))).await;
+    l.call("POST", "/api/lookups/subcollection", Some(json!({"name": "Part", "collection": "Empty"}))).await;
+    assert!(l.call("DELETE", "/api/lookups/collection/unused", None).await.json()["count"].as_i64() >= Some(1));
+    assert_eq!(l.scalar::<i64>("SELECT count(*) FROM collections WHERE name = 'Empty'"), 0);
+    assert_eq!(l.scalar::<i64>("SELECT count(*) FROM subcollections WHERE name = 'Part'"), 0, "taken with its collection");
+    assert_eq!(l.call("DELETE", "/api/lookups/sculptor/unused", None).await.json()["count"], 0, "used ones stay");
+    assert_eq!(l.call("DELETE", "/api/lookups/nope/unused", None).await.status, StatusCode::NOT_FOUND);
 
     // Authors and profiles.
     let authors = l.call("GET", "/api/authors", None).await.json();

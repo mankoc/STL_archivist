@@ -268,14 +268,14 @@ pub fn merge(tx: &Transaction, kind: &str, keep_id: i64, delete_id: i64) -> Resu
     Ok(())
 }
 
-const UNUSED_TAGS: &str = "NOT EXISTS (SELECT 1 FROM model_tags WHERE model_tags.tag_id = tags.id)";
-
-pub fn unused_tag_count(conn: &Connection) -> Result<i64> {
-    conn.query_row(&format!("SELECT count(*) FROM tags WHERE {UNUSED_TAGS}"), [], |r| r.get(0))
-}
-
-pub fn delete_unused_tags(tx: &Transaction) -> Result<usize> {
-    tx.execute(&format!("DELETE FROM tags WHERE {UNUSED_TAGS}"), [])
+/// Delete the rows of a lookup kind no model uses (a collection takes its
+/// subcollections, which then no model uses either). How many were deleted.
+pub fn delete_unused(tx: &Transaction, kind: &str) -> Result<usize> {
+    let unused: Vec<i64> = list(tx, kind)?.into_iter().filter(|r| r.2 == 0).map(|r| r.0).collect();
+    for &id in &unused {
+        delete(tx, kind, id)?;
+    }
+    Ok(unused.len())
 }
 
 /// `merge_tags`: re-tag the models of `tag_ids` with the tag named `target`
