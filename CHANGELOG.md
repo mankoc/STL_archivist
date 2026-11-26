@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026.48.2 — 2026-11-26
 
 - **Find by Image and deleting records after a sync:** a sync gave the CLIP vector index's storage rows new
   internal ids (sqlite-vec reads them by those ids, which a column named `rowid` hid from the sync). Searches
