@@ -1990,6 +1990,48 @@
         }
       }
     },
+    "/api/lookups/{kind}/unused": {
+      "delete": {
+        "tags": [
+          "lookups"
+        ],
+        "summary": "Delete the rows of a lookup kind that no model uses (their `models` is 0 in\nthe list); a collection takes its subcollections. How many were deleted.",
+        "operationId": "delete_lookups_by_kind_unused",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "Lookup kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Count"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/lookups/{kind}/{id}": {
       "get": {
         "tags": [
@@ -4034,46 +4076,6 @@
         "responses": {
           "204": {
             "description": ""
-          }
-        }
-      }
-    },
-    "/api/tags/unused": {
-      "get": {
-        "tags": [
-          "lookups"
-        ],
-        "summary": "Tags no model uses.",
-        "operationId": "get_tags_unused",
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Count"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "lookups"
-        ],
-        "summary": "Delete the tags no model uses.",
-        "operationId": "delete_tags_unused",
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Count"
-                }
-              }
-            }
           }
         }
       }

@@ -743,6 +743,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lookups/{kind}/unused": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete the rows of a lookup kind that no model uses (their `models` is 0 in
+         *     the list); a collection takes its subcollections. How many were deleted.
+         */
+        delete: operations["delete_lookups_by_kind_unused"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lookups/{kind}/{id}": {
         parameters: {
             query?: never;
@@ -1435,24 +1455,6 @@ export interface paths {
         /** Merge tags into one (Tag editor → Merge). */
         post: operations["post_tags_merge"];
         delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/tags/unused": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Tags no model uses. */
-        get: operations["get_tags_unused"];
-        put?: never;
-        post?: never;
-        /** Delete the tags no model uses. */
-        delete: operations["delete_tags_unused"];
         options?: never;
         head?: never;
         patch?: never;
@@ -4982,6 +4984,36 @@ export interface operations {
             };
         };
     };
+    delete_lookups_by_kind_unused: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Lookup kind */
+                kind: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Count"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     get_lookups_by_kind_by_id: {
         parameters: {
             query?: never;
@@ -6470,44 +6502,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-        };
-    };
-    get_tags_unused: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Count"];
-                };
-            };
-        };
-    };
-    delete_tags_unused: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Count"];
-                };
             };
         };
     };
