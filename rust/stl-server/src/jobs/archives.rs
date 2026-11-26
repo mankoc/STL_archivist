@@ -125,10 +125,10 @@ pub(super) fn sort_files(lib: &Library, job: &Job, ids: &[i64], target_dir: &str
 
 // ── AI tagger ────────────────────────────────────────────────────────────────
 
-pub(super) fn ai_suggest(lib: &Library, job: &Job, id: i64, max_tags: usize, ignore_meta: bool) -> Result<String, String> {
+pub(super) fn ai_suggest(lib: &Library, job: &Job, id: i64, max_tags: usize, ignore_meta: bool, collections: bool) -> Result<String, String> {
     let log = |line: String| lib.job_log(job, line);
     job.ctl.set_total(1);
-    let s = crate::ai::suggest(lib, &job.ctl, &log, id, max_tags, ignore_meta).inspect_err(|e| log_rate_limit(lib, job, e))?;
+    let s = crate::ai::suggest(lib, &job.ctl, &log, id, max_tags, ignore_meta, collections).inspect_err(|e| log_rate_limit(lib, job, e))?;
     job.ctl.advance(1);
     let msg = format!("{}: {} tag(s) suggested", s.title, s.tags.len());
     job.set_result(crate::jobs::JobResult::AiSuggestion(Box::new(s)));
@@ -228,7 +228,7 @@ fn log_rate_limit(lib: &Library, job: &Job, e: &str) {
 /// `_BatchThread`: suggest and save each model in turn. A failure on the first
 /// model (most likely the setup) or a rate limit ends the job; other failures
 /// are logged and skipped.
-pub(super) fn ai_tag(lib: &Library, job: &Job, ids: &[i64], overwrite: bool, ignore_meta: bool, max_tags: usize) -> Result<String, String> {
+pub(super) fn ai_tag(lib: &Library, job: &Job, ids: &[i64], overwrite: bool, ignore_meta: bool, max_tags: usize, collections: bool) -> Result<String, String> {
     let log = |line: String| lib.job_log(job, line);
     job.ctl.set_total(ids.len() as u64);
     let mut saved = 0usize;
@@ -236,7 +236,7 @@ pub(super) fn ai_tag(lib: &Library, job: &Job, ids: &[i64], overwrite: bool, ign
         if job.stopped() {
             break;
         }
-        match crate::ai::suggest(lib, &job.ctl, &log, id, max_tags, ignore_meta) {
+        match crate::ai::suggest(lib, &job.ctl, &log, id, max_tags, ignore_meta, collections) {
             Ok(s) => {
                 if let Some(path) = crate::ai::commit(lib, id, s.fields, &s.tags, overwrite)? {
                     saved += 1;

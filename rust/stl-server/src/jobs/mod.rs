@@ -547,12 +547,12 @@ fn run(lib: &Library, job: &Job) -> Result<String, String> {
             sort_files(lib, job, &ids, &target_dir, &pattern, missing.as_deref().unwrap_or(stl_core::sort_files::UNKNOWN))
         }
         JobRequest::RelocateLibrary { id, root, apply, fix_case } => relocate_library(lib, job, id, &root, apply, fix_case),
-        JobRequest::AiSuggest { id, max_tags, ignore_meta } => ai_suggest(lib, job, id, max_tags, ignore_meta),
+        JobRequest::AiSuggest { id, max_tags, ignore_meta, collections } => ai_suggest(lib, job, id, max_tags, ignore_meta, collections),
         JobRequest::AiFields { id } => ai_fields(lib, job, id),
         JobRequest::AiPattern { folder, ids } => ai_pattern(lib, job, &folder, &ids),
         JobRequest::AiFill { ids, overwrite } => ai_fill(lib, job, &ids, overwrite),
         JobRequest::AiCheck { ids } => ai_check(lib, job, &ids),
-        JobRequest::AiTag { ids, overwrite, ignore_meta, max_tags } => ai_tag(lib, job, &ids, overwrite, ignore_meta, max_tags),
+        JobRequest::AiTag { ids, overwrite, ignore_meta, max_tags, collections } => ai_tag(lib, job, &ids, overwrite, ignore_meta, max_tags, collections),
         JobRequest::GenerateSidecars => generate_sidecars(lib, job),
         JobRequest::RemoveSidecars => remove_sidecars(lib, job),
         JobRequest::CleanSidecars => clean_sidecars(lib, job),

@@ -165,8 +165,29 @@ pub fn build_tags_prompt(stems: &[String], archive_path: &str, meta: &[(String, 
     )
 }
 
-/// `build_meta_prompt`.
-pub fn build_meta_prompt(archive_path: &str, meta: &[(String, String)]) -> String {
+/// `build_meta_prompt`; with `collections` (the library's collection and
+/// subcollection names worth showing) it also asks for `COLLECTION` and
+/// `SUBCOLLECTION`.
+pub fn build_meta_prompt(archive_path: &str, meta: &[(String, String)], collections: Option<&[(&str, Vec<&str>)]>) -> String {
+    let base = build_meta_prompt_7(archive_path, meta);
+    let Some(vocab) = collections else { return base };
+    let known: String = vocab.iter().filter(|(_, v)| !v.is_empty()).map(|(k, v)| format!("- {k}: {}
+", v.join(" | "))).collect();
+    let known = if known.is_empty() {
+        String::new()
+    } else {
+        format!("Collections already used in this library (reuse the exact spelling when one fits):
+{known}")
+    };
+    let base = base.strip_suffix("Output ONLY these 7 lines.").expect("the prompt's last line");
+    format!(
+        "{base}COLLECTION: <series, franchise or collection the model belongs to — or empty>
+         SUBCOLLECTION: <a group within that collection — or empty>
+{known}Output ONLY these 9 lines."
+    )
+}
+
+fn build_meta_prompt_7(archive_path: &str, meta: &[(String, String)]) -> String {
     format!(
         "This is a 3D printable miniature model. Full archive path: \"{archive_path}\". {}The archive may contain \
          several images; some may show a different model, separate parts, packaging, or promotional art — base \
@@ -251,6 +272,8 @@ pub fn normalize_meta(meta: &[(String, String)]) -> AiFields {
         sculptor: get("SCULPTOR"),
         scale: get("SCALE"),
         description: get("DESCRIPTION"),
+        collection: get("COLLECTION"),
+        subcollection: get("SUBCOLLECTION"),
         source: if VALID_SOURCES.contains(&source.as_str()) { source } else { String::new() },
         year,
     }
@@ -572,7 +595,13 @@ mod tests {
         assert!(p.contains("Image file names: \"front\", \"back\". Existing catalogued metadata"));
         assert!(p.contains("- Title: Batman\n"));
         assert!(build_tags_prompt(&[], "D:/x.zip", &[]).contains("Image file names: (none). Use the full path"));
-        assert!(build_meta_prompt("D:/x.zip", &[]).ends_with("Output ONLY these 7 lines."));
+        assert!(build_meta_prompt("D:/x.zip", &[], None).ends_with("Output ONLY these 7 lines."));
+        let p = build_meta_prompt("D:/x.zip", &[], Some(&[("COLLECTION", vec!["Marvel"]), ("SUBCOLLECTION", vec![])]));
+        assert!(p.contains("DESCRIPTION: <one sentence describing the model>
+COLLECTION: <"), "{p}");
+        assert!(p.contains("
+- COLLECTION: Marvel
+") && !p.contains("- SUBCOLLECTION") && p.ends_with("Output ONLY these 9 lines."), "{p}");
         assert_eq!(image_stem(3, Some("renders/front.png")), "front");
         assert_eq!(image_stem(3, None), "img3");
     }

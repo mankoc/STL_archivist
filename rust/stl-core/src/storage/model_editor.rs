@@ -292,6 +292,9 @@ pub struct AiFields {
     pub sculptor: String,
     pub scale: String,
     pub year: Option<i64>,
+    /// Empty unless the tagger was asked for collections.
+    pub collection: String,
+    pub subcollection: String,
 }
 
 fn empty(v: &Option<String>) -> bool {
@@ -319,6 +322,17 @@ pub fn ai_commit(tx: &Transaction, model_id: i64, f: &AiFields, tags: &[String],
     }
     if !f.sculptor.is_empty() && (overwrite || new.sculptor_id.is_none()) {
         new.sculptor_id = set_named(tx, "sculptors", &f.sculptor)?;
+    }
+    if !f.collection.is_empty() && (overwrite || new.collection_id.is_none()) {
+        set_collection(tx, &mut new, clean(Some(&f.collection)).as_deref())?;
+    }
+    // A subcollection only within the suggested collection (the model may keep another).
+    let in_collection = match new.collection_id {
+        Some(id) => lookup_name(tx, "collections", Some(id))?.is_some_and(|n| n.to_lowercase() == py_strip(&f.collection).to_lowercase()),
+        None => false,
+    };
+    if !f.subcollection.is_empty() && in_collection && (overwrite || new.subcollection_id.is_none()) {
+        set_subcollection(tx, &mut new, clean(Some(&f.subcollection)).as_deref())?;
     }
     if !f.scale.is_empty() {
         let has_scales: bool =

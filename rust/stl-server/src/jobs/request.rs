@@ -201,6 +201,9 @@ pub enum JobRequest {
         /// Leave the catalogued metadata out of the prompt.
         #[serde(default)]
         ignore_meta: bool,
+        /// Also ask for the collection and subcollection.
+        #[serde(default)]
+        collections: bool,
     },
     /// "AI data": ask the model for as many of one model's editor fields as
     /// it can infer; nothing is saved (the editor shows them for review).
@@ -235,6 +238,9 @@ pub enum JobRequest {
         ignore_meta: bool,
         #[serde(default = "default_max_tags")]
         max_tags: usize,
+        /// Also ask for (and save) the collection and subcollection.
+        #[serde(default)]
+        collections: bool,
     },
     /// Records cataloguing the same archive more than once (same content hash,
     /// else same file name and size).

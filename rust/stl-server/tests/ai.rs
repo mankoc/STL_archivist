@@ -155,7 +155,30 @@ async fn suggest_commit_and_batch() {
     let sculptor: String = scalar(&lib, &format!("SELECT s.name FROM models m JOIN sculptors s ON s.id = m.sculptor_id WHERE m.id = {knight}"));
     assert_eq!(sculptor, "Studio", "filled fields are kept");
     let collections: i64 = scalar(&lib, &format!("SELECT count(collection_id) FROM models WHERE id IN ({dragon}, {knight})"));
-    assert_eq!(collections, 0, "the tagger never fills collections");
+    assert_eq!(collections, 0, "the tagger fills collections only when asked");
+
+    // Asked for collections: the prompt has the two lines, the suggestion and the batch carry them.
+    seen.lock().unwrap().clear();
+    let v = run(&lib, &ed, json!({"kind": "ai_suggest", "id": dragon, "collections": true})).await;
+    assert_eq!((v["result"]["fields"]["collection"].as_str(), v["result"]["fields"]["subcollection"].as_str()), (Some("comics"), Some("DC")), "{v}");
+    {
+        let seen = seen.lock().unwrap();
+        let prompt = seen[1]["messages"][0]["content"].as_array().unwrap().last().unwrap()["text"].as_str().unwrap();
+        assert!(prompt.contains("SUBCOLLECTION: <") && prompt.ends_with("Output ONLY these 9 lines."), "{prompt}");
+    }
+    let v = run(&lib, &ed, json!({"kind": "ai_tag", "ids": [dragon, knight], "collections": true})).await;
+    assert_eq!(v["job"]["message"], "saved 2 of 2 model(s)");
+    let saved: String = scalar(
+        &lib,
+        &format!("SELECT c.name || '/' || s.name FROM models m JOIN collections c ON c.id = m.collection_id JOIN subcollections s ON s.id = m.subcollection_id WHERE m.id = {knight}"),
+    );
+    assert_eq!(saved, "comics/DC");
+    // A kept collection gets no subcollection meant for another one.
+    let other = json!({"fields": {"collection": "Marvel", "subcollection": "X-Men"}, "tags": []});
+    call(&lib.state, "POST", &format!("/api/ai/commit/{knight}"), Some(&ed), Some(other)).await;
+    let kept: String = scalar(&lib, &format!("SELECT s.name FROM models m JOIN subcollections s ON s.id = m.subcollection_id WHERE m.id = {knight}"));
+    assert_eq!(kept, "DC");
+    assert_eq!(scalar::<i64>(&lib, "SELECT count(*) FROM subcollections WHERE name = 'X-Men'"), 0);
 }
 
 #[tokio::test(flavor = "multi_thread")]

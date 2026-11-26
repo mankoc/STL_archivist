@@ -66,7 +66,7 @@ Version: 2026.48.2
 - **AI tagger** — a local vision model through llama.cpp (Qwen3-VL 4B by default, or Qwen2.5-VL 3B; chosen in
   *Settings → Components*, any GGUF via `ai.model`), a free OpenRouter vision model, or any OpenAI-compatible
   endpoint (Gemini's `gemini-flash-lite-latest` by default), suggests tags, title,
-  creator, sculptor, scale, source, year and description (never collection or subcollection); review one by one or
+  creator, sculptor, scale, source, year and description (collection and subcollection too when asked); review one by one or
   tag a selection in one job
 - **AI metadata check** — *Actions → AI metadata check…* lists problems the AI model sees in the selected models'
   metadata (implausible scales, misspelled names, mismatched titles) with the current and suggested values; ticked suggestions are applied in one click
