@@ -332,18 +332,15 @@ pub struct Count {
     pub count: i64,
 }
 
-/// Tags no model uses.
-#[utoipa::path(get, path = "/api/tags/unused", tag = "lookups", responses((status = 200, body = Count)))]
-pub async fn unused_tags(State(lib): State<AppState>, _me: CurrentUser) -> Result<Json<Count>, ApiError> {
-    let count = lib.run(|lib| Ok(lib.db.with(admin::unused_tag_count)?)).await?;
-    Ok(Json(Count { count }))
-}
-
-/// Delete the tags no model uses.
-#[utoipa::path(delete, path = "/api/tags/unused", tag = "lookups", responses((status = 200, body = Count)))]
-pub async fn delete_unused_tags(State(lib): State<AppState>, me: CurrentUser) -> Result<Json<Count>, ApiError> {
+/// Delete the rows of a lookup kind that no model uses (their `models` is 0 in
+/// the list); a collection takes its subcollections. How many were deleted.
+#[utoipa::path(delete, path = "/api/lookups/{kind}/unused", tag = "lookups",
+    params(("kind" = String, Path, description = "Lookup kind")),
+    responses((status = 200, body = Count), (status = 404, body = crate::error::ErrorBody)))]
+pub async fn delete_unused(State(lib): State<AppState>, me: CurrentUser, Path(kind): Path<String>) -> Result<Json<Count>, ApiError> {
     me.require(Role::Editor)?;
-    let n = lib.run(|lib| Ok(lib.db.with_tx(admin::delete_unused_tags)?)).await?;
+    kind_ok(&kind)?;
+    let n = lib.run(move |lib| Ok(lib.db.with_tx(|tx| admin::delete_unused(tx, &kind))?)).await?;
     Ok(Json(Count { count: n as i64 }))
 }
 

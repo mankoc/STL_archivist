@@ -23,6 +23,44 @@ fn py_strip(s: &str) -> &str {
     s.trim_matches(py_isspace)
 }
 
+/// What a model writes instead of a value: "none", "n/a", "(no change needed)",
+/// "leave as is", "no problem"…
+fn is_placeholder(s: &str) -> bool {
+    const EXACT: [&str; 30] = [
+        "", "none", "na", "null", "nil", "unknown", "empty", "blank", "unchanged", "same", "ok", "okay", "correct", "fine",
+        "keep", "asis", "tbd", "nothing", "notapplicable", "notavailable", "notspecified", "notstated", "notprovided",
+        "nochange", "nochanges", "noproblem", "noproblems", "noissue", "noissues", "nosuggestion",
+    ];
+    const PREFIXES: [&str; 14] = [
+        "nochange", "noproblem", "noissue", "nosuggest", "leaveasis", "leaveempty", "leaveblank", "leaveunchanged",
+        "leaveit", "keepasis", "keepthe", "keepcurrent", "sameas", "notneeded",
+    ];
+    let k = squash(s);
+    EXACT.contains(&k.as_str()) || PREFIXES.iter().any(|p| k.starts_with(p))
+}
+
+/// A value from the model's reply as it may be stored: without wrapping quotes or
+/// markdown and without a remark such as `"Vyra studio" (no change needed)`; empty
+/// when it is only a placeholder ([`is_placeholder`]).
+pub fn clean_value(raw: &str) -> String {
+    let mut v = py_strip(raw).trim_matches(['*', '`']).trim();
+    // A quoted value followed by a remark.
+    if let Some(rest) = v.strip_prefix(['"', '\u{201c}'])
+        && let Some(end) = rest.find(['"', '\u{201d}'])
+    {
+        v = rest[..end].trim();
+    }
+    // A remark in parentheses, alone or after the value.
+    if v.ends_with(')')
+        && let Some(i) = v.rfind('(')
+        && is_placeholder(&v[i + 1..v.len() - 1])
+    {
+        v = v[..i].trim();
+    }
+    let v = v.trim_matches(['"', '\'', '\u{201c}', '\u{201d}']).trim();
+    if is_placeholder(v) { String::new() } else { v.to_string() }
+}
+
 /// Python's `str.splitlines()`: every line boundary it knows, `\r\n` as one.
 fn py_splitlines(s: &str) -> Vec<&str> {
     let is_break = |c: char| {
@@ -221,11 +259,11 @@ pub fn parse_meta(raw: &str, archive_path: &str, stems: &[String], files: &[Stri
     for line in py_splitlines(raw) {
         let Some((key, val)) = line.split_once(':') else { continue };
         let key = py_strip(key).to_uppercase();
-        let val = py_strip(val);
-        if !val.is_empty() && !["n/a", "none", "unknown", ""].contains(&val.to_lowercase().as_str()) {
+        let val = clean_value(val);
+        if !val.is_empty() {
             match meta.iter_mut().find(|(k, _)| *k == key) {
-                Some(e) => e.1 = val.to_string(),
-                None => meta.push((key, val.to_string())),
+                Some(e) => e.1 = val,
+                None => meta.push((key, val)),
             }
         }
     }
@@ -462,7 +500,12 @@ pub fn parse_issues(raw: &str, meta: &[(String, String)]) -> Vec<Issue> {
             continue;
         }
         let Some(field) = CHECK_FIELDS.iter().find(|f| f.eq_ignore_ascii_case(parts[0])) else { continue };
-        let suggestion = parts.get(2).copied().unwrap_or_default().to_string();
+        // "Title | matches | (no change needed)": not a problem.
+        let raw = parts.get(2).copied().unwrap_or_default();
+        let suggestion = clean_value(raw);
+        if is_placeholder(parts[1]) || (!raw.is_empty() && suggestion.is_empty()) {
+            continue;
+        }
         let current = meta.iter().find(|(k, _)| k == field).map(|(_, v)| v.as_str()).unwrap_or_default();
         if !suggestion.is_empty() && squash(&suggestion) == squash(current) {
             continue;
@@ -585,6 +628,24 @@ mod tests {
         let raw = "**Scale** | 280 mm is not a miniature scale | 28 mm\nTitle | fine | Orc\ncreator | misspelled | Loot Studios\nTags | x | y\nNONE";
         let s = |f: &str, p: &str, v: &str| Issue { field: f.into(), problem: p.into(), suggestion: v.into() };
         assert_eq!(parse_issues(raw, &meta), vec![s("Scale", "280 mm is not a miniature scale", "28 mm"), s("Creator", "misspelled", "Loot Studios")]);
+    }
+
+    #[test]
+    fn placeholders_are_not_values() {
+        for p in ["None", "n/a", "(no change needed)", "No change needed.", "leave as is", "(leave empty)", "(no problem)", "Keep the current value", "\"N/A\""] {
+            assert_eq!(clean_value(p), "", "{p}");
+        }
+        assert_eq!(clean_value("\"Vyra studio\" (no change needed)"), "Vyra studio");
+        assert_eq!(clean_value("Vyra studio (unchanged)"), "Vyra studio");
+        assert_eq!(clean_value("\"Miniatures\""), "Miniatures");
+        assert_eq!(clean_value("**Batman (Arkham)**"), "Batman (Arkham)");
+        assert_eq!(clean_value("Nonesuch"), "Nonesuch");
+        let meta = parse_meta("TITLE: leave as is\nCREATOR: \"Vyra studio\" (no change)\nSCULPTOR: (no change needed)", "D:/x.zip", &[], &[]);
+        assert_eq!(meta, vec![("CREATOR".to_string(), "Vyra studio".to_string())]);
+        let current = vec![("Title".to_string(), "Lara".to_string())];
+        let raw = "Title | no problem | (no change needed)\nCreator | matches | leave as is\nCategory | plural | \"Bust\"";
+        let issues = parse_issues(raw, &current);
+        assert_eq!(issues.iter().map(|i| (i.field.as_str(), i.suggestion.as_str())).collect::<Vec<_>>(), [("Category", "Bust")]);
     }
 
     #[test]
