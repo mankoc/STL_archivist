@@ -63,6 +63,9 @@ async fn grid_and_folders() {
     assert_eq!(g[1]["images"], 1);
     assert!(g[1]["thumbnail"].as_str().unwrap().starts_with("/api/thumb/"));
     assert_eq!(g[0]["thumbnail"], Value::Null);
+    let first_image: i64 = lib.state.db.with(|c| c.query_row("SELECT id FROM images WHERE model_id = ?1", [dragon], |r| r.get(0))).unwrap();
+    assert_eq!(g[1]["image_id"], first_image, "for the full-size viewer");
+    assert!(g[1]["archive_size"].as_i64().unwrap() > 0 && g[1]["created_at"].is_string(), "{}", g[1]);
     let many: Vec<i64> = (0..501).collect();
     let r = call(&lib.state, "POST", "/api/views/grid", Some(&ed), Some(json!({"ids": many}))).await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST);

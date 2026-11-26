@@ -244,7 +244,7 @@ export function BrowserPage({ active = true }: { active?: boolean }) {
         </Group>
         <Box className={classes.tableBody}>
           {view === "grid" ? (
-            <GridView ids={order} selected={selection.current} onOpen={(id) => setSelection((s) => click(s, order, id, { ctrl: false, shift: false }))}
+            <GridView ids={order} selected={selection.current} sort={sort} onSort={setSort} onOpen={(id) => setSelection((s) => click(s, order, id, { ctrl: false, shift: false }))}
               onContextMenu={openMenu} />
           ) : (
             <ModelTable
