@@ -336,7 +336,8 @@ and the metadata already catalogued.
   type and Enter adds) and fields, then **Save & next**, or **Skip**.
 - **Process all** — tags every selected model in one job and saves the results.
 - Options: **Max tags**; **Ignore catalogued metadata** (use only the images and names);
-  **Collection and subcollection** (also ask for them, reusing the library's collection names; a
+  **Collection and subcollection** (also ask for them, judged from the tags just read from the images, the
+  catalogued metadata and the path, reusing the library's collection names; a
   subcollection is saved only within the suggested collection); **Overwrite filled fields** (by default only empty fields are filled; tags are always added
   to the existing ones).
 
