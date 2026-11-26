@@ -1,4 +1,4 @@
-import { CARD_WIDTH, cardLayout, clampCard, columnsFor, loadCardWidth, pagesFor, saveCardWidth } from "./grid";
+import { CARD_WIDTH, cardLayout, clampCard, columnsFor, GRID_CARD_KEY, infoLines, loadCardInfo, loadCardWidth, pagesFor, saveCardInfo, saveCardWidth } from "./grid";
 
 describe("grid", () => {
   it("fits columns", () => {
@@ -13,6 +13,23 @@ describe("grid", () => {
     expect(pagesFor(10, 12, 5, 1000, 10)).toEqual([5, 6]);
     expect(pagesFor(0, 100, 5, 23, 10)).toEqual([0, 1, 2]);
     expect(pagesFor(0, 5, 5, 0)).toEqual([]);
+  });
+
+  it("shows the chosen lines below a card's title", () => {
+    const cell = { id: 1, title: "Orc", creator: "Loot", archive_path: "F:/STL/Loot/Orc.7z", thumbnail: null, images: 0, archive_size: 2048, release_year: 2024, release_month: 3, created_at: "2026-11-26 11:55:01.5" };
+    expect(infoLines(cell, ["added", "creator", "size"])).toEqual(["Loot", expect.stringContaining("2"), "2026-11-26 11:55"]);
+    expect(infoLines(cell, ["name", "date"])).toEqual(["Orc.7z", "2024-03"]);
+    expect(infoLines({ ...cell, creator: null, archive_size: undefined }, ["creator", "size"])).toEqual(["", ""]);
+    expect(cardLayout(180, 3)).toEqual({ image: 150, row: 256 });
+  });
+
+  it("remembers the card lines and the grid's own width", () => {
+    localStorage.clear();
+    expect(loadCardInfo()).toEqual(["creator"]);
+    saveCardInfo(["size", "path"]);
+    expect(loadCardInfo()).toEqual(["path", "size"]);
+    saveCardWidth(400, GRID_CARD_KEY);
+    expect([loadCardWidth(GRID_CARD_KEY), loadCardWidth()]).toEqual([400, CARD_WIDTH]);
   });
 
   it("sizes cards", () => {

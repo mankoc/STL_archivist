@@ -1795,11 +1795,27 @@ export interface components {
         /** @description One model as a thumbnail cell. */
         Cell: {
             archive_path?: string | null;
+            /**
+             * Format: int64
+             * @description Image grid only, like the next three.
+             */
+            archive_size?: number | null;
+            /** @description When it was added (`YYYY-MM-DD HH:MM:SS…`, UTC). */
+            created_at?: string | null;
             creator?: string | null;
             /** Format: int64 */
             id: number;
+            /**
+             * Format: int64
+             * @description The first image (for the full-size viewer); image grid only.
+             */
+            image_id?: number | null;
             /** @description How many images the model has. */
             images: number;
+            /** Format: int64 */
+            release_month?: number | null;
+            /** Format: int64 */
+            release_year?: number | null;
             /** @description The first thumbnail. */
             thumbnail?: string | null;
             title?: string | null;

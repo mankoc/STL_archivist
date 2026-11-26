@@ -27,6 +27,19 @@ pub struct Cell {
     pub thumbnail: Option<String>,
     /// How many images the model has.
     pub images: usize,
+    /// The first image (for the full-size viewer); image grid only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_id: Option<i64>,
+    /// Image grid only, like the next three.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub archive_size: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub release_year: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub release_month: Option<i64>,
+    /// When it was added (`YYYY-MM-DD HH:MM:SS…`, UTC).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
 }
 
 fn first_thumb(lib: &Library, thumbs: &[Vec<Option<String>>]) -> Result<Vec<Option<String>>, ApiError> {
@@ -60,6 +73,12 @@ pub async fn grid(State(lib): State<AppState>, _me: CurrentUser, Json(req): Json
                     _ => None,
                 })
             };
+            let int = |r: &model_views::GridModel, k: &str| -> Option<i64> {
+                r.fields.iter().find(|(f, _)| *f == k).and_then(|(_, v)| match v {
+                    rusqlite::types::Value::Integer(i) => Some(*i),
+                    _ => None,
+                })
+            };
             let mut by_id: HashMap<i64, Cell> = rows
                 .iter()
                 .zip(thumbs)
@@ -71,6 +90,11 @@ pub async fn grid(State(lib): State<AppState>, _me: CurrentUser, Json(req): Json
                         archive_path: text(r, "archive_path"),
                         thumbnail,
                         images: r.thumbs.len(),
+                        image_id: r.thumbs.iter().flatten().find_map(|t| t.trim().parse().ok()),
+                        archive_size: int(r, "archive_size"),
+                        release_year: int(r, "release_year"),
+                        release_month: int(r, "release_month"),
+                        created_at: text(r, "created_at"),
                     };
                     (r.id, cell)
                 })
@@ -114,6 +138,11 @@ pub async fn folder(State(lib): State<AppState>, _me: CurrentUser, Json(req): Js
                         creator: r.creator,
                         archive_path: r.archive_path,
                         thumbnail,
+                        image_id: None,
+                        archive_size: None,
+                        release_year: None,
+                        release_month: None,
+                        created_at: None,
                     })
                     .collect::<Vec<_>>(),
             )

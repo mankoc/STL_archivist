@@ -172,7 +172,11 @@ Drag the filter pane's right edge to resize it (a double-click resets it).
   ones in between shift over. Clicking a header still sorts and its right edge still resizes.
   The order is saved with your account; **Columns → Reset column order** puts the columns
   back in their default order.
-- **Table / Images** switches between the table and a grid of thumbnails of the same models.
+- **Table / Images** switches between the table and a grid of thumbnails of the same models. The
+  grid's toolbar sizes the images (slider), sorts them (the same sort as the table's: title, creator,
+  date, file size, added, path, sculptor, collection; the arrow flips the direction) and picks what
+  shows below each title (creator, file name, path, file size, date, added). Double-click an image to
+  see the model's images at full size.
 - Click a row to select it; **Ctrl**-click adds or removes rows; **Shift**-click selects a range.
   The count of selected models shows above the table.
 

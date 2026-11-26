@@ -6,6 +6,12 @@
   just read from the images (franchises, characters…) go into the metadata request beside the catalogued metadata
   and the path, so the collection is judged from all three. The prompt's collection lines are also tidied (a
   subcollection line no longer starts with stray spaces).
+- **Image grid options:** the browser's *Images* view has a toolbar: a slider sizes the images (remembered in this
+  browser, apart from the Folders page's), a sort control orders them by title, creator, date, file size, added,
+  path, sculptor or collection (the table's sort, so both views agree; the arrow flips the direction), and a list
+  picks what shows below each title: creator, file name, path, file size, date and added. Double-clicking an image
+  opens the model's images at full size, as the detail pane's thumbnails do. `/api/views/grid` cells carry
+  `image_id`, `archive_size`, `release_year`, `release_month` and `created_at`.
 
 ## 2026.48.3 — 2026-11-26
 

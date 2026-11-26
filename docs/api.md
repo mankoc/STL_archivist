@@ -407,9 +407,14 @@ One model as a thumbnail cell.
 | Field | Type | Description |
 |---|---|---|
 | `archive_path` (optional) | string \| null |  |
+| `archive_size` (optional) | integer \| null | Image grid only, like the next three. |
+| `created_at` (optional) | string \| null | When it was added (`YYYY-MM-DD HH:MM:SS…`, UTC). |
 | `creator` (optional) | string \| null |  |
 | `id` | integer |  |
+| `image_id` (optional) | integer \| null | The first image (for the full-size viewer); image grid only. |
 | `images` | integer | How many images the model has. |
+| `release_month` (optional) | integer \| null |  |
+| `release_year` (optional) | integer \| null |  |
 | `thumbnail` (optional) | string \| null | The first thumbnail. |
 | `title` (optional) | string \| null |  |
 

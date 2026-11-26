@@ -6,12 +6,18 @@ import { useEffect, useRef, useState } from "react";
 
 import type { Schemas } from "../api/client";
 import { baseName } from "../format";
-import { CARD_GAP, CARD_WIDTH, cardLayout, columnsFor } from "./grid";
+import { CARD_GAP, CARD_WIDTH, type CardInfo, cardLayout, columnsFor, infoLines } from "./grid";
 
 export type Cell = Schemas["Cell"];
 
-export function CellGrid({ count, cell, cardWidth = CARD_WIDTH, selected, onOpen, onContextMenu, onRange }: {
+const CREATOR: readonly CardInfo[] = ["creator"];
+
+export function CellGrid({ count, cell, cardWidth = CARD_WIDTH, info = CREATOR, selected, onOpen, onDoubleClick, onContextMenu, onRange }: {
   count: number;
+  /** The lines below each card's title. */
+  info?: readonly CardInfo[];
+  /** A cell was double-clicked. */
+  onDoubleClick?: (id: number) => void;
   /** Card width in pixels (images and rows scale with it). */
   cardWidth?: number;
   cell: (index: number) => Cell | undefined;
@@ -33,7 +39,7 @@ export function CellGrid({ count, cell, cardWidth = CARD_WIDTH, selected, onOpen
   }, []);
   const cols = columnsFor(width, cardWidth);
   const rows = Math.ceil(count / cols);
-  const layout = cardLayout(cardWidth);
+  const layout = cardLayout(cardWidth, info.length);
   const virtualizer = useVirtualizer({ count: rows, getScrollElement: () => scrollRef.current, estimateSize: () => layout.row, overscan: 3 });
   // A new card size changes every row's height.
   useEffect(() => virtualizer.measure(), [virtualizer, layout.row]);
@@ -56,6 +62,7 @@ export function CellGrid({ count, cell, cardWidth = CARD_WIDTH, selected, onOpen
                     {m ? (
                       <UnstyledButton
                         onClick={() => onOpen(m.id)}
+                        onDoubleClick={onDoubleClick && (() => onDoubleClick(m.id))}
                         onContextMenu={onContextMenu && ((e) => {
                           e.preventDefault();
                           onContextMenu(m.id, e);
@@ -70,7 +77,9 @@ export function CellGrid({ count, cell, cardWidth = CARD_WIDTH, selected, onOpen
                             <Box h={layout.image} bg="var(--mantine-color-default-hover)" style={{ borderRadius: 4 }} />
                           )}
                           <Text size="sm" truncate mt={4}>{m.title || baseName(m.archive_path)}</Text>
-                          <Text size="xs" c="dimmed" truncate>{m.creator || " "}</Text>
+                          {infoLines(m, info).map((line, k) => (
+                            <Text key={k} size="xs" c="dimmed" truncate title={line}>{line || " "}</Text>
+                          ))}
                         </Card>
                       </UnstyledButton>
                     ) : (
