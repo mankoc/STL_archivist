@@ -16,6 +16,8 @@
 - **Lookups: delete unused values on every tab:** the Lookups page's **Delete … unused** button, which tags had,
   now works for categories, collections (with their subcollections), subcollections, scales, sculptors and releases
   too (`DELETE /api/lookups/{kind}/unused`, replacing `/api/tags/unused`).
+- **Lookups: delete several values at once:** tick rows (the header's box ticks every row shown, after a search
+  too) and **Delete N selected**; the confirmation says how many models lose the values.
 
 ## 2026.48.2 — 2026-11-26
 
