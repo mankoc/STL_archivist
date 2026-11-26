@@ -133,7 +133,7 @@ pub struct GridModel {
     pub thumbs: Vec<Option<String>>,
 }
 
-const GRID_FIELDS: [&str; 10] = [
+const GRID_FIELDS: [&str; 12] = [
     "title",
     "creator",
     "source",
@@ -144,6 +144,8 @@ const GRID_FIELDS: [&str; 10] = [
     "warning",
     "description",
     "url",
+    "archive_size",
+    "created_at",
 ];
 
 fn names_by_model(conn: &Connection, sql: &str, ids: &[i64]) -> Result<HashMap<i64, Vec<String>>> {

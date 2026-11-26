@@ -4987,6 +4987,21 @@
               "null"
             ]
           },
+          "archive_size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Image grid only, like the next three."
+          },
+          "created_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When it was added (`YYYY-MM-DD HH:MM:SS…`, UTC)."
+          },
           "creator": {
             "type": [
               "string",
@@ -4997,10 +5012,32 @@
             "type": "integer",
             "format": "int64"
           },
+          "image_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The first image (for the full-size viewer); image grid only."
+          },
           "images": {
             "type": "integer",
             "description": "How many images the model has.",
             "minimum": 0
+          },
+          "release_month": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "release_year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
           },
           "thumbnail": {
             "type": [
