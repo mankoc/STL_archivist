@@ -203,25 +203,32 @@ pub fn build_tags_prompt(stems: &[String], archive_path: &str, meta: &[(String, 
     )
 }
 
-/// `build_meta_prompt`; with `collections` (the library's collection and
-/// subcollection names worth showing) it also asks for `COLLECTION` and
-/// `SUBCOLLECTION`.
-pub fn build_meta_prompt(archive_path: &str, meta: &[(String, String)], collections: Option<&[(&str, Vec<&str>)]>) -> String {
+/// What the tagger asks for the collection and subcollection with.
+pub struct CollectionHints<'a> {
+    /// The library's collection and subcollection names worth showing (a field key and its names).
+    pub vocab: &'a [(&'a str, Vec<&'a str>)],
+    /// The tags the model just read from the images (franchises, characters…).
+    pub image_tags: &'a [String],
+}
+
+/// `build_meta_prompt`; with `collections` it also asks for `COLLECTION` and
+/// `SUBCOLLECTION`, judged from the tags read from the images, the catalogued
+/// metadata and the path.
+pub fn build_meta_prompt(archive_path: &str, meta: &[(String, String)], collections: Option<&CollectionHints>) -> String {
     let base = build_meta_prompt_7(archive_path, meta);
-    let Some(vocab) = collections else { return base };
-    let known: String = vocab.iter().filter(|(_, v)| !v.is_empty()).map(|(k, v)| format!("- {k}: {}
-", v.join(" | "))).collect();
+    let Some(hints) = collections else { return base };
+    let seen = if hints.image_tags.is_empty() { String::new() } else { format!("Tags seen in the images: {}.\n", hints.image_tags.join(", ")) };
+    let known: String = hints.vocab.iter().filter(|(_, v)| !v.is_empty()).map(|(k, v)| format!("- {k}: {}\n", v.join(" | "))).collect();
     let known = if known.is_empty() {
         String::new()
     } else {
-        format!("Collections already used in this library (reuse the exact spelling when one fits):
-{known}")
+        format!("Collections already used in this library (reuse the exact spelling when one fits):\n{known}")
     };
     let base = base.strip_suffix("Output ONLY these 7 lines.").expect("the prompt's last line");
     format!(
-        "{base}COLLECTION: <series, franchise or collection the model belongs to — or empty>
-         SUBCOLLECTION: <a group within that collection — or empty>
-{known}Output ONLY these 9 lines."
+        "{base}COLLECTION: <series, franchise or collection the model belongs to, judged from the tags seen in the \
+         images, the existing metadata and the path — or empty>\n\
+         SUBCOLLECTION: <a group within that collection — or empty>\n{seen}{known}Output ONLY these 9 lines."
     )
 }
 
@@ -657,12 +664,11 @@ mod tests {
         assert!(p.contains("- Title: Batman\n"));
         assert!(build_tags_prompt(&[], "D:/x.zip", &[]).contains("Image file names: (none). Use the full path"));
         assert!(build_meta_prompt("D:/x.zip", &[], None).ends_with("Output ONLY these 7 lines."));
-        let p = build_meta_prompt("D:/x.zip", &[], Some(&[("COLLECTION", vec!["Marvel"]), ("SUBCOLLECTION", vec![])]));
-        assert!(p.contains("DESCRIPTION: <one sentence describing the model>
-COLLECTION: <"), "{p}");
-        assert!(p.contains("
-- COLLECTION: Marvel
-") && !p.contains("- SUBCOLLECTION") && p.ends_with("Output ONLY these 9 lines."), "{p}");
+        let vocab = [("COLLECTION", vec!["Marvel"]), ("SUBCOLLECTION", vec![])];
+        let p = build_meta_prompt("D:/x.zip", &[], Some(&CollectionHints { vocab: &vocab, image_tags: &v(&["Spider-Man", "comics"]) }));
+        assert!(p.contains("DESCRIPTION: <one sentence describing the model>\nCOLLECTION: <"), "{p}");
+        assert!(p.contains("\nSUBCOLLECTION: <a group within that collection — or empty>\nTags seen in the images: Spider-Man, comics.\n"), "{p}");
+        assert!(p.contains("\n- COLLECTION: Marvel\n") && !p.contains("- SUBCOLLECTION") && p.ends_with("Output ONLY these 9 lines."), "{p}");
         assert_eq!(image_stem(3, Some("renders/front.png")), "front");
         assert_eq!(image_stem(3, None), "img3");
     }

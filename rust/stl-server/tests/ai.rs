@@ -165,6 +165,7 @@ async fn suggest_commit_and_batch() {
         let seen = seen.lock().unwrap();
         let prompt = seen[1]["messages"][0]["content"].as_array().unwrap().last().unwrap()["text"].as_str().unwrap();
         assert!(prompt.contains("SUBCOLLECTION: <") && prompt.ends_with("Output ONLY these 9 lines."), "{prompt}");
+        assert!(prompt.contains("Tags seen in the images: Batman, cape, DC Comics.") && prompt.contains("- Title: The Dark Knight"), "the image tags and the catalogued metadata: {prompt}");
     }
     let v = run(&lib, &ed, json!({"kind": "ai_tag", "ids": [dragon, knight], "collections": true})).await;
     assert_eq!(v["job"]["message"], "saved 2 of 2 model(s)");
