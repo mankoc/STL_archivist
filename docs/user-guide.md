@@ -278,7 +278,7 @@ Editing needs the editor role.
   the archive files stay. Crawling the folder again brings them back.
 - **Lookups** page — tags, categories, collections, subcollections, scales, sculptors and releases: rename,
   delete (it shows how many models lose the value first), merge two entries (for tags: merge
-  the selected tags into one) and **Delete … unused** (every value of the tab that no model uses). The **Creators** tab renames,
+  the selected tags into one) **Delete N selected** (tick rows, or the header's box for every row shown) and **Delete … unused** (every value of the tab that no model uses). The **Creators** tab renames,
   merges and clears creators, and edits a creator's profile. **Merge similar…**, on every
   tab, lists near-duplicates by spelling, sound or shared words; click the name to keep.
 

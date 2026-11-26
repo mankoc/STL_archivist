@@ -80,6 +80,7 @@ function LookupEditor({ kind }: { kind: Kind }) {
   const [renameTo, setRenameTo] = useState("");
   const [deleting, setDeleting] = useState<{ row: Row; info: Schemas["DeleteInfo"] } | null>(null);
   const [merging, setMerging] = useState(false);
+  const [deletingSelected, setDeletingSelected] = useState(false);
   const [keep, setKeep] = useState<string>("");
   const [tagTarget, setTagTarget] = useState("");
   const [similar, setSimilar] = useState(false);
@@ -138,6 +139,11 @@ function LookupEditor({ kind }: { kind: Kind }) {
             </Button>
           </Group>
         )}
+        {editor && checked.length > 0 && (
+          <Button variant="light" color="red" onClick={() => setDeletingSelected(true)} data-testid="delete-selected">
+            Delete {checked.length} selected
+          </Button>
+        )}
         {editor && unused > 0 && (
           <Button variant="subtle" color="red" onClick={() => act(async () => unwrap(await api.DELETE("/api/lookups/{kind}/unused", { params: { path: { kind } } })))}>
             Delete {unused} unused
@@ -149,7 +155,16 @@ function LookupEditor({ kind }: { kind: Kind }) {
           <Table fz="sm" highlightOnHover stickyHeader verticalSpacing={4}>
             <Table.Thead>
               <Table.Tr>
-                {editor && <Table.Th w={36} />}
+                {editor && (
+                  <Table.Th w={36}>
+                    <Checkbox
+                      aria-label="Select all shown"
+                      checked={list.length > 0 && list.every((r) => checked.includes(r.id))}
+                      indeterminate={list.some((r) => checked.includes(r.id)) && !list.every((r) => checked.includes(r.id))}
+                      onChange={(e) => setChecked(e.currentTarget.checked ? [...new Set([...checked, ...list.map((r) => r.id)])] : checked.filter((id) => !list.some((r) => r.id === id)))}
+                    />
+                  </Table.Th>
+                )}
                 <Table.Th>Name</Table.Th>
                 {kind === "subcollection" && <Table.Th>Collection</Table.Th>}
                 <Table.Th w={90}>Models</Table.Th>
@@ -263,6 +278,32 @@ function LookupEditor({ kind }: { kind: Kind }) {
             </Group>
           </Stack>
         )}
+      </Modal>
+      <Modal opened={deletingSelected} onClose={() => setDeletingSelected(false)} title={`Delete ${checked.length} selected`}>
+        <Stack>
+          <Text size="sm">
+            {checked.reduce((n, id) => n + (byId.get(id)?.models ?? 0), 0)} model(s) lose these values.
+            {kind === "collection" && " Their subcollections are deleted too."}
+          </Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setDeletingSelected(false)}>
+              Cancel
+            </Button>
+            <Button
+              color="red"
+              data-testid="confirm-delete-selected"
+              onClick={() => {
+                const ids = checked;
+                setDeletingSelected(false);
+                return act(async () => {
+                  for (const id of ids) unwrap(await api.DELETE("/api/lookups/{kind}/{id}", { params: { path: { kind, id } } }));
+                });
+              }}
+            >
+              Delete
+            </Button>
+          </Group>
+        </Stack>
       </Modal>
       <SimilarModal kind={kind} label={KINDS.find((k) => k.kind === kind)!.label.toLowerCase()} opened={similar} onClose={() => setSimilar(false)} onMerged={refresh} />
       <Modal opened={merging} onClose={() => setMerging(false)} title="Merge">
