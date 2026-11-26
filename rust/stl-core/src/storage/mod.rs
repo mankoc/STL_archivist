@@ -149,6 +149,9 @@ pub struct MigrateReport {
     pub embeddings_moved: Option<usize>,
     /// The embedding model changed, so the stored vectors were dropped.
     pub vectors_reset: bool,
+    /// Vector chunks put back under the rowid sqlite-vec reads them by (a sync
+    /// before 2026.48.2 moved them).
+    pub vector_chunks_fixed: usize,
     pub scales_copied: Option<usize>,
     /// Absolute paths turned into libraries and relative paths (one-way).
     pub paths: Option<libraries::PathsMigration>,
@@ -210,6 +213,7 @@ pub fn migrate(path: &Path, vectors: &Vectors) -> Result<MigrateReport> {
     if vectors.enabled {
         let tx = conn.transaction()?;
         ensure_vector_schema(&tx, vectors, &mut report)?;
+        report.vector_chunks_fixed = fix_vector_chunk_rowids(&tx)?;
         tx.commit()?;
     }
     if report.embeddings_moved.is_some() {
@@ -375,6 +379,25 @@ fn create_missing_tables(tx: &Transaction, report: &mut MigrateReport) -> Result
 
 /// `vectors.ensure_schema`: the vec0 table for the current embedding model, and
 /// the one-time move of legacy `images.embedding` blobs into it.
+/// `image_vec_vector_chunks00` keys its rows by a column named `rowid` (not an
+/// `INTEGER PRIMARY KEY`, so not the real rowid), and sqlite-vec opens their
+/// blobs by the real one. Syncs before 2026.48.2 gave the rows they replaced new
+/// real rowids: put every row back under its column's value.
+fn fix_vector_chunk_rowids(tx: &Transaction) -> Result<usize> {
+    let chunks = format!("{}_vector_chunks00", schema_sql::VECTOR_TABLE);
+    if !tables(tx)?.contains(&chunks) {
+        return Ok(0);
+    }
+    tx.execute_batch(&format!(
+        "CREATE TEMP TABLE moved_chunks AS SELECT rowid AS r, vectors FROM \"{chunks}\" WHERE _rowid_ <> rowid;
+         DELETE FROM \"{chunks}\" WHERE _rowid_ <> rowid;
+         INSERT INTO \"{chunks}\" (_rowid_, rowid, vectors) SELECT r, r, vectors FROM temp.moved_chunks;"
+    ))?;
+    let n = tx.query_row("SELECT count(*) FROM temp.moved_chunks", [], |r| r.get::<_, i64>(0))?;
+    tx.execute_batch("DROP TABLE temp.moved_chunks")?;
+    Ok(n as usize)
+}
+
 fn ensure_vector_schema(tx: &Transaction, v: &Vectors, report: &mut MigrateReport) -> Result<()> {
     use schema_sql::{VECTOR_INFO, VECTOR_TABLE};
     let (model, dim) = (v.model_id.as_str(), v.dim);
@@ -479,6 +502,31 @@ mod tests {
             let p = plan(sql);
             assert!(p.contains(index), "{sql}: {p}");
         }
+    }
+
+    #[test]
+    fn moved_vector_chunks_are_put_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("lib.db");
+        migrate(&path, &Vectors::default()).unwrap();
+        let conn = open(&path).unwrap();
+        let v = |x: f32| (0..512).flat_map(|_| x.to_le_bytes()).collect::<Vec<u8>>();
+        conn.execute("INSERT INTO image_vec (image_id, embedding) VALUES (1, ?1), (2, ?2)", params![v(1.0), v(0.5)]).unwrap();
+        // What an old sync did: the chunk row replaced under a new real rowid.
+        conn.execute_batch(
+            "CREATE TEMP TABLE c AS SELECT rowid AS r, vectors FROM image_vec_vector_chunks00;
+             DELETE FROM image_vec_vector_chunks00;
+             INSERT INTO image_vec_vector_chunks00 (_rowid_, rowid, vectors) SELECT r + 100, r, vectors FROM temp.c;",
+        )
+        .unwrap();
+        assert!(conn.execute("DELETE FROM image_vec WHERE image_id = 1", []).is_err(), "sqlite-vec cannot open the chunk");
+        drop(conn);
+        assert_eq!(migrate(&path, &Vectors::default()).unwrap().vector_chunks_fixed, 1);
+        let conn = open(&path).unwrap();
+        conn.execute("DELETE FROM image_vec WHERE image_id = 1", []).unwrap();
+        let left: i64 = conn.query_row("SELECT image_id FROM image_vec WHERE embedding MATCH ?1 AND k = 1", [v(0.5)], |r| r.get(0)).unwrap();
+        assert_eq!(left, 2);
+        assert_eq!(migrate(&path, &Vectors::default()).unwrap().vector_chunks_fixed, 0, "nothing more to fix");
     }
 
     #[test]

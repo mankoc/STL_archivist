@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **Find by Image and deleting records after a sync:** a sync gave the CLIP vector index's storage rows new
+  internal ids (sqlite-vec reads them by those ids, which a column named `rowid` hid from the sync). Searches
+  could then read the wrong vectors, and deleting an image with a vector failed with "Could not fetch vector data
+  … opening blob failed", which stopped *Update libraries* and any other cleanup of missing archives. Syncs now
+  keep the ids, and opening a library puts damaged rows back in place (the server log reports
+  `vector_chunks_fixed`).
+- **Archives with the same tag in different case:** a new archive whose metadata lists a tag twice in different
+  case (such as `NSFW` and `nsfw`) failed with "UNIQUE constraint failed: model_tags" and was not added; the tag is
+  now linked once.
+
 ## 2026.48.1 — 2026-11-25
 
 - **ONNX Runtime comes from NuGet:** Microsoft's ONNX Runtime repository is no longer on GitHub, so the component's
