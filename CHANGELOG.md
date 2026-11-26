@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026.48.3 — 2026-11-26
 
 - **AI tagger: collection and subcollection:** the AI tagger drawer has a **Collection and subcollection** option
   (in both *Review one by one* and *Process all*) that also asks the model for them, listing the library's
