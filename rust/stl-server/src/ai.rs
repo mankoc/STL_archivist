@@ -656,7 +656,8 @@ pub fn suggest(lib: &Library, ctl: &Control, log: &dyn Fn(String), model_id: i64
     };
     let context = std::iter::once(a.inputs.archive_path.as_str()).chain(a.inputs.files.iter().map(String::as_str)).collect::<Vec<_>>().join(" ");
     let vocab: Vec<(&str, Vec<&str>)> = lists.iter().map(|(k, names)| (*k, T::relevant_names(names, &context, VOCAB_CAP))).collect();
-    let raw_meta = ask(&T::build_meta_prompt(&a.inputs.archive_path, &known, collections.then_some(vocab.as_slice())), if collections { 260 } else { 200 })?;
+    let hints = T::CollectionHints { vocab: &vocab, image_tags: &tags };
+    let raw_meta = ask(&T::build_meta_prompt(&a.inputs.archive_path, &known, collections.then_some(&hints)), if collections { 260 } else { 200 })?;
     let meta = T::parse_meta(&raw_meta, &a.inputs.archive_path, &a.stems, &a.inputs.files);
     let mut fields = T::normalize_meta(&meta);
     if collections {
